@@ -59,7 +59,23 @@ def validate():
     assert all(t['implemented'] is False and t['revisit_gate'] for t in fit['tools'])
     ux = set(re.findall(r'^\| (UX\d{2}) \|',
                         (here / '06-INTEGRATED-JOURNEY.md').read_text(), re.MULTILINE))
-    assert ux == set(fit['ux_acceptance_ids']) and len(ux) == 16
+    assert ux == set(fit['ux_acceptance_ids']) and len(ux) == 19
+    placement = fit['rapid_response_placement']
+    assert placement['primary_capability'] == placement['primary_result_home'] == 'Control Strategy'
+    assert placement['study_request_owner'] == 'scenarios'
+    assert placement['input_owners'] == {
+        'event': 'loads', 'connection_limits': 'connection',
+        'asset_response_and_reserve': 'assets'}
+    assert placement['secondary_result_summaries'] == ['Grid', 'Reliability']
+    for key in ('canonical_result_per_variant', 'grid_coupled_requires_compatible_operating_point',
+                'standalone_analytical_baseline_must_be_declared',
+                'planning_effect_requires_supported_enforced_verified_constraint',
+                'dependency_and_terminal_states_shared_across_views'):
+        assert placement[key] is True, key
+    for key in ('secondary_views_start_duplicate_jobs', 'new_top_level_flow_section',
+                'short_event_establishes_annual_reliability', 'load_flow_establishes_transient_response'):
+        assert placement[key] is False, key
+    assert plan['recommendation_version'] == fit['recommendation_version'] == 3
     assert workflow['frontend_section_ids'] == [s['id'] for s in workflow['section_contract']]
     assert len(workflow['section_contract']) == 10
     for entry in workflow['native_files']:

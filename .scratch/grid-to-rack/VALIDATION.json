@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-10-21T12:35:38.938181+00:00",
+  "checked_at_utc": "2026-10-21T12:55:16.731629+00:00",
   "scope": "Code/source and workflow-fit research with existing targeted frontend tests; proposed native journey, no runtime integration",
   "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
   "runtime_implementation": false,
@@ -13,7 +13,8 @@
     "diff_whitespace": "pass",
     "workflow_sections_and_source_hashes": "pass",
     "tool_dispositions_and_ux_references": "pass",
-    "existing_targeted_frontend_tests": "pass (76 tests in 6 files)"
+    "existing_targeted_frontend_tests": "pass (76 tests in 6 files)",
+    "rapid_response_placement_contract": "pass (Control Strategy primary, shared Grid/Reliability result, input owners and scope boundaries)"
   },
   "not_performed": [
     "engine installation or execution",
@@ -33,20 +34,20 @@
     "01-CURRENT-GAPS.md": "ae16d5a14aa3516b26779d0f7e65704f441d2034ffa844710548ae69809cbe84",
     "02-ARCHITECTURE.md": "8435bf491c27821d218bbc5bc46459487e3c785b6d13b3504817053d24012611",
     "03-OPEN-SOURCE.md": "2df3565fe2aff02793a0fbd2f212277af4826c7fc322fcece16a2d5b48bbb384",
-    "04-IMPLEMENTATION-TESTS.md": "c07a9ad3ad8024e98a48c88dd28bd72369199b147641bff39614936cc9e836a4",
-    "05-WORKFLOW-FIT-DECISION.md": "6b2191fdfaa1ed401a0dd8fcba71a17548526f3e9f0fe98ebc5f417e9fc50683",
-    "06-INTEGRATED-JOURNEY.md": "9fe01b9a313bd6cb6846851a8c999da8c8767adca4bd4817b942cf397febaed9",
-    "HANDOFF.md": "84c72e9405a913070e528ff3ae669565b973ea52940351321771dd70943f0450",
-    "README.md": "0c50c7597e0f8491e84ebdecb7be9c6f996873aaf71dc30c761103051e571340",
+    "04-IMPLEMENTATION-TESTS.md": "3e2e2ba723c10f48c8a3ec47249ea99cc2d866167f71863866dcd1ac37ce1e96",
+    "05-WORKFLOW-FIT-DECISION.md": "4a5d6653ac01ce6ee733e9c657c4da4854fae68afd0ef0256730aae4492f623a",
+    "06-INTEGRATED-JOURNEY.md": "5c83079df996911c21c26e558bdb8cc7aa612296611a7eaf1ff2cded9ab0ed8a",
+    "HANDOFF.md": "16410698797f54829c773a067b3afb95c2a659f515882f57b288b297bef13e01",
+    "README.md": "435a3cbb581fd37de50a7950a08ac6e8ce5f85ebc18e0b75e73e793b9694bbc0",
     "illustrative-balance.json": "45bc4ddb97844f9a97ed11e6706775f5ac20ee847b9d788eb28f923bceeeb778",
-    "implementation-plan.json": "bf4e068aab88077417a086549eaab7b8cf7718ee8d9db953bdc7829cfb9d3b10",
+    "implementation-plan.json": "e2c7ababef1aac12f8c9d2972e1aec9d199247e6f16ec148ca10cf2f82d628fd",
     "native-evidence.json": "cbe5c3a3ae34d32316f8cbe7acd335db839e58457644556069799be9169d48d8",
     "source-observations.json": "de803e1d5ac16300de6dfe2cc38c21f94269c1f6f836b95a10746248da59bd23",
-    "validate_assessment.py": "85140ab760bb0c129f1c4f378abe252a9319f75b35de691f01c957d94d324cc4",
-    "workflow-fit-decision.json": "b3fb96e279737fac271c4ff28a6b421cb52776e274fc8c45e02de4579aeafe9f",
+    "validate_assessment.py": "60205cf5128f7c2e74da1c852fbdc30309e228f1e5a9b6bad7cdfd85861fc72a",
+    "workflow-fit-decision.json": "f51e577cc63ce3377bc3abe399cd5ba299055900e126d2b03d230c0d13628f45",
     "workflow-fit-evidence.json": "06c6cf2a33ba5616fd23cf7064b6b48e79fcf9f5bffffb68302039a7b7c85dd7"
   },
-  "reviewed_master": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "reviewed_master": "d2b8b19d3fcff3c8b44d4b7ebb2949d7ffea2650",
   "assessed_native_paths_changed_since_baseline": [],
   "evidence_counts": {
     "native_files": 25,
@@ -60,10 +61,10 @@
     "workflow_native_and_test_files": 19,
     "workflow_sections_checked": 10,
     "additional_primary_page_observations": 10,
-    "ux_acceptance_tasks_documented": 16,
+    "ux_acceptance_tasks_documented": 19,
     "integration_dispositions": 10
   },
-  "recommendation_version": 2,
+  "recommendation_version": 3,
   "existing_targeted_frontend_tests": {
     "command": "node node_modules/vitest/vitest.mjs run src/layout/flowSections.test.ts src/layout/sidebar/FlowSectionBlock.test.tsx src/pages/hubDesign/HubDesignPanel.flow.test.tsx src/components/gridReadiness/GridReadinessScorecard.test.tsx src/pages/hubDesign/ChaptersSection.test.tsx src/App.guidedBack.test.tsx --maxWorkers=2",
     "files": [
@@ -83,5 +84,6 @@
     "live_browser_validation": false,
     "external_engine_execution": false
   },
-  "new_feature_usability_study": "pending"
+  "new_feature_usability_study": "pending",
+  "latest_revision_validation": "Documentation/structured-contract consistency only; prior 76 existing frontend tests retained as historical evidence and not rerun for this documentation-only revision."
 }

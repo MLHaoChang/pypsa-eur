@@ -18,7 +18,7 @@ The user requested an integrated assessment linking rapidly varying AI workloads
 
 Counts describe evidence observations, not independent admitted libraries or completed integrations. No raw third-party code, data, PDF, waveform or model binary is committed. No engine/library was installed, no GPU/site hardware used, no account created and no paid model/media call made.
 
-**Revised scope:** [fit decision](05-WORKFLOW-FIT-DECISION.md), [integrated journey](06-INTEGRATED-JOURNEY.md), [structured decisions](workflow-fit-decision.json) and [native workflow/test/source evidence](workflow-fit-evidence.json). Keep the native capability, defer external integrations and preserve the existing flow. The journey adds 16 proposed UX acceptance tasks; 76 existing frontend tests passed, not a new-UI usability study.
+**Revised scope:** [fit decision](05-WORKFLOW-FIT-DECISION.md), [integrated journey](06-INTEGRATED-JOURNEY.md), [structured decisions](workflow-fit-decision.json) and [native workflow/test/source evidence](workflow-fit-evidence.json). Keep the native capability, defer external integrations and preserve the existing flow. Control Strategy owns the rapid-response assessment and primary result, with Grid/Reliability summaries sharing its receipt. The journey includes 19 proposed UX acceptance tasks; 76 existing frontend tests passed, not a new-UI usability study.
 
 ## Reproduce structural verification
 

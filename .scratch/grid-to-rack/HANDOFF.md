@@ -10,7 +10,7 @@ Read [overview](../../docs/research/gridspine-grid-to-rack-overview.md), [archit
 2. Link 20-year investment/operational scenarios to selected short electrical events. Do not simulate every millisecond of 20 years or manufacture high-speed measurements from hourly means.
 3. Keep measurement planes explicit: GPU/server/rack, UPS/DC link, campus and PoC. Distinguish active-power buffering from reactive voltage support.
 4. Reuse existing frequency screening, converter presets and heuristic planning-cut/apply seams, preserving their scope labels. A 1 ms integration step is not evidence of voltage/PLL/current-limit/EMT fidelity.
-5. First implement a bounded source-tagged trace/cohort and buffer/reserve screen. Voltage, harmonics and detailed rack ride-through remain not established at this level.
+5. First implement a bounded source-tagged trace/cohort and buffer/reserve screen under **Control Strategy → Response to rapid load changes**. That is the primary execution/result home, with Grid/Reliability summaries referencing one canonical result per variant; Scenarios still owns the request and existing asset/load/connection forms own inputs. Voltage, harmonics and detailed rack ride-through remain not established at this level. A short event does not prove annual LOLE/EUE; planning feedback affects the optimum only through supported, enforced and verified constraints.
 6. Revisit an external adapter only after a specific need, required inputs, native project mapping, independent validation and deployment gates pass. No default engine selected, mandatory second planner/coordinator or automatic gated download.
 
 ## Start next session
@@ -19,7 +19,7 @@ Refresh actual master and relevant open data-centre, grid-readiness, island, wor
 
 Take GTR-00 first: agree fidelity levels, physical planes, trace/state contracts and permitted outputs. The existing readiness spec excluded in-app EMT, and the island plan parks ANDES under Q4. This research proposes an optional detailed-engine extension; it does not silently authorize bundling/deployment or reopen Q4. Follow the current engine/design/licensing/gatekeeper process before implementing those changes.
 
-Then scope GTR-01/02 and a small GTR-06 screen view. Preserve the original example when opt-in is absent. Reuse native imports/pins, jobs/approvals, source tags, stale-result and evidence exports. Write meaningful independent balance/rejection tests and run relevant native suites. Source/admission metadata and an external library's README are not physical validation.
+Then scope GTR-01/02 and a small GTR-06 Control Strategy screen with linked Grid/Reliability summaries. Use a compatible operating-point receipt for grid-coupled studies and exact parent dispatch/SOC; label any standalone analytical baseline and excluded network claims. Implement UX17–UX19 for result identity, cross-domain limits and consistent dependency/cancellation state. Preserve the original example when opt-in is absent. Reuse native imports/pins, jobs/approvals, source tags, stale-result and evidence exports. Write meaningful independent balance/rejection tests and run relevant native suites. Source/admission metadata and an external library's README are not physical validation.
 
 ## External evidence
 

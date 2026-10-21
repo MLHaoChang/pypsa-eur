@@ -15,7 +15,7 @@
         "G12",
         "G14"
       ],
-      "deliverable": "Current native workflow/input ownership and fidelity contract, with fit gates; no new engine selection.",
+      "deliverable": "Current native workflow/input ownership and fidelity contract, with fit gates; no new engine selection. Define Control Strategy primary assessment/results and single-receipt Grid/Reliability summaries; distinguish static operating point, short response and annual adequacy.",
       "acceptance_test_ids": [
         "C01",
         "C02",
@@ -65,7 +65,7 @@
         "G06",
         "G08"
       ],
-      "deliverable": "Energy-conserving target/achieved PoC comparison; omitted metrics unknown.",
+      "deliverable": "Control Strategy rapid-response screen: energy-conserving target/achieved PoC and shared reserve comparison, with compatible operating-point/state evidence for grid-coupled claims and declared-baseline analytical option; omitted metrics unknown.",
       "acceptance_test_ids": [
         "P01",
         "P02",
@@ -178,7 +178,7 @@
         "G10",
         "G14"
       ],
-      "deliverable": "Optional contextual inputs/results in existing flow, no engine picker or mandatory extra setup; preserve run-readiness and evidence.",
+      "deliverable": "Control Strategy primary result with Grid/Reliability summaries sharing one canonical receipt/state per variant; existing input owners and Scenarios request; UX17\u2013UX19; no duplicate jobs or mandatory new section.",
       "acceptance_test_ids": [
         "C05",
         "C07",
@@ -197,7 +197,7 @@
     "GTR-05": "Requires GTR-03/04 evidence if feedback claims those detailed/coupled capabilities.",
     "GTR-06": "First release is screen-only; later detailed result views depend on passed GTR-03."
   },
-  "recommendation_version": 2,
+  "recommendation_version": 3,
   "workflow_fit_decision": "workflow-fit-decision.json",
   "near_term_native_packages": [
     "GTR-00",
@@ -209,5 +209,6 @@
     "GTR-03",
     "GTR-04"
   ],
-  "initial_new_external_runtime_dependencies": []
+  "initial_new_external_runtime_dependencies": [],
+  "rapid_response_placement_reference": "workflow-fit-decision.json#rapid_response_placement"
 }

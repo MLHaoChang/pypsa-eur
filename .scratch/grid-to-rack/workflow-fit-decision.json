@@ -1,6 +1,6 @@
 {
   "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
-  "recommendation_version": 2,
+  "recommendation_version": 3,
   "supersedes": "Initial next-integration recommendation in PR527 head1bbee03c0fe0aee3fe616a8705d73fd3cd899fbd",
   "summary": "Native contextual capability first; no new external runtime dependency or top-level workflow section in the initial proposal.",
   "runtime_implementation": false,
@@ -35,7 +35,10 @@
     "UX13",
     "UX14",
     "UX15",
-    "UX16"
+    "UX16",
+    "UX17",
+    "UX18",
+    "UX19"
   ],
   "tools": [
     {
@@ -120,5 +123,30 @@
     }
   ],
   "independent_usability_study": "pending",
-  "domain_hardware_validation": "pending"
+  "domain_hardware_validation": "pending",
+  "rapid_response_placement": {
+    "study_label": "Response to rapid load changes",
+    "primary_capability": "Control Strategy",
+    "primary_result_home": "Control Strategy",
+    "study_request_owner": "scenarios",
+    "input_owners": {
+      "event": "loads",
+      "connection_limits": "connection",
+      "asset_response_and_reserve": "assets"
+    },
+    "secondary_result_summaries": [
+      "Grid",
+      "Reliability"
+    ],
+    "canonical_result_per_variant": true,
+    "secondary_views_start_duplicate_jobs": false,
+    "grid_coupled_requires_compatible_operating_point": true,
+    "standalone_analytical_baseline_must_be_declared": true,
+    "initial_scope": "power/energy/reserve screen; optional explicitly modeled frequency",
+    "short_event_establishes_annual_reliability": false,
+    "load_flow_establishes_transient_response": false,
+    "planning_effect_requires_supported_enforced_verified_constraint": true,
+    "dependency_and_terminal_states_shared_across_views": true,
+    "new_top_level_flow_section": false
+  }
 }

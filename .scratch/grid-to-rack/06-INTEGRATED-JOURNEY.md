@@ -6,9 +6,26 @@ Proposed behavior, not implemented UI. This document applies the [revised fit de
 
 The initial interaction is a contextual extension to normal project work:
 
-**Configure the same site and loads → plan assets and energy → inspect existing grid/reliability results → assess rapid changes when relevant → compare proposed changes → explicitly apply and rerun.**
+**Configure the same site and loads → plan assets and energy → establish the relevant electrical operating point → assess rapid changes in Control Strategy when requested → review linked Grid/Reliability implications → explicitly apply supported changes and rerun.**
 
 This is a decision journey, not a forced backend execution order. Reliability can participate in capacity sizing, and grid/control feedback may require iteration. Do not make load flow or dynamics mandatory for every project, or suggest that one completed stage guarantees all later engineering questions.
+
+## One assessment home, shared implications
+
+The optional study is **Control Strategy → Response to rapid load changes**. This is its user-facing execution and primary result home within the existing capabilities/results, not a new top-level flow section. Scenarios & optimisation still owns the study request, Assets & sizing owns supported controller/response parameters, and existing jobs own execution. A shortcut from Grid or Reliability opens this same study and result, preserving the originating context; it does not start a second simulation.
+
+| Context | Owned input or result | Boundary |
+| --- | --- | --- |
+| Loads & demand | Event size, shape, duration, source and physical plane | One event editor; hourly demand does not establish a measured rapid event. |
+| Connection & grid | Connection limits and electrical model/operating point | Static load flow establishes its supported operating-point quantities; it does not calculate transient response. |
+| Assets & sizing | UPS/BESS power/energy, supported response/control settings and joint reserves | No copied asset parameters or implicit extra reserve. |
+| Scenarios & optimisation / Readiness → run | Optional study selection, parent case and scoped input readiness | Existing run contracts apply; missing detailed-study inputs do not globally block valid preliminary planning. |
+| Control Strategy results | Primary rapid-response result: achieved storage response, residual PoC disturbance, energy/SOC, recharge and remaining reserve | Initial power/energy/reserve screen; frequency only when explicitly modeled. Voltage, harmonics and converter transients remain unassessed. |
+| Grid results | Linked original/achieved PoC and entered-limit summary from that same result | Preserve original before-mitigation readiness; no independent rerun or compliance certificate. |
+| Reliability results | Linked backup/autonomy and shared-reserve implications from that same result | No annual LOLE/EUE, uptime or failure-probability claim from a short event. |
+| Capacity planning | Proposed sizing/cost/reserve changes tied to validated feedback | Claim an effect on the optimum only when the corresponding constraint is supported, enforced and verified. |
+
+A grid-coupled study references the compatible grid operating-point receipt plus the parent dispatch/SOC, topology, period, controller, event and limits. Missing or stale prerequisites produce scoped Inputs needed/Stale, never fabricated grid results. A standalone analytical power/energy screen may use an explicitly declared baseline without forcing a load-flow run, but cannot then claim network voltage or grid-coupled dynamic behavior. Each assessment has one canonical result identity shared by all summaries and exports; comparisons retain a separate identity for each variant. Cancellation, failure or changed dependencies must propagate consistently to every view.
 
 ### 1. Capacity planning stays familiar
 
@@ -28,13 +45,13 @@ If both backup and smoothing use an asset, show a concise **shared reserve** exp
 
 ### 3. Request an answer, not a simulator
 
-Scenarios & optimisation owns the optional study request and comparable variants. The user-facing choice is a task such as **Assess rapid load changes against the connection and available reserve**. It must accurately state whether it is screening only.
+Scenarios & optimisation owns the optional study request and comparable variants. The user-facing choice is **Response to rapid load changes**, shown under Control Strategy and described as assessing the connection and available reserve. It must accurately state whether it is screening only. Entry points elsewhere link to the same request and result.
 
 Readiness → run summarizes missing inputs and requested-study status. Existing planning Run is not globally blocked by a new advisory or missing specialist model. If a requested detailed study lacks required inputs, that study cannot run or pass; other valid preliminary work may still proceed. An actual operator/delivery requirement remains visible as unresolved in the relevant results/report rather than being hidden by a general Ready to run label.
 
 ### 4. Explain results where users already look
 
-Use existing Grid plan and Reliability/Operation contexts with coordinated summaries, not another “Grid-to-rack” result silo. The grid summary answers whether modeled connection limits are met; reliability/operation shows what reserve remains for the stated duty. Link between these views using the same result/case identity, avoiding independent reruns or conflicting badges.
+**Control Strategy is the primary result view.** Show achieved response, residual PoC load, energy consumed/recharged and remaining reserve there. Grid and Reliability provide linked summaries of this same result: entered connection-limit outcomes in Grid, shared reserve and the modeled backup/autonomy implications in Reliability. Use existing operation/control result integration rather than a new “Grid-to-rack” silo or top-level flow section. A successful short event does not establish annual reliability; a separate supported adequacy calculation is needed for LOLE/EUE. Ordinary load flow establishes no transient response.
 
 The existing grid-readiness endpoint/scorecard explicitly screens the original envelope **before mitigation**. Preserve that meaning. Do not replace the source envelope with a filtered trace or overwrite its advisory verdict with a post-mitigation result. A smoothing assessment needs its own case/result receipt, linked from the existing result context, showing the original and achieved values and their respective scope. Any future checked-answer profile must validate that exact derived result and its dependencies before calling it checked.
 
@@ -92,12 +109,15 @@ These are proposed acceptance criteria, not results of a user study. Validate wi
 | UX14 | Export results or ask chat about compliance | Same source/fidelity/unknown/requirement status; no stronger claim than the corresponding supported evidence. |
 | UX15 | Use a read-only project or private customer trace | Native ownership/access rules preserved; no common-scope leak or new live-control authority. |
 | UX16 | Navigate capacity→grid→reliability→controls and back | One project; one owner for every input; engineering dependencies shown without a mandatory new navigation tree. |
+| UX17 | Open rapid-response assessment from Control Strategy, Grid and Reliability | One canonical result per variant and same request/job; secondary views link to the Control Strategy detail. Navigating does not submit a duplicate job. |
+| UX18 | Complete a short response screen and interpret other domains | Grid retains before-mitigation readiness and scoped achieved-limit summary; Reliability distinguishes remaining backup/autonomy from uncomputed annual LOLE/EUE; planning shows no optimum effect from an unenforced suggestion. |
+| UX19 | Change the parent operating point or cancel the assessment | Grid, Reliability and Control Strategy show the same stale/failed/cancelled receipt state. A grid-coupled study refuses missing/incompatible operating-point evidence; a standalone analytical screen clearly labels its declared baseline and excluded network claims. |
 
 Use observed task success, misunderstanding of limitations, unassisted completion and navigation errors to assess the design. Numeric time/success targets should be set from a real baseline, not invented in this document. Existing component tests establish contract behavior only; they do not replace these user tasks or physical validation.
 
 ## Delivery order
 
 1. Reconcile existing Guided/native editors for the workload and asset inputs actually needed. Preserve section ownership and existing run-readiness behavior.
-2. Deliver the smallest trace/envelope/reserve screen and existing-result summary that answers a named user decision. State precisely which planning constraints are and are not enforced.
+2. Deliver the smallest trace/envelope/reserve screen under Control Strategy, with Grid/Reliability summaries linked to the same result. State precisely which operating point, limitations and planning constraints apply.
 3. Add bounded native reserve/planning feedback only when independently validated and clearly previewed; compare the resulting design under the same assumptions.
 4. Revisit a single external adapter only after representative user need, required data, project-state mapping and independent benchmark gates pass. Detailed electrical/thermal/measurement tools stay optional specialist capabilities.
