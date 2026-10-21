@@ -46,7 +46,7 @@ export function CurtailmentByCauseTable({ payload }: { payload: CurtailmentByCau
       <header className="px-4 py-2.5 border-b border-border bg-bg-2 flex justify-between items-center">
         <span className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Curtailment by cause</span>
         <button type="button" className="text-[11px] underline" data-testid="curtailment-to-revenue"
-                onClick={() => requestResultsTab('investment')}>← Revenue by stream</button>
+                onClick={() => requestResultsTab('investment', 'case')}>← Revenue by stream</button>
       </header>
       <div className="p-3 space-y-2">
         {!split && (

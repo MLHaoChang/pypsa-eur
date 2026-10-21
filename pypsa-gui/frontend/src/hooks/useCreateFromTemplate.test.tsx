@@ -219,7 +219,7 @@ describe('useCreateFromTemplate', () => {
     const { hook } = render('/app')
     act(() => hook.result.current.mutate('ipp'))
     await waitFor(() => expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledTimes(1))
-    expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledWith('investment')
+    expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledWith('investment', undefined)
     expect(resultsApi.getEhTemplate).toHaveBeenCalledWith(NAME, { quiet: true })
   })
 
@@ -231,5 +231,15 @@ describe('useCreateFromTemplate', () => {
     await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalledTimes(1))
     await new Promise(r => setTimeout(r, 0))
     expect(useUIStore.getState().requestResultsTab).not.toHaveBeenCalled()
+  })
+
+  it('passes the meta\'s initial section with the tab', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'ipp', name: 'IPP',
+      recommended_archetype: 'grid_tied', initial_results_tab: 'investment',
+      initial_results_section: 'case' } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('ipp'))
+    await waitFor(() => expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledTimes(1))
+    expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledWith('investment', 'case')
   })
 })

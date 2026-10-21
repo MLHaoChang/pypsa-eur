@@ -480,6 +480,9 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  /** A section within the requested Results tab (the Investment tab's
+   *  `SECTIONS` ids, e.g. 'case'); consumed and cleared by that tab. */
+  resultsSectionRequest: string | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -620,8 +623,9 @@ interface UIStore {
   setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
-  requestResultsTab: (tab: string) => void
+  requestResultsTab: (tab: string, section?: string) => void
   clearResultsTabRequest: () => void
+  clearResultsSectionRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -701,6 +705,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  resultsSectionRequest: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
@@ -914,8 +919,13 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
-  requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
+  // A request without a section drops any section still pending, so an
+  // older section never applies to a later tab.
+  requestResultsTab: (tab, section) => {
+    navigationChanged(); set({ resultsTabRequest: tab, resultsSectionRequest: section ?? null })
+  },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),

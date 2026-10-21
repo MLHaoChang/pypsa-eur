@@ -114,13 +114,16 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
-      // The template may name the Results tab its project opens on (IPP
-      // ticket 05): asked for once, here; an unreadable meta asks nothing.
+      // The template may name the Results tab (and section) its project
+      // opens on (IPP ticket 05): asked for once, here; an unreadable meta
+      // asks nothing.
       const project = res.imported
       void qc.fetchQuery({ queryKey: nk(project, 'adequacy', 'eh_template'),
                            queryFn: () => resultsApi.getEhTemplate(project, { quiet: true }) })
         .then(meta => {
-          if (meta?.initial_results_tab) useUIStore.getState().requestResultsTab(meta.initial_results_tab)
+          if (!meta?.initial_results_tab) return
+          useUIStore.getState().requestResultsTab(meta.initial_results_tab,
+                                                  meta.initial_results_section ?? undefined)
         })
         .catch(() => { /* no template meta: Results opens as it would */ })
     },

@@ -41,14 +41,14 @@ describe('CurtailmentByCauseTable', () => {
     expect(screen.queryByTestId('curtailment-cause-rule')).toBeNull()
   })
 
-  it('the return link asks for the investment tab', () => {
+  it('the return link asks for the investment tab, Investment case section', () => {
     const spy = vi.fn()
     const real = useUIStore.getState().requestResultsTab
     useUIStore.setState({ requestResultsTab: spy })
     try {
       render(<CurtailmentByCauseTable payload={OK} />)
       fireEvent.click(screen.getByRole('button', { name: '← Revenue by stream' }))
-      expect(spy).toHaveBeenCalledWith('investment')
+      expect(spy).toHaveBeenCalledWith('investment', 'case')
     } finally { useUIStore.setState({ requestResultsTab: real }) }
   })
 })

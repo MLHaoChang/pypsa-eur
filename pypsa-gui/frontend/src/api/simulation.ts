@@ -946,6 +946,8 @@ export interface EhTemplateMeta {
   /** The Results tab a project made from this template opens on (IPP
    *  ticket 05); a `ResultsTab` id. */
   initial_results_tab?: string | null
+  /** A section within that tab (the Investment tab's 'case', …). */
+  initial_results_section?: string | null
 }
 
 /** Read-only preflight from GET /results/eh_readiness (P14). */
