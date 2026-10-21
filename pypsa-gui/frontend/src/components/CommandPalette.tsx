@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
+  Search, X, FolderOpen, Camera, Save as SaveIcon, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
   SlidersHorizontal, MessageSquare, Compass,
@@ -433,7 +433,11 @@ function useCommands(mode: PaletteMode): Command[] {
           id: 'act-projects-home',
           kind: 'action',
           title: 'Projects home',
-          subtitle: 'Browse, create, import or duplicate a project',
+          // The one entry point for a new project (its create wizard lives
+          // there). The palette never resets the open network itself: a
+          // "New project" row here once did, with no confirmation (UX-flow
+          // audit finding 12). The subtitle is matched, so "new project" finds it.
+          subtitle: 'Create a new project, or browse, import or duplicate one',
           icon: <LayoutGrid size={14} />,
           run: () => navigate('/projects'),
         },
@@ -444,26 +448,6 @@ function useCommands(mode: PaletteMode): Command[] {
           subtitle: 'Ownership, edit lock, scenario tree and members',
           icon: <Users size={14} />,
           run: () => setSlidePanel('workspace'),
-        },
-        {
-          id: 'act-newproj',
-          kind: 'action',
-          title: 'New project',
-          hint: 'reset network',
-          icon: <FilePlus size={14} />,
-          run: async () => {
-            // Same path as the header's "New" button — clears state and
-            // strips the active project marker.
-            await networkApi.resetNetwork()
-            // Scope the invalidation to the project we're leaving (captured
-            // before setCurrentProject(null)) so its now-stale cache clears
-            // without nuking other resident projects.
-            const leaving = currentProject
-            setCurrentProject(null)
-            setProjectName('Untitled')
-            invalidateNetworkQueries(qc, leaving)
-            toast.success('New empty project — give it a name and save')
-          },
         },
         {
           id: 'act-toggle-theme',

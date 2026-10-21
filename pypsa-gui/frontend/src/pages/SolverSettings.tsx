@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, AlertCircle, Leaf, ArrowRight, Pencil } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
+import StressScenarioEditor from './results/StressScenarioEditor'
 import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
@@ -853,6 +854,14 @@ export default function SolverSettings() {
 
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
       <ReliabilityAssumptions draft={draft} patch={patch} />
+
+      {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
+      <section className="border border-border rounded" data-testid="solver-stress">
+        <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
+          Stress conditions
+        </div>
+        <div className="p-3"><StressScenarioEditor project={currentProject} /></div>
+      </section>
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
       <SclopfPanel draft={draft} patch={patch} />
