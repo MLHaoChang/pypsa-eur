@@ -116,3 +116,17 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Features landed in whichever screen their PR touched.** Users had to jump away and back (16 places found in one audit).
   - Fix: a UX reviewer session writes one generic project workflow (sections, completion states, Run unlocks on complete-or-warning). Once the owner approves it, every UI PR needs the reviewer's OK on its exact head, next to the gatekeeper's.
   - Lives in: coordinator "Merging", steward "UX reviewer", `docs/agents/roles.md`.
+
+## 20 Oct 2026: glossary overlap counted as code
+
+- **Two PRs adding entries to the same `CONTEXT.md` showed as a `code` overlap.** That blocked the merge and forced a master merge plus a ~2 h CI cycle (two cycles lost on #421 and #422).
+  - Fix: `docs_only_re` also covers `CONTEXT.md` at any depth, `GLOSSARY.md` and `GLOSSARY-MAP.md`. A real git conflict still blocks, in its own check.
+  - Lives in: `scripts/coord/premerge.sh`, `docs_only_re`.
+
+- **`Integration (macos)` never got a runner (from ~13:40Z), so every premerge said "blocked (checks: 1 failed)".** The job cancelled after ~15 min with no `runner_id` and no steps.
+  - Fix: premerge waives an `Integration (macos)` job that was cancelled with no runner and no steps, when `Integration (ubuntu)` succeeded on the same head, and prints a `waived` line. A macOS job that ran, failed, or was cancelled mid-run still blocks.
+  - Lives in: `scripts/coord/premerge.sh`, "checks" section.
+
+- **Two PRs touching the same generated inventory (`harness/catalogue.py`, `capability-inventory.json`) counted as a `code` overlap even when the merge was clean and every test passed.** Each one cost a master merge and a ~2 h CI cycle.
+  - Fix: overlap only in those files does not block when the trial merge is clean and the semantic tests and the assistant inventory check pass on it; premerge prints a `waived` line. Any other code overlap, or any conflict, still blocks. The template has the same mechanism as `waive_overlap_re` (empty by default).
+  - Lives in: `scripts/coord/premerge.sh`, `inventory_overlap_re` (template: `waive_overlap_re`).

@@ -380,7 +380,11 @@ shared harness. No new stream vocabulary or provider-specific guard path is used
 The actor-owned record store uses bounded cross-process transactions, but the live
 project runtime still supports one application worker. These checks do not certify
 all engineering domains, arbitrary request completeness or independent expert
-approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+approval. Unmapped strict tools fail closed: a checked turn runs only
+`assurance.CHECKED_TOOLS`, and `tests/test_checked_results_dispositions.py` proves
+every other catalogue tool is refused before its handler runs. Each result view
+declares `checked_profiles` and a `checked_gap` (`services/result_views.py`; plan in
+`.scratch/checked-results/audit.md`). Deployment remains opt-in. Read the
 [implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
 and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
@@ -849,6 +853,20 @@ exists. With no such section the result is
 `unavailable_kind=historical_loadflow_unavailable`. Omit `run_id` for the
 live results. `window_from` and `window_to` are snapshot indexes;
 `window_from` must not exceed `window_to`.
+
+### Current energy flows
+
+`get_energy_flows` (`services/energy_flows_read.py`) reads the current solve's
+Energy flow tab through the same `services/results/energy_flows.py` payload
+the tab draws: Source → Via → Destination MWh, the largest rows first (default
+12, maximum 40, trimmed under 3800 characters), the conservation check and the
+window. It computes nothing of its own. `not_delivered` carries
+`unserved_product_mwh` (process shortfall per load) and `unserved_mwh` (shed
+load) as energy NOT delivered; neither is ever a row or a source. Before a
+solve it is `unavailable_kind=not_solved`; an attribution the module cannot
+prove to conserve energy is `not_established`, with no rows. Current results
+only; `inputs_changed_since_solve` says when the inputs moved after the solve.
+The `flows` result view (`services/result_views.py`) goes live with this tool.
 
 ### Experiment plans
 

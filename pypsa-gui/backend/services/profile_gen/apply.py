@@ -1,4 +1,9 @@
-"""Apply a generated renewable profile to a network generator.
+"""Apply a generated profile to a network component.
+
+Originally the renewable path (generator p_max_pu); since the time-series
+generators ticket 01 the target is any ``(component_type, attribute)`` in
+`TARGETS`, and the meta's family (`families.py`) decides which targets it may
+write. The alignment and write contract below hold for every target.
 
 Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md §4
 Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md Task 5
@@ -19,7 +24,7 @@ reindexing:
     into EVERY period by month-day-hour, leap rules applied per period
     (owner ruling D7=B); meta ``tiled: true`` + the weather year.
 
-Write contract: store entry ``("generators", "p_max_pu", name)`` + provenance
+Write contract: store entry ``(component_type, attribute, name)`` + provenance
 meta (the `_user_ts_meta` channel), `_t` reapply, changelog, dispatch
 invalidation via `services/dispatch_status.clear_dispatch` — a profile change
 invalidates solved results exactly like a topology edit does. Overwrite
@@ -31,7 +36,8 @@ user entry (see tests/test_profile_gen_apply.py).
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping
 
 import numpy as np
 import pandas as pd
@@ -39,6 +45,7 @@ import pandas as pd
 from services import change_log_service
 from services.dispatch_status import clear_dispatch
 from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.families import family_of, get_family
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
     _reapply_user_ts_to_network,
@@ -55,7 +62,7 @@ class ProfileApplyError(ProfileGenError):
 
 
 class ComponentNotFoundError(ProfileApplyError):
-    """The named generator does not exist on the network."""
+    """The named component does not exist on the network."""
 
 
 class CarrierMismatchError(ProfileApplyError):
@@ -74,6 +81,30 @@ class LeapYearMismatchError(ProfileApplyError):
 
 class InvalidTimeBasisError(ProfileApplyError):
     """The declared snapshot time basis is not "UTC" or an IANA zone."""
+
+
+class UnknownFamilyError(ProfileApplyError):
+    """The meta names a profile family nobody registered."""
+
+
+class UnsupportedTargetError(ProfileApplyError):
+    """The (component_type, attribute) pair is not in `TARGETS`."""
+
+
+class FamilyTargetMismatchError(CarrierMismatchError):
+    """The profile's family may not write this target (a renewable capacity
+    factor onto a load, a load shape onto a generator bound). A subclass of
+    CarrierMismatchError: the renewable refusal it generalises."""
+
+
+class ProfileBoundConflictError(ProfileApplyError):
+    """The new bound crosses the component's other bound (p_min_pu above
+    p_max_pu at some snapshot), which makes the LP infeasible."""
+
+
+class InvalidSeriesUnitError(ProfileApplyError):
+    """The meta's unit does not fit the target, or the series does not match
+    the normalisation its unit states."""
 
 
 # The mapping basis when the snapshots' clock is not stated (see
@@ -493,6 +524,184 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
 
 
 # ---------------------------------------------------------------------------
+# Targets: what the apply path can write, and the bounds of each
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TargetSpec:
+    """How one ``(component_type, attribute)`` is written.
+
+    ``kind``:
+      * ``per_unit`` — a [0, 1] bound; out-of-range values are clipped and the
+        clip recorded; p_min_pu and p_max_pu are checked against each other;
+      * ``power`` — MW, never negative (refused, not clipped: a net export is
+        a generator beside the load, not a negative load); a shape is scaled
+        by its unit, and its realised energy is recorded;
+      * ``price`` — currency/MWh of any sign, with its money basis recorded;
+      * ``ratio`` — strictly positive (an efficiency or COP).
+    """
+
+    kind: Literal["per_unit", "power", "price", "ratio"]
+    display: str  # changelog class, e.g. "Generator"
+    noun: str     # error wording, e.g. "generator"
+    # The snapshot weighting a power series' energy is counted with.
+    weighting: str = "generators"
+
+
+TARGETS: dict[tuple[str, str], TargetSpec] = {
+    ("generators", "p_max_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    ("generators", "p_min_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    ("loads", "p_set"): TargetSpec("power", "Load", "load"),
+    ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit",
+                                            weighting="stores"),
+    ("generators", "marginal_cost"): TargetSpec("price", "Generator", "generator"),
+    ("links", "marginal_cost"): TargetSpec("price", "Link", "link"),
+    ("links", "efficiency"): TargetSpec("ratio", "Link", "link"),
+}
+
+# The other half of a per-unit pair: writing one is checked against the other.
+_BOUND_PAIRS = {"p_min_pu": "p_max_pu", "p_max_pu": "p_min_pu"}
+
+# A shape family's realised energy may differ from its profile's by this much
+# before the apply warns (gatekeeper review 2026-10-20).
+ENERGY_TOLERANCE = 0.02
+ENERGY_MISMATCH_WARNING = "energy_mismatch"
+BOUND_FORCES_OFF_WARNING = "bound_forces_off"
+
+# How close a normalised shape's peak/mean must be to 1.
+_NORM_RTOL = 1e-3
+
+
+def _target(component_type: str, attribute: str) -> TargetSpec:
+    try:
+        return TARGETS[(component_type, attribute)]
+    except KeyError:
+        known = ", ".join(f"{c}/{a}" for c, a in sorted(TARGETS))
+        raise UnsupportedTargetError(
+            f"profiles cannot be applied to {component_type}/{attribute}; "
+            f"supported targets: {known}"
+        ) from None
+
+
+def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dict]:
+    """The factor that turns ``series`` into MW, per its stated unit, checked
+    against the SOURCE series (the source year is what a per-unit mean or
+    peak refers to)."""
+    unit = str(meta.get("unit") or "MW")
+    if unit == "MW":
+        return 1.0, {"unit": "MW"}
+    if unit not in ("per_unit_peak", "per_unit_mean"):
+        raise InvalidSeriesUnitError(
+            f"unit {unit!r} does not fit a power target; expected MW, "
+            "per_unit_peak or per_unit_mean"
+        )
+    try:
+        scale = float(meta.get("scale_mw"))
+    except (TypeError, ValueError):
+        scale = float("nan")
+    if not (np.isfinite(scale) and scale > 0):
+        raise InvalidSeriesUnitError(
+            f"a {unit} shape needs a positive scale_mw, got "
+            f"{meta.get('scale_mw')!r}"
+        )
+    vals = series.to_numpy(dtype=float)
+    ref = float(np.nanmax(vals)) if unit == "per_unit_peak" else float(np.nanmean(vals))
+    if not np.isclose(ref, 1.0, rtol=_NORM_RTOL, atol=0.0):
+        what = "peak" if unit == "per_unit_peak" else "mean"
+        raise InvalidSeriesUnitError(
+            f"the series is declared {unit} but its source-year {what} is "
+            f"{ref:.4g}, not 1"
+        )
+    extra = {"unit": unit, "scale_mw": scale}
+    if unit == "per_unit_mean":
+        extra["per_unit_mean_of"] = "source_year"
+    return scale, extra
+
+
+def _money(meta: Mapping[str, Any]) -> dict:
+    """A price series' unit and money basis, in the money-year convention's
+    words ("real basis, 2020 EUR")."""
+    unit = str(meta.get("unit") or "")
+    cur, _, per = unit.partition("/")
+    if per != "MWh" or not (len(cur) == 3 and cur.isalpha() and cur.isupper()):
+        raise InvalidSeriesUnitError(
+            f"a price series must be in currency/MWh (e.g. EUR/MWh), got "
+            f"{unit!r}"
+        )
+    basis = str(meta.get("price_basis") or "").strip().lower()
+    if basis not in ("real", "nominal"):
+        raise InvalidSeriesUnitError(
+            f"a price series must state price_basis real or nominal, got "
+            f"{meta.get('price_basis')!r}"
+        )
+    year = meta.get("currency_year")
+    # Required: every price in the model is real base-year money read from
+    # its price-data year (the money-year convention), so a price series
+    # without one would carry an unknown into the objective (gatekeeper
+    # review 2026-10-20).
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        raise InvalidSeriesUnitError(
+            f"a price series must state its currency_year (the year of its "
+            f"price data), got {year!r}") from None
+    return {"unit": unit, "price_basis": basis, "currency_year": year,
+            "money": f"{basis} basis, {year} {cur}"}
+
+
+def _current_bound(n, component_type: str, component: str, attribute: str):
+    """The component's present value of ``attribute`` per snapshot: its
+    series when it has one, else its static value."""
+    static = float(getattr(n, component_type).at[component, attribute])
+    table = getattr(n, f"{component_type}_t")[attribute]
+    if component in table.columns:
+        # A gap in the series is the static value, as PyPSA reads it.
+        return (table[component].reindex(n.snapshots).fillna(static)
+                .to_numpy(dtype=float))
+    return np.full(len(n.snapshots), static)
+
+
+def _check_bound_pair(n, component_type: str, component: str, attribute: str,
+                      vals: np.ndarray) -> list[str]:
+    """Refuse a p_min_pu above p_max_pu at any snapshot — the LP would be
+    infeasible. A committable unit is the exception: its bounds are
+    status·p_min_pu ≤ p/p_nom ≤ status·p_max_pu, so a crossing hour forces it
+    off instead (gatekeeper review 2026-10-20); that is written and warned."""
+    other = _BOUND_PAIRS.get(attribute)
+    if other is None:
+        return []
+    current = _current_bound(n, component_type, component, other)
+    lo, hi = (vals, current) if attribute == "p_min_pu" else (current, vals)
+    bad = np.flatnonzero(lo > hi + 1e-9)
+    if not bad.size:
+        return []
+    i = int(bad[0])
+    table = getattr(n, component_type)
+    if "committable" in table.columns and bool(table.at[component, "committable"]):
+        return [(
+            f"{BOUND_FORCES_OFF_WARNING}: {component!r} is committable and its "
+            f"p_min_pu exceeds p_max_pu at {bad.size} snapshots (first "
+            f"{n.snapshots[i]}); the unit is forced off in those hours"
+        )]
+    raise ProfileBoundConflictError(
+        f"{component!r}: p_min_pu {lo[i]:.4g} would exceed p_max_pu "
+        f"{hi[i]:.4g} at snapshot {n.snapshots[i]} ({bad.size} snapshots "
+        "in all) — the LP would be infeasible"
+    )
+
+
+def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
+    """Σ value × snapshot_weightings[weighting], per investment period."""
+    w = n.snapshot_weightings[weighting].reindex(aligned.index).to_numpy(dtype=float)
+    energy = pd.Series(aligned.to_numpy(dtype=float) * w, index=aligned.index)
+    if isinstance(aligned.index, pd.MultiIndex):
+        per = energy.groupby(level=0).sum()
+        return {str(int(p)): float(v) for p, v in per.items()}
+    return {"total": float(energy.sum())}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -503,10 +712,16 @@ def assign_profile(
     series: pd.Series,
     meta: Mapping[str, Any],
     *,
+    component_type: str = "generators",
+    attribute: str = "p_max_pu",
     now: _dt.datetime | str | None = None,
     time_basis: str | None = None,
 ) -> dict:
-    """Apply a generated per-unit profile to ``component``'s ``p_max_pu``.
+    """Apply a generated profile to ``component``'s ``attribute``.
+
+    The target ``(component_type, attribute)`` must be in `TARGETS`, and the
+    meta's ``family`` (renewable when absent) must allow it. The defaults are
+    the original renewable case, generator p_max_pu.
 
     ``ctx`` is the ProjectContext that owns the network AND the user-ts
     stores — the two are written as a pair (the tenancy rule of
@@ -528,51 +743,92 @@ def assign_profile(
     if not isinstance(meta, Mapping):
         raise ProfileApplyError("meta must be the engine's provenance dict")
 
-    n = ctx.network
-    if component not in n.generators.index:
-        raise ComponentNotFoundError(
-            f"generator {component!r} not found on the network"
-        )
-    carrier = str(n.generators.at[component, "carrier"] or "")
-    cl = carrier.lower()
-    is_wind = "wind" in cl
-    is_solar = "solar" in cl or "pv" in cl
-    if not (is_wind or is_solar):
-        raise CarrierMismatchError(
-            f"generator {component!r} has carrier {carrier!r}; generated "
-            "profiles apply to wind/solar assets only"
-        )
-    tech = str(meta.get("technology", "")).strip().lower()
-    if tech not in ("wind", "solar"):
-        raise CarrierMismatchError(
-            f"profile meta carries technology {tech!r}; expected wind/solar"
-        )
-    if (tech == "wind" and not is_wind) or (tech == "solar" and not is_solar):
-        raise CarrierMismatchError(
-            f"profile technology {tech!r} does not match generator "
-            f"{component!r}'s carrier {carrier!r}"
+    target = _target(component_type, attribute)
+    family_name = family_of(meta)
+    family = get_family(family_name)
+    if (component_type, attribute) not in family.targets:
+        allowed = ", ".join(f"{c}/{a}" for c, a in sorted(family.targets))
+        raise FamilyTargetMismatchError(
+            f"a {family_name} profile cannot be applied to "
+            f"{component_type}/{attribute}; it applies to {allowed}"
         )
 
+    n = ctx.network
+    if component not in getattr(n, component_type).index:
+        raise ComponentNotFoundError(
+            f"{target.noun} {component!r} not found on the network"
+        )
+    if family.guard is not None:
+        family.guard(n, component_type, component, meta)
+
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
+    unit_meta: dict[str, Any] = {}
+    scale = 1.0
+    if target.kind == "power":
+        scale, unit_meta = _scale_power(series, meta)
+    elif target.kind == "price":
+        unit_meta = _money(meta)
+
     time_basis, recorded_basis, warnings = resolve_time_basis(
         time_basis, _commercial_timezone(ctx))
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
 
-    # A p_max_pu bound must be finite at every snapshot — a NaN masks the
-    # constraint row out of the LP (the Phase 12f rule). Values are clipped
-    # into [0, 1] defensively; a clip is recorded in meta.
-    vals = aligned.to_numpy(dtype=float)
+    # Every written value must be finite at every snapshot — a NaN masks the
+    # constraint row out of the LP (the Phase 12f rule).
+    vals = aligned.to_numpy(dtype=float) * scale
     if not np.isfinite(vals).all():
         raise ProfileApplyError(
             f"profile for {component!r} has non-finite values after "
             "alignment — refusing to write a bound with holes"
         )
-    clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
-    if clipped:
-        vals = np.clip(vals, 0.0, 1.0)
-        aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
+    clipped = False
+    if target.kind == "per_unit":
+        # Clipped into [0, 1] defensively; a clip is recorded in meta.
+        clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
+        if clipped:
+            vals = np.clip(vals, 0.0, 1.0)
+        warnings = [*warnings, *_check_bound_pair(n, component_type, component,
+                                                  attribute, vals)]
+    elif target.kind == "power":
+        if (vals < 0.0).any():
+            i = int(np.flatnonzero(vals < 0.0)[0])
+            raise ProfileApplyError(
+                f"{target.noun} {component!r}: {attribute} is negative "
+                f"({vals[i]:.4g} MW at {aligned.index[i]}); model a net "
+                "export as a generator beside it, not a negative value"
+            )
+    elif target.kind == "ratio":
+        if (vals <= 0.0).any():
+            i = int(np.flatnonzero(vals <= 0.0)[0])
+            raise ProfileApplyError(
+                f"{target.noun} {component!r}: {attribute} must be positive, "
+                f"got {vals[i]:.4g} at {aligned.index[i]}"
+            )
+    aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
+
+    if target.kind == "power":
+        # The source year's energy: its mean power over its hours. For an
+        # hourly series this is the plain sum; a daily or weekly series is a
+        # mean per step, and a weekly one's edge weeks straddle the year.
+        src_year = int(align_meta["weather_year"])
+        year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
+        profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
+        modelled = _modelled_mwh(n, aligned, target.weighting)
+        unit_meta["profile_annual_mwh"] = profile_mwh
+        unit_meta["modelled_mwh"] = modelled
+        if profile_mwh > 0:
+            off = {k: v for k, v in modelled.items()
+                   if abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
+            if off:
+                parts = ", ".join(f"{k}: {v:,.0f} MWh" for k, v in off.items())
+                warnings = [*warnings, (
+                    f"{ENERGY_MISMATCH_WARNING}: the profile's source year "
+                    f"holds {profile_mwh:,.0f} MWh but the model sees "
+                    f"{parts} (snapshot weightings), more than "
+                    f"{ENERGY_TOLERANCE:.0%} apart"
+                )]
 
     if now is None:
         applied_at = _dt.datetime.now(_dt.timezone.utc)
@@ -581,9 +837,11 @@ def assign_profile(
     else:
         applied_at = now
 
-    key = ("generators", "p_max_pu", component)
+    key = (component_type, attribute, component)
     full_meta: dict[str, Any] = {
         **dict(meta),
+        **unit_meta,
+        "family": family_name,
         "weather_year": align_meta["weather_year"],
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
@@ -613,8 +871,12 @@ def assign_profile(
         # edit — flip freshness so Results can't serve the old solve.
         dispatch_cleared = clear_dispatch(n)
 
+    if family_name == "renewable":
+        what = f"generated {meta.get('technology', '?')} profile"
+    else:
+        what = f"{family_name} profile"
     desc = (
-        f"Applied generated {tech} profile to {component}: source "
+        f"Applied {what} to {component} {attribute}: source "
         f"{meta.get('source', '?')}, weather year {align_meta['weather_year']}"
     )
     if align_meta["resolution"] != "hourly":
@@ -623,11 +885,13 @@ def assign_profile(
         desc += f", tiled over {len(align_meta['periods'])} investment periods"
     if align_meta["leap_day"] == "dropped":
         desc += ", Feb 29 dropped"
-    change_log_service.log("timeseries", "Generator", component, desc)
+    change_log_service.log("timeseries", target.display, component, desc)
 
     return {
         "component": component,
-        "attribute": "p_max_pu",
+        "component_type": component_type,
+        "attribute": attribute,
+        "family": family_name,
         "hours": int(len(aligned)),
         "weather_year": align_meta["weather_year"],
         "leap_day": align_meta["leap_day"],
@@ -639,4 +903,7 @@ def assign_profile(
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
         "peak": float(aligned.max()),
+        **({"modelled_mwh": unit_meta["modelled_mwh"],
+            "profile_annual_mwh": unit_meta["profile_annual_mwh"]}
+           if target.kind == "power" else {}),
     }

@@ -410,7 +410,7 @@ interface ContractBase {
   base_year?: number | null
   library_ref?: LibraryItemRef | null
 }
-/** Mirrors backend `PpaContract` (IC P2 WP2.2a/b, WP2.2d `changes_dispatch`). */
+/** Mirrors backend `PpaContract` (IC P2 WP2.2a/b, WP2.2d `changes_dispatch`, IPP 01 share/settlement). */
 export interface PpaContract extends ContractBase {
   type: 'ppa'
   kind: 'pay_as_produced' | 'baseload' | 'as_consumed_btm' | 'sleeved'
@@ -430,6 +430,12 @@ export interface PpaContract extends ContractBase {
   baseload_mw?: number | null
   sleeving_fee_eur_per_mwh?: number | null
   sleeving_party?: string | null
+  /** IPP ticket 01: the share of the output the PPA covers, (0, 1]; baseload refuses ≠ 1. */
+  share?: number
+  /** `financial`: (price − ref) × share × gen, a fixed-price pay-as-produced PPA only. */
+  settlement?: 'physical' | 'financial'
+  /** The financial form's negative-price clause; null = the form's default (true). */
+  suspend_on_negative_price?: boolean | null
 }
 export interface CfdContract extends ContractBase {
   type: 'cfd'
@@ -442,6 +448,8 @@ export interface CfdContract extends ContractBase {
   indexation_pct_per_year?: number
   reference?: 'interval' | 'monthly_capture'
   suspend_on_negative_price?: boolean
+  /** IPP ticket 01: the share of the output the CfD covers, (0, 1]. */
+  share?: number
 }
 export interface DrContract extends ContractBase {
   type: 'dr'
@@ -491,8 +499,8 @@ export type ValueStreamKind =
   | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
   | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
   | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
-  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'lost_production'
-  | 'other'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'energy_wholesale'
+  | 'lost_production' | 'other'
 export interface Participant {
   id: string; name: string; role: ParticipantRole; currency?: string
 }
@@ -555,6 +563,8 @@ export interface CommercialConfig {
   site_party?: string
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
+  /** IPP ticket 07: the wholesale import price, a Library series on the import Link(s). */
+  import_price_ref?: LibraryRef | null
   export_link?: string | null
   timezone?: string | null
   connection?: ConnectionAgreement | null

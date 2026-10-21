@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 265,
+  "tool_count": 267,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -3178,7 +3178,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "efbad4ff4dfcfd3ca17c5b3fd5934cd268856615dc4371ba98a4fa6440e111eb",
+      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -5592,7 +5592,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "3fee3fd1579f25938f311af69c6da1ad4df6771e28290a3ca4fbaa9e0e32ce72",
+      "schema_sha256": "b46446d653180d98e76cef8cbdb028da3cdc19b7ef9a6d79c89c8d4c4805242a",
       "behavioral_fixture": "pending"
     },
     {
@@ -5707,6 +5707,23 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "8141d78f100db6a8a9c0e566273a6a97fe92d94493d1912c0d50d2f30462899d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_energy_flows",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "period",
+        "window_from",
+        "window_to",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
       "behavioral_fixture": "pending"
     },
     {
@@ -6045,6 +6062,27 @@
       "safety_tier": "write",
       "schema_sha256": "03068bc75969f2330c68781e3c718de251ca87e12e5a76ea329ad3f6d3849f1d",
       "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_flow",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
     }
   ],
   "result_tabs": [
@@ -6071,6 +6109,10 @@
     {
       "id": "flows",
       "label": "Energy flow"
+    },
+    {
+      "id": "loadshape",
+      "label": "Load shape"
     },
     {
       "id": "prices",
@@ -6129,7 +6171,8 @@
     "investment",
     "adequacy",
     "fmea",
-    "flows"
+    "flows",
+    "loadshape"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [

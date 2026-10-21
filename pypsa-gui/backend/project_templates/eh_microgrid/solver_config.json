@@ -10,6 +10,7 @@
     "group_cap_mw": null,
     "group_contract": null,
     "group_members": [],
+    "import_price_ref": null,
     "import_tariff": null,
     "import_tariff_id": null,
     "import_tariff_ref": null,

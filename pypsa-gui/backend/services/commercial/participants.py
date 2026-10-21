@@ -370,6 +370,9 @@ class LedgerInputs:
     external_ppa_assets: list[str] = field(default_factory=list)
     # An energy hub's allocation inputs (WP3.3a); None without an allocation key.
     hub: HubInputs | None = None
+    # The wholesale import cost per period (IPP ticket 07, `import_price_ref`): + the
+    # site pays the market; {} when the config prices no import series.
+    import_cost: dict[str, float | None] = field(default_factory=dict)
 
 
 @dataclass
@@ -537,6 +540,13 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
             src.legs = [("market", site, v if _finite(v) else None)]
             if not _finite(v):
                 src.flags.append("export_revenue_not_established")
+        out.append(src)
+    if p in inputs.import_cost:
+        v = inputs.import_cost[p]
+        src = _Source("import_price", "import_price", "energy_wholesale",
+                      legs=[(site, "market", v if _finite(v) else None)])
+        if not _finite(v):
+            src.flags.append("import_cost_not_established")
         out.append(src)
     for i, s in enumerate(inputs.settlement):
         if s.get("period") != p or s.get("value_stream") in _VOLUME_ONLY:
@@ -940,6 +950,9 @@ def check_conservation(ledger: Ledger, inputs: LedgerInputs,
             if p in inputs.export_revenue:
                 v = inputs.export_revenue[p]
                 terms.append(None if v is None else -v)
+            if p in inputs.import_cost:
+                # In the LP rows (`ic_energy_price`), outside the bill (IPP ticket 07).
+                terms.append(inputs.import_cost[p])
             if any(not _finite(t) for t in terms):
                 rec_ok, detail = None, "a bridge term is unknown"
             else:
