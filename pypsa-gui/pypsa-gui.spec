@@ -106,6 +106,10 @@ datas = [
     # module (collected by import), its data files are not.
     (str(BACKEND / "services" / "library" / "defaults_pack" / "versions"),
      "services/library/defaults_pack/versions"),
+    # The shipped EU cost references (GS-EU): `services/library/europe_reference.py`
+    # reads `Path(__file__).with_name("reference_data")`, a data folder beside the module.
+    (str(BACKEND / "services" / "library" / "reference_data"),
+     "services/library/reference_data"),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
