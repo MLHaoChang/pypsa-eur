@@ -8,10 +8,12 @@ import type { FlowSectionId } from '../../api/flow'
 import { projectsApi } from '../../api/projects'
 import { simulationApi } from '../../api/simulation'
 import { isActive } from '../../api/solveQueue'
+import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useSolveQueue } from '../../hooks/useSolveQueue'
+import { storedStudyRef, useDecisionStore } from '../../pages/decision/decisionStore'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { isOpenItem } from '../../utils/flowItems'
+import { countOpen } from '../../utils/flowItems'
 import AssetPaletteInline from './AssetPaletteInline'
 import { SItem, usePanelToggle } from './SidebarRows'
 
@@ -117,16 +119,24 @@ function ReadinessRows({ onCloseModal }: Props) {
     refetchInterval: 30_000,
     staleTime: 15_000,
   })
+  // One number for the badge, the rail and Issues: the flow's open to-do and
+  // to-check items (sections 1–8, acknowledged ones left out), falling back to
+  // the preflight count only while the flow is unavailable.
+  const { flow } = useProjectFlow()
+  const flowItems = flow ? flow.sections.filter(s => s.state !== null).flatMap(s => s.items) : null
+  const open = flowItems ? countOpen(flowItems) : null
+  const errorCount = open ? open.todo : (preflight?.errors ?? 0)
+  const warningCount = open ? open.check : (preflight?.warnings ?? 0)
   // ADR-0001: a failed preflight fetch must never render as "no issues".
-  const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
-  const hasErrors = (preflight?.errors ?? 0) > 0
+  const issueCount = errorCount + warningCount
+  const hasErrors = errorCount > 0
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
   return (
     <>
       <SItem icon={<AlertTriangle size={15} />} label="Issues"
         active={activeSlidePanel === 'issues'}
-        rightEl={preflightErrored ? (
+        rightEl={preflightErrored && !flowItems ? (
           <span className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
             style={{ background: 'rgba(148,163,184,0.18)', color: '#94a3b8' }}
             title="Could not check for issues — the preflight validation request failed">?</span>
@@ -134,7 +144,7 @@ function ReadinessRows({ onCloseModal }: Props) {
           <span className={`shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded ${
             hasErrors ? 'bg-danger/15 text-danger' : 'bg-warn/15 text-warn'}`}
           data-severity={hasErrors ? 'error' : 'warning'}
-          title={issueBadgeTitle(preflight?.errors ?? 0, preflight?.warnings ?? 0)}>{issueCount}</span>
+          title={issueBadgeTitle(errorCount, warningCount)}>{issueCount}</span>
         ) : undefined}
         onClick={() => toggle('issues')} />
       <SItem icon={<ListChecks size={15} />} label="Solve Queue"
@@ -157,13 +167,21 @@ function ResultRows({ onCloseModal }: Props) {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: projectsApi.list, staleTime: 10_000 })
   const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
   const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
+  // A decision study is its own project kind, started and reopened from the
+  // projects home (workspace-reconciliation §6.2): the row shows only in the
+  // study's own project, or while its panel is open (UX-flow #21).
+  const studyRef = useDecisionStore(s => s.active) ?? storedStudyRef()
+  const showDecision = activeSlidePanel === 'decision'
+    || (!!studyRef && !!currentProject && studyRef.project === currentProject)
   return (
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"
         active={activeSlidePanel === 'results'} onClick={() => toggle('results')} />
-      <SItem icon={<Scale size={15} />} label="Decision study"
-        title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
-        active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />
+      {showDecision && (
+        <SItem icon={<Scale size={15} />} label="Decision study"
+          title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
+          active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />
+      )}
       {!knownNotAStudy && (
         <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
           title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."

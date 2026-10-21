@@ -10,6 +10,7 @@ import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-ro
 import { projectsApi } from '../api/projects'
 import type { BundleImportResult } from '../api/types'
 import { getPostLoginPath } from '../auth/resume'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries } from '../utils/projectActions'
@@ -112,6 +113,9 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
+      // Guided opens on its initial step; Expert lands in section 1 so the
+      // new project starts at the top of the flow, not on a bare canvas.
+      if (useUIStore.getState().uiMode === 'expert') openSectionInExpert('project')
     },
     // A refused site parameter is shown beside its field by the form.
     onError: (e: unknown) => {

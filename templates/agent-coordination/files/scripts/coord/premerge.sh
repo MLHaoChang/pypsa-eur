@@ -8,7 +8,8 @@
 # non-zero on a conflict, a code-file overlap with the base branch, a failing
 # semantic check on the trial merge, or any check run on the head that is not
 # success or skipped (or that it could not read). Docs-only overlap and files
-# identical on both sides are reported, not fatal. Reading check runs needs
+# identical on both sides are reported, not fatal. With overlap_tests_script set,
+# a code overlap is waived when the tests that exercise each file pass too. Reading check runs needs
 # the gh CLI.
 #
 # Environment:
@@ -25,6 +26,7 @@ remote=${PREMERGE_REMOTE:-origin}
 base_branch=${PREMERGE_BASE:-{{BASE_BRANCH}}}
 gh_repo=${PREMERGE_REPO:-{{REPO}}}
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
@@ -46,6 +48,15 @@ waive_overlap_re=''
 # Leave empty to treat such a manifest as code.
 append_only_overlap_re=''
 append_only_test_cmd=()
+# A code overlap does not block when the trial merge is clean, semantic_cmd
+# passes and the tests that exercise each overlapping file pass. Set
+# overlap_tests_script to a script (path relative to this one) that is called as
+# `<script> <trial-worktree> <file>...` and prints, per file, `test<TAB>file<TAB>
+# test-id` for each test or `none<TAB>file`. overlap_test_cmd (run from the
+# worktree root, test ids appended) runs them. A file with no test still blocks.
+# Leave empty to treat every non-docs overlap as code.
+overlap_tests_script=''
+overlap_test_cmd=(python3 -m pytest -q -p no:cacheprovider)
 # -------------------------------------------------------------------------
 
 base_ref="refs/remotes/$remote/$base_branch"
@@ -85,6 +96,7 @@ fi
 
 echo
 echo "== files changed on both sides since merge-base"
+code_files=()  # code overlap, waived if its tests pass on the trial merge (below)
 waive_overlap=()  # overlap files that pass if the trial merge and semantic_cmd do
 append_overlap=()  # append-only manifest overlap, waived if only lines were added (below)
 overlap=$(comm -12 \
@@ -93,7 +105,6 @@ overlap=$(comm -12 \
 if [[ -z $overlap ]]; then
   echo "none"
 else
-  code_overlap=0
   while IFS= read -r f; do
     # Same blob on both sides (e.g. a cherry-pick the base already has), or
     # deleted on both: nothing to reconcile.
@@ -110,21 +121,20 @@ else
       append_overlap+=("$f")
     else
       echo "  code       $f"
-      fail=1
-      code_overlap=$((code_overlap + 1))
+      code_files+=("$f")
     fi
   done <<<"$overlap"
-  if ((code_overlap)); then
-    reasons+=("overlap: $code_overlap code file$([[ $code_overlap -eq 1 ]] || echo s)")
-  fi
 fi
 
 echo
 echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
 sem_ok=0
-if { [[ -z $semantic_re ]] || ! grep -Eq "$semantic_re" <<<"$changed"; } && ((${#waive_overlap[@]} == 0)) \
-  && ((${#append_overlap[@]} == 0)); then
+unmapped=() overlap_tests=()
+need_sem=0
+{ { [[ -n $semantic_re ]] && grep -Eq "$semantic_re" <<<"$changed"; } \
+  || ((${#waive_overlap[@]} || ${#append_overlap[@]})); } && need_sem=1
+if ((!need_sem)) && { [[ -z $overlap_tests_script ]] || ((${#code_files[@]} == 0)); }; then
   echo "not needed (no path matches semantic_re)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -137,7 +147,18 @@ else
   git worktree add -q --detach "$wt" "$trial"
 
   echo "trial merge $trial"
-  if (cd "$wt" && "${semantic_cmd[@]}"); then
+
+  # The tests that exercise each code-overlap file; a file with none still blocks.
+  if [[ -n $overlap_tests_script ]] && ((${#code_files[@]})); then
+    while IFS=$'\t' read -r kind f t; do
+      if [[ $kind == none ]]; then unmapped+=("$f"); else overlap_tests+=("$t"); fi
+    done < <("$script_dir/$overlap_tests_script" "$wt" "${code_files[@]}")
+    ((${#unmapped[@]} == 0)) && need_sem=1
+  fi
+
+  if ((!need_sem)); then
+    echo "not needed (no path matches semantic_re)"
+  elif (cd "$wt" && "${semantic_cmd[@]}"); then
     echo "semantic tests: pass"
     sem_ok=1
   else
@@ -154,6 +175,34 @@ else
       fail=1
       reasons+=("append-only manifest test failed")
     fi
+  fi
+fi
+
+if ((${#code_files[@]})); then
+  if [[ -z $overlap_tests_script ]]; then
+    ok=0
+  else
+    echo
+    echo "== code overlap tests"
+    ok=0
+    if ((conflict)); then
+      echo "  no trial merge while the PR conflicts"
+    elif ((${#unmapped[@]})); then
+      printf '  no test     %s\n' "${unmapped[@]}"
+      echo "  these files have no test, so the overlap blocks"
+    elif ((!sem_ok)); then
+      echo "  semantic tests did not pass on the trial merge, so the overlap blocks"
+    else
+      ok=1
+      mapfile -t uniq_tests < <(printf '%s\n' "${overlap_tests[@]}" | sort -u)
+      (cd "$wt" && "${overlap_test_cmd[@]}" "${uniq_tests[@]}") || ok=0
+      ((ok)) || echo "  the overlap tests failed on the trial merge, so the overlap blocks"
+    fi
+    ((ok)) && echo "  waived      code overlap (${#code_files[@]} file(s)): clean trial merge, semantic pass, ran: ${uniq_tests[*]}"
+  fi
+  if ((!ok)); then
+    fail=1
+    reasons+=("overlap: ${#code_files[@]} code file$([[ ${#code_files[@]} -eq 1 ]] || echo s)")
   fi
 fi
 
@@ -212,6 +261,9 @@ if runs=$(command -v gh >/dev/null &&
   [[ -n $waived ]] && printf '%s' "$waived"
   if ((total == 0)); then
     echo "  none yet"
+    if (($(date +%s) - $(git log -1 --format=%ct "$head") > 600)); then
+      echo "  no CI ran on this head (e.g. base retargeted after the push): merge $base_branch in, as a real merge commit, to trigger it"
+    fi
     fail=1
     reasons+=("checks: none yet")
   elif [[ -n $bad ]]; then

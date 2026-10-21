@@ -27,6 +27,7 @@ logged, never echoed in errors, never stored per project.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import threading
@@ -35,6 +36,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 from app_paths import app_data_dir
 from services.profile_gen.engine import AtliteNotInstalledError, ProfileGenError
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Typed errors
@@ -215,8 +218,12 @@ def _call_with_timeout(fn: Callable[[], None], timeout_s: float, month: int) -> 
         exc = error[0]
         if isinstance(exc, ProfileGenError):
             raise exc
+        # The library's own text stays in the server log: it can carry the
+        # request URL, and a caller sees only the type (`refusals`).
+        logger.error("ERA5 download failed at month %s", month, exc_info=exc)
         raise CutoutDownloadError(
-            f"ERA5 download failed at month {month}: {type(exc).__name__}: {exc}"
+            f"ERA5 download failed at month {month} ({type(exc).__name__}); "
+            "see the server log"
         ) from exc
 
 

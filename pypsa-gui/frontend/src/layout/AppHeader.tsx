@@ -21,6 +21,8 @@ import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
+import { useRunGate } from '../hooks/useRunGate'
+import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
@@ -42,12 +44,10 @@ export function formatObjective(v: number | null | undefined): string | null {
   return `€${v.toFixed(0)}`
 }
 
-/** Open Results after a solve: on Economics in Expert (Guided has no
- *  Economics tab and keeps its own default). */
+/** Open Results after a solve, on its Summary (the answer first; the Summary
+ *  hands on to Reports and Export). */
 function openResultsAfterSolve() {
-  const ui = useUIStore.getState()
-  if (ui.uiMode !== 'guided') ui.requestResultsTab('economics')
-  ui.setSlidePanel('results')
+  useUIStore.getState().setSlidePanel('results')
 }
 
 // ── Search types ───────────────────────────────────────────────────────────────
@@ -594,6 +594,7 @@ export default function AppHeader() {
     pf:   'solve a non-linear (AC) Newton-Raphson power flow on the current dispatch',
   }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
+  const runGate = useRunGate('optimisation')
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
@@ -1057,13 +1058,39 @@ export default function AppHeader() {
         // the idle solve button is hidden; a queued / running solve still
         // shows here so it can be cancelled or aborted.
         if (uiMode === 'guided' && !amber) return null
+        // Disabled exactly when the server would refuse (design §3.3), saying
+        // why by section; display-only gaps ride beside an enabled Run.
+        const gated = runGate.blocked && !amber
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
-        return (
+        return (<>
+          {gated && (
+            <button type="button" data-testid="run-blocker"
+              onClick={() => runGate.blocker ? openFlowTarget(runGate.blocker.target) : openSectionInExpert('readiness')}
+              title="Show the field to fix"
+              className="max-w-[18rem] truncate text-[11px] text-warn underline-offset-2 hover:underline">
+              {runGate.reason}
+            </button>
+          )}
+          {runGate.checking && !amber && (
+            <span data-testid="run-checking" className="text-[11px] text-muted">
+              Checking whether the project is ready…
+            </span>
+          )}
+          {!gated && !amber && runGate.notes.length > 0 && (
+            <button type="button" data-testid="run-notes"
+              onClick={() => openFlowTarget(runGate.notes[0].target)}
+              title={runGate.notes.map(n => n.message).join('\n')}
+              className="text-[11px] text-muted underline-offset-2 hover:underline">
+              {runGate.notes.length === 1 ? '1 note' : `${runGate.notes.length} notes`}
+            </button>
+          )}
           <button
             onClick={handleRunButton}
-            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber)}
+            disabled={abort.isPending || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
               ? 'Read-only — another user is editing this project'
+              : gated
+              ? `Cannot run yet — ${runGate.reason}`
               : jobRunning || isRunning
               ? 'Abort the running simulation'
               : jobQueued
@@ -1095,7 +1122,7 @@ export default function AppHeader() {
                     {runLabel}
                   </>}
           </button>
-        )
+        </>)
       })()}
 
       <UiModeSwitch />

@@ -57,8 +57,15 @@ from services.profile_gen.apply import (
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
 from services.profile_gen.job import KEEP_PENDING, pending_io_lock, write_pending
+from services.profile_gen.availability import (
+    ForcedOutagesNotWrittenError,
+    InvalidAvailabilityParamsError,
+    MaintenanceYearError,
+    UnknownAvailabilityKindError,
+)
 from services.profile_gen.load_upload import (
     UploadCoverageError,
     UploadFormatError,
@@ -139,6 +146,17 @@ class LoadGenerateRequest(BaseModel):
     year: int | None = None
     # Archetypes are hourly shapes; the field stays for the shared engine call.
     resolution: Literal["hourly"] = "hourly"
+
+
+class AvailabilityGenerateRequest(BaseModel):
+    # An availability kind (`services/profile_gen/availability.py`) for the
+    # named generators of the open network; one column per generator.
+    kind: str
+    generators: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    # The source year. Unset: the network's (first period's) year, so dated
+    # maintenance windows land where the user means them.
+    year: int | None = None
 
 
 class ShapeRequest(BaseModel):
@@ -343,19 +361,24 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
 )
 
-# Load generation and upload refusals, literal for the same reason.
-_LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+# Generation and upload refusals (load, availability), literal for the same
+# reason.
+_GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
     (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
     (UploadFormatError, {"error_kind": "load_upload_format"}),
     (UploadUnitError, {"error_kind": "load_upload_unit"}),
     (UploadCoverageError, {"error_kind": "load_upload_coverage"}),
     (UploadNoLoadError, {"error_kind": "unknown_load"}),
+    (ForcedOutagesNotWrittenError, {"error_kind": "forced_outages_not_written"}),
+    (UnknownAvailabilityKindError, {"error_kind": "unknown_availability_kind"}),
+    (InvalidAvailabilityParamsError, {"error_kind": "invalid_availability_params"}),
+    (MaintenanceYearError, {"error_kind": "maintenance_year"}),
 )
 
 
 def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
-    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_REFUSALS):
+    for cls, kind in (*_APPLY_REFUSALS, *_GENERATE_REFUSALS):
         if isinstance(exc, cls):
             return dict(kind)
     return {"error_kind": _error_kind(exc)}
@@ -372,7 +395,8 @@ def list_profile_presets(technology: str | None = None):
     try:
         found = presets.list_presets(technology)
     except ProfileGenError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422,
+                            detail=public_message(exc, route="presets")) from exc
     return {
         "presets": [
             {
@@ -417,7 +441,8 @@ def estimate_profile(body: EstimateRequest):
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="estimate")},
         ) from exc
     # Hourly previews are downsampled to daily means for the map; coarser
     # resolutions are already compact enough to return as-is.
@@ -494,12 +519,14 @@ def generate_profiles(
     except CdsCredentialError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": "cds_credential", "message": str(exc)},
+            detail={"error_kind": "cds_credential",
+                    "message": public_message(exc, route="generate")},
         ) from exc
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="generate")},
         ) from exc
 
     project = _row(proj, db)
@@ -552,7 +579,7 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
                                 component_type="loads", attribute="p_set")
         except ProfileApplyError as exc:
             stats[col]["modelled_mwh"] = None
-            warnings.add(f"not_applicable: {exc}")
+            warnings.add(f"not_applicable: {public_message(exc, route='load_preview')}")
             continue
         stats[col]["modelled_mwh"] = pv["modelled_mwh"]
         warnings.update(pv["warnings"])
@@ -608,7 +635,8 @@ def generate_load_profiles(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_generate")},
         ) from exc
 
     job_id = str(uuid.uuid4())
@@ -658,7 +686,8 @@ async def upload_load_profiles(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_upload")},
         ) from exc
     matched = list(up.frame.columns)
     unmatched = up.unmatched
@@ -675,6 +704,84 @@ async def upload_load_profiles(
     preview = _preview_load_energy(ctx, frame, record, stats)
     return {**record, "unmatched": unmatched, "stats": stats,
             "warnings": preview}
+
+
+@project_router.post("/{name}/profiles/availability/generate")
+def generate_availability_profiles(
+    body: AvailabilityGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate an availability bound (maintenance, must_run, derating) for
+    named generators into the pending store; `/profiles/apply` writes it to
+    the target it states (p_max_pu or p_min_pu). Synchronous, like the load
+    archetypes; nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "generate")
+    gens = ctx.network.generators
+    missing = [g for g in body.generators if g not in gens.index]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_generator",
+                    "message": f"no generator named {', '.join(map(repr, missing))} "
+                               f"on the open network"},
+        )
+    from services.profile_gen.families import is_weather_carrier
+
+    weather = [g for g in body.generators if is_weather_carrier(gens.at[g, "carrier"])]
+    if weather:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "carrier_mismatch",
+                    "message": f"{', '.join(map(repr, weather))} carry a weather "
+                               "profile; an availability series would overwrite it"},
+        )
+    snaps = ctx.network.snapshots
+    first = (snaps.get_level_values(-1)[0] if isinstance(snaps, pd.MultiIndex)
+             else pd.DatetimeIndex(snaps)[0])
+    params = dict(body.params or {})
+    if "timezone" not in params:
+        from services.profile_gen.apply import _commercial_timezone
+
+        tz = _commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    try:
+        result = engine.generate_profile(
+            body.generators, body.kind, params=params,
+            year=body.year or int(first.year), family="availability",
+        )
+        # A dated window that apply would refuse is refused before anything
+        # reaches the pending store.
+        from services.profile_gen.availability import check_dated_windows
+
+        check_dated_windows(ctx, result.meta)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="availability_generate")},
+        ) from exc
+
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+    is_cap = record["target"][1] == "p_max_pu"
+    stats = {}
+    for col in result.series.columns:
+        v = result.series[col]
+        stats[col] = {"min": float(v.min()), "mean": float(v.mean()),
+                      "max": float(v.max())}
+        if is_cap:
+            stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
+        else:
+            stats[col]["hours_floored"] = int((v > 1e-9).sum())
+    return {**record, "stats": stats}
 
 
 @project_router.get("/{name}/profiles/pending")
@@ -733,7 +840,8 @@ def apply_profile(
     except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
         raise HTTPException(
             status_code=422,
-            detail=f"pending profile for job {body.job_id!r} is unreadable: {exc}",
+            detail=(f"pending profile for job {body.job_id!r} is unreadable: "
+                    f"{public_message(exc, route='apply', job_id=body.job_id)}"),
         ) from exc
     series = pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
                        name=body.component, dtype=float)
@@ -790,7 +898,8 @@ def apply_profile(
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="apply", job_id=body.job_id)},
         ) from exc
 
     from routers.simulation import _state_update
@@ -843,14 +952,16 @@ def shape_profile(
             raise HTTPException(
                 status_code=422,
                 detail={"error_kind": "unreachable_target",
-                        "message": f"{point}: {exc}",
+                        "message": f"{point}: "
+                                   f"{public_message(exc, route='reshape', job_id=body.job_id)}",
                         "point": point,
                         "reachable_max": exc.reachable_max},
             ) from exc
         except ProfileGenError as exc:
             raise HTTPException(
                 status_code=422,
-                detail={"error_kind": _error_kind(exc), "message": str(exc)},
+                detail={"error_kind": _error_kind(exc),
+                        "message": public_message(exc, route="reshape", job_id=body.job_id)},
             ) from exc
 
     # Reshaping a shaped artifact extends its chain: the ops accumulate in

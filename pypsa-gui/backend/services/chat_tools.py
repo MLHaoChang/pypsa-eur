@@ -695,10 +695,27 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
         result = handler()
     result = _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
     if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
-        if detail == "lines":
-            return _value_flow_lines_page(result, offset, limit)
-        return _value_flows_summary(result)
-    return result
+        result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
+                  else _value_flows_summary(result))
+    return _with_freshness(result)
+
+
+def _with_freshness(result: Any) -> Any:
+    """LC-12: a result read says whether the inputs changed since the solve."""
+    if not isinstance(result, dict):
+        return result
+    from services.workflow_tools import solve_freshness
+    freshness = solve_freshness()
+    out = {**result, **freshness}
+    if freshness["inputs_changed_since_solve"]:
+        out["freshness_note"] = ("stale: the inputs changed after this solve, so these results "
+                                 "describe the earlier inputs; re-run before relying on them.")
+    elif freshness["inputs_changed_since_solve"] is False and not freshness["results_current"]:
+        out["freshness_note"] = ("not current: these are not verified as this session's optimal LP "
+                                 "solve of the current inputs (an AC power flow replaced them, the "
+                                 "solve did not finish optimal, or it was loaded rather than solved "
+                                 "here); re-run before relying on them.")
+    return out
 
 
 # ── value flows for the model (IC P3 WP3.4) ────────────────────────────────
@@ -1529,6 +1546,9 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
     {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
     {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+    {"error_kind": "library_reference_unknown"},
+    {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
+    {"error_kind": "reference_confirmation_needed"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -1635,6 +1655,43 @@ def get_library_item(kind: str, name: str, version: int | None = None,
     if kind == "tariff" and detail != "full":
         return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
     return out
+
+
+def list_library_references(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library_references import list_references as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_reference(technology: str, projection_year: int, component: str | None = None,
+                          asset: str | None = None) -> dict:
+    """One shipped reference beside the pack value it would otherwise be. With an asset,
+    the pack is the one that asset's overnight cost was priced from (its provenance)."""
+    from routers.library_references import get_reference as _h
+
+    pack_source = None
+    if (component is None) != (asset is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "library_reference_unknown",
+            "message": "pass component and asset together, or neither"})
+    if asset is not None:
+        from routers.network import get_asset_provenance as _p
+        fields = _route(_p, component, asset)["fields"]
+        pack_source = (fields.get("overnight_cost") or {}).get("source")
+    return _library_call(_h, technology, projection_year,
+                         pack_source=pack_source).model_dump(mode="json")
+
+
+def apply_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                            confirm: list[str] | None = None) -> dict:
+    """Write one shipped reference onto one asset through the network route (the
+    edit card is shown and confirmed before this runs)."""
+    from routers.network_library_reference import ReferenceApplyRun
+    from routers.network_library_reference import apply_library_reference as _h
+
+    body = ReferenceApplyRun(component_class=component_class, name=name, technology=technology,
+                             projection_year=projection_year, confirm=list(confirm or []))
+    return _route(_h, body)
 
 
 def _urdb_rate(data, item_index: int | None = None):
@@ -2862,8 +2919,10 @@ def dispatch_status() -> dict:
     string).
     """
     from services.dispatch_status import dispatch_status_detail as _ds
+    from services.workflow_tools import solve_freshness
     n = PyPSAService.get_network()
-    return _ds(n)
+    # LC-12: the axis check misses a parameter-only edit; the fingerprint does not.
+    return {**_ds(n), **solve_freshness()}
 
 
 # ── Simulation execution (4) ────────────────────────────────────────────────
@@ -3398,13 +3457,28 @@ def solve_queue_clear_finished() -> dict:
 # Thin wrappers over `routers/profiles.py`, called in-process through `_route`
 # with the PATH project resolved by `_authorized_project` where a route takes
 # one. The routes own the guards (ProjectAccessDep, project lock, undo push);
-# the wrappers own nothing but argument shaping.
+# the wrappers own nothing but argument shaping, and `_profile_route`, which
+# gives an exception the routes did not type the same reply a route gives
+# (`profile_gen.refusals`): its type, never its text.
+
+
+def _profile_route(handler, *args, **kwargs):
+    from services.profile_gen.refusals import public_message
+
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — the model sees the type, the log the rest
+        raise HTTPException(
+            status_code=500, detail=public_message(exc, route=handler.__name__),
+        ) from exc
 
 
 def list_profile_presets(technology: str | None = None) -> dict:
     from routers.profiles import list_profile_presets as _h
     kw = {"technology": technology} if technology else {}
-    return _route(_h, **kw)
+    return _profile_route(_h, **kw)
 
 
 def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
@@ -3414,11 +3488,16 @@ def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
 
     from services.profile_gen import presets as _presets
     from services.profile_gen.engine import ProfileGenError
+    from services.profile_gen.refusals import public_message
 
     try:
         p = _presets.get_preset(preset, technology)
     except ProfileGenError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=public_message(
+            exc, route="get_profile_parameters")) from exc
+    except Exception as exc:  # noqa: BLE001 — as `_profile_route`: the type, never the text
+        raise HTTPException(status_code=500, detail=public_message(
+            exc, route="get_profile_parameters")) from exc
     return {
         "name": p.name,
         "technology": p.technology,
@@ -3446,12 +3525,12 @@ def preview_renewable_profile(points: list | None = None, technology: str = "",
     if resolution is not None:
         kw["resolution"] = resolution
     body = EstimateRequest(**kw)
-    return _route(_h, body)
+    return _profile_route(_h, body)
 
 
 def list_pending_profiles(project_id: str) -> dict:
     from routers.profiles import list_pending_profiles as _h
-    return _route(_h, proj=_authorized_project(project_id))
+    return _profile_route(_h, proj=_authorized_project(project_id))
 
 
 def generate_renewable_profile(project_id: str, points: list | None = None,
@@ -3471,7 +3550,7 @@ def generate_renewable_profile(project_id: str, points: list | None = None,
     if resolution is not None:
         kw["resolution"] = resolution
     body = GenerateRequest(**kw)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
@@ -3483,7 +3562,7 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
                         time_basis=time_basis, component_type=component_type,
                         attribute=attribute)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # Load profiles (time-series generators ticket 01): the archetype catalogue and
@@ -3492,7 +3571,7 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
 
 def list_load_profile_archetypes() -> dict:
     from routers.profiles import list_load_archetypes as _h
-    return _route(_h)
+    return _profile_route(_h)
 
 
 def generate_load_profile(project_id: str, archetype: str, loads: list,
@@ -3501,7 +3580,19 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
                                year=year)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def generate_availability_profile(project_id: str, kind: str, generators: list,
+                                  params: dict | None = None,
+                                  year: int | None = None) -> dict:
+    from routers.profiles import (
+        AvailabilityGenerateRequest,
+        generate_availability_profiles as _h,
+    )
+    body = AvailabilityGenerateRequest(kind=kind, generators=generators,
+                                       params=params, year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # ── Project management (21) ─────────────────────────────────────────────────
@@ -7592,6 +7683,7 @@ DISPATCHERS: dict[str, Any] = {
     "apply_generated_profile": apply_generated_profile,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
+    "generate_availability_profile": generate_availability_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
@@ -7636,6 +7728,9 @@ DISPATCHERS: dict[str, Any] = {
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "list_library_references": list_library_references,
+    "get_library_reference": get_library_reference,
+    "apply_library_reference": apply_library_reference,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c

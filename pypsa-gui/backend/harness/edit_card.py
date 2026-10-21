@@ -327,6 +327,18 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
         _refuse("invalid_edit_value", f"{component_class}.{key} takes true or false.")
 
 
+# A rated capacity and its bounds are magnitudes; PyPSA stores a negative one
+# without complaint and the solve then reads it as a reversed limit.
+RATINGS = frozenset(f"{base}{suffix}" for base in ("s_nom", "p_nom", "e_nom") for suffix in ("", "_min", "_max"))
+
+
+def _check_rating(name: str, key: str, value, field: dict | None) -> None:
+    if key in RATINGS and isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
+        unit = (field or {}).get("unit_storage") or ""
+        _refuse("invalid_edit_value", f"{name} {key} cannot be negative ({value:g} {unit}".rstrip()
+                + "); a rating is a magnitude, at least 0.")
+
+
 # PyPSA rewrites these from the standard type at solve time
 # (`apply_line_types` / `apply_transformer_types`), so a typed component's
 # value would read back and then be discarded.
@@ -394,6 +406,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     for name, attrs in targets:
         for key, value in attrs.items():
             _check_value(component_class, key, value, fields.get(key))
+            _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
     attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
         "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
@@ -586,6 +599,36 @@ def _bulk_preview(args: dict) -> list[dict]:
 
 register("update_component", Adapter("parameter_edit", _update_component_preview, _component_readback))
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
+
+
+# ── Library references: apply_library_reference ───────────────────────────
+
+
+def _library_reference_preview(args: dict) -> list[dict]:
+    """The native update's rows for the fields a shipped reference writes, each with
+    the reference (source cell, money year) and the pack value beside it, plus one
+    note per confirmation given, per projection-year note and the licence. A plan
+    still missing a confirmation refuses before any card (`reference_confirmation_needed`)."""
+    from services import chat_tools
+    from services.library import reference_apply as A
+
+    p = A.plan_active(args)
+    A.require_confirmed(p)
+    klass, name = p["component_class"], p["name"]
+    rows = _sandbox_rows(klass, [(name, dict(p["attrs"]))],
+                         lambda: chat_tools.update_component(klass, name, dict(p["attrs"])))
+    beside = {row["field"]: row for row in p["rows"]}
+    for row in rows:
+        if row["role"] == "typed" and row["name"] == name and row["field"] in beside:
+            row.update({k: beside[row["field"]][k] for k in ("reference", "pack", "differs")})
+    for need in p["needs"]:
+        rows.append({**_note(klass, name, need["confirmation"], need["text"]), "confirmed": True})
+    rows += [_note(klass, name, "projection_year", text) for text in p["notes"]]
+    rows.append(_note(klass, name, "licence", f"{p['attribution']} Licence {p['licence']}."))
+    return rows
+
+
+register("apply_library_reference", Adapter("parameter_edit", _library_reference_preview, _component_readback))
 
 
 # ── Solver settings: update_solver_config ──────────────────────────────────

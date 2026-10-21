@@ -1,0 +1,738 @@
+{
+  "retrieved_on": "2026-10-21",
+  "observations": [
+    {
+      "id": "td_latest",
+      "url": "https://api.github.com/repos/PyPSA/technology-data/releases/latest",
+      "final_url": "https://api.github.com/repos/PyPSA/technology-data/releases/latest",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 3353,
+      "sha256": "1f9eef1b667dfae125b67eff96b98f4d908147f37828d9fad83796f5234b35f7"
+    },
+    {
+      "id": "td_readme",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/README.md",
+      "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/README.md",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 1861,
+      "sha256": "b6f6f0102509e980553ef00bd1540f19aff484b1d0d7d14fb0c01e3836047669"
+    },
+    {
+      "id": "td_2030",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2030.csv",
+      "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2030.csv",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 277614,
+      "sha256": "34eea67816627a80ecf2893cd49c5f642f7b7ee2698db76ea8bcce4b3ce1d4d5"
+    },
+    {
+      "id": "td_2040",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2040.csv",
+      "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2040.csv",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 277631,
+      "sha256": "d1bd7ac0e1e0a59c21ea955375e4d19d31383a1095d3c9014c6de2c11bbb5b2c"
+    },
+    {
+      "id": "td_2050",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2050.csv",
+      "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2050.csv",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 277553,
+      "sha256": "8fde1021aed881bedd6f7f89cbc3614e662d74bb8758cfe9ad0feae5410abae8"
+    },
+    {
+      "id": "acer_ppa",
+      "url": "https://www.acer.europa.eu/electricity/market-monitoring/ppas",
+      "error": "HTTP Error 503: Service Unavailable"
+    },
+    {
+      "id": "pvgis",
+      "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
+      "final_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 117997,
+      "sha256": "f80bcbd8431bbc99cd0efa1663037dd53e6242edc937a3d5bee1acd15f2ac558"
+    },
+    {
+      "id": "dea_power",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-generation-electricity-and-district-heating",
+      "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-generation-electricity-and-district-heating",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 39343,
+      "sha256": "fcde3293d8211430283d81d35174d689b364c8fa966f929e037dfc0146de4357"
+    },
+    {
+      "id": "dea_fuels",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+      "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 39108,
+      "sha256": "ffc4f8c5cc5301f6a21f35b98a31c1e9228a2ddc4f31fcc8d395b791b9e4b928"
+    },
+    {
+      "id": "dea_storage",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+      "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 37930,
+      "sha256": "f15c0813371ee39b0ff39e5f4d4c0ae0213ccc6db4fb9d94015e0ac384e7aa8b"
+    },
+    {
+      "id": "hydrogen_observatory",
+      "url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/levelised-cost-hydrogen-calculator",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/levelised-cost-hydrogen-calculator",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 38540,
+      "sha256": "6f507d6b793b184dd021ff91de5b98e4578cd9874174a5df9800e10b781b3780"
+    },
+    {
+      "id": "liander",
+      "url": "https://www.liander.nl/grootzakelijk/tarieven",
+      "final_url": "https://www.liander.nl/grootzakelijk/tarieven",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 226317,
+      "sha256": "a3b8cb0e2e9d41d7c5afce53bace6ff23e436de4015c2ce1362afe61b7b438c9"
+    },
+    {
+      "id": "netze_bw",
+      "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+      "error": "The read operation timed out"
+    },
+    {
+      "id": "oreda",
+      "url": "https://www.oreda.com/",
+      "final_url": "https://oreda.com/",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 108796,
+      "sha256": "5017360b53de86abd2ddabe62b7c2dd8dc552da14d20bb606caf2ea48bb6105f"
+    },
+    {
+      "id": "td15_2030",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.15.0/outputs/costs_2030.csv",
+      "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.15.0/outputs/costs_2030.csv",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 281355,
+      "sha256": "6f97aa2164d5e28a81e104fd6ef7092f8cea637564374c19f08a5a5892383227"
+    },
+    {
+      "id": "dea_power_xlsx",
+      "url": "https://ens.dk/media/8615/download",
+      "final_url": "https://ens.dk/media/8615/download",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 1846175,
+      "sha256": "afb78dede13a17d17dca371ce74689bad98e55149ca58996fb3a535ac2704bb9"
+    },
+    {
+      "id": "dea_fuels_xlsx",
+      "url": "https://ens.dk/media/6444/download",
+      "final_url": "https://ens.dk/media/6444/download",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 1453032,
+      "sha256": "07ac3ef166883591a438e739ac69c7768b5419964abdd43e668130bd7a55ffee"
+    },
+    {
+      "id": "dea_storage_xlsx",
+      "url": "https://ens.dk/media/6589/download",
+      "final_url": "https://ens.dk/media/6589/download",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 336703,
+      "sha256": "227c63de212697978815a0a6ed86d84527899d2ae309fd411a6a8490fe122405"
+    },
+    {
+      "id": "dea_pv_brief",
+      "url": "https://ens.dk/media/8720/download",
+      "final_url": "https://ens.dk/media/8720/download",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 238400,
+      "sha256": "c0c9afbe4fc6e8943e3d3741656bf93a97c6ca9fcbde98fcda0ee867ab452d05"
+    },
+    {
+      "id": "dea_h2_brief",
+      "url": "https://ens.dk/media/3352/download",
+      "final_url": "https://ens.dk/media/3352/download",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 423958,
+      "sha256": "8faad103315953bb8ea67a608b6ca7dec663449f1b9d1b036165b56ec4365e31"
+    },
+    {
+      "id": "cre26",
+      "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+      "final_url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 74516,
+      "sha256": "157e41cf15f646c291d0734a887a14ff28ebb8551ed235ae5cdecf57258646e3"
+    },
+    {
+      "id": "cnmc26",
+      "url": "https://www.cnmc.es/gl/node/417840",
+      "final_url": "https://www.cnmc.es/gl/node/417840",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 77684,
+      "sha256": "926b08f6cd1af3621618acbf4ecdfb35e28c83856e7fae3b1eff4bb044525b26"
+    },
+    {
+      "id": "italy_dso",
+      "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+      "final_url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 51823,
+      "sha256": "f96a7b260d07961bf26e58ee91424c479fd90fbfc1c81238cc4ae094d26bbb6d"
+    },
+    {
+      "id": "arera_tx",
+      "url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/tariffa-per-il-servizio-di-trasmissione",
+      "final_url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/tariffa-per-il-servizio-di-trasmissione",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 240976,
+      "sha256": "87f0654aecc9aa23912f4b42ebc6d4150e11b7a10409b828bfaa2a9736ce52f9"
+    },
+    {
+      "id": "arera_dso",
+      "url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/distr",
+      "final_url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/distr",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 198656,
+      "sha256": "63c7128a310cce23702f164d371b5a5fa637c32d11ee672556026ef01c55f6a3"
+    },
+    {
+      "id": "acm_tennet",
+      "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+      "final_url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 74565,
+      "sha256": "08ed8ad18adba129f5496e25ebafcba09b66ad23dbb6dca4f439fd724a0cc6fa"
+    },
+    {
+      "id": "50hertz",
+      "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+      "final_url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 195176,
+      "sha256": "4ae47df8cc9d4bf1127be5dbda65fad6b04f2555573cf169fdc485c4ac30d6f3"
+    },
+    {
+      "id": "eex_power",
+      "url": "https://www.eex.com/en/market-data/power/futures",
+      "final_url": "https://www.eex.com/en/market-data/market-data-hub",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 194375,
+      "sha256": "9ed85070982e6c08c712cb37cb54a698f9d8ea13c15248731e0976d393d47660"
+    },
+    {
+      "id": "emissions_auctions",
+      "url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+      "final_url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 208364,
+      "sha256": "0a94239524ccf37dab424b3b5d20307c608e29acf8fc10d5a5f9f73ad1aaab2b"
+    },
+    {
+      "id": "ec_h2_auctions",
+      "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+      "final_url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 110251,
+      "sha256": "1a4b01bbc9fc8e2e195f5c10ff88be67db3551749d324d086aeee141c3c91f57"
+    },
+    {
+      "id": "pvgis_api",
+      "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/getting-started-pvgis/api-non-interactive-service_en",
+      "final_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 178534,
+      "sha256": "5720f2040be4c2d83df3818753bd4fffedcbe3899e8297b1dd53c208a5136db0"
+    },
+    {
+      "id": "dk_tariff_meta",
+      "url": "https://api.energidataservice.dk/meta/dataset/DatahubPricelist",
+      "final_url": "https://api.energidataservice.dk/meta/dataset/DatahubPricelist",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 12539,
+      "sha256": "b451e3b4471eec27e09a5223d6881e10f3a277b700c2fa87c9decf49853577e1"
+    },
+    {
+      "id": "dk_tariff_sample",
+      "url": "https://api.energidataservice.dk/dataset/DatahubPricelist?limit=3",
+      "final_url": "https://api.energidataservice.dk/dataset/DatahubPricelist?limit=3",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 2271,
+      "sha256": "48a23dba779db448ac7e02c87052442f3e5a03e4be4152c3dfd1ebddd2c98aa5"
+    },
+    {
+      "id": "dk_price_meta",
+      "url": "https://api.energidataservice.dk/meta/dataset/DayAheadPrices",
+      "final_url": "https://api.energidataservice.dk/meta/dataset/DayAheadPrices",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 5579,
+      "sha256": "fed02b2bc94874cc312a848bb96f8a13238874794f4646980a1a0cf2b2c5fd66"
+    },
+    {
+      "id": "dk_terms",
+      "url": "https://www.energidataservice.dk/Guides/Terms",
+      "final_url": "https://www.energidataservice.dk/Guides/Terms",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 18164,
+      "sha256": "39b2a9cf2e4bb6e5159c8a9bb4d05047defaff9843471d7055fb32caa77accf6"
+    },
+    {
+      "id": "trader_power",
+      "url": "https://www.energytraderseurope.org/our-contracts-overview/standard-form-contracts-gas-power-biomethane",
+      "final_url": "https://www.energytraderseurope.org/our-contracts-overview/standard-form-contracts-gas-power-biomethane",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 805426,
+      "sha256": "ac896d8c2a6746b1d26ab0b90074c36597101f033e708c08d3b5dde038907ef8"
+    },
+    {
+      "id": "trader_terms",
+      "url": "https://www.energytraderseurope.org/terms-of-use",
+      "final_url": "https://www.energytraderseurope.org/terms-of-use",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 807978,
+      "sha256": "62a414f1d2b5f8e61dc6feababd038822c4620c0414e370c0580618868eaea20"
+    },
+    {
+      "id": "fingrid_services",
+      "url": "https://www.fingrid.fi/en/grid/main-grid-services/",
+      "final_url": "https://www.fingrid.fi/en/grid/main-grid-services/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 276386,
+      "sha256": "ba81cb94ebffe24dbabac557834f4fbace590daed8a9af974933ca891978f989"
+    },
+    {
+      "id": "pvps_performance",
+      "url": "https://iea-pvps.org/key-topics/assessment-of-performance-loss-rate-of-pv-power-systems/",
+      "final_url": "https://iea-pvps.org/key-topics/assessment-of-performance-loss-rate-of-pv-power-systems/",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 121591,
+      "sha256": "1d885f48aeeef6bb7b9ab0802db527cac0059b2eecda0af7800e6f5281ec3d4c"
+    },
+    {
+      "id": "pvps_om",
+      "url": "https://iea-pvps.org/key-topics/guidelines-for-operation-and-maintenance-of-photovoltaic-power-plants-in-different-climates/",
+      "final_url": "https://iea-pvps.org/key-topics/guidelines-for-operation-and-maintenance-of-photovoltaic-power-plants-in-different-climates/",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 123348,
+      "sha256": "7e3eebcae75c98544a658e27343b597917068c466c95c2481755d965500ba538"
+    },
+    {
+      "id": "engie_scada",
+      "url": "https://opendata-renewables.engie.com/explore/dataset/la-haute-borne-data/information/",
+      "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+    },
+    {
+      "id": "jrc_ceto",
+      "url": "https://setis.ec.europa.eu/clean-energy-technology-observatory-ceto_en",
+      "final_url": "https://setis.ec.europa.eu/publications-and-documents/clean-energy-technology-observatory_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 84378,
+      "sha256": "b489f635609762d85f73b15b57feedf72ba3f9c87c7a59ec3ecabbef033c8683"
+    },
+    {
+      "id": "h2datasets",
+      "url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/datasets",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/datasets",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 62233,
+      "sha256": "ddfac97094dc7744a36a8d6f080812616101ea73d333cab61c3378f995411e60"
+    },
+    {
+      "id": "h2legal",
+      "url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 37982,
+      "sha256": "d8ac9fda777537cfbd59c04180b4c580a4a462e5b20a2c6d5267bcb07a878bd3"
+    },
+    {
+      "id": "acer_ppa2",
+      "url": "https://www.acer.europa.eu/monitoring/MMR/ppas",
+      "error": "HTTP Error 503: Service Unavailable"
+    },
+    {
+      "id": "github_om",
+      "url": "https://api.github.com/repos/WISDEM/WOMBAT",
+      "final_url": "https://api.github.com/repositories/359557010",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 6698,
+      "sha256": "046b4aee63c4e046deeede66d3263739469a3c29a2028fe2eab47aa3dd3cba73"
+    },
+    {
+      "id": "liander26_pdf",
+      "url": "https://www.liander.nl/-/media/files/tarieven/grootzakelijk/tarieven-2026/tarieven-voor-aansluiting-en-transport-elektriciteit-2026_2.pdf?v=1&amp;d=20251204T155708Z",
+      "final_url": "https://www.liander.nl/-/media/files/tarieven/grootzakelijk/tarieven-2026/tarieven-voor-aansluiting-en-transport-elektriciteit-2026_2.pdf?v=1&amp;d=20251204T155708Z",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 170837,
+      "sha256": "8a31dc13006a7586182b615167ed4631d781bfa6fc76dbf44b990bf85ba0ff37"
+    },
+    {
+      "id": "hertz26_pdf",
+      "url": "https://www.50hertz.com/cdn/files/ccee42bb-4c36-410b-cd8b-08df1e03d14c/price%20sheet%202026.pdf",
+      "final_url": "https://www.50hertz.com/cdn/files/ccee42bb-4c36-410b-cd8b-08df1e03d14c/price%20sheet%202026.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 130101,
+      "sha256": "ff102004e4bc3d539044642f863aee5dd199ac48c7725847c382092ecc78275f"
+    },
+    {
+      "id": "cnmc26_xlsx",
+      "url": "https://www.cnmc.es/sites/default/files/6331871.xlsx",
+      "final_url": "https://www.cnmc.es/sites/default/files/6331871.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 298772,
+      "sha256": "036e9f3b9110b942fd2ea85fd4f16cbd7bc9b9091f055ad544f84a73249e67bd"
+    },
+    {
+      "id": "cnmc26_pdf",
+      "url": "https://www.cnmc.es/sites/default/files/6331866.pdf",
+      "final_url": "https://www.cnmc.es/sites/default/files/6331866.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 417240,
+      "sha256": "828973ac6d50c008ce034cdbbe58945f22e2b19a1b1f90fa33a48537358e9354"
+    },
+    {
+      "id": "acm26_xlsx",
+      "url": "https://www.acm.nl/system/files/documents/rekenmodule-tarievenbesluit-tennet-2026.xlsx",
+      "final_url": "https://www.acm.nl/system/files/documents/rekenmodule-tarievenbesluit-tennet-2026.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 478181,
+      "sha256": "5e490437f77111ad81cd89e2d75ec40452a2e76cbac5515359b6fd7ab5de1db8"
+    },
+    {
+      "id": "it_dso_xlsx",
+      "url": "https://www.arera.it/fileadmin/area_operatori/prezzi_e_tariffe/tariffe_di_distribuzione/616-23TIT_ti__2_.xlsx",
+      "final_url": "https://www.arera.it/fileadmin/area_operatori/prezzi_e_tariffe/tariffe_di_distribuzione/616-23TIT_ti__2_.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 23014,
+      "sha256": "582158f28e449260aef16b3c90887119ac45222cdce6cbff96f5c63029d6bc5d"
+    },
+    {
+      "id": "trader_ppa",
+      "url": "https://www.energytraderseurope.org/our-contracts-overview/power-purchase-agreement",
+      "final_url": "https://www.energytraderseurope.org/our-contracts-overview/power-purchase-agreement",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 834509,
+      "sha256": "51a8d133657d7ef2866e7101965db980967e476fd049256889049d854186c0d7"
+    },
+    {
+      "id": "ec_reuse",
+      "url": "https://commission.europa.eu/legal-notice_en",
+      "final_url": "https://commission.europa.eu/legal-notice_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 154050,
+      "sha256": "14e68e8ddf0f518009d4dfbd6caa15b312f0b08c9679ecf4c0e8409a1c945fde"
+    },
+    {
+      "id": "eex_legal",
+      "url": "https://www.eex.com/en/market-data/market-data-hub",
+      "final_url": "https://www.eex.com/en/market-data/market-data-hub",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 194375,
+      "sha256": "9ed85070982e6c08c712cb37cb54a698f9d8ea13c15248731e0976d393d47660"
+    },
+    {
+      "id": "grexel",
+      "url": "https://www.aib-net.org/facts/market-information/statistics",
+      "final_url": "https://www.aib-net.org/facts/market-information/statistics",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 58786,
+      "sha256": "92ec65d63563dbff41c369f604250989e47601c9a7420c5b79c4b729645ec4f3"
+    },
+    {
+      "id": "wombat_readme",
+      "url": "https://raw.githubusercontent.com/WISDEM/WOMBAT/main/README.md",
+      "final_url": "https://raw.githubusercontent.com/WISDEM/WOMBAT/main/README.md",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 9799,
+      "sha256": "4a1480d187e47ddd95639e912cd63c2a9b34117b7e4b3e8ab680cc46004772a4"
+    },
+    {
+      "id": "fraunhofer_lcoe",
+      "url": "https://www.ise.fraunhofer.de/en/publications/studies/cost-of-electricity.html",
+      "final_url": "https://www.ise.fraunhofer.de/en/publications/studies/cost-of-electricity.html",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 202224,
+      "sha256": "b85f1304f0567d0443c5aa07f07e93663b8e33568c84896c194a7daa67ca3a9c"
+    },
+    {
+      "id": "jrc_h2_cost",
+      "url": "https://publications.jrc.ec.europa.eu/repository/handle/JRC130683",
+      "final_url": "https://publications.jrc.ec.europa.eu/repository/handle/JRC130683",
+      "status": 200,
+      "content_type": "text/html;charset=UTF-8",
+      "bytes": 165707,
+      "sha256": "432357651381b9fcb05095da32a6c027d6a10523102c2c1f9ce9667a23979308"
+    },
+    {
+      "id": "h2cost_xlsx",
+      "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-04/Electrolyser%20cost%202025.xlsx",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-04/Electrolyser%20cost%202025.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 175251,
+      "sha256": "2bd5f1e5e842ffc4b012d45ce9bc2757c46af557ae459155ae21270a6d5b7242"
+    },
+    {
+      "id": "h2production_xlsx",
+      "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2025-09/Hydrogen%20production%20costs%202024.xlsx",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2025-09/Hydrogen%20production%20costs%202024.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 232711,
+      "sha256": "4c10193a2a62ea05defbe191fd5b05c14226b08104221d37b1d3dbf7f736e01a"
+    },
+    {
+      "id": "h2breakeven_xlsx",
+      "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-07/Break-even%20prices%20of%20renewable%20hydrogen%202025.xlsx",
+      "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-07/Break-even%20prices%20of%20renewable%20hydrogen%202025.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 541059,
+      "sha256": "27f856551e2c35a2c42bd42386a930003b79e31ec8f3ce68687e39f130057144"
+    },
+    {
+      "id": "cre_hta",
+      "url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-les-domaines-de-tension-hta-et-bt-et-sur-levolution-du-parametre-rf.html",
+      "final_url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-les-domaines-de-tension-hta-et-bt-et-sur-levolution-du-parametre-rf.html",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 68838,
+      "sha256": "f58807e39389c81f0137a75dbdeac1f6f5a78cb65534f26333697ca7238177a0"
+    },
+    {
+      "id": "cre_htb",
+      "url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-le-domaine-de-tension-htb.html",
+      "final_url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-le-domaine-de-tension-htb.html",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 67042,
+      "sha256": "8af0fcb9990c7842e3daa62488a24a28f0952222940b92134603df03ebe0b5fd"
+    },
+    {
+      "id": "pvps_report_139",
+      "url": "https://iea-pvps.org/key-topics/degradation-failure-modes-new-cell-module-technologies/",
+      "final_url": "https://iea-pvps.org/key-topics/degradation-failure-modes-new-cell-module-technologies/",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 128332,
+      "sha256": "3b242557681cc55682ff384f4e9d868ba2983fe57019e52e548dc1e0b5077d86"
+    },
+    {
+      "id": "at_econtrol",
+      "url": "https://www.e-control.at/industrie/strom/strompreis/systemnutzungsentgelte",
+      "final_url": "https://www.e-control.at/industrie/strom/strompreis/systemnutzungsentgelte",
+      "status": 200,
+      "content_type": "text/html;charset=UTF-8",
+      "bytes": 481035,
+      "sha256": "eec31444bff3dd58a7a91283cc561cb9c763a7e3caaeb9484b1c566b48381e66"
+    },
+    {
+      "id": "pt_erse",
+      "url": "https://www.erse.pt/atividade/regulacao/tarifas-e-precos-eletricidade/",
+      "final_url": "https://www.erse.pt/atividade/regulacao/tarifas-e-precos-eletricidade/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 109063,
+      "sha256": "c2df4cdcd5fa82cd90f027204d72f95d9c54cde7594058fcef128d291b42a1eb"
+    },
+    {
+      "id": "eu_market_design",
+      "url": "https://energy.ec.europa.eu/topics/markets-and-consumers/market-legislation/electricity-market-design_en",
+      "final_url": "https://energy.ec.europa.eu/topics/markets-and-consumers/electricity-market-design_en",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 110226,
+      "sha256": "90e07ba4f77f83ae7b463856e0dd2e196b4da94d52760f431f30cf0d373584a1"
+    },
+    {
+      "id": "ore_engine",
+      "url": "https://api.github.com/repos/OpenSourceRisk/Engine",
+      "final_url": "https://api.github.com/repos/OpenSourceRisk/Engine",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 6555,
+      "sha256": "2b3e9ba83e0c145f47c5c744a36cf6a90765aa5ca32c3f0d24fad3bf343040d9"
+    },
+    {
+      "id": "quantlib",
+      "url": "https://api.github.com/repos/lballabio/QuantLib",
+      "final_url": "https://api.github.com/repos/lballabio/QuantLib",
+      "status": 200,
+      "content_type": "application/json; charset=utf-8",
+      "bytes": 5280,
+      "sha256": "ec7f3519aa3689dc0ee927e15bf2e7227475d00a77530b089137ab4da34aa85a"
+    },
+    {
+      "id": "dk_api_guide",
+      "url": "https://www.energidataservice.dk/guides/api-guides",
+      "final_url": "https://www.energidataservice.dk/guides/api-guides",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 49127,
+      "sha256": "9912443843f0ae960b78b346fe220b134cb7b797f588aa5e8b16d6480dd71737"
+    },
+    {
+      "id": "dk_terms2",
+      "url": "https://www.energidataservice.dk/terms-conditions",
+      "final_url": "https://www.energidataservice.dk/terms-conditions",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 18366,
+      "sha256": "ddf59231c878e4453683299fc89b51a5439028853efc5c0da12b6346d44a696a"
+    },
+    {
+      "id": "fi_pricing",
+      "url": "https://www.fingrid.fi/en/grid/main-grid-services/main-grid-service-pricing/",
+      "error": "HTTP Error 404: Not Found"
+    },
+    {
+      "id": "es_boe26",
+      "url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-26348",
+      "final_url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-26348",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 91986,
+      "sha256": "d8fe55826ccacba16a7005d69623c7ae3e6ff435458334e84fd7a83cb9d46bf2"
+    },
+    {
+      "id": "de_dso_retry",
+      "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+      "error": "The read operation timed out"
+    },
+    {
+      "id": "cre_hta_pdf",
+      "url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-105_Evolution_TURPE_7_HTA-BT.pdf",
+      "final_url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-105_Evolution_TURPE_7_HTA-BT.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 1093608,
+      "sha256": "5d4b2e13e91469182c4bac5c9c24997b29f276a7ebad185c4784c15a0e199523"
+    },
+    {
+      "id": "cre_htb_pdf",
+      "url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-104_Evolution_TURPE_7_HTB.pdf",
+      "final_url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-104_Evolution_TURPE_7_HTB.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 1409805,
+      "sha256": "b4d85baf7243bfaea3227cb29ac225aff1faa6088a7f2f75f4fb08c44374dacd"
+    },
+    {
+      "id": "fraunhofer_lcoe_pdf",
+      "url": "https://www.ise.fraunhofer.de/content/dam/ise/en/documents/publications/studies/EN2024_ISE_Study_Levelized_Cost_of_Electricity_Renewable_Energy_Technologies.pdf",
+      "final_url": "https://www.ise.fraunhofer.de/content/dam/ise/en/documents/publications/studies/EN2024_ISE_Study_Levelized_Cost_of_Electricity_Renewable_Energy_Technologies.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 9236124,
+      "sha256": "cbf916be79a8792caa54adf7cf1ca1d430008b90869fa62ce22b7ba7a14b2f38"
+    },
+    {
+      "id": "bnetza_wind_root",
+      "url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/start.html",
+      "final_url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/start.html",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 79462,
+      "sha256": "ac160de04b55b3fa0b19c9fe105435698d3a9b595a3956cc8c2cbf03b3e37c63"
+    },
+    {
+      "id": "eirgrid_ress",
+      "url": "https://www.eirgrid.ie/industry/renewable-electricity-support-scheme-ress",
+      "final_url": "https://www.eirgrid.ie/industry/renewable-electricity-support-scheme-ress",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 409317,
+      "sha256": "a6199ec6e47482c99440a4e2bb2adf23e1d919d0a68332ddcdce635a491152f0"
+    },
+    {
+      "id": "quantlib_license",
+      "url": "https://raw.githubusercontent.com/lballabio/QuantLib/master/LICENSE.TXT",
+      "final_url": "https://raw.githubusercontent.com/lballabio/QuantLib/master/LICENSE.TXT",
+      "status": 200,
+      "content_type": "text/plain; charset=utf-8",
+      "bytes": 8832,
+      "sha256": "a0f9ffa00d1f9d1388fd2e3390729667f78b41f1a4d4b13df441c9d16103eba9"
+    },
+    {
+      "id": "bnetza_awards",
+      "url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/BeendeteAusschreibungen/start.html",
+      "final_url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/BeendeteAusschreibungen/start.html",
+      "status": 200,
+      "content_type": "text/html;charset=utf-8",
+      "bytes": 127539,
+      "sha256": "c33d3aba3cf4e3126284d376c5de218c69144453cf62efa4cc6fa1ca0b286ce2"
+    },
+    {
+      "id": "ress5_pdf",
+      "url": "https://cms.eirgrid.ie/sites/default/files/publications/RESS-5-Final-Auction-Results-R5FAR.pdf",
+      "final_url": "https://www.eirgrid.ie/sites/default/files/publications/RESS-5-Final-Auction-Results-R5FAR.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 353842,
+      "sha256": "cfacb615167083ebf0269a14240aa8eceb09b2c0f673f3786768de58d604350e"
+    },
+    {
+      "id": "ress4_xlsx",
+      "url": "https://cms.eirgrid.ie/sites/default/files/publications/Final-Auction-Results-RESS-4.xlsx",
+      "final_url": "https://www.eirgrid.ie/sites/default/files/publications/Final-Auction-Results-RESS-4.xlsx",
+      "status": 200,
+      "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "bytes": 17136,
+      "sha256": "cb5f6528e13b4a65226744001084ce7fa2cacd1a588385e66e5e2035d104ef3c"
+    }
+  ],
+  "excluded_discovery": "Unrelated OpenEI US zipcode page, unrelated guessed Zenodo record, noisy search responses and unvalidated general search hits were rejected; none supplies a parameter or licence grant."
+}

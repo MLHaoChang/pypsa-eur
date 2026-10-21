@@ -198,6 +198,7 @@ import numpy as np
 import pandas as pd
 
 from models.process_unit import product_roles
+from services.adequacy.slack import lost_slack_name
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
 from services.asset_schema.derive import has_parts, number
@@ -1143,7 +1144,9 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     # A product's buy-in and shortfall (ticket 06) on a bus whose load the
     # counterfactual buys: the purchase replaces them, never stands beside them.
     bought_buses = {str(n.loads.at[ld, "bus"]) for ld in bought}
-    replaced = {("Generator", g) for g in product_roles(n) if str(n.generators.at[g, "bus"]) in bought_buses}
+    captured = {_asset_of(a) for acc in ledger_accs.values() for a in acc.values() if a.source == "asset"}
+    replaced = {("Generator", g) for g in product_roles(n) if str(n.generators.at[g, "bus"]) in bought_buses} \
+        | ({("Generator", lost_slack_name(b)) for b in bought_buses} & captured)  # a captured slack (ticket 08)
     if replaced:
         flags.append("counterfactual_purchase_replaces:" + ",".join(sorted(g for _c, g in replaced)))
     co2 = getattr(parsed, "co2_price", None)
