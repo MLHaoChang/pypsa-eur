@@ -17,6 +17,12 @@ flow has a displayed-data adapter; the words say "showing" only with that.
 
 `historical_section` names the run-evidence section that keeps this view for
 past runs. None means past runs refuse it; current results never stand in.
+
+`checked_profiles` are the bounded profiles that answer part of this view when
+Check answers is on (`harness/calculations.py`); the reads above are refused in
+a checked turn. `checked_gap` says why the rest is not checked: it is withheld
+as "Requested results unavailable", never published as checked. A new view
+starts withheld. See `.scratch/checked-results/audit.md`.
 """
 from __future__ import annotations
 
@@ -55,6 +61,8 @@ class ResultView:
     needs: tuple[str, ...] = ()
     multi_period_only: bool = False
     requires_tools: tuple[str, ...] = ()
+    checked_profiles: tuple[str, ...] = ()
+    checked_gap: str | None = "outside_checked_scope"
 
     def live(self, tool_names: set[str] | None = None) -> bool:
         """True when every tool this view depends on is in the catalogue."""
@@ -81,22 +89,26 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="statistics"),
                 _r("get_results", result_kind="cost_breakdown")),
                guided_label="Summary",
-               units="EUR, MWh"),
+               units="EUR, MWh",
+               checked_profiles=("generator-dispatch/1", "network-linear-cost/1")),
     ResultView("overview", _RESULTS, "overview", "Overview",
                "the mix and build per investment period", "results",
                (_r("get_vintage_results"),),
                multi_period_only=True,
-               units="MW, MWh, EUR per period"),
+               units="MW, MWh, EUR per period",
+               checked_gap="unsupported_snapshot_scope"),
     ResultView("capex", _RESULTS, "capex", "Capacity Expansion",
                "sized assets and their capital cost", "results",
                (_r("get_results", result_kind="cost_breakdown"),
                 _r("get_results", result_kind="economics_by_carrier")),
-               units="MW, MWh, EUR/a"),
+               units="MW, MWh, EUR/a",
+               checked_profiles=("generator-cost/1", "storage-unit-cost/1")),
     ResultView("dispatch", _RESULTS, "dispatch", "Dispatch",
                "hourly generation and storage operation", "results",
                (_r("get_results", result_kind="generators"),
                 _r("get_results", result_kind="storage_dispatch")),
-               units="MW per snapshot, MWh"),
+               units="MW per snapshot, MWh",
+               checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1")),
     # Gated: the copilot read for energy flows lands with the catalogue work
     # (site commercial UX A1); the tab itself is navigable now.
     ResultView("flows", _RESULTS, "flows", "Energy flow",
@@ -151,7 +163,8 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
     ResultView("storage", _RESULTS, "storage", "Storage cycling",
                "storage cycles and state of charge", "results",
                (_r("get_results", result_kind="storage"),),
-               units="cycles, MWh"),
+               units="cycles, MWh",
+               checked_profiles=("storage-unit-dispatch/1",)),
     ResultView("fmea", _RESULTS, "fmea", "FMEA",
                "failure modes ranked by their effect on supply", "adequacy",
                (_r("get_adequacy_results", kind="fmea_modes"),),
@@ -164,21 +177,24 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
     ResultView("asset", _RESULTS, "asset", "Asset Detail",
                "one asset's time series and KPIs", "results",
                (_r("get_asset_results"),), needs=("component_class", "name"),
-               units="per metric, as each series returns it"),
+               units="per metric, as each series returns it",
+               checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1")),
     # Gated: the profile generator's reads (PR377). Live once its tools merge.
     ResultView("profiles_pending", "profiles", None, "Profile studio",
                "generated renewable profiles waiting to be applied", "profiles",
                (_r("list_pending_profiles"),),
                requires_tools=("list_pending_profiles",),
-               units="p.u."),
+               units="p.u.", checked_gap="synthetic_estimate"),
     ResultView("profile_preview", "profiles", None, "Profile studio",
                "a synthetic daily estimate of a renewable profile", "profiles",
                (_r("preview_renewable_profile"),), needs=("points",),
                claim_limits="A synthetic estimate, not a weather-year profile.",
                requires_tools=("preview_renewable_profile", "get_profile_parameters",
                                "list_profile_presets"),
-               units="p.u. (daily means)"),
+               units="p.u. (daily means)", checked_gap="synthetic_estimate"),
 )
+
+CHECKED_GAPS = ("outside_checked_scope", "unsupported_snapshot_scope", "synthetic_estimate")
 
 _BY_ID = {v.view_id: v for v in RESULT_VIEWS}
 

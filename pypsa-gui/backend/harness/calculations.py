@@ -103,6 +103,24 @@ def _series(component, attribute, entity, index):
     return [_number(component.static.at[entity, attribute])] * len(index)
 
 
+def solve_matches_inputs(ctx):
+    """Both recorded solve fingerprints match the current inputs: the lossy one
+    and the exact one the Load flow tab requires. After an AC power flow the
+    live outputs are PF values (ac_pf_service overwrites them and keeps the LP
+    aside), so the live network no longer holds the LP solve."""
+    n, state = ctx.network, ctx.solver_state
+    return (
+        state.get("ac_pf_results") is None
+        and state.get("lopf_results") is None
+        and state.get("status") == "completed"
+        and state.get("condition") == "optimal"
+        and n.meta.get("assistant_solve_input_fingerprint")
+        == workflow_tools._network_input_fingerprint(ctx)
+        and n.meta.get("assistant_solve_exact_input_fingerprint")
+        == workflow_tools._network_input_fingerprint(ctx, exact=True)
+    )
+
+
 def source(ctx, entity):
     """Called under the network lock. Preserve missing values rather than fill."""
     n = ctx.network
@@ -151,11 +169,7 @@ def source(ctx, entity):
     }
     fingerprint = workflow_tools._network_input_fingerprint(ctx)
     state = ctx.solver_state
-    valid_solve = (
-        state.get("status") == "completed"
-        and state.get("condition") == "optimal"
-        and n.meta.get("assistant_solve_input_fingerprint") == fingerprint
-    )
+    valid_solve = solve_matches_inputs(ctx)
     return {
         "index": [v.isoformat() for v in index],
         "inputs": inputs,
