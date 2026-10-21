@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Add the complete GridSpine project-management redesign and chatbot integration specification, with a 24-feature master audit, safe-restore findings, shared-variant assumption workflow, proposed API/UI contracts, implementation slices and required validation matrix. No runtime behavior changes.

@@ -1,0 +1,1439 @@
+{
+  "version": 1,
+  "baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "status": "proposed_not_implemented",
+  "runtime_implementation": false,
+  "new_test_cases_executed": false,
+  "package_namespace": "delivery packages PM00\u2013PM14 (distinct from audit feature IDs PM01\u2013PM24)",
+  "packages": [
+    {
+      "id": "PM00",
+      "title": "Freeze current contracts and coexistence with incoming work",
+      "depends_on": [],
+      "existing_seams": [
+        ".scratch/project-workflow/design.md",
+        ".scratch/project-workflow/integration-sensitivities.md",
+        "docs/agents/owner-decisions.md"
+      ],
+      "proposed_files": [],
+      "new_test_targets": [],
+      "acceptance_ids": [],
+      "done_when": "Refresh master/source hashes, resolve overlaps with W2/W7/S5/S6 and #496/#428/#368, confirm restore-domain and action ownership; write scoped issue before production edits.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM01",
+      "title": "Safe dirty-state capture and protected checkpoints",
+      "depends_on": [
+        "PM00"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/routers/snapshots.py",
+        "pypsa-gui/backend/services/dirty_state.py",
+        "pypsa-gui/frontend/src/pages/SnapshotsPanel.tsx",
+        "pypsa-gui/frontend/src/utils/projectActions.ts"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/project_checkpoints.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_checkpoint_capture.py",
+        "pypsa-gui/frontend/src/pages/SnapshotsPanel.capture.test.tsx"
+      ],
+      "acceptance_ids": [
+        "SR01",
+        "SR02",
+        "SR03",
+        "SR04"
+      ],
+      "done_when": "Reproduce F01; capture exact intended live/saved state with explicit dirty handling, pending-save flush and protected quota semantics. No unsaved edit lost behind a successful restore message.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM02",
+      "title": "Exact declared-domain restore and restart recovery",
+      "depends_on": [
+        "PM01"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/routers/snapshots.py",
+        "pypsa-gui/backend/routers/projects.py",
+        "pypsa-gui/backend/services/atomic_io.py",
+        "pypsa-gui/backend/services/project_registry.py"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/project_restore.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_restore_manifest.py",
+        "pypsa-gui/backend/tests/test_project_restore_recovery.py"
+      ],
+      "acceptance_ids": [
+        "SR05",
+        "SR06",
+        "SR07",
+        "SR08",
+        "SR09",
+        "SR10",
+        "SR11",
+        "SR12",
+        "SR13",
+        "SR14"
+      ],
+      "done_when": "Reproduce F02/F03; versioned presence/hash manifest, legacy policy, scoped removal, protected rollback and durable recoverable publish. Corrupt/partial restore cannot report fully restored.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM03",
+      "title": "Authorized lightweight project-management summary",
+      "depends_on": [
+        "PM00"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/routers/projects.py",
+        "pypsa-gui/backend/models/schemas.py",
+        "pypsa-gui/backend/db/models.py",
+        "pypsa-gui/backend/services/project_registry.py",
+        "pypsa-gui/frontend/src/api/projects.ts"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/project_management.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_management_summary.py"
+      ],
+      "acceptance_ids": [
+        "PD01",
+        "PD02",
+        "PD03",
+        "PD04",
+        "PD05",
+        "PD06",
+        "PD07",
+        "PD08",
+        "PD09",
+        "PD10"
+      ],
+      "done_when": "Document bounded DTO with canonical IDs, real timestamp/source semantics, family count, readiness/result refs and action capabilities; no heavy network hydration or accidental activation. Metadata migration only for admitted fields.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM04",
+      "title": "Redesigned project landing and overview",
+      "depends_on": [
+        "PM03"
+      ],
+      "existing_seams": [
+        "pypsa-gui/frontend/src/pages/ProjectsHomePage.tsx",
+        "pypsa-gui/frontend/src/pages/projectsHome.ts",
+        "pypsa-gui/frontend/src/store/activeSection.ts",
+        "pypsa-gui/frontend/src/layout/flowNavigation.ts"
+      ],
+      "proposed_files": [
+        "pypsa-gui/frontend/src/pages/projects/ProjectOverview.tsx",
+        "pypsa-gui/frontend/src/pages/projects/ProjectList.tsx"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/frontend/src/pages/projects/ProjectOverview.test.tsx",
+        "pypsa-gui/frontend/src/pages/ProjectsHomePage.management.test.tsx",
+        "pypsa-gui/frontend/scripts/smoke-project-management.mjs"
+      ],
+      "acceptance_ids": [
+        "UI01",
+        "UI02",
+        "UI03",
+        "UI04",
+        "UI05",
+        "UI06",
+        "UI07",
+        "UI08",
+        "UI13",
+        "UI14"
+      ],
+      "done_when": "Compact Resume; search/list/cards; exact next action; neutral/coral themes; keyboard/mobile/reduced-motion. Use existing create/resume/edit entry points and authoritative state.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM05",
+      "title": "Connect variants, runs, versions, files and access views",
+      "depends_on": [
+        "PM03",
+        "PM04"
+      ],
+      "existing_seams": [
+        "pypsa-gui/frontend/src/pages/ScenariosPanel.tsx",
+        "pypsa-gui/frontend/src/pages/SnapshotsPanel.tsx",
+        "pypsa-gui/frontend/src/pages/SolveQueuePanel.tsx",
+        "pypsa-gui/frontend/src/pages/WorkspacePanel.tsx",
+        "pypsa-gui/frontend/src/pages/CompareView.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/frontend/src/pages/projects/ProjectManagement.tsx"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/frontend/src/pages/projects/ProjectManagement.test.tsx"
+      ],
+      "acceptance_ids": [
+        "UI09",
+        "UI10",
+        "UI11",
+        "UI12",
+        "UI13",
+        "UI14"
+      ],
+      "done_when": "One canonical entry per action, same section-8 variant table, linked source/run/version identities and accurate access text. Remove global Best objective and current/newest ambiguity; no duplicated editor state.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM06",
+      "title": "Exact version inspection, isolated version runs and comparison basis",
+      "depends_on": [
+        "PM02",
+        "PM05"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/routers/snapshots.py",
+        "pypsa-gui/backend/routers/compare.py",
+        "pypsa-gui/backend/services/run_evidence.py",
+        "pypsa-gui/frontend/src/pages/CompareView.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/project_version_views.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_version_views.py",
+        "pypsa-gui/backend/tests/test_project_comparison_basis.py",
+        "pypsa-gui/frontend/src/pages/SnapshotsPanel.compare.test.tsx"
+      ],
+      "acceptance_ids": [
+        "VM01",
+        "VM02",
+        "VM03",
+        "VM04",
+        "VM05",
+        "VM07",
+        "VM08"
+      ],
+      "done_when": "Read exact authorized version without mutation; supported version-copy plus ordinary queue run; richer comparison basis. Source absence refuses; no restore hidden behind View/Run.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM07",
+      "title": "Read-only common-assumption matrix and previews",
+      "depends_on": [
+        "PM03",
+        "PM05"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/services/workflow_tools.py",
+        "pypsa-gui/backend/services/project_acl.py",
+        "pypsa-gui/backend/services/project_locks.py",
+        "pypsa-gui/frontend/src/pages/ScenariosPanel.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/variant_changes.py",
+        "pypsa-gui/backend/routers/variant_changes.py",
+        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.tsx"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_variant_change_preview.py",
+        "pypsa-gui/frontend/src/pages/projects/VariantAssumptionsDrawer.test.tsx"
+      ],
+      "acceptance_ids": [
+        "BV01",
+        "BV02",
+        "BV03",
+        "BV04",
+        "BV05",
+        "BV06",
+        "BV07",
+        "BV08",
+        "BV18"
+      ],
+      "done_when": "Explicit bounded targets, canonical field/unit/effective-value mapping and preview digest; common-value vs explicit overwrite; unresolved differences stop Apply. No writes/solves in preview.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM08",
+      "title": "One admitted shared scalar edit, read-back and guarded revert",
+      "depends_on": [
+        "PM02",
+        "PM07"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/services/workflow_tools.py",
+        "pypsa-gui/backend/services/project_registry.py",
+        "pypsa-gui/backend/services/dirty_state.py"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/variant_change_journal.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_variant_change_apply.py",
+        "pypsa-gui/backend/tests/test_variant_change_recovery.py",
+        "pypsa-gui/backend/tests/test_variant_change_revert.py"
+      ],
+      "acceptance_ids": [
+        "BV01",
+        "BV02",
+        "BV03",
+        "BV04",
+        "BV05",
+        "BV06",
+        "BV07",
+        "BV08",
+        "BV09",
+        "BV10",
+        "BV11",
+        "BV12",
+        "BV13",
+        "BV16",
+        "BV18",
+        "BV20"
+      ],
+      "done_when": "First field Generator.marginal_cost, scalar-only within matching declared bus/carrier/unit/money basis and no conflicting series override. Canonical validators/writers, expected revisions, deterministic locks, capture/journal/read-back and safe reverse patch; no new LP semantics or ad hoc unit conversion.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM09",
+      "title": "Exact-target runs and native base-plus-N comparison",
+      "depends_on": [
+        "PM06",
+        "PM08"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/routers/solve_queue.py",
+        "pypsa-gui/backend/services/solve_queue.py",
+        "pypsa-gui/backend/routers/compare.py",
+        "pypsa-gui/frontend/src/pages/CompareView.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/variant_run_groups.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_variant_run_groups.py",
+        "pypsa-gui/backend/tests/test_variant_comparison_table.py"
+      ],
+      "acceptance_ids": [
+        "BV14",
+        "BV15",
+        "BV19",
+        "VM04",
+        "VM05",
+        "VM06",
+        "VM08"
+      ],
+      "done_when": "Admitted exact-target job group, per-case outcomes, caps and no duplicate replay; S6 native bounded base-plus-N table/exports computed by existing numerical readers. Eight-target editor does not raise four-case sweep cap.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM10",
+      "title": "Companion management context, summaries and navigation",
+      "depends_on": [
+        "PM03",
+        "PM04",
+        "PM05"
+      ],
+      "existing_seams": [
+        "pypsa-gui/frontend/src/components/AssistantDock.tsx",
+        "pypsa-gui/frontend/src/components/ChatPanel.tsx",
+        "pypsa-gui/backend/harness/navigation.py",
+        "pypsa-gui/backend/harness/catalogue.py"
+      ],
+      "proposed_files": [
+        "pypsa-gui/frontend/src/components/ProjectChatContext.tsx"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_management_chat_context.py",
+        "pypsa-gui/frontend/src/components/ProjectChatContext.test.tsx"
+      ],
+      "acceptance_ids": [
+        "AI01",
+        "AI02",
+        "AI03",
+        "AI04",
+        "AI05",
+        "AI18",
+        "AI23",
+        "AI25"
+      ],
+      "done_when": "One visible project/variant/source context; preserve no-key generic shortcuts, exact resolution and owning-field navigation. Read only; no new authority from summaries or mount-only acknowledgements.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM11",
+      "title": "Companion shared-edit and safe-version action adapters",
+      "depends_on": [
+        "PM06",
+        "PM08",
+        "PM10"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/harness/edit_card.py",
+        "pypsa-gui/backend/harness/effects.py",
+        "pypsa-gui/backend/harness/catalogue.py",
+        "pypsa-gui/backend/services/chat_tools.py",
+        "pypsa-gui/frontend/src/components/EditCard.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/harness/project_management_adapters.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_management_chat_actions.py",
+        "pypsa-gui/frontend/src/components/EditCard.variantChanges.test.tsx"
+      ],
+      "acceptance_ids": [
+        "BV17",
+        "AI06",
+        "AI07",
+        "AI08",
+        "AI09",
+        "AI10",
+        "AI11",
+        "AI12",
+        "AI19",
+        "AI20",
+        "AI21",
+        "AI22",
+        "AI23",
+        "AI26"
+      ],
+      "done_when": "Thin adapters to native operation services, full previews/read-back and per-target restrictions; deny/uncertain stops dependent runs. Strict unmapped tools refuse until a separate validated adapter is admitted.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM12",
+      "title": "Companion group completion, evidence comparison and input-mode parity",
+      "depends_on": [
+        "PM09",
+        "PM10",
+        "PM11"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/harness/continuation.py",
+        "pypsa-gui/backend/services/assistant_tasks.py",
+        "pypsa-gui/backend/harness/activity_history.py",
+        "pypsa-gui/frontend/src/components/AssistantActivity.tsx",
+        "pypsa-gui/frontend/src/components/AssistantDock.tsx"
+      ],
+      "proposed_files": [],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_management_chat_continuation.py",
+        "pypsa-gui/backend/tests/test_project_management_provider_parity.py",
+        "pypsa-gui/frontend/src/components/AssistantDock.projectManagement.test.tsx",
+        "pypsa-gui/frontend/scripts/smoke-project-management-chat.mjs"
+      ],
+      "acceptance_ids": [
+        "AI13",
+        "AI14",
+        "AI15",
+        "AI16",
+        "AI17",
+        "AI18",
+        "AI22",
+        "AI24",
+        "AI25",
+        "AI26"
+      ],
+      "done_when": "At-most-once eligible origin-bound completion without new approvals, native numerical evidence, explicit checked gaps and no active-project hijack. Type/dictate/live share the native gate; speech mocks do not claim hosted-voice validation.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM13",
+      "title": "Pins, tags, archive and bounded activity",
+      "depends_on": [
+        "PM03",
+        "PM05",
+        "PM02"
+      ],
+      "existing_seams": [
+        "pypsa-gui/backend/db/models.py",
+        "pypsa-gui/backend/services/project_settings.py",
+        "pypsa-gui/backend/routers/projects.py",
+        "pypsa-gui/frontend/src/pages/ProjectsHomePage.tsx"
+      ],
+      "proposed_files": [
+        "pypsa-gui/backend/services/project_lifecycle.py"
+      ],
+      "new_test_targets": [
+        "pypsa-gui/backend/tests/test_project_management_metadata.py",
+        "pypsa-gui/backend/tests/test_project_archive_lifecycle.py",
+        "pypsa-gui/frontend/src/pages/ProjectsHomePage.archive.test.tsx"
+      ],
+      "acceptance_ids": [
+        "LF01",
+        "LF02",
+        "LF03",
+        "LF04",
+        "LF05",
+        "LF06"
+      ],
+      "done_when": "Personal vs shared metadata migrations, explicit family archive policy and busy/dirty checks; permanent delete stays guarded, no invented Trash/full audit guarantee. Chat writes admitted only after native services exist.",
+      "status": "planned_not_implemented"
+    },
+    {
+      "id": "PM14",
+      "title": "Integrated release gate and implementation handoff",
+      "depends_on": [
+        "PM01",
+        "PM02",
+        "PM03",
+        "PM04",
+        "PM05",
+        "PM06",
+        "PM07",
+        "PM08",
+        "PM09",
+        "PM10",
+        "PM11",
+        "PM12",
+        "PM13"
+      ],
+      "existing_seams": [
+        "pypsa-gui/TESTING.md",
+        "scripts/coord/premerge.sh"
+      ],
+      "proposed_files": [],
+      "new_test_targets": [],
+      "acceptance_ids": [
+        "SR01",
+        "SR02",
+        "SR03",
+        "SR04",
+        "SR05",
+        "SR06",
+        "SR07",
+        "SR08",
+        "SR09",
+        "SR10",
+        "SR11",
+        "SR12",
+        "SR13",
+        "SR14",
+        "PD01",
+        "PD02",
+        "PD03",
+        "PD04",
+        "PD05",
+        "PD06",
+        "PD07",
+        "PD08",
+        "PD09",
+        "PD10",
+        "UI01",
+        "UI02",
+        "UI03",
+        "UI04",
+        "UI05",
+        "UI06",
+        "UI07",
+        "UI08",
+        "UI09",
+        "UI10",
+        "UI11",
+        "UI12",
+        "UI13",
+        "UI14",
+        "VM01",
+        "VM02",
+        "VM03",
+        "VM04",
+        "VM05",
+        "VM06",
+        "VM07",
+        "VM08",
+        "LF01",
+        "LF02",
+        "LF03",
+        "LF04",
+        "LF05",
+        "LF06",
+        "BV01",
+        "BV02",
+        "BV03",
+        "BV04",
+        "BV05",
+        "BV06",
+        "BV07",
+        "BV08",
+        "BV09",
+        "BV10",
+        "BV11",
+        "BV12",
+        "BV13",
+        "BV14",
+        "BV15",
+        "BV16",
+        "BV17",
+        "BV18",
+        "BV19",
+        "BV20",
+        "AI01",
+        "AI02",
+        "AI03",
+        "AI04",
+        "AI05",
+        "AI06",
+        "AI07",
+        "AI08",
+        "AI09",
+        "AI10",
+        "AI11",
+        "AI12",
+        "AI13",
+        "AI14",
+        "AI15",
+        "AI16",
+        "AI17",
+        "AI18",
+        "AI19",
+        "AI20",
+        "AI21",
+        "AI22",
+        "AI23",
+        "AI24",
+        "AI25",
+        "AI26"
+      ],
+      "done_when": "Every delivered requirement has passing independent native/fixture/browser evidence on the current source; failures, unsupported families, external review and real-use limits explicitly reported. Full applicable CI/premerge and exact-head UX/engine review under then-current rules; no production activation in this package.",
+      "status": "planned_not_implemented"
+    }
+  ],
+  "test_cases": [
+    {
+      "id": "SR01",
+      "scenario": "Unsaved model change before restore",
+      "expected": "Preserve the exact dirty live input state in a protected checkpoint or refuse before changing files; reproduce F01 through authenticated HTTP.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR02",
+      "scenario": "Pending frontend/debounced field edits",
+      "expected": "Flush or explicitly resolve pending edits before preview/capture; no apparently saved checkpoint of an older server value.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR03",
+      "scenario": "Checkpoint creation from dirty project",
+      "expected": "Explicit Save and capture or last-saved-only choice; source identity and included/excluded state are clear.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR04",
+      "scenario": "Create checkpoint at quota / ID collision",
+      "expected": "Protected operation rollback points and chosen source survive pruning; collision has a typed bounded outcome.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR05",
+      "scenario": "Sidecar absent at capture then created",
+      "expected": "Known-absent stress/asset/control settings revert to absence within declared domain; reproduce F02.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR06",
+      "scenario": "Directory absent at capture then created",
+      "expected": "Known-absent uploads/reports/studies/sites domains follow manifest policy; reproduce F03 without deleting outside the domain.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR07",
+      "scenario": "Sidecar/directory present in saved version",
+      "expected": "Restore exact captured content and required metadata; read back through fresh HTTP and registered context.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR08",
+      "scenario": "Legacy snapshot with unknown presence",
+      "expected": "Migrate or offer explicit legacy limited restore; never infer known absence or promise exact full restore.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR09",
+      "scenario": "Copy/read/write failure partway through capture/restore",
+      "expected": "Fault-inject each stage; do not publish complete success; keep old state/recoverable protection and explicit recovery status.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR10",
+      "scenario": "Process restart during restore publish",
+      "expected": "Durable journal identifies pre/post/uncertain state, blocks unsafe normal reads/writes and supports idempotent recovery.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR11",
+      "scenario": "Concurrent autosave, edit, queued/running work or lock takeover",
+      "expected": "Recheck source/target/lock/revision before commit; no interleaved mixed checkpoint or overwritten newer edit.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR12",
+      "scenario": "Corrupt manifest/member/hash, traversal or symlink",
+      "expected": "Refuse before mutation; authorized containment, finite size and correct member type checks.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR13",
+      "scenario": "Restore networkless specialized study",
+      "expected": "Either declared supported capture/restore adapter or clear unsupported result without partial writes or fallback network.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "SR14",
+      "scenario": "Complete restore source/current-state reconciliation",
+      "expected": "Next authenticated request sees restored context; section/result freshness and provenance are correct; historical approvals/jobs do not revive.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD01",
+      "scenario": "Authorized project summary listing",
+      "expected": "Only accessible roots/variants, stable identifiers and bounded pagination; no cross-org metadata/name disclosure.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD02",
+      "scenario": "Creation vs modification vs personal last-open",
+      "expected": "Distinct source semantics; passive reads do not count as model edits; real relevant writes update/derive correct revision.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD03",
+      "scenario": "Nested family count and cycles",
+      "expected": "Consistent whole-family or explicitly direct count; missing/cyclic parents bounded, no duplicate rows.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD04",
+      "scenario": "Summary performance with large networks",
+      "expected": "No per-row NetCDF hydration or project activation; bounded metadata/evidence reads and explicit pagination.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD05",
+      "scenario": "Missing folder, orphan temporary file and corrupt metadata",
+      "expected": "Different empty/error/recovery states; missing data is not zero or an empty valid project.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD06",
+      "scenario": "Current result and readiness projection",
+      "expected": "Same canonical scope/readiness/evidence contract; objective presence does not establish all selected modules complete.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD07",
+      "scenario": "Rename stable-link compatibility",
+      "expected": "Root/descendants, last section, compare targets, pending references and selected project resolve coherently.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD08",
+      "scenario": "Organization identity and action capabilities",
+      "expected": "Safe non-admin display DTO; server-calculated allowed operations respect locks/read-only/busy state.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD09",
+      "scenario": "New metadata migration and legacy/local compatibility",
+      "expected": "Old bundles/rows load with explicit defaults; no invented modification history or server-only requirement for local support.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "PD10",
+      "scenario": "Family portability/source relationships",
+      "expected": "Export/import/copy retain declared version/batch/base receipts or explicitly mark unavailable; no fabricated lineage.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI01",
+      "scenario": "Search/filter/cards/list",
+      "expected": "Find intended root or nested variant with 0/1/50+ accessible projects; persisted filters scoped correctly.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI02",
+      "scenario": "Compact Resume",
+      "expected": "Actual existing last project/mode/section reused; missing/deleted/revoked target is not opened or replaced silently.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI03",
+      "scenario": "Overview next action",
+      "expected": "Server reason plus owning editor; same project/mode/return position; no duplicate parameter form.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI04",
+      "scenario": "Independent status meanings",
+      "expected": "Lifecycle, readiness, job state, result freshness and access remain distinguishable, including stale completed results.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI05",
+      "scenario": "Project creation/examples boundary",
+      "expected": "Reuse wizard/Builder; integrated horizon; current supported template/scope choices only; no duplicate staged examples.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI06",
+      "scenario": "Visual language and theme",
+      "expected": "Cool neutral light/dark surfaces, coral primary/selection styling, semantic errors, readable typography and consistent spacing.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI07",
+      "scenario": "Keyboard/touch/reduced motion",
+      "expected": "Visible focus, semantic controls, accessible dialogs/drawers, touch actions and reduced motion; no hover-only primary actions.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI08",
+      "scenario": "Responsive layout",
+      "expected": "Native desktop and mobile journey; no clipped target previews, destructive buttons or inaccessible horizontal-only actions.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI09",
+      "scenario": "One canonical variant table/tree",
+      "expected": "Management and section-8 entries share data/actions; nested lineage and active/base/preferred distinctions preserved.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI10",
+      "scenario": "Runs vs saved versions",
+      "expected": "Separate identity/action labels; Latest saved is not labelled current without equality; viewing retained results never restores inputs.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI11",
+      "scenario": "Files/reports and access navigation",
+      "expected": "Known supported artifacts display source/coverage; inherited membership and per-node lock explained accurately.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI12",
+      "scenario": "Single companion integration",
+      "expected": "One context-aware dock across management and workbench; native help/actions remain usable without model key.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI13",
+      "scenario": "Empty/error/loading/busy states",
+      "expected": "Server failures and pending state explicit; navigation does not hide stale data under success badges.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "UI14",
+      "scenario": "One owning entry per feature",
+      "expected": "No duplicate editors/buttons across Guided/Expert/management; shortcuts open the same canonical surface and return.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM01",
+      "scenario": "Snapshot-row exact comparison",
+      "expected": "Clicked version ID selects a non-mutating reader or explicitly refuses; general project A/B rail is not a substitute.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM02",
+      "scenario": "Read-only old-version inspection",
+      "expected": "No active-project restore/activation; source/member scope and unknown artifact coverage explicit.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM03",
+      "scenario": "Run exact old version in isolated copy",
+      "expected": "Parent version/input hashes pinned, current design unchanged, ordinary readiness/queue approval and job receipts.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM04",
+      "scenario": "Comparison with equal counts but different basis",
+      "expected": "Periods, weighting, demand, objective, currency/year/units and scope differences exposed; no unsupported like-for-like delta.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM05",
+      "scenario": "Zero baseline, stale/failed/missing result",
+      "expected": "Native signed deltas only where valid; unavailable not zero; no best-project ranking across unrelated studies.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM06",
+      "scenario": "Base plus N comparison",
+      "expected": "Admitted native service computes deltas/rank/exports; caps enforced, no LLM arithmetic or implicit solver execution.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM07",
+      "scenario": "Version selection after rename/deletion/revocation",
+      "expected": "Stable authorized reference or source-unavailable, never newest/current fallback.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "VM08",
+      "scenario": "Compare/export reproducibility",
+      "expected": "Native table, chart and download share exact source/window/basis; changed source invalidates incompatible views.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF01",
+      "scenario": "Personal pins and saved filters",
+      "expected": "Scoped to current actor/org; no credential/approval inheritance or shared-browser leakage.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF02",
+      "scenario": "Tags/root description/site metadata",
+      "expected": "Canonical metadata with validation; reuse site records; same values through all views and bundle policy.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF03",
+      "scenario": "Archive/unarchive with descendants and active work",
+      "expected": "Preview family scope; deterministic queued/active/dirty handling; archive is not hidden delete/cancel.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF04",
+      "scenario": "Archived restore/export and lookup",
+      "expected": "Explicit read/write rules; no background autosave resurrection or fallback to wrong active project.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF05",
+      "scenario": "Permanent delete and recovery boundaries",
+      "expected": "Existing confirmation/descendant/queue/permission guards retained; no false Trash/Undo promise.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "LF06",
+      "scenario": "Activity lineage and authorization",
+      "expected": "Only actual durable events/receipts shown with source; no complete-audit certification from partial logs.",
+      "status": "required_not_implemented",
+      "origin": "04-IMPLEMENTATION-PLAN.md"
+    },
+    {
+      "id": "BV01",
+      "scenario": "Same value across three selected variants",
+      "expected": "Preview shows all exact old/new values; one reviewed apply; source base changes only if selected.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV02",
+      "scenario": "One variant intentionally differs",
+      "expected": "Common-value policy preserves/lists it; Set all requires explicit replacement preview.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV03",
+      "scenario": "Missing, renamed or different asset",
+      "expected": "No guessed target, hidden creation or partial silent skip; mapping must be resolved.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV04",
+      "scenario": "Scalar with existing time-series override",
+      "expected": "Effective value/scope shown; no claim scalar edit changed the profile.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV05",
+      "scenario": "EUR/USD, price-year, cost basis or component-specific units differ",
+      "expected": "Explicit valid conversion with basis evidence or refusal; no bare-number copying.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV06",
+      "scenario": "Dirty resident project or pending editor save",
+      "expected": "Capture/save resolution or refusal before any writes; later autosave cannot resurrect pre-batch data.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV07",
+      "scenario": "Foreign org, revoked membership, locked/busy target",
+      "expected": "Server rechecks each target; refuse before writes or record true later recovery state.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV08",
+      "scenario": "Target changes after preview",
+      "expected": "Digest/old-value conflict, no overwrite based on stale preview.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV09",
+      "scenario": "Crash/cancel/disk failure between target commits",
+      "expected": "Durable completed/failed/uncertain ledger; verified compensation/recovery; never false all-success.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV10",
+      "scenario": "Double-click/retry same request",
+      "expected": "Same receipt; no duplicate writes, copies or jobs. Changed payload conflicts.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV11",
+      "scenario": "Reverse patch after unrelated/conflicting later edits",
+      "expected": "Preserve unrelated work; conflict when postconditions no longer match; no blind full-project restore.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV12",
+      "scenario": "Snapshot quota and rollback retention",
+      "expected": "Operation checkpoints remain until safe resolution; retention behavior is explicit.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV13",
+      "scenario": "Batch input edit with old results",
+      "expected": "Affected current results stale; immutable historical evidence retained; no automatic solve.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV14",
+      "scenario": "Run exact three selected variants, one fails",
+      "expected": "Only selected targets/jobs; each real terminal state; successful results readable and failed metrics unavailable.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV15",
+      "scenario": "More than current sweep/compare caps",
+      "expected": "Explicit supported limit or different admitted path; planned eight-case compare does not authorize unlimited execution.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV16",
+      "scenario": "Export/import/fork after common edit",
+      "expected": "Declared changes, source/base and receipt references travel under the declared portability contract or show unavailable; no invented provenance.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV17",
+      "scenario": "Guided/Expert/chat entry",
+      "expected": "Same preview/service/IDs and ordinary confirmations; user can perform all actions without an LLM.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV18",
+      "scenario": "Base edited after an independent fork",
+      "expected": "Existing fork inputs/results do not change silently; show baseline relationship explicitly.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV19",
+      "scenario": "Run a saved version",
+      "expected": "Isolated exact-source copy where supported; working branch unchanged; ordinary queue/job receipt.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "BV20",
+      "scenario": "Restore fails partway or required evidence is corrupt",
+      "expected": "No success badge; prior protection/recovery and explicit invalid/uncertain state.",
+      "status": "required_not_implemented",
+      "origin": "02-SHARED-ASSUMPTIONS-SPEC.md"
+    },
+    {
+      "id": "AI01",
+      "scenario": "Project-home generic open/new action without model key",
+      "expected": "Existing native shortcut works once; no model call, duplicate wizard or silent named-target claim.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI02",
+      "scenario": "Named project, partial name, UUID-shaped name or foreign-org collision",
+      "expected": "Exact authorized resolution or scoped choice/not-found; no active-project substitution or name leak.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI03",
+      "scenario": "Ambiguous \u201cthis\u201d, \u201clatest\u201d, \u201cprevious\u201d across variant/run/version",
+      "expected": "Resolve distinct canonical source or ask; no newest-equals-current assumption.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI04",
+      "scenario": "Project/org switch while model response, preview or approval is pending",
+      "expected": "Origin remains bound; stale preview/action cannot mutate the newly active project.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI05",
+      "scenario": "Overview readiness/next action",
+      "expected": "Same server verdict and owning field as native UI; context/mode/return position preserved.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI06",
+      "scenario": "Single edit in Guided/Expert",
+      "expected": "Same unit/basis, complete native old\u2192new card, approval digest and read-back; computed/read-only fields refused.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI07",
+      "scenario": "Batch common-value edit with intentional variant difference",
+      "expected": "Exact selected targets, differing assumption preserved by default, explicit overwrite preview when requested; no root edit unless selected.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI08",
+      "scenario": "Target missing/renamed asset, profile override or incompatible money basis",
+      "expected": "Explain/refuse unsupported mapping/effective value; no guessed name, silent scalar/profile substitution or model-side conversion.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI09",
+      "scenario": "Child is read-only/restricted, ACL revoked, lock acquired or policy revision changes",
+      "expected": "Recheck every target at native admission/commit; stale approval cannot authorize it.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI10",
+      "scenario": "Native form changed after chat preview, including change-and-restore",
+      "expected": "Revalidation rejects stale version/digest; fresh preview required under current revision rules.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI11",
+      "scenario": "Denied edit or partial/uncertain batch effect before a dependent run",
+      "expected": "No solve submitted; show actual per-target receipt/recovery state and preserve historical evidence.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI12",
+      "scenario": "Approve edit but no run authorization, or ask only for preview",
+      "expected": "No implicit queue submission or extra project writes. Existing approved composites stay within their exact declared scope.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI13",
+      "scenario": "Run exact selected set with one failure/cancellation",
+      "expected": "Only reviewed jobs; per-job native terminal results, unknowns explicit; no invented all-success or unintended descendant run.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI14",
+      "scenario": "Long job exceeds turn wait, tab closes, application restarts",
+      "expected": "Existing durable origin tracking and at-most-once eligible continuation; no duplicate run or revived approval. Group completion waits for its explicit group contract.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI15",
+      "scenario": "Origin job completes while user works elsewhere",
+      "expected": "Activity retains source; no active-project hijack, unsolicited result navigation or wrong-project numerical answer.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI16",
+      "scenario": "Pairwise or base+N request with different horizons/currencies/scope",
+      "expected": "Native comparison supports or refuses exact request; no model-generated deltas/ranking and no false like-for-like winner.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI17",
+      "scenario": "Requested annual reliability/compliance metric missing or outside checked scope",
+      "expected": "Explicit unavailable/not checked or strict refusal; no inference from objective/job completion or fallback to unverified execution.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI18",
+      "scenario": "Source-bound native result display unavailable",
+      "expected": "Honest Opened/mounted-only status; no claim displayed data was verified, no forced Expert mode or current-result substitution.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI19",
+      "scenario": "Ask to undo vs view historical result vs restore whole version",
+      "expected": "Clarify exact intent/scope; historical viewing changes no inputs; unavailable safe restore refuses.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI20",
+      "scenario": "Reverse shared change after later conflicting edit",
+      "expected": "Native conflict check preserves later work; no blind multi-project snapshot restore.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI21",
+      "scenario": "Run saved version",
+      "expected": "Exact supported isolated copy/source manifest and ordinary job request; current working design unchanged.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI22",
+      "scenario": "Restored/copied chat history contains prior approvals",
+      "expected": "No restored tokens or policy inheritance; current access and native effect admission required.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI23",
+      "scenario": "Malicious project title/upload/report contains tool or policy instructions",
+      "expected": "Treat as untrusted data; bounded reader cannot execute instructions, reveal secrets or select foreign targets.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI24",
+      "scenario": "Type/dictate/live command, interrupted speech or stale transcript",
+      "expected": "Same intent/target/approval/receipt pipeline; no background/partial speech approval; distinct speech/wait/job cancellation.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI25",
+      "scenario": "Model unavailable, quota exhausted or user chooses native UI",
+      "expected": "Management, previews, edits and jobs remain usable through native controls; no hidden provider fallback or paid call.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    },
+    {
+      "id": "AI26",
+      "scenario": "Export, replay/retry, double-click or uncertain completion",
+      "expected": "Exact supported source/export scope; same request returns same receipt; no duplicate effects or stronger checked claims in reports.",
+      "status": "required_not_implemented",
+      "origin": "03-CHATBOT-INTEGRATION-SPEC.md"
+    }
+  ],
+  "audit_feature_delivery_map": {
+    "PM01": [
+      "PM03",
+      "PM04",
+      "PM13"
+    ],
+    "PM02": [
+      "PM04",
+      "PM10"
+    ],
+    "PM03": [
+      "PM04"
+    ],
+    "PM04": [
+      "PM01",
+      "PM02"
+    ],
+    "PM05": [
+      "PM02",
+      "PM10"
+    ],
+    "PM06": [
+      "PM05",
+      "PM07"
+    ],
+    "PM07": [
+      "PM03",
+      "PM05"
+    ],
+    "PM08": [
+      "PM03",
+      "PM05"
+    ],
+    "PM09": [
+      "PM09"
+    ],
+    "PM10": [
+      "PM09",
+      "PM12"
+    ],
+    "PM11": [
+      "PM02",
+      "PM08"
+    ],
+    "PM12": [
+      "PM01",
+      "PM02"
+    ],
+    "PM13": [
+      "PM01",
+      "PM02"
+    ],
+    "PM14": [
+      "PM06"
+    ],
+    "PM15": [
+      "PM06",
+      "PM09"
+    ],
+    "PM16": [
+      "PM09"
+    ],
+    "PM17": [
+      "PM02",
+      "PM03",
+      "PM08"
+    ],
+    "PM18": [
+      "PM03",
+      "PM13"
+    ],
+    "PM19": [
+      "PM03",
+      "PM11",
+      "PM13"
+    ],
+    "PM20": [
+      "PM03",
+      "PM05",
+      "PM12"
+    ],
+    "PM21": [
+      "PM05",
+      "PM13"
+    ],
+    "PM22": [
+      "PM09",
+      "PM12"
+    ],
+    "PM23": [
+      "PM07",
+      "PM08",
+      "PM11"
+    ],
+    "PM24": [
+      "PM06",
+      "PM11"
+    ]
+  },
+  "domain_journeys": [
+    {
+      "domain": "C&I / own site",
+      "availability": "Existing eh_site path",
+      "required_journey": "Create/resume, scalar common-input preview, variants/queue/result freshness; irrelevant Grid/Control options remain outside scope."
+    },
+    {
+      "domain": "Data centre",
+      "availability": "Existing integrated horizon/growth path",
+      "required_journey": "Shared cost assumption, dirty checkpoint, weak-connection result and source-bound summary; no inferred transient/compliance result."
+    },
+    {
+      "domain": "Hydrogen hub",
+      "availability": "Existing H2 example",
+      "required_journey": "Carrier/process units and demand unchanged by management edit; same-unit scalar edits only, missing Generator target refuses rather than guessing a Link."
+    },
+    {
+      "domain": "Ammonia",
+      "availability": "Existing staged process example in reviewed source",
+      "required_journey": "Preserve production units/recipe and period mapping; no energy-sum or monetary-basis substitution; native module support drives available actions."
+    },
+    {
+      "domain": "Island microgrid",
+      "availability": "Existing microgrid example",
+      "required_journey": "Joint backup/control assumptions remain native; failed/partial jobs show correct evidence; no annual reliability claim from short dynamics screen."
+    },
+    {
+      "domain": "IPP / generation-only",
+      "availability": "Existing generation project where supported",
+      "required_journey": "No critical-load/control requirement invented; comparison exposes contract/time/currency basis; market-series references preserved."
+    },
+    {
+      "domain": "Blank / raw-network / full bundle import",
+      "availability": "Existing creation/import paths",
+      "required_journey": "Network-only versus declared full bundle clear; meaningful empty states, variant mapping and no missing-equals-zero."
+    },
+    {
+      "domain": "Planning\u2192dynamics / networkless study",
+      "availability": "Existing specialized project kind",
+      "required_journey": "Summary/navigation/access supported; checkpoint/batch actions use explicit adapter or refuse unsupported kind without mutation."
+    },
+    {
+      "domain": "Mining / future templates",
+      "availability": "No new template implementation in this plan",
+      "required_journey": "Generic management contracts apply when admitted; do not advertise an unavailable template, process/control engine or runnable combination."
+    }
+  ],
+  "shared_assumptions_reference": "02-SHARED-ASSUMPTIONS-SPEC.md",
+  "chatbot_reference": "03-CHATBOT-INTEGRATION-SPEC.md",
+  "release_implementation_requires_fresh_checks": true
+}
