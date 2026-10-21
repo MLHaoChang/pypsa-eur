@@ -153,7 +153,11 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             aria-label={`Ask the assistant about ${row.requirement}`}
             onClick={() => ask(`On the grid-readiness scorecard, explain "${row.requirement}": `
               + `why it reads ${VERDICT[row.verdict].word.toLowerCase()}, what the limit and its source are, `
-              + 'and what I could change.')}
+              + 'and what I could change.'
+              // An unknown row's next step is its missing input (a study to run, a value
+              // to enter): the Ask carries it, since Guided has no jump (UX review).
+              + (row.verdict === 'unknown' ? ` It is not known yet (${row.note ?? 'an input is missing'}): `
+                + 'what is needed, and can you do it for me?' : ''))}
             disabled={noAssistant} title={noAssistant ? NO_ASSISTANT : ASK_TITLE}
             className="shrink-0 inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50 disabled:hover:border-border disabled:hover:text-muted">
             <MessageCircleQuestion size={12} /> Ask the assistant

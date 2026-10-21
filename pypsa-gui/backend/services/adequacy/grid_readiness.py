@@ -523,7 +523,7 @@ def _island_rows(inp: _Inputs) -> list[dict]:
         v = variants.get(sc)
         if inp.island_study is None or v is None:
             verdict, value, note = ("unknown", None,
-                                    "No island study since the island requirements were saved: run it")
+                                    "No island study since the island requirements were saved")
         elif v.get("status") == "ok":
             verdict, value, note = "pass", "feasible", "The plan, sized with the island rows, is feasible"
         else:
