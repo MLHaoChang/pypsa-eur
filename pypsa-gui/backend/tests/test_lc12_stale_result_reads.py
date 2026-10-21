@@ -95,3 +95,21 @@ def test_reads_agree_with_the_check_answers_guard(oj_grid):  # noqa: F811
     assert status['results_current'] is gens['results_current'] is _guard() is False
     assert status['inputs_changed_since_solve'] is gens['inputs_changed_since_solve'] is True
     assert gens['freshness_note'].startswith('stale')
+
+
+def test_a_project_solved_here_saved_and_reopened_is_still_current(oj_grid, client):  # noqa: F811
+    """The solve fingerprints travel in network.nc: reopening a project solved
+    in the app must not read stale. oj-grid's Solar profile is a user time
+    series, whose index name user_ts.json now round-trips."""
+    from services.pypsa_service import PyPSAService
+    from tests.oj_grid import NAME
+
+    assert chat_tools.dispatch_status()['results_current'] is True
+    assert client.post(f'/api/projects/{NAME}').status_code == 200   # save
+    assert client.get(f'/api/projects/{NAME}').status_code == 200    # reopen from disk
+    meta = PyPSAService.get_network().meta
+    assert meta.get('assistant_solve_input_fingerprint')
+    status, gens = chat_tools.dispatch_status(), chat_tools.get_results('generators')
+    assert status['inputs_changed_since_solve'] is False
+    assert status['results_current'] is gens['results_current'] is _guard() is True
+    assert 'freshness_note' not in gens
