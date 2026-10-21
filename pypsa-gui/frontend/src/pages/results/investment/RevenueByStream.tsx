@@ -36,7 +36,7 @@ export default function RevenueByStream({ report }: { report: InvestmentCaseRepo
   if (!streams) {
     return (
       <section className="space-y-1" data-testid="ic-revenue-unavailable">
-        <h3 className="text-[11px] font-semibold">Revenue by stream</h3>
+        <h3 id="ic-revenue-by-stream" className="text-[11px] font-semibold">Revenue by stream</h3>
         <p className="text-muted">
           Revenue by stream is not established: {project?.note ?? 'the operating cash is not established.'}</p>
         <p>{link}</p>
@@ -55,7 +55,7 @@ export default function RevenueByStream({ report }: { report: InvestmentCaseRepo
   return (
     <section className="space-y-1">
       <div className="flex justify-between items-center">
-        <h3 className="text-[11px] font-semibold">Revenue by stream</h3>
+        <h3 id="ic-revenue-by-stream" className="text-[11px] font-semibold">Revenue by stream</h3>
         <button type="button" className="text-[11px] underline" onClick={csv}>
           Export the revenue by stream (CSV)</button>
       </div>
