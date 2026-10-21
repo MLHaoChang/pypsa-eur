@@ -75,6 +75,6 @@ def revenue_by_stream(op) -> dict[str, Any] | None:
         "rows": [{"id": r, "label": LABELS[r], "values": _values(rows[r])} for r in ROWS],
         "total": {"id": "total", "label": LABELS["total"], "values": _values(total)},
         "replacements": {"id": "replacements", "label": LABELS["replacements"],
-                         "values": _values(-np.asarray(op.replacement, dtype=float))},
+                         "values": _values(0.0 - np.asarray(op.replacement, dtype=float))},
         "other_keys": other_keys,
     }

@@ -65,17 +65,17 @@ export default function RevenueByStream({ report }: { report: InvestmentCaseRepo
         <table className="text-[11px] w-full" data-testid="ic-revenue-streams">
           <caption className="text-left text-muted">+ income, − costs; a dash is not established</caption>
           <thead><tr>
-            <th scope="col" className="text-left">Year</th>
+            <th scope="col" className="text-left pr-3">Year</th>
             {cols.map(c => (
-              <th key={c.id} scope="col" className={`text-right ${tone(c)}`}
+              <th key={c.id} scope="col" className={`text-right align-bottom px-2 ${tone(c)}`}
                   data-testid={`ic-revenue-col-${c.id}`}>{c.label}</th>
             ))}
           </tr></thead>
           <tbody>{streams.years.map((y, i) => (
             <tr key={y} data-testid={`ic-revenue-${y}`}>
-              <th scope="row" className="text-left font-normal">{y}</th>
+              <th scope="row" className="text-left font-normal pr-3">{y}</th>
               {cols.map(c => (
-                <td key={c.id} className={`text-right ${tone(c)}`}
+                <td key={c.id} className={`text-right px-2 ${tone(c)}`}
                     data-established={c.values[i] != null}>{cell(c.values[i])}</td>
               ))}
             </tr>
