@@ -165,10 +165,23 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         entry="none; services/solver/process_uc.py covers eh_process commitment only",
         inputs="-", outputs="-", locks_and_state="-", implicit_steps="-", freshness="-",
         evidence=(_T + "test_process_modelling_is_unit_commitment_only",), note="after GTP"),
-    Row("fixed_sizes", "Dispatch on fixed sizes (sizing off)", "unsupported", False,
-        entry="none yet: slice F1 (a solver-config option over sweep.freeze_capacities)",
-        inputs="-", outputs="-", locks_and_state="-", implicit_steps="-", freshness="-",
-        evidence=(_T + "test_flipping_sizing_off_is_refused_by_preflight",), note="F1"),
+    Row("fixed_sizes", "Dispatch on fixed sizes (sizing off)", "supported", True,
+        entry="an option of optimisation: SolverConfig.fixed_sizes = capacity_run | nameplate "
+              "(services/solver/fixed_sizes.py, F1)",
+        inputs="the capacity run's recorded sizes (n.meta['sizing_record']) or the nameplate",
+        outputs="as optimisation; *_nom_opt = the fixed sizes; _state['sizing']",
+        locks_and_state="as optimisation; freeze_capacities(transient=False) clamps the bounds "
+                        "for the solve and undoes them on every exit; sets _fixed_design",
+        implicit_steps="as optimisation (the process UC check and the island UC run); the "
+                       "connection is pinned at the fixed size",
+        freshness="the sizing record: refused when the sizes or the topology changed since",
+        evidence=(_T + "test_flipping_sizing_off_is_refused_by_preflight",
+                  _T + "test_sizing_off_answers_for_its_source",
+                  "tests/test_fixed_sizes.py::test_capacity_run_after_a_nameplate_run_is_refused",
+                  "tests/test_fixed_sizes.py::test_capacity_run_reproduces_the_plans_sizes_after_a_cost_edit",
+                  "tests/test_fixed_sizes.py::test_a_raise_at_the_commercial_binding_leaves_no_freeze_behind"),
+        note="no run kind of its own: the optimisation with fixed_sizes set. Refused with "
+             "the myopic and rolling strategies and in PF mode"),
 )}
 
 
@@ -200,14 +213,17 @@ def loadflow_verdict() -> dict:
 # The run option each optional kind switches on in the solver config. Its
 # refusals in `validate_for_run` fire only with the option on, so its verdict
 # asks the validator with it on (gatekeeper, #497).
-_OPTION_FLAG = {"sclopf": "sclopf", "loadflow": "run_ac_pf_after_lopf"}
+# Sizing off (F1) is the `fixed_sizes` option set to its size source.
+_OPTION_FLAG = {"sclopf": "sclopf", "loadflow": "run_ac_pf_after_lopf",
+                "fixed_sizes": "fixed_sizes"}
 
 
-def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict) -> dict:
-    """The verdict on switching ``kind``'s option on: ``validate_for_run`` with
-    the flag set, in the preflight's lock span, its first error in flow order
-    (the section the flow files it to). With the flag already on it is the
-    optimisation's own (flow) verdict."""
+def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict, *,
+                    value=True) -> dict:
+    """The verdict on switching ``kind``'s option on (to ``value``):
+    ``validate_for_run`` with the option set, in the preflight's lock span, its
+    first error in flow order (the section the flow files it to). With the
+    option already set so it is the optimisation's own (flow) verdict."""
     from dataclasses import replace
 
     from routers.simulation import preflight_validate
@@ -218,9 +234,9 @@ def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict) ->
     flag = _OPTION_FLAG[kind]
 
     def under(n, cfg):
-        if getattr(cfg, flag, False):
+        if getattr(cfg, flag, False) == value:
             return None
-        errors = [i for i in validate_for_run(n, replace(cfg, **{flag: True}))
+        errors = [i for i in validate_for_run(n, replace(cfg, **{flag: value}))
                   if i.severity == "error"]
 
         def section(i) -> str:
@@ -251,7 +267,7 @@ def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict) ->
 
 
 def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: str,
-             db=None, org_id=None) -> dict[str, dict]:
+             db=None, org_id=None, size_source: str = "capacity_run") -> dict[str, dict]:
     """``{kind: {ready, deferred, blocker}}`` for the open project at
     ``project_dir``. ``blocker`` carries at least ``message``.
 
@@ -261,14 +277,16 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
     when ``optimisation`` is among ``kinds`` (Stage 2, the
     ``run_ac_pf_after_lopf`` option), answer for switching their option ON:
     the validator with the option set (the flow's verdict once it is set).
-    ``loadflow`` alone is the standalone route's refusal. A row that is not
-    runnable reads ``ready: false`` with its classification."""
+    ``loadflow`` alone is the standalone route's refusal. ``fixed_sizes``
+    (sizing off, F1) answers for setting ``fixed_sizes`` to ``size_source``
+    ("capacity_run" or "nameplate"). A row that is not runnable reads
+    ``ready: false`` with its classification."""
     from services import flow_service
 
     out: dict[str, dict] = {}
     flow: dict | None = None
     for kind in kinds:
-        if kind in ("optimisation", "sclopf", "study") or (
+        if kind in ("optimisation", "sclopf", "study", "fixed_sizes") or (
                 kind == "loadflow" and "optimisation" in kinds):
             if flow is None:
                 flow = flow_service.project_flow(project_dir, cache_key=cache_key,
@@ -278,7 +296,9 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
                                   "The project has no reliability study to run (no EH template).")
                          if v is None else {**v, "deferred": flow["deferred"]})
             if kind in _OPTION_FLAG and not out[kind]["deferred"]:
-                out[kind] = _option_verdict(project_dir, kind, out[kind])
+                out[kind] = _option_verdict(
+                    project_dir, kind, out[kind],
+                    value=size_source if kind == "fixed_sizes" else True)
         elif kind == "loadflow":
             out[kind] = loadflow_verdict()
         else:

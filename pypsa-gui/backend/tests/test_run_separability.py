@@ -456,3 +456,25 @@ def test_flipping_sizing_off_is_refused_by_preflight(client, site, edit):
     issues = client.post("/api/simulation/preflight").json()["issues"]
     assert "generator_p_nom_invalid" in {i["code"] for i in issues if i["severity"] == "error"}
     assert _pf._flow(client, name)["verdicts"]["optimisation"]["ready"] is False
+
+
+def test_sizing_off_answers_for_its_source(client, site, set_cfg, bound_ctx, project_storage_dir):
+    """Sizing off (F1): with no capacity run, "capacity_run" is refused while
+    the nameplate is ready; with the option already set it is the flow's."""
+    name = site()
+    kinds = ("optimisation", "fixed_sizes")
+    with bound_ctx(client):
+        dirpath = project_storage_dir(name)
+        v = RS.verdicts(dirpath, kinds, cache_key=KEY)
+        plate = RS.verdicts(dirpath, kinds, cache_key=KEY, size_source="nameplate")
+    assert v["optimisation"]["ready"] is True
+    assert v["fixed_sizes"]["ready"] is False
+    assert v["fixed_sizes"]["blocker"]["code"] == "fixed_sizes_no_capacity_run"
+    assert v["fixed_sizes"]["blocker"]["section"] == "scenarios"
+    assert plate["fixed_sizes"]["ready"] is True
+    set_cfg(fixed_sizes="nameplate", solve_strategy="rolling")
+    with bound_ctx(client):
+        plate = RS.verdicts(project_storage_dir(name), kinds, cache_key=KEY,
+                            size_source="nameplate")
+    assert plate["fixed_sizes"] == plate["optimisation"]
+    assert plate["fixed_sizes"]["ready"] is False                 # rolling refuses it
