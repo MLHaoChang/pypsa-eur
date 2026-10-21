@@ -387,7 +387,7 @@ function CreateSnapshotModal({
   )
 }
 
-function RestoreConfirmModal({
+export function RestoreConfirmModal({
   snapshot, projectName, pending, onConfirm, onClose,
 }: {
   snapshot: SnapshotInfo
@@ -459,7 +459,7 @@ function RestoreConfirmModal({
         <div className="bg-bg/60 border border-border rounded p-3 mb-3 text-xs text-muted">
           <div className="font-medium text-text mb-1">Older snapshot</div>
           This snapshot does not record which files existed when it was taken, so
-          settings, uploads and reports added since then stay as they are.
+          settings, uploads and reports added since then are kept as they are.
         </div>
       )}
 
@@ -467,6 +467,12 @@ function RestoreConfirmModal({
         <div className="font-medium text-text mb-1">Safety net</div>
         The current state will be auto-saved as a snapshot labelled
         <strong> "before-restore"</strong> so you can roll back if this isn't what you wanted.
+        {snapshot.has_capture_manifest !== false && (
+          <div className="mt-1">
+            Settings, uploads and reports added since this snapshot are removed; they are
+            kept in the <strong>"before-restore"</strong> snapshot.
+          </div>
+        )}
       </div>
       <div className="flex items-center justify-end gap-2">
         <button
@@ -481,7 +487,7 @@ function RestoreConfirmModal({
           disabled={pending}
           className="px-3 py-1.5 text-sm font-medium bg-accent text-white rounded hover:bg-accent/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {pending ? 'Restoring…' : 'Restore'}
+          {pending ? 'Restoring…' : 'Restore snapshot'}
         </button>
       </div>
     </Dialog>
