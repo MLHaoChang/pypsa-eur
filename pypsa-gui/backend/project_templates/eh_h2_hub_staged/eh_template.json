@@ -121,6 +121,58 @@
       "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on this plan: at 1 h sustained they add about 33 MW of battery in 2027, hold the grid import to about 3 MW and take the demo NPV from +14.6 M to -2.1 M EUR; at 4 h the NPV is -32 M EUR; at 24 h no plan meets them (owner: island data on, rows off, the user opts in)",
       "source": "assumed",
       "value": "off (island_constraints false)"
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "connection_ramp",
+      "item": "connection_ramp",
+      "label": "Connection ramp limit",
+      "note": "assumed: 10% of the 200 MW connection per minute; RfG/DCC set no ramp limit for a demand facility, so this is a placeholder of the order a network operator writes into a connection offer for large loads",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "MW/min",
+      "value": 20.0
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "oscillation",
+      "item": "oscillation",
+      "label": "Power oscillation limit",
+      "note": "assumed: peak-to-peak power oscillation at most 1 % of the connection in the 0.1-2 Hz band (forced-oscillation concern for large loads, NERC 2025 large-loads white paper); no code value",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "% of connection, peak-to-peak",
+      "value": 1.0
+    },
+    {
+      "component": "Link",
+      "entity": "grid_import",
+      "field": "efficiency",
+      "item": "import_efficiency",
+      "label": "Import efficiency",
+      "note": "assumed: the grid_import Link's efficiency (losses = 1 - efficiency); what reaches the site side of the PoC Link. Losses further in (transformers, UPS) are not in it",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "p.u.",
+      "value": 1.0
+    },
+    {
+      "component": "Bus",
+      "entity": "grid",
+      "field": "eh_sk_mva",
+      "item": "fault_level",
+      "label": "Fault level at the PoC",
+      "note": "assumed: short-circuit power at the PoC (grid); the SCR and rapid-voltage-change screenings read it",
+      "panel": null,
+      "section": "connection",
+      "source": "assumed",
+      "unit": "MVA",
+      "value": 5000.0
     }
   ],
   "name": "Industrial Hydrogen Hub (staged growth)",

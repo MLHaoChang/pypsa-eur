@@ -154,5 +154,75 @@ def _ledgers() -> dict[str, list[dict]]:
 @pytest.mark.parametrize("tid", sorted(_ledgers()))
 def test_every_assumed_ledger_row_files_to_a_named_section(tid):
     rows = [r for r in _ledgers()[tid] if r.get("source") == "assumed"]
-    unfiled = [r["item"] for r in rows if S.ledger_section(r["item"]) is None]
+    unfiled = [r["item"] for r in rows
+               if r.get("section") not in S.F.INPUT_SECTIONS
+               and S.ledger_section(r["item"]) is None]
     assert not unfiled, f"add a word to _LEDGER_SECTIONS for: {unfiled}"
+
+
+# DC-02's rows name their own target (`{item, value, unit, source, note,
+# section, field, entity, component, panel}`).
+DC02_ROWS = [
+    {"item": "connection_ramp", "label": "Connection ramp limit", "value": 4.0,
+     "unit": "MW/min", "source": "assumed",
+     "note": "...", "section": "connection", "panel": None, "component": "Link",
+     "entity": "grid_import", "field": "connection_ramp"},
+    {"item": "fault_level", "value": 800.0, "unit": "MVA", "source": "assumed", "note": "...",
+     "section": "connection", "panel": None, "component": "Bus", "entity": "poc",
+     "field": "eh_sk_mva"},
+    {"item": "oscillation", "value": 2.0, "unit": "% of connection", "source": "assumed",
+     "note": "n", "section": "connection", "field": "oscillation_band", "entity": "grid_import",
+     "component": "Link", "panel": None},
+    {"item": "import_efficiency", "value": 0.99, "unit": None, "source": "assumed",
+     "note": "n", "section": "connection", "field": "efficiency", "entity": "grid_import",
+     "component": "Link", "panel": None},
+    {"item": "lole_goal", "value": 0.5, "unit": "h/yr", "source": "assumed", "note": "n",
+     "section": "scenarios", "field": "target_lole_h", "entity": None, "component": None,
+     "panel": "simparams"},
+]
+
+
+def test_a_row_with_its_own_target_is_filed_there():
+    items = S._assumed_items({"ledger": DC02_ROWS + [
+        {"item": "discount rate", "value": "7 %", "source": "assumed"}]})
+    got = {i["code"]: (i["target"], i["message"]) for i in items}
+    assert got["assumed_connection_ramp"] == (
+        {"section": "connection", "panel": None, "component": "Link",
+         "entity": "grid_import", "field": "connection_ramp"},
+        "Connection ramp limit: 4 MW/min (assumed) — confirm it or set your own.")
+    assert got["assumed_fault_level"] == (
+        {"section": "connection", "panel": None, "component": "Bus", "entity": "poc",
+         "field": "eh_sk_mva"},
+        "Fault level: 800 MVA (assumed) — confirm it or set your own.")    # no label: humanised
+    assert len(items) == 6
+    assert got["assumed_lole_goal"][0] == {"section": "scenarios", "panel": "simparams",
+                                           "component": None, "entity": None,
+                                           "field": "target_lole_h"}
+    assert got["assumed_import_efficiency"][1].startswith("Import efficiency: 0.99 (assumed)")
+    # An older row keeps today's behaviour.
+    assert got["assumed_default"][0]["section"] == "commercial"
+    assert got["assumed_default"][0]["entity"] == "discount rate"
+
+
+def test_two_rows_on_one_entity_keep_separate_acks(tmp_path):
+    items = S._assumed_items({"ledger": DC02_ROWS})
+    S.acknowledge(tmp_path, items, "assumed_connection_ramp", "grid_import")
+    S._apply_acks(items, S.read_acks(tmp_path))
+    acked = {i["code"]: i["acknowledged"] for i in items}
+    assert acked["assumed_connection_ramp"] is True
+    assert acked["assumed_oscillation"] is False
+
+
+def test_an_assumed_value_shows_at_full_precision():
+    """No exponent form or 6-digit rounding (`1.5e+06`), and the ack value is
+    the raw value, so a change past the 6th digit still re-raises it."""
+    items = S._assumed_items({"ledger": [
+        {"item": "fault_level", "value": 1500000, "unit": "kVA", "source": "assumed",
+         "section": "connection"},
+        {"item": "import_efficiency", "value": 0.9876543, "source": "assumed",
+         "section": "connection"}]})
+    got = {i["code"]: i for i in items}
+    assert got["assumed_fault_level"]["message"].startswith("Fault level: 1500000 kVA (assumed)")
+    assert got["assumed_import_efficiency"]["message"].startswith(
+        "Import efficiency: 0.9876543 (assumed)")
+    assert got["assumed_import_efficiency"]["_value"] == "0.9876543"

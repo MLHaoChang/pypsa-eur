@@ -21,7 +21,10 @@ period and unweighted (the `cost_rows` basis):
   * the assets — `n.statistics.capex / fom / opex(groupby=False)` inside the
     same `with_periodized_cost_defaults(for_back_calculation=True)` fill
     `cost_breakdown` uses, so the ledger re-adds to it exactly; each asset
-    classed site / grid / unclassified by `participants.classify_buses`;
+    classed site / grid / unclassified by `participants.classify_buses`; a
+    product slack (a `process_role` Generator) flagged `product_buy_in` /
+    `product_shortfall`, which the ledger books as a purchase or as lost
+    production, never as an asset;
   * the reconciliation terms — `cost_breakdown`'s total per period (÷ years on
     a multi-period network) and Σ `commercial_cost_terms` items;
   * disclosures, not money lines — the DSR slack cost (`buses_t["ic_dsr_p"]` ×
@@ -39,6 +42,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from models.process_unit import product_roles
 from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
 
@@ -106,12 +110,15 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
         fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
         opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
+    roles = product_roles(n)
     out = []
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
         side, flags = P.asset_side(n, comp, name, sides)
         if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
             flags = [*flags, "fuel_supply_generator"]
+        if comp == "Generator" and name in roles:
+            flags = [*flags, P.PRODUCT_SLACK_FLAGS[roles[name]]]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))

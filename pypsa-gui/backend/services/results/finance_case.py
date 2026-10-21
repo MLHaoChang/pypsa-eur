@@ -82,7 +82,9 @@ What it builds:
   against the ledger's `commodity_from_grid_side_generator` line to
   max(a cent, 1e-9 relative)) KEYED LIKE the actual commodity line, the
   owner's connection-fee lines copied, the cost lines of assets outside the
-  owner's copied (a boiler's gas), and the lines of contracts that name none
+  owner's copied (a boiler's gas; not a product's buy-in or shortfall on a bus
+  whose load it buys: the purchase replaces them,
+  `counterfactual_purchase_replaces:<gens>`), and the lines of contracts that name none
   of the owner's assets copied (they would exist without the investment;
   flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
   assets are absent. An owner conversion Link beside a non-electric site
@@ -195,6 +197,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from models.process_unit import product_roles
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
 from services.asset_schema.derive import has_parts, number
@@ -1137,6 +1140,12 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     unused = sorted(set(purchases) - set(bought))
     if unused:
         flags.append("counterfactual_reference_purchase_unused:" + ",".join(unused))
+    # A product's buy-in and shortfall (ticket 06) on a bus whose load the
+    # counterfactual buys: the purchase replaces them, never stands beside them.
+    bought_buses = {str(n.loads.at[ld, "bus"]) for ld in bought}
+    replaced = {("Generator", g) for g in product_roles(n) if str(n.generators.at[g, "bus"]) in bought_buses}
+    if replaced:
+        flags.append("counterfactual_purchase_replaces:" + ",".join(sorted(g for _c, g in replaced)))
     co2 = getattr(parsed, "co2_price", None)
     grid_co2 = co2 is not None and co2.grid_t_per_mwh is not None
     if co2 is not None and blockers:
@@ -1310,7 +1319,7 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         # review B2); the commodity is the meter's, above.
         not_owned = {key for key, a in ledger_accs[k].items()
                      if a.source == "asset" and not _is_commodity(a)
-                     and _asset_of(a) not in owned}
+                     and _asset_of(a) not in owned and _asset_of(a) not in replaced}
         for ln in templates_actual[k]:
             if ln.source == "connection":
                 lines.append(ln)

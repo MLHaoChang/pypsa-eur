@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The project flow files a template ledger row that names its own section and target (component, entity, field, panel) there, with its unit in the message, so DC-02's assumed grid limits land in Connection & grid and Scenarios; older rows are filed as before.
