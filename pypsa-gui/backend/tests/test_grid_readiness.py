@@ -694,3 +694,61 @@ def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
             assert word not in text, (r["id"], word, text)
         if r["verdict"] == "unknown":
             assert r["note"][0].isupper(), (r["id"], r["note"])
+
+
+# ── after mitigation (DC 03) ────────────────────────────────────────────────
+
+
+def _envelope_rows(tmp_path, tid="eh_datacenter", dc_load=None, edit=None):
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    if edit:
+        edit(n)
+    out = G.grid_readiness(d, n, PROFILE)
+    return out, {k: v for k, v in _rows(out).items() if k in G._AFTER_IDS}
+
+
+def test_the_campus_ups_shapes_the_step_to_the_limit_after_mitigation(tmp_path):
+    """The 40 MW / 10 MWh UPS keeps 34.5 MW × 600 s = 5.75 MWh for its bridge;
+    the 3.75 MWh left covers the 23.4 MW step's 2 × 23.4²/480 = 2.28 MWh band
+    and the whole 3.6 MW oscillation, so all three rows pass after it, while
+    their own verdicts stay before mitigation."""
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    assert {k: r["verdict"] for k, r in rows.items()} == {
+        "ramp_rate": "fail", "oscillation": "fail", "rapid_voltage_change": "warn"}
+    assert rows["ramp_rate"]["after_battery"]["value"] == pytest.approx(4.0)
+    assert rows["oscillation"]["after_battery"]["value"] == 0.0
+    assert rows["rapid_voltage_change"]["after_battery"]["value"] == 0.0
+    assert {r["after_battery"]["verdict"] for r in rows.values()} == {"pass"}
+    assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
+    assert "before mitigation" in rows["ramp_rate"]["note"]
+    assert out["summary"]["pass_after_mitigation"] == 3
+    assert out["summary"]["red_flags"] == 3                         # the summary stays before mitigation
+
+
+def test_a_small_ups_covers_part_of_the_step(tmp_path):
+    """A 10 MW UPS: S_c = 10 of 23.4 MW, 13.4 MW reach the grid at the
+    envelope's rate, so the ramp fails and the voltage change warns after it."""
+    def shrink(n):
+        n.storage_units.at["ups_battery", "p_nom"] = 10.0
+        n.storage_units.at["ups_battery", "max_hours"] = 2.0        # 19 MWh: power-bound
+    _, rows = _envelope_rows(tmp_path, dc_load={}, edit=shrink)
+    rvc = rows["rapid_voltage_change"]["after_battery"]
+    assert rvc["value"] == pytest.approx(round(13.4 / 250.0 * 100.0, 4))
+    assert rvc["verdict"] == "warn"                                  # 5.36 % above the 3 % limit
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(4.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
+    assert ramp["verdict"] == "fail"
+
+
+def test_without_a_battery_or_ups_there_is_no_after_value(tmp_path):
+    def drop(n):
+        n.remove("StorageUnit", "ups_battery")
+    out, rows = _envelope_rows(tmp_path, dc_load={}, edit=drop)
+    assert not any("after_battery" in r for r in rows.values())
+    assert out["summary"]["pass_after_mitigation"] == 0
+
+
+@pytest.mark.parametrize("tid", TIDS)
+def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
+    _, rows = _envelope_rows(tmp_path, tid)
+    assert not any("after_battery" in r for r in rows.values())
