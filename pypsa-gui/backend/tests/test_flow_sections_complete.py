@@ -144,3 +144,17 @@ def test_sections_are_the_ten_in_flow_order():
 ])
 def test_file_issue(code, cls, name, expected):
     assert F.file_issue(code, cls, name, frozenset({"grid_import"})) == expected
+
+
+@pytest.mark.parametrize(("cls", "entity", "expected"), [
+    ("Link", "grid_import", "connection"),
+    ("Link", "electrolyser", "assets"),
+    ("Load", "it", "loads"),
+    ("Bus", "site", "connection"),
+    ("GlobalConstraint", "co2", "scenarios"),
+    ("SomethingNew", "x", "project"),
+])
+def test_section_for(cls, entity, expected):
+    got = F.section_for(cls, entity, frozenset({"grid_import"}))
+    assert got == {"id": expected, "label": F.SECTION_LABELS[expected],
+                   "panel": F.SECTION_PANEL[expected]}
