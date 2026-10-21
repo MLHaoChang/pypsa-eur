@@ -64,19 +64,19 @@
     },
     {
       "item": "Haber-Bosch capex, FOM, lifetime",
-      "note": "technology-data v0.14.0 costs_2030.csv, pack 2026-10-20 (haber-bosch). The loop is a fixed-size, sunk unit in this template, so the solve does not charge it; the rows are there for the investment case",
+      "note": "technology-data v0.14.0 costs_2030.csv, pack 2026-10-22 (haber-bosch). The loop is a fixed-size, sunk unit in this template, so the solve does not charge it; the rows are there for the investment case",
       "source": "sourced",
       "value": "1842.99 EUR/kW_NH3, 3 %/year, 30 years"
     },
     {
       "item": "NH3 tank",
-      "note": "technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack 2026-10-20 (nh3-tank); extendable, one row built in 2027",
+      "note": "technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack 2026-10-22 (nh3-tank); extendable, one row built in 2027",
       "source": "sourced",
       "value": "211.83 EUR/MWh_NH3, 2 %/year, 20 years"
     },
     {
       "item": "H2 tank",
-      "note": "technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack 2026-10-20 (h2-tank); extendable from 0 (the hub's 2000 MWh tank is replaced), one row built in 2027",
+      "note": "technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack 2026-10-22 (h2-tank); extendable from 0 (the hub's 2000 MWh tank is replaced), one row built in 2027",
       "source": "sourced",
       "value": "60.05 EUR/kWh_H2, 1.11 %/year, 30 years"
     },

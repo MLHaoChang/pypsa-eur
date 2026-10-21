@@ -108,17 +108,17 @@ def test_the_template_prices_its_tanks_from_this_version():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
     import eh_ammonia as A
 
-    assert A.AMMONIA_PACK_VERSION == NEW
+    assert A.AMMONIA_PACK_VERSION == "2026-10-22"     # repinned to the typed successor (GS-2b)
 
 
 def test_moving_latest_changes_no_template_and_no_guided_seed():
     """The other templates price from the pinned 2026-10-13 rows (unchanged in this version), the guided study
-    from 2026-10-05: only the ammonia template reads the new version."""
+    from 2026-10-05: only the ammonia template reads the new version (since GS-2b every template reads 2026-10-22)."""
     import sys
 
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
     import eh_templates as T
     from services.study import library as L
 
-    assert T.TEMPLATE_PACK_VERSION == PREV
+    assert T.TEMPLATE_PACK_VERSION == "2026-10-22"    # repinned to the typed successor (GS-2b)
     assert L.PACK_VERSION == "2026-10-05"
