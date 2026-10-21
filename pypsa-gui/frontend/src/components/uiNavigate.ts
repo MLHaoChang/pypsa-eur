@@ -162,7 +162,7 @@ function apply(d: NavigationRequest) {
     || panel === 'solveQueue' || panel === 'hubDesign'
     || panel === 'workspace' || panel === 'settings' || panel === 'gridspine'
     || panel === 'reports' || panel === 'campusElectrical' || panel === 'decision'
-    || panel === 'economics' || panel === 'profiles' || panel === 'library'
+    || panel === 'economics' || panel === 'profiles'
   ) {
     ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }

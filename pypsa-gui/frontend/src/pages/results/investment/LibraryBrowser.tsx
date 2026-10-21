@@ -287,7 +287,9 @@ function SeriesPanel() {
   )
 }
 
-export default function LibraryBrowser() {
+/** `onOpenInputs`: where the attached item went. The workspace-level page sets it;
+ *  where the browser sits beside its inputs it is left out. */
+export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => void } = {}) {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [kind, setKind] = useState<LibraryItemKind>('tariff')
@@ -334,7 +336,11 @@ export default function LibraryBrowser() {
         ))}
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
-        {message.text}</p>}
+        {message.text}
+        {message.tone === 'ok' && onOpenInputs && (
+          <>{' '}<button type="button" className="underline" onClick={onOpenInputs}>
+            Open Tariffs &amp; contracts</button></>
+        )}</p>}
       {items.isError && <p role="alert" className="text-danger">{detailText(items.error)}</p>}
       <ul className="space-y-1" data-testid="lib-items">
         {(items.data ?? []).map(r => (

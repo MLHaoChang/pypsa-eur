@@ -182,11 +182,11 @@ describe('E2: the site connection and IC’s editors', () => {
     for (const id of ['ic-tariff', 'ic-contracts', 'ic-participants']) expect(screen.getByTestId(id)).toBeTruthy()
   })
 
-  it('has no Library tab: the Library is one page, opened from a link', () => {
+  it('has no Library tab: the commercial library is one page, opened from a link', () => {
     renderPanel()
     expect(screen.queryByRole('tab', { name: 'Library' })).toBeNull()
     fireEvent.click(screen.getByRole('tab', { name: 'Tariffs & contracts' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Open the Library' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the commercial library' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('library')
   })
 })

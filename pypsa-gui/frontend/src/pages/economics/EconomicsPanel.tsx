@@ -3,7 +3,7 @@
 // ECONOMICS step. Inputs only: the investment case, value flows and the bill
 // stay on Results → Investment. IC's editors are embedded as they are (E0
 // moved the two wrappers this panel mounts into their own files).
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { commercialApi } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
@@ -46,6 +46,13 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
 export default function EconomicsPanel() {
   const [tab, setTab] = useState<TabId>('basis')
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const tabRequest = useUIStore(s => s.economicsTabRequest)
+  const clearTabRequest = useUIStore(s => s.clearEconomicsTabRequest)
+  useEffect(() => {
+    if (!tabRequest) return
+    setTab(tabRequest)
+    clearTabRequest()
+  }, [tabRequest, clearTabRequest])
   return (
     <div className="h-full flex flex-col">
       <div role="tablist" aria-label="Economics" className="flex gap-1 px-3 pt-2 border-b border-border">
@@ -71,9 +78,9 @@ export default function EconomicsPanel() {
             <Block title="Contracts"><ContractsEditor /></Block>
             <Block title="Participants"><ParticipantsDesigner /></Block>
             <p className="text-[11px] text-muted" data-testid="economics-open-library">
-              Tariffs and contracts can be taken from the Library.{' '}
+              Tariffs and contracts can be taken from the commercial library.{' '}
               <button type="button" className="underline" onClick={() => setSlidePanel('library')}>
-                Open the Library
+                Open the commercial library
               </button>
             </p>
           </div>

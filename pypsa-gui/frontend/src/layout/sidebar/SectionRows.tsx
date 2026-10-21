@@ -222,8 +222,8 @@ export function ProjectUtilityRows({ onCloseModal }: Props) {
       <SItem icon={<Camera size={15} />} label="Snapshots"
         title="Saved copies of the network: restore one, or compare it with the network you have now."
         active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
-      <SItem icon={<Library size={15} />} label="Library"
-        title="The tariffs, contracts and connection agreements your organisation keeps, with the versions a project pins. Pick one from Economics."
+      <SItem icon={<Library size={15} />} label="Commercial library"
+        title="Tariffs, contracts, connection agreements and price series your organisation keeps, with the versions a project pins."
         active={activeSlidePanel === 'library'} onClick={() => toggle('library')} />
     </>
   )

@@ -73,7 +73,7 @@ const ROWS: Record<string, string[]> = {
   model: ['Campus electrical', 'Loads', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
   run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
   results: ['Results', 'Planning → dynamics', 'Reports'],
-  reports: ['Snapshots', 'Library'],
+  reports: ['Snapshots', 'Commercial library'],
 }
 
 // The project's actions, now behind the footer card's menu.

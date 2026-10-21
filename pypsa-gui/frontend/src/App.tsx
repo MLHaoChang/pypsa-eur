@@ -33,7 +33,7 @@ import GridspinePanel from './pages/GridspinePanel'
 import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import EconomicsPanel from './pages/economics/EconomicsPanel'
-import LibraryBrowser from './pages/results/investment/LibraryBrowser'
+import CommercialLibraryPage from './pages/economics/CommercialLibraryPage'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
 import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
@@ -141,7 +141,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   profiles:   { eyebrow: 'BUILD',     title: 'Profile studio' },
   decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
-  library:    { eyebrow: 'PROJECT',    title: 'Library' },
+  library:    { eyebrow: 'PROJECT',    title: 'Commercial library' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
@@ -163,7 +163,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'overview':   return <OverviewPanel />
     case 'scenarios':  return <ScenariosPanel />
     case 'workspace':  return <WorkspacePanel />
-    case 'library':    return <div className="h-full overflow-auto p-3"><LibraryBrowser /></div>
+    case 'library':    return <CommercialLibraryPage />
     // Superseded by the docked comparison rail inside Results (the Compare
     // triggers now open Results + the rail). Kept so the SlidePanel union /
     // PANEL_META stay exhaustive; don't re-point the triggers back here.
