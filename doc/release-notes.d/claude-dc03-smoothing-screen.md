@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A closed-form load-smoothing screen (`services/adequacy/smoothing.py`) sizes the battery/UPS buffer an AI-training load's steps, checkpoints and oscillation need against the connection's ramp and oscillation limits, from the reserve left after the backup duty (DC 03).
