@@ -4,7 +4,7 @@
 // WP3.7c), and the P4 finance case (Finance inputs WP4.7a, Investment case
 // WP4.7b). A result the server does not establish is shown as such — never as
 // a zero (ADR-0001).
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
@@ -25,6 +25,7 @@ const SECTIONS = [
   { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
+const isSection = (v: string | null): v is SectionId => SECTIONS.some(s => s.id === v)
 
 export { fmtAmount }
 
@@ -115,7 +116,17 @@ export default function InvestmentTab() {
   const poc = useQuery({ queryKey: nk(project, 'commercial', 'poc'),
                          queryFn: () => commercialApi.getPocState() })
   const island = poc.data?.open === true
-  const [section, setSection] = useState<SectionId>('participants')
+  // A section asked for with the tab (`requestResultsTab('investment', 'case')`)
+  // opens once, then the user's choice holds.
+  const sectionRequest = useUIStore(s => s.resultsSectionRequest)
+  const clearSectionRequest = useUIStore(s => s.clearResultsSectionRequest)
+  const [section, setSection] = useState<SectionId>(
+    () => (isSection(sectionRequest) ? sectionRequest : 'participants'))
+  useEffect(() => {
+    if (!sectionRequest) return
+    if (isSection(sectionRequest)) setSection(sectionRequest)
+    clearSectionRequest()
+  }, [sectionRequest, clearSectionRequest])
   const expert = useUIStore(s => s.uiMode === 'expert')
   const openCommercial = () => {
     if (expert) openSectionInExpert('commercial')

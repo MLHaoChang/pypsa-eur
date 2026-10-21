@@ -292,5 +292,38 @@ describe('InvestmentTab → Economics', () => {
     expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
     expect(screen.queryByTestId('ic-island')).toBeNull()
   })
-})
 
+  // IPP ticket 05: `requestResultsTab('investment', 'case')` opens a section.
+  it('opens on a requested section once, and clears the request', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    useUIStore.getState().requestResultsTab('investment', 'case')
+    renderTab()
+    expect(screen.getByRole('tab', { name: 'Investment case' }).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(useUIStore.getState().resultsSectionRequest).toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: 'Bill' }))
+    expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
+    useUIStore.getState().clearResultsTabRequest()
+  })
+
+  it('a section requested while mounted switches to it', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    renderTab()
+    useUIStore.getState().requestResultsTab('investment', 'case')
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Investment case' })
+      .getAttribute('aria-selected')).toBe('true'))
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    useUIStore.getState().clearResultsTabRequest()
+  })
+
+  it('no section: opens on Participants as before', () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    useUIStore.getState().requestResultsTab('investment')
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    renderTab()
+    expect(screen.getByRole('tab', { name: 'Participants' }).getAttribute('aria-selected')).toBe('true')
+    useUIStore.getState().clearResultsTabRequest()
+  })
+})

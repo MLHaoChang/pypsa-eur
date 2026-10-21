@@ -5,7 +5,7 @@ twice would silently replace another profile's label, unit or formula id.
 """
 
 from harness import (
-    branch_calculations, calculations, capacity_calculations, carrier_calculations,
+    branch_calculations, calculations, capacity_calculations, carrier_calculations, energy_balance_calculations,
     curtailment_calculations, emissions_calculations, lost_load_calculations,
     price_calculations, storage_calculations, storage_costs, storage_cycles_calculations,
 )
@@ -16,7 +16,7 @@ TABLES = (
     branch_calculations.METRICS, branch_calculations.NETWORK_METRICS, lost_load_calculations.METRICS,
     price_calculations.METRICS, emissions_calculations.GENERATOR_METRICS,
     emissions_calculations.NETWORK_METRICS, curtailment_calculations.METRICS,
-    capacity_calculations.METRICS, storage_cycles_calculations.METRICS,
+    capacity_calculations.METRICS, storage_cycles_calculations.METRICS, energy_balance_calculations.METRICS,
 )
 
 
