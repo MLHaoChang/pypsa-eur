@@ -1530,6 +1530,8 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
     {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
     {"error_kind": "library_reference_unknown"},
+    {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
+    {"error_kind": "reference_confirmation_needed"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -1661,6 +1663,18 @@ def get_library_reference(technology: str, projection_year: int, component: str 
         pack_source = (fields.get("overnight_cost") or {}).get("source")
     return _library_call(_h, technology, projection_year,
                          pack_source=pack_source).model_dump(mode="json")
+
+
+def apply_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                            confirm: list[str] | None = None) -> dict:
+    """Write one shipped reference onto one asset through the network route (the
+    edit card is shown and confirmed before this runs)."""
+    from routers.network_library_reference import ReferenceApplyRun
+    from routers.network_library_reference import apply_library_reference as _h
+
+    body = ReferenceApplyRun(component_class=component_class, name=name, technology=technology,
+                             projection_year=projection_year, confirm=list(confirm or []))
+    return _route(_h, body)
 
 
 def _urdb_rate(data, item_index: int | None = None):
@@ -7641,6 +7655,7 @@ DISPATCHERS: dict[str, Any] = {
     "attach_tariff": attach_tariff,
     "list_library_references": list_library_references,
     "get_library_reference": get_library_reference,
+    "apply_library_reference": apply_library_reference,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c

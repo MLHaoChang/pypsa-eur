@@ -1,0 +1,268 @@
+"""
+Apply one shipped cost reference to one asset (GS-EU Part 2, slice P2b): the plan.
+
+The gatekeeper's conditions are the tests: an input-priced electrolyser on a Link
+is never scaled by efficiency; the pack is unchanged; a non-EUR pack refuses;
+AC PV, a double-counted connection and a different money year each need an
+explicit confirmation; fixed O&M follows the pack's own Generator/Link
+convention; only the chosen asset's fields are named.
+"""
+from __future__ import annotations
+
+import pypsa
+import pytest
+from fastapi import HTTPException
+
+from services.asset_schema import provenance as P
+from services.library import europe_reference as R
+from services.library import reference_apply as A
+from services.library.defaults_pack.loader import load_defaults_pack
+from services.library.defaults_pack.pricing import price_from_pack
+
+
+def _net() -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(pd_index())
+    for bus in ("el", "h2", "grid"):
+        n.add("Bus", bus)
+    n.add("Link", "electrolyser", bus0="el", bus1="h2", p_nom=10.0, efficiency=0.55)
+    n.add("Generator", "wind", bus="el", p_nom=20.0)
+    n.add("Generator", "pv", bus="el", p_nom=5.0)
+    n.add("Link", "poc", bus0="grid", bus1="el", p_nom=50.0)
+    return n
+
+
+def pd_index():
+    import pandas as pd
+
+    return pd.date_range("2030-01-01", periods=2, freq="h")
+
+
+def _apply(n, p):
+    frame = getattr(n, {"Generator": "generators", "Link": "links"}[p["component_class"]])
+    for column, value in p["attrs"].items():
+        frame.at[p["name"], column] = value
+    A.stamp(n, p, approved_by="tester@example.com", approved_at="2026-10-21T10:00:00+00:00")
+
+
+def _codes(exc) -> tuple[str, list]:
+    return exc.value.detail["error_kind"], exc.value.detail.get("missing", [])
+
+
+# ── 1. the electrolyser on a Link is never scaled by efficiency ─────────────
+
+@pytest.mark.parametrize("efficiency", [0.4, 0.55, 0.8])
+def test_input_priced_electrolyser_overnight_is_written_unscaled(efficiency):
+    n = _net()
+    n.links.at["electrolyser", "efficiency"] = efficiency
+    ref = R.load_europe_technology_reference("electrolysis-aec-100mw", 2030)
+    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030, confirm=())
+    assert p["attrs"]["overnight_cost"] == ref.cost_part.overnight.value  # exactly: no factor at all
+    assert p["attrs"]["efficiency"] == ref.cost_part.efficiency.value
+
+
+def test_changing_efficiency_after_apply_does_not_move_the_cost():
+    n = _net()
+    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    A.require_confirmed(p)
+    _apply(n, p)
+    cost = n.links.at["electrolyser", "overnight_cost"]
+    n.links.at["electrolyser", "efficiency"] = 0.7
+    assert n.links.at["electrolyser", "overnight_cost"] == cost
+    again = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    assert again["attrs"]["overnight_cost"] == cost
+
+
+# ── fixed O&M: the pack's Generator/Link convention ────────────────────────
+
+def test_wind_fom_cost_is_overnight_times_share_and_capital_cost_is_untouched():
+    n = _net()
+    n.generators.at["wind", "capital_cost"] = 123.0
+    p = A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    assert set(p["attrs"]) == {"overnight_cost", "lifetime", "fom_cost"}
+    assert p["attrs"]["overnight_cost"] == pytest.approx(1_146_644.89966, rel=1e-9)
+    # = the source's absolute fixed O&M, DEA 20 Onshore turbines!E25, EUR/MW/year
+    assert p["attrs"]["fom_cost"] == pytest.approx(16_662.66796409161, rel=1e-9)
+    _apply(n, p)
+    assert n.generators.at["wind", "capital_cost"] == 123.0
+
+
+# ── 2. the pack is unchanged; 7. only the chosen asset ────────────────────
+
+def test_pack_and_other_assets_are_unchanged():
+    n = _net()
+    before_pack = load_defaults_pack().model_dump_json()
+    before = (n.generators.copy(), n.links.drop(index="electrolyser").copy())
+    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    _apply(n, p)
+    assert load_defaults_pack().model_dump_json() == before_pack
+    assert n.generators.equals(before[0])
+    assert n.links.drop(index="electrolyser").equals(before[1])
+
+
+# ── 3. a non-EUR pack refuses ──────────────────────────────────────────────
+
+def test_a_non_eur_pack_refuses_without_converting(monkeypatch):
+    n = _net()
+    real = A.C.reference_detail
+
+    def gbp(technology, year, provenance=None):
+        detail = real(technology, year, provenance)
+        rows = [row.model_copy(update={"pack": row.pack.model_copy(update={"currency": "GBP"})})
+                if row.pack is not None and row.parameter == "overnight" else row
+                for row in detail.comparison]
+        return detail.model_copy(update={"comparison": rows})
+
+    monkeypatch.setattr(A.C, "reference_detail", gbp)
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    assert _codes(exc)[0] == "currency_mismatch"
+
+
+# ── 4. PV on AC needs the DC/AC confirmation ──────────────────────────────
+
+def test_ac_pv_on_an_undeclared_generator_needs_confirmation():
+    n = _net()
+    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030)
+    assert "dc_ac" in p["missing"]
+    with pytest.raises(HTTPException) as exc:
+        A.require_confirmed(p)
+    assert _codes(exc) == ("reference_confirmation_needed", p["missing"])
+    ok = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=p["missing"])
+    assert ok["missing"] == []
+    A.require_confirmed(ok)
+
+
+# ── 5. grid connection counted twice ──────────────────────────────────────
+
+def test_grid_connection_is_flagged_only_when_the_project_prices_its_connection():
+    n = _net()
+    commercial = {"poc_link": "poc"}
+    free = A.plan(n, commercial, "Generator", "wind", "onwind", 2030)
+    assert "grid_connection" not in free["missing"]
+    n.links.at["poc", "overnight_cost"] = 200_000.0
+    priced = A.plan(n, commercial, "Generator", "wind", "onwind", 2030)
+    assert "grid_connection" in priced["missing"]
+    fee = A.plan(_net(), {"poc_link": "poc", "connection": {"capacity_fee": {"kind": "capacity"}}},
+                 "Generator", "wind", "onwind", 2030)
+    assert "grid_connection" in fee["missing"]
+    unknown = A.plan(n, commercial, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    assert "grid_connection" not in unknown["missing"]  # "unknown" is not flagged as double
+
+
+# ── money year: copied as is, confirmed when it differs ───────────────────
+
+def test_a_different_money_year_needs_confirmation_and_is_never_adjusted():
+    n = _net()
+    price_from_pack(n, "generators", "pv", "solar-utility", version=load_defaults_pack().version)
+    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac"])
+    assert p["missing"] == ["money_year"]
+    assert p["attrs"]["overnight_cost"] == R.load_europe_technology_reference(
+        "solar-utility", 2030).cost_part.overnight.value
+    assert p["currency_year"] == 2025
+    overnight = next(r for r in p["rows"] if r["field"] == "overnight_cost")
+    assert overnight["pack"]["currency_year"] == 2020 and overnight["reference"]["currency_year"] == 2025
+
+
+# ── provenance per field, and the projection-year note ────────────────────
+
+def test_stamp_records_source_money_year_currency_and_approval_per_field():
+    n = _net()
+    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    _apply(n, p)
+    stamps = P.get(n, "Link", "electrolyser")
+    ref = R.load_europe_technology_reference("electrolysis-aec-100mw", 2030)
+    assert set(stamps) == {"overnight_cost", "lifetime", "fom_cost", "efficiency"}
+    over = stamps["overnight_cost"]
+    assert over["source"].startswith(f"eu-dea-2026-08#{ref.reference_hash[:16]}")
+    assert (over["status"], over["currency"], over["currency_year"]) == ("customised", "EUR", 2020)
+    assert over["approved_by"] == "tester@example.com"
+    assert stamps["lifetime"].get("currency") is None
+    P.mark_customised(n, "Link", "electrolyser", ["overnight_cost"])
+    assert "approved_by" not in P.get(n, "Link", "electrolyser")["overnight_cost"]
+
+
+def test_projection_year_mismatch_is_a_note_not_a_refusal():
+    n = _net()
+    p = A.plan(n, {}, "Generator", "wind", "onwind", 2040)
+    assert p["notes"] and "2040" in p["notes"][0] and "2030" in p["notes"][0]
+
+
+# ── refusals ───────────────────────────────────────────────────────────────
+
+def test_wrong_class_unknown_asset_and_storage_are_refused():
+    n = _net()
+    n.add("StorageUnit", "bat", bus="el", p_nom=1.0)
+    for args, kind in [(("Link", "electrolyser", "onwind", 2030), "reference_target_unsupported"),
+                       (("Generator", "wind", "electrolysis-aec-100mw", 2030), "reference_target_unsupported"),
+                       (("StorageUnit", "bat", "onwind", 2030), "reference_target_unsupported"),
+                       (("Generator", "nope", "onwind", 2030), "component_not_found"),
+                       (("Generator", "wind", "onwind", 2035), "library_reference_unknown")]:
+        with pytest.raises(HTTPException) as exc:
+            A.plan(n, {}, *args)
+        assert exc.value.detail["error_kind"] == kind, args
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "wind", "onwind", 2030, confirm=["everything"])
+    assert exc.value.detail["error_kind"] == "invalid_edit_value"
+
+
+# ── routes and the assistant tool, on the active network ──────────────────
+
+ROUTE = "/api/network/library_reference"
+AEC = {"component_class": "Link", "name": "electrolyser",
+       "technology": "electrolysis-aec-100mw", "projection_year": 2030}
+
+
+def test_preview_card_then_apply_writes_and_stamps(client, install_network):
+    n = install_network(_net())
+    r = client.post(f"{ROUTE}/preview", json=AEC)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["missing"] == [] and body["card"]["tool"] == "apply_library_reference"
+    typed = {row["field"]: row for row in body["card"]["rows"] if row["role"] == "typed"}
+    assert set(typed) == {"overnight_cost", "lifetime", "fom_cost", "efficiency"}
+    assert typed["overnight_cost"]["reference"]["cell"] and typed["efficiency"]["pack"]["key"] == \
+        "electrolysis.investment.efficiency"
+    assert any(row["field"] == "licence" for row in body["card"]["rows"])
+    r = client.post(f"{ROUTE}/apply", json={**AEC, "digest": body["card"]["digest"]})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["receipt"]["outcome"] == "verified"
+    ref = R.load_europe_technology_reference("electrolysis-aec-100mw", 2030)
+    assert n.links.at["electrolyser", "overnight_cost"] == ref.cost_part.overnight.value
+    assert P.get(n, "Link", "electrolyser")["overnight_cost"]["source"] == out["source"]
+
+
+def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client, install_network):
+    install_network(_net())
+    pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility", "projection_year": 2030}
+    body = client.post(f"{ROUTE}/preview", json=pv).json()
+    # AC basis undeclared, and 2025 EUR beside the generic pack's 2020 EUR
+    assert body["card"] is None and body["missing"] == ["dc_ac", "money_year"]
+    assert "AC output" in body["needs"][0]["text"] and "not adjusted" in body["needs"][1]["text"]
+    r = client.post(f"{ROUTE}/apply", json=pv)
+    assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
+    card = client.post(f"{ROUTE}/preview", json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
+    assert any(row["field"] == "dc_ac" and row.get("confirmed") for row in card["rows"])
+
+
+def test_a_stale_digest_refuses_and_writes_nothing(client, install_network):
+    n = install_network(_net())
+    card = client.post(f"{ROUTE}/preview", json=AEC).json()["card"]
+    n.links.at["electrolyser", "lifetime"] = 7.0  # the asset moved after the card was shown
+    r = client.post(f"{ROUTE}/apply", json={**AEC, "digest": card["digest"]})
+    assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "edit_preview_stale"
+    assert n.links.at["electrolyser", "lifetime"] == 7.0
+
+
+def test_the_tool_is_a_network_edit_with_a_card(install_network):
+    from harness import edit_card
+    from harness.catalogue import safety_tier_for, tool_edits_network
+    from services import chat_tools
+
+    assert safety_tier_for("apply_library_reference") == "write"
+    assert tool_edits_network("apply_library_reference") and edit_card.is_edit("apply_library_reference")
+    assert "apply_library_reference" in chat_tools.UNDO_CAPTURED_TOOLS
+    install_network(_net())
+    card = edit_card.preview("apply_library_reference", dict(AEC))
+    assert card["kind"] == "parameter_edit" and card["complete"]

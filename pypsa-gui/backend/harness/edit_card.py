@@ -588,6 +588,40 @@ register("update_component", Adapter("parameter_edit", _update_component_preview
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
 
 
+# ── Library references: apply_library_reference ───────────────────────────
+
+
+def _library_reference_preview(args: dict) -> list[dict]:
+    """The native update's rows for the fields a shipped reference writes, each with
+    the reference (source cell, money year) and the pack value beside it, plus one
+    note per confirmation given, per projection-year note and the licence. A plan
+    still missing a confirmation refuses before any card (`reference_confirmation_needed`)."""
+    from services import chat_tools
+    from services.library import reference_apply as A
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    p = A.plan(ctx.network, getattr(ctx.solver_state.get("solver_config"), "commercial", None),
+               args.get("component_class"), args.get("name"), args.get("technology"),
+               args.get("projection_year"), args.get("confirm") or ())
+    A.require_confirmed(p)
+    klass, name = p["component_class"], p["name"]
+    rows = _sandbox_rows(klass, [(name, dict(p["attrs"]))],
+                         lambda: chat_tools.update_component(klass, name, dict(p["attrs"])))
+    beside = {row["field"]: row for row in p["rows"]}
+    for row in rows:
+        if row["role"] == "typed" and row["name"] == name and row["field"] in beside:
+            row.update({k: beside[row["field"]][k] for k in ("reference", "pack", "differs")})
+    for need in p["needs"]:
+        rows.append({**_note(klass, name, need["confirmation"], need["text"]), "confirmed": True})
+    rows += [_note(klass, name, "projection_year", text) for text in p["notes"]]
+    rows.append(_note(klass, name, "licence", f"{p['attribution']} Licence {p['licence']}."))
+    return rows
+
+
+register("apply_library_reference", Adapter("parameter_edit", _library_reference_preview, _component_readback))
+
+
 # ── Solver settings: update_solver_config ──────────────────────────────────
 
 

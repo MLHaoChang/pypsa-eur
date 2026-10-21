@@ -44,11 +44,14 @@ def get(n, component_class: str, name: str) -> dict[str, dict[str, Any]]:
 
 def record(n, component_class: str, name: str, field: str, *, status: str, source: str | None = None,
            source_year: int | None = None, currency_year: int | None = None,
-           range: tuple[float, float] | None = None, illustrative: bool = False) -> None:
-    """Write one field's provenance, replacing what was there."""
+           range: tuple[float, float] | None = None, illustrative: bool = False,
+           currency: str | None = None, approved_by: str | None = None,
+           approved_at: str | None = None) -> None:
+    """Write one field's provenance, replacing what was there. `currency`, `approved_by` and
+    `approved_at` (a value the user applied from a Library reference) are kept only when given."""
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}, got {status!r}")
-    _root(n).setdefault(component_class, {}).setdefault(name, {})[field] = {
+    entry = {
         "status": status,
         "source": source,
         "source_year": source_year,
@@ -56,6 +59,10 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
         "range": None if range is None else [float(range[0]), float(range[1])],
         "illustrative": bool(illustrative),
     }
+    for key, value in (("currency", currency), ("approved_by", approved_by), ("approved_at", approved_at)):
+        if value is not None:
+            entry[key] = value
+    _root(n).setdefault(component_class, {}).setdefault(name, {})[field] = entry
 
 
 def mark_customised(n, component_class: str, name: str, fields: Iterable[str]) -> None:
@@ -63,6 +70,8 @@ def mark_customised(n, component_class: str, name: str, fields: Iterable[str]) -
     asset = _root(n).setdefault(component_class, {}).setdefault(name, {})
     for f in fields:
         entry = asset.get(f) or {"source": None, "source_year": None, "currency_year": None, "range": None}
+        # A later edit is not the approval of an applied reference: that approval goes.
+        entry = {k: v for k, v in entry.items() if k not in ("approved_by", "approved_at")}
         asset[f] = {**entry, "status": "customised", "illustrative": False}
     _prune(n, component_class, name)
 

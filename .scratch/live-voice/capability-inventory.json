@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 271,
+  "tool_count": 272,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5095,6 +5095,32 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "d0bb21532317ba1c4c749f14f1728a4d2bbc9a1fe3c8d786f7c82ad4dbd6fb60",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/library_reference/apply"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year",
+        "confirm"
+      ],
+      "required": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
       "behavioral_fixture": "pending"
     },
     {

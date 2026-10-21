@@ -3487,7 +3487,7 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
-    # ── Library references (2) — the shipped common cost references ───────
+    # ── Library references (3) — the shipped common cost references ───────
     _t(
         "list_library_references",
         "List the shipped (common) technology cost references: published "
@@ -3522,6 +3522,35 @@ TOOLS: list[dict[str, Any]] = [
             "asset": {"type": "string"},
         },
         ["technology", "projection_year"],
+    ),
+    _t(
+        "apply_library_reference",
+        "Apply one shipped cost reference (list_library_references) to ONE asset: "
+        "a Generator for wind/PV (output-priced), a Link for an electrolyser "
+        "(priced per MW of electrical INPUT, never scaled by efficiency). Writes "
+        "overnight_cost, lifetime, fom_cost (overnight x the reference's FOM "
+        "share) and, on a Link, efficiency; capital_cost and discount_rate stay. "
+        "The user sees an old→new card with the reference and the default it "
+        "replaces, each with its source and money year. Nothing is converted. "
+        "Refusals: reference_target_unsupported (wrong class or a StorageUnit), "
+        "currency_mismatch (the asset's pack is not EUR), and "
+        "reference_confirmation_needed with `missing`: ask the user about each "
+        "item's text, then call again with confirm=[...] naming only what they "
+        "confirmed (dc_ac: AC-priced PV on a generator whose capacity basis is "
+        "not declared; grid_connection: the reference includes grid connection "
+        "and the project already prices its connection; money_year: the value "
+        "is copied in its own money year, not adjusted). Never confirm on the "
+        "user's behalf. Returns {written, source, currency_year, licence, "
+        "attribution, notes, receipt}. Safety: write.",
+        {
+            "component_class": {"type": "string", "enum": ["Generator", "Link"]},
+            "name": {"type": "string"},
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string",
+                        "enum": ["dc_ac", "grid_connection", "money_year"]}},
+        },
+        ["component_class", "name", "technology", "projection_year"],
     ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
@@ -4198,10 +4227,11 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
-    # Library references (2): read-only; the asset's pack comes from its provenance.
+    # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
                               ("GET", "/api/library/references/{technology}/{year}")],
+    "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),
