@@ -29,6 +29,9 @@ RULES = {
     "workstream id": re.compile(r"\bW\d+[a-z]?\b"),
     "question id": re.compile(r"\bQ\d+\b"),
     "ticket id": re.compile(r"\b(?:LC-\d+|DC-?\d+|GS-)"),
+    # The breadcrumb separator is U+203A; a plain U+003E between words is not.
+    # A comparison ("> 0", ">=") and an arrow (U+2192) are fine.
+    "plain > as a breadcrumb separator": re.compile(r"\S \u003e (?![\d=])\S"),
     "raw PyPSA class path": re.compile(
         r"\b(?:Generator|Link|Store|StorageUnit|Line|Transformer|Bus|Load)\s?(?:›|>)"
     ),
@@ -85,13 +88,15 @@ def test_each_rule_fires_and_comments_and_docstrings_are_skipped():
         "D = 'Tracked as LC-12'\n"
         "E = 'Link › grid_import'\n"
         "F = 'Generator>'\n"
+        "G = 'Connection & grid > Link grid_import'\n"
+        "H = 'price > 0, size >= 5, grid \u2192 Link, grid \u203a Link'\n"
         "def f():\n"
         '    """Docstring with GS-2."""\n'
         "    return 'fine words'\n"
     )
     found = findings("sample.py", sample)
     assert [h.split(" ")[1] for h in found] == [
-        "workstream", "section", "question", "ticket", "raw", "raw",
+        "workstream", "section", "question", "ticket", "raw", "raw", "plain",
     ]
 
 

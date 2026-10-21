@@ -48,6 +48,9 @@ const RULES: { name: string; re: RegExp }[] = [
   { name: 'workstream id (W3a)', re: /\bW\d+[a-z]?\b/ },
   { name: 'question id (Q17)', re: /\bQ\d+\b/ },
   { name: 'ticket id (LC-12, DC-05, GS-2)', re: /\b(?:LC-\d+|DC-?\d+|GS-)/ },
+  // The breadcrumb separator is U+203A. A plain U+003E between words is
+  // not; a comparison ("> 0", ">=") and an arrow (U+2192) are fine.
+  { name: 'plain ">" as a breadcrumb separator', re: /\S \u003e (?![\d=])\S/ },
   {
     name: 'raw PyPSA class path (Link ›)',
     re: /\b(?:Generator|Link|Store|StorageUnit|Line|Transformer|Bus|Load)\s?(?:›|>)/,
@@ -152,6 +155,7 @@ describe('UI copy guard', () => {
       'export const c = `Tracked as LC-12 today`',
       'export const d = <span>Link › grid_import</span>',
       'export const e = <span>Generator > wind</span>',
+      'export const f = "Connection & grid > Link grid_import"',
     ].join('\n')
     expect(findings('sample.tsx', sample).map((h) => h.split('  ')[1].split(' in ')[0])).toEqual([
       'section sign (§): "§"',
@@ -159,7 +163,9 @@ describe('UI copy guard', () => {
       'question id (Q17): "Q17"',
       'ticket id (LC-12, DC-05, GS-2): "LC-12"',
       'raw PyPSA class path (Link ›): "Link ›"',
+      'plain ">" as a breadcrumb separator: "r > w"',
       'raw PyPSA class path (Link ›): "Generator >"',
+      'plain ">" as a breadcrumb separator: "d > L"',
     ])
   })
 
@@ -169,6 +175,9 @@ describe('UI copy guard', () => {
       'export const a = <Link to="/x" className="W3a Q17" data-testid="hub-rail-step-W3a">Open</Link>',
       'const b: "Link" | "Bus" = "Bus"',
       'const c = a > b ? Link : Bus',
+      'export const d = "Needs a price > 0 and a size >= 5"',
+      'export const e = "Connection & grid \u203a Link grid_import"',
+      'export const f = "Grid \u2192 Link grid_import"',
     ].join('\n')
     expect(findings('sample.tsx', sample)).toEqual([])
   })
