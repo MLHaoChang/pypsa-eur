@@ -43,7 +43,7 @@ def test_every_numeric_verdict_is_its_declared_rule_or_named(tmp_path, tid, dc_l
             assert _named(row["id"], NOT_SCALAR + CATEGORICAL), row["id"]
 
 
-@pytest.mark.parametrize("scr", [0.5, 2.9, 2.999999, 3.0, 3.000001, 3.1, 12.0])
+@pytest.mark.parametrize("scr", [0.5, 2.9, 2.999999, PASS_SCR - 5e-10, 3.0, PASS_SCR + 5e-10, 3.000001, 3.1, 12.0])
 def test_the_scr_rule_agrees_with_the_scr_gate(scr):
     gate = "pass" if classify_scr(scr).scr == "pass" else "warn"
     assert G._judge(scr, PASS_SCR, G.RULE_SCR) == gate
@@ -60,4 +60,4 @@ def test_a_rounded_boundary_is_a_disagreement_a_checker_must_withhold(tmp_path):
 
 def test_an_unknown_comparator_is_refused():
     with pytest.raises(ValueError):
-        G._judge(1.0, 1.0, {"comparator": "~", "otherwise": "warn"})
+        G._judge(1.0, 1.0, {"comparator": "~", "otherwise": "warn", "tolerance": 0.0})

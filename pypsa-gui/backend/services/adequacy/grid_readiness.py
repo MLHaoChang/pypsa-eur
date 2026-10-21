@@ -87,24 +87,25 @@ def _row(id_, requirement, *, limit, unit, source, project_value, verdict, assum
 
 
 #: A row's declared rule (checked results S9): the project value is compared with the
-#: row's own `limit`; a value that meets it passes, any other value is `otherwise`.
-#: The rule holds no threshold of its own, so it cannot drift from the limit shown.
-RULE_SCR = {"comparator": ">=", "otherwise": "warn"}
-RULE_RAMP = {"comparator": "<=", "otherwise": "fail"}
-RULE_RVC = {"comparator": "<=", "otherwise": "warn"}
-RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn"}
-JUDGE_TOLERANCE = 1e-9
+#: row's own `limit` within the rule's own `tolerance`; a value that meets it passes,
+#: any other value is `otherwise`. The rule holds no threshold of its own, so it
+#: cannot drift from the limit shown. SCR's tolerance is 0, as the SCR gate compares
+#: exactly, so the scorecard and the gate cannot split.
+RULE_SCR = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+RULE_RAMP = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
+RULE_RVC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
 
 
 def _judge(value: float, limit: float, rule: dict) -> str:
-    """The verdict of a value against a limit under a declared rule, within 1e-9."""
-    c = rule["comparator"]
+    """The verdict of a value against a limit under a declared rule and its tolerance."""
+    c, tol = rule["comparator"], float(rule["tolerance"])
     if c == "<=":
-        met = value <= limit + JUDGE_TOLERANCE
+        met = value <= limit + tol
     elif c == "<":
         met = value < limit
     elif c == ">=":
-        met = value >= limit - JUDGE_TOLERANCE
+        met = value >= limit - tol
     else:
         raise ValueError(f"unknown comparator {c!r}")
     return "pass" if met else rule["otherwise"]
