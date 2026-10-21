@@ -314,6 +314,8 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
         stats["energy_after_mwh"] = float(out.sum())
         peak = float(out.max())
         stats["load_factor"] = float(out.mean() / peak) if peak > 0 else 0.0
+        # Not the edit card's: that one is weighted over the model's snapshots.
+        stats["load_factor_basis"] = "hourly mean / peak, source year"
     return out, stats
 
 
@@ -348,6 +350,12 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                     f"not {t.key[0]}/{t.key[1]}")
             try:
                 if op.get("connection") and op.get("of") == "connection":
+                    recorded = _num(op["connection"], "value") * _num(op, "fraction")
+                    if not np.isclose(_num(op, "resolved_mw"), recorded, rtol=1e-9):
+                        raise RefineReplayError(
+                            f"op {i} (scale_peak_to): {_num(op, 'resolved_mw'):g} MW is "
+                            f"not {_num(op, 'fraction'):g} of the recorded connection "
+                            f"({recorded:g} MW)")
                     try:
                         now = _connection(ctx)
                     except InvalidRefineOpError:

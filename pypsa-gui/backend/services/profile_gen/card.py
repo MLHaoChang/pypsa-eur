@@ -100,7 +100,8 @@ def preview(args: dict) -> list[dict]:
              "min": unit}
     cls = _CLASS[ct]
     rows = [{"component_class": cls, "name": component, "field": f"{attr}.{k}",
-             "label": f"{attr} {k.replace('_mwh', '').replace('_', ' ')}",
+             "label": f"{attr} {k.replace('_mwh', '').replace('_', ' ')}"
+                      + (" (weighted, model snapshots)" if k == "load_factor" else ""),
              "old": round(old[k], 6), "new": round(new[k], 6), "unit": units[k], "role": "typed"}
             for k in new]
     differ = int((~np.isclose(old_v, new_v)).sum())
