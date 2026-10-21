@@ -125,6 +125,72 @@ def test_code_overlap_blocks_even_when_clean(repos):
     assert "code       a.py" in res.stdout
 
 
+BACKEND_TEST = "pypsa-gui/backend/tests/test_calc.py"
+
+
+def overlapping_module(repos, tests=True):
+    remote, clone = repos
+    base = {"pypsa-gui/backend/services/calc.py": "x = 1\ny = 2\nz = 3\n"}
+    if tests:
+        base[BACKEND_TEST] = "def test_calc():\n    pass\n"
+    git(remote, "checkout", "-q", "master")
+    commit(remote, base, "add calc")
+    git(remote, "branch", "-f", "pr", "master")
+    git(clone, "pull", "-q")
+    commit(remote, {"pypsa-gui/backend/services/calc.py": "x = 0\ny = 2\nz = 3\n"}, "master edit")
+    publish_pr(remote, {"pypsa-gui/backend/services/calc.py": "x = 1\ny = 2\nz = 4\n"})
+    return clone
+
+
+def test_tested_code_overlap_is_waived(repos, tmp_path):
+    clone = overlapping_module(repos)
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "waived      code overlap (1 file(s))" in res.stdout
+    assert "tests/test_calc.py" in res.stdout.split("waived      code overlap")[1]
+
+
+def test_failing_overlap_test_blocks(repos, tmp_path):
+    clone = overlapping_module(repos)
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 1))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "waived" not in res.stdout
+    assert "RESULT: blocked (semantic tests failed; overlap: 1 code file)" in res.stdout
+
+
+def test_overlap_without_a_test_file_blocks_and_says_why(repos, tmp_path):
+    clone = overlapping_module(repos, tests=False)
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    assert res.returncode == 1, res.stdout + res.stderr
+    assert "no test     pypsa-gui/backend/services/calc.py" in res.stdout
+    assert "overlap: 1 code file" in res.stdout
+
+
+def test_frontend_overlap_runs_vitest(repos, tmp_path):
+    remote, clone = repos
+    src = "pypsa-gui/frontend/src/components/Card"
+    commit(
+        remote,
+        {
+            f"{src}.tsx": "a\nb\nc\n",
+            f"{src}.test.tsx": "t\n",
+            "pypsa-gui/backend/keep": "",
+        },
+        "add card",
+    )
+    git(remote, "branch", "-f", "pr", "master")
+    git(clone, "pull", "-q")
+    commit(remote, {f"{src}.tsx": "A\nb\nc\n"}, "master edit")
+    publish_pr(remote, {f"{src}.tsx": "a\nb\nC\n"})
+    vitest = tmp_path / "fakevitest"
+    vitest.write_text('#!/bin/sh\necho vitest "$@"\nexit 0\n')
+    vitest.chmod(0o755)
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0), PREMERGE_VITEST=str(vitest))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "vitest src/components/Card.test.tsx" in res.stdout
+    assert "waived      code overlap" in res.stdout
+
+
 def test_identical_overlap_passes(repos):
     """A cherry-pick of a change master already has leaves byte-identical files."""
     remote, clone = repos
@@ -246,3 +312,21 @@ def test_unreadable_checks_block(repos, kw):
     res = run(clone, **kw)
     assert res.returncode == 1
     assert "checks: not read" in res.stdout
+
+
+def test_no_runs_on_an_old_head_hints_at_a_master_merge(repos, monkeypatch):
+    remote, clone = repos
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2020-01-01T00:00:00Z")
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, runs=[])
+    assert res.returncode == 1
+    assert "no CI ran on this head" in res.stdout
+    assert "merge master in, as a real merge commit" in res.stdout
+
+
+def test_no_runs_on_a_fresh_head_has_no_hint(repos):
+    remote, clone = repos
+    publish_pr(remote, {"a.py": "a2\n"})
+    res = run(clone, runs=[])
+    assert "none yet" in res.stdout
+    assert "no CI ran" not in res.stdout

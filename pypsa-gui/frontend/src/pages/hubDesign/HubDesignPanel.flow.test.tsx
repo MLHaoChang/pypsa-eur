@@ -439,7 +439,7 @@ describe('the rail is the ten flow sections', () => {
     expect(useUIStore.getState().activeSection).toBe('loads')
     const item = await screen.findByTestId('section-item')
     expect(item.textContent).toContain('Add a demand')
-    expect(item.textContent).toContain("Loads & demand > Load 'dc_it'")
+    expect(item.textContent).toContain("Loads & demand › Load 'dc_it'")
     expect(item.textContent).not.toContain('p_set')
     // The primary action opens the field here, in Guided (design §3.5).
     await user.click(screen.getByTestId('section-item-open'))
@@ -507,5 +507,38 @@ describe('one set of marks and one count (design §3.2)', () => {
     await user.click(screen.getByTestId('hub-rail-section-loads'))
     expect(await screen.findAllByTestId('section-item')).toHaveLength(1)
     expect(screen.getByTestId('section-infos').textContent).toContain('info item')
+  })
+})
+
+describe('the readiness card (section 9)', () => {
+  const target = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: null }
+  async function openReadiness(over: Record<string, unknown>) {
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({ ...flowPayload(), ...over } as never)
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-rail-section-readiness'))
+    return user
+  }
+
+  it('says it is checking while the flow is deferred, never "Ready to run"', async () => {
+    await openReadiness({ deferred: true, run_ready: false })
+    expect(await screen.findByTestId('readiness-checking')).toBeTruthy()
+    expect(screen.queryByTestId('readiness-ready')).toBeNull()
+  })
+
+  it('a blocker opens its field here first, Expert second', async () => {
+    const blocker = { section: 'connection', message: 'Connection & grid: no import connection', target }
+    const user = await openReadiness({
+      run_ready: false, run_blocker: blocker,
+      verdicts: { optimisation: { ready: false, blocker }, study: null },
+    })
+    expect((await screen.findByTestId('readiness-blocked')).textContent).toContain('no import connection')
+    await user.click(screen.getByTestId('readiness-open'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.entity).toBe('grid_import')
+    // The secondary link takes the same field to Expert.
+    useUIStore.setState({ fieldDrawer: null, activeSection: 'readiness' })
+    await user.click(await screen.findByTestId('readiness-open-expert'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
   })
 })

@@ -45,11 +45,15 @@ def get(n, component_class: str, name: str) -> dict[str, dict[str, Any]]:
 def record(n, component_class: str, name: str, field: str, *, status: str, source: str | None = None,
            source_year: int | None = None, currency_year: int | None = None,
            range: tuple[float, float] | None = None, illustrative: bool = False,
-           currency: str | None = None, approved_by: str | None = None,
-           approved_at: str | None = None, replaces: str | None = None) -> None:
-    """Write one field's provenance, replacing what was there. `currency`, `approved_by`,
-    `approved_at` and `replaces` (a value the user applied from a Library reference, and the
-    source it replaced) are kept only when given."""
+           currency: str | None = None, fallback: str | None = None,
+           approved_by: str | None = None, approved_at: str | None = None,
+           replaces: str | None = None) -> None:
+    """Write one field's provenance, replacing what was there. `currency` (the value's ISO
+    currency: a regional pack's, or an applied Library reference's) and `fallback`
+    (`eu_fallback`: the value came from the EU row) are written only when given, so a
+    record from the EU pack is what it always was. `approved_by`, `approved_at` and
+    `replaces` (a value the user applied from a Library reference, and the source it
+    replaced) are likewise kept only when given."""
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}, got {status!r}")
     entry = {
@@ -59,9 +63,10 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
         "currency_year": currency_year,
         "range": None if range is None else [float(range[0]), float(range[1])],
         "illustrative": bool(illustrative),
+        **({"currency": currency} if currency else {}),
+        **({"fallback": fallback} if fallback else {}),
     }
-    for key, value in (("currency", currency), ("approved_by", approved_by), ("approved_at", approved_at),
-                       ("replaces", replaces)):
+    for key, value in (("approved_by", approved_by), ("approved_at", approved_at), ("replaces", replaces)):
         if value is not None:
             entry[key] = value
     _root(n).setdefault(component_class, {}).setdefault(name, {})[field] = entry

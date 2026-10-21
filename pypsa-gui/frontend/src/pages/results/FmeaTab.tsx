@@ -15,7 +15,7 @@ import { fmeaModesRefetchInterval, useStartFmeaSweep } from '../../hooks/useStar
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
-import StressScenarioEditor from './StressScenarioEditor'
+import StressScenariosPointer from './StressScenariosPointer'
 import { GuideButton } from '../../components/GuidedTour'
 import { SortHeader, TableSearchBox, useFilterableTable } from './useFilterableTable'
 import { Term, useTerm, type TermKey } from '../hubDesign/shared/Term'
@@ -434,7 +434,7 @@ export default function FmeaTab() {
         )}
       </div>
 
-      <StressScenarioEditor project={currentProject} />
+      <StressScenariosPointer project={currentProject} />
     </div>
   )
 }

@@ -1454,7 +1454,9 @@ _TEMPLATE_DEFAULT_NAMES = {
 _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "solver_config.json",
                       # The island sidecar (plan 2026-10-07 campus island, I1).
-                      "island_config.json")
+                      "island_config.json",
+                      # Pre-built sensitivity cases, data only until S5 (IPP ticket 04).
+                      "cases.json")
 
 
 def _eh_templates_module():
@@ -1779,6 +1781,13 @@ def create_from_template(
     # reported, never stored unbound. After the metadata, so the project is
     # complete whatever the bind does (#283 review).
     solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
+    if template_series:
+        # The bind materialised the minted series on the network (its price frames): write
+        # them into network.nc, as a save would, so a reopen before the first save prices
+        # the same dispatch (IPP ticket 02).
+        with PyPSAService.get_lock(), PyPSAService.get_netcdf_io_lock():
+            _atomic_write_with(dest / "network.nc",
+                               lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a

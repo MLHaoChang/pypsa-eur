@@ -42,9 +42,9 @@ silently ignored. Shapes are hourly: a day or week mean would lose the shape.
 ``shutdown_weeks`` are ISO weeks of the source year's ISO calendar; days at
 the year's edges that belong to the neighbouring ISO year never match.
 
-Temperature: a closed-form assumed ambient (annual mean, a seasonal cosine
-peaking on day 200, a diurnal cosine peaking at 15:00 local) — the same form
-as the DC model's, not weather data.
+Temperature: the DC model's closed-form assumed ambient
+(`dc_load_profile.ambient_c`: annual mean, a seasonal cosine peaking on day
+200, a diurnal cosine peaking at 15:00 local), not weather data.
 
 Country holiday calendars are not built in (no holiday library is a
 dependency); ``holidays`` takes the dates.
@@ -57,6 +57,7 @@ import re
 import zlib
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -91,12 +92,14 @@ class _Clock:
 
     def __init__(self, idx: pd.DatetimeIndex, timezone: str | None,
                  holidays: Any, year: int):
+        self.utc, self.timezone = idx, timezone
         if timezone:
             try:
                 local = idx.tz_localize("UTC").tz_convert(timezone).tz_localize(None)
-            except Exception as exc:  # noqa: BLE001 — pytz/zoneinfo raise many types
+            except Exception:  # noqa: BLE001 — pytz/zoneinfo raise many types,
+                # and zoneinfo's text can carry the server's tzdata path
                 raise InvalidArchetypeParamsError(
-                    f"timezone {timezone!r} is not an IANA zone ({exc})") from None
+                    f"timezone {timezone!r} is not an IANA zone") from None
         else:
             local = idx
         self.hour = local.hour.to_numpy()
@@ -163,11 +166,15 @@ def _num(p: Mapping[str, Any], key: str, lo: float | None = None,
 
 
 def _ambient_c(clock: _Clock, p: Mapping[str, Any]) -> np.ndarray:
-    return (_num(p, "ambient_annual_mean_c", -40.0, 40.0)
-            + _num(p, "ambient_seasonal_amplitude_k", 0.0, 40.0)
-            * np.cos(_TWO_PI * (clock.doy - 200.0) / 365.0)
-            + _num(p, "ambient_diurnal_amplitude_k", 0.0, 30.0)
-            * np.cos(_TWO_PI * (clock.hour - 15.0) / 24.0))
+    """The DC model's assumed ambient (`dc_load_profile.ambient_c`), the one
+    temperature model every family uses."""
+    from services.dc_load_profile import ambient_c
+
+    amb = SimpleNamespace(
+        ambient_annual_mean_c=_num(p, "ambient_annual_mean_c", -40.0, 40.0),
+        ambient_seasonal_amplitude_k=_num(p, "ambient_seasonal_amplitude_k", 0.0, 40.0),
+        ambient_diurnal_amplitude_k=_num(p, "ambient_diurnal_amplitude_k", 0.0, 30.0))
+    return ambient_c(amb, clock.utc, clock.timezone)
 
 
 _AMBIENT = {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 9.0,

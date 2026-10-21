@@ -2,13 +2,14 @@ import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
+import { readActiveSection, writeActiveSection } from './activeSection'
 import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget } from '../api/flow'
-import { PANEL_SECTION, sectionForComponent } from '../layout/flowSections'
+import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
@@ -492,6 +493,9 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  /** One-shot: Time Series opens on this component's tab with it selected
+   *  ("give it a time series", UX-flow #24). */
+  timeSeriesFocus: { type: string; name: string } | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -634,6 +638,8 @@ interface UIStore {
   clearBottomTabRequest: () => void
   requestResultsTab: (tab: string) => void
   clearResultsTabRequest: () => void
+  focusTimeSeries: (type: string, name: string) => void
+  clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -703,7 +709,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   fieldDrawer: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
-  activeSection: null,
+  activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockPinned: storedAssistantDockPinned(),
@@ -717,6 +723,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
@@ -772,11 +779,27 @@ export const useUIStore = create<UIStore>((set) => ({
       // Guided keeps two of its tabs. Switching to Expert closes the Guided
       // hub design panel (UX review W4) and nothing else.
       // U3: the decision study is a Guided surface too (the Start card opens it).
-      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') patch.activeSlidePanel = null
+      // §7: the switch keeps the section. Guided → Expert opens the section the
+      // user was in (its first panel, or its table), with every field shown;
+      // with no section yet it closes the hub design as before. Expert → Guided
+      // lands on the card of the section the panel or selection belongs to,
+      // which `activeSection` already follows.
+      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') {
+        const open = s.activeSection ? SECTION_OPEN[s.activeSection] : undefined
+        patch.activeSlidePanel = open?.panel ?? null
+        if (open?.table) patch.bottomTabRequest = open.table
+      }
       if (mode === 'guided' && s.activeSlidePanel != null
           && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results'
           && s.activeSlidePanel !== 'decision') {
         patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
+      }
+      // Expert with no panel but a selection from a flow item (the Run's
+      // reason, a field link) lands on that section's card, not the bare
+      // canvas. A plain canvas with nothing selected stays as it is.
+      if (mode === 'guided' && s.activeSlidePanel == null && s.currentProject
+          && s.selectedComponent && s.activeSection) {
+        patch.activeSlidePanel = 'hubDesign'
       }
       return patch
     })
@@ -937,6 +960,10 @@ export const useUIStore = create<UIStore>((set) => ({
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  focusTimeSeries: (type, name) => set({
+    timeSeriesFocus: { type, name }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
+  }),
+  clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
@@ -1003,7 +1030,8 @@ export const useUIStore = create<UIStore>((set) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
-        activeSection: null,
+        // The section this project was left in (design §7), else none.
+        activeSection: readActiveSection(name),
         fieldDrawer: null,
         selectedComponent: null,
         highlightedComponent: null,
@@ -1173,3 +1201,11 @@ if (typeof window !== 'undefined') {
   w.__uiModeStorageListener = onUiModeStorage
   window.addEventListener('storage', onUiModeStorage)
 }
+
+// Remember the section per project (design §7). A project switch restores the
+// new project's own section in the same update, so this writes it back
+// unchanged; a rename carries the section to the new name.
+useUIStore.subscribe((s, prev) => {
+  if (s.activeSection === prev.activeSection && s.currentProject === prev.currentProject) return
+  writeActiveSection(s.currentProject, s.activeSection)
+})

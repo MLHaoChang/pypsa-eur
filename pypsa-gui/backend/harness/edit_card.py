@@ -327,6 +327,18 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
         _refuse("invalid_edit_value", f"{component_class}.{key} takes true or false.")
 
 
+# A rated capacity and its bounds are magnitudes; PyPSA stores a negative one
+# without complaint and the solve then reads it as a reversed limit.
+RATINGS = frozenset(f"{base}{suffix}" for base in ("s_nom", "p_nom", "e_nom") for suffix in ("", "_min", "_max"))
+
+
+def _check_rating(name: str, key: str, value, field: dict | None) -> None:
+    if key in RATINGS and isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
+        unit = (field or {}).get("unit_storage") or ""
+        _refuse("invalid_edit_value", f"{name} {key} cannot be negative ({value:g} {unit}".rstrip()
+                + "); a rating is a magnitude, at least 0.")
+
+
 # PyPSA rewrites these from the standard type at solve time
 # (`apply_line_types` / `apply_transformer_types`), so a typed component's
 # value would read back and then be discarded.
@@ -394,6 +406,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     for name, attrs in targets:
         for key, value in attrs.items():
             _check_value(component_class, key, value, fields.get(key))
+            _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
     attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
         "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]

@@ -87,6 +87,16 @@ One optimisation run over the network — `n.optimize()`, driven through
 Always off the request thread; it blocks.
 _Avoid_: simulation, optimisation run, job
 
+**Sizing off** (fixed-size run):
+A solve that dispatches on fixed sizes instead of choosing them
+(`SolverConfig.fixed_sizes`; `services/solver/fixed_sizes.py`). The sizes come
+from the **capacity run** (the last solve with sizing on, whose sizes are
+recorded in `n.meta["sizing_record"]`) or from the **nameplate** (each asset's
+configured `p_nom` / `s_nom` / `e_nom`). It is a real run of a **fixed
+design**: its results and commercial records stand. The sweep's operational
+re-solve, which also freezes sizes, is a transient check and commits nothing.
+_Avoid_: dispatch-only, operational run (the sweep's term), extendable off
+
 **Unavailable**:
 The state of a figure the backend could not resolve, as distinct from a figure
 that resolved to zero. Zero is a legitimate result in an energy-system model,
@@ -193,6 +203,25 @@ oscillation band (peak amplitude in MW, period in s). IT side at the POC,
 before any UPS/BESS smoothing; every value assumed. Stored under `dc_load` in
 the project's `eh_template.json`, read with `read_envelope`.
 _Avoid_: ramp profile, transient study
+
+**Battery/UPS duties**:
+The two jobs one site battery or UPS does, from one state of charge with no
+MWh counted twice (DC 03). **Backup**: ride-through and autonomy on loss of
+grid (the island study's outage reserve for a ride-through battery, the
+bridge for a UPS), reserved first. **Load smoothing**: holding an AI-training
+load's steps, checkpoint dips and oscillation inside the connection's ramp
+and oscillation limits, from what backup leaves
+(`backend/services/adequacy/smoothing.py`). Control › 2 "Island,
+ride-through & load smoothing".
+_Avoid_: rapid load response (that was #527's research name), peak shaving
+
+**After mitigation**:
+A grid-readiness value as the point of connection sees it once the site's
+battery/UPS has done its smoothing duty (the scorecard's "After battery/UPS"
+line). The row's verdict stays **before mitigation**: the load as the GPUs
+draw it, with no battery credit; the after value sits beside it, never in
+its place.
+_Avoid_: final verdict, mitigated verdict
 
 **Control preset**:
 A named converter control and UPS behaviour for the island sidecar

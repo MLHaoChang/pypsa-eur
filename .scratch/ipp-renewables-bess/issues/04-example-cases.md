@@ -20,3 +20,10 @@ Read [the spec](../spec.md) §7 first.
   require); the ledger says "8 planned cases (editable once sensitivities land; make any now with
   Duplicate)". After S5, "Create the example's cases" calls S5's
   Duplicate-and-change for each, and they are ordinary editable cases.
+
+## Built (2026-10-21)
+
+- `project_templates/eh_ipp_hybrid/cases.json` from `eh_ipp.cases()`, copied into the project at create.
+- Case 5 is "Longer PPA" (owner Q-IPP6 = A).
+- **Follow-up (gated engine ticket, not filed as a PR):** a financial baseload PPA form. Today the engine accepts financial settlement only for a fixed-price pay-as-produced PPA (#461), so a baseload case has no financial representation.
+
