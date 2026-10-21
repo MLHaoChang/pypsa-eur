@@ -37,6 +37,18 @@ describe('ConnectionLimits', () => {
     expect(screen.queryByRole('textbox')).toBeNull()
   })
 
+  it('a staged project lists every energization period, not just the first', async () => {
+    const t = { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' }
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('energization_peak:2030', { unit: 'MW', limit: 20, target: t }),
+      row('energization_peak:2035', { unit: 'MW', limit: 40, target: t }),
+      row('energization_peak:2040', { unit: 'MW', limit: 60, target: t })] } as never)
+    mount()
+    const line = (await screen.findByTestId('connection-limit-energization_peak')).textContent ?? ''
+    expect(line).toMatch(/2030 20 MW · 2035 40 MW · 2040 60 MW/)
+    expect(line).not.toMatch(/Energization: 20 MW\b(?! ·)/)
+  })
+
   it('Expert offers the route to the series; it opens the link', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
       row('energization_peak', { unit: 'MW', limit: 8, target: { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' } })] } as never)

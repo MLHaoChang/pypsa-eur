@@ -9,7 +9,7 @@ import type { FlowTarget } from '../../api/flow'
 import type { GridReadinessRow } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget } from '../../layout/flowNavigation'
-import { useGridReadiness } from './GridReadinessScorecard'
+import { fmt, useGridReadiness } from './GridReadinessScorecard'
 
 const SHOWN: Record<string, string> = {
   energization_peak: 'Energization',
@@ -17,38 +17,45 @@ const SHOWN: Record<string, string> = {
   oscillation: 'Oscillation band',
 }
 
-function limitText(row: GridReadinessRow): string {
-  if (row.limit == null) return 'not known'
-  return typeof row.limit === 'number' ? `${Number(row.limit.toPrecision(4))}${row.unit ? ` ${row.unit}` : ''}` : String(row.limit)
-}
+/** The row's kind: staged projects have one energization row per period, `energization_peak:2035`. */
+const kindOf = (r: GridReadinessRow) => r.id.split(':')[0]
 
 export function ConnectionLimits() {
   const q = useGridReadiness()
   const expert = useUIStore(s => s.uiMode === 'expert')
-  const rows = (q.data?.rows ?? []).filter(r => r.id in SHOWN)
-  // Energization has one row per period; the first of each id names the connection.
-  const first = rows.filter((r, i) => rows.findIndex(x => x.id === r.id) === i)
+  const rows = (q.data?.rows ?? []).filter(r => kindOf(r) in SHOWN)
+  // One line per kind. Energization has one row per period: every period is listed,
+  // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
+  const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))
   return (
     <PageSection title="Connection limits" hint="Read-only here">
       {q.isPending ? <p className="text-[12px] text-muted">Loading the connection limits…</p>
         : q.isError ? <p className="text-[12px] text-warn" data-testid="connection-limits-error">
             The connection limits could not be read.</p>
-        : first.length === 0 ? <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>
+        : kinds.length === 0 ? <p className="text-[12px] text-muted">No grid connection is tagged on this project.</p>
           : (
             <ul className="flex flex-col gap-2" data-testid="connection-limits">
-              {first.map(r => (
-                <li key={r.id} data-testid={`connection-limit-${r.id}`} className="text-[12px]">
-                  <span className="font-semibold">{SHOWN[r.id]}</span>{': '}
-                  <span className="tabular-nums">{limitText(r)}</span>
-                  {r.assumed && <span className="ml-1 text-muted">(assumed)</span>}
-                  <span className="block text-muted">{r.source}{r.note ? `. ${r.note}` : ''}</span>
-                  {expert && r.target.field && (
-                    <button type="button" className="underline text-[11px]" onClick={() => openFlowTarget(r.target as FlowTarget)}>
-                      {r.id === 'energization_peak' ? 'Edit the energization series' : 'Edit on the connection link'}
-                    </button>
-                  )}
-                </li>
-              ))}
+              {kinds.map(k => {
+                const group = rows.filter(r => kindOf(r) === k)
+                const lead = group[0]
+                const staged = group.length > 1 || lead.id.includes(':')
+                const figures = staged
+                  ? group.map(r => `${r.id.split(':')[1] ?? ''} ${fmt(r.limit, r.unit)}`.trim()).join(' · ')
+                  : fmt(lead.limit, lead.unit)
+                return (
+                  <li key={k} data-testid={`connection-limit-${k}`} className="text-[12px]">
+                    <span className="font-semibold">{SHOWN[k]}</span>{': '}
+                    <span className="tabular-nums">{figures}</span>
+                    {group.some(r => r.assumed) && <span className="ml-1 text-muted">(assumed)</span>}
+                    <span className="block text-muted">{lead.source}{lead.note && !staged ? `. ${lead.note}` : ''}</span>
+                    {expert && lead.target.field && (
+                      <button type="button" className="underline text-[11px]" onClick={() => openFlowTarget(lead.target as FlowTarget)}>
+                        {k === 'energization_peak' ? 'Edit the energization series' : 'Edit on the connection link'}
+                      </button>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           )}
     </PageSection>
