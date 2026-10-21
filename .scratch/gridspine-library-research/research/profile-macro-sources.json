@@ -46,9 +46,9 @@
       "CSV"
     ],
     "access": "Public API/download",
-    "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions",
+    "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions; consolidated review requires exact table/geography/source notice and resolves overlapping EU-C19 conservatively, not by choosing the more permissive entry",
     "terms_url": "https://ec.europa.eu/eurostat/help/copyright-notice",
-    "redistribution_status": "open_verified",
+    "redistribution_status": "mixed",
     "cadence": "Monthly indices; energy-price periods depend on table",
     "limitations": "Use exact geo/table/consumption band/tax basis. National statistical averages are not site tariffs. No blanket rights assertion for all non-European or third-party data.",
     "priority": "P1",

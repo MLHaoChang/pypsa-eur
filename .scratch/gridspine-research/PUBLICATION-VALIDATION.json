@@ -5,12 +5,22 @@
   "relative_document_links": "passed",
   "reviewed_artifacts_sha256": "7 unchanged plus independent review verified",
   "parameter_families": 80,
-  "source_assessments": 109,
+  "source_assessments": 114,
   "implementation_slices": 38,
   "third_party_raw_caches_published": false,
   "candidate_model_tests_run": 0,
   "production_data_ingestion": false,
-  "source_cross_review": "pending",
+  "source_cross_review": "completed at research/family-mapping level; exact-resource availability gates remain",
   "files_before_validation_manifest": 40,
-  "publication_base_sha": "21113ed57448c9b7a5b4c89391de25877db2de4a"
+  "publication_base_sha": "21113ed57448c9b7a5b4c89391de25877db2de4a",
+  "original_publication_source_assessments": 109,
+  "library_review_artifact": "../gridspine-library-research/SOURCE-REVIEW.md",
+  "library_review_sha256": "085cc0fb00fca4aad2d4dcce4b02fd8524147f200f024107de9a4a5a1fcf322c",
+  "family_coverage_classes": {
+    "partial_candidates": 28,
+    "benchmark_only": 23,
+    "method_reference_only": 14,
+    "public_data_gap": 15
+  },
+  "runtime_model_or_data_import_tests_run": 0
 }

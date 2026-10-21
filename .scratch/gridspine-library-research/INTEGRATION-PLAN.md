@@ -1,6 +1,6 @@
 # Parameter-library integration sequence
 
-Status: proposed synthesis of saved research; final cross-source review and exact importer contracts remain pending. This document does not authorize mirroring restricted data or changing native model schemas without their normal review.
+Status: implementation proposal following completed family-level research mapping; see SOURCE-REVIEW.md for cross-source review. Exact source-specific importer contracts remain admission gates. This document does not authorize mirroring restricted data or changing native model schemas without their normal review.
 
 ## Architecture
 
@@ -38,7 +38,7 @@ Connectors use administrator-controlled official hosts/endpoints, typed query pa
 | L7 | Lifecycle, performance and control-depth records | Exact validated chemistry/model/temperature/duty and physical calendar basis; curated thermal/process/control model admission. Public cell data or generic dynamic specs cannot become pack/site guarantees |
 | L8 | Coverage expansion and verification | Complete source-to-parameter joins, current scoped rights and actual file/API parsing evidence; source-specific numerical fixtures and downstream evidence invalidation |
 
-Europe and North America are the only target deployment regions here. Start with sources whose actual scope and terms support the intended record. European tariff rollout can begin DE/NL/FR/ES/IT and expand to UK/Nordics/Switzerland. North America includes separate US utility/ISO, Canadian provincial and Mexican CFE/CENACE/CER or other applicable official contexts; do not convert a US assumption into local evidence by FX alone.
+Europe and North America are the only target deployment regions here. Start with sources whose actual scope and terms support the intended record. European tariff rollout can begin DE/NL/FR/ES/IT and expand to UK/Nordics/Switzerland. North America includes separate US utility/ISO, Canadian federal/provincial and Mexican CFE/CENACE/INEGI/Banxico or other applicable official contexts; do not convert a US assumption into local evidence by FX alone.
 
 ## Important gaps
 

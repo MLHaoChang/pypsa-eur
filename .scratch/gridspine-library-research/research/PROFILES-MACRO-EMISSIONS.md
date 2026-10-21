@@ -1,6 +1,6 @@
 # Profiles, economic normalization and emissions sources
 
-Status: research snapshot, 2026-10-20. Generated publication index over the saved structured research; final cross-source review and ingestion validation remain pending. These records identify candidates, not approved populated library values.
+Status: research snapshot, 2026-10-20. Generated publication index over the saved structured research; the completion review and family mapping are recorded in the parent directory; ingestion validation remains a source-specific gate. These records identify candidates, not approved populated library values.
 
 | Source | Reuse/access assessment | Proposed integration |
 | --- | --- | --- |

@@ -1,8 +1,146 @@
 {
   "status": "research_candidates_not_ingested_or_approved",
   "research_date": "2026-10-20",
-  "source_assessments": 109,
+  "completion_review_date": "2026-10-21",
+  "source_assessments": 114,
   "records": [
+    {
+      "source_id": "ADD-ACER",
+      "title": "ACER adequacy metrics, value of lost load and reliability-standard methodology",
+      "url": "https://acer.europa.eu/electricity/security-of-supply/european-resource-adequacy-assessment",
+      "publisher": "ACER",
+      "geography": [
+        "EU; national implementation varies"
+      ],
+      "parameter_families": [
+        "VoLL and reliability-standard reference",
+        "methodology and benchmark context"
+      ],
+      "mapped_family_ids": [
+        "R12",
+        "R13"
+      ],
+      "mapping_scope": "Reference or benchmark only; no automatic project parameter or eligibility inference",
+      "format": "Official HTML/report and linked documents; exact selected dataset/formats to validate",
+      "access": "Public primary-source page inspected; no bulk file ingestion or protected-data access",
+      "license_or_terms": "Source/document-specific terms and raw/derived redistribution need review before an embedded shared library",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Edition/methodology/legal changes; pin current applicable publication",
+      "limitations": "No customer-specific value, entitlement, contract or applicability is inferred. Exact units, jurisdiction, effective period, source boundary and native schema must be validated.",
+      "priority": "P2",
+      "integration_mode": "Versioned citation-backed reference/benchmark, then a separately reviewed structured subset if justified",
+      "research_date": "2026-10-21",
+      "research_file": "research/additional-reference-sources.json"
+    },
+    {
+      "source_id": "ADD-ICE",
+      "title": "LBNL ICE Calculator2 interruption-cost report",
+      "url": "https://emp.lbl.gov/publications/ice-calculator-2-final-report-phase",
+      "publisher": "Lawrence Berkeley National Laboratory",
+      "geography": [
+        "United States; survey/case applicability"
+      ],
+      "parameter_families": [
+        "interruption-cost methodology and sector/duration sensitivity"
+      ],
+      "mapped_family_ids": [
+        "R12"
+      ],
+      "mapping_scope": "Reference or benchmark only; no automatic project parameter or eligibility inference",
+      "format": "Official HTML/report and linked documents; exact selected dataset/formats to validate",
+      "access": "Public primary-source page inspected; no bulk file ingestion or protected-data access",
+      "license_or_terms": "Source/document-specific terms and raw/derived redistribution need review before an embedded shared library",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Edition/methodology/legal changes; pin current applicable publication",
+      "limitations": "No customer-specific value, entitlement, contract or applicability is inferred. Exact units, jurisdiction, effective period, source boundary and native schema must be validated.",
+      "priority": "P2",
+      "integration_mode": "Versioned citation-backed reference/benchmark, then a separately reviewed structured subset if justified",
+      "research_date": "2026-10-21",
+      "research_file": "research/additional-reference-sources.json"
+    },
+    {
+      "source_id": "ADD-IRS-DEPRECIATION",
+      "title": "IRS Publication946 depreciation reference",
+      "url": "https://www.irs.gov/forms-pubs/about-publication-946",
+      "publisher": "US Internal Revenue Service",
+      "geography": [
+        "United States; tax-year and entity-specific"
+      ],
+      "parameter_families": [
+        "depreciation rules and dated schedules"
+      ],
+      "mapped_family_ids": [
+        "C16"
+      ],
+      "mapping_scope": "Reference or benchmark only; no automatic project parameter or eligibility inference",
+      "format": "Official HTML/report and linked documents; exact selected dataset/formats to validate",
+      "access": "Public primary-source page inspected; no bulk file ingestion or protected-data access",
+      "license_or_terms": "Source/document-specific terms and raw/derived redistribution need review before an embedded shared library",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Edition/methodology/legal changes; pin current applicable publication",
+      "limitations": "No customer-specific value, entitlement, contract or applicability is inferred. Exact units, jurisdiction, effective period, source boundary and native schema must be validated.",
+      "priority": "P2",
+      "integration_mode": "Versioned citation-backed reference/benchmark, then a separately reviewed structured subset if justified",
+      "research_date": "2026-10-21",
+      "research_file": "research/additional-reference-sources.json"
+    },
+    {
+      "source_id": "ADD-IRS-CREDIT",
+      "title": "IRS Clean Electricity Investment Credit guidance",
+      "url": "https://www.irs.gov/credits-deductions/clean-electricity-investment-credit",
+      "publisher": "US Internal Revenue Service",
+      "geography": [
+        "United States; statute/date/eligibility-specific"
+      ],
+      "parameter_families": [
+        "clean electricity investment-credit program reference"
+      ],
+      "mapped_family_ids": [
+        "C17"
+      ],
+      "mapping_scope": "Reference or benchmark only; no automatic project parameter or eligibility inference",
+      "format": "Official HTML/report and linked documents; exact selected dataset/formats to validate",
+      "access": "Public primary-source page inspected; no bulk file ingestion or protected-data access",
+      "license_or_terms": "Source/document-specific terms and raw/derived redistribution need review before an embedded shared library",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Edition/methodology/legal changes; pin current applicable publication",
+      "limitations": "No customer-specific value, entitlement, contract or applicability is inferred. Exact units, jurisdiction, effective period, source boundary and native schema must be validated.",
+      "priority": "P2",
+      "integration_mode": "Versioned citation-backed reference/benchmark, then a separately reviewed structured subset if justified",
+      "research_date": "2026-10-21",
+      "research_file": "research/additional-reference-sources.json"
+    },
+    {
+      "source_id": "ADD-CA-ITC",
+      "title": "Canada Revenue Agency Clean Economy Investment Tax Credits",
+      "url": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/business-tax-credits/clean-economy-itc.html",
+      "publisher": "Canada Revenue Agency",
+      "geography": [
+        "Canada; program/date/eligibility-specific"
+      ],
+      "parameter_families": [
+        "clean economy investment-credit program reference"
+      ],
+      "mapped_family_ids": [
+        "C17"
+      ],
+      "mapping_scope": "Reference or benchmark only; no automatic project parameter or eligibility inference",
+      "format": "Official HTML/report and linked documents; exact selected dataset/formats to validate",
+      "access": "Public primary-source page inspected; no bulk file ingestion or protected-data access",
+      "license_or_terms": "Source/document-specific terms and raw/derived redistribution need review before an embedded shared library",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Edition/methodology/legal changes; pin current applicable publication",
+      "limitations": "No customer-specific value, entitlement, contract or applicability is inferred. Exact units, jurisdiction, effective period, source boundary and native schema must be validated.",
+      "priority": "P2",
+      "integration_mode": "Versioned citation-backed reference/benchmark, then a separately reviewed structured subset if justified",
+      "research_date": "2026-10-21",
+      "research_file": "research/additional-reference-sources.json"
+    },
     {
       "source_id": "cost_pypsa_technology_data",
       "title": "PyPSA technology-data versioned techno-economic assumptions",
@@ -1707,9 +1845,9 @@
         "CSV"
       ],
       "access": "Public API/download",
-      "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions",
+      "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions; consolidated review requires exact table/geography/source notice and resolves overlapping EU-C19 conservatively, not by choosing the more permissive entry",
       "terms_url": "https://ec.europa.eu/eurostat/help/copyright-notice",
-      "redistribution_status": "open_verified",
+      "redistribution_status": "mixed",
       "cadence": "Monthly indices; energy-price periods depend on table",
       "limitations": "Use exact geo/table/consumption band/tax basis. National statistical averages are not site tariffs. No blanket rights assertion for all non-European or third-party data.",
       "priority": "P1",

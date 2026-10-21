@@ -21,10 +21,10 @@ The independent review binds seven files to their SHA-256 hashes in [review-cand
 Start with [the library research index](../gridspine-library-research/README.md):
 
 - [80 parameter families and native mappings](../gridspine-library-research/research/PARAMETER-INVENTORY.md).
-- [109 source assessments in a structured catalog](../gridspine-library-research/source-catalog.json), covering technical components, CapEx/OpEx/lifecycle, outages/maintenance, prices/tariffs/PPA, profiles and economic/emissions references.
-- [Proposed integration sequence](../gridspine-library-research/INTEGRATION-PLAN.md).
+- [114 source assessments in a structured catalog](../gridspine-library-research/source-catalog.json), covering technical components, CapEx/OpEx/lifecycle, outages/maintenance, prices/tariffs/PPA, profiles and economic/emissions references.
+- [Research conclusion](../gridspine-library-research/RESEARCH-CONCLUSION.md), [coverage/gaps](../gridspine-library-research/SOURCE-COVERAGE.md), [cross-source review](../gridspine-library-research/SOURCE-REVIEW.md) and [integration sequence](../gridspine-library-research/INTEGRATION-PLAN.md).
 
-This newer research is a saved source-discovery package. Final cross-source review, complete field-to-source joins, current access/terms confirmation and actual adapter/data validation remain open. A source record is not an approved library value or permission to mirror a database.
+This newer research now includes a completed family-level source map, explicit gaps, prioritization and a separate cross-source AI review. Exact selected source-cell/native-field binding, current source-specific access/terms confirmation and actual adapter/data validation remain implementation gates. A source record is not an approved library value or permission to mirror a database.
 
 ## 3. Continuing safely
 

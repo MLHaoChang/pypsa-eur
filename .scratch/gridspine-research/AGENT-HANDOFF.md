@@ -30,7 +30,7 @@ Choose one bounded slice and retain its input, model/version, unit, region, righ
 
 ## Remaining research work
 
-The library inventory and six structured source files were saved. The data-source package has not received a final independent cross-source review. Complete exact parameter-to-source mappings and current access/terms checks before selecting imports. Do not assume public access implies redistribution, a tariff PDF fits the current schema, a price history is a forecast, or SAIDI/SAIFI is component FOR/MTTR.
+The library inventory, seven structured source files, complete family-level source mapping and prioritized conclusion are saved. Read SOURCE-REVIEW.md in the sibling library directory for the cross-source AI review. Confirm exact selected source cells/native field bindings and current source-specific access/terms before selecting imports. Do not assume public access implies redistribution, a tariff PDF fits the current schema, a price history is a forecast, or SAIDI/SAIFI is component FOR/MTTR.
 
 No candidate package/model or dataset ingestion was executed for this publication. Independent human domain review and real-use calibration remain pending. No reviewer contact, paid model/media call or deployment occurred.
 
