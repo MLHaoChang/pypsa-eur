@@ -89,6 +89,7 @@ from routers import (
     guides,
     io,
     library,
+    library_references,
     local_settings,
     network,
     profiles,
@@ -1264,6 +1265,8 @@ app.include_router(
 )
 # Edge Investment Case (P1 WP1.1b): the org-scoped Library.
 app.include_router(library.router, prefix="/api/library", tags=["library"])
+# The shipped (common) cost references: read-only, the same for every org.
+app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.

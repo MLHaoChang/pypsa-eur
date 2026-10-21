@@ -330,7 +330,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 234 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 244 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -367,6 +367,10 @@ change, and says when it was built to its bound; `storage-cycles/1` divides wind
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
 per-snapshot bounds helper; cyclic units are checked against their bounds only.
 `tests/test_profile_registry.py` keeps every metric name to one module.
+`energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
+unserved, storage change and the unsplit remainder of export, losses and conversion),
+gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own
+attribution and stay withheld.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -774,7 +778,16 @@ checked fields) claims one, at most once per job, and runs an ordinary turn
 whose user message the harness writes: `job <id> finished: <status> (plan:
 <title>)`. None is due after `cancel_task` or a user abort, and none for
 another session or project. The continuation approves nothing: every card in
-that turn still needs its click. `get_task` names the plan's verified edits in
+that turn still needs its click. `POST /api/chat/{session_id}/continuations/
+{job_id}/dismiss` ("Stop waiting") withdraws it; the job runs on.
+
+The chat panel (`hooks/usePlanContinuation.ts`) checks the listing every 3 s
+while a task card waits on a job, and every 15 s otherwise, so a reopened chat
+still gets it. It sends at most once per job and holds a due continuation while
+a turn streams, the composer has text, or a card or Choice waits for an answer;
+the card then offers "Continue now". The transcript shows a muted marker ("The
+solve finished · continuing"), never a user bubble and never the job id, also
+when the history is replayed. `get_task` names the plan's verified edits in
 `changes`, and the OpenAI tool selection favours every tool the plan still
 has to run.
 

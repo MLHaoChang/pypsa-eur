@@ -17,6 +17,12 @@ vi.mock('../../../api/finance', async (importOriginal) => {
   return { ...actual, financeApi: { ...actual.financeApi, getInvestmentCase: vi.fn(),
     startInvestmentCase: vi.fn(), abortInvestmentCase: vi.fn(), getReport: vi.fn() } }
 })
+// The Capture table (IPP ticket 05) reads the network's plants: none here.
+vi.mock('../../../api/network', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/network')>()
+  return { ...actual, networkApi: { ...actual.networkApi, getGenerators: vi.fn(async () => []),
+    getStorageUnits: vi.fn(async () => []) } }
+})
 const api = vi.mocked(financeApi)
 
 const YEARS = [2030, 2031, 2032]

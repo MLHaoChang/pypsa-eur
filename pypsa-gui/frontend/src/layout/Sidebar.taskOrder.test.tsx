@@ -78,7 +78,7 @@ const ROWS: Record<string, string[]> = {
 
 // The project's actions, now behind the footer card's menu.
 const PROJECT_MENU_ROWS = [
-  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Workspace panel',
+  'Project info', 'Duplicate project', 'Export…', 'Other', 'Workspace panel',
 ]
 
 function rowLabels(group: HTMLElement): string[] {
