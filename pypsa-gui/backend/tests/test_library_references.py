@@ -136,3 +136,23 @@ def test_tool_refuses_half_an_asset_and_unknown_selectors():
 def test_a_malformed_pack_source_falls_back_quickly(source):
     detail = C.reference_detail("onwind", 2030, {"overnight_cost": {"source": source}})
     assert detail.pack.chosen_by == "latest_generic"
+
+
+def test_a_regional_version_loads_through_the_loaders_own_region_list(monkeypatch):
+    """Once the loader takes `region=` (#499), a `<date>+<region>` stamp loads that pack;
+    the region and date handed over are the loader's / rebuilt, never the stamp's text."""
+    real = load_defaults_pack()
+    calls = []
+
+    def fake(version=None, *, region=None):
+        calls.append((version, region))
+        return real
+
+    monkeypatch.setattr(C, "load_defaults_pack", fake)
+    monkeypatch.setattr(C.loader, "available_regions", lambda: ("uk",), raising=False)
+    source = f"{real.pack_id}@2026-10-21+uk#{real.hash[:16]}"
+    _pack, choice = C.pack_for_asset({"overnight_cost": {"source": source}})
+    assert calls == [("2026-10-21", "uk")] and choice.chosen_by == "asset_provenance"
+    calls.clear()
+    _pack, choice = C.pack_for_asset({"overnight_cost": {"source": source.replace("+uk", "+fr")}})
+    assert ("2026-10-21", "fr") not in calls and choice.chosen_by == "latest_generic"

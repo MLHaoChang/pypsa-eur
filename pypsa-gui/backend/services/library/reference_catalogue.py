@@ -15,10 +15,12 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict
 
 from services.library import europe_reference as R
+from services.library.defaults_pack import loader
 from services.library.defaults_pack.loader import (
     DefaultsPack,
     DefaultsPackError,
     DefaultsPackLookupError,
+    available_versions,
     load_defaults_pack,
 )
 
@@ -100,16 +102,28 @@ def list_references() -> list[ReferenceSummary]:
 
 
 def _load_named_pack(version: str) -> DefaultsPack | None:
-    """The pack a provenance stamp names, or None when this build cannot load it. A
-    regional version is `<date>+<region>` and needs `load_defaults_pack(date, region=…)`
-    (GS-2, #499); a build without regional packs cannot load it and says so (None)."""
+    """The pack a provenance stamp names, or None when this build cannot load it.
+
+    No caller value reaches the loader (it may come from a request): a plain version is
+    the matching entry of `available_versions()`; a regional `<date>+<region>` version
+    (GS-2, #499) needs the loader's `region=`, takes the region from the loader's own
+    list and the date rebuilt from integers. A build without regional packs cannot load
+    one and says so (None)."""
     date, plus, region = version.partition("+")
     try:
         if not plus:
-            return load_defaults_pack(version)
-        if "region" not in inspect.signature(load_defaults_pack).parameters:
+            shipped = next((v for v in available_versions() if v == version), None)
+            return None if shipped is None else load_defaults_pack(shipped)
+        listed = getattr(loader, "available_regions", None)
+        if listed is None or "region" not in inspect.signature(load_defaults_pack).parameters:
             return None
-        return load_defaults_pack(date, region=region)
+        names = [getattr(r, "region", r) for r in listed()]
+        shipped_region = next((r for r in names if isinstance(r, str) and r == region), None)
+        parts = date.split("-")
+        if shipped_region is None or len(parts) != 3 or not all(p.isdigit() for p in parts):
+            return None
+        year, month, day = (int(p) for p in parts)
+        return load_defaults_pack(f"{year:04d}-{month:02d}-{day:02d}", region=shipped_region)
     except (DefaultsPackError, DefaultsPackLookupError):
         return None
 
