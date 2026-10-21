@@ -75,7 +75,7 @@ describe('IssuesPanel — Topology check group (M5)', () => {
     expect(views).toHaveLength(2)
     await userEvent.click(views[0])          // the unplaced row comes first
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Bus', name: 'U' })
-    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(useUIStore.getState().activeSlidePanel).toBe('issues')
   })
 
   it('reads the routes from the map document and the sites from the sites document', async () => {

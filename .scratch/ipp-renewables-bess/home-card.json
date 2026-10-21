@@ -1,0 +1,31 @@
+{
+ "id": "eh_ipp_hybrid",
+ "name": "Renewables IPP with battery",
+ "title": "Renewables IPP + battery",
+ "category": "RENEWABLE GENERATION",
+ "note": "A wind and solar plant with an optional battery behind one grid connection. Size the battery and weigh PPA against merchant revenue.",
+ "detail": "60 MW wind and 50 MWp PV behind a 70 MW export limit, with a battery candidate up to 50 MW at 2 h. The site and prices are illustrative: bring your own price series.",
+ "chips": [
+  "Capacity · Commercial",
+  "1 year, hourly",
+  "8 cases"
+ ],
+ "art": "ipp",
+ "artTitle": "Renewables IPP with battery — original illustrative scene",
+ "groups": {
+  "capacity": true,
+  "grid": false,
+  "control": false,
+  "reliability": false,
+  "handoff": true,
+  "commercial": true
+ },
+ "suggested": [
+  "capacity",
+  "commercial"
+ ],
+ "presetNote": "Suggested: capacity planning and the commercial case (PPA and merchant revenue; the investment case once available). Grid and control studies are off: switch Grid on later if you need the connection studied. No reliability study: the site has no load.",
+ "status": null,
+ "available": true,
+ "source": ".scratch/ipp-renewables-bess/spec.md §8.1, §8.4 (ticket 06); the template merged in #485"
+}
