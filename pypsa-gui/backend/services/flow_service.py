@@ -194,6 +194,8 @@ class _Facts:
     cfg_dict: dict = field(default_factory=dict)
     cfg_hash: str = ""
     copy: Any = None          # a private copy for eh_readiness, on a cache miss
+    # `{money year: [(class, asset, field), ...]}` of the recorded cost fields (B9).
+    money_years: dict = field(default_factory=dict)
 
 
 # eh_readiness copies and walks the network; cached per readiness key.
@@ -381,7 +383,20 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         asset_count=assets, buses=len(n.buses), buses_placed=placed, voll=voll,
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
-        cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy)
+        cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
+        money_years=_money_years(n))
+
+
+def _money_years(n) -> dict:
+    """The asset costs' money years (`reference_apply.money_years_in_use`), read
+    under the preflight's lock. A failure reads as none: the item is advisory."""
+    try:
+        from services.library.reference_apply import money_years_in_use
+
+        return money_years_in_use(n)
+    except Exception:                                    # noqa: BLE001 — advisory only
+        logger.exception("flow: money years could not be read")
+        return {}
 
 
 def _readiness_key(revision: int, voll: float, template: dict, cfg_hash: str) -> tuple:
@@ -650,6 +665,22 @@ def _assumed_items(template: dict) -> list[dict]:
     return out
 
 
+def _money_year_items(facts: _Facts) -> list[dict]:
+    """B9: asset costs in more than one money year. A Library reference is applied
+    as-is in its own money year (no index is declared), so mixed years stay
+    visible as one acknowledgeable warning in section 5, bound to the set of
+    years: it re-raises when a year is added or removed. Display-only."""
+    years = sorted(facts.money_years)
+    if len(years) < 2:
+        return []
+    klass, asset, _field = facts.money_years[years[-1]][0]
+    listed = ", ".join(str(y) for y in years)
+    return [_item("asset_cost_money_years_mixed", "warning",
+                  f"Asset costs use different money years ({listed}), not adjusted for "
+                  "inflation.", "flow", "assets", component=klass, entity=asset,
+                  fld="capital_cost", value=years)]
+
+
 def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
               loads_not_needed: bool = False) -> list[dict]:
     """The presence rules (`PRESENCE_RULES`), all display-only (kind c)."""
@@ -896,6 +927,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                          loads_not_needed=loads_not_needed)
     items += presence
     items += _validation_items(issues, frozenset(facts.connection_links))
+    items += _money_year_items(facts)
     if body is not None:
         items += study_items
         if not loads_not_needed:
