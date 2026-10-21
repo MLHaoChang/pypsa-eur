@@ -179,7 +179,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
     ResultView("investment", _RESULTS, "investment", "Investment case",
                "the investment case verdict and its cash flows", "investment",
                (_r("get_investment_case"),),
-               checked_profiles=("investment-case/1",),
+               checked_profiles=("investment-case/1", "investment-lcoe/1"),
                units="EUR, %"),
     ResultView("asset", _RESULTS, "asset", "Asset Detail",
                "one asset's time series and KPIs", "results",

@@ -16,6 +16,9 @@ import re
 from harness import profile_common as common
 
 PROFILE = "investment-case/1"
+LCOE_PROFILE = "investment-lcoe/1"
+PROFILES = (PROFILE, LCOE_PROFILE)
+LCOE_TOLERANCE = 1e-9  # relative, against the report's headline
 REL_TOLERANCE = 1e-6  # of the sum of |cash|
 IRR_TOLERANCE = 1e-8  # absolute, against the report's headline
 BRACKET = (-0.99, 10.0)
@@ -50,6 +53,25 @@ METRICS = {
         "label": "Project IRR (post tax)",
     },
 }
+LCOE_METRICS = {
+    "lcoe_nominal": {
+        "formula_id": "investment-lcoe-nominal/1",
+        "unit": "currency/MWh",
+        "label": "LCOE, nominal (engine definition)",
+    },
+    "lcoe_real": {
+        "formula_id": "investment-lcoe-real/1",
+        "unit": "currency/MWh",
+        "label": "LCOE, real (engine definition)",
+    },
+}
+LCOE_DISCLOSURE = (
+    "The investment case's LCOE as its engine defines it (SAM, generalised): the present value of the "
+    "investment's value less that of the post-tax equity cash, divided by the present value of its "
+    "generation, all at the cost of equity, rebuilt from the report's retained per-year series. The real "
+    "LCOE discounts the generation at (1 + r) / (1 + inflation) - 1; on a real price basis it equals the "
+    "nominal one."
+)
 DISCLOSURE = (
     "Rebuilt from the stored investment-case report's cash rows: end-of-year discounting with the "
     "financial-close year undiscounted, at the rates the report records; an IRR only when the cash "
@@ -77,7 +99,7 @@ def is_current(state):
                 and state["assumptions_hash"] and state["assumptions_hash"] == state["current_hash"])
 
 
-def source(ctx, entity, state):
+def source(ctx, entity, state, profile=PROFILE):
     from harness.calculations import _number
 
     if entity != "network":
@@ -92,9 +114,9 @@ def source(ctx, entity, state):
     years = [str(y) for y in payload.get("years") or []]
     if not years:
         raise ValueError("investment_case_not_current")
-    return {
+    raw = {
         "version": 1,
-        "profile": PROFILE,
+        "profile": profile,
         "entity_id": entity,
         "index": years,
         "assumptions_hash": stored["assumptions_hash"],
@@ -107,6 +129,18 @@ def source(ctx, entity, state):
         "basis_statement": str(payload.get("basis_statement") or ""),
         "price_basis": str(payload.get("price_basis") or ""),
     }
+    if profile == LCOE_PROFILE:
+        inputs = payload.get("lcoe_inputs")  # absent from reports stored before S8b
+        raw.update(
+            lcoe_inputs=None if not isinstance(inputs, dict) else {
+                "energy_mwh": None if inputs.get("energy_mwh") is None else [_number(v) for v in inputs["energy_mwh"]],
+                "value": None if inputs.get("value") is None else [_number(v) for v in inputs["value"]],
+                "inflation": _number(inputs.get("inflation")),
+            },
+            lcoe_headlines={k: _number(payload.get(k)) for k in ("lcoe_nominal_per_mwh", "lcoe_real_per_mwh")},
+            has_counterfactual=bool(payload.get("has_counterfactual")),
+        )
+    return raw
 
 
 def npv(rate, cash):
@@ -154,11 +188,66 @@ def unique_irr(cash):
     return min(sorted(candidates), key=lambda r: (abs(npv(r, cash)), len(repr(r)))), None
 
 
+def _pv(rate, series):
+    return math.fsum(v / (1.0 + rate) ** k for k, v in enumerate(series))
+
+
+def _close(value, headline):
+    return headline is not None and abs(value - headline) <= LCOE_TOLERANCE * max(1.0, abs(headline))
+
+
+def _lcoe(raw, scope, currency):
+    """The engine's LCOE (`services/finance/engine.py`) from the retained inputs."""
+    inputs, heads = raw["lcoe_inputs"], raw["lcoe_headlines"]
+    rate, equity = raw["rates"]["cost_of_equity"], raw["cash"].get("equity_post_tax")
+    available, reasons = {}, {}
+    n = len(raw["index"])
+    if inputs is None or inputs["energy_mwh"] is None or inputs["value"] is None:
+        reasons = dict.fromkeys(LCOE_METRICS, "lcoe_inputs_not_retained")
+    elif rate is None or rate <= -1:
+        reasons = dict.fromkeys(LCOE_METRICS, "npv_rate_not_recorded")
+    elif not (equity and len(equity) == len(inputs["energy_mwh"]) == len(inputs["value"]) == n
+              and common.finite(equity) and common.finite(inputs["energy_mwh"]) and common.finite(inputs["value"])):
+        reasons = dict.fromkeys(LCOE_METRICS, "cash_not_established")
+    else:
+        numerator = _pv(rate, inputs["value"]) - _pv(rate, equity)
+        energy = _pv(rate, inputs["energy_mwh"])
+        if energy <= 0:  # the engine gives no LCOE then
+            reasons = dict.fromkeys(LCOE_METRICS, "no_discounted_generation")
+        else:
+            figures = {"lcoe_nominal": numerator / energy}
+            if raw["price_basis"] == "real":
+                figures["lcoe_real"] = figures["lcoe_nominal"]
+            elif inputs["inflation"] is None or inputs["inflation"] <= -1:
+                reasons["lcoe_real"] = "inflation_not_recorded"
+            else:
+                real_rate = (1.0 + rate) / (1.0 + inputs["inflation"]) - 1.0
+                real_energy = _pv(real_rate, inputs["energy_mwh"])
+                if real_energy > 0:
+                    figures["lcoe_real"] = numerator / real_energy
+                else:
+                    reasons["lcoe_real"] = "no_discounted_generation"
+            for metric, value in figures.items():
+                headline = heads[metric + "_per_mwh"]
+                if headline is None:
+                    reasons[metric] = "headline_not_established"
+                elif not _close(value, headline):
+                    reasons[metric] = "headline_mismatch"
+                else:
+                    available[metric] = value
+    definitions = {m: {**d, "unit": currency + "/MWh"} for m, d in LCOE_METRICS.items()}
+    return common.facts_and_slots(scope, definitions, available, reasons, n)
+
+
 def calculate(raw, scope):
-    if raw.get("version") != 1 or raw.get("profile") != PROFILE or raw["entity_id"] != scope["entity_id"]:
+    if (raw.get("version") != 1 or raw.get("profile") not in PROFILES or raw["profile"] != scope["profile"]
+            or raw["entity_id"] != scope["entity_id"]):
         raise ValueError("investment_source_identity")
     if "start" in scope:
         raise ValueError("unsupported_snapshot_scope")
+    if raw["profile"] == LCOE_PROFILE:
+        code = raw["currency"] if re.fullmatch(r"[A-Z]{3}", raw["currency"]) else "currency"
+        return _lcoe(raw, scope, code)
     available, reasons = {}, {}
     for metric, (series, rate_key, headline_key) in SERIES.items():
         cash, headline = raw["cash"].get(series), raw["headlines"][headline_key]
@@ -208,5 +297,8 @@ def notes(raw, label):
         f"Equity at the cost of equity {pct(rates['cost_of_equity'])}; project at the WACC "
         f"{pct(rates['wacc_nominal'])}, as the report records them. End-of-year discounting; {first} "
         "(financial close) is undiscounted.",
-        "LCOE is not checkable yet: its energy and value series are not retained in the report.",
-    ]
+    ] + ([
+        "The LCOE is on the incremental value against the counterfactual, as the engine computes it."
+    ] if raw.get("has_counterfactual") else []) + ([] if raw["profile"] == LCOE_PROFILE else [
+        "The LCOE is checked separately (investment-lcoe/1), from the series the report retains.",
+    ])

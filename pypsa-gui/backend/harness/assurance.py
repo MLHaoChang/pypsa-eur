@@ -437,6 +437,7 @@ class Turn:
             assurance_metrics.balance.PROFILE: "Network",
             assurance_metrics.site_import.PROFILE: "Network",
             assurance_metrics.investment.PROFILE: "Network",
+            assurance_metrics.investment.LCOE_PROFILE: "Network",
             assurance_metrics.curtailment.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Generator",
         }.get(profile)
@@ -474,7 +475,7 @@ class Turn:
             lines.extend(assurance_metrics.balance.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.site_import.PROFILE:
             lines.extend(assurance_metrics.site_import.notes(record["raw"]))
-        if profile == assurance_metrics.investment.PROFILE:
+        if profile in assurance_metrics.investment.PROFILES:
             lines.extend(assurance_metrics.investment.notes(record["raw"], _label))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])

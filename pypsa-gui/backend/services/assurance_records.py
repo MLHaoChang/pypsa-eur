@@ -372,7 +372,7 @@ def capture_scoped(owner, scope):
                                                   calculations.curtailment.PROFILE,
                                                   calculations.capacity.PROFILE, calculations.cycles.PROFILE,
                                                   calculations.balance.PROFILE, calculations.site_import.PROFILE,
-                                                  calculations.investment.PROFILE)
+                                                  *calculations.investment.PROFILES)
                  else next(iter(raw["generators"].values())))
         record = {
             "version": 1,
@@ -411,7 +411,7 @@ def _scoped_read(ctx, scope, owner):
     the locked read: both must be current and name the same report."""
     from harness import calculations
 
-    invested = scope["profile"] == calculations.investment.PROFILE
+    invested = scope["profile"] in calculations.investment.PROFILES
     before = calculations.investment.current(ctx) if invested else None
     with network_guard():
         raw = calculations.scoped_source(ctx, scope, owner, investment_state=before)
