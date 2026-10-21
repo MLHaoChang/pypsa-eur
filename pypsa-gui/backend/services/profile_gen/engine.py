@@ -29,7 +29,16 @@ from services.profile_gen import synthetic
 
 
 class ProfileGenError(Exception):
-    """Base class for all typed profile-generation refusals."""
+    """Base class for all typed profile-generation refusals.
+
+    ``public`` is the sentence a caller may see (`refusals.public_message`):
+    the one the refusal was raised with, which we author. Raised with no
+    sentence, it has none and the caller sees only the type.
+    """
+
+    def __init__(self, *args):
+        super().__init__(*args)
+        self.public: str | None = args[0] if args and isinstance(args[0], str) else None
 
 
 class UnsupportedTechnologyError(ProfileGenError):

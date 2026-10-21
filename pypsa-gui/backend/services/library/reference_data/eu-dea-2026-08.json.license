@@ -1,0 +1,7 @@
+SPDX-FileCopyrightText: Danish Energy Agency and Energinet
+SPDX-FileCopyrightText: 2026 GridSpine contributors (selection and transformations)
+SPDX-License-Identifier: CC-BY-4.0
+
+Source: DEA/Energinet August 2026 technology workbooks, https://ens.dk/media/8615/download and https://ens.dk/media/6444/download
+Both inspected Intro worksheets explicitly state Attribution 4.0 International.
+Modified: selected central cells only; native reader converts units and derives annual FOM shares. Original cells, labels, source hashes and money years are retained in the JSON. No endorsement is implied.

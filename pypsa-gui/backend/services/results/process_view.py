@@ -19,12 +19,11 @@ from services.compare.support import _build_snapshot_weights, _per_period_groupb
 from services.period_utils import is_multi_period
 from services.process_products import (
     BUY_IN,
-    SHORTFALL,
     bus_unit,
     generator_role,
-    lost_production_value,
     product_buses,
     product_value,
+    shortfalls,
 )
 
 ENERGY_BASIS = "generators"
@@ -52,8 +51,9 @@ def _frame_col(frame, name: str, sns):
 
 
 class _View:
-    def __init__(self, n):
+    def __init__(self, n, lost_load=None):
         self.n = n
+        self.shortfalls = shortfalls(n, lost_load)
         self.sns = n.snapshots
         self.multi = is_multi_period(n)
         self.w_energy = _build_snapshot_weights(n, ENERGY_BASIS)
@@ -112,37 +112,44 @@ def _product(view: _View, bus: str) -> dict:
 
     gens = n.generators.index[n.generators["bus"] == bus]
     gen_p = getattr(n.generators_t, "p", None)
-    buy, lost, role_flags = [], [], set()
+    buy, role_flags = [], set()
     for g in gens:
         role, flag = generator_role(n, g)
-        if flag:
-            role_flags.add(flag)
         if role == BUY_IN:
             buy.append(g)
-        elif role == SHORTFALL:
-            lost.append(g)
-
-    lost_series = [_frame_col(gen_p, g, sns) for g in lost]
-    lost_amount = view.amount([s.clip(lower=0) for s in lost_series if s is not None], unit, tf)
+            if flag:
+                role_flags.add(flag)
+    # The shortfall from the one accessor: a role Generator, else the solve's capture (ticket 08).
+    lost = [s for s in view.shortfalls if s.bus == str(bus)]
+    role_flags |= {s.flag for s in lost if s.flag == "role_from_name"}
+    capture_flag = next((s.flag for s in lost if s.source == "capture" and s.flag), None)
+    lost_amount = view.amount([s.p.clip(lower=0) for s in lost if s.p is not None], unit, tf)
     eur, eur_flag, eur_pp = None, None, {}
     if not lost:
         lost_amount["flag"] = "no_shortfall_slack"
         eur_flag = "lost_production_value_missing"
-    elif any(lost_production_value(n, g) is None for g in lost):
+    elif any(s.p is None and s.source == "capture" for s in lost):
+        # A bus value with no capture of this solve: its lost production is not known, never 0.
+        lost_amount.update(value=None, t=None, mwh=None, by_period={}, flag=capture_flag, t_flag=capture_flag)
+        eur_flag = capture_flag
+    elif any(s.value is None for s in lost):
         eur_flag = "lost_production_value_missing"
     else:
         eur = 0.0
-        for g, s in zip(lost, lost_series):
-            if s is None:
+        for s in lost:
+            if s.p is None:
                 continue
-            t, pp = view.wsum(s.clip(lower=0) * lost_production_value(n, g), view.w_cost)
+            t, pp = view.wsum(s.p.clip(lower=0) * s.cost, view.w_cost)
             if t is None:
                 eur, eur_flag, eur_pp = None, "non_finite_values", {}
                 break
             eur += t
             for k, v in pp.items():
                 eur_pp[k] = eur_pp.get(k, 0.0) + v
-    lost_amount.update(eur=eur, eur_flag=eur_flag, eur_by_period=eur_pp, eur_weighting=COST_BASIS)
+    if capture_flag and not lost_amount.get("flag"):
+        lost_amount["flag"] = capture_flag              # stale: shown, never as current
+    lost_amount.update(eur=eur, eur_flag=eur_flag or capture_flag, eur_by_period=eur_pp,
+                       eur_weighting=COST_BASIS)
 
     inventory = []
     for st in n.stores.index[n.stores["bus"] == bus]:
@@ -210,10 +217,11 @@ def _process_unit(view: _View, link: str) -> dict:
     }
 
 
-def compute_process_view(n) -> dict:
+def compute_process_view(n, lost_load=None) -> dict:
     """The process view of a solved network: `products` (one per product bus) and `process_units` (one per Link with
-    `eh_process` set). Both empty on a network with neither."""
-    view = _View(n)
+    `eh_process` set). Both empty on a network with neither. `lost_load`: the solve's capture, whose
+    `lost_production` entry (ticket 08) is read for a bus with no shortfall Generator."""
+    view = _View(n, lost_load)
     units = []
     if "eh_process" in n.links.columns:
         units = [_process_unit(view, link) for link in n.links.index if _as_bool(n.links.at[link, "eh_process"])]
