@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-20",
+  "generated_at": "2026-10-21",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 267,
+  "tool_count": 268,
   "tools": [
     {
       "name": "resolve_project_target",
