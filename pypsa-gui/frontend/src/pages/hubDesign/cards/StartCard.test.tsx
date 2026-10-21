@@ -59,9 +59,9 @@ describe('StartCard', () => {
     mount()
     const ids = TEMPLATES.filter(t => t.id.startsWith('eh_')).map(t => t.id)
     expect(ids).toEqual(['eh_datacenter', 'eh_h2_hub', 'eh_microgrid', 'eh_datacenter_staged',
-      'eh_h2_hub_staged', 'eh_ammonia_staged', 'eh_microgrid_staged'])
+      'eh_h2_hub_staged', 'eh_ammonia_staged', 'eh_ipp_hybrid', 'eh_microgrid_staged'])
     const list = screen.getByTestId('hub-start-templates')
-    expect(list.querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(7)
+    expect(list.querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(8)
     for (const t of TEMPLATES.filter(t => t.id.startsWith('eh_'))) {
       const el = screen.getByTestId(`hub-start-template-${t.id}`)
       expect(el.textContent).toContain(t.name)
@@ -184,7 +184,7 @@ describe('StartCard — your own site (G2)', () => {
     expect(await screen.findByTestId('site-form')).toBeTruthy()
     // the tile is not one of the example templates
     expect(screen.getByTestId('hub-start-templates')
-      .querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(7)
+      .querySelectorAll('[data-testid^="hub-start-template-"]').length).toBe(8)
     cleanup()
     useHubDesignStore.setState({ siteFormRequested: true })
     mount()

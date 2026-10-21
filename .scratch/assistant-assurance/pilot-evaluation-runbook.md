@@ -1,12 +1,15 @@
 # Run the bounded checked-answer evaluation
 
-The CI gate evaluates 164 versioned requests through the authenticated public stream
+The CI gate evaluates 214 versioned requests through the authenticated public stream
 and owned answer API in disposable projects. Every current default metric in all
-eight profiles has an independently specified positive expectation. Network
+thirteen profiles has an independently specified positive expectation. Network
 aggregation uses two generators (300 EUR), generator economics uses one
 (230 EUR), the StorageUnit trajectory/accounting oracle totals 51 EUR, and the
 opt-in `carrier-energy/1` oracle sums two wind generators to 32 MWh (peak 8 MW),
-and the opt-in loading oracles put line L12 at a 100 % peak against its 8 MVA rating.
+the opt-in loading oracles put line L12 at a 100 % peak against its 8 MVA rating,
+the opt-in lost-load oracle sheds 15 MWh over 3 weighted hours (10000 EUR at VoLL 1000),
+and the opt-in result oracles give a 25 EUR/MWh time-weighted price, 8.5 t of generator CO2
+(6 t at a 40 EUR/t binding cap) and 33 of 50 MWh curtailed.
 See the [plan](pilot-evaluation-plan.md) and the hand-worked comments in
 [the catalogue](../../pypsa-gui/backend/harness/pilot_evaluation.py).
 The additional 80 stress cases cover eight varied numerical scenarios across

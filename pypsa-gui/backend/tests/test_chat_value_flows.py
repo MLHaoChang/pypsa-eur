@@ -269,5 +269,10 @@ def test_not_established_passes_through(reset_backend):
     from tests.test_value_flow_reconciliation import _commercial, _network, _solve
 
     _solve(_network(), _commercial(vf=None))
-    assert chat_tools.get_results("value_flows") == {"status": "not_established",
-                                                     "reason": "no_value_flows_config"}
+    result = chat_tools.get_results("value_flows")
+    # LC-12: the helper solves outside the solver lifecycle, so Check answers'
+    # guard cannot verify it as this session's optimal solve.
+    assert {k: result.pop(k) for k in ("inputs_changed_since_solve", "results_current")} == {
+        "inputs_changed_since_solve": False, "results_current": False}
+    assert result.pop("freshness_note").startswith("not current")
+    assert result == {"status": "not_established", "reason": "no_value_flows_config"}

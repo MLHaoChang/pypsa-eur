@@ -330,7 +330,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 164 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 214 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -351,7 +351,17 @@ Stores and always discloses how many it excluded. `branch-loading/1` and
 `network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
 Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
-refuse whenever AC power-flow results exist.
+refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
+hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
+claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
+the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
+`bus-price/1`, `generator-emissions/1`, `network-emissions/1` and `curtailment/1`
+(opt-in, `price_calculations.py`, `emissions_calculations.py`,
+`curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
+time-weighted price, generator CO2 over the time-varying efficiency with the cap's
+dual as −mu, and curtailment of generators with a time-varying availability. Every
+profile refuses once an AC power flow has overwritten the LP outputs.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -771,6 +781,18 @@ solve finished · continuing"), never a user bubble and never the job id, also
 when the history is replayed. `get_task` names the plan's verified edits in
 `changes`, and the OpenAI tool selection favours every tool the plan still
 has to run.
+
+### Stale result reads (LC-12)
+
+A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
+`state` can still say `fresh`. `dispatch_status` and every dict answer of
+`get_results` therefore also carry `workflow_tools.solve_freshness()`:
+`inputs_changed_since_solve` compares both recorded solve fingerprints with
+the current inputs (`null` when no solve recorded them), and `results_current`
+is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
+never disagree with it, also after an AC power flow. `get_results` adds a
+`freshness_note`: stale when the inputs changed, not current when the guard
+fails for another reason.
 
 ## Recorded runs, load flow, and experiment plans
 

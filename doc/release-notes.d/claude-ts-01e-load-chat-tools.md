@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can generate load profiles: `list_load_profile_archetypes` and `generate_load_profile` tools, and `apply_generated_profile` writes a load profile to the load's p_set (or a named target).
