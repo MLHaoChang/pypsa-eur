@@ -139,7 +139,11 @@ def render(ctx, record, requested):
     if not data["columns"]:
         return {"status": "not_drawn", "reason": "nothing_drawable", "title": "No requested series could be drawn",
                 "series": slots}
-    lines = caption(slots, window) + [f"Evidence {record['evidence_id']}"]
+    import datetime
+
+    drawn_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
+    # The drawing is as of this solve; an image outlives its evidence and must say when.
+    lines = caption(slots, window) + [f"Checked against the solve of {drawn_at} · evidence {record['evidence_id']}"]
     png = _draw(record, data, lines)
     project, root, _owner = assistant_tools._project()
     byte_hash = hashlib.sha256(png).hexdigest()
@@ -148,7 +152,7 @@ def render(ctx, record, requested):
         "evidence_id": record["evidence_id"], "source_sha256": record["source_sha256"],
         "profile": record["request_scope"]["profile"], "entity_id": record["request_scope"]["entity_id"],
         "requested": requested, "window": window, "series": slots, "caption": lines,
-        "owner_id": record["owner_id"],
+        "owner_id": record["owner_id"], "drawn_at": drawn_at,
         "dataset": data, "dataset_sha256": canonical_sha256(data),
         "render_spec": {"kind": "line", "points": "every snapshot as stored", "caption": lines},
         "artifact_sha256": byte_hash,
@@ -207,8 +211,13 @@ def _draw(record, data, lines):
     return buffer.getvalue()
 
 
+EXPIRED_NOTE = "checked against the solve of {drawn_at}; evidence expired, not re-verified now"
+
+
 def verify(manifest):
-    """True when a checked chart's dataset is still its evidence's: the evidence
+    """"current" when a checked chart's dataset is still its evidence's, "expired"
+    once that evidence has expired (the chart then stands on its integrity hashes
+    and says so), False on any mismatch. Current means: the evidence
     record's source hash and the series values, re-extracted, must match.
 
     The download route has already checked the reader's access to the project and
@@ -220,14 +229,19 @@ def verify(manifest):
 
     from services import assurance_records
 
+    import time
+
     path = assurance_records._path(manifest["owner_id"], manifest["evidence_id"])
     if not path.exists():
-        return True
+        return "expired"
     envelope = json.loads(path.read_text(encoding="utf-8"))
     record = envelope["record"]
     if (assurance_records.digest(record) != envelope["sha256"] or record["record_kind"] != "evidence"
             or record["project_id"] != manifest["project_id"] or record["owner_id"] != manifest["owner_id"]
             or record["source_sha256"] != manifest["source_sha256"]):
         return False
+    if record["expires_at"] <= time.time():
+        return "expired"
     data, slots, window = dataset(record, manifest["requested"])
-    return data == manifest["dataset"] and slots == manifest["series"] and window == manifest["window"]
+    same = data == manifest["dataset"] and slots == manifest["series"] and window == manifest["window"]
+    return "current" if same else False

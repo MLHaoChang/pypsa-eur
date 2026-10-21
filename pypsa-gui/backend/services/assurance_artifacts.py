@@ -55,11 +55,14 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
             from services import checked_charts
 
             try:
-                current = checked_charts.verify(manifest)
+                status = checked_charts.verify(manifest)
             except HTTPException:
-                current = False
-            if not current:
+                status = False
+            if not status:
                 raise ValueError("checked chart evidence mismatch")
+            manifest = {**manifest, "evidence_status": status}
+            if status == "expired":
+                manifest["evidence_note"] = checked_charts.EXPIRED_NOTE.format(drawn_at=manifest["drawn_at"])
         return record if provenance else manifest
     except (OSError, ValueError, TypeError, KeyError):
         raise HTTPException(
