@@ -732,6 +732,16 @@ foreground solver calls retain the detached start receipt. A start or
 contradictory still-running receipt cannot complete a task; fully asynchronous
 durable-task step resumption remains outside the checked-scope recovery tranche.
 
+### Stale result reads (LC-12)
+
+A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
+`state` can still say `fresh`. `dispatch_status` and every dict answer of
+`get_results` therefore also carry `inputs_changed_since_solve`
+(`workflow_tools.inputs_changed_since_solve`): the solve-input fingerprint the
+last solve recorded compared with the current inputs, `null` when no solve
+recorded one. When true, `get_results` adds a `freshness_note` calling the
+results stale, as the load-flow, energy-flow and load-shape reads already do.
+
 ## Recorded runs, load flow, and experiment plans
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,

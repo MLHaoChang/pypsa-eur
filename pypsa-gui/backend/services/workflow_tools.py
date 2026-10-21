@@ -420,6 +420,18 @@ def _exact_frame_json(frame):
         sort_keys=True, allow_nan=False)
 
 
+def inputs_changed_since_solve(ctx=None):
+    """LC-12: whether the inputs differ from the last solve's, by fingerprint.
+
+    None when no solve recorded its fingerprint: no claim either way."""
+    from services.pypsa_service import PyPSAService
+    ctx = ctx or PyPSAService.get_active_context()
+    solved = ctx.network.meta.get("assistant_solve_input_fingerprint") if hasattr(ctx.network, "meta") else None
+    if not solved:
+        return None
+    return solved != _network_input_fingerprint(ctx)
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a

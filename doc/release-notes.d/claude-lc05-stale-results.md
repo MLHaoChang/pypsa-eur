@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): After a chat edit, the assistant's result reads (`get_results`, `dispatch_status`) say whether the inputs changed since the last solve, by its input fingerprint, and call such results stale instead of presenting them as current.

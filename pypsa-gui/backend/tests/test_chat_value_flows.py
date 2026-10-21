@@ -270,4 +270,5 @@ def test_not_established_passes_through(reset_backend):
 
     _solve(_network(), _commercial(vf=None))
     assert chat_tools.get_results("value_flows") == {"status": "not_established",
-                                                     "reason": "no_value_flows_config"}
+                                                     "reason": "no_value_flows_config",
+                                                     "inputs_changed_since_solve": False}
