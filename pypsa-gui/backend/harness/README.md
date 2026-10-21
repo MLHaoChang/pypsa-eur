@@ -322,7 +322,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 283 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 292 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -375,6 +375,11 @@ generation and value the report retains (reports stored before that read
 `copt-screening/1` (opt-in) reconvolves the COPT's two-state fleet in plain numpy on the
 1 MW grid (strict LOLP, the engine's 1e-12 snap, generator weights, horizon totals) against a
 residual it recomputes; profiled, period-varying, folded or off-grid fleets are refused.
+`grid-readiness/1` (opt-in) checks the grid-readiness scorecard as the route reads it: a row
+is checked when it declares the code's rule for its id and its stored value, judged by that
+rule against its stored limit, gives its verdict; boundary disagreements are withheld, and
+unknown, non-scalar and categorical rows are named. Only the counts are facts; the harness
+writes one line per row.
 A checked request may add `chart` (or end with "; chart <series>, ..."): `services/checked_charts.py`
 draws only per-snapshot series the request's evidence holds (generator `p`; StorageUnit `p_store`,
 `p_dispatch`, `state_of_charge`; bus `marginal_price`; branch `p0`, `p1`, and `loading` from the branch

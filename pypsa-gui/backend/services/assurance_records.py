@@ -372,7 +372,8 @@ def capture_scoped(owner, scope):
                                                   calculations.curtailment.PROFILE,
                                                   calculations.capacity.PROFILE, calculations.cycles.PROFILE,
                                                   calculations.balance.PROFILE, calculations.site_import.PROFILE,
-                                                  *calculations.investment.PROFILES, calculations.copt_screen.PROFILE)
+                                                  *calculations.investment.PROFILES, calculations.copt_screen.PROFILE,
+                                                  calculations.readiness.PROFILE)
                  else next(iter(raw["generators"].values())))
         record = {
             "version": 1,

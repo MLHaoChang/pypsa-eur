@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the grid-readiness scorecard (`grid-readiness/1`, opt-in): each row whose verdict follows from its declared rule is recomputed from its stored value and limit, and the answer lists every row as checked or names why it is not.

@@ -24,7 +24,7 @@ class RequestScope(BaseModel):
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
-        "copt-screening/1",
+        "copt-screening/1", "grid-readiness/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -91,7 +91,7 @@ def validate(value):
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
         raise ValueError("unsupported_component_class")
     if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
-                            "copt-screening/1") and (
+                            "copt-screening/1", "grid-readiness/1") and (
         scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("network_scope_required")
@@ -200,6 +200,10 @@ def _from_message(message, project_id, ui_context):
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:investment case )?lcoe\s+for\s+network[.!?]?",
                     message.strip(), re.I):
         return validate({"version": 1, "profile": "investment-lcoe/1", "project_id": project_id,
+                         "entity_id": "network", "retain": False})
+    if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?grid[- ]readiness(?:\s+scorecard)?"
+                    r"\s+for\s+network[.!?]?", message.strip(), re.I):
+        return validate({"version": 1, "profile": "grid-readiness/1", "project_id": project_id,
                          "entity_id": "network", "retain": False})
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:copt|screening adequacy|copt screening)"
                     r"\s+for\s+network[.!?]?", message.strip(), re.I):

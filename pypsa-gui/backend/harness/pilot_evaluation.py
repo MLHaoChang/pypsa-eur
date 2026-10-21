@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/11"
+SUITE_VERSION = "checked-pilot-evaluation/12"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -100,8 +100,14 @@ LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 # Residuals 70 and 100 MW at weight 2: LOLP 0.625 both hours, LOLE 2.5 h; EUE 21.25 + 40 = 61.25
 # per unit weight, 122.5 MWh.
 COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
-# Computed on demand from the current network: nothing to go stale.
-ON_DEMAND = {"copt-screening/1"}
+# The data-centre template's saved scorecard as the route reads it (14 rows): SCR 250 MVA / 30 MW
+# = 8.333 >= 3.0 is the one row a declared rule checks (pass); the other 13 are unknown (ramp,
+# voltage change, reactive range), not scalar (the peak, oscillation, LOLE) or categorical
+# (frequency support, four dynamic rows, grid former, ride-through).
+GRID = {"checked_pass": (1, "rows"), "checked_warn": (0, "rows"), "checked_fail": (0, "rows"),
+        "not_checked": (13, "rows")}
+# Computed on demand from the current network or saved files: nothing to go stale.
+ON_DEMAND = {"copt-screening/1", "grid-readiness/1"}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -137,6 +143,7 @@ ADDED = {
     "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
     "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
     "copt-screening/1": ("network", "Show the COPT screening for", COPT, "screening_lole"),
+    "grid-readiness/1": ("network", "Show the grid readiness for", GRID, "checked_pass"),
 }
 # Profiles whose scope names the component's class.
 SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
@@ -189,6 +196,8 @@ LABELS = {
     "screening_lole": "Screening LOLE over the modelled horizon (COPT)",
     "screening_eue": "Screening EUE over the modelled horizon (COPT)",
     "screening_lolp_max": "Highest hourly loss-of-load probability (COPT)",
+    "checked_pass": "Scorecard rows checked as pass", "checked_warn": "Scorecard rows checked as warn",
+    "checked_fail": "Scorecard rows checked as fail", "not_checked": "Scorecard rows not checked",
 }
 
 
