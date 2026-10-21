@@ -49,8 +49,10 @@ from fastapi import HTTPException
 MAX_ROWS = 500
 MAX_COLUMNS = 40
 MAX_CELL_CHARS = 200
-# Cells one card shows; a larger mapping is split by the user (rows or columns).
+# Changed cells one card shows; a larger mapping is split by the user (rows or columns).
 MAX_CARD_CELLS = 200
+# Left-out cells one card or preview lists; the rest are counted.
+MAX_LISTED_GAPS = 50
 
 MAX_XLSX_INFLATED = 100 * 1024 * 1024
 MAX_XLSX_RATIO = 100
@@ -123,12 +125,18 @@ def _read_csv(blob: bytes) -> tuple[list[str], list[list[dict]]]:
 
 
 _DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
+_DECLARED = re.compile(rb"""<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+_WIDE = (b"\xff\xfe", b"\xfe\xff", b"\x00<", b"<\x00", b"\x00\x00", b"\x4c\x6f\xa7\x94")
 
 
 def _check_xlsx(blob: bytes) -> None:
-    """Refuse a zip bomb or an XML DOCTYPE/entity before openpyxl parses anything."""
+    """Refuse a zip bomb, or a DOCTYPE/entity in ANY member, before openpyxl parses anything.
+    Every member is scanned whatever its name (openpyxl follows the package's own part
+    names), and a member in a wide or declared non-UTF-8 encoding refuses, because the
+    byte scan could not see a DOCTYPE in it."""
     try:
-        members = zipfile.ZipFile(io.BytesIO(blob)).infolist()
+        archive = zipfile.ZipFile(io.BytesIO(blob))
+        members = archive.infolist()
     except (zipfile.BadZipFile, ValueError):
         _refuse("unreadable_table", "The workbook could not be read as XLSX: not a zip archive.")
     inflated = sum(m.file_size for m in members)
@@ -137,16 +145,22 @@ def _check_xlsx(blob: bytes) -> None:
         _refuse("table_unsafe", f"The workbook inflates to {inflated} bytes from {packed}; a table is read up to "
                 f"{MAX_XLSX_INFLATED} bytes and {MAX_XLSX_RATIO}x compression.",
                 limits={"inflated_bytes": MAX_XLSX_INFLATED, "ratio": MAX_XLSX_RATIO})
-    archive = zipfile.ZipFile(io.BytesIO(blob))
-    for m in members:
-        if not m.filename.lower().endswith((".xml", ".rels", ".vml")):
-            continue
-        tail = b""
-        with archive.open(m) as part:
-            while chunk := part.read(1 << 16):
-                if _DTD.search(tail + chunk):
-                    _refuse("table_unsafe", f"{m.filename} declares a DOCTYPE or entity; the workbook is not read.")
-                tail = chunk[-16:]
+    try:
+        for m in members:
+            tail, head = b"", True
+            with archive.open(m) as part:
+                while chunk := part.read(1 << 16):
+                    if head:
+                        declared = _DECLARED.match(chunk.lstrip(b"\xef\xbb\xbf \t\r\n"))
+                        if chunk.startswith(_WIDE) or (declared and declared.group(1).lower().replace(b"-", b"")
+                                                       not in (b"utf8", b"usascii", b"ascii")):
+                            _refuse("table_unsafe", f"{m.filename} is not UTF-8 text; the workbook is not read.")
+                        head = False
+                    if _DTD.search(tail + chunk):
+                        _refuse("table_unsafe", f"{m.filename} declares a DOCTYPE or entity; the workbook is not read.")
+                    tail = chunk[-16:]
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, EOFError, OSError, NotImplementedError) as exc:
+        _refuse("unreadable_table", f"The workbook could not be read as XLSX: {type(exc).__name__}.")
 
 
 def _read_xlsx(blob: bytes, sheet: str | None) -> tuple[str, list[str], list[str], list[list[dict]]]:
@@ -163,10 +177,15 @@ def _read_xlsx(blob: bytes, sheet: str | None) -> tuple[str, list[str], list[str
     name = sheet if sheet is not None else sheets[0]
     if name not in sheets:
         _refuse("sheet_not_found", f"No sheet {name!r}; the workbook has {sheets}.", sheets=sheets)
-    vrows = [list(r) for r in values[name].iter_rows(values_only=True)]
-    frows = [list(r) for r in formulas[name].iter_rows(values_only=True)]
-    values.close()
-    formulas.close()
+    try:
+        # Read-only sheets parse lazily: a malformed sheet fails here, not at load.
+        vrows = [list(r) for r in values[name].iter_rows(values_only=True)]
+        frows = [list(r) for r in formulas[name].iter_rows(values_only=True)]
+    except Exception as exc:  # noqa: BLE001 — any parser failure is one refusal
+        _refuse("unreadable_table", f"Sheet {name!r} could not be read: {type(exc).__name__}.")
+    finally:
+        values.close()
+        formulas.close()
     def blank(r: int) -> bool:
         return all(v is None for v in vrows[r]) and all(f is None for f in (frows[r] if r < len(frows) else ()))
 
@@ -380,7 +399,7 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
             d = _number(cell["raw"])
             if d is None:
                 unmapped.append({"name": nm, "field": p["field"], "kind": "unparsed_number", "source": lineage,
-                                 "message": f"{cell['cell']} holds {cell['raw']!r}, not a plain number."})
+                                 "message": f"{cell['cell']} does not hold a plain number."})
                 continue
             value = _as_value(d / p["scale"])
             try:
@@ -409,9 +428,6 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
     if years and base_year is None:
         notes.append(f"No investment case to compare money years with: costs are {', '.join(map(str, years))} "
                      "money, as the table states.")
-    if len(cells) > MAX_CARD_CELLS:
-        _refuse("mapping_too_large", f"The mapping writes {len(cells)} cells; one card shows at most "
-                f"{MAX_CARD_CELLS}. Map fewer rows or columns per apply.", limits={"card_cells": MAX_CARD_CELLS})
     return {"component_class": component_class, "source": src, "name_column": name_column,
             "targets": targets, "cells": cells, "unmapped": unmapped, "needs": needs,
             "missing": [x["confirmation"] for x in needs if x["confirmation"] not in set(confirm or ())],
@@ -443,6 +459,13 @@ def require_confirmed(p: dict) -> None:
     if p["missing"]:
         _refuse("table_confirmation_needed", "Confirm before applying: " + " ".join(
             x["text"] for x in p["needs"] if x["confirmation"] in p["missing"]), missing=p["missing"])
+
+
+def require_card_size(todo: dict[str, dict]) -> None:
+    count = sum(len(v) for v in todo.values())
+    if count > MAX_CARD_CELLS:
+        _refuse("mapping_too_large", f"The mapping changes {count} cells; one card shows at most "
+                f"{MAX_CARD_CELLS}. Map fewer rows or columns per apply.", limits={"card_cells": MAX_CARD_CELLS})
 
 
 def changes(n, p: dict) -> dict[str, dict]:

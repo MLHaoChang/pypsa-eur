@@ -26,6 +26,8 @@ Gatekeeper review (GO WITH CHANGES), each with its case:
 - ET-14 a zip bomb or a DOCTYPE/entity refuses before openpyxl opens the workbook;
 - ET-15 time-series fields stay out; static-or-series fields are written as static;
 - ET-16 the card's digest binds the source cell, not the raw text in it;
+- ET-18 the 200-cell card bound counts changed cells only, and left-out cells are
+  listed up to 50 with the rest counted;
 - ET-17 the route sits behind the foreign-lock gate and the undo middleware, both
   tools are lock-gated, the apply is undo-captured, and an anonymous apply is refused.
 """
@@ -356,7 +358,36 @@ def test_et14_a_zip_bomb_or_a_doctype_refuses_before_openpyxl_opens_it(grid, mon
     with pytest.raises(HTTPException) as exc:
         chat_tools.preview_equipment_mapping(dtd, "Line", "name", columns)
     assert exc.value.detail["error_kind"] == "table_unsafe" and "DOCTYPE" in exc.value.detail["message"]
+
+    # Any member name, and an encoding the byte scan cannot read, refuse too.
+    for parts in ({"xl/worksheets/sheet1.bin": xxe},
+                  {"xl/worksheets/sheet1.xml": xxe.decode().replace("1.0\"?", "1.0\" encoding=\"UTF-16\"?")
+                   .encode("utf-16")},
+                  {"xl/worksheets/sheet1.xml": b'<?xml version="1.0" encoding="UTF-16LE"?><worksheet/>'}):
+        bad = upload_service.add_upload("P", _xlsx_bytes(parts), "x.xlsx", mime).file_id
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.preview_equipment_mapping(bad, "Line", "name", columns)
+        assert exc.value.detail["error_kind"] == "table_unsafe", parts.keys()
     assert opened == []
+
+
+def test_et14b_a_malformed_sheet_refuses_as_unreadable_not_a_server_error(grid):
+    import zipfile
+
+    buf = io.BytesIO()
+    wb = Workbook()
+    wb.active.title = "Lines"
+    wb.save(buf)
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(buf.getvalue())) as src, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as dst:
+        for item in src.infolist():
+            data = src.read(item)
+            dst.writestr(item, b"<worksheet><sheetData><row" if item.filename.endswith("sheet1.xml") else data)
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    uid = upload_service.add_upload("P", out.getvalue(), "broken.xlsx", mime).file_id
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.preview_equipment_mapping(uid, "Line", "name", {"rating": {"field": "s_nom", "unit": "MVA"}})
+    assert exc.value.detail["error_kind"] == "unreadable_table"
 
 
 def test_et15_time_series_fields_stay_out_and_static_or_series_fields_are_static(grid):
@@ -411,3 +442,23 @@ def test_et17_the_route_is_gated_undo_captured_and_refuses_anonymous_callers(ano
     r = anon_client.post(path, json={**args, "digest": "f" * 64})
     assert r.status_code == 401
     assert PyPSAService.get_network().lines.at["L1", "s_nom"] == 300
+
+
+def test_et18_the_card_bound_counts_changed_cells_and_long_gap_lists_are_counted(grid, monkeypatch):
+    monkeypatch.setattr(T, "MAX_CARD_CELLS", 3)
+    monkeypatch.setattr(T, "MAX_LISTED_GAPS", 2)
+    # Four mapped cells, two of them already equal to the network: two change.
+    same = _csv("name,rating,reactance\nL1,300,12.1\nL2,450,7.25\nL7,1,1\nL8,1,1\nL9,1,1\n")
+    out = chat_tools.preview_equipment_mapping(same, "Line", "name", LINE_COLUMNS)
+    assert (out["changed_cells"], out["unchanged_cells"]) == (2, 2)
+    assert [(c["name"], c["field"]) for c in out["cells"]] == [("L2", "s_nom"), ("L2", "x")]
+    assert len(out["unmapped"]) == 2 and out["unmapped_total"] == 3
+    assert out["unmapped_by_kind"] == {"component_not_found": 3}
+
+    card = _card({"upload_id": same, "component_class": "Line", "name_column": "name", "columns": LINE_COLUMNS})
+    gaps = [r for r in card["rows"] if r.get("gap")]
+    assert len(gaps) == 2 and any("1 more cells are left out" in str(r) for r in card["rows"])
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.preview_equipment_mapping(_csv(LINES), "Line", "name", LINE_COLUMNS)
+    assert exc.value.detail["error_kind"] == "mapping_too_large"

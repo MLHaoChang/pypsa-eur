@@ -659,6 +659,7 @@ def _equipment_table_preview(args: dict) -> list[dict]:
     todo = T.changes(PyPSAService.get_network(), p)
     if not todo:
         _refuse("nothing_to_change", "Every mapped value already equals the network's; nothing to apply.")
+    T.require_card_size(todo)
     klass = p["component_class"]
 
     def run():
@@ -675,9 +676,12 @@ def _equipment_table_preview(args: dict) -> list[dict]:
                 row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
     for need in p["needs"]:
         rows.append({**_note(klass, "", need["confirmation"], need["text"]), "confirmed": True})
-    for gap in p["unmapped"]:
+    for gap in p["unmapped"][:T.MAX_LISTED_GAPS]:
         rows.append({**_note(klass, gap.get("name") or "", gap.get("field") or gap.get("column") or "",
                               gap["message"]), "gap": gap["kind"], **({"source": gap["source"]} if "source" in gap else {})})
+    if len(p["unmapped"]) > T.MAX_LISTED_GAPS:
+        rows.append(_note(klass, "", "", f"{len(p['unmapped']) - T.MAX_LISTED_GAPS} more cells are left out; "
+                          "preview_equipment_mapping counts them by kind."))
     rows += [_note(klass, "", "money_year", text) for text in p["notes"]]
     return rows
 

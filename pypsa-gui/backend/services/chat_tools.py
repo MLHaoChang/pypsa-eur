@@ -1704,11 +1704,18 @@ def preview_equipment_mapping(upload_id: str, component_class: str, name_column:
     p = T.plan_active({"upload_id": upload_id, "sheet": sheet, "component_class": component_class,
                        "name_column": name_column, "columns": columns, "currency": currency,
                        "money_year": money_year, "confirm": confirm})
-    todo = T.changes(PyPSAService.get_network(), p) if not p["missing"] else {}
-    return {"source": p["source"], "component_class": component_class, "cells": p["cells"],
-            "changed_cells": sum(len(v) for v in todo.values()), "unmapped": p["unmapped"],
+    todo = T.changes(PyPSAService.get_network(), p)
+    T.require_card_size(todo)
+    gaps = p["unmapped"]
+    return {"source": p["source"], "component_class": component_class,
+            "cells": [c for c in p["cells"] if c["field"] in todo.get(c["name"], {})],
+            "changed_cells": sum(len(v) for v in todo.values()),
+            "unchanged_cells": len(p["cells"]) - sum(len(v) for v in todo.values()),
+            "unmapped": gaps[:T.MAX_LISTED_GAPS], "unmapped_total": len(gaps),
+            "unmapped_by_kind": {k: sum(g["kind"] == k for g in gaps) for k in dict.fromkeys(g["kind"] for g in gaps)},
             "needs": p["needs"], "missing": p["missing"], "notes": p["notes"],
-            "limits": {"rows": T.MAX_ROWS, "columns": T.MAX_COLUMNS, "card_cells": T.MAX_CARD_CELLS},
+            "limits": {"rows": T.MAX_ROWS, "columns": T.MAX_COLUMNS, "card_cells": T.MAX_CARD_CELLS,
+                       "listed_gaps": T.MAX_LISTED_GAPS},
             "next": "apply_equipment_mapping with the same arguments and source_sha256 = source.sha256"}
 
 
