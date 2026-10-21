@@ -253,7 +253,7 @@ describe('CampusElectricalPanel', () => {
   it('shows the library section between the grid codes and the settings', async () => {
     api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
     renderPanel()
-    expect(await screen.findByLabelText('Asset library')).toBeTruthy()
+    expect(await screen.findByLabelText('Equipment library')).toBeTruthy()
   })
 
   it('shows compliance as is and with measures, with the clause and its tag', async () => {
