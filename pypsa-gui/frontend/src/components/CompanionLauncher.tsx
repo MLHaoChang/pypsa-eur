@@ -104,6 +104,7 @@ export default function CompanionLauncher({
       data-media-state="off"
       data-motion={reduce ? 'off' : 'on'}
       data-hovered={hovered ? 'true' : 'false'}
+      aria-describedby={voiceReasonId}
       data-live={liveOpen ? 'open' : 'closed'}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
@@ -166,6 +167,11 @@ export default function CompanionLauncher({
           </div>
         </form>
       )}
+      {/* L2: the model chip and the voice note are extras. Idle they are
+          visually hidden but stay in the DOM with their accessible names
+          (the launcher is described by the voice note); hover, keyboard
+          focus or live chat shows them (index.css .companion-extras). */}
+      <div className="companion-extras flex flex-col items-end gap-2" data-testid="companion-extras">
       <button
         type="button"
         onClick={onProfiles}
@@ -176,6 +182,7 @@ export default function CompanionLauncher({
       >
         {profileLabel}
       </button>
+      </div>
       <div className="companion-character-wrap" data-lit={lit ? 'true' : 'false'}>
         <div
           aria-hidden="true"
@@ -231,7 +238,8 @@ export default function CompanionLauncher({
           Chat here
         </button>
       </div>
-      <div className="max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted">
+      <div className="companion-extras max-w-72 rounded-lg border border-border bg-bg-2 px-3 py-2 text-[10px] text-muted"
+        data-testid="companion-voice-note">
         <button type="button" disabled aria-describedby={voiceReasonId}
           className="font-medium text-muted disabled:cursor-not-allowed">
           Start voice

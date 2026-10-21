@@ -3,7 +3,7 @@ import { RESULT_GROUPS, groupOf, type ResultsTab } from './groups'
 
 const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
-  'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment',
+  'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -23,7 +23,7 @@ describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
     ['capex', 'investment'], ['economics', 'investment'], ['prices', 'investment'], ['investment', 'investment'],
     ['loadflow', 'grid_plan'],
     ['adequacy', 'reliability'], ['lostload', 'reliability'], ['fmea', 'reliability'],
-    ['dispatch', 'operation'], ['storage', 'operation'], ['curtailment', 'operation'], ['emissions', 'operation'],
+    ['dispatch', 'operation'], ['flows', 'operation'], ['loadshape', 'operation'], ['storage', 'operation'], ['curtailment', 'operation'], ['emissions', 'operation'],
     ['summary', 'summary'], ['overview', 'summary'],
   ] as const)('files %s under %s', (tab, group) => {
     expect(groupOf(tab)).toBe(group)

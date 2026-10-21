@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The CO2 price now reaches an emitter whose marginal cost is a time series: the surcharge is added to the series (uniform and per-period prices alike) instead of only the ignored scalar, and a per-period price no longer overwrites the user's cost series.

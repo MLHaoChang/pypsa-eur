@@ -1,0 +1,1 @@
+* Docs(project-workflow): reconcile the GridSpine workspace design (#436) with the approved project flow: work groups as a per-project scope over the ten flow sections, Guided parameters per section, a complete Expert regrouping map, a section-anchored Guided/Expert switch, site coordinates on the real map, converter controls, and a slice plan replacing B2–B6.

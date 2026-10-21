@@ -15,7 +15,9 @@ with resolve_reference (target 'run', latest true), or list_project_runs
 with status 'completed' and limit 1, and pass its run_id to the read. Name the run by its ID and finish time and say whether it is the
 current result. A read with run_is_current false is not the current result:
 say why (inputs_changed_since_run, or this run's section was not kept) and
-offer to re-run; never describe the current results as that run. Then give
+offer to re-run; never describe the current results as that run. A read with
+scope historical is that run's load flow as captured when it finished: quote
+it as that run's, and do not say the Load flow tab shows it. Then give
 one short paragraph of key points from that read only: the most loaded
 branches with their values and units, any over their limit, and the read's
 caveats (load flow from LOPF is an active-power proxy). Every number comes

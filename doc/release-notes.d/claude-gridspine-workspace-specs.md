@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Publish the GridSpine workspace redesign and implementation acceptance specification, with an industrial example-library prototype, original illustrations and explicit backend integration gates. No application behavior changes.

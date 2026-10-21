@@ -81,11 +81,24 @@ class TemplateLine:
     # dispatch (then a finance-only solve is refused).
     price: float | None = None
     changes_dispatch: bool = False
+    # A difference line ((price − ref) × q: a financial PPA, a CfD; IPP ticket 01): the
+    # owner-signed volume the price multiplies (the settlement's paid MWh). Its price leg
+    # `price × price_qty_mwh` escalates at the contract's indexation and the rest (the
+    # reference leg) at REFERENCE_CLASS; `solve_ppa` scales the price leg only. None = a
+    # line whose whole amount escalates in one class.
+    price_qty_mwh: float | None = None
     # The line's own money year (None = its template's): P2 indexes contract
     # prices to the period year but not tariffs, connection fees, export
     # prices or costs, so a multi-period adapter states those in the base year
     # (WP4.6a review B4). Escalation runs from it.
     money_year: int | None = None
+
+    @property
+    def price_leg(self) -> float | None:
+        """A difference line's price leg, price × price_qty_mwh; None for any other line."""
+        if self.price is None or self.price_qty_mwh is None:
+            return None
+        return self.price * self.price_qty_mwh
 
 
 @dataclass(frozen=True)

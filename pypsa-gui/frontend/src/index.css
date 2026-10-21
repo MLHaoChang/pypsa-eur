@@ -396,6 +396,20 @@ html {
   transform-origin: center bottom;
 }
 
+/* L2 (LC-04): compact idle. The extras stay in the accessibility tree (an
+   sr-only clip, not display:none) and show on hover, focus or live chat. */
+.companion-launcher:not([data-hovered='true']):not([data-live='open']):not(:focus-within) .companion-extras {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  margin: -1px;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .companion-idle {
     animation: companion-bob 2.4s ease-in-out infinite;

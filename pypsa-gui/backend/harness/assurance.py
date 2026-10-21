@@ -112,6 +112,12 @@ def _label(value):
     )
 
 
+# The only tools a checked turn may run. Every results read, chart and export
+# is refused before its handler runs; checked results come from the bounded
+# profiles, computed by software from the request scope.
+CHECKED_TOOLS = frozenset({"get_component", "ui_open_panel", "update_component"})
+
+
 class Turn:
     def __init__(self, session, ctx):
         self.turn_id = str(uuid.uuid4())
@@ -133,6 +139,7 @@ class Turn:
         self.usage_before = dict(session.usage_acc)
         self.effect_pending = False
         self.reservation_nonce = None
+        self.scope_hint = None
 
     def review_interpretations(self, blocks, provider, model, ctx):
         if self.clarification is not None:
@@ -235,8 +242,16 @@ class Turn:
                 self.request_evidence = records.capture_scoped(
                     self.owner, self.request_scope
                 )
-            except (ValueError, KeyError, TypeError, HTTPException):
-                self.request_scope["reason"] = "unsupported_or_unavailable_source"
+            except (ValueError, KeyError, TypeError, HTTPException) as exc:
+                from harness import branch_calculations, carrier_calculations
+
+                refusals = carrier_calculations.REFUSALS | branch_calculations.REFUSALS
+                named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
+                self.request_scope["reason"] = (
+                    exc.args[0] if named else "unsupported_or_unavailable_source"
+                )
+                if named and len(exc.args) > 1 and isinstance(exc.args[1], str):
+                    self.scope_hint = exc.args[1]
             return
         # Deliberately narrow whole-message grammar. Additional instructions,
         # periods or another requested quantity never silently become this profile.
@@ -354,6 +369,13 @@ class Turn:
         if record is None:
             if draft.blocks:
                 raise ValueError("unavailable request")
+            if self.scope_hint is not None:
+                return (
+                    f"No carrier is named exactly {_label(self.request_scope['entity_id'])}; "
+                    f"did you mean {_label(self.scope_hint)}?",
+                    [],
+                    [],
+                )
             return (
                 "Select a generator or StorageUnit with verified current LP results and an exact supported scope to check its key results.",
                 [],
@@ -394,8 +416,13 @@ class Turn:
                 }
             )
         scoped = record["source_kind"] == "scoped_result"
+        carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
+        loading = self.request_scope["profile"] in assurance_metrics.branch.PROFILES
         entity_kind = (
-            "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
+            "Carrier" if carrier
+            else "Network" if self.request_scope["profile"] == assurance_metrics.branch.NETWORK_PROFILE
+            else "Branch" if loading
+            else "StorageUnit" if self.request_scope["profile"] in assurance_metrics.STORAGE_PROFILES
             else "Network" if self.request_scope["profile"] == "network-linear-cost/1" else "Generator"
         )
         lines = [
@@ -403,6 +430,10 @@ class Turn:
             f"{'retained run' if self.request_scope.get('retain') else 'requested snapshots' if scoped else 'all current snapshots'} "
             f"({record['scope']['start']} to {record['scope']['end']})."
         ]
+        if carrier:
+            lines.extend(assurance_metrics.carrier.notes(record["raw"], self.request_scope))
+        if loading:
+            lines.extend(assurance_metrics.branch.notes(record["raw"]))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
@@ -483,7 +514,7 @@ class Turn:
         return seed
 
     def tool_guard(self, tool_name, args):
-        if self.effect_pending:
+        if self.effect_pending or tool_name not in CHECKED_TOOLS:
             return False
         if self.operation_contract is not None and tool_name == "update_component":
             from harness.rollout import effects_enabled

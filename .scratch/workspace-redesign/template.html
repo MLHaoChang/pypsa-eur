@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GridSpine · Workspace redesign</title>
+  <link rel="icon" href="../../pypsa-gui/frontend/public/gridspine-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+  <script src="expert-preview.js" defer></script>
+  <script src="sections-preview.js" defer></script>
+  <script src="prototype.js" defer></script>
+</head>
+<body class="dark">
+  <a class="skip" href="#main">Skip to workspace</a>
+  <div class="preview-bar"><span><i></i> Interactive design · sample content</span><nav aria-label="Design previews"><button data-view="home">Home</button><button data-view="builder">Builder</button><button data-view="guided">Guided</button><button data-view="expert">Expert</button></nav><button id="theme" aria-label="Switch to light theme">◐ <span>Dark</span></button></div>
+  <header class="app-header">
+    <button class="brand" data-view="home" aria-label="GridSpine home"><img src="../../pypsa-gui/frontend/public/gridspine-mark.svg" alt="" width="32" height="32"><span>GridSpine</span></button>
+    <div class="header-context" id="header-context">Your workspace <span>/</span> Overview</div>
+    <div class="header-right"><span class="local-label">Design preview</span><button class="avatar" id="account" aria-label="Preview account information">GS</button></div>
+  </header>
+  <div id="shell"><aside id="sidebar" aria-label="Workspace navigation"></aside><main id="main" tabindex="-1"></main></div>
+  <section id="chat" role="dialog" aria-modal="false" aria-labelledby="chat-title" hidden>
+    <div class="chat-head"><div><span class="eyebrow">YOUR COMPANION</span><h2 id="chat-title">GridSpine</h2></div><button id="close-chat" class="icon-btn" aria-label="Close companion">×</button></div>
+    <p class="context-chip" id="chat-context">Context: workspace overview</p>
+    <p id="mode-info" class="mode-info" role="status">Write · review your message before sending.</p>
+    <div class="chat-messages" id="messages"><p>I can help you connect analyses, parameterize your model, or explore your results. Proposed changes still need the ordinary checks and approvals.</p><p class="fine">This is a visual prototype. Messages stay here; no model or backend is connected.</p></div>
+    <form id="chat-form"><label class="sr-only" for="message">Message GridSpine</label><textarea id="message" placeholder="Ask about this workspace…" rows="2"></textarea><div class="compose-footer"><span>Preview only · no message sent</span><button type="submit" aria-label="Preview message">↑</button></div></form>
+  </section>
+  <div id="companion-controls">
+    <div id="companion-actions" class="companion-mode-menu" role="group" aria-label="GridSpine conversation options" hidden>
+      <button data-conversation-mode="write"><b>Write</b><small>Type a message</small></button>
+      <button data-conversation-mode="dictate"><b>Dictate</b><small>Review speech as text</small></button>
+      <button data-conversation-mode="live"><b>Live chat</b><small>Text on this page · voice unavailable</small></button>
+    </div>
+  <button id="companion" aria-label="Open GridSpine companion" aria-expanded="false" aria-controls="chat"><span class="pearl"><span class="pearl-face"><i></i><i></i><b></b></span></span><span class="companion-label">Ask GridSpine</span></button>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>

@@ -81,6 +81,7 @@ from routers import (
     durable_conversation,
     clustering,
     adequacy_worksheet,
+    flow,
     compare,
     gridspine,
     campus_electrical,
@@ -590,6 +591,14 @@ async def lifespan(app: FastAPI):
             mcp_server.write_endpoint_file()
         except Exception:  # noqa: BLE001 — no endpoint file costs MCP clients, not the app
             logging.getLogger("pypsa_gui").exception("could not write the MCP endpoint file")
+    elif local_bootstrap.is_default_sqlite(get_settings().database_url):
+        # Web mode with no DATABASE_URL: a fresh dev checkout. Nothing else
+        # creates the app-data directory, the schema or a sign-in. Never
+        # fails boot, like the other startup steps.
+        try:
+            local_bootstrap.ensure_dev_admin()
+        except Exception:  # noqa: BLE001 — a missing dev sign-in beats a dead app
+            logger.exception("dev admin bootstrap failed; continuing without it")
     PyPSAService.initialize()
     # Decision-study forks a crash left behind (plan 2026-09-28 guided
     # investment study MVP-1, S9; gate S6 [N7]): throw-away tornado variants
@@ -1309,6 +1318,12 @@ app.include_router(
 # `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
 app.include_router(
     reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# The project flow (project-workflow B1): `/{name}/flow` and `/{name}/flow/ack`,
+# the section states over the existing checks. Same guard; before the catch-all.
+app.include_router(
+    flow.router, prefix="/api/projects", tags=["flow"],
     dependencies=_projects_router_guard,
 )
 # Report generation (WP3): `/{name}/reports/generate…` and the per-section

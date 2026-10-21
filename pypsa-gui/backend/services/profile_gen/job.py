@@ -108,6 +108,42 @@ def _evict_pending(storage_dir: str | Path, keep: int = KEEP_PENDING) -> None:
 # ---------------------------------------------------------------------------
 
 
+def pending_io_lock():
+    """The process-wide netCDF lock (`PyPSAService.get_netcdf_io_lock`):
+    netCDF4/HDF5 is not thread-safe per process, so a pending write or read
+    must not run beside another one, a project save/load, an export or a
+    campus read (concurrent pending writes crashed the API).
+
+    Non-re-entrant: never call under the lock. It is a plain Lock, and every
+    pending access takes it on its own, so a nested call would hang."""
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_netcdf_io_lock()
+
+
+def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
+                  record: dict[str, Any]) -> tuple[Path, Path]:
+    """Write one pending artifact pair and evict the oldest beyond the
+    keep. Both files are staged then renamed (`.nc` first, `.json` last —
+    the record IS the artifact's identity, so a crash leaves at most an
+    orphan `.nc` the listing skips, never a truncated record)."""
+    nc, meta_path = _artifact_paths(storage_dir, job_id)
+    nc.parent.mkdir(parents=True, exist_ok=True)
+    part = Path(str(nc) + ".part")
+    meta_part = Path(str(meta_path) + ".part")
+    try:
+        with pending_io_lock():
+            frame.rename_axis("time").to_xarray().to_netcdf(str(part))
+        os.replace(part, nc)
+        meta_part.write_text(json.dumps(record, indent=2, default=str))
+        os.replace(meta_part, meta_path)
+    finally:
+        part.unlink(missing_ok=True)
+        meta_part.unlink(missing_ok=True)
+    _evict_pending(storage_dir)
+    return nc, meta_path
+
+
 def _parse_spec(job: Any) -> dict[str, Any]:
     raw = job.solver_config_json
     if not raw:
@@ -197,18 +233,6 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     )
     _check_stop()
 
-    nc, meta_path = _artifact_paths(job.storage_dir, str(job.id))
-    nc.parent.mkdir(parents=True, exist_ok=True)
-
-    # Stage-then-rename: an abort/crash mid-write leaves a `.part`, never a
-    # half-written artifact the apply path could mistake for a complete one.
-    part = Path(str(nc) + ".part")
-    try:
-        result.series.rename_axis("time").to_xarray().to_netcdf(str(part))
-        os.replace(part, nc)
-    finally:
-        part.unlink(missing_ok=True)
-
     record = dict(result.meta)
     record["job_id"] = str(job.id)
     record["project_id"] = job.project_id
@@ -218,7 +242,4 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     record["point_coords"] = {
         p.id: [p.lon, p.lat] for p in engine._normalize_points(points)
     }
-    meta_path.write_text(json.dumps(record, indent=2, default=str))
-
-    _evict_pending(job.storage_dir)
-    return nc, meta_path
+    return write_pending(job.storage_dir, str(job.id), result.series, record)
