@@ -29,6 +29,12 @@ first and smoothing gets what is left.
   state-of-charge band above the backup floor: the battery sits where it can
   both give E_up and take E_down, so E_up + E_down ≤ e − R (UPS: e − bridge).
 
+A unit counts in a phase when it is in service at the phase's COD year (the
+asset must exist when that load does); the reserve R reads the hours of the
+investment period the phase falls in, as the peak check does. Each
+StorageUnit counts once: a UPS also named for ride-through keeps both its
+bridge and its share of R.
+
 Only committed (non-extendable) StorageUnits count, as in the peak check: an
 extendable unit is sized by the run, so the screen cannot know its rating
 (one sizing basis with the peak check). Nothing is time-stepped, solved or
@@ -100,27 +106,43 @@ def _reserve(n, island: dict, year: int | None) -> dict:
     out = {"mw": 0.0, "mwh": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [], "notes": []}
     rt = ride_through_batteries(n, island, year)
     out["unsized"] += rt["unsized"]
+    upss, unsized = committed_storage(n, [u for u, d in units.items() if d.get("kind") == "ups"], year)
+    out["unsized"] += unsized
+    bridge_s = float(_value(req.get("bridge_s")) or 0.0)
+    # Island row (b): each UPS keeps η·e ≥ P_it·bridge_s/3600, the whole IT
+    # load it carries (its rating when that load is not in the network).
+    bridge = {}
+    for u in upss:
+        it = [x for x in units[u].get("it_load") or [] if x in n.loads.index]
+        carried = float(named_load(n, it)[mask].max()) if it else float(su.at[u, "p_nom"])
+        bridge[u] = (carried * bridge_s / 3600.0, carried, bool(it))
+
+    def bridge_note(u):
+        keep, carried, known = bridge[u]
+        return (f"UPS {u}: {keep:.3g} MWh kept to bridge {carried:.3g} MW for {bridge_s:g} s"
+                + ("" if known else " (its IT load is not in the network: its rating)"))
+
     if rt["names"]:
+        # A UPS also named for ride-through is one StorageUnit: counted once,
+        # in this group, keeping its bridge on top of the outage reserve.
         keep, words = outage_reserve_mwh(n, island, mask, delivered_mw(n), year)
+        shared = [u for u in upss if u in rt["names"]]
+        keep += sum(bridge[u][0] for u in shared)
         out["mw"] += rt["p_mw"]
         out["mwh"] += max(0.0, rt["e_mwh"] - keep)
         out["backup_mwh"] += keep
         out["units"] += rt["names"]
-        out["notes"].append(f"ride-through {', '.join(rt['names'])} keeps the {words}")
-    upss, unsized = committed_storage(n, [u for u, d in units.items() if d.get("kind") == "ups"], year)
-    out["unsized"] += unsized
-    bridge_s = float(_value(req.get("bridge_s")) or 0.0)
+        out["notes"] += [f"ride-through {', '.join(rt['names'])} keeps the {words}",
+                         *(bridge_note(u) for u in shared)]
     for u in upss:
-        p = float(su.at[u, "p_nom"])
-        it = [x for x in units[u].get("it_load") or [] if x in n.loads.index]
-        carried = min(p, float(named_load(n, it)[mask].max())) if it else p
-        keep = carried * bridge_s / 3600.0
-        out["mw"] += p
+        if u in rt["names"]:
+            continue
+        keep = bridge[u][0]
+        out["mw"] += float(su.at[u, "p_nom"])
         out["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
         out["backup_mwh"] += keep
         out["units"].append(u)
-        out["notes"].append(f"UPS {u}: {keep:.3g} MWh kept to bridge {carried:.3g} MW for {bridge_s:g} s"
-                            + ("" if it else " (its IT load is not in the network: its rating)"))
+        out["notes"].append(bridge_note(u))
     return out
 
 
@@ -141,9 +163,9 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
              if osc_limit_pct is not None and connection_mw else None)
     a_x = (max(0.0, amp - a_lim) if a_lim is not None else amp) if in_band else 0.0
     e_osc = oscillation_mwh(a_x, period) if a_x > 0 else 0.0
-    # The checkpoint dip charges and gives back at most S²/(2R) (≤ e_step): it
-    # sits inside the step's band, so it adds to the repeat rate, not the band.
-    need_mw, need_mwh = s + a_x, 2.0 * e_step + e_osc
+    # The band holds the larger of the step and the checkpoint dip (the dip is
+    # inside it when its depth is at most the swing, as the envelope makes it).
+    need_mw, need_mwh = s + a_x, 2.0 * max(e_step, e_ck) + e_osc
     row.update({
         "ramp_limit_mw_per_min": ramp, "ramp_minutes": s / ramp,
         "step_mwh": e_step, "checkpoint_mwh": e_ck,
