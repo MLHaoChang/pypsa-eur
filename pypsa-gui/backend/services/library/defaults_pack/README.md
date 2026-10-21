@@ -107,8 +107,10 @@ What each region carries (technologies: `solar-utility`, `onwind`, `gas-genset`;
 | Region | Source and cell | Money |
 |---|---|---|
 | `ca_federal` | CER EF2026 cost data electricity CSV: Province/Territory ON, Scenario CM, Year 2030 | CAD, Dollar Year 2025. Overnight excludes the separate Connection Costs field; FOM includes property and municipal tax, insurance and land. |
-| `uk` | DESNZ Annex A, sheet "Technical and Cost Assumptions", 2030 commissioning, Medium. Overnight is pre-development + construction + infrastructure / reference plant size; `fom_share` is (fixed O&M + insurance) / overnight | GBP, real 2024. Infrastructure includes connection costs; connection and use of system charges are left out of `fom_share`. |
-| `us_federal` | EIA AEO2025 capital cost study (SL-018001 Rev A), Table 1-2 cases 16 (PV, 150 MWac), 13 (onshore wind, 200 MW) and 4 (H-class simple cycle, 419 MW) | USD, 2023 price levels, EPC boundary, no financing cost. |
+| `uk` | DESNZ Annex A, sheet "Technical and Cost Assumptions", 2030 commissioning, Medium. Overnight is pre-development + construction (no infrastructure); `fom_share` is (fixed O&M + insurance) / overnight | GBP, real 2024. Overnight = pre-development + construction; the Infrastructure component is left out because it includes the grid connection, which a project prices separately (the connection share cannot be separated from it). Connection and use of system charges are left out of `fom_share`. |
+| `us_federal` | EIA AEO2025 capital cost study (SL-018001 Rev A), Table 1-2 cases 16 (PV, 150 MWac), 13 (onshore wind, 200 MW) and 4 (H-class simple cycle, 419 MW) | USD, 2023 price levels, EPC boundary, no financing cost. The study's capital cost includes generic interconnections (a one-mile transmission line and gas lateral, owner's costs); their share cannot be separated from Table 1-2. |
+
+Regional packs carry technology rows only: the finance defaults (discount rate and the rest) stay the EU base's until a regional finance source is cleared, and `price_from_pack` records the base pack as the discount rate's source. A regional `price_from_pack` returns the region's `currency` and `annualised_cost_per_mw_yr` (no `_eur_` key), and records `currency` on its money fields and `fallback: eu_fallback` on a field taken from the EU row.
 
 Not mapped (no clear key): battery power and energy parts (the sources price a whole battery system
 per kW, not the inverter and the storage block), the diesel genset (a diesel engine farm; CER and

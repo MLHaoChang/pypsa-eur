@@ -1,22 +1,16 @@
 key,source_file,locator,value,unit
 solar-utility.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D8 (Pre-development Cost, Medium; 2030 commissioning, Medium)",30,GBP/kW
 solar-utility.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D20 (Construction Cost, Medium; 2030 commissioning, Medium)",500,GBP/kW
-solar-utility.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D32 (Infrastructure, Medium; 2030 commissioning, Medium)",6100,kGBP
-solar-utility.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D3 (Reference plant size; 2030 commissioning, Medium)",52,MW
 solar-utility.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D34 (Fixed O&M; 2030 commissioning, Medium)",5900,GBP/MW/year
 solar-utility.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D36 (Insurance; 2030 commissioning, Medium)",1600,GBP/MW/year
 solar-utility.investment.lifetime,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell D6 (Operating lifetime; 2030 commissioning, Medium)",38,years
 onwind.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I8 (Pre-development Cost, Medium; 2030 commissioning, Medium)",80,GBP/kW
 onwind.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I20 (Construction Cost, Medium; 2030 commissioning, Medium)",1300,GBP/kW
-onwind.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I32 (Infrastructure, Medium; 2030 commissioning, Medium)",16300,kGBP
-onwind.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I3 (Reference plant size; 2030 commissioning, Medium)",51.6,MW
 onwind.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I34 (Fixed O&M; 2030 commissioning, Medium)",18400,GBP/MW/year
 onwind.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I36 (Insurance; 2030 commissioning, Medium)",3800,GBP/MW/year
 onwind.investment.lifetime,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell I6 (Operating lifetime; 2030 commissioning, Medium)",35,years
 gas-genset.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR8 (Pre-development Cost, Medium; 2030 commissioning, Medium)",20,GBP/kW
 gas-genset.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR20 (Construction Cost, Medium; 2030 commissioning, Medium)",600,GBP/kW
-gas-genset.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR32 (Infrastructure, Medium; 2030 commissioning, Medium)",13200,kGBP
-gas-genset.investment.overnight,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR3 (Reference plant size; 2030 commissioning, Medium)",299,MW
 gas-genset.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR34 (Fixed O&M; 2030 commissioning, Medium)",11800,GBP/MW/year
 gas-genset.investment.fom_share,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR36 (Insurance; 2030 commissioning, Medium)",1500,GBP/MW/year
 gas-genset.investment.lifetime,annex-a-additional-estimates-and-key-assumptions-2025.xlsx,"sheet 'Technical and Cost Assumptions' cell AR6 (Operating lifetime; 2030 commissioning, Medium)",25,years

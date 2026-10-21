@@ -388,8 +388,8 @@ def test_uk_overnight_and_fom_are_recomputed_from_the_annex_cells(shipped_caches
 
     for tech in ("solar-utility", "onwind", "gas-genset"):
         k = f"{tech}.investment"
-        over = cell(f"{k}.overnight", "Pre-development") + cell(f"{k}.overnight", "Construction") \
-            + cell(f"{k}.overnight", "Infrastructure") / cell(f"{k}.overnight", "Reference plant size")
+        over = cell(f"{k}.overnight", "Pre-development") + cell(f"{k}.overnight", "Construction")
+        assert not any("Infrastructure" in c["locator"] for c in cells if c["key"] == f"{k}.overnight")
         assert pack.value(f"{k}.overnight").value == pytest.approx(over * 1000, abs=0.1)
         fom = (cell(f"{k}.fom_share", "Fixed O&M") + cell(f"{k}.fom_share", "Insurance")) / 1000
         assert pack.value(f"{k}.fom_share").original_value == pytest.approx(fom / over * 100,
@@ -441,3 +441,57 @@ def test_a_ca_project_prices_solar_in_cad_from_its_region_and_an_eu_one_is_uncha
     with pytest.raises(D.MissingRegionalRow):
         price_from_pack(net(), "generators", "pv", "solar-rooftop", version=SHIPPED,
                         region="ca_federal")
+
+
+def test_pricing_carries_the_regions_currency_never_an_eur_label(shipped_caches):
+    import pypsa
+
+    from services.asset_schema import provenance
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = pypsa.Network()
+    n.add("Bus", "b")
+    n.add("Generator", "pv", bus="b", p_nom_extendable=True)
+    out = price_from_pack(n, "generators", "pv", "solar-utility", version=SHIPPED,
+                          region="us_federal")
+    assert out["currency"] == "USD"
+    assert "annualised_cost_per_mw_yr" in out
+    assert not any("eur" in k for k in out)
+    prov = provenance._root(n)["Generator"]["pv"]
+    assert prov["overnight_cost"]["currency"] == "USD" and prov["fom_cost"]["currency"] == "USD"
+    assert prov["overnight_cost"]["currency_year"] == 2023
+    assert "currency" not in prov["lifetime"]
+    # the EU output keeps its label and records no currency or fallback key
+    m = pypsa.Network()
+    m.add("Bus", "b")
+    m.add("Generator", "pv", bus="b", p_nom_extendable=True)
+    eu = price_from_pack(m, "generators", "pv", "solar-utility", version=BASE)
+    assert "annualised_cost_eur_per_mw_yr" in eu and "currency" not in eu
+    assert all("currency" not in f and "fallback" not in f
+               for f in provenance._root(m)["Generator"]["pv"].values())
+
+
+def test_an_eu_fallback_field_and_the_eu_discount_rate_are_recorded_as_such(shipped_caches):
+    import pypsa
+
+    from services.asset_schema import provenance
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = pypsa.Network()
+    n.add("Bus", "b")
+    n.add("Generator", "pv", bus="b", p_nom_extendable=True)
+    price_from_pack(n, "generators", "pv", "solar-utility", version=SHIPPED, region="us_federal")
+    prov = provenance._root(n)["Generator"]["pv"]
+    assert prov["lifetime"]["fallback"] == "eu_fallback"          # the study states no lifetime
+    assert "fallback" not in prov["overnight_cost"]
+    pack = D.load_defaults_pack(region="us_federal")
+    eu = D.load_defaults_pack(BASE)
+    assert prov["overnight_cost"]["source"].startswith(f"generic_defaults@{pack.version}#")
+    assert prov["discount_rate"]["source"] == f"generic_defaults@{BASE}#{eu.hash[:16]}"
+
+
+def test_uk_overnight_leaves_out_the_infrastructure_that_includes_the_connection(shipped_caches):
+    pack = D.load_defaults_pack(region="uk")
+    # solar: pre-development 30 + construction 500 GBP/kW (Annex A D8, D20)
+    assert pack.value("solar-utility.investment.overnight").value == pytest.approx(530_000.0)
+    assert "left out" in pack.value("solar-utility.investment.overnight").note

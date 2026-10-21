@@ -53,21 +53,31 @@ def _derived(component_class: str) -> set[str]:
         return set()
 
 
-def _stamp(n, component_class: str, name: str, pack, entries: dict) -> None:
-    """`entries`: {field: (row or None, range scale)}; a row None is the finance discount rate."""
+def _stamp(n, component_class: str, name: str, pack, entries: dict, *, money=()) -> None:
+    """`entries`: {field: (row or None, range scale)}; a row None is the finance discount rate.
+    A regional pack's finance defaults are the EU base's, so that source names the base pack;
+    `money` are the fields in the region's currency; a row taken from the EU pack is `eu_fallback`."""
     from services.asset_schema import provenance
 
+    info = pack.region_info
     source = f"{pack.pack_id}@{pack.version}#{pack.hash[:16]}"
+    base_source = source if info is None else \
+        f"{pack.pack_id}@{info.base_version}#{info.base_hash[:16]}"
     skip = _derived(component_class)
     for field, (row, scale) in entries.items():
         if field in skip:
             continue
         src = pack.finance.discount_rate if row is None else row
         rng = None if src.range is None else (src.range.low * scale, src.range.high * scale)
-        provenance.record(n, component_class, name, field, status="default", source=source,
+        fell_back = info is not None and row is not None and \
+            info.row_source.get(row.key) == "eu_fallback"
+        provenance.record(n, component_class, name, field, status="default",
+                          source=base_source if row is None else source,
                           source_year=src.source_year,
                           currency_year=getattr(src, "currency_year", None),
-                          range=rng, illustrative=bool(src.illustrative))
+                          range=rng, illustrative=bool(src.illustrative),
+                          currency=info.currency if info is not None and field in money else None,
+                          fallback="eu_fallback" if fell_back else None)
 
 
 def _value(pack, key: str) -> float:
@@ -120,12 +130,16 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             "lifetime": (_row(pack, f"{technology}.investment.lifetime"), 1.0),
             # FOM per MW: the overnight cost × the share's range
             "fom_cost": (_row(pack, f"{technology}.investment.fom_share"), overnight),
-            "discount_rate": (None, 1.0)})   # capital_cost: derived on every class
+            "discount_rate": (None, 1.0)},   # capital_cost: derived on every class
+           money=("overnight_cost", "fom_cost"))
     from pypsa.costs import annuity as _annuity   # PyPSA's own; an IC package never imports the solver
 
     # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
     # (its meaning everywhere in the GUI; the column itself stays 0, PyPSA annuitises
     # `overnight_cost`), `fom_cost` beside it, and their sum.
     annuity = overnight * _annuity(rate, written["lifetime"])
+    if pack.region_info is not None:           # a regional sum is in the region's money, not EUR
+        return {**stamp, "currency": pack.region_info.currency, **written, "capital_cost": annuity,
+                "annualised_cost_per_mw_yr": annuity + written["fom_cost"]}
     return {**stamp, **written, "capital_cost": annuity,
             "annualised_cost_eur_per_mw_yr": annuity + written["fom_cost"]}
