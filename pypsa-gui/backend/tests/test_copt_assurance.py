@@ -165,3 +165,14 @@ def test_a_must_take_built_in_a_later_period_is_refused_by_name(baseline, checke
 def test_an_infinite_availability_is_refused_by_name(classical, checked):
     classical.network.generators_t.p_max_pu["windfarm"] = [float("inf"), 0.0]
     assert refused(checked, classical) == {"copt_inputs_not_finite"}
+
+
+def test_a_missing_availability_is_refused_not_filled(classical, checked):
+    # The engine reads a NaN availability as 0; the oracle does not share the fill.
+    classical.network.generators_t.p_max_pu["windfarm"] = [float("nan"), 0.0]
+    assert refused(checked, classical) == {"copt_inputs_not_finite"}
+
+
+def test_a_missing_demand_is_refused_not_filled(classical, checked):
+    classical.network.loads_t.p_set["L1"] = [float("nan"), 100.0]
+    assert refused(checked, classical) == {"copt_inputs_not_finite"}

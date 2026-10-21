@@ -54,7 +54,16 @@ DISCLOSURE = (
 
 def _residual(n, cfg):
     """Demand on electrical buses less must-take availability, recomputed here; the
-    must-take membership is the engine's declared split."""
+    must-take membership is the engine's declared split. Where the engine fills a
+    missing value (NaN demand or availability as 0, a non-finite static p_max_pu as
+    1), the oracle refuses instead: a shared fill could not be caught by comparing."""
+
+    def known(values):
+        values = np.asarray(values, dtype=float)
+        if not np.isfinite(values).all():
+            raise ValueError("copt_inputs_not_finite")
+        return values
+
     from services.adequacy.copt import must_take_generators, solved_capacity
     from services.adequacy.demand import demand_frame_for
     from services.adequacy.metrics import electrical_columns
@@ -67,18 +76,17 @@ def _residual(n, cfg):
         if str(n.loads.at[load, "bus"]) not in electrical:
             continue
         if frame is not None and load in frame.columns:
-            demand += frame[load].reindex(snapshots).fillna(0.0).to_numpy(dtype=float)
+            demand += known(frame[load].reindex(snapshots).to_numpy(dtype=float))
         else:
-            demand += float(n.loads.at[load, "p_set"] or 0.0)
+            demand += known(float(n.loads.at[load, "p_set"]))
     p_max_pu = n.generators_t.p_max_pu
     take = np.zeros(len(snapshots))
     for g in must_take_generators(n):
         cap = solved_capacity(n.generators.loc[g])
         if g in p_max_pu.columns:
-            take += np.maximum(p_max_pu[g].reindex(snapshots).fillna(0.0).to_numpy(dtype=float), 0.0) * cap
+            take += np.maximum(known(p_max_pu[g].reindex(snapshots).to_numpy(dtype=float)), 0.0) * cap
         else:
-            static = float(n.generators.at[g, "p_max_pu"])
-            take += max(static if math.isfinite(static) else 1.0, 0.0) * cap
+            take += max(float(known(float(n.generators.at[g, "p_max_pu"]))), 0.0) * cap
     return demand - take
 
 
