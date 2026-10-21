@@ -330,16 +330,20 @@ def test_no_scope_file_reads_exactly_as_before(client, tmp_projects_dir, project
     name = _create(client, tid, f"g_{tid}", **kw)
     preset = _flow(client, name)
     assert preset["scope"]["source"] == "preset"
-    assert preset["run_request"] == {"optimisation": True, "study": True}
+    template = json.loads((project_storage_dir(name) / "eh_template.json").read_text())
+    # Master's rule: every EH template requests the study, except a load-less
+    # generation-only plant (#485's IPP hybrid).
+    generation_only = bool(template.get("generation_only"))
+    assert preset["run_request"] == {"optimisation": True, "study": not generation_only}
     items = [i for s in preset["sections"] for i in s["items"]]
     assert all(i["in_scope"] for i in items)
-    template = json.loads((project_storage_dir(name) / "eh_template.json").read_text())
     (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps(_all_on(template)))
     everything = _flow(client, name)
     assert _strip_scope(preset) == _strip_scope(everything)
     # Only the islanded connection reads not_needed.
     nn = {s["section"] for s in preset["sections"] if s["state"] == "not_needed"}
-    assert nn == ({"connection"} if template.get("recommended_archetype") == "off_grid" else set())
+    assert nn == (({"connection"} if template.get("recommended_archetype") == "off_grid"
+                   else set()) | ({"loads"} if generation_only else set()))
 
 
 def test_a_project_without_a_template_keeps_its_payload(client, install_network,

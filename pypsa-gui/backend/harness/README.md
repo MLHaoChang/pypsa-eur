@@ -329,7 +329,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 164 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 174 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -350,7 +350,11 @@ Stores and always discloses how many it excluded. `branch-loading/1` and
 `network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
 Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
 P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
-refuse whenever AC power-flow results exist.
+refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
+hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
+claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
+the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
