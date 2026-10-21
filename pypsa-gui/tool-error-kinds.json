@@ -867,6 +867,26 @@
       "surface": "inline",
       "why": "A measured load upload does not cover one full calendar year, covers several without one named, or holds a gap longer than a week. The detail says which; the assistant asks for the year or a complete file, per call."
     },
+    "carrier_mismatch": {
+      "surface": "inline",
+      "why": "Availability generation named a wind or solar generator, whose weather profile the series would overwrite. The detail names them; the assistant picks another generator, per call."
+    },
+    "forced_outages_not_written": {
+      "surface": "inline",
+      "why": "Availability generation asked for forced outages, which the reliability study samples from each asset's own outage rate and repair time and are never written into the dispatch. The detail says so; the assistant points the user to the reliability study, per call."
+    },
+    "unknown_availability_kind": {
+      "surface": "inline",
+      "why": "Availability generation named a kind that does not exist. The detail lists maintenance, must_run and derating; the assistant picks one, per call."
+    },
+    "invalid_availability_params": {
+      "surface": "inline",
+      "why": "An availability kind's parameters are missing, unknown or out of range (a malformed window, a share outside [0, 1], a bad rule). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
+    "maintenance_year": {
+      "surface": "inline",
+      "why": "A dated maintenance window does not fall in the year it would apply to, or the network is multi-period. The detail says so; the assistant uses MM-DD windows or the network's year, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."

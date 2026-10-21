@@ -5,10 +5,11 @@
 // step: it moves to a card in the footer, with its actions behind a menu.
 // Guided keeps its own sidebar (spec §3.5), pinned by Sidebar.uiMode.test.tsx.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
+import { useDecisionStore } from '../pages/decision/decisionStore'
 import Sidebar from './Sidebar'
 
 vi.mock('../api/network', () => ({
@@ -71,13 +72,13 @@ const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
   model: ['Campus electrical', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
   run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
-  results: ['Results', 'Decision study', 'Planning → dynamics', 'Reports'],
+  results: ['Results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots'],
 }
 
 // The project's actions, now behind the footer card's menu.
 const PROJECT_MENU_ROWS = [
-  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Projects home', 'Workspace panel',
+  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Workspace panel',
 ]
 
 function rowLabels(group: HTMLElement): string[] {
@@ -114,6 +115,19 @@ describe('M2 — Expert sidebar, expanded', () => {
     expect(rowLabels(screen.getByTestId(`sidebar-group-${id}`))).toEqual(ROWS[id])
   })
 
+  // UX-flow #21: the Decision study row shows only in a study's own project.
+  it('shows the Decision study row only in the project of the open decision study', async () => {
+    useDecisionStore.setState({ active: { project: 'Demo', studyId: 's1' } })
+    await renderSidebar()
+    expect(rowLabels(screen.getByTestId('sidebar-group-results')))
+      .toEqual(['Results', 'Decision study', 'Planning → dynamics', 'Reports'])
+    cleanup()
+    useDecisionStore.setState({ active: { project: 'Elsewhere', studyId: 's1' } })
+    await renderSidebar()
+    expect(rowLabels(screen.getByTestId('sidebar-group-results'))).not.toContain('Decision study')
+    useDecisionStore.setState({ active: null })
+  })
+
   it('drops the old kind-based headers', async () => {
     await renderSidebar()
     for (const old of ['BUILD', 'TIME', 'DATA', 'SIMULATION']) expect(screen.queryByText(old)).toBeNull()
@@ -135,7 +149,7 @@ describe('M2 — Expert sidebar, expanded', () => {
     expect(reports.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Outside the scrolling body, so it stays on screen.
     expect(container.querySelector('.overflow-y-auto')?.contains(card)).toBe(false)
-    expect(within(card).getByTitle('Rename project (header field)').textContent).toContain('Demo')
+    expect(within(card).getByText('Demo').textContent).toContain('Demo')
     expect(within(card).getByText(/Autosave/)).toBeTruthy()
   })
 
