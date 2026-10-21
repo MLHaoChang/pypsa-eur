@@ -129,12 +129,15 @@ def test_an_item_carries_its_target(client, site, edit):
     row = next(s for s in body["sections"] if s["section"] == "loads")
     item = next(i for i in row["items"] if i["severity"] == "error")
     assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
-                         "acknowledged"}
+                         "acknowledged", "title"}
+    assert item["title"] and "_" not in item["title"]
     assert item["source"] == "validation" and item["blocking"] is True
     assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
                               "entity": "it", "field": None}
     assert body["run_blocker"]["section"] == "loads"
-    assert body["run_blocker"]["message"].startswith("Loads & demand: ")
+    # The blocker reads in the plain title and the entity, not the validator's
+    # detail text ("p_set must be finite ...").
+    assert body["run_blocker"]["message"] == f"Loads & demand: {item['title']} (it)"
     assert body["run_blocker"]["target"] == item["target"]
 
 

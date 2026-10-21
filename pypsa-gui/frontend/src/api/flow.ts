@@ -46,6 +46,8 @@ export interface FlowItem {
   code: string
   severity: 'error' | 'warning' | 'info'
   message: string
+  /** Plain title of the check where the server has one (validation codes). */
+  title?: string | null
   source: FlowItemSource
   target: FlowTarget
   /** A server refusal (`validate_for_run`, or the study's own start refusal):

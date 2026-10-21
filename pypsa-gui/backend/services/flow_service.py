@@ -64,6 +64,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from services import flow_sections as F
+from services.issue_titles import issue_title
 
 logger = logging.getLogger(__name__)
 
@@ -175,9 +176,13 @@ def _hash(*parts: Any) -> str:
 
 def _item(code: str, severity: str, message: str, source: str, section: str, *,
           component: str = "", entity: str = "", fld: str = "",
-          panel: str | None = None, value: Any = None, blocking: bool = False) -> dict:
+          panel: str | None = None, value: Any = None, blocking: bool = False,
+          title: str | None = None) -> dict:
     return {
         "code": code, "severity": severity, "message": message, "source": source,
+        # Plain title of the check, where the server has one (validation
+        # codes); the other sources' messages are already plain.
+        "title": title,
         "target": {"section": section,
                    "panel": panel if panel is not None else F.SECTION_PANEL[section],
                    "component": component or None, "entity": entity or None,
@@ -355,7 +360,7 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
         section = F.file_issue(i.code, i.component_class or "", i.name or "", connection_links)
         out.append(_item(i.code, i.severity, i.message, "validation", section,
                          component=i.component_class or "", entity=i.name or "",
-                         blocking=i.severity == "error"))
+                         blocking=i.severity == "error", title=issue_title(i.code)))
     return out
 
 
@@ -732,7 +737,11 @@ def _strip(it: dict) -> dict:
 
 
 def _pointer(row_label: str, it: dict) -> dict:
-    return {"section": it["target"]["section"], "message": f"{row_label}: {it['message']}",
+    """The Run's blocker or a note: "<section>: <title> (<entity>)" when the
+    check has a plain title, else the section and the item's own message."""
+    title, entity = it.get("title"), it["target"].get("entity")
+    text = f"{title} ({entity})" if title and entity else title or it["message"]
+    return {"section": it["target"]["section"], "message": f"{row_label}: {text}",
             "target": it["target"]}
 
 
