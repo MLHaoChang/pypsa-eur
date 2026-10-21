@@ -5,6 +5,7 @@
 // stays where the value lives (the connection link) until the ledger gets a
 // write path; this block is the one place the three are listed together.
 import { PageSection } from '../PageKit'
+import type { FlowTarget } from '../../api/flow'
 import type { GridReadinessRow } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget } from '../../layout/flowNavigation'
@@ -42,7 +43,7 @@ export function ConnectionLimits() {
                   {r.assumed && <span className="ml-1 text-muted">(assumed)</span>}
                   <span className="block text-muted">{r.source}{r.note ? `. ${r.note}` : ''}</span>
                   {expert && r.target.field && (
-                    <button type="button" className="underline text-[11px]" onClick={() => openFlowTarget(r.target)}>
+                    <button type="button" className="underline text-[11px]" onClick={() => openFlowTarget(r.target as FlowTarget)}>
                       {r.id === 'energization_peak' ? 'Edit the energization series' : 'Edit on the connection link'}
                     </button>
                   )}
