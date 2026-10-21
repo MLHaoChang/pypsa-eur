@@ -428,7 +428,7 @@ describe('the rail is the ten flow sections', () => {
     loads.state = 'incomplete'
     loads.items = [{
       code: 'no_load', severity: 'error', message: 'Add a demand', source: 'validation', blocking: false,
-      acknowledged: false,
+      acknowledged: false, card: null, in_scope: true,
       target: { section: 'loads', panel: null, component: 'Load', entity: 'dc_it', field: 'p_set' },
     }]
     vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
