@@ -194,8 +194,10 @@ class _Facts:
     cfg_dict: dict = field(default_factory=dict)
     cfg_hash: str = ""
     copy: Any = None          # a private copy for eh_readiness, on a cache miss
-    # `{money year: [(class, asset, field), ...]}` of the recorded cost fields (B9).
+    # `{money year: [(class, asset, field), ...]}` of the recorded cost fields, and
+    # how many cost fields a person typed (no money year recorded) (B9).
     money_years: dict = field(default_factory=dict)
+    hand_typed_costs: int = 0
 
 
 # eh_readiness copies and walks the network; cached per readiness key.
@@ -384,16 +386,19 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
-        money_years=_money_years(n))
+        **_money_years(n))
 
 
 def _money_years(n) -> dict:
-    """The asset costs' money years (`reference_apply.money_years_in_use`), read
-    under the preflight's lock. A failure reads as none: the item is advisory."""
+    """``{money_years, hand_typed_costs}`` for `_Facts`: the asset costs' recorded
+    money years (`reference_apply.money_years_in_use`) and the count of hand-typed
+    cost fields, read under the preflight's lock. A failure reads as none: the item
+    is advisory."""
     try:
-        from services.library.reference_apply import money_years_in_use
+        from services.library.reference_apply import hand_typed_cost_fields, money_years_in_use
 
-        return money_years_in_use(n)
+        return {"money_years": money_years_in_use(n),
+                "hand_typed_costs": len(hand_typed_cost_fields(n))}
     except Exception:                                    # noqa: BLE001 — advisory only
         logger.exception("flow: money years could not be read")
         return {}
@@ -673,12 +678,16 @@ def _money_year_items(facts: _Facts) -> list[dict]:
     years = sorted(facts.money_years)
     if len(years) < 2:
         return []
-    klass, asset, _field = facts.money_years[years[-1]][0]
+    # The jump lands on the recorded field that carries the newest year.
+    klass, asset, cost_field = facts.money_years[years[-1]][0]
     listed = ", ".join(str(y) for y in years)
+    typed = facts.hand_typed_costs
+    hand = (f" {typed} cost{'s' if typed != 1 else ''} typed by hand: money year not "
+            "recorded." if typed else "")
     return [_item("asset_cost_money_years_mixed", "warning",
                   f"Asset costs use different money years ({listed}), not adjusted for "
-                  "inflation.", "flow", "assets", component=klass, entity=asset,
-                  fld="capital_cost", value=years)]
+                  f"inflation.{hand}", "flow", "assets", component=klass, entity=asset,
+                  fld=cost_field, value=years)]
 
 
 def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,

@@ -17,7 +17,7 @@ def _cost_year(n, klass: str, name: str, year: int) -> None:
     meta = n.meta if isinstance(n.meta, dict) else {}
     params = meta.setdefault("asset_params", {})
     params.setdefault(klass, {}).setdefault(name, {})["overnight_cost"] = {
-        "value": 1.0, "currency_year": year}
+        "source": "defaults_pack", "status": "default", "currency_year": year}
     n.meta = meta
 
 
@@ -53,7 +53,7 @@ def test_two_years_is_one_warning_in_assets_and_never_blocks(client, site, edit)
     assert item["target"]["section"] == "assets"
     assert item["target"]["component"] == "Generator"
     assert item["target"]["entity"] == "pv"                 # the newest year's first asset
-    assert item["target"]["field"] == "capital_cost"
+    assert item["target"]["field"] == "overnight_cost"       # the field that carries the year
     assert item["message"] == ("Asset costs use different money years (2020, 2025), "
                                "not adjusted for inflation.")
     assert body["run_ready"] is ready
@@ -90,3 +90,25 @@ def test_it_clears_when_one_year_remains(client, site, edit):  # noqa: F811
     with edit() as n:
         _cost_year(n, "Generator", "pv", 2020)
     assert _items(_flow(client, name)) == []
+
+
+def test_a_hand_typed_cost_carries_no_money_year(client, site, edit):  # noqa: F811
+    """Gatekeeper on B9: `mark_customised` keeps the overridden source's
+    `currency_year`, so a typed cost must not count as that year."""
+    from services.asset_schema import provenance
+
+    name = site(_net())
+    with edit() as n:
+        _cost_year(n, "Generator", "gas", 2020)
+        _cost_year(n, "Generator", "pv", 2025)
+    assert len(_items(_flow(client, name))) == 1
+    with edit() as n:
+        provenance.mark_customised(n, "Generator", "pv", ["overnight_cost"])
+    assert _items(_flow(client, name)) == []
+    # Two recorded years again: the item says how many costs were typed by hand.
+    with edit() as n:
+        _cost_year(n, "Generator", "wind", 2025)
+    [item] = _items(_flow(client, name))
+    assert item["message"] == ("Asset costs use different money years (2020, 2025), not "
+                               "adjusted for inflation. 1 cost typed by hand: money year "
+                               "not recorded.")
