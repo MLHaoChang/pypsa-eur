@@ -1,8 +1,8 @@
 # 08: Observed price seed (GS-4): SMARD DE-LU and Energinet DK1, 2024
 
-Status: ready-for-agent
+Status: ready-for-human
 
-**Paused (owner, 2026-10-21, about 11:20 CEST):** the owner chose "finish in-flight, pause new" at the 7-day usage warning. This ticket resumes after the reset (Mon 26 Oct 18:00 CEST). The build below is on branch `claude/ipp-gs4-observed-prices`. No PR is open.
+**Resumed (owner PACE-2, 2026-10-21):** the pause was lifted. The PR opened after #515 and #518 merged. This ticket is built and awaits review.
 
 ## What
 
@@ -41,10 +41,8 @@ The basis rule table refuses 2024-dated series against the 2030 finance block. S
 
 `test_eh_ipp_observed_prices.py`, `test_eh_ipp.py` and `test_template_price_series.py` pass locally: 67 tests, live solve included.
 
-## To resume
+## Done before the PR
 
-1. Merge master into the branch. Regenerate the sidecars if #510 or #515 changed `eh_ipp.py`: `T.write_sidecars('project_templates/eh_ipp_hybrid', 'eh_ipp_hybrid')`.
-2. Run the wider regression, which has not run yet: `test_energy_hub_templates.py`, `test_project_flow.py` (ledger filing for the new rows), the site-card and bundle fixtures, and `tests/fixtures/flow_site_card_args.json`.
-3. Open the PR. Send the GK the built diff for an OK; it is backend-only, so no UX review is needed.
-4. Once CI is green, run premerge and send `premerge ok` to the coordinator.
-5. Tell E1 (session_01S7WJfjiHwyW6t83C5Pn37n) about the new files and the re-dating, which bears on SERIES_NOTES `currency_year`.
+1. Master was merged in after #510, #515 and #518. The sidecars regenerate byte-identical.
+2. The wider regression passes: templates, project flow, ledger filing, site-card parity, bundle sidecars and pins, revenue streams, curtailment by cause.
+3. E1 (session_01S7WJfjiHwyW6t83C5Pn37n) to be told about the new files and the re-dating, which bears on the SERIES_NOTES `currency_year`.
