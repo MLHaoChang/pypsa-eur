@@ -555,3 +555,64 @@ def test_an_edit_landing_as_the_solve_ends_never_completes_the_step(oj_grid):
     assert 'inputs_changed_before_publish' in record['warnings']
     assert 'loadflow' not in (record.get('sections') or {})
     assert len(oj_grid.starts) == 1
+
+
+def test_another_users_dismiss_leaves_my_continuation_armed(oj_grid):
+    """Dismiss is owner-scoped: a second user of the same org cannot withdraw it."""
+    import uuid
+    from datetime import datetime, timezone
+    from db import session as db_session
+    from db.models import OrgMembership, Project, User
+    from harness import continuation
+    from services import assistant_tasks
+    from services.auth_service import hash_password
+
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    job, task_id = results[3]['job_id'], results[0]['task_id']
+    mine = chat_tools.acting_user_id()
+
+    with db_session.SessionLocal() as db:
+        project = db.query(Project).filter(Project.name == NAME).one()
+        other = User(email=f'{uuid.uuid4()}@example.com', password_hash=hash_password('secret-pass'),
+                     status='active', is_super_admin=False, created_at=datetime.now(tz=timezone.utc))
+        db.add(other)
+        db.flush()
+        db.add(OrgMembership(user_id=other.id, org_id=project.org_id, role='admin'))
+        db.commit()
+        other_id = str(other.id)
+
+    def state():
+        _, raw = assistant_tasks._read(task_id)
+        return next(s for s in raw['steps'] if s['id'] == 'run')['job']['continuation']
+
+    assert state() == 'armed'
+    chat_tools.set_acting_user(other_id)
+    try:
+        try:
+            assert continuation.dismiss(session, job) is False
+        except Exception as exc:  # the route turns 404/409 into {"ok": False}
+            assert getattr(exc, 'status_code', None) in (404, 409)
+    finally:
+        chat_tools.set_acting_user(mine)
+    assert state() == 'armed'
+
+    oj_grid.open.set()
+    assert [d['job_id'] for d in _await_due(session)] == [job]
+
+
+def test_dismiss_after_the_job_is_due_withdraws_the_claim(oj_grid):
+    from harness import continuation
+
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    job = results[3]['job_id']
+    oj_grid.open.set()
+    assert [d['job_id'] for d in _await_due(session)] == [job]
+
+    assert continuation.dismiss(session, job) is True
+    assert continuation.due(session) == []
+    refused = list(chat_service.run_turn(session, '', continuation_job_id=job))
+    assert refused[0][1]['error_kind'] == 'continuation_unavailable'
+    with pytest.raises(Exception) as exc:
+        continuation.claim(session, job)
+    assert 'continuation_unavailable' in str(getattr(exc.value, 'detail', exc.value))
+    assert continuation.dismiss(session, job) is False  # nothing left to withdraw
