@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): sizing off (F1): a solver option `fixed_sizes` dispatches on the last capacity run's sizes or on the nameplate (through `freeze_capacities`), refused when that source no longer holds, and incompatible with the myopic and rolling strategies.

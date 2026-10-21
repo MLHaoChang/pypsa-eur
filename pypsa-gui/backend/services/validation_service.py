@@ -2487,6 +2487,13 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
 
+    # Capacity › sizing off (F1): the source and the modes and strategies it
+    # excludes. Any mode, so a power-flow run with the option set is refused.
+    from services.solver import fixed_sizes as _fixed_sizes
+
+    issues += [Issue(severity=sev, code=code, component_class="", name=name, message=msg)
+               for sev, code, name, msg in _fixed_sizes.issues(n, solver_config)]
+
     mode = solver_config.mode
     if mode == "pf":
         issues += _check_pf(n)

@@ -163,7 +163,15 @@ def preserve_bus_topology(n, lock=None):
                 "values")
 
 
-def freeze_capacities(n, lock=None) -> Callable[[], None]:
+# Set by `freeze_capacities(skip_uc_check=True)` (the sweep and the DtC, many
+# operational re-solves): `run_simulation` skips the process binary UC check.
+# A fixed-size run (F1) freezes without it and gets the check (gatekeeper,
+# 2026-10-21: the flag is split from `_ic_operational`).
+SKIP_UC_CHECK_ATTR = "_skip_process_uc_check"
+
+
+def freeze_capacities(n, lock=None, *, source: str = "opt",
+                      skip_uc_check: bool = True) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
     current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
@@ -183,7 +191,12 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
     ΔEUE. Returns an undo closure restoring both bound columns exactly.
 
     ``lock`` (P27a, A1): the runner's captured lock; when given, the undo
-    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked."""
+    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked.
+
+    ``source="nom"`` pins at the configured ``*_nom`` instead (the fixed-size
+    run's nameplate source, F1); ``*_nom_opt`` is then left alone, so a failed
+    solve keeps the previous sizes. ``skip_uc_check`` sets
+    ``SKIP_UC_CHECK_ATTR``."""
     undo_ops: list[Callable[[], None]] = []
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
@@ -214,7 +227,7 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
         undo_ops.append(_undo)
         size = df.loc[idx, nom].astype(float)
         opt_col = f"{nom}_opt"
-        if opt_col in df.columns:
+        if source == "opt" and opt_col in df.columns:
             opt = df.loc[idx, opt_col].astype(float)
             good = opt.notna() & opt.map(math.isfinite)
             size[good] = opt[good]
@@ -227,10 +240,13 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
     # re-sizing it per contingency (WP1.4 review round 2 #1). Set LAST, once
     # the pins are in place, so a raise above can never leave it behind.
     setattr(n, "_ic_operational", True)
+    if skip_uc_check:
+        setattr(n, SKIP_UC_CHECK_ATTR, True)
 
     def _clear_operational(n=n):
-        if hasattr(n, "_ic_operational"):
-            delattr(n, "_ic_operational")
+        for attr in ("_ic_operational", SKIP_UC_CHECK_ATTR):
+            if hasattr(n, attr):
+                delattr(n, attr)
 
     undo_ops.append(_clear_operational)
 

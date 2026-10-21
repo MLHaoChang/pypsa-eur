@@ -88,6 +88,7 @@ from services.solver.periodized_costs import (  # noqa: F401
     with_periodized_cost_defaults,
 )
 from services.validation_service import has_errors, validate_for_run
+from services.solver import fixed_sizes as _fixed_sizes
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
@@ -374,6 +375,9 @@ class SolverConfig:
     # linearised unless another unit is committable (a user's binary gensets
     # are never relaxed silently). See services/solver/process_uc.py.
     process_uc: Literal["auto", "linearised", "binary"] = "auto"
+    # Capacity › sizing off (F1, `services/solver/fixed_sizes.py`): "off" sizes
+    # as usual; "capacity_run" / "nameplate" dispatch on that source's sizes.
+    fixed_sizes: str = "off"
     # ── Solve strategy ──────────────────────────────────────────────────────
     # Three modes:
     #
@@ -488,6 +492,17 @@ def _run_process_uc_check(network, config, merged_solver_options, phase) -> dict
         phase(f"Binary check {label}: {_process_uc.result_line(row)}")
     phase(("WARN: " if check["flagged"] or check["status"] != "ok" else "") + check["message"])
     return check
+
+
+def _revision_or_none() -> int | None:
+    """The active project's network revision (the sizing record's provenance);
+    None where no project context is bound (qa scripts)."""
+    try:
+        from services import dirty_state
+
+        return dirty_state.revision()
+    except Exception:                                         # noqa: BLE001
+        return None
 
 
 def run_simulation(
@@ -809,6 +824,23 @@ def run_simulation(
                 # WP1.3 PoC prices are transient too (spec §5.1; re-review #1/#2):
                 # the user's marginal_cost is never modified on disk. Runs with
                 # no commercial config as well — its commit clears stale frames.
+                # Capacity › sizing off (F1): pin every extendable size to the
+                # chosen source BEFORE the commercial binding, so the
+                # connection agreement sees an operational (fixed-design)
+                # solve. The bounds are always restored, last of all, by
+                # `_real_restore`; `*_nom_opt` is never stashed (a failed
+                # solve writes none, so the previous sizes stay).
+                _unfreeze = lambda: None   # noqa: E731
+                _fixed = getattr(config, "fixed_sizes", "off")
+                if _fixed != "off":
+                    from services.adequacy.sweep import freeze_capacities
+
+                    _unfreeze = freeze_capacities(
+                        network, source="opt" if _fixed == "capacity_run" else "nom",
+                        skip_uc_check=False)
+                    phase(f"Sizing off: dispatching on fixed sizes from "
+                          f"{'the capacity run' if _fixed == 'capacity_run' else 'the nameplate'}.")
+                _emit_state(sizing=_fixed_sizes.run_label(network, config))
                 try:
                     # The strategy that will actually RUN (rolling falls back to
                     # full with SCLOPF or multi-period; WP1.5a review #7).
@@ -821,6 +853,7 @@ def run_simulation(
                         solve_strategy=_ic_strategy,
                         multi_period=bool(config.multi_investment_periods))
                 except CommercialBindingError as exc:
+                    _unfreeze()
                     log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
@@ -837,6 +870,7 @@ def run_simulation(
                 except BaseException:
                     _energization_undo()
                     _ic_conn.undo()
+                    _unfreeze()
                     raise
                 _assumptions_restore = _real_restore
 
@@ -847,7 +881,10 @@ def run_simulation(
                         try:
                             _energization_undo()
                         finally:
-                            _ic_conn.undo()
+                            try:
+                                _ic_conn.undo()
+                            finally:
+                                _unfreeze()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on
@@ -1197,7 +1234,7 @@ def run_simulation(
                     if (status in ("ok", "optimal") and config.mode == "lopf"
                             and plan_uc_kwargs.get("linearized_unit_commitment")
                             and len(_process_uc.process_committable(network))
-                            and not getattr(network, "_ic_operational", False)):
+                            and not getattr(network, "_skip_process_uc_check", False)):
                         _proc_check = _run_process_uc_check(
                             network, config, merged_solver_options, phase)
                     _emit_state(last_process_uc_check=_proc_check)
@@ -1237,6 +1274,11 @@ def run_simulation(
                 # produced a dispatch (re-review #5: no rows mixing one run's
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
+                    # A sizing solve records its sizes: the fixed-size run's
+                    # "capacity_run" source (F1). Never an operational one.
+                    if (getattr(config, "fixed_sizes", "off") == "off"
+                            and not getattr(network, "_ic_operational", False)):
+                        _fixed_sizes.record_sizing(network, _revision_or_none())
                     _ic_conn.commit()
                     # The DSR dispatch record (IC P2 WP2.2-0): committed, or
                     # cleared, only after a successful non-operational solve.
