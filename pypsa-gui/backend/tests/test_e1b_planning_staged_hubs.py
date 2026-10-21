@@ -318,6 +318,13 @@ def test_the_microgrid_solves_with_its_island_rows_at_shifted_years(reset_backen
 
 
 @pytest.mark.live_solve
+def test_the_microgrid_solves_at_uneven_years_from_2026(reset_backend, monkeypatch, tmp_path):
+    n, _cfg, _state = _solve(MG, _plan(MG, UNEVEN), monkeypatch, tmp_path)
+    assert list(n.investment_periods) == [2026, 2029, 2040]
+    assert _cfg.island_constraints is True
+
+
+@pytest.mark.live_solve
 def test_the_h2_hub_solves_and_its_case_builds_from_2026(reset_backend, monkeypatch, tmp_path):
     """Uneven years from 2026: the case's CO2 lines are priced from the held
     point (no ``co2_price_year_uncovered``) and the baseline buys grey H2."""
