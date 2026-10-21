@@ -97,8 +97,10 @@ def test_tou_needs_a_period_for_every_hour():
 def test_tou_refuses_a_malformed_period():
     params = dict(_TOU, periods=[{"name": "x", "rate": 1.0, "start_hour": 20,
                                   "end_hour": 8}])
-    with pytest.raises(InvalidSeriesParamsError, match="periods"):
+    # Our own sentence: the period's index and field, no pydantic prefix.
+    with pytest.raises(InvalidSeriesParamsError) as err:
         _gen("tou", params)
+    assert str(err.value) == "period 0: end_hour must be after start_hour"
 
 
 def test_a_hand_made_price_meta_without_a_currency_year_is_refused_at_apply():
@@ -186,9 +188,14 @@ def test_inflow_applies_with_its_energy_record():
 
 # ── heat-pump COP ───────────────────────────────────────────────────────────
 
+_AMB = {"ambient_annual_mean_c": 10.0, "ambient_seasonal_amplitude_k": 9.0,
+        "ambient_diurnal_amplitude_k": 5.0}
+
+
 def test_air_source_cop_follows_the_carnot_fraction_of_the_ambient():
-    params = {"source": "air", "sink_c": 45.0, "eta": 0.45, "cop_max": 7.0}
+    params = {"source": "air", "sink_c": 45.0, "eta": 0.45, "cop_max": 7.0, **_AMB}
     res = _gen("cop", params)
+    assert res.meta["ambient_from"] == "params"
     s = res.series["X"]
     temp = dc_load_profile.ambient_c(SimpleNamespace(**res.meta["ambient"]), s.index)
     sink = 45.0 + 273.15
@@ -299,3 +306,52 @@ def test_the_inflow_warning_carries_the_storage_tools_reason_code():
                          res.meta, component_type=ct, attribute=attr,
                          time_basis="UTC", now=NOW)
     assert any(w.startswith("unsupported_storage_inflow:") for w in out["warnings"])
+
+
+# ── review round 2 (gatekeeper on #554) ─────────────────────────────────────
+
+def test_air_cop_without_an_ambient_is_refused():
+    from services.profile_gen.series import CopAmbientUnknownError
+
+    with pytest.raises(CopAmbientUnknownError, match="ambient"):
+        _gen("cop", {"source": "air", "sink_c": 45.0})
+
+
+def test_air_cop_with_part_of_the_ambient_is_refused():
+    with pytest.raises(InvalidSeriesParamsError, match="state all of"):
+        _gen("cop", {"source": "air", "ambient_annual_mean_c": 10.0})
+
+
+def test_a_formula_cop_below_one_is_floored_counted_and_warned():
+    res = _gen("cop", {"source": "ground", "source_c": -10.0, "sink_c": 70.0,
+                       "eta": 0.2})
+    assert float(res.series["X"].min()) == 1.0
+    assert res.meta["cop_floored_hours"] == 8760
+    assert res.meta["warnings"][0].startswith("cop_floored")
+    assert "0.858" in res.meta["warnings"][0]
+
+
+def test_an_inflow_shape_that_is_not_a_name_is_a_typed_refusal():
+    with pytest.raises(InvalidSeriesParamsError, match="shape"):
+        _gen("inflow", {"annual_mwh": 100.0, "shape": ["snowmelt"]})
+
+
+def test_a_partial_finance_block_refuses_only_what_it_sets():
+    # Only a discount rate: currency and basis are unset, so a USD series is
+    # accepted unverified, not refused against a default EUR.
+    _price_net(finance={"discount_rate": 0.08})
+    out = _apply_series(_gen("tou", dict(_TOU, currency="USD"), ids=("grid",)), "grid")
+    assert any(w.startswith("money_basis_unverified") for w in out["warnings"])
+
+
+def test_a_set_currency_without_a_year_accepts_a_real_series_unverified():
+    _price_net(finance={"currency": "EUR"})
+    out = _apply_series(_gen("tou", dict(_TOU, price_basis="real"), ids=("grid",)), "grid")
+    warn = [w for w in out["warnings"] if w.startswith("money_basis_unverified")]
+    assert warn and "basis unset" in warn[0] and "year unstated" in warn[0]
+
+
+def test_a_set_currency_that_differs_still_refuses():
+    _price_net(finance={"currency": "EUR"})
+    with pytest.raises(InvalidSeriesUnitError, match="counts in EUR"):
+        _apply_series(_gen("tou", dict(_TOU, currency="USD"), ids=("grid",)), "grid")

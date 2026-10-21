@@ -5,7 +5,7 @@ import os
 import pandas as pd
 import pytest
 
-from harness.pilot_evaluation import CASES, GOLDEN_CASES, UNSAFE, LiveBudget, score
+from harness.pilot_evaluation import CASES, GOLDEN_CASES, SCOPE_CLASS, UNSAFE, LiveBudget, score
 from services import chat_service, llm_config, workflow_tools
 from tests.assurance_acceptance.support import Harness, parse_sse
 from tests.test_assurance_metrics import NumericalProvider
@@ -18,7 +18,10 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile == "bus-price/1":
+    if case.profile == "capacity/1":
+        n.add("Generator", "G2", bus="B1", p_nom_extendable=True, p_nom_max=3, capital_cost=1, marginal_cost=0)
+        n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
+    elif case.profile == "bus-price/1":
         n.add("Generator", "G2", bus="B1", p_nom=20, marginal_cost=30)
         n.loads_t.p_set = pd.DataFrame({"L1": [5, 25]}, index=n.snapshots)
         n.snapshot_weightings.loc[:, "generators"] = [1, 3]
@@ -109,6 +112,7 @@ def run_case(case, ctx, harness, provider, node, mode):
     if case.fault not in ("golden", "basis"):
         scope = {"version": 1, "profile": case.profile, "project_id": ctx.project_uuid,
                  "entity_id": case.entity,
+                 **({"component_class": SCOPE_CLASS[case.profile]} if case.profile in SCOPE_CLASS else {}),
                  "retain": False, "metrics": list(case.expected) + list(case.unavailable)}
         if "cost" in case.profile:
             scope["cost_basis"] = {"currency": "EUR", "price_year": 2026,
@@ -139,6 +143,8 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
     if case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile == "capacity/1":
+        n.generators.at["G2", "p_nom_opt"] = float("nan")
     elif case.fault == "missing" and case.profile == "bus-price/1":
         n.buses_t.marginal_price.loc[:, "B1"] = float("nan")
     elif case.fault == "missing" and case.profile.startswith("lost-"):

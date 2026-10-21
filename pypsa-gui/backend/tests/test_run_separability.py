@@ -456,3 +456,47 @@ def test_flipping_sizing_off_is_refused_by_preflight(client, site, edit):
     issues = client.post("/api/simulation/preflight").json()["issues"]
     assert "generator_p_nom_invalid" in {i["code"] for i in issues if i["severity"] == "error"}
     assert _pf._flow(client, name)["verdicts"]["optimisation"]["ready"] is False
+
+
+def test_sizing_off_answers_for_its_source(client, site, set_cfg, bound_ctx, project_storage_dir):
+    """Sizing off (F1): with no capacity run, "capacity_run" is refused while
+    the nameplate is ready; with the option already set it is the flow's."""
+    name = site()
+    kinds = ("optimisation", "fixed_sizes")
+    with bound_ctx(client):
+        dirpath = project_storage_dir(name)
+        v = RS.verdicts(dirpath, kinds, cache_key=KEY)
+        plate = RS.verdicts(dirpath, kinds, cache_key=KEY, size_source="nameplate")
+    assert v["optimisation"]["ready"] is True
+    assert v["fixed_sizes"]["ready"] is False
+    assert v["fixed_sizes"]["blocker"]["code"] == "fixed_sizes_no_capacity_run"
+    assert v["fixed_sizes"]["blocker"]["section"] == "scenarios"
+    assert plate["fixed_sizes"]["ready"] is True
+    set_cfg(fixed_sizes="nameplate", solve_strategy="rolling")
+    with bound_ctx(client):
+        plate = RS.verdicts(project_storage_dir(name), kinds, cache_key=KEY,
+                            size_source="nameplate")
+    assert plate["fixed_sizes"] == plate["optimisation"]
+    assert plate["fixed_sizes"]["ready"] is False                 # rolling refuses it
+
+
+def test_sizing_off_answers_for_the_source_asked_not_the_one_set(client, site, set_cfg,
+                                                                 bound_ctx, project_storage_dir):
+    """Gatekeeper: "already on" means "already this source". With the config
+    on the nameplate, a capacity-run query still asks for a capacity run."""
+    name = site()
+    set_cfg(fixed_sizes="nameplate")
+    with bound_ctx(client):
+        dirpath = project_storage_dir(name)
+        cap = RS.verdicts(dirpath, ("optimisation", "fixed_sizes"), cache_key=KEY)
+        plate = RS.verdicts(dirpath, ("fixed_sizes",), cache_key=KEY, size_source="nameplate")
+    assert cap["optimisation"]["ready"] is True                    # the flow: nameplate
+    assert plate["fixed_sizes"]["ready"] is True
+    assert cap["fixed_sizes"]["blocker"]["code"] == "fixed_sizes_no_capacity_run"
+
+
+@pytest.mark.parametrize("source", ["off", "whatever"])
+def test_sizing_off_refuses_a_source_that_is_not_one(tmp_path, source):
+    v = RS.verdicts(tmp_path, ("fixed_sizes",), cache_key=KEY, size_source=source)
+    assert v["fixed_sizes"]["ready"] is False
+    assert v["fixed_sizes"]["blocker"]["code"] == "fixed_sizes_unknown"
