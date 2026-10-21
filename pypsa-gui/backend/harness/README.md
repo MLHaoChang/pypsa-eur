@@ -322,7 +322,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 164 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -335,7 +335,15 @@ external verification. See the [calibration and review guide](../../../.scratch/
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch
-and declared-basis direct StorageUnit costs.
+and declared-basis direct StorageUnit costs. A sixth, `carrier-energy/1`
+(`carrier_calculations.py`), sums one exact carrier's generator energy, combined
+peak and StorageUnit charge/discharge; it is opt-in (`calculations.OPT_IN_PROFILES`
+run only when listed in `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`), excludes Links and
+Stores and always discloses how many it excluded. `branch-loading/1` and
+`network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
+Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
+P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
+refuse whenever AC power-flow results exist.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

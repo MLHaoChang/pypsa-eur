@@ -482,29 +482,34 @@ def test_r4_in_flight(client, site, monkeypatch):
 # The state of each section right after create. Where it differs from the
 # instantiation table, the comment says how (recorded in the PR, not papered
 # over): the table's **R** inputs (location, the data centre's limits, ramp
-# and LOLE goal) have no source that says "not yet confirmed" except the
-# template's `assumed` ledger rows, and the site location is a warning by the
-# brief's rule (the validator does not require it).
+# and LOLE goal) say "not yet confirmed" through the template's `assumed`
+# ledger rows (DC grid readiness 02 adds connection_ramp, oscillation,
+# import_efficiency, fault_level and lole_goal), and the site location is a
+# warning by the brief's rule (the validator does not require it).
 TEMPLATE_STATES = {
     # R location → warning (site_location_missing). R connection limits and
-    # ramp, R LOLE goal: no `assumed` row names them → complete.
+    # ramp, R LOLE goal: DC 02's assumed ledger rows → connection and
+    # scenarios warning ("to check").
     "eh_datacenter": {"project": "warning", "carriers": "complete",
-                      "connection": "complete", "loads": "complete",
+                      "connection": "warning", "loads": "complete",
                       "assets": "complete", "profiles": "complete",
-                      "commercial": "complete", "scenarios": "complete"},
+                      "commercial": "complete", "scenarios": "warning"},
     # Islanded: connection `not_needed`. Assumed island data → assets warning.
+    # DC 02's assumed LOLE goal → scenarios warning.
     "eh_microgrid": {"project": "warning", "carriers": "complete",
                      "connection": "not_needed", "loads": "complete",
                      "assets": "warning", "profiles": "complete",
-                     "commercial": "warning", "scenarios": "complete"},
+                     "commercial": "warning", "scenarios": "warning"},
     # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
     # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning.
     "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
                           "connection": "warning", "loads": "complete",
                           "assets": "warning", "profiles": "complete",
                           "commercial": "warning", "scenarios": "complete"},
+    # DC 02's assumed connection limits → connection warning; no LOLE goal
+    # (the strong-grid pack sets an ENS cap only) → scenarios complete.
     "eh_h2_hub": {"project": "warning", "carriers": "complete",
-                  "connection": "complete", "loads": "complete",
+                  "connection": "warning", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
                   "commercial": "complete", "scenarios": "complete"},
     # Generation-only (IPP ticket 03): no Load, so loads `not_needed` and no study.
