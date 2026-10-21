@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AnnualRow, HeatmapState, MonthRow, WeekView } from '../../api/loadShape'
 import {
-  annualStack, cellTitle, fmtMwh, heatColor, heatMax, missingGroups, monthRows, socRows, weekRows,
+  annualStack, cellTitle, fmtMwh, heatBackground, heatColor, NO_SNAPSHOT_HATCH, heatMax, missingGroups, monthRows, socRows, weekRows,
 } from './loadShape'
 
 const HEAT: HeatmapState = {
@@ -32,6 +32,12 @@ describe('heatmap colours', () => {
     expect(zero).not.toBe(none)                       // a zero is data, a gap is not
     expect(peak).toContain('0.900')
     expect(zero).toContain('0.050')
+  })
+  it('hatches a cell with no snapshot, so it never reads as the lightest shade', () => {
+    expect(heatBackground(null, 10)).toBe(NO_SNAPSHOT_HATCH)
+    expect(heatBackground(0, 10)).toBe(heatColor(0, 10))          // a computed zero is a shade, not a hatch
+    expect(heatBackground(0, 10)).not.toContain('repeating')
+    expect(NO_SNAPSHOT_HATCH).toContain('repeating-linear-gradient')
   })
   it('names the cell and its sample count in the hover title', () => {
     expect(cellTitle(0, 7, 12.34, 3)).toBe('Mon 07:00: 12.3 MW (3 snapshots)')
