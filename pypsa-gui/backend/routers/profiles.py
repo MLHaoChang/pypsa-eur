@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 import pandas as pd
 import xarray as xr
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
@@ -46,12 +46,34 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    DcLoadOwnedError,
+    FamilyTargetMismatchError,
+    InvalidSeriesUnitError,
     ProfileApplyError,
+    ProfileBoundConflictError,
+    UnknownFamilyError,
+    UnsupportedTargetError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
-from services.profile_gen.job import KEEP_PENDING, write_pending
+from services.profile_gen.refusals import public_message
+from services.profile_gen.families import default_target
+from services.profile_gen.job import KEEP_PENDING, pending_io_lock, write_pending
+from services.profile_gen.load_upload import (
+    UploadCoverageError,
+    UploadFormatError,
+    UploadNoLoadError,
+    UploadUnitError,
+    read_load_upload,
+)
+from services.profile_gen.load_archetypes import (
+    ARCHETYPES,
+    InvalidArchetypeParamsError,
+    UnknownArchetypeError,
+    list_presets as list_load_presets,
+    resolve_defaults as load_archetype_defaults,
+)
 
 router = APIRouter()          # global: /api/profiles/…
 project_router = APIRouter()  # scoped: /api/projects/{name}/profiles/…
@@ -103,6 +125,21 @@ class ApplyRequest(BaseModel):
     # zone's offset, DST included). Unset: UTC when the project's commercial
     # timezone is set, else applied unshifted with a `warnings` entry.
     time_basis: str | None = None
+    # The target. Unset: the artifact's family default (a renewable capacity
+    # factor onto generators/p_max_pu, a load shape onto loads/p_set).
+    component_type: str | None = None
+    attribute: str | None = None
+
+
+class LoadGenerateRequest(BaseModel):
+    # A load archetype (`services/profile_gen/load_archetypes.py`) for the
+    # named loads of the open network; one column per load, ids = names.
+    archetype: str
+    loads: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    year: int | None = None
+    # Archetypes are hourly shapes; the field stays for the shared engine call.
+    resolution: Literal["hourly"] = "hourly"
 
 
 class ShapeRequest(BaseModel):
@@ -294,6 +331,37 @@ def _error_kind(exc: Exception) -> str:
     ).lstrip("_").removesuffix("_error")
 
 
+# Apply refusals whose error_kind is written out as a literal, so
+# tests/test_tool_error_kind_manifest.py's scan sees each one; the rest fall
+# back to the class-name kind. Subclasses before their bases.
+_APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+    (ComponentNotFoundError, {"error_kind": "component_not_found"}),
+    (ProfileBoundConflictError, {"error_kind": "profile_bound_conflict"}),
+    (UnsupportedTargetError, {"error_kind": "unsupported_target"}),
+    (UnknownFamilyError, {"error_kind": "unknown_family"}),
+    (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
+    (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
+    (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
+)
+
+# Load generation and upload refusals, literal for the same reason.
+_LOAD_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
+    (UnknownArchetypeError, {"error_kind": "unknown_archetype"}),
+    (InvalidArchetypeParamsError, {"error_kind": "invalid_archetype_params"}),
+    (UploadFormatError, {"error_kind": "load_upload_format"}),
+    (UploadUnitError, {"error_kind": "load_upload_unit"}),
+    (UploadCoverageError, {"error_kind": "load_upload_coverage"}),
+    (UploadNoLoadError, {"error_kind": "unknown_load"}),
+)
+
+
+def _apply_refusal_kind(exc: Exception) -> dict[str, str]:
+    for cls, kind in (*_APPLY_REFUSALS, *_LOAD_REFUSALS):
+        if isinstance(exc, cls):
+            return dict(kind)
+    return {"error_kind": _error_kind(exc)}
+
+
 # ---------------------------------------------------------------------------
 # Global: presets + estimate
 # ---------------------------------------------------------------------------
@@ -305,7 +373,8 @@ def list_profile_presets(technology: str | None = None):
     try:
         found = presets.list_presets(technology)
     except ProfileGenError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422,
+                            detail=public_message(exc, route="presets")) from exc
     return {
         "presets": [
             {
@@ -316,6 +385,16 @@ def list_profile_presets(technology: str | None = None):
             }
             for p in found
         ]
+    }
+
+
+@router.get("/load-archetypes")
+def list_load_archetypes():
+    """The load archetypes with their parameter defaults, and the presets."""
+    return {
+        "archetypes": [{"name": a, "params": load_archetype_defaults(a)}
+                       for a in ARCHETYPES],
+        "presets": list_load_presets(),
     }
 
 
@@ -340,7 +419,8 @@ def estimate_profile(body: EstimateRequest):
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="estimate")},
         ) from exc
     # Hourly previews are downsampled to daily means for the map; coarser
     # resolutions are already compact enough to return as-is.
@@ -417,12 +497,14 @@ def generate_profiles(
     except CdsCredentialError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": "cds_credential", "message": str(exc)},
+            detail={"error_kind": "cds_credential",
+                    "message": public_message(exc, route="generate")},
         ) from exc
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="generate")},
         ) from exc
 
     project = _row(proj, db)
@@ -441,6 +523,165 @@ def generate_profiles(
                    f"{job.status}; wait for it or abort it",
         )
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
+
+
+def _foreground_ctx(proj: AuthorizedProject, verb: str):
+    """The active context, refused (409) unless it holds this project."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project not in (None, proj.name):
+        raise HTTPException(
+            status_code=409,
+            detail={"error_kind": "project_not_open",
+                    "message": f"'{proj.name}' is not the open project "
+                               f"(the foreground holds {ctx.loaded_project!r}); "
+                               f"open it first, then {verb}"},
+        )
+    return ctx
+
+
+def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
+                         stats: dict[str, dict]) -> list[str]:
+    """What apply will record, shown before it: each load's modelled energy
+    on this network's snapshots (a sampled template sees less than the year)
+    into ``stats``, and the warnings (time basis, energy mismatch). A preview
+    that cannot align (a partial-year network) says why instead; apply
+    refuses the same way."""
+    from services.profile_gen.apply import ProfileApplyError, preview_energy
+
+    warnings: set[str] = set()
+    for col in frame.columns:
+        try:
+            pv = preview_energy(ctx, frame[col], record,
+                                component_type="loads", attribute="p_set")
+        except ProfileApplyError as exc:
+            stats[col]["modelled_mwh"] = None
+            warnings.add(f"not_applicable: {public_message(exc, route='load_preview')}")
+            continue
+        stats[col]["modelled_mwh"] = pv["modelled_mwh"]
+        warnings.update(pv["warnings"])
+    return sorted(warnings)
+
+
+def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
+    hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
+    return {col: {"peak_mw": float(frame[col].max()) * scale,
+                  "annual_mwh": float(frame[col].mean()) * scale * hours}
+            for col in frame.columns}
+
+
+@project_router.post("/{name}/profiles/loads/generate")
+def generate_load_profiles(
+    body: LoadGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate a load archetype for named loads into the pending store.
+
+    Synchronous: an archetype is closed-form and takes milliseconds, so it
+    skips the solve queue the weather sources need. The artifact is the same
+    pending pair the renewable jobs write (`job.write_pending`) and is applied
+    through the same `/profiles/apply`. Nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "generate")
+    missing = [ld for ld in body.loads if ld not in ctx.network.loads.index]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_load",
+                    "message": f"no load named {', '.join(map(repr, missing))} "
+                               f"on the open network; it has "
+                               f"{sorted(ctx.network.loads.index)[:20]}"},
+        )
+    params = dict(body.params or {})
+    # Working hours are on the site's wall clock: with the project's
+    # commercial timezone set, its snapshots are UTC (`resolve_time_basis`),
+    # so the archetype maps on that zone unless the caller names one.
+    if "timezone" not in params:
+        from services.profile_gen.apply import _commercial_timezone
+
+        tz = _commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    try:
+        result = engine.generate_profile(
+            body.loads, body.archetype, params=params,
+            year=body.year, resolution=body.resolution, family="load",
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_generate")},
+        ) from exc
+
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+
+    stats = _load_stats(result.series, float(record["scale_mw"]),
+                        int(record["weather_year"]))
+    warnings = _preview_load_energy(ctx, result.series, record, stats)
+    return {**record, "stats": stats, "warnings": warnings}
+
+
+@project_router.post("/{name}/profiles/loads/upload")
+async def upload_load_profiles(
+    file: UploadFile = File(...),
+    unit: str | None = Form(None),
+    timezone: str | None = Form(None),
+    year: int | None = Form(None),
+    annual_mwh: float | None = Form(None),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Read a measured load export (`load_upload.read_load_upload`) into the
+    pending store, one column per load the network has; apply it through
+    `/profiles/apply` like a generated profile. Columns that name no load
+    come back as `unmatched` and are not read. Naive timestamps default to
+    the project's commercial timezone."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from services.profile_gen.apply import _commercial_timezone
+    from services.upload_guard import read_capped
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "upload")
+    blob = await read_capped(file)
+    try:
+        # A large export is seconds of pandas: off the event loop.
+        up = await run_in_threadpool(
+            read_load_upload, blob, file.filename or "upload.csv", unit=unit,
+            timezone=timezone, default_timezone=_commercial_timezone(ctx),
+            year=year, annual_mwh=annual_mwh, only=set(ctx.network.loads.index),
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_upload")},
+        ) from exc
+    matched = list(up.frame.columns)
+    unmatched = up.unmatched
+    frame = up.frame
+    job_id = str(uuid.uuid4())
+    record = dict(up.meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = matched
+    record["notes"] = up.notes
+    record["qa_warnings"] = up.warnings  # timeseries_qa findings, per column
+    write_pending(str(proj.directory), job_id, frame, record)
+    stats = _load_stats(frame, 1.0, int(record["weather_year"]))
+    preview = _preview_load_energy(ctx, frame, record, stats)
+    return {**record, "unmatched": unmatched, "stats": stats,
+            "warnings": preview}
 
 
 @project_router.get("/{name}/profiles/pending")
@@ -468,7 +709,9 @@ def apply_profile(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Write one pending profile onto a generator's `p_max_pu`.
+    """Write one pending profile onto its target: a generator's `p_max_pu`
+    for a renewable profile, a load's `p_set` for a load shape, or the
+    `component_type`/`attribute` the body names.
 
     Undo FIRST: this prefix is outside the undo middleware's coverage, so the
     snapshot is pushed here, before any write. The component is re-resolved at
@@ -480,7 +723,7 @@ def apply_profile(
 
     point_id = body.point_id or body.component
     try:
-        with xr.open_dataset(nc) as ds:
+        with pending_io_lock(), xr.open_dataset(nc) as ds:
             if point_id not in ds.data_vars:
                 raise HTTPException(
                     status_code=422,
@@ -497,7 +740,8 @@ def apply_profile(
     except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
         raise HTTPException(
             status_code=422,
-            detail=f"pending profile for job {body.job_id!r} is unreadable: {exc}",
+            detail=(f"pending profile for job {body.job_id!r} is unreadable: "
+                    f"{public_message(exc, route='apply', job_id=body.job_id)}"),
         ) from exc
     series = pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
                        name=body.component, dtype=float)
@@ -518,7 +762,8 @@ def apply_profile(
     warning = None
     coords = (meta.get("point_coords") or {}).get(point_id)
     gen = ctx.network.generators
-    if coords is not None and body.component in gen.index:
+    if (coords is not None and body.component in gen.index
+            and body.component_type in (None, "generators")):
         bus = str(gen.at[body.component, "bus"])
         if bus in ctx.network.buses.index:
             from services.network_geometry import _bus_coord
@@ -544,17 +789,17 @@ def apply_profile(
     push_undo_snapshot()
 
     try:
+        component_type, attribute = default_target(
+            meta, body.component_type, body.attribute)
         summary = assign_profile(ctx, body.component, series, meta,
+                                 component_type=component_type,
+                                 attribute=attribute,
                                  time_basis=body.time_basis)
-    except ComponentNotFoundError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"error_kind": "component_not_found", "message": str(exc)},
-        ) from exc
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="apply", job_id=body.job_id)},
         ) from exc
 
     from routers.simulation import _state_update
@@ -579,7 +824,7 @@ def shape_profile(
     refusals."""
     _check_lock(proj, db, user)
     nc, parent = _pending_artifact(proj, body.job_id)
-    with xr.open_dataset(nc) as ds:
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
         frame = ds.to_dataframe()
     frame.index = pd.DatetimeIndex(frame.index)
     if body.points is not None and not body.points:
@@ -607,14 +852,16 @@ def shape_profile(
             raise HTTPException(
                 status_code=422,
                 detail={"error_kind": "unreachable_target",
-                        "message": f"{point}: {exc}",
+                        "message": f"{point}: "
+                                   f"{public_message(exc, route='reshape', job_id=body.job_id)}",
                         "point": point,
                         "reachable_max": exc.reachable_max},
             ) from exc
         except ProfileGenError as exc:
             raise HTTPException(
                 status_code=422,
-                detail={"error_kind": _error_kind(exc), "message": str(exc)},
+                detail={"error_kind": _error_kind(exc),
+                        "message": public_message(exc, route="reshape", job_id=body.job_id)},
             ) from exc
 
     # Reshaping a shaped artifact extends its chain: the ops accumulate in

@@ -108,6 +108,19 @@ def _evict_pending(storage_dir: str | Path, keep: int = KEEP_PENDING) -> None:
 # ---------------------------------------------------------------------------
 
 
+def pending_io_lock():
+    """The process-wide netCDF lock (`PyPSAService.get_netcdf_io_lock`):
+    netCDF4/HDF5 is not thread-safe per process, so a pending write or read
+    must not run beside another one, a project save/load, an export or a
+    campus read (concurrent pending writes crashed the API).
+
+    Non-re-entrant: never call under the lock. It is a plain Lock, and every
+    pending access takes it on its own, so a nested call would hang."""
+    from services.pypsa_service import PyPSAService
+
+    return PyPSAService.get_netcdf_io_lock()
+
+
 def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
                   record: dict[str, Any]) -> tuple[Path, Path]:
     """Write one pending artifact pair and evict the oldest beyond the
@@ -119,7 +132,8 @@ def write_pending(storage_dir: str | Path, job_id: str, frame: pd.DataFrame,
     part = Path(str(nc) + ".part")
     meta_part = Path(str(meta_path) + ".part")
     try:
-        frame.rename_axis("time").to_xarray().to_netcdf(str(part))
+        with pending_io_lock():
+            frame.rename_axis("time").to_xarray().to_netcdf(str(part))
         os.replace(part, nc)
         meta_part.write_text(json.dumps(record, indent=2, default=str))
         os.replace(meta_part, meta_path)

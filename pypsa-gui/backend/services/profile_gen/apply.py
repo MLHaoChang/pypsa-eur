@@ -1,4 +1,9 @@
-"""Apply a generated renewable profile to a network generator.
+"""Apply a generated profile to a network component.
+
+Originally the renewable path (generator p_max_pu); since the time-series
+generators ticket 01 the target is any ``(component_type, attribute)`` in
+`TARGETS`, and the meta's family (`families.py`) decides which targets it may
+write. The alignment and write contract below hold for every target.
 
 Spec: docs/superpowers/specs/2026-10-17-renewable-profile-generator-spec.md §4
 Plan: docs/superpowers/plans/2026-10-17-renewable-profile-generator.md Task 5
@@ -13,13 +18,17 @@ reindexing:
     ``leap_day: dropped``;
   * non-leap weather year onto a leap target → typed refusal (fabricating
     24 h is worse than refusing);
-  * partial-year / sub-hourly / segmented snapshots → typed refusal naming
-    the supported shapes;
+  * an hourly snapshot window (a representative week, several sampled
+    weeks, a month) → the weather year sliced to it by month-day-hour, the
+    window recorded as ``window: {first, last, hours, runs}``; an hour the
+    source does not have (Feb 29, a DST-gap hour) is refused, never filled;
+  * sub-hourly / off-the-hour snapshots, or a window that repeats a
+    calendar hour → typed refusal naming the supported shapes;
   * MultiIndex (multi-investment-period) snapshots → tile the weather year
     into EVERY period by month-day-hour, leap rules applied per period
     (owner ruling D7=B); meta ``tiled: true`` + the weather year.
 
-Write contract: store entry ``("generators", "p_max_pu", name)`` + provenance
+Write contract: store entry ``(component_type, attribute, name)`` + provenance
 meta (the `_user_ts_meta` channel), `_t` reapply, changelog, dispatch
 invalidation via `services/dispatch_status.clear_dispatch` — a profile change
 invalidates solved results exactly like a topology edit does. Overwrite
@@ -31,7 +40,8 @@ user entry (see tests/test_profile_gen_apply.py).
 from __future__ import annotations
 
 import datetime as _dt
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal, Mapping
 
 import numpy as np
 import pandas as pd
@@ -39,6 +49,7 @@ import pandas as pd
 from services import change_log_service
 from services.dispatch_status import clear_dispatch
 from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.families import family_of, get_family
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
     _reapply_user_ts_to_network,
@@ -55,7 +66,7 @@ class ProfileApplyError(ProfileGenError):
 
 
 class ComponentNotFoundError(ProfileApplyError):
-    """The named generator does not exist on the network."""
+    """The named component does not exist on the network."""
 
 
 class CarrierMismatchError(ProfileApplyError):
@@ -74,6 +85,34 @@ class LeapYearMismatchError(ProfileApplyError):
 
 class InvalidTimeBasisError(ProfileApplyError):
     """The declared snapshot time basis is not "UTC" or an IANA zone."""
+
+
+class UnknownFamilyError(ProfileApplyError):
+    """The meta names a profile family nobody registered."""
+
+
+class DcLoadOwnedError(ProfileApplyError):
+    """The project's `dc_load` spec owns the data-centre load (#421)."""
+
+
+class UnsupportedTargetError(ProfileApplyError):
+    """The (component_type, attribute) pair is not in `TARGETS`."""
+
+
+class FamilyTargetMismatchError(CarrierMismatchError):
+    """The profile's family may not write this target (a renewable capacity
+    factor onto a load, a load shape onto a generator bound). A subclass of
+    CarrierMismatchError: the renewable refusal it generalises."""
+
+
+class ProfileBoundConflictError(ProfileApplyError):
+    """The new bound crosses the component's other bound (p_min_pu above
+    p_max_pu at some snapshot), which makes the LP infeasible."""
+
+
+class InvalidSeriesUnitError(ProfileApplyError):
+    """The meta's unit does not fit the target, or the series does not match
+    the normalisation its unit states."""
 
 
 # The mapping basis when the snapshots' clock is not stated (see
@@ -171,14 +210,47 @@ def _validate_year_block(idx: pd.DatetimeIndex, *, what: str) -> int:
     ):
         raise UnsupportedSnapshotsError(
             f"{what}: snapshots must span one full calendar year (Jan 1 00:00 "
-            "– Dec 31 23:00, hourly); partial-year horizons are not supported "
-            "yet. Generated profiles apply to full-year hourly projects; a "
-            "representative-week template (e.g. an Energy Hub study week) "
-            "needs its weeks sampled from the weather year, which is "
-            "planned — until then, upload a profile for the template's "
-            "snapshots instead"
+            "– Dec 31 23:00, hourly) for a daily or weekly profile. A "
+            "partial-year network (e.g. an Energy Hub study week) takes an "
+            "hourly profile, sliced to its snapshot window — regenerate at "
+            "hourly resolution"
         )
     return int(year)
+
+
+def _hourly_window(idx: pd.DatetimeIndex, *, what: str) -> dict | None:
+    """None when ``idx`` is one full calendar year (`_validate_year_block`);
+    else the window record ``{first, last, hours, runs}`` of an hourly sample
+    of the year: tz-naive, on the hour, strictly increasing, no calendar hour
+    twice (a window covers at most one year). ``runs`` counts the contiguous
+    blocks, so two sampled weeks read as two. Anything else is refused with
+    the full-year check's own reason."""
+    try:
+        _validate_year_block(idx, what=what)
+        return None
+    except UnsupportedSnapshotsError as exc:
+        full_year_error = exc
+    if (not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None or len(idx) == 0
+            or idx.has_duplicates or not idx.is_monotonic_increasing):
+        raise full_year_error
+    steps = idx.to_series().diff().dropna()
+    if (steps < _ONE_HOUR).any():
+        raise full_year_error
+    off = idx[idx != idx.floor("h")]
+    if len(off):
+        raise UnsupportedSnapshotsError(
+            f"{what}: snapshot {off[0]} is not on the hour — generated "
+            "profiles are hourly")
+    seen: set[tuple[int, int, int]] = set()
+    for t in idx:
+        key = (t.month, t.day, t.hour)
+        if key in seen:
+            raise UnsupportedSnapshotsError(
+                f"{what}: snapshot {t} repeats a calendar hour already in the "
+                "window — a window samples at most one year")
+        seen.add(key)
+    return {"first": str(idx[0]), "last": str(idx[-1]), "hours": int(len(idx)),
+            "runs": int(1 + (steps != _ONE_HOUR).sum())}
 
 
 def _check_time_basis(time_basis: str) -> str:
@@ -224,9 +296,21 @@ def _utc_keys(target_idx: pd.DatetimeIndex,
     return out
 
 
+def _dst_gap_labels(target_idx: pd.DatetimeIndex, time_basis: str) -> list[str]:
+    """The snapshots a local clock skips (the spring-forward hour): on a
+    full year `_utc_keys` reads each as the next valid hour, so they are
+    recorded as ``dst_gap_shifted`` rather than shifted silently."""
+    if time_basis == "UTC":
+        return []
+    local = target_idx.tz_localize(
+        time_basis, ambiguous=np.ones(len(target_idx), dtype=bool), nonexistent="NaT")
+    return [str(t) for t in target_idx[local.isna()]]
+
+
 def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
                 src_year: int, label: str,
                 time_basis: str = DEFAULT_TIME_BASIS,
+                window: bool = False,
                 ) -> tuple[np.ndarray, bool]:
     """Map weather-year values onto `target_idx` by month-day-hour of the
     UTC instant each snapshot stands for (see `_utc_keys`).
@@ -234,10 +318,37 @@ def _map_by_mdh(series: pd.Series, target_idx: pd.DatetimeIndex, *,
     Returns (values, feb29_dropped). Raises LeapYearMismatchError when the
     target needs a Feb 29 the weather year does not have — per spec §4,
     fabricating 24 h is worse than refusing.
+
+    ``window``: the target is a sample of the year (`_hourly_window`). Every
+    snapshot is matched after the time-basis conversion, and one that maps
+    to an hour the source does not have — Feb 29 of a non-leap source, the
+    skipped spring hour of a local clock — is refused by name, never filled.
     """
     src_lookup = {
         (t.month, t.day, t.hour): v for t, v in series.items()
     }
+    if window:
+        if time_basis != "UTC":
+            local = target_idx.tz_localize(
+                time_basis, ambiguous=np.ones(len(target_idx), dtype=bool),
+                nonexistent="NaT")
+            if local.isna().any():
+                raise UnsupportedSnapshotsError(
+                    f"{label}: snapshot {target_idx[local.isna()][0]} does not "
+                    f"exist on the {time_basis} clock (the spring-forward "
+                    "hour); a window refuses it rather than fill it")
+        values = np.empty(len(target_idx), dtype=float)
+        for i, keys in enumerate(_utc_keys(target_idx, time_basis)):
+            missing = [k for k in keys if k not in src_lookup]
+            if missing:
+                m, d, h = missing[0]
+                raise LeapYearMismatchError(
+                    f"{label}: snapshot {target_idx[i]} maps to "
+                    f"{m:02d}-{d:02d} {h:02d}:00, which weather year {src_year} "
+                    "does not have (Feb 29) — refusing to fabricate it. Pick "
+                    "a leap weather year, or move the window off Feb 29.")
+            values[i] = float(np.mean([src_lookup[k] for k in keys]))
+        return values, False
     src_has_feb29 = (2, 29, 0) in src_lookup
     target_has_feb29 = any(t.month == 2 and t.day == 29 for t in target_idx)
     if target_has_feb29 and not src_has_feb29:
@@ -387,13 +498,19 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             periods = [int(p) for p in lvl0.unique()]
             out = np.empty(len(snapshots), dtype=float)
             dropped_any = False
+            windows: dict[str, dict] = {}
+            gaps: list[str] = []
             for p in periods:
                 mask = np.asarray(lvl0 == p)
                 block = pd.DatetimeIndex(snapshots[mask].get_level_values(1))
-                _validate_year_block(block, what=f"period {p}")
+                win = _hourly_window(block, what=f"period {p}")
+                if win is not None:
+                    windows[str(p)] = win
+                else:
+                    gaps += _dst_gap_labels(block, time_basis)
                 values, dropped = _map_by_mdh(
                     series, block, src_year=src_year, label=f"period {p}",
-                    time_basis=time_basis,
+                    time_basis=time_basis, window=win is not None,
                 )
                 out[mask] = values
                 dropped_any = dropped_any or dropped
@@ -404,13 +521,15 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
                 "tiled": True,
                 "periods": periods,
                 "resolution": "hourly",
+                "window": windows or None,
+                "dst_gap_shifted": gaps,
             }
 
         target_idx = pd.DatetimeIndex(snapshots)
-        _validate_year_block(target_idx, what="network snapshots")
+        win = _hourly_window(target_idx, what="network snapshots")
         values, dropped = _map_by_mdh(
             series, target_idx, src_year=src_year, label="the target year",
-            time_basis=time_basis,
+            time_basis=time_basis, window=win is not None,
         )
         aligned = pd.Series(values, index=target_idx, name=series.name)
         return aligned, {
@@ -419,6 +538,8 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
             "tiled": False,
             "periods": None,
             "resolution": "hourly",
+            "window": win,
+            "dst_gap_shifted": [] if win is not None else _dst_gap_labels(target_idx, time_basis),
         }
 
     if resolution == "daily":
@@ -493,6 +614,269 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
 
 
 # ---------------------------------------------------------------------------
+# Targets: what the apply path can write, and the bounds of each
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TargetSpec:
+    """How one ``(component_type, attribute)`` is written.
+
+    ``kind``:
+      * ``per_unit`` — a [0, 1] bound; out-of-range values are clipped and the
+        clip recorded; p_min_pu and p_max_pu are checked against each other;
+      * ``power`` — MW, never negative (refused, not clipped: a net export is
+        a generator beside the load, not a negative load); a shape is scaled
+        by its unit, and its realised energy is recorded;
+      * ``price`` — currency/MWh of any sign, with its money basis recorded;
+      * ``ratio`` — strictly positive (an efficiency or COP).
+    """
+
+    kind: Literal["per_unit", "power", "price", "ratio"]
+    display: str  # changelog class, e.g. "Generator"
+    noun: str     # error wording, e.g. "generator"
+    # The snapshot weighting a power series' energy is counted with.
+    weighting: str = "generators"
+
+
+TARGETS: dict[tuple[str, str], TargetSpec] = {
+    ("generators", "p_max_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    ("generators", "p_min_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    ("loads", "p_set"): TargetSpec("power", "Load", "load"),
+    ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit",
+                                            weighting="stores"),
+    ("generators", "marginal_cost"): TargetSpec("price", "Generator", "generator"),
+    ("links", "marginal_cost"): TargetSpec("price", "Link", "link"),
+    ("links", "efficiency"): TargetSpec("ratio", "Link", "link"),
+}
+
+# The other half of a per-unit pair: writing one is checked against the other.
+_BOUND_PAIRS = {"p_min_pu": "p_max_pu", "p_max_pu": "p_min_pu"}
+
+# A shape family's realised energy may differ from its profile's by this much
+# before the apply warns (gatekeeper review 2026-10-20).
+ENERGY_TOLERANCE = 0.02
+ENERGY_MISMATCH_WARNING = "energy_mismatch"
+BOUND_FORCES_OFF_WARNING = "bound_forces_off"
+
+# How close a normalised shape's peak/mean must be to 1.
+_NORM_RTOL = 1e-3
+
+
+def _target(component_type: str, attribute: str) -> TargetSpec:
+    try:
+        return TARGETS[(component_type, attribute)]
+    except KeyError:
+        known = ", ".join(f"{c}/{a}" for c, a in sorted(TARGETS))
+        raise UnsupportedTargetError(
+            f"profiles cannot be applied to {component_type}/{attribute}; "
+            f"supported targets: {known}"
+        ) from None
+
+
+def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dict]:
+    """The factor that turns ``series`` into MW, per its stated unit, checked
+    against the SOURCE series (the source year is what a per-unit mean or
+    peak refers to)."""
+    unit = str(meta.get("unit") or "MW")
+    if unit == "MW":
+        return 1.0, {"unit": "MW"}
+    if unit not in ("per_unit_peak", "per_unit_mean"):
+        raise InvalidSeriesUnitError(
+            f"unit {unit!r} does not fit a power target; expected MW, "
+            "per_unit_peak or per_unit_mean"
+        )
+    try:
+        scale = float(meta.get("scale_mw"))
+    except (TypeError, ValueError):
+        scale = float("nan")
+    if not (np.isfinite(scale) and scale > 0):
+        raise InvalidSeriesUnitError(
+            f"a {unit} shape needs a positive scale_mw, got "
+            f"{meta.get('scale_mw')!r}"
+        )
+    vals = series.to_numpy(dtype=float)
+    ref = float(np.nanmax(vals)) if unit == "per_unit_peak" else float(np.nanmean(vals))
+    if not np.isclose(ref, 1.0, rtol=_NORM_RTOL, atol=0.0):
+        what = "peak" if unit == "per_unit_peak" else "mean"
+        raise InvalidSeriesUnitError(
+            f"the series is declared {unit} but its source-year {what} is "
+            f"{ref:.4g}, not 1"
+        )
+    extra = {"unit": unit, "scale_mw": scale}
+    if unit == "per_unit_mean":
+        extra["per_unit_mean_of"] = "source_year"
+    return scale, extra
+
+
+def _money(meta: Mapping[str, Any]) -> dict:
+    """A price series' unit and money basis, in the money-year convention's
+    words ("real basis, 2020 EUR")."""
+    unit = str(meta.get("unit") or "")
+    cur, _, per = unit.partition("/")
+    if per != "MWh" or not (len(cur) == 3 and cur.isalpha() and cur.isupper()):
+        raise InvalidSeriesUnitError(
+            f"a price series must be in currency/MWh (e.g. EUR/MWh), got "
+            f"{unit!r}"
+        )
+    basis = str(meta.get("price_basis") or "").strip().lower()
+    if basis not in ("real", "nominal"):
+        raise InvalidSeriesUnitError(
+            f"a price series must state price_basis real or nominal, got "
+            f"{meta.get('price_basis')!r}"
+        )
+    year = meta.get("currency_year")
+    # Required: every price in the model is real base-year money read from
+    # its price-data year (the money-year convention), so a price series
+    # without one would carry an unknown into the objective (gatekeeper
+    # review 2026-10-20).
+    try:
+        year = int(year)
+    except (TypeError, ValueError):
+        raise InvalidSeriesUnitError(
+            f"a price series must state its currency_year (the year of its "
+            f"price data), got {year!r}") from None
+    return {"unit": unit, "price_basis": basis, "currency_year": year,
+            "money": f"{basis} basis, {year} {cur}"}
+
+
+def _current_bound(n, component_type: str, component: str, attribute: str):
+    """The component's present value of ``attribute`` per snapshot: its
+    series when it has one, else its static value."""
+    static = float(getattr(n, component_type).at[component, attribute])
+    table = getattr(n, f"{component_type}_t")[attribute]
+    if component in table.columns:
+        # A gap in the series is the static value, as PyPSA reads it.
+        return (table[component].reindex(n.snapshots).fillna(static)
+                .to_numpy(dtype=float))
+    return np.full(len(n.snapshots), static)
+
+
+def _check_bound_pair(n, component_type: str, component: str, attribute: str,
+                      vals: np.ndarray) -> list[str]:
+    """Refuse a p_min_pu above p_max_pu at any snapshot — the LP would be
+    infeasible. A committable unit is the exception: its bounds are
+    status·p_min_pu ≤ p/p_nom ≤ status·p_max_pu, so a crossing hour forces it
+    off instead (gatekeeper review 2026-10-20); that is written and warned."""
+    other = _BOUND_PAIRS.get(attribute)
+    if other is None:
+        return []
+    current = _current_bound(n, component_type, component, other)
+    lo, hi = (vals, current) if attribute == "p_min_pu" else (current, vals)
+    bad = np.flatnonzero(lo > hi + 1e-9)
+    if not bad.size:
+        return []
+    i = int(bad[0])
+    table = getattr(n, component_type)
+    if "committable" in table.columns and bool(table.at[component, "committable"]):
+        return [(
+            f"{BOUND_FORCES_OFF_WARNING}: {component!r} is committable and its "
+            f"p_min_pu exceeds p_max_pu at {bad.size} snapshots (first "
+            f"{n.snapshots[i]}); the unit is forced off in those hours"
+        )]
+    raise ProfileBoundConflictError(
+        f"{component!r}: p_min_pu {lo[i]:.4g} would exceed p_max_pu "
+        f"{hi[i]:.4g} at snapshot {n.snapshots[i]} ({bad.size} snapshots "
+        "in all) — the LP would be infeasible"
+    )
+
+
+def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
+    """Σ value × snapshot_weightings[weighting], per investment period."""
+    w = n.snapshot_weightings[weighting].reindex(aligned.index).to_numpy(dtype=float)
+    energy = pd.Series(aligned.to_numpy(dtype=float) * w, index=aligned.index)
+    if isinstance(aligned.index, pd.MultiIndex):
+        per = energy.groupby(level=0).sum()
+        return {str(int(p)): float(v) for p, v in per.items()}
+    return {"total": float(energy.sum())}
+
+
+def _window_blocks(window: dict | None, modelled: dict[str, float]) -> dict[str, dict]:
+    """The window record of each ``modelled_mwh`` block (``total`` for one
+    horizon, the period for a tiled one) that is a sample of the year."""
+    if not window:
+        return {}
+    if "first" in window:  # one horizon
+        return {k: window for k in modelled}
+    return {k: window[k] for k in modelled if k in window}
+
+
+def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
+                   target: TargetSpec, src_year: int,
+                   window: dict | None = None) -> tuple[dict, list[str]]:
+    """``profile_annual_mwh`` (the source year's energy: its mean power over
+    its hours — the plain sum for an hourly series, while a daily or weekly
+    one is a mean per step whose edge weeks straddle the year),
+    ``modelled_mwh`` per period, and the energy_mismatch warning.
+
+    A block that samples the year (``window``, `_hourly_window`) is held to
+    what its snapshots claim to represent instead: the source year's energy
+    × Σ weightings (the target's own column, the one ``modelled_mwh`` sums)
+    / the source year's hours. An unweighted week is checked against
+    a week's share of the year, a week weighted ×52 against the year, and a summer
+    week weighted to stand for the year is flagged."""
+    year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
+    profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
+    modelled = _modelled_mwh(n, aligned, target.weighting)
+    warnings: list[str] = []
+    sampled = _window_blocks(window, modelled)
+    if sampled and profile_mwh > 0:
+        w = n.snapshot_weightings[target.weighting].reindex(aligned.index)
+        for k, win in sampled.items():
+            block = w if k == "total" else w.xs(int(k), level=0)
+            sum_w = float(block.sum())
+            expected = profile_mwh * sum_w / year_hours
+            if expected > 0 and abs(modelled[k] - expected) / expected > ENERGY_TOLERANCE:
+                where = "" if k == "total" else f"period {k}: "
+                warnings.append(
+                    f"{ENERGY_MISMATCH_WARNING}: {where}the snapshot window "
+                    f"{win['first']} – {win['last']} ({win['hours']} h in "
+                    f"{win['runs']} run{'s' if win['runs'] != 1 else ''}) carries "
+                    f"weightings summing to {sum_w:,.0f} h, {sum_w / year_hours:.1%} "
+                    f"of the source year; its {profile_mwh:,.0f} MWh × that share is "
+                    f"{expected:,.0f} MWh but the model sees {modelled[k]:,.0f} MWh, "
+                    f"more than {ENERGY_TOLERANCE:.0%} apart — the window does not "
+                    "represent the year's energy at these weightings"
+                )
+    if profile_mwh > 0:
+        off = {k: v for k, v in modelled.items() if k not in sampled
+               and abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
+        if off:
+            parts = ", ".join(f"{k}: {v:,.0f} MWh" for k, v in off.items())
+            warnings.append(
+                f"{ENERGY_MISMATCH_WARNING}: the profile's source year "
+                f"holds {profile_mwh:,.0f} MWh but the model sees "
+                f"{parts} (snapshot weightings), more than "
+                f"{ENERGY_TOLERANCE:.0%} apart"
+            )
+    return {"profile_annual_mwh": profile_mwh, "modelled_mwh": modelled}, warnings
+
+
+def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
+                   component_type: str, attribute: str,
+                   time_basis: str | None = None) -> dict:
+    """What `assign_profile` would record for a power series' energy —
+    ``profile_annual_mwh``, ``modelled_mwh`` and its warnings, the time-basis
+    one included — aligned exactly as apply aligns, written nowhere. Lets a
+    caller show the gap on a sampled model (a one-week template) before the
+    user applies."""
+    target = _target(component_type, attribute)
+    if target.kind != "power":
+        raise UnsupportedTargetError(
+            f"{component_type}/{attribute} is not a power target; it has no energy")
+    scale, _ = _scale_power(series, meta)
+    basis, _recorded, warnings = resolve_time_basis(time_basis, _commercial_timezone(ctx))
+    resolution = str(meta.get("resolution") or "hourly").strip().lower()
+    aligned, align_meta = _align_to_snapshots(
+        series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
+    aligned = aligned * scale
+    energy, energy_warnings = _energy_record(
+        ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]),
+        window=align_meta.get("window"))
+    return {**energy, "warnings": [*warnings, *energy_warnings]}
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -503,10 +887,16 @@ def assign_profile(
     series: pd.Series,
     meta: Mapping[str, Any],
     *,
+    component_type: str = "generators",
+    attribute: str = "p_max_pu",
     now: _dt.datetime | str | None = None,
     time_basis: str | None = None,
 ) -> dict:
-    """Apply a generated per-unit profile to ``component``'s ``p_max_pu``.
+    """Apply a generated profile to ``component``'s ``attribute``.
+
+    The target ``(component_type, attribute)`` must be in `TARGETS`, and the
+    meta's ``family`` (renewable when absent) must allow it. The defaults are
+    the original renewable case, generator p_max_pu.
 
     ``ctx`` is the ProjectContext that owns the network AND the user-ts
     stores — the two are written as a pair (the tenancy rule of
@@ -528,51 +918,77 @@ def assign_profile(
     if not isinstance(meta, Mapping):
         raise ProfileApplyError("meta must be the engine's provenance dict")
 
-    n = ctx.network
-    if component not in n.generators.index:
-        raise ComponentNotFoundError(
-            f"generator {component!r} not found on the network"
-        )
-    carrier = str(n.generators.at[component, "carrier"] or "")
-    cl = carrier.lower()
-    is_wind = "wind" in cl
-    is_solar = "solar" in cl or "pv" in cl
-    if not (is_wind or is_solar):
-        raise CarrierMismatchError(
-            f"generator {component!r} has carrier {carrier!r}; generated "
-            "profiles apply to wind/solar assets only"
-        )
-    tech = str(meta.get("technology", "")).strip().lower()
-    if tech not in ("wind", "solar"):
-        raise CarrierMismatchError(
-            f"profile meta carries technology {tech!r}; expected wind/solar"
-        )
-    if (tech == "wind" and not is_wind) or (tech == "solar" and not is_solar):
-        raise CarrierMismatchError(
-            f"profile technology {tech!r} does not match generator "
-            f"{component!r}'s carrier {carrier!r}"
+    target = _target(component_type, attribute)
+    family_name = family_of(meta)
+    family = get_family(family_name)
+    if (component_type, attribute) not in family.targets:
+        allowed = ", ".join(f"{c}/{a}" for c, a in sorted(family.targets))
+        raise FamilyTargetMismatchError(
+            f"a {family_name} profile cannot be applied to "
+            f"{component_type}/{attribute}; it applies to {allowed}"
         )
 
+    n = ctx.network
+    if component not in getattr(n, component_type).index:
+        raise ComponentNotFoundError(
+            f"{target.noun} {component!r} not found on the network"
+        )
+    if family.guard is not None:
+        family.guard(ctx, component_type, component, meta)
+
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
+    unit_meta: dict[str, Any] = {}
+    scale = 1.0
+    if target.kind == "power":
+        scale, unit_meta = _scale_power(series, meta)
+    elif target.kind == "price":
+        unit_meta = _money(meta)
+
     time_basis, recorded_basis, warnings = resolve_time_basis(
         time_basis, _commercial_timezone(ctx))
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
 
-    # A p_max_pu bound must be finite at every snapshot — a NaN masks the
-    # constraint row out of the LP (the Phase 12f rule). Values are clipped
-    # into [0, 1] defensively; a clip is recorded in meta.
-    vals = aligned.to_numpy(dtype=float)
+    # Every written value must be finite at every snapshot — a NaN masks the
+    # constraint row out of the LP (the Phase 12f rule).
+    vals = aligned.to_numpy(dtype=float) * scale
     if not np.isfinite(vals).all():
         raise ProfileApplyError(
             f"profile for {component!r} has non-finite values after "
             "alignment — refusing to write a bound with holes"
         )
-    clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
-    if clipped:
-        vals = np.clip(vals, 0.0, 1.0)
-        aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
+    clipped = False
+    if target.kind == "per_unit":
+        # Clipped into [0, 1] defensively; a clip is recorded in meta.
+        clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
+        if clipped:
+            vals = np.clip(vals, 0.0, 1.0)
+        warnings = [*warnings, *_check_bound_pair(n, component_type, component,
+                                                  attribute, vals)]
+    elif target.kind == "power":
+        if (vals < 0.0).any():
+            i = int(np.flatnonzero(vals < 0.0)[0])
+            raise ProfileApplyError(
+                f"{target.noun} {component!r}: {attribute} is negative "
+                f"({vals[i]:.4g} MW at {aligned.index[i]}); model a net "
+                "export as a generator beside it, not a negative value"
+            )
+    elif target.kind == "ratio":
+        if (vals <= 0.0).any():
+            i = int(np.flatnonzero(vals <= 0.0)[0])
+            raise ProfileApplyError(
+                f"{target.noun} {component!r}: {attribute} must be positive, "
+                f"got {vals[i]:.4g} at {aligned.index[i]}"
+            )
+    aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
+
+    if target.kind == "power":
+        energy, energy_warnings = _energy_record(
+            n, series, aligned, scale, target, int(align_meta["weather_year"]),
+            window=align_meta.get("window"))
+        unit_meta.update(energy)
+        warnings = [*warnings, *energy_warnings]
 
     if now is None:
         applied_at = _dt.datetime.now(_dt.timezone.utc)
@@ -581,9 +997,11 @@ def assign_profile(
     else:
         applied_at = now
 
-    key = ("generators", "p_max_pu", component)
+    key = (component_type, attribute, component)
     full_meta: dict[str, Any] = {
         **dict(meta),
+        **unit_meta,
+        "family": family_name,
         "weather_year": align_meta["weather_year"],
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
@@ -593,6 +1011,10 @@ def assign_profile(
     }
     if align_meta["periods"] is not None:
         full_meta["periods"] = align_meta["periods"]
+    if align_meta.get("window"):
+        full_meta["window"] = align_meta["window"]
+    if align_meta.get("dst_gap_shifted"):
+        full_meta["dst_gap_shifted"] = align_meta["dst_gap_shifted"]
     if align_meta["resolution"] != "hourly":
         # The basis is recorded, but a day/week mean is not re-binned by a
         # 1–2 h offset — say so, so the provenance cannot imply a shift.
@@ -613,8 +1035,12 @@ def assign_profile(
         # edit — flip freshness so Results can't serve the old solve.
         dispatch_cleared = clear_dispatch(n)
 
+    if family_name == "renewable":
+        what = f"generated {meta.get('technology', '?')} profile"
+    else:
+        what = f"{family_name} profile"
     desc = (
-        f"Applied generated {tech} profile to {component}: source "
+        f"Applied {what} to {component} {attribute}: source "
         f"{meta.get('source', '?')}, weather year {align_meta['weather_year']}"
     )
     if align_meta["resolution"] != "hourly":
@@ -623,20 +1049,28 @@ def assign_profile(
         desc += f", tiled over {len(align_meta['periods'])} investment periods"
     if align_meta["leap_day"] == "dropped":
         desc += ", Feb 29 dropped"
-    change_log_service.log("timeseries", "Generator", component, desc)
+    if align_meta.get("window"):
+        desc += ", sliced to the snapshot window"
+    change_log_service.log("timeseries", target.display, component, desc)
 
     return {
         "component": component,
-        "attribute": "p_max_pu",
+        "component_type": component_type,
+        "attribute": attribute,
+        "family": family_name,
         "hours": int(len(aligned)),
         "weather_year": align_meta["weather_year"],
         "leap_day": align_meta["leap_day"],
         "tiled": align_meta["tiled"],
         "periods": align_meta["periods"],
         "resolution": align_meta["resolution"],
+        "window": align_meta.get("window"),
         "time_basis": recorded_basis,
         "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
         "peak": float(aligned.max()),
+        **({"modelled_mwh": unit_meta["modelled_mwh"],
+            "profile_annual_mwh": unit_meta["profile_annual_mwh"]}
+           if target.kind == "power" else {}),
     }

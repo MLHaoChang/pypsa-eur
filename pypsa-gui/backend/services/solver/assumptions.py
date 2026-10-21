@@ -39,6 +39,7 @@ from services.adequacy.slack import (
     voll_slack_name,
 )
 from services.pypsa_service import PyPSAService
+from services.solver import lost_production as _lost_production
 from services.solver.periodized_costs import fill_periodized_cost_defaults
 from services.solver.vintage_store import _frozen_vintage_store
 from services.vintage_service import apply_vintage_bounds
@@ -660,12 +661,20 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         #    the bump; efficiency=0 is a model error elsewhere — skip silently.
         #
         #    Two flavours:
-        #      • Uniform `co2_price` (single float) — bump every emitter's scalar
-        #        marginal_cost by emissions × price / efficiency.
+        #      • Uniform `co2_price` (single float) — bump every emitter's cost
+        #        by emissions × price / efficiency.
         #      • Per-period `co2_price_per_period` (dict period→€/tCO2) — applies
         #        ONLY on multi-period networks. Sets generators_t.marginal_cost
         #        (time-varying) so each snapshot uses the period's price.
         #        Periods missing from the dict fall back to the scalar co2_price.
+        #
+        #    Either way the surcharge goes onto the DENSE cost: PyPSA reads
+        #    generators_t.marginal_cost wherever a generator has a column there
+        #    and ignores its scalar, so an emitter with a cost series (a price
+        #    profile, an upload) gets series + surcharge, and the others their
+        #    scalar + surcharge. Bumping only the scalar silently dropped the
+        #    CO2 cost of every series; writing scalar + surcharge into the
+        #    table overwrote the user's series.
         has_per_period_price = (
             bool(getattr(cfg, "co2_price_per_period", None))
             and isinstance(n.snapshots, pd.MultiIndex)
@@ -696,15 +705,16 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         # surcharge[g, t] = price_series[t] × co2[carrier(g)] / efficiency[g]
                         intensity_per_gen = gens.loc[idx, "carrier"].map(co2)
                         eff_per_gen = gens.loc[idx, "efficiency"]
-                        base_mc = gens.loc[idx, "marginal_cost"].copy()
+                        base_mc = n.get_switchable_as_dense(
+                            "Generator", "marginal_cost", inds=idx)
                         # outer = snapshot × generator; broadcast price (T,) × intensity (G,)
                         surcharge = pd.DataFrame(
                             {g: price_series * float(intensity_per_gen.loc[g]) / float(eff_per_gen.loc[g])
                              for g in idx},
                             index=n.snapshots,
                         )
-                        # Time-varying marginal_cost = scalar base + per-snapshot surcharge.
-                        # PyPSA picks up generators_t.marginal_cost when set.
+                        # Time-varying marginal_cost = dense base (series or
+                        # scalar) + per-snapshot surcharge.
                         mc_t = n.generators_t.marginal_cost
                         # Capture the pre-existing time-varying columns we're
                         # about to overwrite so restore() can put them back.
@@ -712,7 +722,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         saved_t_mc = mc_t[existing_cols].copy() if existing_cols else None
                         new_cols = [g for g in idx if g not in mc_t.columns]
                         for g in idx:
-                            n.generators_t.marginal_cost[g] = float(base_mc.loc[g]) + surcharge[g]
+                            n.generators_t.marginal_cost[g] = base_mc[g] + surcharge[g]
                         undo_actions.append(("t_marginal_cost", saved_t_mc, list(new_cols)))
                         by_period_msg = ", ".join(
                             f"{p}: {period_price.get(p, cfg.co2_price):.1f}"
@@ -728,6 +738,13 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         original_mc = gens.loc[idx, "marginal_cost"].copy()
                         gens.loc[idx, "marginal_cost"] = original_mc + add_per_mwh
                         undo_actions.append(("col", "generators", "marginal_cost", idx, original_mc))
+                        mc_t = n.generators_t.marginal_cost
+                        with_series = [g for g in idx if g in mc_t.columns]
+                        if with_series:
+                            saved_t_mc = mc_t[with_series].copy()
+                            for g in with_series:
+                                n.generators_t.marginal_cost[g] = mc_t[g] + float(add_per_mwh.loc[g])
+                            undo_actions.append(("t_marginal_cost", saved_t_mc, []))
                         phase(
                             f"Applied CO2 price {cfg.co2_price:.1f} EUR/tCO2 to {len(idx)} "
                             f"fossil generator(s) (sum surcharge {add_per_mwh.sum():.2f} EUR/MWh)."
@@ -1083,6 +1100,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             n.remove("Generator", nm)
                         PyPSAService.unmark_transient("Generator", nm)
                 undo_actions.append(("call", _capture_and_remove_slacks))
+
+        # 5b') Lost-production slacks (grid-to-process ticket 08): one per product bus with a
+        #    lost_production_value and no hand-built shortfall, priced at that value (never VoLL).
+        #    Same transient lifecycle as the VOLL slacks; captured into captured["lost_production"].
+        _lost_production.apply(n, phase, undo_actions, captured)
 
         # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
         #    per bus. Independent of VOLL (a resource, not a failure valve).

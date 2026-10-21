@@ -59,6 +59,18 @@ SLACK_NAME_PREFIXES: tuple[str, ...] = (
 )
 
 
+# The solve-time lost-production slack of a product bus (grid-to-process ticket 08,
+# `services/solver/lost_production.py`). It is NOT unserved electricity: never in
+# SLACK_NAME_PREFIXES or the carrier sets above. Readers find it by its
+# `process_role`, or read its capture once it is removed.
+LOST_SLACK_PREFIX = "__lost_"
+
+
+def lost_slack_name(bus: object) -> str:
+    """Canonical solve-time lost-production slack Generator name for one product bus."""
+    return f"{LOST_SLACK_PREFIX}{bus}"
+
+
 def voll_slack_name(load_id: object) -> str:
     """Canonical involuntary VOLL slack Generator name for one Load."""
     return f"{VOLL_SLACK_PREFIX}{load_id}"

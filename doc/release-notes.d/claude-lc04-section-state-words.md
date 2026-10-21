@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's change receipt names a project-flow section's state in the same words as the flow rail ("to check", "to do", "not needed", "not known yet") instead of the internal state name.
