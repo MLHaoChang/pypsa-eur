@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add optional source-backed European technology references for onshore wind, utility/commercial PV and AEC/PEM electrolysis using native Library cost models, without changing project defaults. Document focused European tariff, PPA/CfD, cost, hydrogen and maintenance research, parameter mappings and remaining integration gates.
