@@ -3,8 +3,9 @@
 The explanation runs the explain-results workflow on the card the browser has
 open. While it runs, a task cap lowers the turn's limits (512 output tokens,
 3 tool calls, 2 rounds) and never raises them. The cap keys on harness state
-only (the workflow and a validated `results_card`), and hitting it is said,
-never silent. Numbers come from the views' own native reads; under strict
+only (the workflow and a validated `results_card`), and stopping at its step
+limit is said, never silent; an answer that reaches the output cap ends like
+any other. Numbers come from the views' own native reads; under strict
 checking only the bounded profiles publish, and everything else is withheld or
 refused. Cases RI07–RI10, RI12 (#558) and D12, D13 (#567 HV-D3). Only provider
 HTTP is mocked in the journey tests; checked turns script the model only.
@@ -136,10 +137,10 @@ def test_ri07_reads_are_native_and_a_view_without_data_is_not_zero(oj_grid):
     assert {row['data'] for row in rows} <= set(rv.DATA_STATUSES)
 
 
-def test_the_explanation_turn_asks_for_at_most_512_tokens(oj_grid):
+def test_the_explanation_keeps_a_stricter_profile_token_limit(oj_grid):
     seen, _ = _caps_seen(*WIRE, [_read('dispatch'), _answer()], 'capacity',
                          answer='Gas covers the night.')
-    assert seen and all(t is not None and t <= 256 for t in seen)  # the journey profile is 256
+    assert seen == [256, 256]  # the journey profile's 256 is below the cap's 512
 
 
 def test_the_cap_is_off_without_the_card(oj_grid, monkeypatch):
@@ -234,23 +235,40 @@ def test_d13_a_thirteenth_fact_is_withheld(solved, checked):
     assert not any(e == 'answer_approved' and d['verdict'] == 'passed' for e, d in frames)
 
 
-def test_ri08_a_checked_answer_cut_at_the_cap_is_still_checked(solved, checked):
-    """An answer that reaches the output cap is committed like any other: an
-    injected number is withheld, then the turn says it stopped."""
-    class Truncated(NumericalProvider):
-        def stream(self, request):
-            for event in super().stream(request):
-                if event.type == 'message_done':
-                    event.usage['output_tokens'] = budget.EXPLAIN_CARD.output_tokens
-                yield event
+class _AtTheCap(NumericalProvider):
+    """Reports the answer as having used the whole output cap."""
+    def stream(self, request):
+        for event in super().stream(request):
+            if event.type == 'message_done':
+                event.usage['output_tokens'] = budget.EXPLAIN_CARD.output_tokens
+            yield event
 
+
+def _ends_on_its_answer(frames):
+    """The turn ends on the turn_done naming the published answer: the panel
+    shows a checked answer only then."""
+    assert not any(e in ('error', 'session_done') for e, _ in frames)
+    assert frames[-1][0] == 'turn_done'
+    assert frames[-1][1]['answer_id'] == approval(frames)['answer_id']
+
+
+def test_ri08_a_checked_answer_at_the_cap_is_still_checked(solved, checked):
+    """An answer that reaches the output cap is committed like any other: an
+    injected number is withheld."""
     def inject(ledger):
         ledger['blocks'][0]['value'] += 1
 
-    frames = _checked_explain(checked, Truncated(mutate=inject), 'capacity',
+    frames = _checked_explain(checked, _AtTheCap(mutate=inject), 'capacity',
                               checked_scope=_scope(solved, 'generator-dispatch/1', 'G1'))
     assert not any(e == 'answer_approved' and d['verdict'] == 'passed' for e, d in frames)
-    assert [d['error_kind'] for e, d in frames if e == 'error'][-1:] == ['task_step_limit']
+    _ends_on_its_answer(frames)
+
+
+def test_a_passing_checked_answer_at_the_cap_is_published(solved, checked):
+    frames = _checked_explain(checked, _AtTheCap(), 'capacity',
+                              checked_scope=_scope(solved, 'generator-dispatch/1', 'G1'))
+    assert approval(frames)['verdict'] == 'passed'
+    _ends_on_its_answer(frames)
 
 
 def test_ri10_energy_balance_totals_do_not_certify_the_flow_rows():

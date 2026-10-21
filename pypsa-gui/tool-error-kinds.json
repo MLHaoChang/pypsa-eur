@@ -561,7 +561,7 @@
     },
     "tool_call_cap_exceeded": {
       "surface": "banner",
-      "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the only per-turn bound there is."
+      "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the one per-turn bound every turn has; a bounded task's task_step_limit only lowers it."
     },
     "task_step_limit": {
       "surface": "inline",

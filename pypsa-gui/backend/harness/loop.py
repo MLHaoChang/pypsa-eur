@@ -745,8 +745,8 @@ def _dispatch_tool_uses(
         # and the Authorization header with it, on every iteration. It also
         # REMOVED a bound that existed before this guard was added, where an
         # unknown name fell through to the counter and hit
-        # MAX_TOOL_CALLS_PER_TURN. The cap is the only per-turn bound there is;
-        # nothing may skip it.
+        # MAX_TOOL_CALLS_PER_TURN. The cap is the one per-turn bound every turn
+        # has (a task cap only lowers it); nothing may skip it.
         tool_call_count += 1
         if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
             yield "tool_error", {
@@ -2132,15 +2132,10 @@ def _run_turn_body(
                 choice = session.assurance_turn.clarification_choice()
                 if choice is not None:
                     yield "choice_request", choice
-            # W10 H2a — an answer that reached the task's output cap may be cut
-            # off: it was committed (and checked) like any other, and the turn
-            # says it stopped rather than finishing silently.
-            task_cap = session.turn_task_cap
-            if task_cap is not None and (final_usage or {}).get("output_tokens", 0) >= task_cap.output_tokens:
-                yield "error", {"error_kind": "task_step_limit",
-                                "message": harness_budget.TASK_STEP_LIMIT}
-                yield "session_done", {"reason": "task_step_limit"}
-            elif session.assurance_turn is not None:
+            # W10 H2a — an answer that reached the task's output cap ends like
+            # any other: the panel publishes a checked answer only on the
+            # turn_done naming its answer_id, so an error here would drop it.
+            if session.assurance_turn is not None:
                 yield "turn_done", {"usage": usage_snapshot,
                                     "answer_id": session.assurance_turn.approved["answer_id"]}
             else:
