@@ -9,21 +9,27 @@ steps:
   - id: orient
     title: See what is there
     done_when: The user has heard the bus, line, generator, load and storage counts and said what to add first.
+    flow_section: project
   - id: buses
     title: Buses and carriers
     done_when: Every bus the user wants exists with a carrier and a nominal voltage.
+    flow_section: carriers
   - id: branches
     title: Lines, links and transformers
     done_when: Every bus the user wants connected is connected and no island remains that the user did not intend.
+    flow_section: connection
   - id: assets
     title: Generators, loads and storage
     done_when: Each asset the user named exists with a capacity and a cost the user confirmed.
+    flow_section: assets
   - id: time
     title: Snapshots and profiles
     done_when: Snapshots are set and every load and variable generator has a profile or an explicit constant.
+    flow_section: profiles
   - id: check
     title: Validate
     done_when: validate_network returns no error and the user has seen the warnings.
+    flow_section: readiness
 ---
 
 ## Step: orient
