@@ -19,7 +19,7 @@ Owner input #10, 2026-10-20, about 20:10 CEST:
 |---|---|---|---|
 | **Capacity expansion** | 1. Asset sizing (expansion) · 2. Dispatch & economics · 3. Process detail | `optimisation` | 1 + 2 together yes; 2 alone (sizing off) not yet available (needs the run option in §4); 3 not yet available (W0) |
 | **AC power flow & grid** | 1. Load flow (AC power flow after the optimisation) · 2. Grid code & electrical design (scorecard, campus PCC compliance, transformer and compensation sizing) · 3. N-1 security (SCLOPF) | `loadflow`; campus study; SCLOPF as an `optimisation` option | 1 bundled (needs dispatch); 2 scorecard advisory, campus study per W0; 3 yes, in LOPF mode only (not with the rolling strategy; lines and transformers; linear, no AC) |
-| **Control** | 1. Converter control presets · 2. Island & ride-through checks · 3. Frequency & dynamics | `control_checks` | 1 inputs only; 2 per W0; 3 not yet available |
+| **Control** | 1. Converter control presets · 2. Island, ride-through & load smoothing · 3. Frequency & dynamics | `control_checks` | 1 inputs only; 2 per W0; 3 not yet available |
 | **Reliability** (owner Q17 = A) | 1. Reliability goal & study (LOLE / ENS) · 2. Stress conditions & FMEA · 3. Outage-data screening (COPT) | `study` | 1 yes; 2 yes (sweep); 3 yes: no solve, but it needs unit outage rates and availability profiles |
 | **Commercial & finance** | 1. Tariffs & bill · 2. Contracts & PPAs · 3. Investment case & parties | the LP's tariff/PPA terms (inside `optimisation`); `investment_case` | 1 yes, after the capacity/dispatch run (the bill reads the solved dispatch); 2 yes; 3 per W0 |
 | **Hand-off** | 1. Reports · 2. Data exports · 3. Specialist packet (Planning → dynamics, PowerFactory read-back) | — | yes |
@@ -126,8 +126,8 @@ Research ids carry the prefix **`GS-`** here (GS-B1 is the research's B1, BLAST-
 | `commercial.merchant_risk` | Commercial › 2 Contracts & PPAs | Market exposure of the IPP's unsold volume, beside its PPA (GS-I1) |
 | `commercial.finance` | Commercial › 3 Investment case & parties | |
 | `control.policy_replay` | Control › 1 Converter control presets, read as **control strategy** | A strategy is chosen in 1; replaying it is the check run by 2 |
-| `control.grid_forming` | Control › 1 (presets) and › 2 (island & ride-through screen) | |
-| `control.process_restart` | Control › 2 Island & ride-through checks | Restart and pick-up after an island event (GS-M2) |
+| `control.grid_forming` | Control › 1 (presets) and › 2 (island, ride-through & load smoothing screen) | |
+| `control.process_restart` | Control › 2 Island, ride-through & load smoothing | Restart and pick-up after an island event (GS-M2) |
 | `control.dynamic_validation` | Control › 3 Frequency & dynamics | |
 | Hand-off (outside the research's cards) | **Hand-off** card, 1 Reports · 2 Data exports · 3 Specialist packet | Kept as a card (owner Q1 = A). It is never labelled Reliability (the research's GS-F9 rule holds) |
 | Shared context (project, assets, planning) | sections 1–6 | Not a card in either model |

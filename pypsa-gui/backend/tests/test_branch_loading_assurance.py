@@ -215,7 +215,7 @@ def test_scope_and_grammar():
     assert line["profile"] == BRANCH and line["component_class"] == "Line"
     assert assurance_scope.from_message("Show the loading for transformer T1", "p", {})[
         "component_class"] == "Transformer"
-    with pytest.raises(ValueError, match="component_class_requires_branch_scope"):
+    with pytest.raises(ValueError, match="unsupported_component_class"):
         assurance_scope.validate({"version": 1, "profile": NETWORK, "project_id": "p",
                                   "entity_id": "network", "component_class": "Line"})
     network = assurance_scope.from_message("Show loading for network", "p", {})
