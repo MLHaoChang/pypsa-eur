@@ -1,5 +1,5 @@
 import { beforeEach, describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useChatStore } from '../store/chatStore'
 import CompanionOutcome from './CompanionOutcome'
 import { useUIStore } from '../store/uiStore'
@@ -105,5 +105,26 @@ describe('CompanionOutcome', () => {
     render(<CompanionOutcome />)
     expect(screen.getByText('Ready.')).toBeTruthy()
     expect(screen.queryByTestId('companion-download')).toBeNull()
+  })
+})
+
+describe('docked outcome (L2 follow-up)', () => {
+  it('starts as one line in the launcher footprint on a full-screen tab, opens on request, never on a timer', () => {
+    useUIStore.setState({ currentProject: 'oj-grid', projectMismatch: null })
+    useChatStore.setState({ streaming: false, error: null, messages: [
+      { id: 'u1', role: 'user', content: 'Run it.', origin_project: 'oj-grid' },
+      { id: 'a1', role: 'assistant', content: 'The solve was started (job fg:1).', origin_project: 'oj-grid' },
+    ] as never })
+    render(<CompanionOutcome docked />)
+    const card = screen.getByTestId('companion-outcome')
+    expect(card.getAttribute('data-docked')).toBe('true')
+    expect(screen.getByTestId('companion-answer-text').textContent).toContain('The solve was started')
+    expect(screen.queryByText('Open transcript')).toBeNull()
+    fireEvent.click(screen.getByTestId('companion-outcome-show'))
+    expect(screen.getByTestId('companion-outcome').getAttribute('data-docked')).toBeNull()
+    expect(screen.getByText('Open transcript')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('companion-outcome-hide'))
+    expect(screen.getByTestId('companion-outcome').getAttribute('data-docked')).toBe('true')
+    cleanup()
   })
 })

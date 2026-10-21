@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The in-app assistant can read the Energy flow results (`get_energy_flows`): where the site's energy came from, what it passed through and where it went, in MWh, exactly as the Energy flow tab shows them. Energy that was not delivered is reported as such, never as supply, and flows that cannot be proved to conserve energy are reported as unavailable.

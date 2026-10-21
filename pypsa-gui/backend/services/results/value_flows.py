@@ -21,7 +21,10 @@ period and unweighted (the `cost_rows` basis):
   * the assets — `n.statistics.capex / fom / opex(groupby=False)` inside the
     same `with_periodized_cost_defaults(for_back_calculation=True)` fill
     `cost_breakdown` uses, so the ledger re-adds to it exactly; each asset
-    classed site / grid / unclassified by `participants.classify_buses`;
+    classed site / grid / unclassified by `participants.classify_buses`; a
+    product slack (a `process_role` Generator) flagged `product_buy_in` /
+    `product_shortfall`, which the ledger books as a purchase or as lost
+    production, never as an asset;
   * the reconciliation terms — `cost_breakdown`'s total per period (÷ years on
     a multi-period network) and Σ `commercial_cost_terms` items;
   * disclosures, not money lines — the DSR slack cost (`buses_t["ic_dsr_p"]` ×
@@ -39,6 +42,7 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
+from models.process_unit import product_roles
 from services.commercial import lp_bindings as _lp
 from services.commercial import participants as P
 
@@ -106,12 +110,15 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         capex = _per_asset(n.statistics.capex(groupby=False, round=0), periods)
         fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
         opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
+    roles = product_roles(n)
     out = []
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
         side, flags = P.asset_side(n, comp, name, sides)
         if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
             flags = [*flags, "fuel_supply_generator"]
+        if comp == "Generator" and name in roles:
+            flags = [*flags, P.PRODUCT_SLACK_FLAGS[roles[name]]]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))
@@ -193,6 +200,30 @@ def _export_revenue(n, parsed) -> tuple[dict[str, float | None], dict | None]:
         out[_key(p)] = None if np.isnan(vals).any() else float(vals.sum())
         intervals[_key(p)] = vals
     return out, intervals
+
+
+def _import_cost(n, parsed) -> dict[str, float | None]:
+    """The wholesale import cost per period (IPP ticket 07): Σ w · p0(import Links) ·
+    `links_t["ic_import_price"]`, unweighted by the period's years; {} when the config
+    prices no import series; a period whose price column or flow is missing is None."""
+    if parsed.import_price_ref is None:
+        return {}
+    store = n.links_t.get(_lp.IMPORT_PRICE_ATTR) if hasattr(n.links_t, "get") else None
+    p0 = getattr(n.links_t, "p0", None)
+    links = _lp.import_links(parsed)
+    if store is None or p0 is None or any(
+            link not in getattr(store, "columns", []) or link not in p0.columns
+            for link in links):
+        return {_key(p): None for p in _periods(n)}
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    per_interval = sum(w * p0[link].reindex(n.snapshots).to_numpy(dtype=float)
+                       * store[link].reindex(n.snapshots).to_numpy(dtype=float)
+                       for link in links)
+    out = {}
+    for p in _periods(n):
+        vals = per_interval[_period_mask(n, p)]
+        out[_key(p)] = None if np.isnan(vals).any() else float(vals.sum())
+    return out
 
 
 def export_revenue(n, commercial) -> dict[str, float | None]:
@@ -431,7 +462,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         curtailment_compensation=bool(
             agreement is not None
             and agreement.curtailment_compensation_eur_per_mwh is not None),
-        export_revenue=export_revenue, export_split=split,
+        export_revenue=export_revenue, export_split=split, import_cost=_import_cost(n, parsed),
         assets=_asset_costs(n, cfg, parsed, sides),
         cost_breakdown_total=_cost_breakdown_total(n, cb),
         lp_commercial=_lp_commercial(n, commercial),

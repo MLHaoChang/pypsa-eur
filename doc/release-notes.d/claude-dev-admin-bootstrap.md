@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A first boot of the API with no `DATABASE_URL` now creates the app-data directory, a generated `dev-admin-password` file and `admin@example.com` with a personal workspace, as AGENTS.md describes. Before, every database call failed with "unable to open database file".

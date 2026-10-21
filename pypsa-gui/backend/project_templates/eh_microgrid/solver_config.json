@@ -10,6 +10,7 @@
     "group_cap_mw": null,
     "group_contract": null,
     "group_members": [],
+    "import_price_ref": null,
     "import_tariff": null,
     "import_tariff_id": null,
     "import_tariff_ref": null,
@@ -75,7 +76,7 @@
           "owner": "site"
         }
       ],
-      "built_digest": "dd90d30ca00ae130",
+      "built_digest": "a5299a876b286612",
       "built_inputs_digest": "13a391e6ac067ebd",
       "connection_fee_payee": null,
       "export_revenue_to": "site_party",
@@ -99,7 +100,7 @@
       ],
       "tariff_payees": [],
       "template": "single_owner",
-      "template_version": "single_owner@2"
+      "template_version": "single_owner@3"
     }
   },
   "finance": {

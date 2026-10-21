@@ -226,6 +226,48 @@ Personal read-only rules remain authoritative even for a field marked editable;
 the strict checked pilot continues to refuse this unmapped tool. Non-component
 service/domain schemas and exact target resolution remain LC-01 follow-ups.
 
+## Edit cards (LC-04)
+
+Owner decision Q3: every chat edit shows an old → new card before it applies,
+in Expert as in Guided, settings included. `harness/edit_card.py` is the one
+preview → confirm → receipt contract; the dispatcher (`loop.py`) calls it for
+every tool `edit_card.is_edit` names, and the browser renders it with one
+component (`frontend/src/components/EditCard.tsx`).
+
+- **What is an edit.** A tool that writes the live network
+  (`catalogue.tool_edits_network`) or a project setting (`SETTINGS_EDITS`).
+  Every other write-tier tool is in `NOT_EDITS` with its reason;
+  `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
+  is gated as Guided gates a write, so Expert shows the card too.
+- **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
+  says, complete, digest}`, or refuses before any card (`unknown_field`,
+  `derived_field`, `read_only_field`, `invalid_edit_value`,
+  `component_not_found`, `edit_refused`). Component rows come from running the
+  NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
+  suppressed), so derived columns are exactly what the native derive writes;
+  they appear as `role: 'derived'` rows. Values are in stored units; a field
+  with a display scale also carries `display` (e.g. EUR/MWh stored, EUR/kWh
+  shown). Nothing in the seam converts or annualises a value.
+- **Approval binding.** The card rides the ordinary
+  `tool_pending_confirmation` frame as `edit_card`. Just before the handler
+  runs, `require_current` re-previews; a different digest (the inputs moved)
+  refuses with `edit_preview_stale` and applies nothing.
+- **Receipt.** The tool result gains `_edit_receipt`: each row read back
+  natively, `outcome: verified` only when every value equals the card's `new`
+  (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
+  differs from now) and `undo: {tool: 'undo_last', available}`.
+- **Adding an edit kind** (TS-04's series refinement, a new settings tool):
+  `edit_card.register(tool, Adapter(kind, preview, readback))`, where
+  `preview(args)` returns rows `{component_class, name, field, label, old,
+  new, unit, role}` and `readback(args, rows)` the stored values in row order.
+  An edit without an adapter still gets a card of kind `arguments`
+  (`complete: false`): the requested values, no old value claimed, and its
+  receipt is never `verified`.
+- **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
+  component and app-described field with unit and basis; never a derived field.
+- **Not covered here.** Checked-assurance turns keep their own effect path
+  (`effects.py`) and do not get a card from this seam.
+
 ## Target and reference resolution (LC-01B, LC-10)
 
 Two read-tier controls name a target before anything reads or changes it.
@@ -819,6 +861,34 @@ exists. With no such section the result is
 `unavailable_kind=historical_loadflow_unavailable`. Omit `run_id` for the
 live results. `window_from` and `window_to` are snapshot indexes;
 `window_from` must not exceed `window_to`.
+
+### Current energy flows
+
+`get_energy_flows` (`services/energy_flows_read.py`) reads the current solve's
+Energy flow tab through the same `services/results/energy_flows.py` payload
+the tab draws: Source → Via → Destination MWh, the largest rows first (default
+12, maximum 40, trimmed under 3800 characters), the conservation check and the
+window. It computes nothing of its own. `not_delivered` carries
+`unserved_product_mwh` (process shortfall per load) and `unserved_mwh` (shed
+load) as energy NOT delivered; neither is ever a row or a source. Before a
+solve it is `unavailable_kind=not_solved`; an attribution the module cannot
+prove to conserve energy is `not_established`, with no rows. Current results
+only; `inputs_changed_since_solve` says when the inputs moved after the solve.
+The `flows` result view (`services/result_views.py`) goes live with this tool.
+
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
 
 ### Experiment plans
 

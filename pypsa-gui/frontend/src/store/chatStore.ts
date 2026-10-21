@@ -105,6 +105,8 @@ export interface PendingConfirmationCard {
   confirmation_token: string
   ttl_seconds: number
   expires_at_epoch_ms: number
+  /** LC-04: the old → new rows of a chat edit (harness/edit_card.py). */
+  edit_card?: unknown
 }
 
 export interface ChatUsageAcc {

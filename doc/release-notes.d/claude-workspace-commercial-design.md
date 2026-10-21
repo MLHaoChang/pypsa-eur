@@ -1,0 +1,1 @@
+* Docs(project-workflow): design the Commercial & finance work group: section 7's five blocks (tariffs, contracts and PPAs, markets, finance, parties), parameter sources (library, uploads, defaults packs), Guided key parameters vs Expert, and package C folded into the slice plan.

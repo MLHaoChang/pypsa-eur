@@ -68,7 +68,7 @@ def prev():
     return load_defaults_pack(PREV)
 
 
-def test_the_new_version_is_the_latest_and_pinned(new, prev):
+def test_the_new_version_follows_its_predecessor_and_is_pinned(new, prev):
     import json
     import pathlib
 
@@ -76,8 +76,8 @@ def test_the_new_version_is_the_latest_and_pinned(new, prev):
 
     pins = json.loads((pathlib.Path(__file__).parent / "fixtures" / "defaults_pack"
                        / "pack_hashes.json").read_text())["generic_defaults"]
-    assert loader.available_versions()[-2:] == (PREV, NEW)
-    assert loader.load_defaults_pack().version == NEW
+    versions = loader.available_versions()
+    assert versions[versions.index(PREV) + 1] == NEW           # consecutive (the latest: the ammonia test's)
     assert new.hash == pins[NEW] != prev.hash == pins[PREV]
 
 
