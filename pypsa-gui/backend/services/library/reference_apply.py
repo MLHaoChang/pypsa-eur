@@ -21,14 +21,17 @@ was not given (`reference_confirmation_needed`, naming each one):
   declared;
 - `grid_connection`: a reference that already includes grid connection, on a
   project that prices its connection (a PoC Link cost or a connection fee);
-- `money_year`: the reference's money year is not the one the asset would otherwise
-  be priced in; the value is copied in its own money year, not adjusted.
+- `money_year`: the reference's money year is not the money the project reads it in:
+  the investment case's base year when the project has a case (the engine reads typed
+  costs as real base-year money), else the money year of the pack value it replaces.
+  The value is copied in its own money year and not adjusted (gatekeeper, 2026-10-21:
+  no price index is declared; an index would apply to packs and references alike).
 """
 from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException
@@ -82,8 +85,20 @@ def _asset_period(n, frame, name: str) -> int | None:
     return years.pop() if len(years) == 1 else None
 
 
+def case_base_year(n, config) -> int | None:
+    """The investment case's base year, derived as the edit card's money basis is (the first
+    investment period, else the first snapshot year); None when the project has no case."""
+    if not getattr(config, "finance", None):
+        return None
+    periods = list(n.investment_periods) if len(getattr(n, "investment_periods", ())) else []
+    if periods:
+        return int(periods[0])
+    return int(n.snapshots[0].year) if len(n.snapshots) and hasattr(n.snapshots[0], "year") else None
+
+
 def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: str,
-         technology: str, projection_year: int, confirm: Iterable[str] = ()) -> dict:
+         technology: str, projection_year: int, confirm: Iterable[str] = (),
+         base_year: int | None = None) -> dict:
     """What applying `technology`/`projection_year` to `component_class` `name` writes,
     with the reference and the pack value beside each field. Writes nothing."""
     confirm = set(confirm or ())
@@ -133,11 +148,14 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                       f"This reference's investment already includes grid connection, and {why}: the connection "
                       "would be counted twice. Unconfirmed, nothing is applied."})
     pack_year = pack_overnight.currency_year if pack_overnight is not None else None
-    if pack_year is not None and pack_year != ref.currency_year:
-        needs.append({"confirmation": "money_year", "text":
-                      f"The reference is in {ref.currency_year} {ref.currency}; the value it replaces is in "
-                      f"{pack_year} {pack_currency or ref.currency}. It is copied in {ref.currency_year} "
-                      f"{ref.currency}, not adjusted for inflation. Unconfirmed, nothing is applied."})
+    read_as = base_year if base_year is not None else pack_year
+    if read_as is not None and read_as != ref.currency_year:
+        against = ("the investment case's base year" if base_year is not None
+                   else "the money year of the value it replaces")
+        needs.append({"confirmation": "money_year", "reference_year": ref.currency_year,
+                      "read_as_year": read_as, "text":
+                      f"{ref.currency_year} {ref.currency} price data, read as {read_as} money ({against}): "
+                      "not adjusted for inflation. Unconfirmed, nothing is applied."})
 
     period = _asset_period(n, frame, name)
     notes = []
@@ -161,11 +179,22 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                 "source": cmp.pack.source},
             "differs": cmp.differs})
     return {"component_class": component_class, "name": name, "technology": technology,
-            "projection_year": projection_year, "attrs": attrs, "rows": rows,
+            "projection_year": projection_year, "attrs": attrs, "rows": rows, "base_year": base_year,
             "needs": needs, "missing": [x["confirmation"] for x in needs if x["confirmation"] not in confirm],
             "notes": notes, "pack": detail.pack.model_dump(), "source": source_id(ref),
             "currency": ref.currency, "currency_year": ref.currency_year,
             "licence": ref.licence, "attribution": ref.attribution}
+
+
+def plan_active(args: Mapping[str, Any]) -> dict:
+    """`plan` on the active network, with its commercial config and investment-case base year."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    config = ctx.solver_state.get("solver_config")
+    return plan(ctx.network, getattr(config, "commercial", None), args.get("component_class"),
+                args.get("name"), args.get("technology"), args.get("projection_year"),
+                args.get("confirm") or (), base_year=case_base_year(ctx.network, config))
 
 
 def require_confirmed(p: dict) -> None:
@@ -185,7 +214,7 @@ def stamp(n, p: dict, *, approved_by: str | None, approved_at: str | None = None
     """Record each written field as the user's explicit choice of this reference."""
     from services.asset_schema import provenance
 
-    when = approved_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    when = approved_at or datetime.now(UTC).isoformat(timespec="seconds")
     for field in p["attrs"]:
         provenance.record(n, p["component_class"], p["name"], field, status="customised",
                           source=p["source"], source_year=2026,

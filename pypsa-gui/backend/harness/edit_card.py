@@ -598,12 +598,8 @@ def _library_reference_preview(args: dict) -> list[dict]:
     still missing a confirmation refuses before any card (`reference_confirmation_needed`)."""
     from services import chat_tools
     from services.library import reference_apply as A
-    from services.pypsa_service import PyPSAService
 
-    ctx = PyPSAService.get_active_context()
-    p = A.plan(ctx.network, getattr(ctx.solver_state.get("solver_config"), "commercial", None),
-               args.get("component_class"), args.get("name"), args.get("technology"),
-               args.get("projection_year"), args.get("confirm") or ())
+    p = A.plan_active(args)
     A.require_confirmed(p)
     klass, name = p["component_class"], p["name"]
     rows = _sandbox_rows(klass, [(name, dict(p["attrs"]))],

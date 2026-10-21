@@ -46,11 +46,8 @@ def preview_library_reference(body: ReferenceApplyIn, user: User = Depends(requi
     `needs` says what each confirmation means, and the caller previews again with it."""
     from harness import edit_card
     from services.library import reference_apply as A
-    from services.pypsa_service import PyPSAService
 
-    ctx = PyPSAService.get_active_context()
-    p = A.plan(ctx.network, getattr(ctx.solver_state.get("solver_config"), "commercial", None),
-               body.component_class, body.name, body.technology, body.projection_year, body.confirm)
+    p = A.plan_active(_args(body))
     card = None if p["missing"] else edit_card.preview(TOOL, _args(body))
     return {"card": card, "needs": p["needs"], "missing": p["missing"], "notes": p["notes"],
             "rows": p["rows"], "pack": p["pack"], "licence": p["licence"], "attribution": p["attribution"]}
@@ -62,10 +59,7 @@ def apply_reference(args: dict, approved_by: str | None) -> dict:
     from services.library import reference_apply as A
     from services.pypsa_service import PyPSAService
 
-    ctx = PyPSAService.get_active_context()
-    commercial = getattr(ctx.solver_state.get("solver_config"), "commercial", None)
-    p = A.plan(ctx.network, commercial, args["component_class"], args["name"], args["technology"],
-               args["projection_year"], args.get("confirm") or ())
+    p = A.plan_active(args)
     A.require_confirmed(p)
     chat_tools.update_component(p["component_class"], p["name"], p["attrs"])
     A.stamp(PyPSAService.get_network(), p, approved_by=approved_by)

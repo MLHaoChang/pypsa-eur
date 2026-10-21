@@ -266,3 +266,30 @@ def test_the_tool_is_a_network_edit_with_a_card(install_network):
     install_network(_net())
     card = edit_card.preview("apply_library_reference", dict(AEC))
     assert card["kind"] == "parameter_edit" and card["complete"]
+
+
+# ── money year against the investment case's base year (gatekeeper, option 1) ──
+
+def test_onwind_2020_eur_on_a_case_with_base_year_2026_needs_money_year():
+    from types import SimpleNamespace
+
+    import pandas as pd
+
+    n = _net()
+    n.set_snapshots(pd.date_range("2026-01-01", periods=2, freq="h"))
+    base = A.case_base_year(n, SimpleNamespace(finance={"currency": "EUR"}))
+    assert base == 2026
+    assert A.case_base_year(n, SimpleNamespace(finance=None)) is None
+    p = A.plan(n, {}, "Generator", "wind", "onwind", 2030, base_year=base)
+    need = next(x for x in p["needs"] if x["confirmation"] == "money_year")
+    assert (need["reference_year"], need["read_as_year"]) == (2020, 2026)
+    assert "2020 EUR price data, read as 2026 money" in need["text"] and "not adjusted" in need["text"]
+    with pytest.raises(HTTPException) as exc:
+        A.require_confirmed(p)
+    assert _codes(exc) == ("reference_confirmation_needed", ["money_year"])
+    ok = A.plan(n, {}, "Generator", "wind", "onwind", 2030, confirm=["money_year"], base_year=base)
+    A.require_confirmed(ok)
+    _apply(n, ok)
+    assert P.get(n, "Generator", "wind")["overnight_cost"]["currency_year"] == 2020
+    # without a case, the same 2020 EUR beside the pack's 2020 EUR needs nothing
+    assert "money_year" not in A.plan(_net(), {}, "Generator", "wind", "onwind", 2030)["missing"]
