@@ -2,11 +2,14 @@ import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
+import { readActiveSection, writeActiveSection } from './activeSection'
 import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
+import type { FlowSectionId, FlowTarget } from '../api/flow'
+import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
 import type { ProjectMismatch } from '../utils/projectMismatch'
@@ -444,6 +447,16 @@ interface UIStore {
   canvasMode: CanvasMode
   canvasView: CanvasView
   activeSlidePanel: SlidePanel | null
+  // The flow section the user is working in, shared by Guided and Expert
+  // (workspace-reconciliation §7). Moved by opening a section's panel, by
+  // selecting a component, or by picking a section on the Guided rail; the
+  // mode switch keeps it. Null until one is chosen.
+  // Guided: the field a section item opened in place, in a drawer over the
+  // card, so the user finishes it without leaving Guided (design §3.5).
+  fieldDrawer: FlowTarget | null
+  setFieldDrawer: (t: FlowTarget | null) => void
+  activeSection: FlowSectionId | null
+  setActiveSection: (s: FlowSectionId | null) => void
   // The assistant is NOT a SlidePanel. It has its own open/closed state so it
   // can stay on screen while it navigates you somewhere — see Task 3's
   // regression test and the 2026-08-05 presence spec.
@@ -689,6 +702,10 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSiteId: readActiveSite(storedCurrentProject()),
   siteSizing: 'installed',
   activeSlidePanel: null,
+  fieldDrawer: null,
+  setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
+  activeSection: readActiveSection(storedCurrentProject()),
+  setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockPinned: storedAssistantDockPinned(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -747,7 +764,7 @@ export const useUIStore = create<UIStore>((set) => ({
       if (explicit) localStorage.setItem(UI_MODE_EXPLICIT_KEY, '1')
     } catch { /* noop */ }
     set(s => {
-      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
+      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit, fieldDrawer: null }
       // UX review W5: switching mode keeps the autosave state, so the footer
       // reads the same for one project in Guided and in Expert. The mode only
       // seeds the default at load (storedAutosave).
@@ -756,11 +773,27 @@ export const useUIStore = create<UIStore>((set) => ({
       // Guided keeps two of its tabs. Switching to Expert closes the Guided
       // hub design panel (UX review W4) and nothing else.
       // U3: the decision study is a Guided surface too (the Start card opens it).
-      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') patch.activeSlidePanel = null
+      // §7: the switch keeps the section. Guided → Expert opens the section the
+      // user was in (its first panel, or its table), with every field shown;
+      // with no section yet it closes the hub design as before. Expert → Guided
+      // lands on the card of the section the panel or selection belongs to,
+      // which `activeSection` already follows.
+      if (mode === 'expert' && s.activeSlidePanel === 'hubDesign') {
+        const open = s.activeSection ? SECTION_OPEN[s.activeSection] : undefined
+        patch.activeSlidePanel = open?.panel ?? null
+        if (open?.table) patch.bottomTabRequest = open.table
+      }
       if (mode === 'guided' && s.activeSlidePanel != null
           && s.activeSlidePanel !== 'hubDesign' && s.activeSlidePanel !== 'results'
           && s.activeSlidePanel !== 'decision') {
         patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
+      }
+      // Expert with no panel but a selection from a flow item (the Run's
+      // reason, a field link) lands on that section's card, not the bare
+      // canvas. A plain canvas with nothing selected stays as it is.
+      if (mode === 'guided' && s.activeSlidePanel == null && s.currentProject
+          && s.selectedComponent && s.activeSection) {
+        patch.activeSlidePanel = 'hubDesign'
       }
       return patch
     })
@@ -816,6 +849,7 @@ export const useUIStore = create<UIStore>((set) => ({
   openRightPanel: () => set({ rightPanelOpen: true }),
   setSelectedComponent: (c) => { navigationChanged(); set(s => ({
     selectedComponent: c,
+    activeSection: sectionForComponent(c?.type) ?? s.activeSection,
     // P30 (B10): an edit request belongs to one component; moving the
     // selection anywhere else drops it.
     propertiesEditRequest: s.propertiesEditRequest && c
@@ -856,7 +890,11 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSiteSizing: (m) => set({ siteSizing: m }),
-  setSlidePanel: (p) => { navigationChanged(); set({ activeSlidePanel: p }) },
+  setSlidePanel: (p) => {
+    navigationChanged()
+    const section = p ? PANEL_SECTION[p] : undefined
+    set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })
+  },
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)
     set({ assistantDockOpen: open })
@@ -982,6 +1020,9 @@ export const useUIStore = create<UIStore>((set) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
+        // The section this project was left in (design §7), else none.
+        activeSection: readActiveSection(name),
+        fieldDrawer: null,
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,
@@ -1150,3 +1191,11 @@ if (typeof window !== 'undefined') {
   w.__uiModeStorageListener = onUiModeStorage
   window.addEventListener('storage', onUiModeStorage)
 }
+
+// Remember the section per project (design §7). A project switch restores the
+// new project's own section in the same update, so this writes it back
+// unchanged; a rename carries the section to the new name.
+useUIStore.subscribe((s, prev) => {
+  if (s.activeSection === prev.activeSection && s.currentProject === prev.currentProject) return
+  writeActiveSection(s.currentProject, s.activeSection)
+})

@@ -11,8 +11,10 @@ the tool-results file as saved, wrapper included), then run::
     python scripts/coord/sessions.py sessions.json
 
 Each line shows the id suffix, status, last update, title, status category,
-status detail and whether the session needs action. Archived sessions are
-left out. Fields a session lacks print as ``-``.
+status detail, context used (``context_usage.used_tokens``) and whether the
+session needs action. A session past 300k tokens of context is flagged
+``ROTATE``: the coordinator asks it for a hand-off note and a fresh session.
+Archived sessions are left out. Fields a session lacks print as ``-``.
 """
 
 import argparse
@@ -21,6 +23,7 @@ import sys
 from pathlib import Path
 
 ARCHIVED = {"SESSION_STATUS_ARCHIVED", "archived"}
+ROTATE_TOKENS = 300_000
 
 
 def strip_prefix(value, prefix):
@@ -64,6 +67,22 @@ def load(text):
     return payload
 
 
+def context_tokens(session):
+    """Used context tokens, or None when the record carries none."""
+    for holder in (session, session.get("session_context") or {}):
+        tokens = (holder.get("context_usage") or {}).get("used_tokens")
+        if isinstance(tokens, (int, float)):
+            return int(tokens)
+    return None
+
+
+def fmt_context(tokens):
+    if tokens is None:
+        return "-"
+    flag = " ROTATE" if tokens > ROTATE_TOKENS else ""
+    return f"{round(tokens / 1000)}k{flag}"
+
+
 def row(session):
     summary = session.get("post_turn_summary") or {}
     status = session.get("session_status") or session.get("status")
@@ -85,6 +104,7 @@ def row(session):
                 or session.get("status_detail")
                 or (session.get("external_metadata") or {}).get("task_summary")
             ),
+            fmt_context(context_tokens(session)),
             fmt(summary.get("needs_action", session.get("needs_action"))),
         ]
     )

@@ -60,19 +60,19 @@ async function renderSidebar() {
   return utils
 }
 
-// UX overhaul (owner decision Q6a): the workflow order, named by category —
-// MODEL (assets, bounds, time, economics), RUN, RESULTS, STUDIES, PROJECT.
-// The PROJECT step keeps the id `reports`; panel ids are unchanged.
-const ORDER = ['model', 'run', 'results', 'studies', 'reports']
+// Workspace reconciliation §6.1: the ten flow sections under four bands, then
+// the project utilities. Bands are the collapsible headers; each section's
+// rows are the rows the old steps held, under their new section.
+const ORDER = ['setup', 'model', 'run', 'results', 'reports']
 
-// What each step holds. Planning → dynamics shows because the mocked project
-// list is empty (unknown is not "not a study", Sidebar.studies.test.tsx).
+// What each band holds, per section. Planning → dynamics shows because the
+// mocked project list is empty (unknown is not "not a study").
 const ROWS: Record<string, string[]> = {
-  model: ['Assets', 'Capacity Bounds', 'Profile Studio', 'Model Horizon', 'Time Series', 'Economics'],
-  run: ['Solver Settings', 'Issues', 'Solve Queue'],
-  results: ['Results'],
-  studies: ['Decision study', 'Campus electrical', 'Planning → dynamics'],
-  reports: ['Scenarios', 'Snapshots', 'Reports'],
+  setup: ['Model Horizon', 'Carriers'],
+  model: ['Campus electrical', 'Loads', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
+  run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
+  results: ['Results', 'Decision study', 'Planning → dynamics', 'Reports'],
+  reports: ['Snapshots'],
 }
 
 // The project's actions, now behind the footer card's menu.
@@ -102,7 +102,7 @@ beforeEach(() => {
 describe('M2 — Expert sidebar, expanded', () => {
   beforeEach(() => useUIStore.setState({ sidebarMode: 'expanded' }))
 
-  it('lists the five steps in the order of the work', async () => {
+  it('lists the bands in the order of the flow', async () => {
     const { container } = await renderSidebar()
     const headers = Array.from(container.querySelectorAll('[data-testid^="sidebar-section-"]'))
       .map(el => el.getAttribute('data-testid')!.replace('sidebar-section-', ''))
@@ -196,19 +196,18 @@ describe('M2 — Expert sidebar, icon strip', () => {
   })
 })
 
-describe('Q6a — studies are labelled by category', () => {
+describe('flow sections in the sidebar', () => {
   beforeEach(() => useUIStore.setState({ sidebarMode: 'expanded' }))
 
-  it('files the decision study under Investment and the electrical studies under Grid plan', async () => {
-    await renderSidebar()
-    const group = screen.getByTestId('sidebar-group-studies')
-    const text = group.textContent ?? ''
-    expect(text.indexOf('Investment')).toBeLessThan(text.indexOf('Decision study'))
-    expect(text.indexOf('Grid plan')).toBeGreaterThan(text.indexOf('Decision study'))
-    expect(text.indexOf('Grid plan')).toBeLessThan(text.indexOf('Campus electrical'))
+  it('lists the ten sections, numbered, in flow order', async () => {
+    const { container } = await renderSidebar()
+    const ids = Array.from(container.querySelectorAll('[data-testid^="flow-section-"]'))
+      .map(el => el.getAttribute('data-testid')!.replace('flow-section-', ''))
+    expect(ids).toEqual(['project', 'carriers', 'connection', 'loads', 'assets', 'profiles',
+      'commercial', 'scenarios', 'readiness', 'results'])
   })
 
-  it('names the last step PROJECT', async () => {
+  it('names the last band PROJECT', async () => {
     await renderSidebar()
     expect(within(screen.getByTestId('sidebar-group-reports')).getByText('PROJECT')).toBeTruthy()
   })

@@ -44,8 +44,11 @@ def get(n, component_class: str, name: str) -> dict[str, dict[str, Any]]:
 
 def record(n, component_class: str, name: str, field: str, *, status: str, source: str | None = None,
            source_year: int | None = None, currency_year: int | None = None,
-           range: tuple[float, float] | None = None, illustrative: bool = False) -> None:
-    """Write one field's provenance, replacing what was there."""
+           range: tuple[float, float] | None = None, illustrative: bool = False,
+           currency: str | None = None, fallback: str | None = None) -> None:
+    """Write one field's provenance, replacing what was there. `currency` (a regional pack's
+    ISO code) and `fallback` (`eu_fallback`: the value came from the EU row) are written only
+    when given, so a record from the EU pack is what it always was."""
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}, got {status!r}")
     _root(n).setdefault(component_class, {}).setdefault(name, {})[field] = {
@@ -55,6 +58,8 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
         "currency_year": currency_year,
         "range": None if range is None else [float(range[0]), float(range[1])],
         "illustrative": bool(illustrative),
+        **({"currency": currency} if currency else {}),
+        **({"fallback": fallback} if fallback else {}),
     }
 
 
