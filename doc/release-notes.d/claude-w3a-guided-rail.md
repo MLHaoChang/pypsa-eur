@@ -1,1 +1,1 @@
-* Feat(pypsa-gui): The Guided rail shows the ten project-flow sections with their state from the project flow; each section lists what is still to do or to check, with a button that shows the field in Expert; sections without a card yet show a generic section card.
+* Feat(pypsa-gui): The Guided rail shows the ten project-flow sections with their state from the project flow; each section lists what is still to do or to check, and each item opens its field in a drawer without leaving Guided (or in Expert); sections without a card yet show a generic section card.
