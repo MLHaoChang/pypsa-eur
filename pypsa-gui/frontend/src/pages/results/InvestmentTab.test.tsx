@@ -270,7 +270,7 @@ describe('InvestmentTab → Economics', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open Commercial & parties' }))
     expect(useUIStore.getState().uiMode).toBe('guided')
     expect(useUIStore.getState().activeSection).toBe('commercial')
-    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
   it('shows an island with an open PoC: no connection, tariff or export to set (H4)', async () => {

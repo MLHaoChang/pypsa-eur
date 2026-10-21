@@ -11,7 +11,7 @@ import {
   type ValueFlowsPayload,
 } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
-import { openSectionInExpert } from '../../layout/flowNavigation'
+import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
@@ -119,7 +119,7 @@ export default function InvestmentTab() {
   const expert = useUIStore(s => s.uiMode === 'expert')
   const openCommercial = () => {
     if (expert) openSectionInExpert('commercial')
-    else { const ui = useUIStore.getState(); ui.setActiveSection('commercial'); ui.setSlidePanel(null) }
+    else openSectionInGuided('commercial')
   }
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
