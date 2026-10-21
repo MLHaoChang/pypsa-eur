@@ -27,7 +27,7 @@ _PLAIN = {
 #: the growth input in words.
 _GROWTH_LABELS = {"it_mw": "The IT load", "energized_mw": "The energized import"}
 _GROWTH_TEXT = ("{label} in {year} is a placeholder (the example's value for the same stage, "
-                "not set for this year): the plan and this case rest on it until it is set.")
+                "not set for this year): the plan and this case rest on it.")
 
 
 def flag_text(flag: str) -> str | None:

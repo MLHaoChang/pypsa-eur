@@ -270,14 +270,16 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
     rows = []
     for r in checked:
         if r["unset"]:
-            # A placeholder growth value (E1): the example's figure for another
-            # year, so the period's verdict is not established.
+            # A placeholder growth value (E1): the example's same-stage figure,
+            # so the period's verdict is not established.
             rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
                              limit=None, unit="MW", source="the template's growth inputs",
                              project_value=None, verdict="unknown", assumed=True,
-                             note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the example "
-                                   "has no figure for this year and its placeholder is not a "
-                                   "value to check against; set it in the flow"),
+                             note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the "
+                                   "period takes the example's same-stage value, a placeholder "
+                                   "that is not a value to check against, so the period stays unknown "
+                                   "(setting a placeholder is follow-up "
+                                   "E1-set-growth-placeholders)"),
                              section="connection", target=target))
             continue
         uplift = _in_hour_uplift_mw(inp, r["period"])
