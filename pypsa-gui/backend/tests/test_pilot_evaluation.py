@@ -18,7 +18,17 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile == "energy-balance/1":
+    if case.profile == "site-import/1":
+        n.generators.at["G1", "marginal_cost"] = 0
+        n.generators_t.p_max_pu = pd.DataFrame({"G1": [0.0, 0.0]}, index=n.snapshots)
+        n.loads_t.p_set = pd.DataFrame({"L1": [6, 3]}, index=n.snapshots)
+        n.add("Bus", "grid")
+        n.add("Carrier", ["grid"])
+        n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=100, p_min_pu=-1, marginal_cost=20)
+        n.add("Link", "meter", bus0="grid", bus1="B1", p_nom=6, p_min_pu=-1, eh_role="grid_import")
+        n.links_t.p_max_pu = pd.DataFrame({"meter": [1.0, 0.5]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1]
+    elif case.profile == "energy-balance/1":
         n.loads.at["L1", "p_set"] = 0
         n.add("Bus", "prod")
         n.add("Carrier", ["product_shortfall"])
