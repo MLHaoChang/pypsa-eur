@@ -1500,12 +1500,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "apply_generated_profile",
-        "Write one PENDING generated profile onto a generator's p_max_pu "
-        "(undoable; the confirmation card authorises the write). The point "
-        "feeding the component defaults to the component's own name. Refuses "
-        "(422) when the component is gone, its carrier is not wind/solar, or "
-        "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "Write one PENDING generated profile onto its target (undoable; the "
+        "confirmation card authorises the write): a renewable profile onto a "
+        "generator's p_max_pu, a load profile (generate_load_profile) onto a "
+        "load's p_set; `component_type`/`attribute` name another target "
+        "only when the user asks. The point feeding the component defaults "
+        "to the component's own name. Refuses (422) when the component is "
+        "gone, a renewable profile meets a non-wind/solar carrier, the "
+        "profile's family may not write that target, or the artifact holds "
+        "no column for it; warns when the bus moved since generation. A load "
+        "answer carries profile_annual_mwh and modelled_mwh; relay an "
+        "energy_mismatch warning. `time_basis` says what the snapshots mean: \"UTC\" "
         "or the IANA zone whose wall clock they are (e.g. "
         "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
         "Leave it unset unless the user said; then the answer's `warnings` "
@@ -1517,8 +1522,45 @@ TOOLS: list[dict[str, Any]] = [
          "job_id": {"type": "string"},
          "component": {"type": "string"},
          "point_id": {"type": "string"},
-         "time_basis": {"type": "string"}},
+         "time_basis": {"type": "string"},
+         "component_type": {"type": "string"},
+         "attribute": {"type": "string"}},
         ["project_id", "job_id", "component"],
+    ),
+    _t(
+        "list_load_profile_archetypes",
+        "List the load-profile archetypes (industrial, commercial, "
+        "residential, ev_charging, heat, data_centre, library) with every "
+        "parameter and its default, and the named presets (e.g. "
+        "commercial_office, industrial_three_shift). Every archetype is a "
+        "stated, assumed shape, never a measurement. Safety: read.",
+        {},
+    ),
+    _t(
+        "generate_load_profile",
+        "Generate a load archetype for named loads of the open project into "
+        "the pending store (one column per load; nothing on the network "
+        "changes until apply_generated_profile). `params` must state exactly "
+        "one of peak_mw or annual_mwh; other keys are the archetype's (see "
+        "list_load_profile_archetypes) and a misspelt one is refused. Shapes "
+        "are hourly; working hours follow the project's commercial timezone "
+        "unless params.timezone says otherwise. The answer gives each load's "
+        "peak MW, its source-year annual MWh, the MWh this model's snapshots "
+        "will see (modelled_mwh: a sampled template sees less), any "
+        "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
+        "job_id to apply. On a project made "
+        "with a data-centre dc_load spec, that spec owns the DC load: apply "
+        "refuses a data_centre profile there. `project_id` is the project "
+        "NAME and must be the open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "archetype": {"type": "string",
+                       "enum": ["industrial", "commercial", "residential",
+                                "ev_charging", "heat", "data_centre",
+                                "library"]},
+         "loads": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "archetype", "loads"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -3976,13 +4018,15 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (6)
+    # profile generator (8)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
+    "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
+    "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],

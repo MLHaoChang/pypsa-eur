@@ -211,6 +211,7 @@ def generate_profile(
     year: int | None = None,
     resolution: str = "hourly",
     now: _dt.datetime | str | None = None,
+    family: str = "renewable",
 ) -> ProfileResult:
     """Generate per-unit capacity-factor profiles for `points`.
 
@@ -226,36 +227,31 @@ def generate_profile(
       resolution. Coarser resolutions are means over the hour.
     - `now`: injectable clock so tests (and reproducible runs) get
       byte-identical meta.
+    - `family`: "renewable" (this docstring) or another registered family
+      (`families.py`), whose own generator then makes the series:
+      `technology` names its kind (a load archetype) and `points` may be
+      plain ids.
     """
     params = dict(params or {})
+    fam = str(family or "renewable").strip().lower()
+    if fam != "renewable":
+        return _generate_family(fam, points, technology, params, year,
+                                resolution, now)
     tech = str(technology).strip().lower()
     if tech not in SUPPORTED_TECHNOLOGIES:
         raise UnsupportedTechnologyError(
             f"cannot generate a profile for technology {technology!r}; "
             f"supported: {', '.join(SUPPORTED_TECHNOLOGIES)}"
         )
-    res = str(resolution).strip().lower()
-    if res not in RESOLUTIONS:
-        raise UnsupportedResolutionError(
-            f"unsupported resolution {resolution!r}; supported: "
-            f"{', '.join(RESOLUTIONS)}"
-        )
+    res, year = _resolve_res_year(resolution, year)
     source_fn = _resolve_source(source)
     pts = _normalize_points(points)
-    if year is None:
-        year = _dt.datetime.now(_dt.timezone.utc).year - 1
-    year = int(year)
 
     frame, meta_extra = source_fn(pts, tech, params, year)
     if res != "hourly":
         frame = _aggregate(frame, res)
 
-    if now is None:
-        generated_at = _dt.datetime.now(_dt.timezone.utc)
-    elif isinstance(now, str):
-        generated_at = _dt.datetime.fromisoformat(now)
-    else:
-        generated_at = now
+    generated_at = _resolve_now(now)
 
     meta: dict[str, Any] = {
         "source": source,
@@ -275,4 +271,59 @@ def generate_profile(
         "atlite_version": None,  # the atlite source overwrites this via extra
     }
     meta.update(meta_extra)
+    return ProfileResult(series=frame, meta=meta)
+
+
+def _resolve_now(now: _dt.datetime | str | None) -> _dt.datetime:
+    if now is None:
+        return _dt.datetime.now(_dt.timezone.utc)
+    if isinstance(now, str):
+        return _dt.datetime.fromisoformat(now)
+    return now
+
+
+def _resolve_res_year(resolution: str, year: int | None) -> tuple[str, int]:
+    res = str(resolution).strip().lower()
+    if res not in RESOLUTIONS:
+        raise UnsupportedResolutionError(
+            f"unsupported resolution {resolution!r}; supported: "
+            f"{', '.join(RESOLUTIONS)}"
+        )
+    if year is None:
+        year = _dt.datetime.now(_dt.timezone.utc).year - 1
+    return res, int(year)
+
+
+def _generate_family(family: str, points: Iterable[Any], kind: str,
+                     params: dict[str, Any], year: int | None,
+                     resolution: str, now) -> ProfileResult:
+    """A non-renewable family's generator, with the engine's common meta and
+    the same post-generation aggregation as the renewable path."""
+    from services.profile_gen.families import get_family
+
+    fam = get_family(family)
+    if fam.generate is None:
+        raise ProfileGenError(f"the {family} family has no generator")
+    res, year = _resolve_res_year(resolution, year)
+    if res != "hourly":
+        # A day or week mean of a stated shape loses the shape; the apply
+        # path would hold it flat for 24/168 h.
+        raise UnsupportedResolutionError(
+            f"{family} profiles are hourly only, got {resolution!r}")
+    ids = [p if isinstance(p, str) else _as_point(p).id for p in points]
+    if not ids:
+        raise ProfileGenError("at least one id is required")
+    if len(set(ids)) != len(ids):
+        raise ProfileGenError(f"ids must be unique; got {ids}")
+    frame, meta_extra = fam.generate(ids, str(kind).strip().lower(), params, year)
+    generated_at = _resolve_now(now)
+    meta: dict[str, Any] = {
+        "family": family,
+        "source": "archetype",
+        "weather_year": year,  # the source year, as the apply path names it
+        "resolution": res,
+        "leap_day": "kept",
+        "generated_at": generated_at.isoformat(),
+        **meta_extra,
+    }
     return ProfileResult(series=frame, meta=meta)
