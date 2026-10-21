@@ -52,5 +52,5 @@ Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), researc
 - Never mark a step done from a caller-supplied result alone (`resolve_task_step`); read the result back natively before the next step.
 - No replay on resume; an interrupted step resumes or is reported, never re-run silently.
 - A failed step yields a correction draft, never an automatic retry.
-- No cross-card study brief or separate progress line: the card workspace Next row and H1 are the entry points.
+- Superseded by AI-567b: the cross-card study brief is built by the study copilot (ticket 23, #569) on these plans; no separate progress line, the plan card is its one entry point and the card workspace Next row stays the per-card next step.
 - Cases: #567 S-series (see 05-IMPLEMENTATION-AND-TESTS.md).
