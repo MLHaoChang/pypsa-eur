@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Other model series through the profile engine: time-of-use price bands onto marginal_cost (with their money basis), seasonal hydro inflow from an annual MWh onto storage inflow, and heat-pump COP from the source temperature onto link efficiency. Part-load efficiency curves are refused (they depend on the dispatch).
