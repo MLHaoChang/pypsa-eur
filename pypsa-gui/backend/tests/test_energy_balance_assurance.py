@@ -85,6 +85,16 @@ def shortfall(baseline):
     return ctx
 
 
+def test_mixed_carriers_are_split_beside_the_totals(shortfall, checked):
+    shortfall.network.buses.at["prod", "carrier"] = "NH3"
+    ctx = solve(shortfall)
+    values = {"generation_energy": 6, "served_energy": 6, "unserved_energy": 4,
+              "storage_change": 0, "export_losses_and_conversion": 0}
+    text = public_text(ask(checked, ctx, values))
+    assert ("These totals add MWh of different carriers. Generation: AC 6; served: NH3 6; "
+            "unserved: NH3 4.") in text
+
+
 def test_a_shortfall_comes_off_served_as_it_comes_off_generation(shortfall, checked):
     ctx = solve(shortfall)
     # G1 makes 3 MW for two unit-weight hours; the delivery is served 6 of 10 MWh.
@@ -96,7 +106,9 @@ def test_a_shortfall_comes_off_served_as_it_comes_off_generation(shortfall, chec
     assert expected["unserved_product"] == pytest.approx(4)
     for metric in ("generation_energy", "served_energy", "storage_change", "export_losses_and_conversion"):
         assert values[metric] == pytest.approx(expected[metric], abs=1e-6)
-    assert "split by source and route is its own attribution" in public_text(frames)
+    text = public_text(frames)
+    assert "split by source and route is its own attribution" in text
+    assert "derived (generation minus served minus storage change), not separately measured" in text
 
 
 @pytest.fixture

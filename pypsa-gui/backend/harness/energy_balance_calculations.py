@@ -151,6 +151,11 @@ def source(ctx, entity):
         "shortfall": [all_gens.index(g) for g in shortfall],
         "load_p": _frame(n.loads_t.p, loads, index),
         "load_bus": [str(n.loads.at[x, "bus"]) for x in loads],
+        "load_names": loads,
+        "bus_carrier": {str(b): (str(c) if isinstance(c, str) and c else "AC")
+                        for b, c in n.buses["carrier"].items()},
+        "shed_by_load": None if capture is None or capture.empty else
+        {str(c): np.maximum(np.nan_to_num(capture[c].to_numpy(dtype=float)), 0.0) for c in capture.columns},
         "shed": shed,
         "flows": flows,
         "storage": storage,
@@ -220,8 +225,54 @@ def calculate(raw, scope):
     return common.facts_and_slots(scope, METRICS, available, {m: base for m in METRICS}, b - a + 1)
 
 
-def notes(raw):
-    return [
+def _by_carrier(raw, scope):
+    """Generation, served and unserved MWh per bus carrier over the window."""
+    T = len(raw["index"])
+    a, b = common.window(raw["index"], scope)
+    w = np.array(raw["w_gen"])[a : b + 1]
+    gp = _array(raw["gen_p"]).reshape(T, -1)[a : b + 1]
+    lp = _array(raw["load_p"]).reshape(T, -1)[a : b + 1]
+    carrier = raw["bus_carrier"]
+    out = {}
+
+    def add(key, kind, values):
+        row = out.setdefault(key, {"generation": 0.0, "served": 0.0, "unserved": 0.0})
+        row[kind] += math.fsum(values * w)
+
+    for j in raw["kept"]:
+        add(carrier[raw["gen_bus"][j]], "generation", np.maximum(gp[:, j], 0.0))
+    shed = raw.get("shed_by_load") or {}
+    lost = {}
+    for j in raw["shortfall"]:
+        bus = raw["gen_bus"][j]
+        lost[bus] = lost.get(bus, 0) + np.maximum(gp[:, j], 0.0)
+    for j, bus in enumerate(raw["load_bus"]):
+        add(carrier[bus], "served", lp[:, j])
+    for bus, values in lost.items():
+        add(carrier[bus], "unserved", values)
+        add(carrier[bus], "served", -values)
+    for load, values in shed.items():
+        bus = raw["load_bus"][list(raw.get("load_names", [])).index(load)] if load in raw.get("load_names", []) else None
+        if bus is not None:
+            add(carrier[bus], "unserved", np.asarray(values)[a : b + 1])
+            add(carrier[bus], "served", -np.asarray(values)[a : b + 1])
+    return out
+
+
+def notes(raw, scope, label):
+    lines = [
         "Totals only: the Energy flow tab's split by source and route is its own attribution and is "
-        "not checked."
+        "not checked.",
+        "Export, losses and conversion is derived (generation minus served minus storage change), "
+        "not separately measured.",
     ]
+    if not raw["valid_solve"] or not _bus_balance_closes(raw):
+        return lines
+    split = _by_carrier(raw, scope)
+    if len(split) > 1:
+        def fmt(kind):
+            return ", ".join(f"{label(c)} {repr(round(v[kind], 9)).removesuffix('.0')}"
+                             for c, v in sorted(split.items()) if v[kind])
+        lines.append("These totals add MWh of different carriers. Generation: " + (fmt("generation") or "none")
+                     + "; served: " + (fmt("served") or "none") + "; unserved: " + (fmt("unserved") or "none") + ".")
+    return lines

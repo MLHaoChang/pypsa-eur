@@ -468,7 +468,7 @@ class Turn:
         if profile == assurance_metrics.cycles.PROFILE:
             lines.extend(assurance_metrics.cycles.notes(record["raw"]))
         if profile == assurance_metrics.balance.PROFILE:
-            lines.extend(assurance_metrics.balance.notes(record["raw"]))
+            lines.extend(assurance_metrics.balance.notes(record["raw"], self.request_scope, _label))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(
