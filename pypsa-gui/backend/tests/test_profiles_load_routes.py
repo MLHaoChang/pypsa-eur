@@ -253,3 +253,127 @@ def test_an_archetype_lands_once_converted_on_utc_snapshots(
     s = session_ctx(client).network.loads_t.p_set["plant"]
     assert _first_on_hour(s, "2025-01-08") == winter   # a Wednesday
     assert _first_on_hour(s, "2025-07-09") == summer
+
+
+# ---------------------------------------------------------------------------
+# availability (ticket 02)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def plant_project(client, install_network):
+    n = _load_network()
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    resp = client.post("/api/projects/CHP Site",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+    return "CHP Site"
+
+
+def _avail(client, project, **over):
+    body = {"kind": "maintenance", "generators": ["chp"],
+            "params": {"windows": [{"from": "07-03", "to": "07-16"}]}}
+    body.update(over)
+    return client.post(f"/api/projects/{project}/profiles/availability/generate",
+                       json=body)
+
+
+def test_availability_generates_on_the_networks_year_and_applies(
+    client, plant_project, session_ctx,
+):
+    gen = _avail(client, plant_project)
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    assert body["weather_year"] == 2025          # the network's own year
+    assert body["target"] == ["generators", "p_max_pu"]
+    assert body["stats"]["chp"]["hours_reduced"] == 14 * 24
+    applied = client.post(f"/api/projects/{plant_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "chp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    p = session_ctx(client).network.generators_t.p_max_pu["chp"]
+    assert float(p.loc["2025-07-04T12:00"]) == 0.0
+
+
+def test_must_run_applies_to_p_min_pu_by_its_stated_target(client, plant_project,
+                                                          session_ctx):
+    body = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.2}).json()
+    applied = client.post(f"/api/projects/{plant_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "chp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["attribute"] == "p_min_pu"
+
+
+@pytest.mark.parametrize("over, kind", [
+    ({"kind": "forced_outages", "params": {}}, "forced_outages_not_written"),
+    ({"kind": "strike", "params": {}}, "unknown_availability_kind"),
+    ({"params": {"windows": "07-03"}}, "invalid_availability_params"),
+    ({"params": {"windows": [{"from": "2031-07-03", "to": "2031-07-04"}]}},
+     "maintenance_year"),
+    ({"generators": ["nope"]}, "unknown_generator"),
+    ({"generators": ["g_wind"]}, "carrier_mismatch"),
+])
+def test_availability_refusals_are_typed(client, plant_project, over, kind):
+    resp = _avail(client, plant_project, **over)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == kind
+
+
+def test_a_dated_window_on_a_multi_period_network_is_refused_before_pending(
+    client, install_network,
+):
+    from services.snapshot_index import _build_period_multiindex
+
+    n = pypsa.Network()
+    idx = [pd.date_range(f"{y}-01-01", f"{y}-12-31T23:00", freq="h") for y in (2030, 2031)]
+    n.set_snapshots(_build_period_multiindex([2030, 2031], idx))
+    n.add("Bus", "B1")
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Two Periods",
+                       params={"force": True, "rebind": True}).status_code == 200
+    resp = _avail(client, "Two Periods",
+                  params={"windows": [{"from": "2030-07-03", "to": "2030-07-04"}]})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "maintenance_year"
+    pending = client.get("/api/projects/Two Periods/profiles/pending").json()
+    assert pending["pending"] == []
+
+
+def test_must_run_stats_count_the_floored_hours(client, plant_project):
+    body = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.2}).json()
+    assert body["stats"]["chp"]["hours_floored"] == 8760
+    assert "hours_reduced" not in body["stats"]["chp"]
+
+
+def test_availability_refusals_say_their_sentence_and_nothing_foreign(
+    client, plant_project, monkeypatch, bound_ctx,
+):
+    # The sanitiser's rule (#508) on ticket 02's route, zone and chat tool.
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.profile_gen import availability
+
+    resp = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.4, "timezone": "Europe"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["message"] == "timezone 'Europe' is not an IANA zone"
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(availability, "generate_frame", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["generate_availability_profile"](
+            project_id=plant_project, kind="maintenance", generators=["chp"],
+            params={"windows": [{"from": "07-03", "to": "07-16"}]})
+    assert err.value.detail == "unexpected error (ValueError); see the server log"
