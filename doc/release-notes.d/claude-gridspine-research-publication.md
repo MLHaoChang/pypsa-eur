@@ -1,0 +1,1 @@
+* Docs(GridSpine): Publish open-source capability research, the independently reviewed five-card sector implementation plan and validation matrix, plus European and North American parameter-library source discovery and portable agent handoffs.

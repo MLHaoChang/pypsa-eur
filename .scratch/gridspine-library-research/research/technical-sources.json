@@ -1,0 +1,549 @@
+[
+  {
+    "source_id": "TECH01",
+    "title": "PyPSA native standard line and transformer types",
+    "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+    "publisher": "PyPSA contributors",
+    "geography": [
+      "Europe: reference types; applicability must be checked"
+    ],
+    "parameter_families": [
+      "line impedance and thermal rating",
+      "transformer impedance/loss/tap parameters",
+      "frequency and voltage applicability"
+    ],
+    "format": "Native versioned standard-type tables/CSV",
+    "access": "Already available through the installed PyPSA version",
+    "license_or_terms": "MIT repository licence; preserve upstream attribution and pin distributed tables; no claim of OEM validation",
+    "terms_url": "https://github.com/PyPSA/PyPSA/blob/master/LICENSE.txt",
+    "redistribution_status": "open_verified",
+    "cadence": "Release based",
+    "limitations": "Reuse native pins; parameter origins and regional/frequency validity remain essential; named type can overwrite explicit parameters",
+    "priority": "P0",
+    "integration_mode": "Expose existing types through version-pinned equipment items; no new engine",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G01",
+      "G02",
+      "G03",
+      "G04"
+    ],
+    "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record."
+  },
+  {
+    "source_id": "TECH02",
+    "title": "pandapower basic standard types",
+    "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+    "publisher": "pandapower contributors",
+    "geography": [
+      "Europe: 50 Hz reference equipment"
+    ],
+    "parameter_families": [
+      "cable/overhead line r/x/c/current",
+      "transformer impedance/loss/vector group/taps",
+      "reference temperature and frequency"
+    ],
+    "format": "Built-in dictionaries/dataframes",
+    "access": "Installed native library and public docs",
+    "license_or_terms": "BSD-3-Clause repository licence for distributed material; retain attribution",
+    "terms_url": "https://github.com/e2nIEE/pandapower/blob/develop/LICENSE",
+    "redistribution_status": "open_verified",
+    "cadence": "Release based",
+    "limitations": "Documentation explicitly warns 50 Hz types may be unrealistic for60 Hz; no automatic North American reuse",
+    "priority": "P0",
+    "integration_mode": "Reuse native types with frequency/region admission and explicit-parameter alternative",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G01",
+      "G02",
+      "G03",
+      "G04"
+    ],
+    "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record."
+  },
+  {
+    "source_id": "TECH03",
+    "title": "California Solar Equipment Lists",
+    "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+    "publisher": "California Energy Commission",
+    "geography": [
+      "North America: United States/California; exported products require local applicability"
+    ],
+    "parameter_families": [
+      "PV nameplate and test ratings",
+      "PV/BESS inverter efficiency/voltage/power",
+      "battery and ESS ratings",
+      "PCS identity/functionality"
+    ],
+    "format": "Web tables and spreadsheet downloads",
+    "access": "Public lists; no account created or bulk extraction performed",
+    "license_or_terms": "CEC public-use provisions coexist with third-party/copyrighted-material and commercial restrictions; exact extract needs terms review",
+    "terms_url": "https://www.energy.ca.gov/conditions-of-use",
+    "redistribution_status": "mixed",
+    "cadence": "Usually1st/11th/21st monthly; some lists event driven",
+    "limitations": "Self-reported information not all independently confirmed; list inclusion does not prove local interconnection, lifetime or GFM capability",
+    "priority": "P1",
+    "integration_mode": "Curated model-level equipment importer after exact-data rights review; retain listing date/source/hash",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E12",
+      "E22",
+      "G01",
+      "G07"
+    ],
+    "mapping_scope": "Ratings/efficiency and identity only where listed; not lifecycle, transfer, fault or GFM validation."
+  },
+  {
+    "source_id": "TECH04",
+    "title": "SAM PV module and inverter coefficient databases",
+    "url": "https://samrepo.nlr.gov/help/component_models_databases.html",
+    "publisher": "National Laboratory of the Rockies / SAM team",
+    "geography": [
+      "North America: US source lists; Europe where exact product applicable"
+    ],
+    "parameter_families": [
+      "CEC/Sandia PV coefficients",
+      "inverter performance coefficients",
+      "measured versus fitted rating provenance"
+    ],
+    "format": "Versioned SAM data files/CSV",
+    "access": "Public software/data preparation documentation",
+    "license_or_terms": "SAM BSD software licence does not alone settle upstream CEC/manufacturer coefficient-data rights; retain original source and fit provenance",
+    "terms_url": "https://www.energy.ca.gov/conditions-of-use",
+    "redistribution_status": "mixed",
+    "cadence": "SAM/list releases",
+    "limitations": "Fitted coefficient is not direct manufacturer measurement; source-list currency and version matter; no detailed dynamic model",
+    "priority": "P1",
+    "integration_mode": "Selected data-only coefficient import; reuse existing PV infrastructure",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E12"
+    ],
+    "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record."
+  },
+  {
+    "source_id": "TECH05",
+    "title": "NLR wind turbine power-curve archive",
+    "url": "https://github.com/NatLabRockies/turbine-models",
+    "publisher": "National Laboratory of the Rockies",
+    "geography": [
+      "Europe: applicable turbine models",
+      "North America: applicable turbine models"
+    ],
+    "parameter_families": [
+      "wind power curves",
+      "available thrust/Cp/Ct curves",
+      "rated power and rotor metadata"
+    ],
+    "format": "CSV, documentation and versioned package/repository",
+    "access": "Public GitHub; no installation performed",
+    "license_or_terms": "BSD-3-Clause root licence; inspect per-model cited origin and any separate notices before promotion",
+    "terms_url": "https://github.com/NatLabRockies/turbine-models/blob/main/LICENSE.txt",
+    "redistribution_status": "open_verified",
+    "cadence": "Repository/package releases",
+    "limitations": "Curves have source and operating assumptions; not every turbine has thrust; no guarantee of current procurement availability or site-calibrated wake behavior",
+    "priority": "P1",
+    "integration_mode": "Import a curated pinned curve subset with per-model attribution and bounds",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E12"
+    ],
+    "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record."
+  },
+  {
+    "source_id": "TECH06",
+    "title": "EPREL European product registry",
+    "url": "https://energy-efficient-products.ec.europa.eu/eprel_en",
+    "publisher": "European Commission DG Energy",
+    "geography": [
+      "Europe: EU/EEA marketed regulated labelled products"
+    ],
+    "parameter_families": [
+      "heating/cooling product efficiency",
+      "product information sheets",
+      "equipment identity/market dates",
+      "selected repair/spare-part links"
+    ],
+    "format": "Public portal/product sheets; public API service",
+    "access": "Public comparison; API registration/key/terms need exact confirmation; no key requested",
+    "license_or_terms": "EU2024/994 provides API subject to terms; public access is not blanket redistribution approval",
+    "terms_url": "https://eprel.ec.europa.eu/screen/requestpublicapikey",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Manufacturer registration/update driven",
+    "limitations": "Covers labelled categories, not all industrial equipment; nonpublic compliance documents excluded; seasonal metrics are not full physical performance maps",
+    "priority": "P1",
+    "integration_mode": "Authenticated approved API adapter or reviewed product-sheet upload, subset first",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E15"
+    ],
+    "mapping_scope": "Only regulated heating/cooling product groups and published rating conditions, not a full industrial map."
+  },
+  {
+    "source_id": "TECH07",
+    "title": "DOE Compliance Certification Database",
+    "url": "https://www.regulations.doe.gov/certification-data/products.html",
+    "publisher": "US Department of Energy",
+    "geography": [
+      "North America: United States"
+    ],
+    "parameter_families": [
+      "motor efficiency and ratings",
+      "distribution-transformer efficiency",
+      "compressor and HVAC certified representations"
+    ],
+    "format": "Searchable downloadable product-group reports",
+    "access": "Public model/basic-model search; no submission or purchase",
+    "license_or_terms": "Government-hosted manufacturer submissions; precise dataset reuse/third-party notices need review",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Approximately every two weeks",
+    "limitations": "Current basic-model records submitted within past year; manufacturer-certified representations, DOE accuracy disclaimer; not full impedance/startup/dynamic parameters",
+    "priority": "P1",
+    "integration_mode": "Product-group importer with explicit test standard/basic-model identity; equipment evidence not blanket certification",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "G04",
+      "G13"
+    ],
+    "mapping_scope": "Transformer efficiency/basic ratings and motor power/efficiency; impedance, starting current and dynamic fields usually missing."
+  },
+  {
+    "source_id": "TECH08",
+    "title": "ENERGY STAR product datasets including UPS",
+    "url": "https://www.energystar.gov/products/productstr",
+    "publisher": "US Environmental Protection Agency ENERGY STAR",
+    "geography": [
+      "North America: US/Canada marketed product scope; verify exact model"
+    ],
+    "parameter_families": [
+      "UPS rated power and load-point efficiency",
+      "HVAC and selected equipment efficiency",
+      "product model/certification metadata"
+    ],
+    "format": "CSV/Excel/XML and API",
+    "access": "Public bulk/export/API documented; no model installed",
+    "license_or_terms": "Record exact dataset rights and third-party notices before common redistribution; certification marks/endorsement are separate",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Daily per official tools page",
+    "limitations": "UPS efficiency does not imply battery runtime, power quality, ride-through or aged capacity; preserve test loads and configurations",
+    "priority": "P1",
+    "integration_mode": "Small UPS/equipment data adapter feeding native equipment records and efficiency curves",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "G07"
+    ],
+    "mapping_scope": "UPS efficiency/nameplate/configuration subset; transfer/ride-through and battery autonomy absent."
+  },
+  {
+    "source_id": "TECH09",
+    "title": "Natural Resources Canada searchable motor/product lists",
+    "url": "https://natural-resources.canada.ca/energy-efficiency/product-energy-ratings/electric-motors",
+    "publisher": "Natural Resources Canada",
+    "geography": [
+      "North America: Canada"
+    ],
+    "parameter_families": [
+      "motor rated output and efficiency",
+      "Canadian equipment identity and market applicability"
+    ],
+    "format": "Public product portal/search",
+    "access": "Public search linked by NRCan; research client encountered403 on some pages; no bulk API verified",
+    "license_or_terms": "Public source; exact export/redistribution conditions not verified",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Portal submission/update driven; exact cadence unverified",
+    "limitations": "Do not treat inaccessible/empty page as complete catalogue; electrical input differs from shaft output; no starting-current curve inferred",
+    "priority": "P2",
+    "integration_mode": "Canada-specific search/import feasibility; authorized selected records only",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "G13"
+    ],
+    "mapping_scope": "Motor efficiency/nameplate subset only; no starting/acceleration or fault model inferred."
+  },
+  {
+    "source_id": "TECH10",
+    "title": "Heat Pump KEYMARK model API",
+    "url": "https://api.heatpumpkeymark.com/model",
+    "publisher": "Heat Pump KEYMARK scheme",
+    "geography": [
+      "Europe: certified model scope"
+    ],
+    "parameter_families": [
+      "heat-pump certified rating points",
+      "model/subtype identity",
+      "test/certification provenance"
+    ],
+    "format": "Documented HTTP model/list and model/detail; certificate documents",
+    "access": "Public API documentation; use/auth and bulk-rights must be established",
+    "license_or_terms": "No open-data redistribution licence verified; public interface alone does not authorize embedding",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Certification/model updates",
+    "limitations": "Load-point/temperature conditions essential; no complete off-design map or arbitrary operating range from rating points",
+    "priority": "P2",
+    "integration_mode": "Reviewed thermal model-point import only after API/rights gate",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E15"
+    ],
+    "mapping_scope": "Certified rating points/identity, not continuous operating-envelope coverage."
+  },
+  {
+    "source_id": "TECH11",
+    "title": "Eurovent certified HVACR directory",
+    "url": "https://www.eurovent-certification.com/en/advancedsearch/result?program=AC",
+    "publisher": "Eurovent Certita Certification",
+    "geography": [
+      "Europe: listed HVACR market scope"
+    ],
+    "parameter_families": [
+      "chiller/heat-pump certified capacities",
+      "HVAC efficiency and performance ratings",
+      "model/certificate metadata"
+    ],
+    "format": "Web search, CSV export, product performance reports",
+    "access": "Public search; full export requires registration/email approval and can request marketing/data consent; not requested",
+    "license_or_terms": "Copyrighted directory; exact legal/data-export terms not verified",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Certification/list updates",
+    "limitations": "No automatic scraping or consent submission; certified point is not universal operating map; no redistribution assumed",
+    "priority": "P2",
+    "integration_mode": "Reference/authorized user-supplied thermal records until rights cleared",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E15"
+    ],
+    "mapping_scope": "Published certified rating subset; plant-specific complete map not guaranteed."
+  },
+  {
+    "source_id": "TECH12",
+    "title": "AHRI certified product directory and licensed data service",
+    "url": "https://www.ahrinet.org/certification/license-ahri-directory-data",
+    "publisher": "Air-Conditioning Heating and Refrigeration Institute",
+    "geography": [
+      "North America: US/Canada and listed matched-system market scope"
+    ],
+    "parameter_families": [
+      "HVAC matched-system certified ratings",
+      "chiller/heat-pump capacity and efficiency",
+      "certification references"
+    ],
+    "format": "Public search/limited CSV; licensed bulk and paid API add-ons",
+    "access": "Public exports limited; embedding in software/databases requires signed Data Subscription agreement",
+    "license_or_terms": "Official page expressly disallows using public-directory downloads in software, databases or services without a signed licence",
+    "terms_url": "https://www.ahrinet.org/certification/license-ahri-directory-data",
+    "redistribution_status": "restricted",
+    "cadence": "Programme/list updates",
+    "limitations": "Not an open seed source; no purchase/application/contact; do not bypass250-record public export limit or embed certificate copies",
+    "priority": "defer",
+    "integration_mode": "Reference links only unless separately authorized/licensed in future",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E15"
+    ],
+    "mapping_scope": "Reference mapping only; integration prohibited without separate AHRI licence."
+  },
+  {
+    "source_id": "TECH13",
+    "title": "EPA catalog of CHP technologies",
+    "url": "https://www.epa.gov/chp/chp-technologies",
+    "publisher": "US Environmental Protection Agency",
+    "geography": [
+      "North America: United States reference assumptions"
+    ],
+    "parameter_families": [
+      "genset/reciprocating-engine efficiency ranges",
+      "turbine/microturbine/fuel-cell performance",
+      "power-to-heat ratios and technical bounds"
+    ],
+    "format": "Public PDF reports and tables",
+    "access": "Public report downloads",
+    "license_or_terms": "Government report; inspect report-specific third-party material/notices before publishing extracts",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Historical catalogue;2017 full edition, not live equipment pricing",
+    "limitations": "Class-level reference not specific OEM settings; fuel HHV/LHV, scale and temperature matter; historical costs not current quotes",
+    "priority": "P1",
+    "integration_mode": "Small dated illustrative technical archetypes with source/boundary, cross-reference cost research",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "E10",
+      "E11",
+      "E21"
+    ],
+    "mapping_scope": "Dated class-level technical ranges; not every commitment/governor/fuel property."
+  },
+  {
+    "source_id": "TECH14",
+    "title": "SimBench reference grids and component/profile data",
+    "url": "https://simbench.de/en/download/datasets/",
+    "publisher": "SimBench project consortium",
+    "geography": [
+      "Europe: German reference systems"
+    ],
+    "parameter_families": [
+      "reference grid equipment/types",
+      "topology and operating-point fixtures",
+      "load/generation/storage profiles"
+    ],
+    "format": "CSV datasets and pandapower conversion",
+    "access": "Public download; dataset page/documented package available",
+    "license_or_terms": "Open Database License for datasets; attribution/database obligations retained",
+    "terms_url": "https://simbench.de/en/download/",
+    "redistribution_status": "open_verified",
+    "cadence": "Versioned releases/scenarios",
+    "limitations": "Reference/benchmark grids, not site inventories or OEM warranties; software converter licence differs from database licence",
+    "priority": "P2",
+    "integration_mode": "Separate synthetic/reference dataset namespace and regression fixtures",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G01",
+      "G02",
+      "G03",
+      "G04",
+      "G08",
+      "E14"
+    ],
+    "mapping_scope": "Reference equipment/profile scope; not actual project or universally representative EU demand."
+  },
+  {
+    "source_id": "TECH15",
+    "title": "SMART-DS US synthetic distribution networks",
+    "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+    "publisher": "National Laboratory of the Rockies / US DOE",
+    "geography": [
+      "North America: US SFO/Greensboro/Austin synthetic regions"
+    ],
+    "parameter_families": [
+      "OpenDSS reference component/topology data",
+      "15-minute P/Q profiles",
+      "feeder powerflow benchmark results"
+    ],
+    "format": "Regional OpenDSS files,CSV,Parquet via OEDI/S3",
+    "access": "Public catalogue/S3 partitions; no bulk download performed",
+    "license_or_terms": "Specific official dataset catalogue records CC-BY4.0; match exact resource and attribution before use",
+    "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+    "redistribution_status": "open_verified",
+    "cadence": "Versioned datasets; catalogue modified2024-01-02 at research",
+    "limitations": "Synthetic not actual utility/customer network; generic OEDI bucket licence metadata may differ, resolve selected resource; no manufacturer warranty",
+    "priority": "P2",
+    "integration_mode": "One small US reference feeder and component conversion/oracle fixture, not generic catalogue default",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G01",
+      "G02",
+      "G03",
+      "G04",
+      "G08",
+      "E14"
+    ],
+    "mapping_scope": "Synthetic feeder equipment/profile scope; not all US/Canada/Mexico equipment or site demand."
+  },
+  {
+    "source_id": "TECH16",
+    "title": "EU RfG and national implementation reference",
+    "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0631",
+    "publisher": "European Union; ENTSO-E implementation guidance",
+    "geography": [
+      "Europe: EU/EEA and applicable synchronous areas; national limits required"
+    ],
+    "parameter_families": [
+      "grid-code applicability",
+      "frequency/voltage/reactive/ride-through requirements",
+      "jurisdiction and clause-version metadata"
+    ],
+    "format": "Official legislation HTML/PDF/ELI plus implementation documents",
+    "access": "Public legal references; national/connection decisions separate",
+    "license_or_terms": "Check official reuse notice for each legal/guidance extract; do not assume all linked national guidance shares rights",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Legislative amendments and national/operator decisions",
+    "limitations": "Non-exhaustive requirements need national/operator choices; guidance/drafts are not binding law; cannot produce one universal Europe preset",
+    "priority": "P1",
+    "integration_mode": "Source-backed reviewed requirement profiles with exact jurisdiction, asset class, effective date and clause",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G10",
+      "G11",
+      "O04"
+    ],
+    "mapping_scope": "Applicable binding clauses and national choices, not OEM trip/controller settings."
+  },
+  {
+    "source_id": "TECH17",
+    "title": "NESO Grid Code and grid-forming guidance",
+    "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+    "publisher": "National Energy System Operator",
+    "geography": [
+      "Europe: Great Britain"
+    ],
+    "parameter_families": [
+      "GB grid-code applicability and limits",
+      "grid-forming assessed phenomena/test references",
+      "code and guidance version metadata"
+    ],
+    "format": "Versioned PDF and live digital code",
+    "access": "Public reference; no document reproduction or rights request performed",
+    "license_or_terms": "Live Grid Code copyright/reproduction restrictions with limited statutory/copyright-law exceptions; not blanket open data",
+    "terms_url": "https://dcm.neso.energy/",
+    "redistribution_status": "restricted",
+    "cadence": "Revision/amendment based; Issue6 Rev46 dated2026-10-08 observed",
+    "limitations": "Use cited source/version; no automatic raw-document redistribution or claim of universal GFM compliance; drafts/guidance distinct",
+    "priority": "P2",
+    "integration_mode": "Reference-only by default; reviewed extracted requirements only with appropriate rights/applicability",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G10",
+      "G11",
+      "O01",
+      "O04"
+    ],
+    "mapping_scope": "Code/guidance requirements/phenomena only; no plant controller gains or unrestricted reproduction."
+  },
+  {
+    "source_id": "TECH18",
+    "title": "WECC generic electrical/control model specifications",
+    "url": "https://www.wecc.org/committees/mvs",
+    "publisher": "Western Electricity Coordinating Council",
+    "geography": [
+      "North America: Western Interconnection model context"
+    ],
+    "parameter_families": [
+      "generic renewable/BESS/load model structures",
+      "dynamic parameter schemas and limitations",
+      "model approval/version references"
+    ],
+    "format": "Public PDF specifications/memos",
+    "access": "Public model/reference pages; no proprietary plant model requested",
+    "license_or_terms": "Public access; exact document/model-code reuse rights require review; simulator/OEM licences separate",
+    "terms_url": null,
+    "redistribution_status": "public_terms_review",
+    "cadence": "Model revisions/approval process",
+    "limitations": "Generic structures/defaults are not plant-specific validated parameters or OEM EMT models; model family/version and limitations essential",
+    "priority": "P2",
+    "integration_mode": "Schema/reference-test inputs for separately admitted dynamics capability; illustrative presets only",
+    "reviewed_at": "2026-10-20",
+    "mapped_family_ids": [
+      "G07",
+      "G11",
+      "O01",
+      "O02",
+      "O03",
+      "O04"
+    ],
+    "mapping_scope": "Generic model structures/parameter schemas and illustrative defaults only; not calibrated OEM plant settings."
+  }
+]

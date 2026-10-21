@@ -1,0 +1,16 @@
+{
+  "scope": "documentation_and_research_helpers_only",
+  "json_files_parsed": 15,
+  "research_helpers_syntax_checked": 2,
+  "relative_document_links": "passed",
+  "reviewed_artifacts_sha256": "7 unchanged plus independent review verified",
+  "parameter_families": 80,
+  "source_assessments": 109,
+  "implementation_slices": 38,
+  "third_party_raw_caches_published": false,
+  "candidate_model_tests_run": 0,
+  "production_data_ingestion": false,
+  "source_cross_review": "pending",
+  "files_before_validation_manifest": 40,
+  "publication_base_sha": "21113ed57448c9b7a5b4c89391de25877db2de4a"
+}

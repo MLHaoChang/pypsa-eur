@@ -1,0 +1,3133 @@
+{
+  "status": "research_candidates_not_ingested_or_approved",
+  "research_date": "2026-10-20",
+  "source_assessments": 109,
+  "records": [
+    {
+      "source_id": "cost_pypsa_technology_data",
+      "title": "PyPSA technology-data versioned techno-economic assumptions",
+      "url": "https://github.com/PyPSA/technology-data",
+      "publisher": "PyPSA technology-data contributors",
+      "geography": [
+        "Europe representative",
+        "source-dependent other regions"
+      ],
+      "parameter_families": [
+        "capex",
+        "fixed_opex",
+        "variable_opex",
+        "efficiency",
+        "lifetime",
+        "process_conversion"
+      ],
+      "format": [
+        "CSV",
+        "source workbooks",
+        "Git release/commit"
+      ],
+      "access": "Public repository; existing native defaults-pack upstream. Pin a release/commit and original source locators.",
+      "license_or_terms": "README: scripts GPLv3; various input data have different licenses/terms. Compiled CSV reuse must preserve source-specific terms.",
+      "terms_url": "https://github.com/PyPSA/technology-data#licence",
+      "redistribution_status": "mixed",
+      "cadence": "Versioned releases/commits; technology and source vintage varies",
+      "limitations": [
+        "Representative assumptions, not site quotes",
+        "Cost-year/scenario/denominator mapping needed",
+        "Do not infer data license from GPL code"
+      ],
+      "priority": "P0",
+      "integration_mode": "Extend existing native pack importer and pinned source ledger; no replacement database",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_dea_generation",
+      "title": "Danish Energy Agency generation and district-heating technology catalog",
+      "url": "https://ens.dk/node/3449",
+      "publisher": "Danish Energy Agency",
+      "geography": [
+        "Denmark",
+        "European representative planning"
+      ],
+      "parameter_families": [
+        "generation_capex",
+        "fixed_opex",
+        "variable_opex",
+        "efficiency",
+        "lifetime",
+        "construction_time",
+        "chp"
+      ],
+      "format": [
+        "XLSX",
+        "PDF",
+        "technology briefs"
+      ],
+      "access": "Public workbook/catalog; landing page lists August2026 updates and per-chapter vintage.",
+      "license_or_terms": "Public planning catalog; blanket data redistribution license not established in this review. Retain source and review chapter/file terms.",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Continuously updated by chapter; not all chapters share cover date",
+      "limitations": [
+        "Not a final project investment estimate",
+        "Generic size/site boundary",
+        "Retain ranges and original cost basis"
+      ],
+      "priority": "P0",
+      "integration_mode": "Curated source-cell extraction through existing technology-data/default-pack lineage",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_dea_storage",
+      "title": "Danish Energy Agency energy-storage technology catalog",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+      "publisher": "Danish Energy Agency",
+      "geography": [
+        "Denmark",
+        "European representative planning"
+      ],
+      "parameter_families": [
+        "storage_power_capex",
+        "storage_energy_capex",
+        "opex",
+        "efficiency",
+        "calendar_life",
+        "cycle_life",
+        "thermal_storage"
+      ],
+      "format": [
+        "XLSX",
+        "PDF",
+        "briefs"
+      ],
+      "access": "Public datasheet/catalog with technology-specific updates.",
+      "license_or_terms": "Dataset/file redistribution terms not verified; do not assume open license from public download.",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Chapter-specific periodic updates",
+      "limitations": [
+        "System/power/energy cost boundaries differ",
+        "Calendar/cycle life assumptions are not field warranty",
+        "Duration and duty conditions required"
+      ],
+      "priority": "P0",
+      "integration_mode": "Curated storage assumption set; normalize components and avoid complete-system/component double-count",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_dea_renewable_fuels",
+      "title": "Danish Energy Agency renewable-fuels and energy-conversion catalog",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+      "publisher": "Danish Energy Agency",
+      "geography": [
+        "Denmark",
+        "European representative planning"
+      ],
+      "parameter_families": [
+        "electrolyser_capex",
+        "process_opex",
+        "efficiency",
+        "lifetime",
+        "renewable_fuels",
+        "hydrogen_conversion"
+      ],
+      "format": [
+        "XLSX",
+        "PDF",
+        "briefs"
+      ],
+      "access": "Public August2026 datasheets, including electrolysis brief.",
+      "license_or_terms": "Public source; workbook/chapter-specific reuse terms unresolved.",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Chapter-specific updates",
+      "limitations": [
+        "Upstream/downstream scope and feedstock assumptions vary",
+        "LHV/HHV and product-throughput denominator explicit",
+        "Generic process cost is not a validated transient model"
+      ],
+      "priority": "P0",
+      "integration_mode": "Pin selected H2/process technology rows with auxiliary and conversion-boundary metadata",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_dea_industrial_heat",
+      "title": "Danish Energy Agency industrial process-heat catalog",
+      "url": "https://ens.dk/node/3455",
+      "publisher": "Danish Energy Agency",
+      "geography": [
+        "Denmark",
+        "European representative planning"
+      ],
+      "parameter_families": [
+        "industrial_heat_capex",
+        "boiler_opex",
+        "heat_pump_efficiency",
+        "temperature_applicability",
+        "lifetime"
+      ],
+      "format": [
+        "XLSX",
+        "PDF"
+      ],
+      "access": "Landing lists January2026 datasheet and April2026 catalog.",
+      "license_or_terms": "Public source; file/chapter reuse terms to review before common-pack distribution.",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Periodic technology-specific revisions",
+      "limitations": [
+        "Temperature/process applicability essential",
+        "Scalar efficiency not a universal part-load map",
+        "Scope-specific heat/electric cost units"
+      ],
+      "priority": "P1",
+      "integration_mode": "Curated thermal-equipment defaults and bounded performance-map references",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_dea_energy_transport",
+      "title": "Danish Energy Agency energy-transport catalog",
+      "url": "https://ens.dk/en/analyses-and-statistics/technology-data-transport-energy",
+      "publisher": "Danish Energy Agency",
+      "geography": [
+        "Denmark",
+        "European representative planning"
+      ],
+      "parameter_families": [
+        "grid_capex",
+        "district_heat_network_cost",
+        "hydrogen_transport_cost",
+        "network_losses",
+        "network_lifetime"
+      ],
+      "format": [
+        "XLSX",
+        "PDF",
+        "briefs"
+      ],
+      "access": "Public workbooks/catalog; electricity transmission update brief June2025.",
+      "license_or_terms": "Public data access; exact redistribution terms not verified.",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Technology/chapter revisions",
+      "limitations": [
+        "Route, terrain, length, voltage and boundary affect cost",
+        "Cannot replace operator connection quotation"
+      ],
+      "priority": "P1",
+      "integration_mode": "Reference cost/loss/lifetime sets tied to engineering configuration and source size/range",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_uk_desnz_2025",
+      "title": "UK Electricity Generation Costs2025, AnnexA assumptions",
+      "url": "https://www.gov.uk/government/publications/electricity-generation-costs-2025",
+      "publisher": "UK Department for Energy Security and Net Zero",
+      "geography": [
+        "United Kingdom"
+      ],
+      "parameter_families": [
+        "capex",
+        "opex",
+        "decommissioning",
+        "lifetime",
+        "construction_time",
+        "generation_efficiency"
+      ],
+      "format": [
+        "XLSX AnnexA",
+        "XLSX AnnexB calculator",
+        "PDF"
+      ],
+      "access": "Public; published14Jan2026, AnnexA corrected18Mar2026.",
+      "license_or_terms": "GOV.UK content OGLv3 except otherwise stated; inspect annexes/third-party source notices before redistribution.",
+      "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "redistribution_status": "open_verified",
+      "cadence": "Periodic report editions and errata",
+      "limitations": [
+        "UK generic plants and stated GBP money basis",
+        "LCOE is output, not marginal cost or tariff",
+        "Third-party exceptions still apply"
+      ],
+      "priority": "P1",
+      "integration_mode": "Dedicated UK technology assumption set plus independent LCOE/accounting reference",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_us_atb_2025",
+      "title": "US Annual Technology Baseline2025 electricity data",
+      "url": "https://atb.nlr.gov/electricity/2025/data",
+      "publisher": "National Laboratory of the Rockies / DOE",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "capex",
+        "fixed_opex",
+        "variable_opex",
+        "capacity_factor",
+        "technology_cost_scenario",
+        "finance_assumptions"
+      ],
+      "format": [
+        "CSV",
+        "Parquet",
+        "XLSX",
+        "CAPEX parameter files"
+      ],
+      "access": "Public official data page links OEDI8759. OEDI record returned429 during review; direct dataset license not confirmed.",
+      "license_or_terms": "ATB disclaimer describes estimates/assumptions and user obligations; exact OEDI item/file terms must be checked. Not automatically public domain.",
+      "terms_url": "https://atb.nlr.gov/electricity/2025/disclaimer",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual editions plus errata/version corrections",
+      "limitations": [
+        "Preserve scenario/resource class/model year and original dollar year",
+        "Capacity factor is not outage probability",
+        "Do not apply US estimates as verified Canadian/Mexican values"
+      ],
+      "priority": "P0",
+      "integration_mode": "US assumption-pack adapter with release/file hash and scenario selection",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_pnnl_storage_2024",
+      "title": "PNNL Energy Storage Cost and Performance Database v2024",
+      "url": "https://www.pnnl.gov/projects/esgc-cost-performance/download-reports",
+      "publisher": "Pacific Northwest National Laboratory / DOE",
+      "geography": [
+        "United States reference"
+      ],
+      "parameter_families": [
+        "storage_component_capex",
+        "storage_opex",
+        "round_trip_efficiency",
+        "calendar_life",
+        "cycle_life",
+        "augmentation",
+        "replacement",
+        "decommissioning"
+      ],
+      "format": [
+        "XLSX",
+        "PDF methodology",
+        "web tables"
+      ],
+      "access": "Public v2024 database advertised; update has no dedicated report. LCOS page identifies underlying2023 values.",
+      "license_or_terms": "Source has specific Terms page; full terms retrieval incomplete/403. Treat as terms-review pending, not blanket US government open license.",
+      "terms_url": "https://www.pnnl.gov/projects/esgc-cost-performance/terms",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Periodic database updates; pin individual version",
+      "limitations": [
+        "v2024 is not automatically2024 money basis",
+        "Storage duration and component scope essential",
+        "LCOS assumptions not observed pack warranty"
+      ],
+      "priority": "P0",
+      "integration_mode": "Storage cost decomposition and lifecycle reference set; independent native finance checks",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_eia_reference_plants",
+      "title": "EIA Capital Cost and Performance Characteristics for utility-scale generation",
+      "url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+      "publisher": "US Energy Information Administration; commissioned Sargent & Lundy study",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "overnight_capex",
+        "fixed_opex",
+        "variable_opex",
+        "heat_rate",
+        "reference_plant_configuration"
+      ],
+      "format": [
+        "PDF tables",
+        "official supporting tables when provided"
+      ],
+      "access": "Public AEO2025 reference study for19 generator types.",
+      "license_or_terms": "EIA policy permits use/distribution of website information products with acknowledgment; retain any identified third-party exceptions.",
+      "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+      "redistribution_status": "open_verified",
+      "cadence": "Periodic commissioned updates",
+      "limitations": [
+        "Engineering reference plant/EPC boundary",
+        "PDF extraction needs table QA",
+        "Overnight cost distinct from financing/construction cashflow"
+      ],
+      "priority": "P1",
+      "integration_mode": "Independent reference-plant subset and reviewed normalized table extraction",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_eia_actual_generator_costs",
+      "title": "EIA observed generator construction-cost aggregates",
+      "url": "https://www.eia.gov/electricity/generatorcosts/",
+      "publisher": "US Energy Information Administration",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "observed_construction_cost",
+        "installed_cohort_cost",
+        "technology_cost_benchmark"
+      ],
+      "format": [
+        "HTML tables",
+        "XLS downloads"
+      ],
+      "access": "Public tables based on EIA860; page covers generators installed2024 at review time.",
+      "license_or_terms": "EIA explicit use/distribution policy with acknowledgment.",
+      "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+      "redistribution_status": "open_verified",
+      "cadence": "Annual installed-cohort statistics",
+      "limitations": [
+        "Aggregated observed sample, not forward scenario or quote",
+        "Sample composition/site scale differs from modeled reference plants"
+      ],
+      "priority": "P1",
+      "integration_mode": "Historical reasonableness/range check; do not overwrite planning projections automatically",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_canada_cer_ef2026",
+      "title": "Canada Energy Future2026 technology cost/performance parameters",
+      "url": "https://open.canada.ca/data/en/dataset/5ab871c2-d811-4b33-93cc-6bb1683c26d2",
+      "publisher": "Canada Energy Regulator",
+      "geography": [
+        "Canada",
+        "all provinces and territories"
+      ],
+      "parameter_families": [
+        "overnight_capex",
+        "connection_cost",
+        "fixed_opex",
+        "variable_opex",
+        "heat_rate_hhv",
+        "round_trip_efficiency",
+        "construction_duration",
+        "lifetime"
+      ],
+      "format": [
+        "CSV English/French",
+        "XLSX data dictionary",
+        "methodology webpage"
+      ],
+      "access": "Official portal record published24Sep2026, modified3Oct2026; CSV and dictionary links documented. Methodology at www.cer-rec.gc.ca opens; portal direct open returned403 but primary indexed metadata exposes license/resources.",
+      "license_or_terms": "Dataset metadata explicitly lists Open Government Licence Canada.",
+      "terms_url": "https://open.canada.ca/en/open-government-licence-canada",
+      "redistribution_status": "open_verified",
+      "cadence": "Energy Future editions / as needed",
+      "limitations": [
+        "Province/scenario/year and CAD reference basis required",
+        "Overnight excludes connection but separate field exists",
+        "FOM includes taxes/insurance/land; avoid finance double-count",
+        "Life is modeled operating life, not physical failure distribution"
+      ],
+      "priority": "P0",
+      "integration_mode": "Dedicated province/scenario Canadian assumption pack with dictionary-driven normalization",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_doe_h2a",
+      "title": "DOE H2A production models and case-study assumptions",
+      "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis/h2a-production",
+      "publisher": "DOE Hydrogen Program / national-laboratory contributors",
+      "geography": [
+        "United States reference cases"
+      ],
+      "parameter_families": [
+        "hydrogen_capex",
+        "hydrogen_opex",
+        "feedstock_use",
+        "plant_life",
+        "process_cost_boundary",
+        "finance_reference_assumptions"
+      ],
+      "format": [
+        "Excel workbooks",
+        "case studies",
+        "methodology"
+      ],
+      "access": "Public official page links production models/cases at NLR.",
+      "license_or_terms": "Per-workbook/model and third-party input terms to inspect; DOE website access alone does not license every workbook dependency.",
+      "terms_url": "https://www.energy.gov/web-policies",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Technology/model case revisions",
+      "limitations": [
+        "Different process and vintage boundaries",
+        "Reference economics not second authoritative native finance",
+        "Extracted assumptions require case/file locators"
+      ],
+      "priority": "P1",
+      "integration_mode": "Curated H2 process/cost input rows and matched native-finance reference cases",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_netl_qgess",
+      "title": "NETL QGESS cost estimation and scaling reference methodology",
+      "url": "https://www.netl.doe.gov/node/7513",
+      "publisher": "US DOE National Energy Technology Laboratory",
+      "geography": [
+        "United States reference engineering"
+      ],
+      "parameter_families": [
+        "process_cost_scope",
+        "cost_scaling_exponent",
+        "cost_scaling_validity",
+        "contingency",
+        "reference_opex",
+        "construction_finance_boundary"
+      ],
+      "format": [
+        "PDF reports",
+        "reference studies"
+      ],
+      "access": "Public QGESS overview and linked cost estimation/scaling reports.",
+      "license_or_terms": "Public methodology; inspect each report/data source and proprietary estimation-tool inputs before redistribution.",
+      "terms_url": "https://netl.doe.gov/disclaimer",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Report revisions; pin methodology edition",
+      "limitations": [
+        "Not a universal vendor equipment price database",
+        "Scaling exponent valid only over stated size/process range",
+        "First-of-kind integration premiums may not be captured"
+      ],
+      "priority": "P1",
+      "integration_mode": "Versioned cost-method/scale-bound metadata and independently checked specific reference rows",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_doe_pvscm_2025",
+      "title": "Q1-2025 US Solar Photovoltaic System Cost Benchmarks",
+      "url": "https://data.nlr.gov/submissions/304",
+      "publisher": "DOE solar office, NLR, LBNL and Sandia contributors",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "pv_component_capex",
+        "pv_bess_system_cost",
+        "installation_cost",
+        "pv_opex",
+        "minimum_sustainable_price_boundary"
+      ],
+      "format": [
+        "ZIP model resources",
+        "XLSX model",
+        "text inputs",
+        "PDF description"
+      ],
+      "access": "Public dataset304; resource/version histories and DOI10.7799/3009689.",
+      "license_or_terms": "Custom dataset license grants no-fee use/copy with whole notice retained, credit and nonendorsement plus other clauses. Separate resource terms override where stated; not CC or public-domain shorthand.",
+      "terms_url": "https://data.nlr.gov/node/304/license",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Quarter/year benchmark editions and resource version changes",
+      "limitations": [
+        "US reference systems, AC/DC/nameplate boundaries",
+        "Benchmark/MSP differs from offered market price",
+        "Complete PV+BESS cost cannot be added to its own components"
+      ],
+      "priority": "P1",
+      "integration_mode": "Component cost decomposition reference and curated reviewed assumptions after custom-terms acceptance",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_batteryarchive_empirical",
+      "title": "BatteryArchive empirical cycling and degradation studies",
+      "url": "https://www.batteryarchive.org/faq.html",
+      "publisher": "BatteryArchive / contributing research groups including Sandia",
+      "geography": [
+        "North American and European/international laboratory studies; filter per study"
+      ],
+      "parameter_families": [
+        "battery_cycle_ageing",
+        "calendar_ageing",
+        "temperature_soc_duty_validity",
+        "empirical_capacity_fade_reference"
+      ],
+      "format": [
+        "Interactive study/cell data",
+        "standardized metadata",
+        "study-specific files"
+      ],
+      "access": "Public study/metadata browsing; FAQ asks contact for many-cell bulk downloads. No contact or bulk retrieval performed.",
+      "license_or_terms": "FAQ requires original experiment citation plus BatteryArchive citation; individual groups may impose additional policies. Website software license is separate from data.",
+      "terms_url": "https://www.batteryarchive.org/faq.html",
+      "redistribution_status": "mixed",
+      "cadence": "Study additions; generally fixed experimental cohorts",
+      "limitations": [
+        "Selected chemistry/protocol/temp applicability",
+        "Cell results not pack power loss/warranty",
+        "File-level license required before common-library mirroring",
+        "No bulk access assumed"
+      ],
+      "priority": "P1",
+      "integration_mode": "Per-study rights-vetted calibration/reference pointers; derive scoped model coefficients with provenance, not universal annual-fade defaults",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_oxford_battery_degradation",
+      "title": "Oxford Battery Degradation Dataset1 and related path-dependent series",
+      "url": "https://ora.ox.ac.uk/objects/uuid%3A03ba4b01-cfed-46d3-9b1a-7d4a7bdf6fac",
+      "publisher": "University of Oxford researchers / Oxford Research Archive",
+      "geography": [
+        "United Kingdom laboratory experiments"
+      ],
+      "parameter_families": [
+        "empirical_cell_ageing",
+        "capacity_fade_validation",
+        "path_dependent_ageing"
+      ],
+      "format": [
+        "Repository data files and study metadata; exact files to verify"
+      ],
+      "access": "Primary record found through search; direct record returned403. No data downloaded.",
+      "license_or_terms": "Exact data-file license not verified. ORA API CC0 metadata is not a license for deposited data files.",
+      "terms_url": "https://ora.ox.ac.uk/terms_of_use",
+      "redistribution_status": "unknown",
+      "cadence": "Fixed experimental dataset releases",
+      "limitations": [
+        "Data license and protocol must be retrieved before use",
+        "Not stationary pack default or vendor warranty",
+        "No universal chemistry/temperature applicability"
+      ],
+      "priority": "defer",
+      "integration_mode": "Potential independent empirical reference only after exact data/license/model applicability verification",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "cost_mexico_copar_lead",
+      "title": "Mexico PLADESE official reference to CFE COPAR Generacion2024",
+      "url": "https://sidof.segob.gob.mx/notas/docFuente/5770297",
+      "publisher": "SENER / Diario Oficial; referenced CFE/CENACE methodology",
+      "geography": [
+        "Mexico"
+      ],
+      "parameter_families": [
+        "generation_reference_capex",
+        "generation_reference_opex",
+        "technical_economic_cost_parameters"
+      ],
+      "format": [
+        "Official HTML planning text",
+        "referenced COPAR source tables not acquired"
+      ],
+      "access": "Official text explicitly cites COPAR Generacion2024. Citation does not prove the underlying structured data is open/downloadable.",
+      "license_or_terms": "Underlying COPAR table access and redistribution rights unresolved; do not represent as admitted open cost dataset.",
+      "terms_url": null,
+      "redistribution_status": "unknown",
+      "cadence": "Planning/source editions; exact COPAR edition to pin if acquired",
+      "limitations": [
+        "No verified structured COPAR cost extract obtained",
+        "Need MXN/base-year/tax/site boundary",
+        "US estimates cannot become verified Mexican values by currency conversion"
+      ],
+      "priority": "P2",
+      "integration_mode": "Discovery/metadata lead only; add local reviewed cost pack when underlying data and rights are established",
+      "research_file": "research/cost-sources.json"
+    },
+    {
+      "source_id": "EU-C01",
+      "title": "ENTSO-E Transparency Platform market data",
+      "url": "https://transparency.entsoe.eu/",
+      "publisher": "ENTSO-E",
+      "geography": "European bidding zones; exact dataset/zone coverage varies",
+      "parameter_families": [
+        "day_ahead_price",
+        "imbalance_price",
+        "reserve_price",
+        "market_zone",
+        "load_and_generation"
+      ],
+      "format": "XML REST API; portal downloads",
+      "access": "Registered API token for authenticated extraction; reuse existing entsoe-py dependency, no credentials created here",
+      "license_or_terms": "Reuse terms and reusable-data list are dataset-specific; exchange-origin rights cannot be assumed open",
+      "terms_url": "https://transparency.entsoe.eu/balancing-domain/r2/termsAndConditions/show",
+      "redistribution_status": "mixed",
+      "cadence": "Market interval; revisions and publication timestamps",
+      "limitations": "Historical market observations are not forecasts. SDAC transitioned to 15-minute MTU in Oct 2025; preserve interval and bidding zone. Inspect current per-dataset reuse list before common redistribution.",
+      "priority": "P0",
+      "integration_mode": "Versioned price_series import, rights-gated common seed or private/org fetch; source pin and raw resolution",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C02",
+      "title": "SMARD downloadable market data",
+      "url": "https://www.smard.de/en/downloadcenter/download-market-data",
+      "publisher": "Bundesnetzagentur",
+      "geography": "Germany and displayed neighboring market areas; validate dataset geography",
+      "parameter_families": [
+        "day_ahead_price",
+        "market_generation",
+        "market_load"
+      ],
+      "format": "CSV downloads; documented portal exports",
+      "access": "Free public downloads; UI supports up to two years per file",
+      "license_or_terms": "CC BY 4.0 for Market data visuals/download data; required source attribution Bundesnetzagentur | SMARD.de",
+      "terms_url": "https://www.smard.de/en/datennutzung",
+      "redistribution_status": "open_verified",
+      "cadence": "Market interval and revised historical publication",
+      "limitations": "Do not infer all website material or all exchange data everywhere has the same rights. Preserve temporal resolution, timezone and data quality/revision.",
+      "priority": "P0",
+      "integration_mode": "Small attributed Germany price seed and scheduled validated series import",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C03",
+      "title": "Energinet Energi Data Service DayAheadPrices and price catalog",
+      "url": "https://www.energidataservice.dk/",
+      "publisher": "Energinet",
+      "geography": "DK1/DK2 and available neighboring PriceArea values; schema-specific",
+      "parameter_families": [
+        "day_ahead_price",
+        "balancing_price",
+        "danish_tariff_series"
+      ],
+      "format": "Public JSON API; CSV/export; per-dataset catalog",
+      "access": "Public API without key; two bounded limit=1 queries succeeded in this research",
+      "license_or_terms": "Published Energi Data Service data CC BY 4.0; credit and modifications required",
+      "terms_url": "https://www.energidataservice.dk/terms-and-conditions",
+      "redistribution_status": "open_verified",
+      "cadence": "Market interval; selected datasets update daily or faster",
+      "limitations": "Real query confirmed current DayAheadPrices fields TimeUTC/TimeDK/DayAheadPriceEUR/DKK versus legacy Elspotprices HourUTC/HourDK/SpotPriceEUR/DKK ending Sep 2025 in returned latest row. Do not assume legacy hourly schema remains current.",
+      "priority": "P0",
+      "integration_mode": "Pinned schema/resolution-aware price_series connector; optional Danish tariff series after rate applicability checks",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C04",
+      "title": "Elexon Insights Solution datasets",
+      "url": "https://developer.data.elexon.co.uk/",
+      "publisher": "Elexon",
+      "geography": "Great Britain settlement and balancing system",
+      "parameter_families": [
+        "imbalance_price",
+        "market_index_price",
+        "balancing_price",
+        "settlement_period"
+      ],
+      "format": "Public REST JSON/CSV/XML; OpenAPI",
+      "access": "Official developer portal states public APIs and no API key required",
+      "license_or_terms": "BSC licences vary by identified dataset; Open/Public/Shared classifications exist. Exact BMRS/Open Data licence applicability must be checked",
+      "terms_url": "https://www.elexon.co.uk/bsc/data/open-data-requests/bsc-open-data-licence/",
+      "redistribution_status": "mixed",
+      "cadence": "Settlement period and publication/revision times",
+      "limitations": "Imbalance price or Market Index Data is not universally the day-ahead auction price. Some licence pages returned 403 to this research client; retain as pending dataset-level terms review.",
+      "priority": "P1",
+      "integration_mode": "Dataset-specific GB series connector with settlement semantics and rights metadata",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C05",
+      "title": "NESO TNUoS and related charging datasets",
+      "url": "https://www.neso.energy/data-portal/transmission-network-use-system-tnuos-tariffs",
+      "publisher": "National Energy System Operator",
+      "geography": "Great Britain transmission tariff zones and classes",
+      "parameter_families": [
+        "transmission_tariff",
+        "residual_charge",
+        "embedded_export_charge",
+        "generator_connection_charge"
+      ],
+      "format": "CSV downloads and public CKAN-compatible API; charging reports",
+      "access": "Public data portal; sign-in needed for subscriptions rather than basic listed CSV",
+      "license_or_terms": "Dataset page links NESO Open Data Licence; commercial reuse with specified attribution and exceptions",
+      "terms_url": "https://www.neso.energy/data-portal/neso-open-licence",
+      "redistribution_status": "open_verified",
+      "cadence": "Quarterly publication updates; annual tariff years and forecasts",
+      "limitations": "Separate forecast/provisional/final records and generator versus demand schedules. Tariff year often April-March; a label 2026 may mean 2025/26 in a particular resource. This is not DUoS or a complete retail bill.",
+      "priority": "P1",
+      "integration_mode": "Typed tariff/connection_agreement extracts; resource and forecast-status pins; independent charge fixtures",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C06",
+      "title": "50Hertz transmission grid-access price sheets",
+      "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+      "publisher": "50Hertz Transmission GmbH",
+      "geography": "German transmission-grid access in 50Hertz area",
+      "parameter_families": [
+        "transmission_demand_charge",
+        "transmission_energy_charge",
+        "reactive_charge",
+        "metering_charge"
+      ],
+      "format": "Annual PDF price sheets and standard-contract attachments",
+      "access": "Public direct documents; 2026 sheet explicitly valid Jan 1-Dec 31 2026",
+      "license_or_terms": "Publicly accessible; no broad redistribution licence verified for the selected sheet",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual, with possible in-year legal/regulatory revision",
+      "limitations": "Annual-use hours, voltage and power/energy class matter. Not the DSO final customer tariff; statutory levies/taxes and connection fees separate. Publication is not a legal reuse grant.",
+      "priority": "P0",
+      "integration_mode": "Official-source bounded fetch; reviewed tariff extract with valid dates/page spans; common promotion only after terms review",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C07",
+      "title": "Netze BW distribution price sheets and electronic tariff workbook",
+      "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+      "publisher": "Netze BW GmbH",
+      "geography": "Netze BW distribution service territory, Germany",
+      "parameter_families": [
+        "distribution_demand_charge",
+        "distribution_energy_charge",
+        "metering_charge",
+        "levy_components",
+        "connection_terms"
+      ],
+      "format": "PDF plus electronic XLS price sheet and XLS charge calculator",
+      "access": "Public final 2026 documents alongside provisional 2027 documents",
+      "license_or_terms": "Public access; redistribution terms for workbook/document not verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual with revised/provisional issue state",
+      "limitations": "Do not select provisional 2027 just because it is latest. Voltage/metering/use-hours classes and levies differ. Upstream network costs may already be included; avoid stacking TSO and DSO terms twice.",
+      "priority": "P0",
+      "integration_mode": "Pilot structured tariff parser against final XLS/PDF and official worked calculator; store only admitted terms",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C08",
+      "title": "Liander large-business connection and transport tariffs",
+      "url": "https://www.liander.nl/grootzakelijk/tarieven",
+      "publisher": "Liander",
+      "geography": "Liander service area, Netherlands",
+      "parameter_families": [
+        "connection_capex",
+        "capacity_charge",
+        "contracted_capacity_charge",
+        "metering_charge",
+        "transport_tariff"
+      ],
+      "format": "Annual PDF price sheets; public large-business tariffs",
+      "access": "Public standard tariff sheets; tailored customer information can require Mijn Liander",
+      "license_or_terms": "Provider website/contract terms; common-library redistribution not established",
+      "terms_url": "https://www.liander.nl/over-ons/algemene-voorwaarden",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual and agreement-specific revisions",
+      "limitations": "Separate recurring transport and one-off connection costs, contracted kW versus monthly peak versus energy, producer/consumer and voltage class. Availability/congestion and customer terms cannot be inferred from standard rate.",
+      "priority": "P0",
+      "integration_mode": "Reviewed tariff and connection_agreement items; retain exact operator/customer applicability",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C09",
+      "title": "ACM TenneT 2026 transmission tariff decision",
+      "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+      "publisher": "Netherlands Authority for Consumers and Markets",
+      "geography": "TenneT Netherlands HS/EHS connection classes",
+      "parameter_families": [
+        "transmission_tariff",
+        "system_service_charge",
+        "tariff_effective_date"
+      ],
+      "format": "Regulator decision and attachments",
+      "access": "Public regulator publication; 2026 tariffs apply from Jan 1 for stated voltage classes",
+      "license_or_terms": "Regulatory publication; selected attachment reuse terms still to record",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual regulator decisions with legal revision",
+      "limitations": "Decision distinguishes 110/150 kV and 220/380 kV. Does not substitute for Liander or another DSO tariff. Maximum approved tariffs and user actual contract may differ.",
+      "priority": "P0",
+      "integration_mode": "Authoritative dated reference for TenneT tariff items; cross-check operator sheet and applicable voltage",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C10",
+      "title": "CRE TURPE 7 current tariff decisions and calculator",
+      "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+      "publisher": "Commission de Regulation de l Energie",
+      "geography": "France HTB transmission and HTA/BT distribution",
+      "parameter_families": [
+        "network_energy_charge",
+        "subscribed_capacity_charge",
+        "time_band_charge",
+        "reactive_charge"
+      ],
+      "format": "Decisions/PDF and official indicative calculator at https://calculatrice.cre.fr/",
+      "access": "Public decisions and calculator; 2026 update links the May 21 decisions",
+      "license_or_terms": "Selected decision/document reuse terms require verification; no blanket website licence inferred",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "TURPE framework plus annual Aug 1 changes and applicable corrections",
+      "limitations": "TURPE7 initial Aug 2025 values are not the current Aug 2026 coefficients. Distribution includes upstream transport: do not add both. Calculator covers TURPE only, excluding supply and taxes; output indicative.",
+      "priority": "P0",
+      "integration_mode": "Dated tariff extracts with HTB vs HTA/BT and subscribed-power/time-band rules; bill oracle fixture on supported subset",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C11",
+      "title": "CNMC 2026 electricity transport/distribution access tolls",
+      "url": "https://www.cnmc.es/gl/node/417840",
+      "publisher": "Comision Nacional de los Mercados y la Competencia",
+      "geography": "Spain voltage and access-tariff classes",
+      "parameter_families": [
+        "network_power_term",
+        "network_energy_term",
+        "time_period_calendar",
+        "reactive_charge"
+      ],
+      "format": "Resolution PDF; assignment model XLSX; BOE legal publication",
+      "access": "Public regulator package for exercise 2026",
+      "license_or_terms": "Public legal/regulator data; selected document/database reuse conditions not fully verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual tolls; tariff calendars and regulatory amendments",
+      "limitations": "Peajes are not all bill charges: separate government cargos, supplier commodity and tax. Six-period calendars, voltage, contracted power, excess power and reactive terms need native mapping; unmapped terms refused.",
+      "priority": "P0",
+      "integration_mode": "Regulator-pinned Spanish tariff schema and calendar; independent known-bill reference before promotion",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C12",
+      "title": "e-distribuzione ARERA transport and system components",
+      "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+      "publisher": "e-distribuzione / ARERA",
+      "geography": "Italy applicable distribution/measurement/transmission customer classes",
+      "parameter_families": [
+        "distribution_tariff",
+        "transmission_tariff",
+        "metering_charge",
+        "ASOS_ARIM_UC_components",
+        "reactive_charge"
+      ],
+      "format": "HTML tables/downloads and cited ARERA decisions",
+      "access": "Public current-tariff page citing 2026 decisions",
+      "license_or_terms": "Public operator/regulator information; selected extraction/common reuse terms require review",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual transport tariffs plus quarterly system-component changes",
+      "limitations": "Page says transport only; commodity and fiscal charges excluded. Distinguish power/energy/fixed charges, voltage class, energy-intensive relief eligibility and quarterly system charges.",
+      "priority": "P0",
+      "integration_mode": "Version tariff rows by component/effective date; prevent duplicate transmission and excluded tax/full-bill claims",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C13",
+      "title": "Statnett transmission tariffs",
+      "url": "https://www.statnett.no/en/for-stakeholders-in-the-power-industry/tariffs/this-years-tariff/",
+      "publisher": "Statnett",
+      "geography": "Norway transmission-connected generation and demand",
+      "parameter_families": [
+        "transmission_fixed_charge",
+        "loss_energy_charge",
+        "producer_consumer_tariff"
+      ],
+      "format": "Public tables and annual tariff/methodology documents",
+      "access": "Public annual schedules and explanatory material",
+      "license_or_terms": "Public access; selected tables redistributability not verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual with model/regulatory revisions",
+      "limitations": "Norwegian NOK, loss factors and producer/demand terms differ; not a generic Nordic DSO bill. Upcoming model and published future-year tariff need effective-date/status separation.",
+      "priority": "P1",
+      "integration_mode": "Norway transmission tariff item and methodology, bounded scope and unit/FX basis",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C14",
+      "title": "Swissgrid transmission grid and system-service tariffs",
+      "url": "https://www.swissgrid.ch/en/home/customers/topics/tariffs.html",
+      "publisher": "Swissgrid",
+      "geography": "Switzerland transmission charges; downstream pass-through depends on network level",
+      "parameter_families": [
+        "grid_usage_charge",
+        "system_service_charge",
+        "power_reserve_surcharge",
+        "solidarised_cost_charge"
+      ],
+      "format": "Public year-comparison HTML tables and downloads",
+      "access": "Public current and future year tables",
+      "license_or_terms": "Public website information; selected table/document reuse terms not verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual",
+      "limitations": "Do not confuse 2027/2026 columns. Usage/system-service/power-reserve and new solidarised costs are distinct; downstream utility may already include these. CHF/Rp vs currency/kWh conversion explicit.",
+      "priority": "P1",
+      "integration_mode": "Typed Swiss transmission/surcharge references; valid-year and network-level applicability",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C15",
+      "title": "ElCom Swiss electricity-price portal and CSV",
+      "url": "https://www.strompreis.abn.elcom.admin.ch/",
+      "publisher": "Swiss Federal Electricity Commission ElCom",
+      "geography": "Swiss municipalities, network operators and standard customer categories",
+      "parameter_families": [
+        "retail_energy_benchmark",
+        "network_tariff_benchmark",
+        "levy_benchmark",
+        "operator_geography"
+      ],
+      "format": "CSV/download portal and opendata.swiss-linked resources",
+      "access": "Public portal; JS rendering limits inspection; verify chosen downloadable resource",
+      "license_or_terms": "Dataset-specific Swiss terms to inspect; no blanket redistribution approval from portal visibility",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual tariff collection",
+      "limitations": "Standard customer-category annual comparisons are not negotiated industrial procurement terms; commodity/network/levies must remain separable. Portal availability was checked, exact CSV/API resource not exercised here.",
+      "priority": "P2",
+      "integration_mode": "Geographic benchmark/reference and later typed tariff extraction after selected resource validation",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C16",
+      "title": "UK Contracts for Difference Allocation Round results",
+      "url": "https://www.gov.uk/government/publications/contracts-for-difference-cfd-allocation-round-7-results/contracts-for-difference-allocation-round-7-results-accessible-webpage",
+      "publisher": "UK Department for Energy Security and Net Zero",
+      "geography": "Great Britain awarded CfD projects/technologies",
+      "parameter_families": [
+        "cfd_strike_reference",
+        "price_basis_year",
+        "delivery_year",
+        "technology_contract_reference"
+      ],
+      "format": "Accessible HTML tables and PDF",
+      "access": "Public government publication",
+      "license_or_terms": "Open Government Licence v3.0 except identified third-party rights, explicitly stated on publication",
+      "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+      "redistribution_status": "open_verified",
+      "cadence": "Allocation rounds and corrections",
+      "limitations": "Auction award benchmark, not corporate PPA quote or executable deal. AR7 displays both 2012 and 2024 money bases; retain indexation, technology, delivery and round.",
+      "priority": "P1",
+      "integration_mode": "Attributed contract/reference-range item; user selects actual price and terms; no automatic market quote",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C17",
+      "title": "ACER PPA market monitoring and publicly listed contract templates",
+      "url": "https://www.acer.europa.eu/electricity/market-monitoring/ppas",
+      "publisher": "ACER",
+      "geography": "EU and country PPA market structures",
+      "parameter_families": [
+        "ppa_archetype",
+        "tenor_reference",
+        "market_structure",
+        "public_template_reference"
+      ],
+      "format": "HTML; country-sheet/report PDF; linked third-party legal templates",
+      "access": "Public overview and linked annual reports/templates",
+      "license_or_terms": "ACER and linked third-party report/template rights differ; source underlying-data rights not established",
+      "terms_url": null,
+      "redistribution_status": "mixed",
+      "cadence": "Annual monitoring and template updates",
+      "limitations": "Not transaction-level current prices. Industry data may be third-party; no blanket embedding of linked EFET/DENA/ISDA legal text. Use to qualify illustrative archetypes and user-supplied offers.",
+      "priority": "P1",
+      "integration_mode": "Evidence-linked PPA contract archetypes/ranges, not a price feed; third-party template links kept as references",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C18",
+      "title": "European Hydrogen Bank IF25 auction results",
+      "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+      "publisher": "European Commission DG CLIMA / CINEA",
+      "geography": "Selected EEA hydrogen-production projects",
+      "parameter_families": [
+        "hydrogen_support_premium",
+        "electrolyser_project_capacity",
+        "support_duration",
+        "award_status"
+      ],
+      "format": "HTML project tables and official call/results documents",
+      "access": "Public commission publication",
+      "license_or_terms": "EU-owned website content CC BY 4.0 unless otherwise stated; third-party exceptions",
+      "terms_url": "https://commission.europa.eu/legal-notice_en",
+      "redistribution_status": "open_verified",
+      "cadence": "Auction rounds; invited/signed/withdrawn status changes",
+      "limitations": "EUR/kg bid is support premium for verified eligible output, not total H2 production cost or market sale price. Some results invited to grant preparation; not signed or operational.",
+      "priority": "P1",
+      "integration_mode": "Reference-only subsidy/contract assumption with status/date, never hydrogen commodity price",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C19",
+      "title": "Eurostat non-household electricity/gas prices and components",
+      "url": "https://ec.europa.eu/eurostat/web/energy/data/database",
+      "publisher": "Eurostat",
+      "geography": "EU/EFTA and other reported geography, subject to country-specific reuse exceptions",
+      "parameter_families": [
+        "electricity_retail_benchmark",
+        "gas_retail_benchmark",
+        "network_component_benchmark",
+        "tax_component_benchmark"
+      ],
+      "format": "SDMX/statistics JSON/TSV and data browser; nrg_pc_205, nrg_pc_205_c, nrg_pc_203",
+      "access": "Public statistical data; no customer contract access",
+      "license_or_terms": "Commercial statistical reuse with attribution under EC policy, with geography/source exceptions",
+      "terms_url": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "redistribution_status": "mixed",
+      "cadence": "Semiannual energy prices; annual component data",
+      "limitations": "Consumption-band averages, not site tariff/15-minute marginal price. Third-party data and countries outside EU/EFTA/candidate groups can be excluded from commercial reuse. Tax categories/currency/PPS are distinct.",
+      "priority": "P1",
+      "integration_mode": "Benchmarks/QA ranges with country/band/tax metadata; no substitution for actual tariff",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C20",
+      "title": "European Commission Weekly Oil Bulletin",
+      "url": "https://energy.ec.europa.eu/data-and-analysis/weekly-oil-bulletin_en",
+      "publisher": "European Commission DG ENER",
+      "geography": "EU countries and petroleum product categories",
+      "parameter_families": [
+        "diesel_price",
+        "heating_oil_price",
+        "fuel_tax",
+        "excise_vat_reference"
+      ],
+      "format": "XLSX current prices with/without tax; historical workbook and methodology",
+      "access": "Public weekly files; no API subscription required for downloads",
+      "license_or_terms": "EU-owned data reuse under EC CC BY 4.0 policy unless otherwise indicated; third-party content excluded",
+      "terms_url": "https://commission.europa.eu/legal-notice_en",
+      "redistribution_status": "open_verified",
+      "cadence": "Weekly; history from 2005 in listed workbook",
+      "limitations": "Consumer petroleum benchmark, not delivered bulk genset fuel quote or guaranteed off-road exemption. Country methodology/product/unit/tax treatment explicit; convert to energy only with declared density/LHV.",
+      "priority": "P1",
+      "integration_mode": "Attributed fuel-price/levy reference; user-reviewed delivered-fuel adjustment separate",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C21",
+      "title": "EEX EU ETS1 primary auction results",
+      "url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+      "publisher": "European Energy Exchange",
+      "geography": "EU ETS1 auction allowances/products",
+      "parameter_families": [
+        "carbon_auction_price",
+        "carbon_scenario_reference"
+      ],
+      "format": "Public auction reports/history ZIP; licensed market-data products separately",
+      "access": "Public report access; automated redistribution/product use rights must be checked",
+      "license_or_terms": "Exchange licensing conditions and product-specific terms; no open licence inferred",
+      "terms_url": "https://www.eex.com/en/market-data/licensing-policies",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Auction days with corrected reports/history",
+      "limitations": "Primary auction clearing price is not spot/futures curve or a universal carbon tax. No scrape/redistribution of proprietary futures/GO/gas/PPA index feeds without rights. ETS1/ETS2/UK ETS must not be mixed.",
+      "priority": "P2",
+      "integration_mode": "Rights-reviewed reference import or BYO licensed series; no unrestricted common feed",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "EU-C22",
+      "title": "Enedis services/connection prestations catalogue",
+      "url": "https://catalogue-prestations.enedis.fr/",
+      "publisher": "Enedis",
+      "geography": "Enedis distribution service territory, France",
+      "parameter_families": [
+        "connection_service_cost",
+        "metering_service_cost",
+        "reconnection_service_cost"
+      ],
+      "format": "Public HTML catalogue and referenced tariff/legal documents",
+      "access": "Public catalogue, but JS limits inspection; official indexed text signals restricted reuse",
+      "license_or_terms": "Official indexed terms warn against reuse beyond stated purpose; full exact conditions require review before any import",
+      "terms_url": "https://catalogue-prestations.enedis.fr/",
+      "redistribution_status": "restricted",
+      "cadence": "Catalogue and regulatory revisions",
+      "limitations": "Publicly readable is not open data. Do not ship copied catalogue text/table or build common cost library from it without appropriate right. Regulated tariff decisions may be a different source/rights path.",
+      "priority": "defer",
+      "integration_mode": "Link/reference or authorized customer-provided extract only until rights established",
+      "research_date": "2026-10-20",
+      "research_file": "research/europe-commercial-sources.json"
+    },
+    {
+      "source_id": "na_urdb",
+      "title": "OpenEI Utility Rate Database (URDB)",
+      "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+      "publisher": "OpenEI / National Laboratory of the Rockies",
+      "geography": [
+        "US"
+      ],
+      "parameter_families": [
+        "retail energy and demand charges",
+        "TOU schedules",
+        "tier thresholds",
+        "ratchets",
+        "fixed charges",
+        "tariff eligibility and effective dates"
+      ],
+      "format": "REST JSON; full downloadable database advertised",
+      "access": "Free API key documented; manual search and download alternatives. Documentation/catalog primary search results inspected; direct pages returned429 during this research.",
+      "license_or_terms": "Record-specific primary reuse license must be verified before common seeding; conflicting third-party CC0/CC-BY descriptions are not sufficient. Raw utility documents have separate terms.",
+      "terms_url": "https://data.openei.org/submissions/5",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Continuously maintained; rates have individual start/end/update dates",
+      "limitations": "US-specific; not every rider/tax or tariff complete/current. Native importer already handles supported rates and explicit refusals; unsupported terms must not become a total bill.",
+      "priority": "P0",
+      "integration_mode": "Reuse native urdb_to_tariff importer; select by utility, voltage/class/service and valid date; review, pin, retain source URI and refused fields. Rights-gated common seed or tenant-local import.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_pge_tariffs",
+      "title": "PG&E official electric tariff book, including B-20",
+      "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+      "publisher": "Pacific Gas and Electric Company",
+      "geography": [
+        "US-CA"
+      ],
+      "parameter_families": [
+        "retail energy and demand charges",
+        "industrial demand/TOU conditions",
+        "tariff applicability",
+        "riders and minimum conditions"
+      ],
+      "format": "HTML index; tariff PDF sheets",
+      "access": "Public tariff index and linked B-20 official PDF; no API established",
+      "license_or_terms": "Public regulatory material; specific copying/redistribution and document restrictions require review, not assumed open license.",
+      "terms_url": "https://www.pge.com/tariffs/en.html",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Tariff revisions/advice-letter effective dates; potentially multiple per year",
+      "limitations": "Example regional utility only. Official sheets govern; URDB record may lag. Rate schedules depend on class/voltage/options and bundled-versus-generation service; new B-20 versus legacy E-20 eligibility matters.",
+      "priority": "P1",
+      "integration_mode": "Curated official-host document parser into native tariff schema; per-field source spans and review; known-bill fixture. No whole-book copying until terms resolved.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_eia_prices",
+      "title": "EIA Open Data v2 and fuel/retail price series",
+      "url": "https://www.eia.gov/opendata/documentation.php",
+      "publisher": "US Energy Information Administration",
+      "geography": [
+        "US"
+      ],
+      "parameter_families": [
+        "industrial electricity benchmark prices",
+        "natural gas and petroleum price series",
+        "fuel-cost assumptions",
+        "historical national/state averages"
+      ],
+      "format": "REST JSON; spreadsheet/CSV and bulk routes",
+      "access": "Free API key required for API; public downloadable series also available",
+      "license_or_terms": "EIA states its publications are public domain, with attribution requested and exceptions for identified third-party content; API terms and rate limits still apply.",
+      "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+      "redistribution_status": "open_verified",
+      "cadence": "Series-specific daily/weekly/monthly/annual and revisions",
+      "limitations": "State/sector average revenues per kWh are benchmarks, not executable tariffs. Gas/petroleum hub or retail prices require delivery/tax/heating-value basis; not PPA quotes or hourly forward forecasts.",
+      "priority": "P0",
+      "integration_mode": "Seed clearly labelled benchmark series from identified EIA-owned products; optional refresh adapter; stage timezone/currency/units and revision metadata in native series_store.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_pjm",
+      "title": "PJM Data Miner 2",
+      "url": "https://dataminer2.pjm.com/",
+      "publisher": "PJM Interconnection",
+      "geography": [
+        "US-PJM region"
+      ],
+      "parameter_families": [
+        "DA/RT locational marginal prices",
+        "ancillary market observations",
+        "load and market inputs"
+      ],
+      "format": "Web downloads and REST API",
+      "access": "Public search; PJM account/API subscription key for automation. Published connection limits differ by member status.",
+      "license_or_terms": "Official Data Miner terms restrict use to internal purposes and prohibit redistributing raw or derived data without a PJM-issued redistribution license.",
+      "terms_url": "https://dataminer2.pjm.com/",
+      "redistribution_status": "restricted",
+      "cadence": "Product-specific interval/daily publication; preliminary/final revisions",
+      "limitations": "Public does not mean seedable. Node/hub, DA/RT, finality and time basis differ. An open-source wrapper does not grant redistribution rights.",
+      "priority": "defer",
+      "integration_mode": "Reference catalog entry only until permitted use established; tenant/user-held licensed connection where allowed. No common seed, bundle export or transformed-data promotion without license.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_caiso",
+      "title": "CAISO OASIS and historical pricing downloader",
+      "url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+      "publisher": "California ISO",
+      "geography": [
+        "US-CAISO and applicable western market locations"
+      ],
+      "parameter_families": [
+        "DA/RT nodal and aggregate price series",
+        "market/ancillary observations",
+        "demand and outage context"
+      ],
+      "format": "OASIS ZIP/XML/CSV downloads; historical bulk portal",
+      "access": "Public OASIS report URLs and historical downloader. Historical pricing portal advertises records since2016; endpoint/product limits must be honored.",
+      "license_or_terms": "Website terms allow specified public-use materials with notices/credit but distinguish third-party and separate API/data rights. Exact OASIS/API clauses need review for product redistribution.",
+      "terms_url": "https://www.caiso.com/privacy-terms-of-use",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Market product intervals and subsequent revisions; bulk archive updates",
+      "limitations": "Not an executable retail tariff. LMP component, location, market and interval must be explicit. Separate public website statements cannot be treated as blanket API-data licensing.",
+      "priority": "P1",
+      "integration_mode": "Optional approved-source series import after scoped rights check; retain report ID/location/market/revision and archive source; avoid default live price dependency.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_ercot",
+      "title": "ERCOT Public API and Data Access Portal",
+      "url": "https://www.ercot.com/services/mdt/data-portal",
+      "publisher": "ERCOT",
+      "geography": [
+        "US-TX ERCOT region"
+      ],
+      "parameter_families": [
+        "DA/RT prices",
+        "settlement-point and ancillary observations",
+        "market load and related scenarios"
+      ],
+      "format": "Registered public reports API; archived CSV/XML/ZIP reports",
+      "access": "Account, authentication ID token and subscription key documented; no credential registration performed",
+      "license_or_terms": "ERCOT API-specific terms apply; source availability is public but redistribution grant not established here.",
+      "terms_url": "https://www.ercot.com/help/terms/data-portal",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Report-dependent intervals, posted/reposted reports and archive lag",
+      "limitations": "Settlement-point prices versus nodal LMP, DA versus RT and interval semantics differ. Auth and archived-report access are not evidence of common-library permission; terms page fetch returned403.",
+      "priority": "P1",
+      "integration_mode": "Optional tenant-scoped credentialed acquisition through native managed data access, not a key in library item; normalize/pin accepted series and revisions.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_miso",
+      "title": "MISO market reports and Data Exchange",
+      "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+      "publisher": "MISO",
+      "geography": [
+        "US-MISO region",
+        "CA-Manitoba market interface where applicable"
+      ],
+      "parameter_families": [
+        "DA/RT LMPs",
+        "ancillary market clearing prices",
+        "load/market scenarios"
+      ],
+      "format": "Public CSV reports; JSON RT APIs; Data Exchange pricing API",
+      "access": "Public reports coexist with Data Exchange registration/subscription workflow; API product/auth details must be pinned",
+      "license_or_terms": "Official data/API terms require scoped review; no blanket open-data grant verified.",
+      "terms_url": "https://data-exchange.misoenergy.org/apis",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Interval/day product-specific; preliminary/final/corrected reports",
+      "limitations": "Report-to-API migration was paused in official notice; do not rely on abandoned endpoints. EST/hour-ending conventions and corrections require report-specific mapping; Manitoba interface is not Canada-wide coverage.",
+      "priority": "P2",
+      "integration_mode": "A versioned approved report adapter or Data Exchange connection, not both without deduplication; native series_store with location/settlement/time/finality metadata.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_nyiso",
+      "title": "NYISO market pricing and MIS public reports",
+      "url": "https://www.nyiso.com/energy-market-operational-data",
+      "publisher": "New York ISO",
+      "geography": [
+        "US-NY"
+      ],
+      "parameter_families": [
+        "DA/RT LBMPs",
+        "hub/zone/generator price locations",
+        "ancillary and capacity observations"
+      ],
+      "format": "Public report CSV/ZIP archives and web reports",
+      "access": "Official landing page requires browser verification in this research; native archived/report path must be verified in bounded adapter pilot",
+      "license_or_terms": "No applicable redistribution license established from primary material in this session; review actual report/website terms.",
+      "terms_url": "https://www.nyiso.com/",
+      "redistribution_status": "unknown",
+      "cadence": "Interval/day/month archive products with revisions",
+      "limitations": "Do not bypass robot check. LBMP node/zone/generator datasets have distinct meaning; market observations are not retail bill rates. Capability remains unavailable until supported endpoint and terms verified.",
+      "priority": "P2",
+      "integration_mode": "Catalog candidate and manual authorised upload initially; admitted official report adapter only after pilot/access/terms evidence.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_isone",
+      "title": "ISO New England Web Services v1.1",
+      "url": "https://www.iso-ne.com/participate/support/web-services-data",
+      "publisher": "ISO New England",
+      "geography": [
+        "US-New England"
+      ],
+      "parameter_families": [
+        "DA/RT LMPs",
+        "final/preliminary hourly prices",
+        "operating reserve and demand observations"
+      ],
+      "format": "REST XML/JSON; reports; published business-documentation spreadsheet",
+      "access": "Automated access requires registration/application; base https://webservices.iso-ne.com/api/v1.1 documented",
+      "license_or_terms": "Legal page reserves copyright and warns duplication/non-personal use may violate rights; no open redistribution license established.",
+      "terms_url": "https://www.iso-ne.com/legal-privacy",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Report-dependent real-time/hourly/day data, prelim/final states",
+      "limitations": "Some internal nodes opt out of publication. API scope/docs and finality are explicit; rights for product distribution need resolution before shared seeding.",
+      "priority": "P2",
+      "integration_mode": "Approved tenant-scoped data connection or manual upload; no common seed until rights resolved; retain location/product/finality and schema version.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_spp",
+      "title": "SPP Integrated Marketplace public portal",
+      "url": "https://portal.spp.org/groups/day-ahead-market",
+      "publisher": "Southwest Power Pool",
+      "geography": [
+        "US-SPP region"
+      ],
+      "parameter_families": [
+        "DA LMP and RTBM LMP",
+        "reserve clearing observations",
+        "hub/interface/price node series"
+      ],
+      "format": "Public downloadable report files via portal; market public-data guide",
+      "access": "Public portal DA and RTBM report pages; no general unrestricted API or auth guarantee established",
+      "license_or_terms": "Portal marks rights reserved and links Terms of Use; dataset redistribution rights need review.",
+      "terms_url": "https://portal.spp.org/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "DA operating-day and RT operating-interval reports",
+      "limitations": "SPP East/Western services and market/location coverage are separate. Official guide time conventions may be CST/hour-ending; pin per-product basis and revisions.",
+      "priority": "P2",
+      "integration_mode": "Versioned bounded public-report adapter or reviewed manual import into series_store; country-wide/national defaults inappropriate.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_bpa",
+      "title": "Bonneville Power Administration power/transmission rate schedules",
+      "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+      "publisher": "Bonneville Power Administration",
+      "geography": [
+        "US-Pacific Northwest eligible customers"
+      ],
+      "parameter_families": [
+        "wholesale power rate schedules",
+        "transmission charges",
+        "ancillary/control-area charges",
+        "risk and rate adjustments"
+      ],
+      "format": "Official PDF rate schedules and decision documents",
+      "access": "Public rate schedule and case pages; current rates include adjustments/supplemental proceedings",
+      "license_or_terms": "Federal agency primary documents; confirm document-specific third-party/notices and current published terms before common packaging.",
+      "terms_url": "https://www.bpa.gov/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Rate-case periods with interim/surcharge/adjustment events",
+      "limitations": "BPA means Bonneville, distinct from PPA. Base BP-26 schedules do not guarantee current bill without subsequent rate adjustments/BP-27 and eligibility/product terms. Not a generic US industrial tariff.",
+      "priority": "P1",
+      "integration_mode": "Curated rate/connection terms for an eligible customer, with exact effective dates and adjustment records; tariff/connection library plus source evidence.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_lbl_solar",
+      "title": "Berkeley Lab US Utility-Scale Solar 2025 public data update",
+      "url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+      "publisher": "Lawrence Berkeley National Laboratory",
+      "geography": [
+        "US utility-scale solar and PV+battery samples"
+      ],
+      "parameter_families": [
+        "historical PPA price benchmarks",
+        "capital and O&M evidence",
+        "capture value and project performance context"
+      ],
+      "format": "Public nonconfidential XLSX with57 tabs, PDF slides/user guide; related OEDI hourly data",
+      "access": "Public download advertised; ~54MB workbook not downloaded here",
+      "license_or_terms": "Public database/report; confirm exact workbook/OEDI record license and source-level exclusions before redistribution, not assume lab authorship means public domain.",
+      "terms_url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual release; release/vintage and confidentiality filtering",
+      "limitations": "Published historical/levelized PPAs from selected projects are not current executable quotes or complete bilateral contracts. Contract vintage, tax incentives/REC bundle and levelization basis matter; cannot infer missing confidential price.",
+      "priority": "P1",
+      "integration_mode": "Reference/range library with sample/vintage/basis labels; native contract archetypes remain illustrative; actual contract/quote is customer input.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_ieso",
+      "title": "IESO public market reports and Ontario price directory",
+      "url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+      "publisher": "Independent Electricity System Operator",
+      "geography": [
+        "CA-ON"
+      ],
+      "parameter_families": [
+        "DA Ontario Zonal Price",
+        "RT nodal/zonal prices",
+        "Ontario Electricity Market Price",
+        "legacy HOEP",
+        "Global Adjustment and reserve context"
+      ],
+      "format": "Public CSV/XML reports and help specifications",
+      "access": "Public reports directory and historical downloads; no credentials needed for listed public report browsing",
+      "license_or_terms": "Limited non-exclusive/non-sublicensable/non-transferable use/reproduction with copyright and terms notice; supplemental terms prevail. No blanket open-data distribution grant.",
+      "terms_url": "https://www.ieso.ca/Terms-of-Use",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Product-dependent intervals/hourly/monthly, corrections and regime changes",
+      "limitations": "OEMP replaces HOEP from2025-05-01; DA-OZP, LFDA, OEMP, nodal prices and Global Adjustment are different. Do not splice series or label wholesale price a delivered industrial bill.",
+      "priority": "P1",
+      "integration_mode": "Regime-aware optional series adapter with explicit CAD/MWh/timezone/finality and rights-gated scope; pair with applicable tariff/bill terms.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_aeso",
+      "title": "AESO market/system reports and API",
+      "url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+      "publisher": "Alberta Electric System Operator",
+      "geography": [
+        "CA-AB"
+      ],
+      "parameter_families": [
+        "pool price",
+        "system marginal price",
+        "operating reserve and annual market statistics"
+      ],
+      "format": "Documented API; public market reports; historical spreadsheets",
+      "access": "API developer registration/key workflow and public reporting routes; API changed2025, pin current product/version",
+      "license_or_terms": "Official site copyright permits non-commercial/personal/educational copying subject to conditions; other use needs written permission.",
+      "terms_url": "https://www.aeso.ca/legal/",
+      "redistribution_status": "restricted",
+      "cadence": "Hourly/market-product reports; annual statistics; corrections",
+      "limitations": "Commercial GridSpine seed/use must not assume permission from free access. Pool price is not total retail/site supply cost; Alberta time and market restructuring require versioned metadata.",
+      "priority": "defer",
+      "integration_mode": "Reference-only until commercial rights established; authorised user-held connection if permitted. Do not seed or transform into common library without clearance.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_oeb",
+      "title": "Ontario Energy Board distribution-rate open data",
+      "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+      "publisher": "Ontario Energy Board",
+      "geography": [
+        "CA-ON"
+      ],
+      "parameter_families": [
+        "historical distribution rates all rate classes",
+        "rate-class eligibility",
+        "utility service territory references",
+        "general-service small-customer rates"
+      ],
+      "format": "XLSX historical databases; XML current limited-class datasets; regulatory sheets",
+      "access": "Public downloads; historical distribution rates since2006. Current general-service XML covers <50kW, not large industrial all-in rates.",
+      "license_or_terms": "Publisher open-data inventory links Open Government Licence Ontario; attribution and exclusions apply. Verify each chosen asset is included before release.",
+      "terms_url": "https://www.ontario.ca/page/open-government-licence-ontario",
+      "redistribution_status": "open_verified",
+      "cadence": "Historical distribution-rate database annually; selected current rate XML monthly",
+      "limitations": "Distribution-only charges are not commodity/Global Adjustment/transmission/taxes total. Large-industrial applicability must come from actual rate class/sheets. Open/Public is access label, while licence coverage must remain attached to source asset.",
+      "priority": "P0",
+      "integration_mode": "Seed eligible OGL-labelled records and derived native tariff entries with exact classes/effective dates; reconcile known bill and explicitly unsupported charges.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_hydroquebec",
+      "title": "Hydro-Quebec official business electricity tariffs",
+      "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+      "publisher": "Hydro-Quebec",
+      "geography": [
+        "CA-QC"
+      ],
+      "parameter_families": [
+        "Rate L/M/LG industrial/commercial energy and demand",
+        "minimum/contract demand",
+        "demand response and optional-rate terms"
+      ],
+      "format": "Official tariff PDF and explanatory HTML",
+      "access": "Public rate indexes/PDF; particular Rate L page returned403 in direct open, search-index primary evidence confirms official source",
+      "license_or_terms": "Public tariff material; website/document-specific copying/redistribution terms not established as open license.",
+      "terms_url": "https://www.hydroquebec.com/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Official tariff effective dates and amendments; document version must be pinned",
+      "limitations": "Rate L industrial versus LG general large-power distinction matters; billed demand/contract terms and optional DR not universal. A data center is not automatically Rate L.",
+      "priority": "P1",
+      "integration_mode": "Curated native tariff rows for chosen eligible service, source-span review and official PDF precedence; scoped tenant import until redistribution rights clear.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_bchydro",
+      "title": "BC Hydro Electric Tariff and large-load rates",
+      "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+      "publisher": "BC Hydro / BCUC approvals",
+      "geography": [
+        "CA-BC"
+      ],
+      "parameter_families": [
+        "distribution/transmission service rates",
+        "large-load demand/energy charges",
+        "connection service terms",
+        "optional OATT schedules"
+      ],
+      "format": "Official approved tariff PDFs; explanatory rate pages",
+      "access": "Public official PDFs; separate distribution, transmission customer and OATT documents",
+      "license_or_terms": "Public regulatory material; provincial open-data licence does not automatically license BC Hydro tariff content. Review specific terms before common redistribution.",
+      "terms_url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions.html",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Approved effective dates/amendments; fiscal-year changes",
+      "limitations": "Official BCUC-approved version prevails over explanations. RS1830 energy-charge consolidation effective2026-04-01 illustrates structural changes; select actual schedule, voltage, customer and connection terms.",
+      "priority": "P1",
+      "integration_mode": "Curated schedule-version adapter and connection agreement references; do not collapse OATT into retail energy charge; validate dated sample bill.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_cenace",
+      "title": "CENACE public SIM PML and ancillary market reports",
+      "url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+      "publisher": "CENACE",
+      "geography": [
+        "MX-SIN",
+        "MX-Baja California",
+        "MX-Baja California Sur"
+      ],
+      "parameter_families": [
+        "day-ahead nodal PML and components",
+        "distributed-node prices",
+        "ancillary service prices",
+        "historical market scenarios"
+      ],
+      "format": "Public report downloads; linked documented SW-PML/PEND/PSC web services",
+      "access": "Public reports plus web-service manuals; actual service authentication/limits not exercised here",
+      "license_or_terms": "CENACE open-data article describes free reuse/redistribution for its designated open datasets, but report/manual-specific terms and original/recalculated indicatory subsets need separate treatment.",
+      "terms_url": "https://www.gob.mx/cenace/articulos/conoce-los-datos-abiertos-del-cenace",
+      "redistribution_status": "mixed",
+      "cadence": "DA/RT products and monthly archives, corrections/republications",
+      "limitations": "Choose node/system/market, MXN and interval/time basis explicitly. Original/recalculated traceability section is described as demonstrative; do not treat every page item as operational settlement truth or blanket open feed.",
+      "priority": "P1",
+      "integration_mode": "Start with verified designated open dataset or approved current report; pin revision and provenance; controlled service adapter after exact manual/terms test, no guessed API endpoints.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "na_cfe",
+      "title": "CFE official industrial tariffs and government tariff decisions",
+      "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+      "publisher": "Comision Federal de Electricidad / Mexican tariff authorities",
+      "geography": [
+        "MX tariff divisions/service classes"
+      ],
+      "parameter_families": [
+        "GDMTH/GDMTO and relevant industrial supply charges",
+        "energy/capacity/distribution components",
+        "tariff applicability and effective dates"
+      ],
+      "format": "Official interactive HTML schedules; government decisions/PDFs",
+      "access": "Public official schedule URL established; direct page returned502. Government official tariff-scheme publication available; full chosen monthly/division schedule still needs acquisition.",
+      "license_or_terms": "Public published tariff decisions; exact portal/document redistribution terms not verified as open license.",
+      "terms_url": "https://www.cfe.gob.mx/hogar/infcliente/Documents/esquematarifariovigente.pdf",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Month/year and tariff-division revisions plus annual regulatory decisions",
+      "limitations": "Energy, capacity, transmission/distribution and supplier/CENACE-service components differ. Mexico demand/timing/voltage/geographic applicability must be parsed; US URDB does not cover this. Access currently unproven for automation.",
+      "priority": "P1",
+      "integration_mode": "Manual verified source upload first; curated official-host parser later; source spans, division/month/service eligibility and refusal of unmappable charges before tariff admission.",
+      "reviewed_on": "2026-10-20",
+      "verification": "Official source documentation/terms researched; no data API authenticated or bulk dataset executed",
+      "research_file": "research/northamerica-commercial-sources.json"
+    },
+    {
+      "source_id": "MAC-ECB",
+      "title": "ECB Data Portal exchange rates and statistical reference series",
+      "url": "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx",
+      "publisher": "ECB",
+      "geography": [
+        "Europe",
+        "EUR reference rates incl USD/CAD/MXN"
+      ],
+      "parameter_families": [
+        "FX",
+        "reference interest rates"
+      ],
+      "format": [
+        "SDMX",
+        "CSV",
+        "XML"
+      ],
+      "access": "Public statistical API; bounded requests",
+      "license_or_terms": "ESCB free public-statistics reuse with attribution, unchanged source statistics; third-party exclusions",
+      "terms_url": "https://www.ecb.europa.eu/stats/ecb_statistics/governance_and_quality_framework/html/usage_policy.en.html",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Daily/monthly depending on series; revisions possible",
+      "limitations": "Preserve original observations; derived currency conversions separately labelled and rights-reviewed. Reference FX is not project financing/forward price; FX conversion alone is not local cost calibration.",
+      "priority": "P1",
+      "integration_mode": "Pinned economic series + explicit derived money-basis transformation",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-EUROSTAT",
+      "title": "Eurostat HICP/PPI and non-household energy-price benchmarks",
+      "url": "https://ec.europa.eu/eurostat/en/web/user-guides/data-browser/api-data-access/api-introduction",
+      "publisher": "Eurostat",
+      "geography": [
+        "EU/EFTA; dataset-specific other Europe"
+      ],
+      "parameter_families": [
+        "inflation",
+        "producer prices",
+        "industrial electricity/gas benchmark"
+      ],
+      "format": [
+        "JSON-stat",
+        "SDMX",
+        "CSV"
+      ],
+      "access": "Public API/download",
+      "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions",
+      "terms_url": "https://ec.europa.eu/eurostat/help/copyright-notice",
+      "redistribution_status": "open_verified",
+      "cadence": "Monthly indices; energy-price periods depend on table",
+      "limitations": "Use exact geo/table/consumption band/tax basis. National statistical averages are not site tariffs. No blanket rights assertion for all non-European or third-party data.",
+      "priority": "P1",
+      "integration_mode": "Economic series and benchmark items; no fabricated tariff schedule",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-BLS",
+      "title": "BLS public CPI/PPI/labor statistics",
+      "url": "https://www.bls.gov/developers/home.htm",
+      "publisher": "US Bureau of Labor Statistics",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "inflation",
+        "producer price escalation",
+        "labor cost"
+      ],
+      "format": [
+        "JSON",
+        "XLSX"
+      ],
+      "access": "API v1 public limited; v2 registration/limits",
+      "license_or_terms": "API terms and government-data notices; attribution/retrieval date; no implied endorsement",
+      "terms_url": "https://www.bls.gov/developers/termsOfService.htm",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Monthly/quarterly by series",
+      "limitations": "Select the appropriate cost index; general CPI is not automatically equipment-specific. A typed read-only POST connector needs separate admission from existing GET-only web fetch.",
+      "priority": "P1",
+      "integration_mode": "Versioned economic series; bounded documented connector",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-STATCAN",
+      "title": "Statistics Canada Web Data Service",
+      "url": "https://www.statcan.gc.ca/en/developers/wds",
+      "publisher": "Statistics Canada",
+      "geography": [
+        "Canada"
+      ],
+      "parameter_families": [
+        "CPI",
+        "industrial prices",
+        "labor and energy statistics"
+      ],
+      "format": [
+        "JSON",
+        "CSV",
+        "SDMX"
+      ],
+      "access": "Public WDS and table downloads",
+      "license_or_terms": "Statistics Canada Open Licence; source/adaptation notice, no endorsement and third-party exceptions",
+      "terms_url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence",
+      "redistribution_status": "open_verified",
+      "cadence": "By table; revised releases",
+      "limitations": "Select province/product/calendar/basis. Public statistics do not supply a private site meter, tariff, debt quote or actual maintenance history.",
+      "priority": "P1",
+      "integration_mode": "Canada-specific reference series with original table/PID and release",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-BOC",
+      "title": "Bank of Canada Valet",
+      "url": "https://www.bankofcanada.ca/valet/docs/",
+      "publisher": "Bank of Canada",
+      "geography": [
+        "Canada"
+      ],
+      "parameter_families": [
+        "FX",
+        "interest-rate reference"
+      ],
+      "format": [
+        "JSON",
+        "CSV",
+        "XML"
+      ],
+      "access": "Public API with usage limits",
+      "license_or_terms": "Bank terms require attribution; data/third-party and permitted-use conditions need scoped review",
+      "terms_url": "https://www.bankofcanada.ca/terms/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Daily/monthly by series",
+      "limitations": "Indicative rates not transaction quotes, WACC or loan offers; do not imply Bank endorsement or mirror third-party series without rights.",
+      "priority": "P1",
+      "integration_mode": "Pinned CAD reference data; no implicit finance assumptions",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-INEGI",
+      "title": "INEGI indicators and downloadable statistics",
+      "url": "https://www.inegi.org.mx/servicios/api-indicadores/",
+      "publisher": "INEGI",
+      "geography": [
+        "Mexico"
+      ],
+      "parameter_families": [
+        "INPC inflation",
+        "INPP producer prices",
+        "economic indices"
+      ],
+      "format": [
+        "JSON",
+        "XML",
+        "CSV downloads"
+      ],
+      "access": "API token for indicator service; public downloads available",
+      "license_or_terms": "INEGI free-use terms, attribution and transformed-data notices; exact selected item terms to retain",
+      "terms_url": "https://www.inegi.org.mx/inegi/terminos.html",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Monthly/periodic by indicator",
+      "limitations": "Do not apply a US inflation series by default to Mexican costs. API tokens remain server-owned credentials.",
+      "priority": "P1",
+      "integration_mode": "Mexico-specific economic series and explicitly chosen cost escalation",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "MAC-BANXICO",
+      "title": "Banco de Mexico SIE time-series API",
+      "url": "https://www.banxico.org.mx/SieAPIRest/swagger/index.html",
+      "publisher": "Banco de Mexico",
+      "geography": [
+        "Mexico"
+      ],
+      "parameter_families": [
+        "MXN FX",
+        "reference rates"
+      ],
+      "format": [
+        "JSON",
+        "REST"
+      ],
+      "access": "Token-managed public API; catalog visible without data request",
+      "license_or_terms": "Public API documentation verified; redistribution terms not established in this research",
+      "terms_url": "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/catalogoSeries",
+      "redistribution_status": "unknown",
+      "cadence": "Daily/periodic by series",
+      "limitations": "Official catalog includes SF43718 MXN/USD FIX. Do not treat policy/TIIE rate as project debt or assert sublicense rights from API availability.",
+      "priority": "P2",
+      "integration_mode": "Metadata-first connector candidate; scoped rights review before distribution",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "PRO-ERA5",
+      "title": "Copernicus ERA5 single-level hourly reanalysis",
+      "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+      "publisher": "ECMWF/Copernicus C3S",
+      "geography": [
+        "Europe",
+        "North America (subset of global dataset)"
+      ],
+      "parameter_families": [
+        "weather",
+        "renewable resource",
+        "temperature stress",
+        "cooling weather"
+      ],
+      "format": [
+        "GRIB",
+        "derived NetCDF as supported"
+      ],
+      "access": "CDS account, dataset terms acceptance and API; no bulk download performed",
+      "license_or_terms": "Dataset page labels CC-BY licence; retain exact applicable licence/version and attribution",
+      "terms_url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+      "redistribution_status": "open_verified",
+      "cadence": "Hourly values; daily provisional updates then final revisions",
+      "limitations": "Reanalysis is not a site sensor or future weather forecast; ERA5T can change. Preserve weather-year identity, gridding, provisional/final state and source correlation. Reuse native atlite pipeline.",
+      "priority": "P1",
+      "integration_mode": "Source/version-pinned weather references; derived regional profiles through existing tooling",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "PRO-PVGIS",
+      "title": "JRC PVGIS non-interactive API",
+      "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+      "publisher": "European Commission JRC",
+      "geography": [
+        "Europe; verify selected radiation database footprint for NA"
+      ],
+      "parameter_families": [
+        "solar resource",
+        "PV yield",
+        "TMY weather"
+      ],
+      "format": [
+        "JSON",
+        "CSV"
+      ],
+      "access": "Public API, version/rate-limited",
+      "license_or_terms": "API docs verified; underlying radiation database and site reuse terms require dataset-specific review",
+      "terms_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Dataset/model release; query-specific years",
+      "limitations": "Modelled PV is not measured plant output. Pin API and radiation database version and system losses; do not use TMY as a multi-year reliability ensemble.",
+      "priority": "P2",
+      "integration_mode": "Optional profile oracle/source; do not duplicate native renewable-profile engine by default",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "PRO-NSRDB",
+      "title": "NLR NSRDB solar resource APIs",
+      "url": "https://developer.nlr.gov/docs/solar/nsrdb/",
+      "publisher": "National Laboratory of the Rockies",
+      "geography": [
+        "North America; endpoint-specific geographic footprint"
+      ],
+      "parameter_families": [
+        "irradiance",
+        "weather",
+        "solar resource"
+      ],
+      "format": [
+        "CSV",
+        "JSON metadata"
+      ],
+      "access": "Developer key and usage limits; dataset endpoints differ",
+      "license_or_terms": "Public API docs; selected source/model rights and attribution must be checked separately",
+      "terms_url": "https://developer.nlr.gov/docs/solar/nsrdb/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual/versioned model releases; selected temporal resolution",
+      "limitations": "Do not infer every endpoint covers all Canada/Mexico. Preserve local/UTC, interval and leap-day options; API credentials never in model-visible prompts/exports.",
+      "priority": "P2",
+      "integration_mode": "Optional bounded source connector and native profile generation",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "PRO-COMSTOCK",
+      "title": "ComStock public end-use profiles",
+      "url": "https://comstock.nlr.gov/page/datasets",
+      "publisher": "NLR/US DOE",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "commercial building load shapes",
+        "cooling and end-use shares",
+        "flexibility scenarios"
+      ],
+      "format": [
+        "CSV",
+        "Parquet",
+        "OEDI metadata"
+      ],
+      "access": "Public release downloads; no bulk retrieval performed",
+      "license_or_terms": "Public release index verified; exact OEDI item licence not retrieved due429; software licence is not data permission",
+      "terms_url": "https://data.openei.org/submissions/4520",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Versioned releases with weather and model year",
+      "limitations": "Synthetic calibrated building-stock outputs, not measured individual factories/DC/mines. Release notices report e.g missing California water heating and weather issues in particular releases; preserve exclusions.",
+      "priority": "P2",
+      "integration_mode": "Curated synthetic archetypes with release/weather/upgrade and known-issue metadata",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "PRO-OPSD",
+      "title": "OPSD contributed household/small-business measurements",
+      "url": "https://data.open-power-system-data.org/household_data/",
+      "publisher": "Open Power System Data / CoSSMic",
+      "geography": [
+        "Southern Germany; selected small businesses/households"
+      ],
+      "parameter_families": [
+        "measured sample load/PV traces",
+        "profile QA fixtures"
+      ],
+      "format": [
+        "CSV",
+        "XLSX",
+        "SQLite"
+      ],
+      "access": "Public versioned downloads; metadata only inspected",
+      "license_or_terms": "Dataset page declares Creative Commons Attribution-International; resolve exact version in pinned datapackage before packaging",
+      "terms_url": "https://data.open-power-system-data.org/household_data/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Archived release2020-04-15",
+      "limitations": "Small historical sample, not a regional industrial default. Values may be interval energy/cumulative-derived rather than MW; preserve interpolation/missing-data flags. Do not reidentify premises.",
+      "priority": "P2",
+      "integration_mode": "Small reference/QA fixture or explicitly scoped shape; never generic mine/DC profile",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "ENV-EGRID",
+      "title": "US EPA eGRID electricity emissions factors",
+      "url": "https://www.epa.gov/egrid",
+      "publisher": "US EPA",
+      "geography": [
+        "United States"
+      ],
+      "parameter_families": [
+        "generation emissions intensity",
+        "grid electricity factor benchmark"
+      ],
+      "format": [
+        "XLSX",
+        "CSV/summary tables as released"
+      ],
+      "access": "Public downloads",
+      "license_or_terms": "EPA official FAQ states eGRID data public domain and commercial/noncommercial use allowed",
+      "terms_url": "https://www.epa.gov/egrid/frequent-questions-about-egrid",
+      "redistribution_status": "open_verified",
+      "cadence": "Edition based on a specified data year",
+      "limitations": "Annual geographic average is not hourly marginal emissions or verified location/time-matched green-fuel eligibility. Denominator/gases/region/year must match.",
+      "priority": "P1",
+      "integration_mode": "Versioned emissions-factor benchmark with explicit accounting boundary",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "ENV-EEA",
+      "title": "EEA electricity generation GHG intensity",
+      "url": "https://www.eea.europa.eu/en/analysis/indicators/greenhouse-gas-emission-intensity-of-1",
+      "publisher": "European Environment Agency",
+      "geography": [
+        "Europe; selected reported countries"
+      ],
+      "parameter_families": [
+        "electricity generation GHG intensity"
+      ],
+      "format": [
+        "Indicator data downloads",
+        "CSV as provided"
+      ],
+      "access": "Public indicator/data catalog",
+      "license_or_terms": "EEA CC-BY material policy, dataset notices and third-party exclusions",
+      "terms_url": "https://www.eea.europa.eu/en/legal-notice",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual/revised inventory releases",
+      "limitations": "Country gross-generation average not site marginal intensity; distinguish production vs consumption mix and preserve underlying inventory/Eurostat provenance.",
+      "priority": "P2",
+      "integration_mode": "Versioned emissions reference; separate from carbon market price",
+      "research_date": "2026-10-20",
+      "research_file": "research/profile-macro-sources.json"
+    },
+    {
+      "source_id": "rel-entsoe-outages",
+      "title": "ENTSO-E Transparency Platform unavailability",
+      "url": "https://www.entsoe.eu/data/transparency-platform/",
+      "publisher": "ENTSO-E and reporting participants",
+      "geography": [
+        "Europe; reporting-area coverage varies"
+      ],
+      "parameter_families": [
+        "planned and forced unavailability events",
+        "generation deratings",
+        "transmission unavailability"
+      ],
+      "format": "XML/API/platform downloads",
+      "access": "Public platform; API registration/token and request limits; not exercised here",
+      "license_or_terms": "Specific datasets on the reuse list CC-BY4; other platform data terms must be checked individually",
+      "terms_url": "https://transparency.entsoe.eu/content/static_content/Static%20content/terms%20and%20conditions/220218_List_of_Data_available_for_reuse.pdf",
+      "redistribution_status": "mixed",
+      "cadence": "Event/update driven",
+      "limitations": [
+        "reporting thresholds and fleet coverage",
+        "not automatically failure-rate observations",
+        "revisions/cancellations/deratings need deduplication",
+        "actual versus forecast availability"
+      ],
+      "priority": "P1",
+      "integration_mode": "Versioned event archive/replay; reviewed estimation later",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-entsoe-eraa",
+      "title": "ERAA modelling inputs and thermal maintenance assumptions",
+      "url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+      "publisher": "ENTSO-E",
+      "geography": [
+        "European participating power systems"
+      ],
+      "parameter_families": [
+        "thermal forced-outage assumptions",
+        "thermal maintenance profiles",
+        "adequacy scenario parameters"
+      ],
+      "format": "Downloadable modelling-data files and PDF methodology",
+      "access": "Public downloads; selected attachment semantics not ingested here",
+      "license_or_terms": "Public modelling inputs; exact file reuse terms require review, not blanket Transparency Platform licence",
+      "terms_url": "https://www.entsoe.eu/eraa/2025/modelling-data/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual assessment edition; revisions possible",
+      "limitations": [
+        "planning assumptions, not user-asset measurements",
+        "target-year/scenario and rate basis must be retained",
+        "RES profiles may already include outages"
+      ],
+      "priority": "P1",
+      "integration_mode": "Curated dated scenario parameter pack after table/terms review",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-elexon-remit",
+      "title": "Elexon Insights REMIT and generation availability",
+      "url": "https://bmrs.elexon.co.uk/api-documentation/endpoint/REMIT",
+      "publisher": "Elexon",
+      "geography": [
+        "Great Britain"
+      ],
+      "parameter_families": [
+        "unit unavailability notices",
+        "availability forecasts",
+        "event revisions"
+      ],
+      "format": "Documented API; JSON/download interfaces",
+      "access": "Public Insights API documentation; no API called here",
+      "license_or_terms": "BMRS open-data licence exists; dataset classification and separate API terms require checking",
+      "terms_url": "https://www.elexon.co.uk/bsc/data/balancing-mechanism-reporting-agent/copyright-licence-bmrs-data/",
+      "redistribution_status": "mixed",
+      "cadence": "Event/update driven",
+      "limitations": [
+        "notice not necessarily measured equipment failure",
+        "planned/forced and revision states needed",
+        "not EU-wide or all UK distribution"
+      ],
+      "priority": "P1",
+      "integration_mode": "Bounded event retrieval and offline fixture parser",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-rte-unavailability",
+      "title": "RTE Unavailability Additional Information",
+      "url": "https://data.rte-france.org/web/guest/catalog/-/api/generation/Unavailability-Additional-Information/v7.0",
+      "publisher": "RTE and market participants",
+      "geography": [
+        "France; dataset scope"
+      ],
+      "parameter_families": [
+        "generation unavailability",
+        "transmission asset unavailability",
+        "planned/forced downtime notices"
+      ],
+      "format": "API",
+      "access": "API subscription/account/OAuth setup; not created or exercised here",
+      "license_or_terms": "Exact API/data conditions and participant-data reuse require review",
+      "terms_url": "https://data.rte-france.org/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Event/update driven",
+      "limitations": [
+        "participant notices republished",
+        "not a component failure distribution",
+        "version and unit matching required"
+      ],
+      "priority": "P2",
+      "integration_mode": "Optional authorized event adapter after terms/access admission",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-nordic-baltic-grid",
+      "title": "Nordic and Baltic Grid Disturbance Statistics",
+      "url": "https://www.entsoe.eu/publications/system-operations-reports/",
+      "publisher": "Nordic/Baltic TSOs via ENTSO-E",
+      "geography": [
+        "Nordic and Baltic transmission systems"
+      ],
+      "parameter_families": [
+        "transmission component disturbance statistics",
+        "availability",
+        "repair/outage duration context"
+      ],
+      "format": "Annual PDF reports/tables",
+      "access": "Public reports including2024 edition",
+      "license_or_terms": "Report-specific extraction/redistribution rights not established in this review",
+      "terms_url": "https://www.entsoe.eu/publications/system-operations-reports/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual",
+      "limitations": [
+        "voltage/equipment population and exposure denominators",
+        "not campus/distribution statistics",
+        "table extraction requires independent checks"
+      ],
+      "priority": "P2",
+      "integration_mode": "Curated transmission reference tables, not generation-shaped rates",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-ceer-quality",
+      "title": "CEER/ECRB quality-of-supply benchmark",
+      "url": "https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/",
+      "publisher": "CEER/ECRB and national regulators",
+      "geography": [
+        "European countries; per-report coverage"
+      ],
+      "parameter_families": [
+        "SAIDI",
+        "SAIFI",
+        "planned/unplanned and exceptional-event benchmarks"
+      ],
+      "format": "Reports/PDF tables",
+      "access": "Public reports",
+      "license_or_terms": "Public publication; unrestricted database redistribution not verified",
+      "terms_url": "https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Periodic benchmark editions",
+      "limitations": [
+        "cross-country definitions not identical",
+        "aggregate customer indices not component rates",
+        "exclusion/year comparability"
+      ],
+      "priority": "P1",
+      "integration_mode": "Cited benchmark references; terms-cleared extracts only",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-enedis-quality",
+      "title": "Enedis duration/frequency supply-quality datasets",
+      "url": "https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt",
+      "publisher": "Enedis",
+      "geography": [
+        "Enedis service network, France"
+      ],
+      "parameter_families": [
+        "BT/HTA interruption duration",
+        "BT/HTA interruption frequency"
+      ],
+      "format": "CSV/API/catalogue schema",
+      "access": "Public small datasets",
+      "license_or_terms": "Dataset catalogue explicitly states Licence Ouverte/Open Licence2.0",
+      "terms_url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
+      "redistribution_status": "open_verified",
+      "cadence": "Twice yearly per catalogue; annual metric observations",
+      "limitations": [
+        "excludes exceptional events and RTE",
+        "territory/network scope retained",
+        "customer benchmark not component MTTR/FOR"
+      ],
+      "priority": "P1",
+      "integration_mode": "Small licensed benchmark importer and reference fixture",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-bnetza-saidi",
+      "title": "Bundesnetzagentur electricity interruptions",
+      "url": "https://www.bundesnetzagentur.de/EN/Areas/Energy/SecurityOfSupply/QualityOfSupply/start.html",
+      "publisher": "Bundesnetzagentur",
+      "geography": [
+        "Germany"
+      ],
+      "parameter_families": [
+        "SAIDI variants",
+        "national/regional continuity benchmarks"
+      ],
+      "format": "HTML/PDF tables",
+      "access": "Public aggregates; operator submission system separate and restricted",
+      "license_or_terms": "Dataset-specific reuse/redistribution terms to review",
+      "terms_url": "https://www.bundesnetzagentur.de/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual",
+      "limitations": [
+        "SAIDI definition and event exclusions vary",
+        "interruptions >3minutes in stated standard scope",
+        "not a user-site outage distribution"
+      ],
+      "priority": "P1",
+      "integration_mode": "Curated regulatory benchmark",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-ukpn-iis",
+      "title": "UKPN Interruptions Incentive Scheme events",
+      "url": "https://ukpowernetworks.opendatasoft.com/explore/dataset/ukpn-iis/information/",
+      "publisher": "UK Power Networks",
+      "geography": [
+        "UKPN licence areas, Great Britain"
+      ],
+      "parameter_families": [
+        "fault/restoration times",
+        "customers affected",
+        "fault causes/equipment",
+        "substation linkage"
+      ],
+      "format": "Portal/API/CSV catalogue",
+      "access": "Official page currently says login required; no account created or access bypassed",
+      "license_or_terms": "Portal has open-licence datasets; exact current IIS dataset licence/access must be confirmed",
+      "terms_url": "https://ukpowernetworks.opendatasoft.com/terms/terms-and-conditions/",
+      "redistribution_status": "mixed",
+      "cadence": "Dataset release/update dependent",
+      "limitations": [
+        "regional DNO only",
+        "IIS inclusion/exclusion and restoration stages",
+        "not automatically manufacturer failure-rate data"
+      ],
+      "priority": "P2",
+      "integration_mode": "Detailed event pilot only after access and exact dataset rights verified",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-nerc-gads",
+      "title": "NERC GADS public conventional fleet statistics",
+      "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures",
+      "publisher": "North American Electric Reliability Corporation",
+      "geography": [
+        "North American reporting fleet; per-table cohort"
+      ],
+      "parameter_families": [
+        "FOR/EFORd and fleet availability",
+        "outage/derating metrics",
+        "cause-code aggregates"
+      ],
+      "format": "Statistical brochure/report tables and methodology",
+      "access": "Public brochures; detailed unit-level products/reporting are separate/restricted",
+      "license_or_terms": "NERC copyright/all-rights notice; exact common-library extract permission not established",
+      "terms_url": "https://www.nerc.com/terms-of-use-policy",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Annual and multi-year windows",
+      "limitations": [
+        "metric denominator and reporting cohort",
+        "class average not local unit",
+        "repair time independently sourced may be inconsistent",
+        "not all North American jurisdictions/assets represented"
+      ],
+      "priority": "P1",
+      "integration_mode": "Exact table/basis curated reference; native defaults replaced only after review",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-nerc-tads",
+      "title": "NERC Transmission Availability Data System",
+      "url": "https://prod.nerc.com/programs/reliability-assessment--performance-analysis/transmission-availability-data-system",
+      "publisher": "NERC",
+      "geography": [
+        "Reporting North American bulk transmission systems"
+      ],
+      "parameter_families": [
+        "transmission outage aggregates",
+        "element inventory",
+        "cause/exposure statistics"
+      ],
+      "format": "Reports/dashboards/supporting tables",
+      "access": "Public summaries; detailed reporting portal restricted",
+      "license_or_terms": "Exact report/table reuse conditions require review; detailed confidential data not an open source",
+      "terms_url": "https://www.nerc.com/terms-of-use-policy",
+      "redistribution_status": "mixed",
+      "cadence": "Annual/reporting-rule revisions",
+      "limitations": [
+        "equipment/voltage/exposure scope",
+        "planned-outage collection scope changed/discontinued in prior data request",
+        "not a general maintenance calendar"
+      ],
+      "priority": "P2",
+      "integration_mode": "Transmission benchmark/referral, not unrestricted unit event ingestion",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-eia861",
+      "title": "EIA861 annual utility reliability files",
+      "url": "https://www.eia.gov/electricity/data/eia861/",
+      "publisher": "U.S. Energy Information Administration",
+      "geography": [
+        "United States reporting utilities"
+      ],
+      "parameter_families": [
+        "SAIDI",
+        "SAIFI",
+        "CAIDI/context",
+        "method/major-event flags"
+      ],
+      "format": "Annual ZIP/XLSX detailed files",
+      "access": "Public downloads; no token needed for files",
+      "license_or_terms": "EIA data public domain with source/date acknowledgement; protected contributed material separately excluded",
+      "terms_url": "https://www.eia.gov/about/copyrights_reuse.php",
+      "redistribution_status": "open_verified",
+      "cadence": "Annual with corrections",
+      "limitations": [
+        "utility/customer index, not component failure history",
+        "IEEE versus other method",
+        "major-event/loss-of-supply exclusions and missing reporting"
+      ],
+      "priority": "P1",
+      "integration_mode": "Versioned US supply-benchmark importer; actual small-file fixture required",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-doe417",
+      "title": "DOE417 electric emergency/disturbance reports",
+      "url": "https://doe417.energy.gov/",
+      "publisher": "U.S. DOE/CESER; official public summaries also republished by EIA",
+      "geography": [
+        "United States reportable events"
+      ],
+      "parameter_families": [
+        "major disturbance events",
+        "load/customer impact",
+        "emergency context"
+      ],
+      "format": "Reporting portal and public annual summary products",
+      "access": "Public summary availability/endpoints must be verified; reporting access is separate",
+      "license_or_terms": "Use only released public summaries; confirm terms and sensitive/withheld fields for exact product",
+      "terms_url": "https://doe417.energy.gov/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Incident based; summary releases/revisions",
+      "limitations": [
+        "threshold/reportability selection",
+        "not all outages",
+        "no population exposure denominator",
+        "security-driven omissions"
+      ],
+      "priority": "P2",
+      "integration_mode": "Stress-event context, never direct ordinary component rate",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-noaa-storm",
+      "title": "NOAA NCEI Storm Events Database",
+      "url": "https://www.ncei.noaa.gov/access/storm-events-database/",
+      "publisher": "NOAA/NCEI/National Weather Service",
+      "geography": [
+        "United States and adjacent waters"
+      ],
+      "parameter_families": [
+        "weather hazard events",
+        "storm location/time covariates",
+        "common-event stress context"
+      ],
+      "format": "Bulk CSV and public cloud data",
+      "access": "Public downloads; large files not downloaded here",
+      "license_or_terms": "Federal dataset catalogue lists CC0; retain source/vintage and caveats",
+      "terms_url": "https://catalog.data.gov/dataset/ncdc-storm-events-database",
+      "redistribution_status": "open_verified",
+      "cadence": "Periodic updates/revisions",
+      "limitations": [
+        "not electrical outage observations",
+        "event reporting history/coverage changes",
+        "causal failure calibration requires asset exposure"
+      ],
+      "priority": "P2",
+      "integration_mode": "Optional hazard covariate/stress-set source, no automatic probability inference",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-oeb-scorecard",
+      "title": "Ontario distributor scorecard open data",
+      "url": "https://www.oeb.ca/open-data/electricity-distributor-performance-scorecard",
+      "publisher": "Ontario Energy Board",
+      "geography": [
+        "Ontario electricity distributors, Canada"
+      ],
+      "parameter_families": [
+        "annual distributor reliability metrics",
+        "SAIDI/SAIFI benchmark",
+        "performance context"
+      ],
+      "format": "Annual XML files",
+      "access": "Explicit Open/Public catalogue;2025 and historical XML linked",
+      "license_or_terms": "OEB open-data page links Open Government Licence Ontario; full licence page returned403 during research, retain exact terms with ingestion",
+      "terms_url": "https://www.ontario.ca/page/open-government-licence-ontario",
+      "redistribution_status": "open_verified",
+      "cadence": "Annual with corrections",
+      "limitations": [
+        "Ontario not all Canada",
+        "scorecard normalized exclusions/definitions",
+        "not component rates"
+      ],
+      "priority": "P1",
+      "integration_mode": "Small Canadian benchmark importer with source year/definition preservation",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-cfe-distribution",
+      "title": "CFE distribution expansion/modernization reliability report",
+      "url": "https://www.cfe.gob.mx/distribucion/cumplimiento/Documents/Programa%20de%20Ampliaci%C3%B3n%20y%20Modernizaci%C3%B3n%20de%20las%20Redes%20Generales%20de%20Distribuci%C3%B3n%202025-2039.pdf",
+      "publisher": "CFE Distribuci\u00f3n",
+      "geography": [
+        "Mexico; national/divisional report scope"
+      ],
+      "parameter_families": [
+        "SAIDI_D",
+        "SAIFI_D",
+        "distribution reliability context"
+      ],
+      "format": "Public planning PDF/tables",
+      "access": "Public report, not verified API/bulk dataset",
+      "license_or_terms": "Public visibility only; exact extract/database redistribution terms unverified",
+      "terms_url": "https://www.cfe.gob.mx/",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Planning/report editions",
+      "limitations": [
+        "definitions/units/regions and observation years",
+        "not a countrywide component-rate library",
+        "table extraction/reuse review required"
+      ],
+      "priority": "P2",
+      "integration_mode": "Curated Mexico benchmark reference after semantic/terms review",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-nrc-inl-parameters",
+      "title": "NRC/INL industry-average component parameter estimates",
+      "url": "https://nrcoe.inl.gov/avgperf/",
+      "publisher": "NRC/Idaho National Laboratory",
+      "geography": [
+        "U.S. commercial nuclear fleet"
+      ],
+      "parameter_families": [
+        "failure-on-demand probabilities",
+        "failure-to-run rates",
+        "maintenance/test unavailability",
+        "uncertainty distributions",
+        "common-cause methodology"
+      ],
+      "format": "Published reports/tables; linked current parameter estimates",
+      "access": "Public reports; underlying operational databases may have separate access",
+      "license_or_terms": "Review exact report/contractor dataset rights; government hosting alone not all-content public-domain proof",
+      "terms_url": "https://www.osti.gov/biblio/1847110",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Parameter updates approximately four/five-year cycle per NRC/INL page",
+      "limitations": [
+        "nuclear maintenance/test/quality context",
+        "not automatically industrial or datacenter generator priors",
+        "exact release and distributions required"
+      ],
+      "priority": "P2",
+      "integration_mode": "Narrow component/method reference and reviewed applicability, not universal default",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "rel-nerc-renewables",
+      "title": "NERC GADS Wind availability and Solar reporting definitions",
+      "url": "https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-wind",
+      "publisher": "NERC",
+      "geography": [
+        "North American reporting wind/solar assets; publication cohort specific"
+      ],
+      "parameter_families": [
+        "wind resource-equivalent forced outage metrics",
+        "renewable availability definitions",
+        "solar outage-reporting taxonomy"
+      ],
+      "format": "Wind metric brochures/dashboard and reporting-instruction documents",
+      "access": "Public wind summaries and wind/solar DRI; underlying asset reports restricted; public solar statistical coverage not established here",
+      "license_or_terms": "NERC copyright; exact public-report extraction permission requires review; reporting definitions do not imply access to submitted unit data",
+      "terms_url": "https://www.nerc.com/terms-of-use-policy",
+      "redistribution_status": "mixed",
+      "cadence": "Reporting cycles and dated public reports",
+      "limitations": [
+        "wind mechanical availability differs from weather resource variability",
+        "public solar distribution/statistical parameters not established",
+        "native outage-in-profile guard still applies",
+        "no campus BESS/UPS failure prior"
+      ],
+      "priority": "P2",
+      "integration_mode": "Methods and conditional dated wind reference; do not auto-apply mechanical outages on observed resource profiles",
+      "research_file": "research/reliability-sources.json"
+    },
+    {
+      "source_id": "TECH01",
+      "title": "PyPSA native standard line and transformer types",
+      "url": "https://docs.pypsa.org/v1.1.2/user-guide/components/line-types/",
+      "publisher": "PyPSA contributors",
+      "geography": [
+        "Europe: reference types; applicability must be checked"
+      ],
+      "parameter_families": [
+        "line impedance and thermal rating",
+        "transformer impedance/loss/tap parameters",
+        "frequency and voltage applicability"
+      ],
+      "format": "Native versioned standard-type tables/CSV",
+      "access": "Already available through the installed PyPSA version",
+      "license_or_terms": "MIT repository licence; preserve upstream attribution and pin distributed tables; no claim of OEM validation",
+      "terms_url": "https://github.com/PyPSA/PyPSA/blob/master/LICENSE.txt",
+      "redistribution_status": "open_verified",
+      "cadence": "Release based",
+      "limitations": "Reuse native pins; parameter origins and regional/frequency validity remain essential; named type can overwrite explicit parameters",
+      "priority": "P0",
+      "integration_mode": "Expose existing types through version-pinned equipment items; no new engine",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04"
+      ],
+      "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH02",
+      "title": "pandapower basic standard types",
+      "url": "https://pandapower.readthedocs.io/en/v3.1.2/std_types/basic.html",
+      "publisher": "pandapower contributors",
+      "geography": [
+        "Europe: 50 Hz reference equipment"
+      ],
+      "parameter_families": [
+        "cable/overhead line r/x/c/current",
+        "transformer impedance/loss/vector group/taps",
+        "reference temperature and frequency"
+      ],
+      "format": "Built-in dictionaries/dataframes",
+      "access": "Installed native library and public docs",
+      "license_or_terms": "BSD-3-Clause repository licence for distributed material; retain attribution",
+      "terms_url": "https://github.com/e2nIEE/pandapower/blob/develop/LICENSE",
+      "redistribution_status": "open_verified",
+      "cadence": "Release based",
+      "limitations": "Documentation explicitly warns 50 Hz types may be unrealistic for60 Hz; no automatic North American reuse",
+      "priority": "P0",
+      "integration_mode": "Reuse native types with frequency/region admission and explicit-parameter alternative",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04"
+      ],
+      "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH03",
+      "title": "California Solar Equipment Lists",
+      "url": "https://www.energy.ca.gov/programs-and-topics/programs/solar-equipment-lists",
+      "publisher": "California Energy Commission",
+      "geography": [
+        "North America: United States/California; exported products require local applicability"
+      ],
+      "parameter_families": [
+        "PV nameplate and test ratings",
+        "PV/BESS inverter efficiency/voltage/power",
+        "battery and ESS ratings",
+        "PCS identity/functionality"
+      ],
+      "format": "Web tables and spreadsheet downloads",
+      "access": "Public lists; no account created or bulk extraction performed",
+      "license_or_terms": "CEC public-use provisions coexist with third-party/copyrighted-material and commercial restrictions; exact extract needs terms review",
+      "terms_url": "https://www.energy.ca.gov/conditions-of-use",
+      "redistribution_status": "mixed",
+      "cadence": "Usually1st/11th/21st monthly; some lists event driven",
+      "limitations": "Self-reported information not all independently confirmed; list inclusion does not prove local interconnection, lifetime or GFM capability",
+      "priority": "P1",
+      "integration_mode": "Curated model-level equipment importer after exact-data rights review; retain listing date/source/hash",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E12",
+        "E22",
+        "G01",
+        "G07"
+      ],
+      "mapping_scope": "Ratings/efficiency and identity only where listed; not lifecycle, transfer, fault or GFM validation.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH04",
+      "title": "SAM PV module and inverter coefficient databases",
+      "url": "https://samrepo.nlr.gov/help/component_models_databases.html",
+      "publisher": "National Laboratory of the Rockies / SAM team",
+      "geography": [
+        "North America: US source lists; Europe where exact product applicable"
+      ],
+      "parameter_families": [
+        "CEC/Sandia PV coefficients",
+        "inverter performance coefficients",
+        "measured versus fitted rating provenance"
+      ],
+      "format": "Versioned SAM data files/CSV",
+      "access": "Public software/data preparation documentation",
+      "license_or_terms": "SAM BSD software licence does not alone settle upstream CEC/manufacturer coefficient-data rights; retain original source and fit provenance",
+      "terms_url": "https://www.energy.ca.gov/conditions-of-use",
+      "redistribution_status": "mixed",
+      "cadence": "SAM/list releases",
+      "limitations": "Fitted coefficient is not direct manufacturer measurement; source-list currency and version matter; no detailed dynamic model",
+      "priority": "P1",
+      "integration_mode": "Selected data-only coefficient import; reuse existing PV infrastructure",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E12"
+      ],
+      "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH05",
+      "title": "NLR wind turbine power-curve archive",
+      "url": "https://github.com/NatLabRockies/turbine-models",
+      "publisher": "National Laboratory of the Rockies",
+      "geography": [
+        "Europe: applicable turbine models",
+        "North America: applicable turbine models"
+      ],
+      "parameter_families": [
+        "wind power curves",
+        "available thrust/Cp/Ct curves",
+        "rated power and rotor metadata"
+      ],
+      "format": "CSV, documentation and versioned package/repository",
+      "access": "Public GitHub; no installation performed",
+      "license_or_terms": "BSD-3-Clause root licence; inspect per-model cited origin and any separate notices before promotion",
+      "terms_url": "https://github.com/NatLabRockies/turbine-models/blob/main/LICENSE.txt",
+      "redistribution_status": "open_verified",
+      "cadence": "Repository/package releases",
+      "limitations": "Curves have source and operating assumptions; not every turbine has thrust; no guarantee of current procurement availability or site-calibrated wake behavior",
+      "priority": "P1",
+      "integration_mode": "Import a curated pinned curve subset with per-model attribution and bounds",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E12"
+      ],
+      "mapping_scope": "Selected source-backed fields in these families only; retain source/region/conditions and validate each admitted record.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH06",
+      "title": "EPREL European product registry",
+      "url": "https://energy-efficient-products.ec.europa.eu/eprel_en",
+      "publisher": "European Commission DG Energy",
+      "geography": [
+        "Europe: EU/EEA marketed regulated labelled products"
+      ],
+      "parameter_families": [
+        "heating/cooling product efficiency",
+        "product information sheets",
+        "equipment identity/market dates",
+        "selected repair/spare-part links"
+      ],
+      "format": "Public portal/product sheets; public API service",
+      "access": "Public comparison; API registration/key/terms need exact confirmation; no key requested",
+      "license_or_terms": "EU2024/994 provides API subject to terms; public access is not blanket redistribution approval",
+      "terms_url": "https://eprel.ec.europa.eu/screen/requestpublicapikey",
+      "redistribution_status": "public_terms_review",
+      "cadence": "Manufacturer registration/update driven",
+      "limitations": "Covers labelled categories, not all industrial equipment; nonpublic compliance documents excluded; seasonal metrics are not full physical performance maps",
+      "priority": "P1",
+      "integration_mode": "Authenticated approved API adapter or reviewed product-sheet upload, subset first",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E15"
+      ],
+      "mapping_scope": "Only regulated heating/cooling product groups and published rating conditions, not a full industrial map.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH07",
+      "title": "DOE Compliance Certification Database",
+      "url": "https://www.regulations.doe.gov/certification-data/products.html",
+      "publisher": "US Department of Energy",
+      "geography": [
+        "North America: United States"
+      ],
+      "parameter_families": [
+        "motor efficiency and ratings",
+        "distribution-transformer efficiency",
+        "compressor and HVAC certified representations"
+      ],
+      "format": "Searchable downloadable product-group reports",
+      "access": "Public model/basic-model search; no submission or purchase",
+      "license_or_terms": "Government-hosted manufacturer submissions; precise dataset reuse/third-party notices need review",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Approximately every two weeks",
+      "limitations": "Current basic-model records submitted within past year; manufacturer-certified representations, DOE accuracy disclaimer; not full impedance/startup/dynamic parameters",
+      "priority": "P1",
+      "integration_mode": "Product-group importer with explicit test standard/basic-model identity; equipment evidence not blanket certification",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "G04",
+        "G13"
+      ],
+      "mapping_scope": "Transformer efficiency/basic ratings and motor power/efficiency; impedance, starting current and dynamic fields usually missing.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH08",
+      "title": "ENERGY STAR product datasets including UPS",
+      "url": "https://www.energystar.gov/products/productstr",
+      "publisher": "US Environmental Protection Agency ENERGY STAR",
+      "geography": [
+        "North America: US/Canada marketed product scope; verify exact model"
+      ],
+      "parameter_families": [
+        "UPS rated power and load-point efficiency",
+        "HVAC and selected equipment efficiency",
+        "product model/certification metadata"
+      ],
+      "format": "CSV/Excel/XML and API",
+      "access": "Public bulk/export/API documented; no model installed",
+      "license_or_terms": "Record exact dataset rights and third-party notices before common redistribution; certification marks/endorsement are separate",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Daily per official tools page",
+      "limitations": "UPS efficiency does not imply battery runtime, power quality, ride-through or aged capacity; preserve test loads and configurations",
+      "priority": "P1",
+      "integration_mode": "Small UPS/equipment data adapter feeding native equipment records and efficiency curves",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "G07"
+      ],
+      "mapping_scope": "UPS efficiency/nameplate/configuration subset; transfer/ride-through and battery autonomy absent.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH09",
+      "title": "Natural Resources Canada searchable motor/product lists",
+      "url": "https://natural-resources.canada.ca/energy-efficiency/product-energy-ratings/electric-motors",
+      "publisher": "Natural Resources Canada",
+      "geography": [
+        "North America: Canada"
+      ],
+      "parameter_families": [
+        "motor rated output and efficiency",
+        "Canadian equipment identity and market applicability"
+      ],
+      "format": "Public product portal/search",
+      "access": "Public search linked by NRCan; research client encountered403 on some pages; no bulk API verified",
+      "license_or_terms": "Public source; exact export/redistribution conditions not verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Portal submission/update driven; exact cadence unverified",
+      "limitations": "Do not treat inaccessible/empty page as complete catalogue; electrical input differs from shaft output; no starting-current curve inferred",
+      "priority": "P2",
+      "integration_mode": "Canada-specific search/import feasibility; authorized selected records only",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "G13"
+      ],
+      "mapping_scope": "Motor efficiency/nameplate subset only; no starting/acceleration or fault model inferred.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH10",
+      "title": "Heat Pump KEYMARK model API",
+      "url": "https://api.heatpumpkeymark.com/model",
+      "publisher": "Heat Pump KEYMARK scheme",
+      "geography": [
+        "Europe: certified model scope"
+      ],
+      "parameter_families": [
+        "heat-pump certified rating points",
+        "model/subtype identity",
+        "test/certification provenance"
+      ],
+      "format": "Documented HTTP model/list and model/detail; certificate documents",
+      "access": "Public API documentation; use/auth and bulk-rights must be established",
+      "license_or_terms": "No open-data redistribution licence verified; public interface alone does not authorize embedding",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Certification/model updates",
+      "limitations": "Load-point/temperature conditions essential; no complete off-design map or arbitrary operating range from rating points",
+      "priority": "P2",
+      "integration_mode": "Reviewed thermal model-point import only after API/rights gate",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E15"
+      ],
+      "mapping_scope": "Certified rating points/identity, not continuous operating-envelope coverage.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH11",
+      "title": "Eurovent certified HVACR directory",
+      "url": "https://www.eurovent-certification.com/en/advancedsearch/result?program=AC",
+      "publisher": "Eurovent Certita Certification",
+      "geography": [
+        "Europe: listed HVACR market scope"
+      ],
+      "parameter_families": [
+        "chiller/heat-pump certified capacities",
+        "HVAC efficiency and performance ratings",
+        "model/certificate metadata"
+      ],
+      "format": "Web search, CSV export, product performance reports",
+      "access": "Public search; full export requires registration/email approval and can request marketing/data consent; not requested",
+      "license_or_terms": "Copyrighted directory; exact legal/data-export terms not verified",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Certification/list updates",
+      "limitations": "No automatic scraping or consent submission; certified point is not universal operating map; no redistribution assumed",
+      "priority": "P2",
+      "integration_mode": "Reference/authorized user-supplied thermal records until rights cleared",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E15"
+      ],
+      "mapping_scope": "Published certified rating subset; plant-specific complete map not guaranteed.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH12",
+      "title": "AHRI certified product directory and licensed data service",
+      "url": "https://www.ahrinet.org/certification/license-ahri-directory-data",
+      "publisher": "Air-Conditioning Heating and Refrigeration Institute",
+      "geography": [
+        "North America: US/Canada and listed matched-system market scope"
+      ],
+      "parameter_families": [
+        "HVAC matched-system certified ratings",
+        "chiller/heat-pump capacity and efficiency",
+        "certification references"
+      ],
+      "format": "Public search/limited CSV; licensed bulk and paid API add-ons",
+      "access": "Public exports limited; embedding in software/databases requires signed Data Subscription agreement",
+      "license_or_terms": "Official page expressly disallows using public-directory downloads in software, databases or services without a signed licence",
+      "terms_url": "https://www.ahrinet.org/certification/license-ahri-directory-data",
+      "redistribution_status": "restricted",
+      "cadence": "Programme/list updates",
+      "limitations": "Not an open seed source; no purchase/application/contact; do not bypass250-record public export limit or embed certificate copies",
+      "priority": "defer",
+      "integration_mode": "Reference links only unless separately authorized/licensed in future",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E15"
+      ],
+      "mapping_scope": "Reference mapping only; integration prohibited without separate AHRI licence.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH13",
+      "title": "EPA catalog of CHP technologies",
+      "url": "https://www.epa.gov/chp/chp-technologies",
+      "publisher": "US Environmental Protection Agency",
+      "geography": [
+        "North America: United States reference assumptions"
+      ],
+      "parameter_families": [
+        "genset/reciprocating-engine efficiency ranges",
+        "turbine/microturbine/fuel-cell performance",
+        "power-to-heat ratios and technical bounds"
+      ],
+      "format": "Public PDF reports and tables",
+      "access": "Public report downloads",
+      "license_or_terms": "Government report; inspect report-specific third-party material/notices before publishing extracts",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Historical catalogue;2017 full edition, not live equipment pricing",
+      "limitations": "Class-level reference not specific OEM settings; fuel HHV/LHV, scale and temperature matter; historical costs not current quotes",
+      "priority": "P1",
+      "integration_mode": "Small dated illustrative technical archetypes with source/boundary, cross-reference cost research",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "E10",
+        "E11",
+        "E21"
+      ],
+      "mapping_scope": "Dated class-level technical ranges; not every commitment/governor/fuel property.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH14",
+      "title": "SimBench reference grids and component/profile data",
+      "url": "https://simbench.de/en/download/datasets/",
+      "publisher": "SimBench project consortium",
+      "geography": [
+        "Europe: German reference systems"
+      ],
+      "parameter_families": [
+        "reference grid equipment/types",
+        "topology and operating-point fixtures",
+        "load/generation/storage profiles"
+      ],
+      "format": "CSV datasets and pandapower conversion",
+      "access": "Public download; dataset page/documented package available",
+      "license_or_terms": "Open Database License for datasets; attribution/database obligations retained",
+      "terms_url": "https://simbench.de/en/download/",
+      "redistribution_status": "open_verified",
+      "cadence": "Versioned releases/scenarios",
+      "limitations": "Reference/benchmark grids, not site inventories or OEM warranties; software converter licence differs from database licence",
+      "priority": "P2",
+      "integration_mode": "Separate synthetic/reference dataset namespace and regression fixtures",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04",
+        "G08",
+        "E14"
+      ],
+      "mapping_scope": "Reference equipment/profile scope; not actual project or universally representative EU demand.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH15",
+      "title": "SMART-DS US synthetic distribution networks",
+      "url": "https://catalog.data.gov/dataset/smart-ds-synthetic-electrical-network-data-opendss-models-for-sfo-gso-and-aus",
+      "publisher": "National Laboratory of the Rockies / US DOE",
+      "geography": [
+        "North America: US SFO/Greensboro/Austin synthetic regions"
+      ],
+      "parameter_families": [
+        "OpenDSS reference component/topology data",
+        "15-minute P/Q profiles",
+        "feeder powerflow benchmark results"
+      ],
+      "format": "Regional OpenDSS files,CSV,Parquet via OEDI/S3",
+      "access": "Public catalogue/S3 partitions; no bulk download performed",
+      "license_or_terms": "Specific official dataset catalogue records CC-BY4.0; match exact resource and attribution before use",
+      "terms_url": "https://creativecommons.org/licenses/by/4.0/",
+      "redistribution_status": "open_verified",
+      "cadence": "Versioned datasets; catalogue modified2024-01-02 at research",
+      "limitations": "Synthetic not actual utility/customer network; generic OEDI bucket licence metadata may differ, resolve selected resource; no manufacturer warranty",
+      "priority": "P2",
+      "integration_mode": "One small US reference feeder and component conversion/oracle fixture, not generic catalogue default",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04",
+        "G08",
+        "E14"
+      ],
+      "mapping_scope": "Synthetic feeder equipment/profile scope; not all US/Canada/Mexico equipment or site demand.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH16",
+      "title": "EU RfG and national implementation reference",
+      "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32016R0631",
+      "publisher": "European Union; ENTSO-E implementation guidance",
+      "geography": [
+        "Europe: EU/EEA and applicable synchronous areas; national limits required"
+      ],
+      "parameter_families": [
+        "grid-code applicability",
+        "frequency/voltage/reactive/ride-through requirements",
+        "jurisdiction and clause-version metadata"
+      ],
+      "format": "Official legislation HTML/PDF/ELI plus implementation documents",
+      "access": "Public legal references; national/connection decisions separate",
+      "license_or_terms": "Check official reuse notice for each legal/guidance extract; do not assume all linked national guidance shares rights",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Legislative amendments and national/operator decisions",
+      "limitations": "Non-exhaustive requirements need national/operator choices; guidance/drafts are not binding law; cannot produce one universal Europe preset",
+      "priority": "P1",
+      "integration_mode": "Source-backed reviewed requirement profiles with exact jurisdiction, asset class, effective date and clause",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G10",
+        "G11",
+        "O04"
+      ],
+      "mapping_scope": "Applicable binding clauses and national choices, not OEM trip/controller settings.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH17",
+      "title": "NESO Grid Code and grid-forming guidance",
+      "url": "https://www.neso.energy/industry-information/codes/grid-code-gc/grid-code-documents",
+      "publisher": "National Energy System Operator",
+      "geography": [
+        "Europe: Great Britain"
+      ],
+      "parameter_families": [
+        "GB grid-code applicability and limits",
+        "grid-forming assessed phenomena/test references",
+        "code and guidance version metadata"
+      ],
+      "format": "Versioned PDF and live digital code",
+      "access": "Public reference; no document reproduction or rights request performed",
+      "license_or_terms": "Live Grid Code copyright/reproduction restrictions with limited statutory/copyright-law exceptions; not blanket open data",
+      "terms_url": "https://dcm.neso.energy/",
+      "redistribution_status": "restricted",
+      "cadence": "Revision/amendment based; Issue6 Rev46 dated2026-10-08 observed",
+      "limitations": "Use cited source/version; no automatic raw-document redistribution or claim of universal GFM compliance; drafts/guidance distinct",
+      "priority": "P2",
+      "integration_mode": "Reference-only by default; reviewed extracted requirements only with appropriate rights/applicability",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G10",
+        "G11",
+        "O01",
+        "O04"
+      ],
+      "mapping_scope": "Code/guidance requirements/phenomena only; no plant controller gains or unrestricted reproduction.",
+      "research_file": "research/technical-sources.json"
+    },
+    {
+      "source_id": "TECH18",
+      "title": "WECC generic electrical/control model specifications",
+      "url": "https://www.wecc.org/committees/mvs",
+      "publisher": "Western Electricity Coordinating Council",
+      "geography": [
+        "North America: Western Interconnection model context"
+      ],
+      "parameter_families": [
+        "generic renewable/BESS/load model structures",
+        "dynamic parameter schemas and limitations",
+        "model approval/version references"
+      ],
+      "format": "Public PDF specifications/memos",
+      "access": "Public model/reference pages; no proprietary plant model requested",
+      "license_or_terms": "Public access; exact document/model-code reuse rights require review; simulator/OEM licences separate",
+      "terms_url": null,
+      "redistribution_status": "public_terms_review",
+      "cadence": "Model revisions/approval process",
+      "limitations": "Generic structures/defaults are not plant-specific validated parameters or OEM EMT models; model family/version and limitations essential",
+      "priority": "P2",
+      "integration_mode": "Schema/reference-test inputs for separately admitted dynamics capability; illustrative presets only",
+      "reviewed_at": "2026-10-20",
+      "mapped_family_ids": [
+        "G07",
+        "G11",
+        "O01",
+        "O02",
+        "O03",
+        "O04"
+      ],
+      "mapping_scope": "Generic model structures/parameter schemas and illustrative defaults only; not calibrated OEM plant settings.",
+      "research_file": "research/technical-sources.json"
+    }
+  ]
+}

@@ -1,0 +1,383 @@
+[
+  {
+    "source_id": "MAC-ECB",
+    "title": "ECB Data Portal exchange rates and statistical reference series",
+    "url": "https://data.ecb.europa.eu/help/getting-data-web-services-sdmx",
+    "publisher": "ECB",
+    "geography": [
+      "Europe",
+      "EUR reference rates incl USD/CAD/MXN"
+    ],
+    "parameter_families": [
+      "FX",
+      "reference interest rates"
+    ],
+    "format": [
+      "SDMX",
+      "CSV",
+      "XML"
+    ],
+    "access": "Public statistical API; bounded requests",
+    "license_or_terms": "ESCB free public-statistics reuse with attribution, unchanged source statistics; third-party exclusions",
+    "terms_url": "https://www.ecb.europa.eu/stats/ecb_statistics/governance_and_quality_framework/html/usage_policy.en.html",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Daily/monthly depending on series; revisions possible",
+    "limitations": "Preserve original observations; derived currency conversions separately labelled and rights-reviewed. Reference FX is not project financing/forward price; FX conversion alone is not local cost calibration.",
+    "priority": "P1",
+    "integration_mode": "Pinned economic series + explicit derived money-basis transformation",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-EUROSTAT",
+    "title": "Eurostat HICP/PPI and non-household energy-price benchmarks",
+    "url": "https://ec.europa.eu/eurostat/en/web/user-guides/data-browser/api-data-access/api-introduction",
+    "publisher": "Eurostat",
+    "geography": [
+      "EU/EFTA; dataset-specific other Europe"
+    ],
+    "parameter_families": [
+      "inflation",
+      "producer prices",
+      "industrial electricity/gas benchmark"
+    ],
+    "format": [
+      "JSON-stat",
+      "SDMX",
+      "CSV"
+    ],
+    "access": "Public API/download",
+    "license_or_terms": "Commercial/noncommercial reuse with attribution; individual notices and third-party/geography exceptions",
+    "terms_url": "https://ec.europa.eu/eurostat/help/copyright-notice",
+    "redistribution_status": "open_verified",
+    "cadence": "Monthly indices; energy-price periods depend on table",
+    "limitations": "Use exact geo/table/consumption band/tax basis. National statistical averages are not site tariffs. No blanket rights assertion for all non-European or third-party data.",
+    "priority": "P1",
+    "integration_mode": "Economic series and benchmark items; no fabricated tariff schedule",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-BLS",
+    "title": "BLS public CPI/PPI/labor statistics",
+    "url": "https://www.bls.gov/developers/home.htm",
+    "publisher": "US Bureau of Labor Statistics",
+    "geography": [
+      "United States"
+    ],
+    "parameter_families": [
+      "inflation",
+      "producer price escalation",
+      "labor cost"
+    ],
+    "format": [
+      "JSON",
+      "XLSX"
+    ],
+    "access": "API v1 public limited; v2 registration/limits",
+    "license_or_terms": "API terms and government-data notices; attribution/retrieval date; no implied endorsement",
+    "terms_url": "https://www.bls.gov/developers/termsOfService.htm",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Monthly/quarterly by series",
+    "limitations": "Select the appropriate cost index; general CPI is not automatically equipment-specific. A typed read-only POST connector needs separate admission from existing GET-only web fetch.",
+    "priority": "P1",
+    "integration_mode": "Versioned economic series; bounded documented connector",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-STATCAN",
+    "title": "Statistics Canada Web Data Service",
+    "url": "https://www.statcan.gc.ca/en/developers/wds",
+    "publisher": "Statistics Canada",
+    "geography": [
+      "Canada"
+    ],
+    "parameter_families": [
+      "CPI",
+      "industrial prices",
+      "labor and energy statistics"
+    ],
+    "format": [
+      "JSON",
+      "CSV",
+      "SDMX"
+    ],
+    "access": "Public WDS and table downloads",
+    "license_or_terms": "Statistics Canada Open Licence; source/adaptation notice, no endorsement and third-party exceptions",
+    "terms_url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence",
+    "redistribution_status": "open_verified",
+    "cadence": "By table; revised releases",
+    "limitations": "Select province/product/calendar/basis. Public statistics do not supply a private site meter, tariff, debt quote or actual maintenance history.",
+    "priority": "P1",
+    "integration_mode": "Canada-specific reference series with original table/PID and release",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-BOC",
+    "title": "Bank of Canada Valet",
+    "url": "https://www.bankofcanada.ca/valet/docs/",
+    "publisher": "Bank of Canada",
+    "geography": [
+      "Canada"
+    ],
+    "parameter_families": [
+      "FX",
+      "interest-rate reference"
+    ],
+    "format": [
+      "JSON",
+      "CSV",
+      "XML"
+    ],
+    "access": "Public API with usage limits",
+    "license_or_terms": "Bank terms require attribution; data/third-party and permitted-use conditions need scoped review",
+    "terms_url": "https://www.bankofcanada.ca/terms/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Daily/monthly by series",
+    "limitations": "Indicative rates not transaction quotes, WACC or loan offers; do not imply Bank endorsement or mirror third-party series without rights.",
+    "priority": "P1",
+    "integration_mode": "Pinned CAD reference data; no implicit finance assumptions",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-INEGI",
+    "title": "INEGI indicators and downloadable statistics",
+    "url": "https://www.inegi.org.mx/servicios/api-indicadores/",
+    "publisher": "INEGI",
+    "geography": [
+      "Mexico"
+    ],
+    "parameter_families": [
+      "INPC inflation",
+      "INPP producer prices",
+      "economic indices"
+    ],
+    "format": [
+      "JSON",
+      "XML",
+      "CSV downloads"
+    ],
+    "access": "API token for indicator service; public downloads available",
+    "license_or_terms": "INEGI free-use terms, attribution and transformed-data notices; exact selected item terms to retain",
+    "terms_url": "https://www.inegi.org.mx/inegi/terminos.html",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Monthly/periodic by indicator",
+    "limitations": "Do not apply a US inflation series by default to Mexican costs. API tokens remain server-owned credentials.",
+    "priority": "P1",
+    "integration_mode": "Mexico-specific economic series and explicitly chosen cost escalation",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "MAC-BANXICO",
+    "title": "Banco de Mexico SIE time-series API",
+    "url": "https://www.banxico.org.mx/SieAPIRest/swagger/index.html",
+    "publisher": "Banco de Mexico",
+    "geography": [
+      "Mexico"
+    ],
+    "parameter_families": [
+      "MXN FX",
+      "reference rates"
+    ],
+    "format": [
+      "JSON",
+      "REST"
+    ],
+    "access": "Token-managed public API; catalog visible without data request",
+    "license_or_terms": "Public API documentation verified; redistribution terms not established in this research",
+    "terms_url": "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/catalogoSeries",
+    "redistribution_status": "unknown",
+    "cadence": "Daily/periodic by series",
+    "limitations": "Official catalog includes SF43718 MXN/USD FIX. Do not treat policy/TIIE rate as project debt or assert sublicense rights from API availability.",
+    "priority": "P2",
+    "integration_mode": "Metadata-first connector candidate; scoped rights review before distribution",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "PRO-ERA5",
+    "title": "Copernicus ERA5 single-level hourly reanalysis",
+    "url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+    "publisher": "ECMWF/Copernicus C3S",
+    "geography": [
+      "Europe",
+      "North America (subset of global dataset)"
+    ],
+    "parameter_families": [
+      "weather",
+      "renewable resource",
+      "temperature stress",
+      "cooling weather"
+    ],
+    "format": [
+      "GRIB",
+      "derived NetCDF as supported"
+    ],
+    "access": "CDS account, dataset terms acceptance and API; no bulk download performed",
+    "license_or_terms": "Dataset page labels CC-BY licence; retain exact applicable licence/version and attribution",
+    "terms_url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels?tab=overview",
+    "redistribution_status": "open_verified",
+    "cadence": "Hourly values; daily provisional updates then final revisions",
+    "limitations": "Reanalysis is not a site sensor or future weather forecast; ERA5T can change. Preserve weather-year identity, gridding, provisional/final state and source correlation. Reuse native atlite pipeline.",
+    "priority": "P1",
+    "integration_mode": "Source/version-pinned weather references; derived regional profiles through existing tooling",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "PRO-PVGIS",
+    "title": "JRC PVGIS non-interactive API",
+    "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+    "publisher": "European Commission JRC",
+    "geography": [
+      "Europe; verify selected radiation database footprint for NA"
+    ],
+    "parameter_families": [
+      "solar resource",
+      "PV yield",
+      "TMY weather"
+    ],
+    "format": [
+      "JSON",
+      "CSV"
+    ],
+    "access": "Public API, version/rate-limited",
+    "license_or_terms": "API docs verified; underlying radiation database and site reuse terms require dataset-specific review",
+    "terms_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Dataset/model release; query-specific years",
+    "limitations": "Modelled PV is not measured plant output. Pin API and radiation database version and system losses; do not use TMY as a multi-year reliability ensemble.",
+    "priority": "P2",
+    "integration_mode": "Optional profile oracle/source; do not duplicate native renewable-profile engine by default",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "PRO-NSRDB",
+    "title": "NLR NSRDB solar resource APIs",
+    "url": "https://developer.nlr.gov/docs/solar/nsrdb/",
+    "publisher": "National Laboratory of the Rockies",
+    "geography": [
+      "North America; endpoint-specific geographic footprint"
+    ],
+    "parameter_families": [
+      "irradiance",
+      "weather",
+      "solar resource"
+    ],
+    "format": [
+      "CSV",
+      "JSON metadata"
+    ],
+    "access": "Developer key and usage limits; dataset endpoints differ",
+    "license_or_terms": "Public API docs; selected source/model rights and attribution must be checked separately",
+    "terms_url": "https://developer.nlr.gov/docs/solar/nsrdb/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual/versioned model releases; selected temporal resolution",
+    "limitations": "Do not infer every endpoint covers all Canada/Mexico. Preserve local/UTC, interval and leap-day options; API credentials never in model-visible prompts/exports.",
+    "priority": "P2",
+    "integration_mode": "Optional bounded source connector and native profile generation",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "PRO-COMSTOCK",
+    "title": "ComStock public end-use profiles",
+    "url": "https://comstock.nlr.gov/page/datasets",
+    "publisher": "NLR/US DOE",
+    "geography": [
+      "United States"
+    ],
+    "parameter_families": [
+      "commercial building load shapes",
+      "cooling and end-use shares",
+      "flexibility scenarios"
+    ],
+    "format": [
+      "CSV",
+      "Parquet",
+      "OEDI metadata"
+    ],
+    "access": "Public release downloads; no bulk retrieval performed",
+    "license_or_terms": "Public release index verified; exact OEDI item licence not retrieved due429; software licence is not data permission",
+    "terms_url": "https://data.openei.org/submissions/4520",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Versioned releases with weather and model year",
+    "limitations": "Synthetic calibrated building-stock outputs, not measured individual factories/DC/mines. Release notices report e.g missing California water heating and weather issues in particular releases; preserve exclusions.",
+    "priority": "P2",
+    "integration_mode": "Curated synthetic archetypes with release/weather/upgrade and known-issue metadata",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "PRO-OPSD",
+    "title": "OPSD contributed household/small-business measurements",
+    "url": "https://data.open-power-system-data.org/household_data/",
+    "publisher": "Open Power System Data / CoSSMic",
+    "geography": [
+      "Southern Germany; selected small businesses/households"
+    ],
+    "parameter_families": [
+      "measured sample load/PV traces",
+      "profile QA fixtures"
+    ],
+    "format": [
+      "CSV",
+      "XLSX",
+      "SQLite"
+    ],
+    "access": "Public versioned downloads; metadata only inspected",
+    "license_or_terms": "Dataset page declares Creative Commons Attribution-International; resolve exact version in pinned datapackage before packaging",
+    "terms_url": "https://data.open-power-system-data.org/household_data/",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Archived release2020-04-15",
+    "limitations": "Small historical sample, not a regional industrial default. Values may be interval energy/cumulative-derived rather than MW; preserve interpolation/missing-data flags. Do not reidentify premises.",
+    "priority": "P2",
+    "integration_mode": "Small reference/QA fixture or explicitly scoped shape; never generic mine/DC profile",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "ENV-EGRID",
+    "title": "US EPA eGRID electricity emissions factors",
+    "url": "https://www.epa.gov/egrid",
+    "publisher": "US EPA",
+    "geography": [
+      "United States"
+    ],
+    "parameter_families": [
+      "generation emissions intensity",
+      "grid electricity factor benchmark"
+    ],
+    "format": [
+      "XLSX",
+      "CSV/summary tables as released"
+    ],
+    "access": "Public downloads",
+    "license_or_terms": "EPA official FAQ states eGRID data public domain and commercial/noncommercial use allowed",
+    "terms_url": "https://www.epa.gov/egrid/frequent-questions-about-egrid",
+    "redistribution_status": "open_verified",
+    "cadence": "Edition based on a specified data year",
+    "limitations": "Annual geographic average is not hourly marginal emissions or verified location/time-matched green-fuel eligibility. Denominator/gases/region/year must match.",
+    "priority": "P1",
+    "integration_mode": "Versioned emissions-factor benchmark with explicit accounting boundary",
+    "research_date": "2026-10-20"
+  },
+  {
+    "source_id": "ENV-EEA",
+    "title": "EEA electricity generation GHG intensity",
+    "url": "https://www.eea.europa.eu/en/analysis/indicators/greenhouse-gas-emission-intensity-of-1",
+    "publisher": "European Environment Agency",
+    "geography": [
+      "Europe; selected reported countries"
+    ],
+    "parameter_families": [
+      "electricity generation GHG intensity"
+    ],
+    "format": [
+      "Indicator data downloads",
+      "CSV as provided"
+    ],
+    "access": "Public indicator/data catalog",
+    "license_or_terms": "EEA CC-BY material policy, dataset notices and third-party exclusions",
+    "terms_url": "https://www.eea.europa.eu/en/legal-notice",
+    "redistribution_status": "public_terms_review",
+    "cadence": "Annual/revised inventory releases",
+    "limitations": "Country gross-generation average not site marginal intensity; distinguish production vs consumption mix and preserve underlying inventory/Eurostat provenance.",
+    "priority": "P2",
+    "integration_mode": "Versioned emissions reference; separate from carbon market price",
+    "research_date": "2026-10-20"
+  }
+]

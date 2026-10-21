@@ -1,0 +1,83 @@
+# Outage, reliability and maintenance library research
+
+Date: 2026-10-20 (Europe/Berlin). Geography: Europe and North America only. Status: primary-source research; no datasets imported, no rates estimated, no commercial data purchased, no accounts created and no numerical tests run. Machine-readable catalogue: [reliability-sources.json](reliability-sources.json), 18 source families.
+
+## Recommendation
+
+Build three distinct library layers, reusing GridSpine's versioned library infrastructure:
+
+1. **Reliability parameter sets:** exact dated fleet/component statistics or published planning assumptions, with rate definition, exposure, applicability and uncertainty. These can become reviewed asset input proposals.
+2. **Event and availability archives:** outage/derating notices, revisions, restoration events and weather context. These support historical replay and carefully reviewed estimation; they are not automatically failure-rate parameter sets.
+3. **Supply-quality benchmarks:** utility/country SAIDI/SAIFI/CAIDI and related indices. These provide context and calibration checks, not component failure or repair distributions.
+
+Start with source provenance and basis validation, then a few curated references and fixture importers. Public outage data is useful, but does **not** provide a complete open CMMS/RAM library for UPS, BESS, process equipment or customer plants. Customer/vendor logs and independently validated assumptions remain necessary.
+
+## Match the native model
+
+Native `pypsa-gui/backend/services/adequacy/occurrence.py` already resolves `outage_rate_value`, `outage_rate_basis` (`FOR` or `EFORd`) and `mttr_hours`, with per-carrier screening defaults. Several defaults cite approximate NERC2019–2023 class averages; this is source-labelled approximation, not evidence of exact table ingestion or validation.
+
+- Preserve FOR versus EFORd. Their denominators differ; service/reserve/demand exposure is needed for conversion. Never silently relabel one as the other.
+- `p_max_pu_includes_outages` prevents forced-outage double counting. Every imported availability profile must say whether it already includes mechanical outages/deratings, rather than apply another generic rate automatically.
+- Existing defaults omit VRE mechanical failure in the generation library; transmission circuits use their own exposure semantics. Do not paste a generator-shaped probability into per-km-year transmission statistics.
+- Planned-outage calendars are explicitly deferred in native `RAM_NOTE`. A maintenance-data importer is new feature work, not an existing calendar API.
+- Preserve missing values. Lack of data must not become zero outage probability, zero repair time or a generic campus uptime guarantee.
+
+## Shortlisted primary sources
+
+| Source | Useful content / access | Recommended role and limitation |
+| --- | --- | --- |
+| [ENTSO-E Transparency Platform](https://www.entsoe.eu/data/transparency-platform/) | Planned/forced generation and transmission unavailability; XML/API and platform downloads, API registration/token required | Historical event/replay archive. Scope thresholds, reporting changes, revisions and overlap matter. Dataset reuse is covered by a **specific CC-BY4 reuse list**, not blanket platform licensing. |
+| [ENTSO-E ERAA modelling data](https://www.entsoe.eu/eraa/2025/modelling-data/) | Downloadable planning inputs and thermal-maintenance profiles, linked methodology/assumptions | High-priority European **scenario-assumption** reference. Not observations of the user's generator. Pin exact edition, table and model basis; reuse terms must be checked for the chosen files. |
+| [Elexon Insights REMIT](https://bmrs.elexon.co.uk/api-documentation/endpoint/REMIT) | GB unit unavailability notices and generation-availability APIs | API historical-event adapter; revisions, cancellations and availability forecasts need separate states. Check dataset licence and API terms; Elexon has open/public/shared classifications, so avoid a blanket all-data licence assertion. |
+| [RTE Unavailability Additional Information](https://data.rte-france.org/web/guest/catalog/-/api/generation/Unavailability-Additional-Information/v7.0) | French generation/transmission unavailability and market-impact information; API subscription/OAuth setup | France-specific event source. RTE republishes participant data; notices are not measured failures or a maintenance prescription. Dataset/API terms must be reviewed before redistribution. |
+| [Nordic/Baltic grid disturbance statistics](https://www.entsoe.eu/publications/system-operations-reports/) | Annual reports including equipment, disturbance and availability statistics; [2024 PDF](https://eepublicdownloads.entsoe.eu/clean-documents/SOC%20documents/Nordic/2024/Nordic_and_Baltic_Grid_Disturbance_Statistics_2024.pdf) | Targeted transmission reference after table/denominator review. Per-circuit/per-length/per-year exposure and voltage class must survive extraction. Not a distribution/campus default. |
+| [CEER/ECRB quality-of-supply benchmarking](https://www.ceer.eu/publication/7th-ceer-ecrb-benchmarking-report-on-the-quality-of-electricity-and-gas-supply/) | Country continuity indices with planned/unplanned and exceptional-event distinctions; reports | Cross-country benchmark library. Definitions, exclusions and reporting windows vary; no direct SAIDI→MTTR or SAIFI→unit failure-rate mapping. Publication is public, unrestricted database redistribution not established here. |
+| [Enedis supply-quality data](https://opendata.enedis.fr/datasets/duree-moyenne-de-coupure-bt) | BT/HTA duration/frequency datasets, CSV/API; catalog explicitly labels **Open Licence2.0**, update cadence twice yearly | Strong small open-data pilot for France. Catalog states exceptional events and RTE are excluded; retain that boundary and network scope. |
+| [Bundesnetzagentur supply interruptions](https://www.bundesnetzagentur.de/EN/Areas/Energy/SecurityOfSupply/QualityOfSupply/start.html) | German aggregate SAIDI and explanatory definitions; tables/reports | Country/regulatory benchmark. Different SAIDI variants and >3-minute/exclusion rules are material. Do not confuse the restricted operator reporting portal with a public retrieval API. |
+| [UKPN Interruptions Incentive Scheme](https://ukpowernetworks.opendatasoft.com/explore/dataset/ukpn-iis/information/) | Fault/restoration events, customers affected, causes/equipment and substation linkage | Valuable detailed DNO pilot candidate, but official route currently says **login required**. Resolve actual access and exact dataset licence first; portal-wide CC-BY examples do not prove this dataset's current terms. |
+| [NERC GADS conventional brochures](https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/generating-unit-statistical-brochures) | Public fleet statistics, definitions and reporting-cohort distinctions; [cause-code reports](https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-conventional/gads-cause-code-reports) aggregate causes | Highest-value NA fleet reference for native rate provenance. Full unit-level data/products are not equivalent to public brochures. NERC is not a US-government public-domain publisher; exact reuse permission remains a gate. |
+| [NERC TADS](https://prod.nerc.com/programs/reliability-assessment--performance-analysis/transmission-availability-data-system) | Transmission inventory/outage aggregate reports/dashboards and methodology | Transmission benchmark/reference; detailed reporting is restricted. Current data-request changes and discontinuation of planned-outage collection in prior TADS scope mean it is not a general maintenance-calendar source. |
+| [EIA861 reliability](https://www.eia.gov/electricity/data/eia861/) | Annual utility-level reliability files in ZIP/XLSX, definitions and reporting method/major-event flags | Best straightforward US supply-benchmark ingestion pilot. [EIA reuse policy](https://www.eia.gov/about/copyrights_reuse.php) permits data reuse with acknowledgment, with separately protected third-party materials excluded. Not component rates or full outage chronology. |
+| [DOE417](https://doe417.energy.gov/) | Reportable electric emergency/disturbance events and public summary products | Tail-event/stress context. Reporting thresholds, security omissions and changed endpoints apply; not all outages and no denominator for ordinary component reliability. Verify current public summary endpoints before automation. |
+| [NOAA NCEI Storm Events](https://www.ncei.noaa.gov/access/storm-events-database/) | US county/event weather reports; bulk CSV/cloud data | Open hazard covariates for correlation/stress studies. [Federal catalogue](https://catalog.data.gov/dataset/ncdc-storm-events-database) lists CC0. Weather reports do not themselves prove an electrical outage or causal failure probability. |
+| [Ontario OEB scorecards](https://www.oeb.ca/open-data/electricity-distributor-performance-scorecard) | Annual distributor-performance XML, including reliability; [open-data page](https://www.oeb.ca/ontarios-energy-sector/open-data) links Ontario Open Government Licence | Good Canadian ingestion pilot. Normalize scorecard year, definitions and major-event/loss-of-supply exclusions. Ontario is not all Canada. |
+| [CFE distribution planning](https://www.cfe.gob.mx/distribucion/cumplimiento/Documents/Programa%20de%20Ampliaci%C3%B3n%20y%20Modernizaci%C3%B3n%20de%20las%20Redes%20Generales%20de%20Distribuci%C3%B3n%202025-2039.pdf) | Mexico distribution reliability indicators and division/national context; public report | Mexico coverage via curated reference, not automatic rate defaults. Public visibility does not establish unrestricted extract/database redistribution; definitions and source year need review. |
+| [NRC/INL industry-average parameter estimates](https://nrcoe.inl.gov/avgperf/) | Component fail-on-demand/run, maintenance/test unavailability and uncertainty distributions; [2020 report](https://www.osti.gov/biblio/1847110) | Valuable component-statistics/method reference, narrowly nuclear context. Not directly transferable to commercial UPS/gensets/processes. Review contractor/data rights and exact release before extracting a pack. |
+| [NERC GADS Wind](https://www.nerc.com/programs/reliability-assessment--performance-analysis/generating-availability-data-system/gads-wind) and Solar reporting instructions | Public wind metrics/availability summaries and wind/solar reporting definitions; underlying asset reports remain separate | Conditional renewable-availability reference. Do not equate weather resource variability with mechanical outages or assume public solar distributions exist because reporting instructions do. Preserve native outage-in-profile guards and review report reuse terms. |
+
+Licence/access statuses in JSON are deliberately conservative. The sources were web-inspected, not each API executed or every attachment parsed. An explicit catalogue licence/link supports an open-data recommendation; a public PDF or page alone does not authorize repackaging.
+
+## Parameters worth storing
+
+**Statistical parameter record:** equipment class and technology; geography/climate/voltage; vintage/age; fleet/sample size; observation dates; operating/demand exposure; metric name and denominator (`FOR`, `EFORd`, fail/start demand, failures/device-year, failures/circuit-km-year); derating treatment; mean and distribution/quantiles/confidence interval; repair/logistics model; planned/test/maintenance distinction; source table and extraction/version.
+
+**Event record:** external asset identifiers and source; planned/forced/unknown; announced, revised, cancelled and actual state; event/revision ID; publication time and effective interval in UTC plus original timezone; unavailable MW/derating; cause/equipment; restoration stages; affected customers; censoring, reportability and exceptional-event flags. Do not store duplicate revisions as separate failures.
+
+**Benchmark record:** utility/territory/country, year, SAIDI/SAIFI/CAIDI units; customer count if present; method and thresholds; major events/loss-of-supply/planned-event inclusions; source and edition. Use only as a benchmark unless a separately reviewed model translates it.
+
+**Private maintenance record:** site asset ID, manufacturer/model, operating hours/cycles, service action, scheduled downtime, inspection/condition, failure mode and repair duration, service contractor/logistics and data rights. Keep tenant scoped. Native planned-calendar support and inference/estimation require separate implementation and validation.
+
+## Important gaps and admission rules
+
+- Publicly calibrated cross-sector UPS/BESS protection/control/process failure and repair data is sparse. Generic vendor MTBF/warranty claims are not a validated fleet FOR+MTTR pair. Maintenance interval is not replacement life or random failure rate.
+- Datacenter surveys and nuclear emergency-diesel statistics have selection/operating/maintenance regimes unlike a user's campus. Treat these as references or ranges with applicability review, never silent priors presented as measured.
+- Do not infer common-cause probabilities from independent marginal rates. Weather/event links need geographical exposure, reporting-bias treatment and held-out calibration. Correlated-outage support itself is not established by importing a dataset.
+- Native class-default replacement should require exact source/table/basis, valid date and review. Changing a default never silently updates pinned projects or converts old evidence into checked output.
+- Event-to-rate estimation must explicitly account for unit population, observation exposure, censored/revised records, reported-vs-unreported events, planned outages, deratings and seasonality. Otherwise keep the event archive as replay/context only.
+- A new EFORd or restoration-distribution profile should join existing assurance and result contracts. No blanket claim of checked LOLE or uninterrupted-service proof follows from a source import.
+
+## Prioritized implementation slices
+
+1. **P0 provenance and semantics:** add approved reliability-parameter and supply-benchmark kinds to the existing store, separating event archives from parameter sets. Expose basis/applicability/uncertainty and current approximate defaults honestly. These kind names are proposed, not current APIs.
+2. **P1 small open pilot:** EIA861 + OEB annual XML + Enedis licensed dataset, retaining every definition/exclusion. They add useful geographic context without inventing component inputs.
+3. **P1 curated class assumptions:** exact reviewed ERAA tables and NERC public brochure references, subject to file terms. Preserve Europe's/NA's differences; do not regionalize unreviewed US rates to Canada/Mexico or Europe.
+4. **P1/P2 event archive:** bounded ENTSO-E/Elexon retrieval, then RTE/UKPN when access/licensing resolves. Use offline fixtures, pagination/rate limits, revisions/deduplication and provenance. No new blanket web access or account creation.
+5. **P2 depth:** Nordic/TADS transmission references, NRC nuclear component studies, DOE417/NOAA common-event stress evidence and Mexican report extracts after terms/semantic review. Add private CMMS imports only with ownership and data-quality safeguards.
+
+Do not prioritize a new reliability engine simply to consume these data. The first useful outcome is source-backed, correctly scoped native inputs and transparent benchmark context.
+
+## Validation checklist
+
+Fixtures should test exact FOR/EFORd and hours/days/percent conversions; no SAIDI/component conversion; excluded major events and unknown values; per-km versus per-device exposure; UTC/DST and partial intervals; revision/cancellation deduplication; forecast versus actual unavailability; derating overlap; data already containing outages; incomplete fleet coverage; changing methodology; uncertainty/sample size; tenant ownership and source rights; stale pins and downstream invalidation. At least one genuine small file import per admitted source adapter must execute; merely reading a source webpage does not certify ingestion.
+
+Additional candidate, not admitted to the main18: [DOE event-correlated outage catalogue](https://catalog.data.gov/dataset/event-correlated-outage-dataset-in-america) references EAGLE-I/DOE417 integration, but direct OEDI submission6458 returned429 during this review. Exact file licence/access and measurement completeness remain unverified; evaluate later rather than treating it as ready.

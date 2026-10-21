@@ -1,0 +1,41 @@
+{
+  "baseline": "90c7b8ffcec104397383361212da0aa21f545f1b",
+  "files": [
+    {
+      "path": ".scratch/ipp-renewables-bess/spec.md",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "ee04aba28bb14d73715d69670b4a350b12be35b0dee223c94313123b9de5c647",
+      "cache_file": ".scratch__ipp-renewables-bess__spec.md"
+    },
+    {
+      "path": ".scratch/project-workflow/design.md",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "b88f646e6a1effe78602f7679ae6c0b40a654a62e941cab2c9e49cc4e73c957e",
+      "cache_file": ".scratch__project-workflow__design.md"
+    },
+    {
+      "path": ".scratch/project-workflow/library-and-live-lookup.md",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "86f96daf796f0153ca107fee4b2549a6f93f295d180b231be545a9a02d5d1c68",
+      "cache_file": ".scratch__project-workflow__library-and-live-lookup.md"
+    },
+    {
+      "path": ".scratch/checked-results/audit.md",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "f6d5e30255dcccc0fa9cd254e1d037ebc8508e73829d6de250fdf8995f4bad0a",
+      "cache_file": ".scratch__checked-results__audit.md"
+    },
+    {
+      "path": "pypsa-gui/backend/services/result_views.py",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "573e4914ec88eae77032a14dd12ef0d23679fc5d488248f2677b238326609c1a",
+      "cache_file": "pypsa-gui__backend__services__result_views.py"
+    },
+    {
+      "path": "pypsa-gui/backend/models/process_unit.py",
+      "source_sha": "90c7b8ffcec104397383361212da0aa21f545f1b",
+      "sha256": "2fbaa6984beb7cdc19390968a5cc6deec297050d977bb48368aaa9cd4688dd3c",
+      "cache_file": "pypsa-gui__backend__models__process_unit.py"
+    }
+  ]
+}
