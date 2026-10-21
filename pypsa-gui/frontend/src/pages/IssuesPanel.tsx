@@ -19,6 +19,7 @@ import { useProjectFlow } from '../hooks/useProjectFlow'
 import { sectionForComponent, sectionMeta } from '../layout/flowSections'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
+import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -104,6 +105,10 @@ export default function IssuesPanel() {
   // the map's routes and the sites' boundaries, computed here from the
   // shared queries and sidecar stores — no map needs to be open.
   const topologyFindings = useTopologyFindings(currentProject)
+
+  // The grid-readiness scorecard (DC 02): shown only when the project has a
+  // saved network to read; a failed read leaves the panel as it was.
+  const { data: gridReadiness } = useGridReadiness()
 
   // Open the offending asset's edit form beside this list (J9). Issues stays
   // open, App.tsx mounts the Properties panel next to it for the selected
@@ -304,6 +309,18 @@ export default function IssuesPanel() {
               {topologyFindings.map((f, i) => (
                 <TopologyFindingRow key={`${f.component.type}:${f.component.name}-${f.kind}-${f.other ?? ''}-${i}`} finding={f} onJumpTo={jumpTo} />
               ))}
+            </div>
+          </PageSection>
+        )}
+        {gridReadiness && (
+          <PageSection
+            title="Grid readiness"
+            hint="Screening against the connection limits and the grid code"
+            bodyClassName=""
+          >
+            <div data-testid="grid-readiness-group">
+              <GridReadinessScorecard data={gridReadiness} mode="expert"
+                onJump={(type, name) => jumpTo(COMPONENT_TYPE_MAP[type] ?? type, name)} />
             </div>
           </PageSection>
         )}
