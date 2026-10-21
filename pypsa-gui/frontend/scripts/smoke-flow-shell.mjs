@@ -134,6 +134,9 @@ async function walk(browser, template, args) {
       }
     }
     const sidebarStates = async label => {
+      // The sidebar reads /flow on mount: wait for it before comparing.
+      await page.waitForFunction(() => document.querySelector('[data-testid="flow-section-project"]')
+        ?.getAttribute('data-state') !== 'unknown', null, { timeout: 20_000 }).catch(() => {})
       for (const id of SECTIONS) {
         check((await byId(`flow-section-${id}`).count()) === 1, `${label} sidebar: section ${id} is there once`)
         if (id === 'readiness' || id === 'results') continue
@@ -150,9 +153,15 @@ async function walk(browser, template, args) {
       }
       await findings.waitFor({ timeout: 15_000 })
       await page.waitForTimeout(800)
-      return page.locator('[data-testid^="issues-section-"]').evaluateAll(els =>
+      const groups = await page.locator('[data-testid^="issues-section-"]').evaluateAll(els =>
         els.map(e => ({ id: e.getAttribute('data-testid').replace('issues-section-', ''),
           rows: e.querySelectorAll('[data-testid="issue-title"]').length })))
+      // The Findings card's own count: no finding may be dropped by the grouping.
+      const head = (await findings.textContent()) ?? ''
+      const total = Number((await page.getByText(/^Findings\s*\d+/).first().textContent())?.match(/\d+/)?.[0] ?? head.match(/\d+/)?.[0])
+      const sum = groups.reduce((n, g) => n + g.rows, 0)
+      if (groups.length) check(sum === total, `issues: the group rows (${sum}) add up to the Findings count (${total})`)
+      return groups
     }
     const verdictOf = f => {
       const v = f.verdicts?.optimisation
