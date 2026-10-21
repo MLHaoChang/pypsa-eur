@@ -1562,6 +1562,34 @@ TOOLS: list[dict[str, Any]] = [
          "year": {"type": "integer"}},
         ["project_id", "archetype", "loads"],
     ),
+    _t(
+        "generate_availability_profile",
+        "Generate a generator availability bound into the pending store "
+        "(nothing changes until apply_generated_profile, which writes it to "
+        "the bound it states). Kinds: maintenance → p_max_pu "
+        "(params.windows [{from, to, available}] with MM-DD ends repeating "
+        "every period, or YYYY-MM-DD in the network's year; or params.rule "
+        "{weeks, season: summer|winter}); must_run → p_min_pu (params.share, "
+        "or winter_share + summer_share, or monthly: 12 shares); derating → "
+        "p_max_pu (threshold_c, per_k, floor) from the assumed ambient; the "
+        "default threshold, 15 °C, is a gas turbine's ISO rating condition, "
+        "so set another equipment's own rating temperature. "
+        "forced_outages is refused: the reliability study samples outages "
+        "from each asset's rate and repair time. Wind/solar generators are "
+        "refused (their weather profile). Apply warns when it replaces an "
+        "existing series, when a must-run floor exceeds what the bus can "
+        "absorb, and that a floor on a committable unit is a min stable "
+        "level; relay those. `project_id` is the project NAME and must be "
+        "the open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "kind": {"type": "string",
+                  "enum": ["maintenance", "must_run", "derating",
+                           "forced_outages"]},
+         "generators": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "kind", "generators"],
+    ),
 
     # ── Project management (21) ────────────────────────────────────────────
 
@@ -4056,7 +4084,7 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (8)
+    # profile generator (9)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
@@ -4065,6 +4093,8 @@ TOOL_ROUTES: dict[str, list] = {
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
     "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
+    "generate_availability_profile": [
+        ("POST", "/api/projects/{name}/profiles/availability/generate")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],

@@ -651,14 +651,23 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     warnings: list[str] = []
     if run_status == 'completed':
         sections = {'summary': summary}
-        # The fingerprint is the solved inputs'; an edit landing during the
-        # capture would make the section describe other inputs, so drop it.
-        fingerprint = _input_fingerprint(ctx)
-        loadflow = _loadflow_section(ctx, token)
-        if loadflow is not None and _input_fingerprint(ctx) == fingerprint:
-            sections['loadflow'] = loadflow
-        else:
+        # The fingerprint is the solved inputs': the one the solve recorded
+        # under its lock. An edit queued on that lock applies as the solve
+        # releases it, before this publish; then the live inputs are not the
+        # solved ones, and the section would describe other inputs.
+        live = _input_fingerprint(ctx)
+        solved = (getattr(ctx.network, 'meta', None) or {}).get('assistant_solve_input_fingerprint')
+        fingerprint = solved or live
+        if solved is not None and live != solved:
+            warnings.append('inputs_changed_before_publish')
             warnings.append('loadflow_not_captured')
+        else:
+            # An edit landing during the capture also drops it.
+            loadflow = _loadflow_section(ctx, token)
+            if loadflow is not None and _input_fingerprint(ctx) == fingerprint:
+                sections['loadflow'] = loadflow
+            else:
+                warnings.append('loadflow_not_captured')
     try:
         return publish_run(
             token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],

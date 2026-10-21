@@ -326,6 +326,16 @@ def test_from_template_mints_the_series_and_binds_every_block(client, tmp_projec
     assert "library_ref_stale" not in {i["code"] for s in flow["sections"] for i in s["items"]}
 
 
+def test_a_project_reopened_before_its_first_save_binds_its_prices(client, tmp_projects_dir):
+    """The minted series' prices travel in the created project's network.nc: reopened from
+    disk before any save (a restart, another tab), it still prices its export (ticket 02)."""
+    _create(client)
+    assert client.post("/api/simulation/preflight").json()["ok"] is True
+    assert client.get("/api/projects/ipp").status_code == 200           # reload from disk
+    pre = client.post("/api/simulation/preflight").json()
+    assert pre["ok"] is True, pre["issues"]
+
+
 def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_projects_dir):
     """Issue 03's acceptance (spec §8.2), through GET /flow on the created project. `assumed`
     rows read `warning` until confirmed, as on every template (B1's rule), where the table says

@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 273,
+  "tool_count": 274,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2371,6 +2371,33 @@
       ],
       "safety_tier": "execution",
       "schema_sha256": "7e4c6f8350d345f5d6c9908cc9f9944961f4b7ea0c7e540c60046c3b9ce33e97",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_availability_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/availability/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "generators",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "generators"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "f41a3cdcbb9086b9c62ce9d9d12a3804f4abaef4fb91c44d690776d2dde0d146",
       "behavioral_fixture": "pending"
     },
     {
