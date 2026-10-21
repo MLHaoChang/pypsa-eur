@@ -667,6 +667,8 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
     ph = max(screened, key=lambda q: q["step_mw"])
     after = after_mitigation(ph)
     units = ph["units"]
+    # Each unit with its kind and assumed response latency, and where it is (DC 03).
+    detail = [{**x, "target": _target("assets", "StorageUnit", x["unit"])} for x in ph.get("latency", [])]
     words = f"{ph['verdict']} by the smoothing screen: {ph['note']}"
     hz = 1.0 / after["period_s"] if after["period_s"] > 0 else math.inf
     in_band = OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1]
@@ -676,10 +678,11 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
             return
         if row["project_value"] is None or row["limit"] is None or value is None:
             row["after_battery"] = {"value": None, "verdict": "unknown", "rule": dict(rule), "units": units,
-                                    "note": "not known yet: the row itself has no value"}
+                                    "unit_detail": detail, "note": "not known yet: the row itself has no value"}
             return
         row["after_battery"] = {"value": round(value, 4), "verdict": _judge(round(value, 4), row["limit"], rule),
-                                "rule": dict(rule), "units": units, "note": f"{how}; {words}"}
+                                "rule": dict(rule), "units": units, "unit_detail": detail,
+                                "note": f"{how}; {words}"}
 
     # The covered part arrives at the limit; the rest, conservatively, at the
     # row's own steepest rate; the residual oscillation's slope 2π·A/T stands.

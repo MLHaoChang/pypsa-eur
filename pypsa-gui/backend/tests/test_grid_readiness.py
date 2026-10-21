@@ -752,3 +752,12 @@ def test_without_a_battery_or_ups_there_is_no_after_value(tmp_path):
 def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
     _, rows = _envelope_rows(tmp_path, tid)
     assert not any("after_battery" in r for r in rows.values())
+
+
+def test_the_after_value_names_each_unit_its_kind_latency_and_asset(tmp_path):
+    _, rows = _envelope_rows(tmp_path, dc_load={})
+    (u,) = rows["ramp_rate"]["after_battery"]["unit_detail"]
+    assert u == {"unit": "ups_battery", "kind": "ups", "latency_s": 0.0, "basis": "UPS",
+                 "target": {"section": "assets", "panel": None, "component": "StorageUnit",
+                            "entity": "ups_battery", "field": None}}
+    assert "'ups_battery' responds in 0 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]

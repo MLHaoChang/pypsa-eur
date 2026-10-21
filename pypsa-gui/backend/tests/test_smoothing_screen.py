@@ -204,3 +204,55 @@ def test_a_ride_through_shortfall_does_not_eat_the_ups_energy():
     assert ph["reserve_mwh"] == pytest.approx(10.0 - 6.0 * 600.0 / 3600.0)
     assert ph["reserve_mw"] == pytest.approx(60.0)
     assert "blind to in-hour ramps" in ph["note"]
+
+
+# ── response latency from the control preset (DC 03 slice 5) ────────────────
+
+
+@pytest.mark.parametrize("block, latency, basis", [
+    ({"kind": "bess", "control": "gfm_vsm"}, 0.02, "grid forming"),
+    ({"kind": "bess", "control": "gfm_droop"}, 0.02, "grid forming"),
+    ({"kind": "bess", "control": "gfl_pq"}, 0.2, "grid following"),
+    ({"kind": "bess", "control": "gfl_fw", "fw_delay_s": {"value": 0.35, "source": "assumed"}}, 0.35,
+     "fast frequency response"),
+    ({"kind": "bess", "control": "gfl_fw", "values": {"fw_delay_s": 0.1}}, 0.1, "fast frequency response"),
+    ({"kind": "ups", "it_load": ["it"]}, 0.0, "UPS"),
+    ({"kind": "bess"}, None, "control not known"),
+])
+def test_each_control_has_its_assumed_latency(block, latency, basis):
+    out = S.response_latency("u", block)
+    assert out["latency_s"] == latency and out["basis"] == basis and out["kind"] == block["kind"]
+
+
+def test_the_latency_lets_part_of_the_step_through():
+    """A grid-following battery answers after 0.2 s; the 100 MW step rises
+    at 100 MW/s, so 20 MW reach the grid first, however large the battery."""
+    n = _site([("rt", 500.0, 1.0, 1.0, False)])
+    island = {"units": {"rt": {"kind": "bess", "control": "gfl_pq"}}, "requirements": {"sustained_h": {"value": 1.0}}}
+    ph = _phase(100.0)
+    ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
+    (out,) = _screen(n, island, [ph])["phases"]
+    assert out["leak_mw"] == pytest.approx(20.0)
+    after = S.after_mitigation(out)
+    assert after["residual_step_mw"] == pytest.approx(20.0) and after["covered_step_mw"] == pytest.approx(80.0)
+    assert "'rt' responds in 0.2 s (grid following, assumed), so 20 MW reach the grid" in out["note"]
+
+
+def test_the_leak_is_capped_at_the_step_and_a_ups_lets_nothing_through():
+    n = _site([("rt", 500.0, 1.0, 1.0, False)])
+    island = {"units": {"rt": {"kind": "bess", "control": "gfl_fw", "fw_delay_s": 5.0}},
+              "requirements": {"sustained_h": {"value": 1.0}}}
+    ph = _phase(100.0)
+    ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
+    (out,) = _screen(n, island, [ph])["phases"]
+    assert out["leak_mw"] == pytest.approx(100.0)
+    n = _site([("ups", 150.0, 0.5, 1.0, False)], {"it": 0.0})
+    (out,) = _screen(n, UPS, [ph])["phases"]
+    assert out["leak_mw"] == 0.0
+    assert out["latency"] == [{"unit": "ups", "kind": "ups", "latency_s": 0.0, "basis": "UPS"}]
+
+
+def test_several_units_are_listed_in_one_line():
+    words = S.latency_words([{"unit": "bess_1", "latency_s": 0.02, "basis": "grid forming"},
+                             {"unit": "ups_1", "latency_s": 0.0, "basis": "UPS"}])
+    assert words == "'bess_1' 0.02 s (grid forming), 'ups_1' 0 s (UPS); all assumed"

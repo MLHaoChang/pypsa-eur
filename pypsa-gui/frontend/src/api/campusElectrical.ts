@@ -673,7 +673,18 @@ export interface GridReadinessAfter {
   verdict: GridReadinessVerdict
   rule: Record<string, unknown>
   units: string[]
+  /** Each unit's kind and assumed response latency from its control preset,
+   *  and where the unit is (DC 03 slice 5). */
+  unit_detail?: GridReadinessAfterUnit[]
   note: string
+}
+
+export interface GridReadinessAfterUnit {
+  unit: string
+  kind: string | null
+  latency_s: number | null
+  basis: string
+  target: GridReadinessTarget
 }
 
 export interface GridReadiness {

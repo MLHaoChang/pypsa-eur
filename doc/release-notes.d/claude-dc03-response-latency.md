@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The battery/UPS smoothing screen reads each unit's assumed response latency from its control preset (grid forming, grid following, FFR delay, UPS); the step it lets through before the battery answers counts in the scorecard's "After battery/UPS" value, and the scorecard lists the latency with a link to the unit (DC 03).
