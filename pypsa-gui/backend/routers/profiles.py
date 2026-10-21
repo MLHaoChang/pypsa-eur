@@ -69,6 +69,7 @@ from services.profile_gen.availability import (
     UnknownAvailabilityKindError,
 )
 from services.profile_gen.series import (
+    CopAmbientUnknownError,
     CopBusError,
     InvalidSeriesParamsError,
     MarketBundlesUnavailableError,
@@ -385,6 +386,7 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
     (PocTariffError, {"error_kind": "poc_tariff"}),
     (CopBusError, {"error_kind": "cop_bus"}),
+    (CopAmbientUnknownError, {"error_kind": "cop_ambient_unknown"}),
     (TwoWayFloorError, {"error_kind": "two_way_floor"}),
     (PocBoundError, {"error_kind": "poc_bound"}),
 )
@@ -834,6 +836,10 @@ def generate_availability_profiles(
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
 
 
+#: The component tables a series may target (`series` family targets).
+_SERIES_COMPONENT_TABLES = ("generators", "links", "storage_units")
+
+
 @project_router.post("/{name}/profiles/series/generate")
 def generate_series_profiles(
     body: SeriesGenerateRequest,
@@ -848,7 +854,14 @@ def generate_series_profiles(
     ctx = _foreground_ctx(proj, "generate")
     params = dict(body.params or {})
     ctype = _SERIES_TYPES.get(body.kind) or str(params.get("component_type") or "generators")
-    table = getattr(ctx.network, ctype, None)
+    if ctype not in _SERIES_COMPONENT_TABLES:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "invalid_series_params",
+                    "message": f"a series goes on {', '.join(_SERIES_COMPONENT_TABLES)}, "
+                               f"not {ctype!r}"},
+        )
+    table = getattr(ctx.network, ctype)
     missing = [c for c in body.components if table is None or c not in table.index]
     if missing and body.kind in ("tou", *_SERIES_TYPES):
         raise HTTPException(
@@ -873,11 +886,21 @@ def generate_series_profiles(
                         "message": public_message(exc, route="series_generate")},
             ) from exc
     if "timezone" not in params and body.kind in ("tou", "cop"):
-        from services.profile_gen.apply import _commercial_timezone
+        from services.profile_gen.apply import commercial_timezone
 
-        tz = _commercial_timezone(ctx)
+        tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
+    # An air-source COP draws the project's own ambient (its data-centre
+    # load spec) unless the ambient is stated; with neither it is refused.
+    from services.dc_load_profile import AMBIENT_FIELDS, read_ambient
+
+    ambient_from_spec = (
+        body.kind == "cop" and params.get("source", "air") == "air"
+        and not any(k in params for k in AMBIENT_FIELDS)
+        and read_ambient(proj.directory))
+    if ambient_from_spec:
+        params.update(ambient_from_spec)
     snaps = ctx.network.snapshots
     first = (snaps.get_level_values(-1)[0] if isinstance(snaps, pd.MultiIndex)
              else pd.DatetimeIndex(snaps)[0])
@@ -895,6 +918,8 @@ def generate_series_profiles(
 
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
+    if ambient_from_spec:
+        record["ambient_from"] = "dc_load_profile"
     record["job_id"] = job_id
     record["project_id"] = proj.name
     record["points"] = list(result.series.columns)

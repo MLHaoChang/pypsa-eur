@@ -735,25 +735,26 @@ def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dic
     return scale, extra
 
 
-def _project_money(ctx) -> tuple[str, str, int | None, bool]:
-    """The project's money basis: (currency, price basis, currency year,
-    stated) of its finance inputs, or their defaults (EUR, nominal, year
-    unstated) with stated False when it has none."""
-    from models.finance import FinanceInputs
-
+def _project_money(ctx) -> dict[str, Any]:
+    """The money fields the project's finance inputs actually set: any of
+    ``currency``, ``price_basis`` and ``currency_year``, each present only
+    when the finance block states it (an unset field is never filled from
+    `FinanceInputs`' defaults — gatekeeper B4 amendment, review of #554)."""
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
     raw = getattr(cfg, "finance", None)
-    stated = isinstance(raw, Mapping) and bool(raw)
     raw = raw if isinstance(raw, Mapping) else {}
-    fields = FinanceInputs.model_fields
-    year = raw.get("currency_year", fields["currency_year"].default)
-    return (str(raw.get("currency") or fields["currency"].default),
-            str(raw.get("price_basis") or fields["price_basis"].default),
-            int(year) if year is not None else None, stated)
+    out: dict[str, Any] = {}
+    if raw.get("currency"):
+        out["currency"] = str(raw["currency"])
+    if raw.get("price_basis"):
+        out["price_basis"] = str(raw["price_basis"]).strip().lower()
+    if raw.get("currency_year") is not None:
+        out["currency_year"] = int(raw["currency_year"])
+    return out
 
 
-def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None, bool],
+def _money(meta: Mapping[str, Any], project: Mapping[str, Any],
            ) -> tuple[dict, list[str]]:
     """A price series' unit and money basis, in the money-year convention's
     words ("real basis, 2020 EUR")."""
@@ -781,27 +782,34 @@ def _money(meta: Mapping[str, Any], project: tuple[str, str, int | None, bool],
         raise InvalidSeriesUnitError(
             f"a price series must state its currency_year (the year of its "
             f"price data), got {year!r}") from None
-    p_cur, p_basis, p_year, p_stated = project
     record = {"unit": unit, "price_basis": basis, "currency_year": year,
               "money": f"{basis} basis, {year} {cur}"}
-    project_words = (f"{p_basis} basis, {p_year if p_year is not None else 'year unstated'} "
-                     f"{p_cur}")
-    unverified = [f"{MONEY_UNVERIFIED_WARNING}: the series is {basis} basis, {year} "
-                  f"{cur}; the project's money is {'not set' if not p_stated else project_words}, "
-                  "so the basis could not be checked"]
-    if not p_stated:
-        # No finance inputs: nothing to contradict, so nothing is refused —
-        # but nothing is verified either (gatekeeper note on ticket 03).
-        return record, unverified
-    if cur != p_cur:
+    # Field by field: a currency, basis or year the project SETS and that
+    # differs refuses; an unset one is accepted, unverified, naming both.
+    p_cur = project.get("currency")
+    p_basis = project.get("price_basis")
+    p_year = project.get("currency_year")
+    if p_cur is not None and cur != p_cur:
         raise InvalidSeriesUnitError(
             f"the series is in {cur} but the project counts in {p_cur}; no "
             "exchange rate is applied, so convert it first")
-    if basis != p_basis or (p_year is not None and year != p_year):
+    project_words = (f"{p_basis or 'basis unset'}"
+                     f"{' basis' if p_basis else ''}, "
+                     f"{p_year if p_year is not None else 'year unstated'} "
+                     f"{p_cur or '(currency unset)'}")
+    if (p_basis is not None and basis != p_basis) or (p_year is not None and year != p_year):
         raise InvalidSeriesUnitError(
             f"the series is {basis} basis, {year} {cur} but the project's money "
             f"is {project_words}; restate the series on the project's basis")
-    return record, (unverified if p_year is None else [])
+    if None in (p_cur, p_basis, p_year):
+        # Nothing set contradicts it, but not everything could be checked
+        # (no finance inputs, or a partial block).
+        return record, [
+            f"{MONEY_UNVERIFIED_WARNING}: the series is {basis} basis, {year} "
+            f"{cur}; the project's money is "
+            f"{project_words if project else 'not set'}, so the basis could not be "
+            "fully checked"]
+    return record, []
 
 
 def _current_bound(n, component_type: str, component: str, attribute: str):

@@ -491,3 +491,62 @@ def test_series_refusals_say_their_sentence_and_nothing_foreign(
             project_id=heat_project, kind="inflow", components=["dam"],
             params={"annual_mwh": 1000.0, "shape": "flat"})
     assert err.value.detail == "unexpected error (ValueError); see the server log"
+
+
+def test_an_air_cop_needs_the_projects_ambient_or_a_stated_one(client, heat_project,
+                                                               monkeypatch):
+    # Gatekeeper D4: no default ambient; the project's DC load spec or the
+    # stated ambient, else refused.
+    from services import dc_load_profile
+
+    monkeypatch.setattr(dc_load_profile, "read_ambient", lambda d: None)
+    resp = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "air", "sink_c": 45.0})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "cop_ambient_unknown"
+
+    amb = {"ambient_annual_mean_c": 12.0, "ambient_seasonal_amplitude_k": 8.0,
+           "ambient_diurnal_amplitude_k": 4.0}
+    monkeypatch.setattr(dc_load_profile, "read_ambient", lambda d: dict(amb))
+    body = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "air", "sink_c": 45.0}).json()
+    assert body["ambient_from"] == "dc_load_profile"
+    assert body["ambient"] == amb
+
+
+def test_read_ambient_takes_the_stored_dc_load_spec(tmp_path):
+    import json
+
+    from services import dc_load_profile
+
+    assert dc_load_profile.read_ambient(tmp_path) is None
+    spec = {"ambient_annual_mean_c": 11.0, "ambient_seasonal_amplitude_k": 7.5,
+            "ambient_diurnal_amplitude_k": 3.0}
+    (tmp_path / "eh_template.json").write_text(
+        json.dumps({dc_load_profile.META_KEY: {"spec": spec}}))
+    assert dc_load_profile.read_ambient(tmp_path) == spec
+
+
+def test_a_series_on_a_table_that_is_not_a_component_is_a_typed_refusal(client,
+                                                                       heat_project):
+    resp = _series(client, heat_project, kind="tou", components=["hp"],
+                   params={"component_type": "snapshots"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_series_params"
+
+
+def test_a_cop_on_a_non_electric_bus0_is_refused_at_apply(client, heat_project,
+                                                          session_ctx):
+    gen = _series(client, heat_project, kind="cop", components=["hp"],
+                  params={"source": "ground", "source_c": 5.0, "sink_c": 35.0}).json()
+    with_heat_bus0 = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                                 json={"job_id": gen["job_id"], "component": "hp",
+                                       "time_basis": "UTC"})
+    assert with_heat_bus0.status_code == 200   # B1 is AC: the electric input
+    # Move the link's input onto the heat bus: the COP would scale heat, refused.
+    session_ctx(client).network.links.at["hp", "bus0"] = "H"
+    resp = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                       json={"job_id": gen["job_id"], "component": "hp",
+                             "time_basis": "UTC"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "cop_bus"

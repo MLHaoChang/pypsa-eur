@@ -16,9 +16,13 @@ One column per component id over the source year's hours:
     as a source-year-mean-normalised series (``per_unit_mean``), so apply's
     energy record holds the stated energy.
   * ``cop`` → links efficiency: η · T_sink / (T_sink − T_source) in kelvin,
-    clipped to [1, cop_max]. ``source`` "air" takes T_source from the one
-    assumed ambient (`dc_load_profile.ambient_c`, the diurnal term on
-    ``timezone``'s wall clock); "ground" a constant ``source_c``.
+    clipped to [1, cop_max]; the hours raised to 1 are counted
+    (``cop_floored_hours``) and warned. ``source`` "air" takes T_source from
+    the ambient `dc_load_profile.ambient_c` draws (the diurnal term on
+    ``timezone``'s wall clock): the project's own DC load spec (the route
+    fills it, ``ambient_from: dc_load_profile``) or the three ambient
+    parameters stated (``ambient_from: params``), never a default; with
+    neither it is refused. "ground" takes a constant ``source_c``.
   * ``part_load`` → refused: a part-load efficiency curve depends on the
     dispatch, which the linear LP cannot take as a time series; it needs a
     piecewise or committable formulation of its own.
@@ -49,12 +53,13 @@ INFLOW_SHAPES = {
     "rain_fed": [1.5, 1.4, 1.3, 1.0, 0.8, 0.6, 0.5, 0.5, 0.7, 1.0, 1.3, 1.5],
     "flat": [1.0] * 12,
 }
+COP_FLOORED_WARNING = "cop_floored"
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "tou": {"periods": None, "currency": None, "price_basis": None,
             "currency_year": None, "component_type": "generators"},
     "inflow": {"annual_mwh": None, "shape": None, "monthly": None},
     "cop": {"source": "air", "sink_c": 45.0, "source_c": 10.0, "eta": 0.45,
-            "cop_max": 7.0, **_AMBIENT},
+            "cop_max": 7.0, **dict.fromkeys(_AMBIENT)},
 }
 _COMMON = {"timezone": None}
 
@@ -81,6 +86,10 @@ class MarketBundlesUnavailableError(SeriesError):
 
 class PocTariffError(SeriesError):
     """A price series on a point-of-connection Link, which the tariff prices."""
+
+
+class CopAmbientUnknownError(SeriesError):
+    """An air-source COP with no ambient: no DC load spec, none stated."""
 
 
 class CopBusError(SeriesError):
@@ -146,12 +155,18 @@ def _tou(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, dic
     raw = p["periods"]
     if not isinstance(raw, list) or not raw:
         raise InvalidSeriesParamsError("tou takes a non-empty list of periods")
-    try:
-        periods = [TariffPeriod.model_validate(x) for x in raw]
-    except pydantic.ValidationError as exc:
-        err = exc.errors()[0]
-        raise InvalidSeriesParamsError(
-            f"periods: {'.'.join(map(str, err['loc']))}: {err['msg']}") from None
+    periods = []
+    for i, x in enumerate(raw):
+        try:
+            periods.append(TariffPeriod.model_validate(x))
+        except pydantic.ValidationError as exc:
+            # Our own sentence (the #508 rule): the period and field it names,
+            # with pydantic's own prefix dropped.
+            err = exc.errors()[0]
+            field = ".".join(map(str, err["loc"]))
+            msg = str(err["msg"]).removeprefix("Value error, ")
+            raise InvalidSeriesParamsError(
+                f"period {i}{f' ({field})' if field else ''}: {msg}") from None
     tiered = [p.name for p in periods if p.tier_rates is not None]
     if tiered:
         raise InvalidSeriesParamsError(
@@ -186,7 +201,7 @@ def _inflow(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, 
     if (p["shape"] is None) == (p["monthly"] is None):
         raise InvalidSeriesParamsError("inflow takes one of shape or monthly")
     if p["shape"] is not None:
-        if p["shape"] not in INFLOW_SHAPES:
+        if not isinstance(p["shape"], str) or p["shape"] not in INFLOW_SHAPES:
             raise InvalidSeriesParamsError(
                 f"shape must be one of {', '.join(INFLOW_SHAPES)}, got {p['shape']!r}")
         shares = INFLOW_SHAPES[p["shape"]]
@@ -215,9 +230,20 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndar
     sink = _num(p, "sink_c", 0.0, 120.0) + 273.15
     extra: dict[str, Any] = {}
     if source == "air":
+        stated = [k for k in _AMBIENT if p[k] is not None]
+        if not stated:
+            raise CopAmbientUnknownError(
+                "an air-source COP needs the site's ambient: set the project's "
+                "data-centre load spec, or state ambient_annual_mean_c, "
+                "ambient_seasonal_amplitude_k and ambient_diurnal_amplitude_k")
+        if len(stated) != len(_AMBIENT):
+            raise InvalidSeriesParamsError(
+                f"state all of {', '.join(_AMBIENT)} for an air source, not only "
+                f"{', '.join(stated)}")
         amb = {k: _num(p, k) for k in _AMBIENT}
         t_src = ambient_c(SimpleNamespace(**amb), idx, timezone) + 273.15
         extra["ambient"] = amb
+        extra["ambient_from"] = "params"
     else:
         t_src = np.full(len(idx), _num(p, "source_c", -30.0, 60.0) + 273.15)
         if sink <= t_src[0]:
@@ -225,6 +251,13 @@ def _cop(idx: pd.DatetimeIndex, p: Mapping[str, Any], timezone) -> tuple[np.ndar
                 "a ground source at or above the sink temperature lifts no heat")
     lift = sink - t_src
     cop = np.where(lift > 0, eta * sink / np.where(lift > 0, lift, 1.0), cop_max)
+    floored = int((cop < 1.0).sum())
+    extra["cop_floored_hours"] = floored
+    if floored:
+        extra["warnings"] = [
+            f"{COP_FLOORED_WARNING}: the formula gives a COP below 1 in {floored} h "
+            f"(lowest {float(cop.min()):.3f}); those hours are raised to 1, a heat "
+            "pump at worst no better than a resistive heater"]
     return np.clip(cop, 1.0, cop_max), {"unit": "ratio", **extra}
 
 
