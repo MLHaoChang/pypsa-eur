@@ -11,8 +11,8 @@ Hour by hour: load(t) ≤ Σ energized import(t) × efficiency + firm gensets an
 each period reports its binding hour (least headroom), where
 
 * the load is the hourly-mean sum of the electric fixed loads' ``p_set``
-  (``electric_loads``: on an AC/DC bus, not a product bus; an H2 or NH3
-  offtake is not electric load; a flexible
+  (``electric_loads``: all but those on a product bus or a non-electric
+  energy carrier such as H2, gas or heat, which are offtakes; a flexible
   conversion unit such as an electrolyser is a decision and is not counted;
   the in-hour peak of an AI-training load is a few per cent higher, which the
   scorecard reports separately);
@@ -188,24 +188,40 @@ def _shave(short: np.ndarray, spare: np.ndarray, rt: dict, reserve: float, hours
     return out
 
 
-#: The bus carriers an electric load sits on (PyPSA's default carrier is "AC";
-#: an empty carrier is the same).
-ELECTRIC_CARRIERS = ("AC", "DC", "")
+#: Bus carriers that are energy carriers other than electricity: a Load on
+#: one is an offtake, not electric load. Matched on the carrier's first word,
+#: and any carrier naming heat ("urban central heat"). Every other carrier,
+#: unknown ones included ("low voltage", "LV", "MV"), counts as electric, so
+#: the check errs towards counting load rather than loosening the refusal.
+NON_ELECTRIC_CARRIERS = ("H2", "gas", "biogas", "heat", "CO2", "co2", "oil", "methanol", "biomass",
+                         "diesel", "coal", "lignite", "NH3")
 
 
-def electric_loads(n) -> list[str]:
-    """The Loads on electric buses: carrier AC, DC or unset, and not a product
-    bus (``process_products.is_product_bus``). An H2 or NH3 offtake is a
-    product, not electric load."""
+def _non_electric(carrier: str) -> bool:
+    words = carrier.split()
+    return bool(words) and (words[0] in NON_ELECTRIC_CARRIERS or "heat" in carrier.lower())
+
+
+def load_split(n) -> tuple[list[str], list[tuple[str, str, str]]]:
+    """(electric Loads, left out as ``(load, bus, carrier)``): every Load
+    counts except one on a product bus (``process_products.is_product_bus``)
+    or on a non-electric energy carrier (``NON_ELECTRIC_CARRIERS``)."""
     from services.process_products import is_product_bus
 
-    out = []
+    electric, out = [], []
     for load in n.loads.index:
         bus = n.loads.at[load, "bus"]
         carrier = str(n.buses.at[bus, "carrier"]) if bus in n.buses.index and "carrier" in n.buses.columns else ""
-        if carrier in ELECTRIC_CARRIERS and not is_product_bus(n, bus):
-            out.append(load)
-    return out
+        if is_product_bus(n, bus) or _non_electric(carrier):
+            out.append((str(load), str(bus), carrier))
+        else:
+            electric.append(load)
+    return electric, out
+
+
+def electric_loads(n) -> list[str]:
+    """The Loads the electric peak counts (``load_split``)."""
+    return load_split(n)[0]
 
 
 def _fixed_load(n) -> pd.Series:
@@ -292,6 +308,7 @@ def peak_check(n, island: dict | None) -> list[dict]:
     delivered = sum(energized[l] * eff[l] for l in links)
     cap0 = delivered + firm_mw
     hours = _snapshot_hours(n)
+    not_electric = [f"{l} on {b} ({c})" for l, b, c in load_split(n)[1]]
     snaps = list(n.snapshots)
     out = []
     for label, mask in _periods(n):
@@ -321,6 +338,7 @@ def peak_check(n, island: dict | None) -> list[dict]:
                     "headroom_mw": float(cap[j] - load[t]), "peak_mw": float(load[idx].max()),
                     "energized_max_mw": float(total_e[idx].max()), "firm": firm,
                     "firm_mw": firm_mw + float(shave[j]), "import_links": list(links),
+                    "not_electric": not_electric,
                     "scheduled": bool(scheduled)})
     return out
 

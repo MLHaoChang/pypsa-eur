@@ -426,6 +426,20 @@ def test_a_product_offtake_is_not_electric_peak_load(tid, product):
         assert row["peak_mw"] == pytest.approx(float(n.loads_t.p_set["process_load"][mask].max()))
 
 
+def test_a_load_on_an_unknown_electric_carrier_counts_and_an_offtake_does_not():
+    """A Load on a "low voltage" bus is electric (an unknown carrier counts);
+    one on an H2 bus is an offtake, left out and named in the row."""
+    n = _one_period(load=np.full(48, 10.0))
+    n.add("Bus", "lv", carrier="low voltage")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "homes", bus="lv", p_set=5.0)
+    n.add("Load", "h2_offtake", bus="h2", p_set=25.0)
+    assert SP.electric_loads(n) == ["demand", "homes"]
+    (row,) = SP.peak_check(n, None)
+    assert row["peak_mw"] == pytest.approx(15.0)
+    assert row["not_electric"] == ["h2_offtake on h2 (H2)"]
+
+
 def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
     """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
     its critical process load, with no genset, needs its peak for the 1 h
@@ -720,36 +734,41 @@ def _envelope_rows(tmp_path, tid="eh_datacenter", dc_load=None, edit=None):
     return out, {k: v for k, v in _rows(out).items() if k in G._AFTER_IDS}
 
 
-def test_the_campus_ups_shapes_the_step_to_the_limit_after_mitigation(tmp_path):
-    """The 40 MW / 10 MWh UPS keeps 34.5 MW × 600 s = 5.75 MWh for its bridge;
-    the 3.75 MWh left covers the 23.4 MW step's 2 × 23.4²/480 = 2.28 MWh band
-    and the whole 3.6 MW oscillation, so all three rows pass after it, while
-    their own verdicts stay before mitigation."""
+def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
+    """The 40 MW / 10 MWh UPS keeps 34.5 MW × 600 s = 5.75 MWh for its bridge
+    and carries the whole 23.4 MW step, but its rectifier walks it onto the
+    grid over 15 s: 23.4·60/15 = 93.6 MW/min, above the 4 MW/min limit. The
+    voltage change and the oscillation pass after it. The rows' own
+    verdicts stay before mitigation."""
     out, rows = _envelope_rows(tmp_path, dc_load={})
     assert {k: r["verdict"] for k, r in rows.items()} == {
         "ramp_rate": "fail", "oscillation": "fail", "rapid_voltage_change": "warn"}
-    assert rows["ramp_rate"]["after_battery"]["value"] == pytest.approx(4.0)
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(93.6) and ramp["verdict"] == "fail"
+    assert "walks 23.4 MW in over 15 s" in ramp["note"]
     assert rows["oscillation"]["after_battery"]["value"] == 0.0
     assert rows["rapid_voltage_change"]["after_battery"]["value"] == 0.0
-    assert {r["after_battery"]["verdict"] for r in rows.values()} == {"pass"}
+    assert rows["oscillation"]["after_battery"]["verdict"] == "pass"
+    assert rows["rapid_voltage_change"]["after_battery"]["verdict"] == "pass"
     assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
     assert "before mitigation" in rows["ramp_rate"]["note"]
-    assert out["summary"]["pass_after_mitigation"] == 3
+    assert out["summary"]["pass_after_mitigation"] == 2
     assert out["summary"]["red_flags"] == 3                         # the summary stays before mitigation
 
 
 def test_a_small_ups_covers_part_of_the_step(tmp_path):
-    """A 10 MW UPS: S_c = 10 of 23.4 MW, 13.4 MW reach the grid at the
-    envelope's rate, so the ramp fails and the voltage change warns after it."""
+    """A 10 MW UPS walks 10 of the 23.4 MW in over 15 s (40 MW/min); the
+    other 13.4 MW reach the grid at the envelope's rate, so the ramp fails and
+    the voltage change warns after it."""
     def shrink(n):
         n.storage_units.at["ups_battery", "p_nom"] = 10.0
-        n.storage_units.at["ups_battery", "max_hours"] = 2.0        # 19 MWh: power-bound
+        n.storage_units.at["ups_battery", "max_hours"] = 2.0
     _, rows = _envelope_rows(tmp_path, dc_load={}, edit=shrink)
     rvc = rows["rapid_voltage_change"]["after_battery"]
     assert rvc["value"] == pytest.approx(round(13.4 / 250.0 * 100.0, 4))
     assert rvc["verdict"] == "warn"                                  # 5.36 % above the 3 % limit
     ramp = rows["ramp_rate"]["after_battery"]
-    assert ramp["value"] == pytest.approx(4.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
+    assert ramp["value"] == pytest.approx(40.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
     assert ramp["verdict"] == "fail"
 
 
@@ -770,10 +789,11 @@ def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
 def test_the_after_value_names_each_unit_its_kind_latency_and_asset(tmp_path):
     _, rows = _envelope_rows(tmp_path, dc_load={})
     (u,) = rows["ramp_rate"]["after_battery"]["unit_detail"]
-    assert u == {"unit": "ups_battery", "kind": "ups", "latency_s": 0.0, "basis": "UPS",
+    assert u == {"unit": "ups_battery", "kind": "ups", "latency_s": None, "walk_in_s": 15.0,
+                 "basis": "UPS, walks in over 15 s",
                  "target": {"section": "assets", "panel": None, "component": "StorageUnit",
                             "entity": "ups_battery", "field": None}}
-    assert "'ups_battery' responds in 0 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]
+    assert "'ups_battery' walks in over 15 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]
 
 
 def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):

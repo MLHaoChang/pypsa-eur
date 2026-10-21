@@ -49,7 +49,8 @@ def _screen(n, island, phases, ramp=20.0, osc=1.0, conn=200.0):
                               oscillation_limit_pct=osc, connection_mw=conn)
 
 
-UPS = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}},
+#: A slow walk-in (600 s), so the UPS shapes these tests' steps to the limit.
+UPS = {"units": {"ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": 600.0}},
        "requirements": {"bridge_s": {"value": 600.0}}}
 
 
@@ -188,7 +189,10 @@ def test_the_data_centre_campus_end_to_end():
     assert ph["units"] == ["ups_battery"]
     assert ph["reserve_mw"] == pytest.approx(40.0)
     assert 0 < ph["reserve_mwh"] < 10.0 * 0.95
-    assert out["verdict"] == "covered"
+    # Its UPS walks the 23.4 MW onto the grid over 15 s: 93.6 MW/min, not 4.
+    assert ph["covered_ups_mw"] == pytest.approx(23.4)
+    assert ph["ups_ramp_mw_per_min"] == pytest.approx(23.4 * 60.0 / 15.0)
+    assert out["verdict"] == "short" and ph["short"] == ["UPS walk-in"]
     assert np.isfinite(ph["need_mwh"])
 
 
@@ -216,12 +220,25 @@ def test_a_ride_through_shortfall_does_not_eat_the_ups_energy():
     ({"kind": "bess", "control": "gfl_fw", "fw_delay_s": {"value": 0.35, "source": "assumed"}}, 0.35,
      "fast frequency response"),
     ({"kind": "bess", "control": "gfl_fw", "values": {"fw_delay_s": 0.1}}, 0.1, "fast frequency response"),
-    ({"kind": "ups", "it_load": ["it"]}, 0.0, "UPS"),
     ({"kind": "bess"}, None, "control not known"),
 ])
 def test_each_control_has_its_assumed_latency(block, latency, basis):
     out = S.response_latency("u", block)
     assert out["latency_s"] == latency and out["basis"] == basis and out["kind"] == block["kind"]
+
+
+def test_a_ups_leak_is_its_walk_in_ramp():
+    """A UPS has no latency here: its share reaches the grid over its walk-in,
+    which ``coverage`` turns into a ramp, never a leak."""
+    out = S.response_latency("u", {"kind": "ups", "it_load": ["it"], "walk_in_s": {"value": 15.0}})
+    assert out == {"unit": "u", "kind": "ups", "latency_s": None, "walk_in_s": 15.0,
+                   "basis": "UPS, walks in over 15 s"}
+    n = _site([("ups", 150.0, 0.5, 1.0, False)], {"it": 0.0})
+    ph = _phase(100.0)
+    ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
+    (got,) = _screen(n, UPS, [ph])["phases"]
+    assert got["leak_mw"] == 0.0 and got["ups_ramp_mw_per_min"] == pytest.approx(10.0)
+    assert "'ups' walks in over 600 s (UPS, assumed)" in got["note"]
 
 
 def test_the_latency_lets_part_of_the_step_through():
@@ -238,7 +255,7 @@ def test_the_latency_lets_part_of_the_step_through():
     assert "'rt' responds in 0.2 s (grid following, assumed), so 20 MW reach the grid" in out["note"]
 
 
-def test_the_leak_is_capped_at_the_step_and_a_ups_lets_nothing_through():
+def test_the_leak_is_capped_at_the_step():
     n = _site([("rt", 500.0, 1.0, 1.0, False)])
     island = {"units": {"rt": {"kind": "bess", "control": "gfl_fw", "fw_delay_s": 5.0}},
               "requirements": {"sustained_h": {"value": 1.0}}}
@@ -246,16 +263,27 @@ def test_the_leak_is_capped_at_the_step_and_a_ups_lets_nothing_through():
     ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
     (out,) = _screen(n, island, [ph])["phases"]
     assert out["leak_mw"] == pytest.approx(100.0)
-    n = _site([("ups", 150.0, 0.5, 1.0, False)], {"it": 0.0})
-    (out,) = _screen(n, UPS, [ph])["phases"]
-    assert out["leak_mw"] == 0.0
-    assert out["latency"] == [{"unit": "ups", "kind": "ups", "latency_s": 0.0, "basis": "UPS"}]
+    assert S.after_mitigation(out)["residual_step_mw"] == pytest.approx(100.0)
+
+
+def test_the_residual_is_the_larger_of_the_leak_and_the_shortfall():
+    """A 30 MW grid-following battery on a 100 MW step at 100 MW/s: the
+    shortfall (70 MW) dominates the 20 MW leak; with 500 MW the leak does."""
+    island = {"units": {"rt": {"kind": "bess", "control": "gfl_pq"}},
+              "requirements": {"sustained_h": {"value": 1.0}}}
+    ph = _phase(100.0)
+    ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
+    for p_nom, residual in ((30.0, 70.0), (500.0, 20.0)):
+        n = _site([("rt", p_nom, 10.0, 1.0, False)])
+        (out,) = _screen(n, island, [ph])["phases"]
+        assert S.after_mitigation(out)["residual_step_mw"] == pytest.approx(residual)
 
 
 def test_several_units_are_listed_in_one_line():
-    words = S.latency_words([{"unit": "bess_1", "latency_s": 0.02, "basis": "grid forming"},
-                             {"unit": "ups_1", "latency_s": 0.0, "basis": "UPS"}])
-    assert words == "'bess_1' 0.02 s (grid forming), 'ups_1' 0 s (UPS); all assumed"
+    words = S.latency_words([{"unit": "bess_1", "kind": "bess", "latency_s": 0.02, "basis": "grid forming"},
+                             {"unit": "ups_1", "kind": "ups", "latency_s": None, "walk_in_s": 15.0,
+                              "basis": "UPS, walks in over 15 s"}])
+    assert words == "'bess_1' 0.02 s (grid forming), 'ups_1' walks in over 15 s (UPS); all assumed"
 
 
 def test_after_battery_oscillation_is_energy_limited_after_the_step():
@@ -263,15 +291,13 @@ def test_after_battery_oscillation_is_energy_limited_after_the_step():
     oscillation (10 MW at 2 s, A·T/π = 1.77 kWh) is covered for
     0.0005·π·3600/2 = 2.83 MW of its amplitude, not by the power term."""
     s, r = 10.0, 20.0
-    band = 2 * S.step_mwh(s, r)
-    ph = {"verdict": "covered", "step_mw": s, "step_mwh": S.step_mwh(s, r), "reserve_mw": 100.0,
-          "reserve_mwh": band + 0.0005, "amplitude_mw": 10.0, "period_s": 2.0, "leak_mw": 0.0}
-    after = S.after_mitigation(ph)
-    assert after["covered_step_mw"] == pytest.approx(s)
-    assert after["residual_amplitude_mw"] == pytest.approx(10.0 - 0.0005 * math.pi * 3600.0 / 2.0)
-    ph["reserve_mwh"] = band + 1.0                                   # energy no longer binds
-    ph["reserve_mw"] = 14.0                                          # the power term does: 14 − 10
-    assert S.after_mitigation(ph)["residual_amplitude_mw"] == pytest.approx(6.0)
+    e_one = S.step_mwh(s, r)
+    reserve = {"battery": {"mw": 100.0, "mwh": 2 * e_one + 0.0005}, "ups": {"mw": 0.0, "mwh": 0.0}}
+    c = S.coverage(s, e_one, 10.0, 2.0, r, reserve)
+    assert c["covered_battery_mw"] == pytest.approx(s)
+    assert c["oscillation_covered_mw"] == pytest.approx(0.0005 * math.pi * 3600.0 / 2.0)
+    reserve["battery"] = {"mw": 14.0, "mwh": 2 * e_one + 1.0}        # energy no longer binds; power does
+    assert S.coverage(s, e_one, 10.0, 2.0, r, reserve)["oscillation_covered_mw"] == pytest.approx(4.0)
 
 
 def test_a_ups_also_named_for_ride_through_is_counted_once():
@@ -301,3 +327,35 @@ def test_a_dip_deeper_than_the_swing_sets_the_band():
     (ph,) = _screen(n, UPS, [_phase(10.0, depth=100.0, duration=600.0)])["phases"]
     assert ph["checkpoint_mwh"] > ph["step_mwh"]
     assert ph["need_mwh"] == pytest.approx(2.0 * ph["checkpoint_mwh"])
+
+
+def test_a_ups_shapes_the_step_only_at_its_walk_in_rate():
+    """23.4 MW on a 40 MW UPS that walks in over 10 s: the grid sees
+    23.4/10·60 = 140 MW/min, above a 4 MW/min limit; only a walk-in of
+    60·23.4/4 = 351 s holds it to the limit."""
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    for walk_in, verdict in ((10.0, "short"), (351.0, "covered")):
+        island = {"units": {"ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": walk_in}},
+                  "requirements": {"bridge_s": {"value": 600.0}}}
+        (ph,) = _screen(n, island, [_phase(23.4)], ramp=4.0, conn=40.0)["phases"]
+        assert ph["ups_ramp_mw_per_min"] == pytest.approx(23.4 * 60.0 / walk_in)
+        assert ph["verdict"] == verdict
+
+
+def test_a_converter_battery_shapes_to_the_limit_and_the_ups_takes_the_rest():
+    """A 10 MW ride-through battery with energy to spare takes 10 of a
+    23.4 MW step to the limit; the UPS carries 13.4 MW at its walk-in."""
+    n = _site([("rt", 10.0, 4.0, 1.0, False), ("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    island = {"units": {"rt": {"kind": "bess"}, "ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": 15.0}},
+              "requirements": {"bridge_s": {"value": 600.0}, "sustained_h": {"value": 1.0}}}
+    (ph,) = _screen(n, island, [_phase(23.4)], ramp=4.0, conn=40.0)["phases"]
+    assert ph["covered_battery_mw"] == pytest.approx(10.0)
+    assert ph["covered_ups_mw"] == pytest.approx(13.4)
+    assert ph["ups_ramp_mw_per_min"] == pytest.approx(13.4 * 4.0)
+
+
+def test_a_ups_without_a_walk_in_is_not_counted_as_shaping():
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    island = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}}, "requirements": {}}
+    (ph,) = _screen(n, island, [_phase(5.0)])["phases"]
+    assert ph["covered_ups_mw"] == 0.0 and "UPS walk-in not known" in ph["short"]

@@ -194,7 +194,8 @@ describe('GridReadinessScorecard', () => {
   })
 
   // DC 03 slice 5: each unit's assumed latency, its name a link to the asset.
-  const UPS_UNIT = { unit: 'ups_battery', kind: 'ups', latency_s: 0, basis: 'UPS',
+  const UPS_UNIT = { unit: 'ups_battery', kind: 'ups', latency_s: null, walk_in_s: 15,
+    basis: 'UPS, walks in over 15 s',
     target: target('assets', 'StorageUnit', 'ups_battery', null) }
   const LAT: GridReadiness = { ...AFTER, rows: AFTER.rows.map(r => r.id === 'ramp_rate'
     ? { ...r, after_battery: { ...r.after_battery!, unit_detail: [UPS_UNIT] } } : r) }
@@ -206,7 +207,7 @@ describe('GridReadinessScorecard', () => {
     expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain("After UPS 'ups_battery': 4 MW/min")
     await user.click(screen.getByTestId('gr-more-ramp_rate'))
     expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
-      .toBe("'ups_battery' responds in 0 s (UPS, assumed)")
+      .toBe("'ups_battery' walks in over 15 s (UPS, assumed)")
     await user.click(screen.getByTestId('gr-latency-unit-ups_battery'))
     expect(onJump).toHaveBeenCalledWith('StorageUnit', 'ups_battery')
   })
@@ -221,6 +222,6 @@ describe('GridReadinessScorecard', () => {
     expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain('After batteries/UPS')
     await user.click(screen.getByTestId('gr-more-ramp_rate'))
     expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
-      .toBe("'bess_1' 0.02 s (grid forming), 'ups_battery' 0 s (UPS); all assumed")
+      .toBe("'bess_1' 0.02 s (grid forming), 'ups_battery' walks in over 15 s (UPS); all assumed")
   })
 })

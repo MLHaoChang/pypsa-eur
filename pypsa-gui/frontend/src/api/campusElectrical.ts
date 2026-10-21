@@ -683,6 +683,8 @@ export interface GridReadinessAfterUnit {
   unit: string
   kind: string | null
   latency_s: number | null
+  /** A UPS's walk-in (its share reaches the grid over it); null for a battery. */
+  walk_in_s?: number | null
   basis: string
   target: GridReadinessTarget
 }
