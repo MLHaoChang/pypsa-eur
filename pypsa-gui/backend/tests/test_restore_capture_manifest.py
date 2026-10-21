@@ -122,3 +122,42 @@ def test_a_name_tracked_after_capture_is_left_alone(
 
     assert (d / "adequacy_stress_scenarios.json").exists()
     assert later.exists()
+
+
+def test_a_folder_present_at_capture_is_restored_exactly(
+        client, api_project, project_storage_dir):
+    """A folder the snapshot carries replaces the live one: a file added to it
+    after the snapshot is gone, and kept in the before-restore snapshot."""
+    name = api_project("restore-folder-equal")
+    d = project_storage_dir(name)
+    (d / "uploads").mkdir()
+    (d / "uploads" / "kept.txt").write_text("present at capture")
+    sid = _snapshot(client, name)
+    (d / "uploads" / "later.txt").write_text("added after the snapshot")
+
+    _restore(client, name, sid)
+
+    assert sorted(p.name for p in (d / "uploads").iterdir()) == ["kept.txt"]
+    assert (_safety_dir(client, name, project_storage_dir) / "uploads" / "later.txt").exists()
+
+
+def test_an_unknown_manifest_version_refuses_the_restore(
+        client, api_project, project_storage_dir):
+    """A manifest this code cannot read is refused before anything changes,
+    not treated as a legacy snapshot."""
+    name = api_project("restore-unknown-manifest")
+    d = project_storage_dir(name)
+    sid = _snapshot(client, name)
+    manifest_path = d / "snapshots" / sid / "capture_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["version"] == 1 and manifest["bundle_version"]
+    manifest_path.write_text(json.dumps({**manifest, "version": 99}))
+    _add_stress_scenario(client, name)
+
+    r = client.post(f"/api/projects/{name}/snapshots/{sid}/restore")
+
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "snapshot_manifest_unknown"
+    assert (d / "adequacy_stress_scenarios.json").exists()
+    labels = [s["label"] for s in client.get(f"/api/projects/{name}/snapshots").json()]
+    assert "before-restore" not in labels

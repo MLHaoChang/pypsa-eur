@@ -5,7 +5,7 @@ A snapshot is a frozen copy of a project's bundle files (`network.nc`,
 `user_ts.json`, `solver_config.json`, `metadata.json`, `layout.json` — the
 full `_BUNDLE_FILES` set) plus a small `snapshot.json` describing it and a
 `capture_manifest.json` recording which bundle files and folders were present
-when it was taken (see `_write_capture_manifest`).
+when it was taken (see `_capture_presence`).
 Snapshots live under
 ``projects/<name>/snapshots/<snapshot_id>/`` where ``snapshot_id`` is
 ``<iso-ts>-<slug>`` so they list newest-first on lexicographic sort.
@@ -24,6 +24,7 @@ recent N restore points without the dir growing unbounded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import pathlib
@@ -286,38 +287,53 @@ def _read_snapshot_meta(snap_dir: pathlib.Path) -> dict:
 # from a file the snapshot simply never tracked (a name `_BUNDLE_FILES` gained
 # in a later release: leave it). SR-1, findings F02/F03.
 _CAPTURE_MANIFEST = "capture_manifest.json"
+_CAPTURE_MANIFEST_VERSION = 1
 
 
-def _write_capture_manifest(project_dir: pathlib.Path, snap_dir: pathlib.Path) -> None:
-    """Record the tracked bundle names and which of them `project_dir` holds.
+def _capture_presence(project_dir: pathlib.Path) -> dict:
+    """The tracked bundle names and which of them `project_dir` holds now.
 
-    Presence is read from the SOURCE, not from what landed in the snapshot: a
+    Read from the SOURCE at copy time, not from what landed in the snapshot: a
     folder whose copy failed was present, so a restore must not delete the live
     one on its account.
     """
-    manifest = {
-        "version": 1,
-        "tracked_files": list(_BUNDLE_FILES),
+    tracked = {"tracked_files": list(_BUNDLE_FILES), "tracked_dirs": list(_BUNDLE_DIRS)}
+    return {
+        "version": _CAPTURE_MANIFEST_VERSION,
+        # Which bundle lists the manifest was judged against, so a reader can
+        # tell a manifest from another release at a glance.
+        "bundle_version": hashlib.sha256(
+            json.dumps(tracked, sort_keys=True).encode()).hexdigest()[:16],
+        **tracked,
         "present_files": [f for f in _BUNDLE_FILES if (project_dir / f).exists()],
-        "tracked_dirs": list(_BUNDLE_DIRS),
         "present_dirs": [d for d in _BUNDLE_DIRS if (project_dir / d).exists()],
     }
-    _atomic_write_text(snap_dir / _CAPTURE_MANIFEST, json.dumps(manifest, indent=2))
 
 
 def _absent_at_capture(snap_dir: pathlib.Path) -> tuple[set[str], set[str]] | None:
     """The bundle (files, dirs) the snapshot's project did NOT have when taken.
 
     ``None`` when the snapshot has no readable manifest (taken before it
-    existed): absent and untracked cannot be told apart, so nothing is removed.
-    Limited to today's bundle names, so a manifest can never name a file
-    outside the bundle for removal.
+    existed, or a capture that crashed before writing it): absent and untracked
+    cannot be told apart, so nothing is removed. A manifest of a version this
+    code does not know is refused rather than read as legacy. Limited to
+    today's bundle names, so a manifest can never name a file outside the
+    bundle for removal.
     """
     try:
         m = json.loads((snap_dir / _CAPTURE_MANIFEST).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(m, dict) or m.get("version") != _CAPTURE_MANIFEST_VERSION:
+        raise HTTPException(409, detail={
+            "error_kind": "snapshot_manifest_unknown",
+            "message": "This snapshot was taken by a newer or unknown version "
+                       "of the app; nothing was restored.",
+        })
+    try:
         files = set(m["tracked_files"]) - set(m["present_files"])
         dirs = set(m["tracked_dirs"]) - set(m["present_dirs"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (KeyError, TypeError):
         return None
     return files & set(_BUNDLE_FILES), dirs & set(_BUNDLE_DIRS)
 
@@ -493,7 +509,7 @@ def _create_snapshot_internal(
     # on typical networks; the user is already paying for a multi-file copy).
     snap_dispatch_status = "none"
     with PyPSAService.get_lock():
-        _write_capture_manifest(project_dir, snap_dir)
+        presence = _capture_presence(project_dir)
         for fname in _BUNDLE_FILES:
             src = project_dir / fname
             if src.exists():
@@ -570,6 +586,11 @@ def _create_snapshot_internal(
                 shutil.copy2(str(src_backup), str(snap_dir / (chat_service.CHAT_FILENAME + ".1")))
     except Exception:  # noqa: BLE001 — never abort snapshot on chat lineage
         pass
+
+    # Last step of the capture, atomically: a crash before it leaves a snapshot
+    # without a manifest, which restores as a legacy one rather than with a
+    # manifest that lies about what was captured.
+    _atomic_write_text(snap_dir / _CAPTURE_MANIFEST, json.dumps(presence, indent=2))
 
     change_log_service.log(
         "snapshot", "Project", name,
@@ -657,6 +678,10 @@ def restore_snapshot(
 
     _enforce_project_lock(db, _lock_target(project), user)
 
+    # Read before anything changes: an unknown manifest version refuses here.
+    absent = _absent_at_capture(snap_dir)
+    absent_files, absent_dirs = absent if absent is not None else (set(), set())
+
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
     # runs inside the safety-snapshot create cannot delete the source we're
@@ -695,8 +720,6 @@ def restore_snapshot(
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
     from services import dirty_state, undo_service
-    absent = _absent_at_capture(snap_dir)
-    absent_files, absent_dirs = absent if absent is not None else (set(), set())
     with PyPSAService.get_lock():
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
