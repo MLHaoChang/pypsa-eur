@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Each grid-readiness scorecard row that judges a number against its limit now declares its rule (a comparator and the verdict otherwise) and sets its verdict through it, so the verdict can be recomputed from the stored row.
