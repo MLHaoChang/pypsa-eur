@@ -279,3 +279,11 @@ def test_a_counterfactual_says_the_lcoe_is_on_incremental_value(project, checked
                      LCOE)
     frames = ask(checked, project, {**values, **real}, LCOE)
     assert "on the incremental value against the counterfactual" in public_text(frames)
+
+
+def test_an_unknown_retained_year_is_named_as_such(project, checked):
+    def gap(payload):
+        lcoe_hand(payload)
+        payload["lcoe_inputs"]["energy_mwh"][1] = None
+    store(project, gap)
+    assert set(reasons(ask(checked, project, {}, LCOE)).values()) == {"lcoe_inputs_not_established"}

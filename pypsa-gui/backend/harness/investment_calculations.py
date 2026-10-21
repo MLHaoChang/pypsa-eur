@@ -131,10 +131,14 @@ def source(ctx, entity, state, profile=PROFILE):
     }
     if profile == LCOE_PROFILE:
         inputs = payload.get("lcoe_inputs")  # absent from reports stored before S8b
+
+        def series(key):
+            values = inputs.get(key)
+            return [_number(v) for v in values] if isinstance(values, list) else None
+
         raw.update(
             lcoe_inputs=None if not isinstance(inputs, dict) else {
-                "energy_mwh": None if inputs.get("energy_mwh") is None else [_number(v) for v in inputs["energy_mwh"]],
-                "value": None if inputs.get("value") is None else [_number(v) for v in inputs["value"]],
+                "energy_mwh": series("energy_mwh"), "value": series("value"),
                 "inflation": _number(inputs.get("inflation")),
             },
             lcoe_headlines={k: _number(payload.get(k)) for k in ("lcoe_nominal_per_mwh", "lcoe_real_per_mwh")},
@@ -206,9 +210,11 @@ def _lcoe(raw, scope, currency):
         reasons = dict.fromkeys(LCOE_METRICS, "lcoe_inputs_not_retained")
     elif rate is None or rate <= -1:
         reasons = dict.fromkeys(LCOE_METRICS, "npv_rate_not_recorded")
-    elif not (equity and len(equity) == len(inputs["energy_mwh"]) == len(inputs["value"]) == n
-              and common.finite(equity) and common.finite(inputs["energy_mwh"]) and common.finite(inputs["value"])):
+    elif not (equity and len(equity) == n and common.finite(equity)):
         reasons = dict.fromkeys(LCOE_METRICS, "cash_not_established")
+    elif not (len(inputs["energy_mwh"]) == len(inputs["value"]) == n
+              and common.finite(inputs["energy_mwh"]) and common.finite(inputs["value"])):
+        reasons = dict.fromkeys(LCOE_METRICS, "lcoe_inputs_not_established")
     else:
         numerator = _pv(rate, inputs["value"]) - _pv(rate, equity)
         energy = _pv(rate, inputs["energy_mwh"])
