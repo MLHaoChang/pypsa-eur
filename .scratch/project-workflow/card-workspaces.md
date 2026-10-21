@@ -1,6 +1,6 @@
 # Card workspaces: inputs, card assets, results and the assistant, per card
 
-Status: draft for UX reviewer and engine gatekeeper review; owner questions in §9. No UI is built until the owner's go.
+Status: reviewed (UX reviewer, engine gatekeeper); the owner answered §9 on 2026-10-21 (RC1–RC4 = A) and gave the go to build from slice R0, in §8's order.
 Date: 2026-10-21
 Author: W10 session (results by card), commissioned through the coordinator
 Base: master `87546ef`, with W4a (#496, `services/flow_scope.py`) read from its branch
@@ -460,6 +460,8 @@ Order follows workspace-reconciliation §13 (W10 after W3a, W4a; W3b moves first
 Dependencies outside this package: W4a #496 (scope, `ScopeGate`), W3b (#533 investment inputs, #535 stress editor, #545 campus split, #546 connection limits, W3b-R reliability goal), W3c #543 (Summary landing, "Next: hand off"), DC 03 (#544 merged, #562 / #565 open: after-battery rows and report chapter), IPP 05 (#515 merged: revenue by stream, curtailment by cause), checked-results S8/S9 (#480, #482, #500), LC-05/LC-12 freshness (`solve_freshness`).
 
 ## 9. Owner questions
+
+**Answered 2026-10-21, about 22:5x CEST (relayed by the coordinator): RC1 A, RC2 A, RC3 A, RC4 A**, all as recommended. The answers are what §3, §2.3 and §3.2 B already describe.
 
 | | Question | Options (recommended first) |
 |---|---|---|
