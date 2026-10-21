@@ -63,8 +63,8 @@ import numpy as np
 import pandas as pd
 
 from services.adequacy.slack import slack_generator_mask
-from models.process_unit import product_role_generators
 from services.period_utils import is_multi_period
+from services.process_products import shortfalls
 
 _log = logging.getLogger(__name__)
 
@@ -224,16 +224,16 @@ def _shed(n, capture, rows, load_names, load_bus) -> np.ndarray | None:
     return out
 
 
-def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
-    """The whole-period attribution: per-snapshot MW by (source, via, dest)."""
+def _read(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
+    """The solved dispatch of one period as arrays (MW per snapshot), with the
+    shed / shortfall removed from what the loads were served and non-energy
+    buses refused. Shared by the flow attribution and the load-shape views."""
     T = int(mask.sum())
     buses = [str(b) for b in n.buses.index]
     bus_ix = {b: i for i, b in enumerate(buses)}
     nb = len(buses)
     if T == 0 or nb == 0:
         _refuse("no snapshots in the period")
-    if T * nb * nb > MAX_CELLS:
-        _refuse("the network is too large for the flow attribution")
 
     wg = n.snapshot_weightings["generators"].to_numpy(dtype=float)[mask]
     dt = n.snapshot_weightings["stores"].to_numpy(dtype=float)[mask]
@@ -245,7 +245,16 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     keep = ~slack_generator_mask(gens) if len(gens) else pd.Series([], dtype=bool)
     # A process shortfall is lost production, never supply (grid-to-process
     # ticket 04): it reduces what the product's load was served, like shed demand.
-    shortfall = [str(g) for g in product_role_generators(n, "shortfall") if str(g) in set(map(str, gens.index))]
+    # The shortfalls from the one accessor (ticket 08): a role Generator, else the solve's capture.
+    lost_src = shortfalls(n, capture, gen_p=_frame(n, result_df, "generators_t", "p"))
+    for s in lost_src:
+        if s.p is None and s.source == "generator":
+            _refuse(f"no solved dispatch for the shortfall {s.name}")
+        if s.p is None:
+            _refuse(f"the lost production of {s.bus} was not captured with this solve")
+        if s.flag == "lost_production_capture_stale":
+            _refuse(f"the lost-production capture of {s.bus} is from another solve")
+    shortfall = [s.name for s in lost_src if s.source == "generator"]
     if shortfall:
         keep = keep & ~gens.index.astype(str).isin(shortfall)
     gnames = [str(g) for g in gens.index[keep.to_numpy()]]
@@ -264,11 +273,14 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
     l_bus = [bus_ix[str(n.loads.at[x, "bus"])] for x in lnames]
     shed = _shed(n, capture, mask, lnames, [buses[b] for b in l_bus])
     lost = np.zeros_like(lp)       # product shortfall MW per load
-    if shortfall:
-        sp = _cols(_frame(n, result_df, "generators_t", "p"), shortfall, "process shortfall dispatch", mask)
-        for j, g in enumerate(shortfall):
-            at = [i for i, b in enumerate(l_bus) if buses[b] == str(gens.at[g, "bus"])]
-            amount = np.maximum(sp[:, j], 0.0)
+    if lost_src:
+        for s in lost_src:
+            g = s.name
+            at = [i for i, b in enumerate(l_bus) if buses[b] == s.bus]
+            values = s.p.to_numpy(dtype=float)[mask]
+            if not np.isfinite(values).all():
+                _refuse(f"the process shortfall dispatch of {g} is not finite")
+            amount = np.maximum(values, 0.0)
             demand = lp[:, at].sum(axis=1) if at else np.zeros(T)
             if (amount > _EPS).any() and (not at or ((amount > _EPS) & (demand <= _EPS)).any()):
                 _refuse(f"shortfall {g} runs where its bus has no load to leave unserved")
@@ -328,6 +340,41 @@ def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
             _refuse(f"bus {buses[b]} is in {bus_unit[b]}, not an energy unit; "
                                  "the flows are shown for energy carriers only")
 
+    return {"T": T, "buses": buses, "bus_ix": bus_ix, "nb": nb, "wg": wg, "dt": dt, "gnames": gnames,
+            "gp": gp, "g_bus": g_bus, "g_lab": g_lab, "external": external, "lnames": lnames, "lp": lp,
+            "l_bus": l_bus, "shed": shed, "lost": lost, "served": served, "elems": elems,
+            "storages": storages, "bus_unit": bus_unit}
+
+
+def read_dispatch(n, mask: np.ndarray, result_df=None, capture=None) -> tuple[dict[str, Any] | None, str | None]:
+    """`_read` for the other results views: (arrays, None), or (None, why not)."""
+    why: list[str] = []
+    token = _WHY.set(why)
+    try:
+        return _read(n, mask, result_df, capture), None
+    except NotEstablished:
+        return None, (why[-1] if why else "not established")
+    finally:
+        _WHY.reset(token)
+
+
+def period_mask(n, period) -> np.ndarray:
+    """Boolean mask over `n.snapshots` for one investment period (all, if flat)."""
+    if is_multi_period(n):
+        return np.asarray(n.snapshots.get_level_values(0)) == period
+    return np.ones(len(n.snapshots), dtype=bool)
+
+
+def _attribute(n, mask: np.ndarray, result_df, capture) -> dict[str, Any]:
+    """The whole-period attribution: per-snapshot MW by (source, via, dest)."""
+    R = _read(n, mask, result_df, capture)
+    T, buses, bus_ix, nb, wg, dt = R["T"], R["buses"], R["bus_ix"], R["nb"], R["wg"], R["dt"]
+    gp, g_bus, g_lab, external = R["gp"], R["g_bus"], R["g_lab"], R["external"]
+    lnames, lp, l_bus, shed, lost, served = R["lnames"], R["lp"], R["l_bus"], R["shed"], R["lost"], R["served"]
+    elems, storages = R["elems"], R["storages"]
+    if T * nb * nb > MAX_CELLS:
+        _refuse("the network is too large for the flow attribution")
+    nst = len(storages)
     # ---- labels -----------------------------------------------------------------
     srcs = sorted(set(g_lab))
     srcs += [STOCK_BEFORE, UNATTRIBUTED]

@@ -112,7 +112,7 @@ def pending_io_lock():
     """The process-wide netCDF lock (`PyPSAService.get_netcdf_io_lock`):
     netCDF4/HDF5 is not thread-safe per process, so a pending write or read
     must not run beside another one, a project save/load, an export or a
-    campus read (two previews in flight crashed the API).
+    campus read (concurrent pending writes crashed the API).
 
     Non-re-entrant: never call under the lock. It is a plain Lock, and every
     pending access takes it on its own, so a nested call would hang."""

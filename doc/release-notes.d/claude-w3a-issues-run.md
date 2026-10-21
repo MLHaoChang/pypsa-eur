@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Issues lists findings under their project-flow section, and "View" opens the field beside the list so it clears as soon as it is fixed; the Run button is disabled exactly when the server would refuse and says why, by section, with a link to the field; the Guided ↔ Expert switch keeps the section.

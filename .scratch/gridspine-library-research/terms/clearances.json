@@ -1,0 +1,114 @@
+{
+  "note": "Owner clearances for the shared (common) library; keys are source_id from source-catalog.json (draft #491). Merge as owner_clearance when the catalog reaches master.",
+  "clearances": {
+    "DEA-FUELS": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator",
+        "note": "DEA August 2026 renewable-fuels workbook (https://ens.dk/media/6444/download, sha256 07ac3ef166883591a438e739ac69c7768b5419964abdd43e668130bd7a55ffee) from source-register.json in .scratch/gridspine-library-eu/. Covered by the cost_dea_renewable_fuels clearance (TERMS-INDEX.md owner decisions 1-2, #498); the in-file CC BY 4.0 governs. Shipped as part of the attributed subset eu-dea-2026-08 (#501)."
+      },
+      "automatic_import_approved": false
+    },
+    "DEA-POWER": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator",
+        "note": "DEA August 2026 electricity/district-heating workbook (https://ens.dk/media/8615/download, sha256 afb78dede13a17d17dca371ce74689bad98e55149ca58996fb3a535ac2704bb9) from source-register.json in .scratch/gridspine-library-eu/. Covered by the cost_dea_generation clearance (TERMS-INDEX.md owner decisions 1-2, #498); the in-file CC BY 4.0 governs. Shipped as part of the attributed subset eu-dea-2026-08 (#501)."
+      },
+      "automatic_import_approved": false
+    },
+    "EU-C02": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "EU-C03": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "EU-C09": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator",
+        "note": "common (upgraded; owner accepts the inference that ACM's general re-use statement covers the decision)"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_dea_energy_transport": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_dea_generation": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_dea_industrial_heat": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator",
+        "note": "common (upgraded; owner accepts that the PDF's CC BY 4.0 covers the datasheet)"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_dea_renewable_fuels": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_dea_storage": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "cost_us_atb_2025": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "rel-eia861": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator"
+      },
+      "automatic_import_approved": false
+    },
+    "rel-oeb-scorecard": {
+      "owner_clearance": {
+        "decision": "common",
+        "date": "2026-10-21",
+        "by": "owner, relayed by coordinator",
+        "note": "common (upgraded; carry the OGL-Ontario attribution line)"
+      },
+      "automatic_import_approved": false
+    }
+  }
+}

@@ -82,7 +82,9 @@ What it builds:
   against the ledger's `commodity_from_grid_side_generator` line to
   max(a cent, 1e-9 relative)) KEYED LIKE the actual commodity line, the
   owner's connection-fee lines copied, the cost lines of assets outside the
-  owner's copied (a boiler's gas), and the lines of contracts that name none
+  owner's copied (a boiler's gas; not a product's buy-in or shortfall on a bus
+  whose load it buys: the purchase replaces them,
+  `counterfactual_purchase_replaces:<gens>`), and the lines of contracts that name none
   of the owner's assets copied (they would exist without the investment;
   flagged `counterfactual_keeps_contract:<id>`). Contracts on the owner's
   assets are absent. An owner conversion Link beside a non-electric site
@@ -195,6 +197,8 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
+from models.process_unit import product_roles
+from services.adequacy.slack import lost_slack_name
 from services.asset_schema import schema as _schema
 from services.asset_schema.access import upfront_parts
 from services.asset_schema.derive import has_parts, number
@@ -345,6 +349,23 @@ def _indexed_price(c, year: int) -> float | None:
     return _K.indexed(c.price, c.indexation_pct_per_year, c.base_year, year)
 
 
+def _is_difference_contract(c) -> bool:
+    """A financial PPA or a CfD: its lines settle (price − ref) × q (IPP ticket 01)."""
+    return c is not None and (getattr(c, "type", None) == "cfd" or _K.is_financial_ppa(c))
+
+
+def _difference_price(c, stream_p2: str, year: int) -> float | None:
+    """The strike or price of a DIFFERENCE line ((price − ref) × q; IPP ticket 01): a
+    financial PPA's energy line or a CfD's difference, indexed to the money year. None
+    for any other line."""
+    t = getattr(c, "type", None)
+    if stream_p2 == "ppa_energy" and _K.is_financial_ppa(c):
+        return _K.indexed(c.price, c.indexation_pct_per_year, c.base_year, year)
+    if t == "cfd" and stream_p2 == "cfd_difference":
+        return _K.indexed(c.strike, c.indexation_pct_per_year, c.base_year, year)
+    return None
+
+
 def _contract_link(c, owner_gens: set[str]) -> tuple[bool, str | None, list[str]]:
     """(generation-linked, the degrading owner generator or None, the owner
     generators it names). A single-asset pay-as-produced, sleeved or
@@ -401,9 +422,12 @@ class _Acc:
     counterparty: str = "external"
     asset: str | None = None
     flags: list[str] = dataclasses.field(default_factory=list)
+    # A contract line's owner-signed settled volume (MWh); None = unknown.
+    qty: float | None = None
 
-    def add(self, v: float | None) -> None:
+    def add(self, v: float | None, q: float | None = None) -> None:
         self.amount = None if (self.amount is None or v is None) else self.amount + v
+        self.qty = None if (self.qty is None or q is None) else self.qty + q
 
 
 def _could_involve(ln, owner: str, contracts: dict, owned_names: set[str]) -> bool:
@@ -450,16 +474,37 @@ def _owner_lines(ledger, inputs, owner: str, k: str, flags: list[str], *,
         else:
             v = None if ln.amount is None else sign * ln.amount
             other = ln.payer if sign > 0 else ln.payee
+        q = _settled_qty(inputs, ln.source_id, owner) if ln.source == "contract" else None
         if key in out:
-            out[key].add(v)
+            out[key].add(v, q)
             out[key].flags += [f for f in ln.flags if f not in out[key].flags]
         else:
             esc = CONTRACT_CLASS if ln.source == "contract" else _esc(ln.value_stream)
             out[key] = _Acc(stream=ln.value_stream, esc_class=esc, amount=v, source=ln.source,
                             source_id=ln.source_id, tariff_item=ln.tariff_item,
                             contract_id=ln.contract_id, counterparty=other or "external",
-                            asset=ln.asset, flags=list(ln.flags))
+                            asset=ln.asset, flags=list(ln.flags), qty=q)
     return out
+
+
+def _settled_qty(inputs, source_id: str, owner: str) -> float | None:
+    """The owner-signed MWh of the settlement line a contract ledger line came from: + when
+    the owner is the contract's payee (the seller of a financial PPA, a CfD's generator owner).
+    The sign follows the CONTRACT's direction, not the ledger leg's (a negative difference is
+    booked with its payer and payee swapped)."""
+    _cid, _, tail = source_id.rpartition(":")
+    try:
+        s = inputs.settlement[int(tail)]
+    except (ValueError, IndexError):
+        return None
+    q = s.get("quantity_mwh")
+    if q is None or not np.isfinite(q):
+        return None
+    if same_party(s.get("payee"), owner):
+        return float(q)
+    if same_party(s.get("payer"), owner):
+        return -float(q)
+    return None
 
 
 def _is_commodity(acc: _Acc) -> bool:
@@ -482,6 +527,11 @@ def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, base_year: int,
         base = dict(stream=a.stream, esc_class=a.esc_class, tariff_item=a.tariff_item,
                     counterparty=a.counterparty, source=a.source, source_id=a.source_id,
                     period=k)
+        if a.contract_id is not None and _is_difference_contract(contracts.get(a.contract_id)) \
+                and (a.source != "contract" or a.qty is None):
+            # Its volume did not reach the line (an allocation split, an unknown leg): the
+            # whole difference escalates in one class (gatekeeper, #461; disclosed).
+            flags.append(f"difference_line_single_class:{key}")
         if a.source == "contract":
             c = contracts.get(a.contract_id)
             linked, asset, on_owner = _contract_link(c, owner_gens)
@@ -495,11 +545,19 @@ def _template_lines(accs: dict[str, _Acc], *, k: str, year: int, base_year: int,
                     amount = None
             pct = getattr(c, "indexation_pct_per_year", None) if c is not None else None
             stream_p2 = key.rsplit(":", 1)[-1]
+            price = _indexed_price(c, year) if stream_p2 == "ppa_energy" else None
+            qty = None
+            diff = _difference_price(c, stream_p2, year)
+            if diff is not None:
+                # Its legs escalate apart and solve_ppa scales the price leg only: both
+                # need the volume; without it the line keeps no price (never a wrong
+                # scaling).
+                price, qty = (diff, a.qty) if a.qty is not None else (None, None)
             lines.append(TemplateLine(
                 key=key, amount=amount, contract_id=a.contract_id, degrades_with=asset,
                 indexation=None if pct is None else float(pct) / 100.0,
                 tenor_years=getattr(c, "tenor_years", None) if c is not None else None,
-                price=_indexed_price(c, year) if stream_p2 == "ppa_energy" else None,
+                price=price, price_qty_mwh=qty,
                 changes_dispatch=bool(getattr(c, "changes_dispatch", False)), **base))
             continue
         base["money_year"] = base_year
@@ -1083,6 +1141,14 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
     unused = sorted(set(purchases) - set(bought))
     if unused:
         flags.append("counterfactual_reference_purchase_unused:" + ",".join(unused))
+    # A product's buy-in and shortfall (ticket 06) on a bus whose load the
+    # counterfactual buys: the purchase replaces them, never stands beside them.
+    bought_buses = {str(n.loads.at[ld, "bus"]) for ld in bought}
+    captured = {_asset_of(a) for acc in ledger_accs.values() for a in acc.values() if a.source == "asset"}
+    replaced = {("Generator", g) for g in product_roles(n) if str(n.generators.at[g, "bus"]) in bought_buses} \
+        | ({("Generator", lost_slack_name(b)) for b in bought_buses} & captured)  # a captured slack (ticket 08)
+    if replaced:
+        flags.append("counterfactual_purchase_replaces:" + ",".join(sorted(g for _c, g in replaced)))
     co2 = getattr(parsed, "co2_price", None)
     grid_co2 = co2 is not None and co2.grid_t_per_mwh is not None
     if co2 is not None and blockers:
@@ -1256,7 +1322,7 @@ def _counterfactual(n, cfg, parsed, sides, inputs, vf, ledger_accs: dict[str, di
         # review B2); the commodity is the meter's, above.
         not_owned = {key for key, a in ledger_accs[k].items()
                      if a.source == "asset" and not _is_commodity(a)
-                     and _asset_of(a) not in owned}
+                     and _asset_of(a) not in owned and _asset_of(a) not in replaced}
         for ln in templates_actual[k]:
             if ln.source == "connection":
                 lines.append(ln)
@@ -1751,7 +1817,9 @@ def _scale(lines, f: float, monthly: dict[str, float | None] | None = None
     for ln in lines:
         fx = monthly[ln.tariff_item] if ln.tariff_item in monthly else f
         amount = None if (ln.amount is None or fx is None) else ln.amount * fx
-        out.append(dataclasses.replace(ln, amount=amount))
+        # A difference line's volume scales with its amount (IPP ticket 01).
+        qty = None if (ln.price_qty_mwh is None or fx is None) else ln.price_qty_mwh * fx
+        out.append(dataclasses.replace(ln, amount=amount, price_qty_mwh=qty))
     return tuple(out)
 
 
@@ -2407,6 +2475,9 @@ def _canon(o):
             # case keeps its hash; stated, the report re-runs to state its figures.
             if o.inputs.island_outage is None and isinstance(out.get("inputs"), dict):
                 out["inputs"].pop("island_outage", None)
+        # A line that is not a difference line (IPP ticket 01) keeps its hash.
+        if isinstance(o, TemplateLine) and o.price_qty_mwh is None:
+            del out["price_qty_mwh"]
         return out
     if hasattr(o, "model_dump"):
         return _canon(o.model_dump(mode="json"))

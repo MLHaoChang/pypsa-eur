@@ -20,7 +20,9 @@ class RequestScope(BaseModel):
     version: Literal[1]
     profile: Literal[
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
-        "storage-unit-dispatch/1", "storage-unit-cost/1",
+        "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
+        "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
+        "generator-emissions/1", "network-emissions/1", "curtailment/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -33,6 +35,7 @@ class RequestScope(BaseModel):
     comparison_evidence_id: str | None = Field(
         default=None, min_length=36, max_length=36
     )
+    component_class: Literal["Line", "Transformer"] | None = None
 
 
 def validate(value):
@@ -52,6 +55,33 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_storage_cost_scope")
+    if scope["profile"] == "carrier-energy/1" and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_carrier_cost_scope")
+    if scope["profile"] in ("branch-loading/1", "network-loading/1") and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_loading_cost_scope")
+    if scope["profile"] in ("bus-price/1", "generator-emissions/1", "network-emissions/1",
+                            "curtailment/1") and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_result_cost_scope")
+    if scope["profile"] in ("generator-emissions/1", "network-emissions/1") and (
+        (scope["profile"] == "network-emissions/1") != (scope["entity_id"] == "network")
+    ):
+        raise ValueError("network_scope_required")
+    if scope["profile"] == "lost-load/1" and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_lost_load_cost_scope")
+    if scope.get("component_class") and scope["profile"] != "branch-loading/1":
+        raise ValueError("component_class_requires_branch_scope")
+    if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
+        scope["profile"] in ("branch-loading/1", "network-loading/1")
+    ) and not scope.get("component_class"):
+        raise ValueError("network_scope_required")
     return scope
 
 
@@ -82,6 +112,76 @@ def from_message(message, project_id, ui_context):
         }
         if storage[2]:
             value.update(start=storage[2], end=storage[3])
+        return validate(value)
+    carrier = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?key results\s+for\s+"
+        r"carrier\s+([^;]{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if carrier:
+        value = {
+            "version": 1, "profile": "carrier-energy/1",
+            "project_id": project_id, "entity_id": carrier[1], "retain": False,
+        }
+        if carrier[2]:
+            value.update(start=carrier[2], end=carrier[3])
+        return validate(value)
+    loading = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:branch\s+)?loading\s+for\s+"
+        r"(network|(line|transformer)\s+([^;]{1,128}?))"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if loading:
+        network = loading[3] is None
+        value = {
+            "version": 1, "profile": "network-loading/1" if network else "branch-loading/1",
+            "project_id": project_id, "entity_id": "network" if network else loading[3],
+            "retain": False,
+        }
+        if not network:
+            value["component_class"] = loading[2].capitalize()
+        if loading[4]:
+            value.update(start=loading[4], end=loading[5])
+        return validate(value)
+    result = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(price|emissions|curtailment)\s+for\s+"
+        r"(network|(bus|generator)\s+([^;]{1,128}?))"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if result:
+        kind, network, word = result[1].lower(), result[3] is None, (result[3] or "").lower()
+        profile = {
+            ("price", "bus"): "bus-price/1",
+            ("emissions", "generator"): "generator-emissions/1",
+            ("emissions", ""): "network-emissions/1",
+            ("curtailment", "generator"): "curtailment/1",
+            ("curtailment", ""): "curtailment/1",
+        }.get((kind, word))
+        if profile is None:
+            return None  # e.g. "price for network" or "emissions for bus X": no such profile
+        value = {
+            "version": 1, "profile": profile, "project_id": project_id,
+            "entity_id": "network" if network else result[4], "retain": False,
+        }
+        if result[5]:
+            value.update(start=result[5], end=result[6])
+        return validate(value)
+    lost = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?lost load\s+for\s+"
+        r"(network|load\s+([^;]{1,128}?))"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if lost:
+        value = {
+            "version": 1, "profile": "lost-load/1", "project_id": project_id,
+            "entity_id": "network" if lost[2] is None else lost[2], "retain": False,
+        }
+        if lost[3]:
+            value.update(start=lost[3], end=lost[4])
         return validate(value)
     storage_cost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"
