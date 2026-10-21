@@ -7,12 +7,12 @@ leaves?
 One battery/UPS, two duties, no double credit: the backup duty is reserved
 first and smoothing gets what is left.
 
-* **Backup duty.** A ride-through battery keeps exactly what the site peak
-  check counts as firm (``site_peak.firm_battery_mw``): f MW, held for the
-  island requirements' ``sustained_h`` D, so f MW and f·D MWh. A UPS keeps
-  the energy to bridge its IT load for ``bridge_s``; its power is free for
-  smoothing while the grid is there (it carries the load only once the grid
-  is lost).
+* **Backup duty, energy only.** The ride-through batteries keep the island
+  study's outage reserve R (``site_peak.outage_reserve_mwh``, the one the
+  peak check keeps): (critical load − firm gensets)⁺ × ``sustained_h``, plus
+  the seamless bridge. A UPS keeps the energy to bridge its IT load for
+  ``bridge_s``. Their power is free for smoothing while the grid is there:
+  they carry the load only once it is lost, and then smoothing stops.
 * **Smoothing need**, closed form per envelope phase (IT side at the PoC, as
   the scorecard's ramp and oscillation rows read it), R the ramp limit:
 
@@ -25,17 +25,25 @@ first and smoothing gets what is left.
     needs the part above the limit, A_x = max(0, A − A_lim), in MW and
     A_x·T/π MWh of swing; outside the band it needs nothing.
 
-  Need = S + A_x MW and S²/R + A_x·T/π MWh.
+  Need = S + A_x MW and S²/R + A_x·T/π MWh. Up and down share one
+  state-of-charge band above the backup floor: the battery sits where it can
+  both give E_up and take E_down, so E_up + E_down ≤ e − R (UPS: e − bridge).
 
 Only committed (non-extendable) StorageUnits count, as in the peak check: an
-extendable unit is sized by the run, so the screen cannot know its rating.
-Nothing is time-stepped, solved or stored; no input is new.
+extendable unit is sized by the run, so the screen cannot know its rating
+(one sizing basis with the peak check). Nothing is time-stepped, solved or
+stored; no input is new. The screen reads the envelope's phases only: it is
+blind to in-hour ramps beyond them (the hourly-mean profile carries none).
+Energies are deliverable MWh; the charging side takes 1/η_store more from the
+grid than it stores, which the screen does not add (a few per cent).
 """
 from __future__ import annotations
 
 import math
 
-from services.adequacy.site_peak import _value, firm_battery_mw
+import numpy as np
+
+from services.adequacy.site_peak import _energized, _periods, _value, import_links, outage_reserve_mwh
 
 #: The screen's verdicts: the reserve covers the need, falls short, or the
 #: screen lacks an input.
@@ -86,10 +94,27 @@ def _it_peak_mw(n, loads: list[str]) -> float | None:
     return float(ts.fillna(static).reindex(n.snapshots).fillna(0.0).sum(axis=1).max())
 
 
+def _delivered(n) -> np.ndarray | None:
+    """The energized import after its efficiency per snapshot, as the peak check reads it."""
+    links = import_links(n)
+    if not links:
+        return None
+    return sum(_energized(n, l) * float(n.links.at[l, "efficiency"]) for l in links)
+
+
+def _mask(n, year: int | None):
+    """The snapshots of the investment period named for ``year``; the whole
+    horizon when no period is (the reserve's maximum over it, conservative)."""
+    for label, mask in _periods(n):
+        if year is not None and label == str(year):
+            return mask
+    return None
+
+
 def _reserve(n, island: dict, year: int | None) -> dict:
     """What the committed ride-through batteries and UPSs hold for smoothing
-    in ``year``, after their backup duty: ``{mw, mwh, backup_mw, backup_mwh,
-    units, unsized, notes}``."""
+    in ``year``, after their backup duty (energy only): ``{mw, mwh,
+    backup_mwh, units, unsized, notes}``."""
     su = n.storage_units
     units = island.get("units") or {}
     req = island.get("requirements") or {}
@@ -97,8 +122,7 @@ def _reserve(n, island: dict, year: int | None) -> dict:
     if rts is None:
         rts = [u for u, d in units.items() if d.get("kind") == "bess"]
     upss = [u for u, d in units.items() if d.get("kind") == "ups"]
-    out = {"mw": 0.0, "mwh": 0.0, "backup_mw": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [],
-           "notes": []}
+    out = {"mw": 0.0, "mwh": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [], "notes": []}
 
     def committed(names):
         live = [u for u in names if u in su.index and _active(su, u, year)]
@@ -111,18 +135,12 @@ def _reserve(n, island: dict, year: int | None) -> dict:
 
     rt = committed(rts)
     if rt:
-        # The peak check's own credit, on the units in service this year.
-        firm, rule = firm_battery_mw(n, {"units": {u: units.get(u, {"kind": "bess"}) for u in rt},
-                                           "requirements": {**req, "ride_through_storage": rt}})
-        d = float(_value(req.get("sustained_h")) or 0.0)
-        p = sum(float(su.at[u, "p_nom"]) for u in rt)
-        e = sum(deliverable(u) for u in rt)
-        out["mw"] += p - firm
-        out["mwh"] += e - firm * d
-        out["backup_mw"] += firm
-        out["backup_mwh"] += firm * d
+        keep, words = outage_reserve_mwh(n, island, _mask(n, year), _delivered(n))
+        out["mw"] += sum(float(su.at[u, "p_nom"]) for u in rt)
+        out["mwh"] += sum(deliverable(u) for u in rt) - keep
+        out["backup_mwh"] += keep
         out["units"] += rt
-        out["notes"].append(f"ride-through {', '.join(rt)}: {firm:.3g} MW kept for backup ({rule})")
+        out["notes"].append(f"ride-through {', '.join(rt)} keeps the {words}")
     bridge_s = float(_value(req.get("bridge_s")) or 0.0)
     for u in committed(upss):
         p, e = float(su.at[u, "p_nom"]), deliverable(u)
@@ -135,7 +153,7 @@ def _reserve(n, island: dict, year: int | None) -> dict:
         out["units"].append(u)
         out["notes"].append(f"UPS {u}: {keep:.3g} MWh kept to bridge {carried:.3g} MW for {bridge_s:g} s"
                             + ("" if load is not None else " (its IT load is not in the network: its rating)"))
-    out["mw"], out["mwh"] = max(out["mw"], 0.0), max(out["mwh"], 0.0)
+    out["mwh"] = max(out["mwh"], 0.0)
     return out
 
 
@@ -164,7 +182,7 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
         "oscillation_excess_mw": a_x, "oscillation_mwh": e_osc, "oscillation_in_band": in_band,
         "need_mw": need_mw, "need_mwh": need_mwh,
         "reserve_mw": reserve["mw"], "reserve_mwh": reserve["mwh"],
-        "backup_mw": reserve["backup_mw"], "backup_mwh": reserve["backup_mwh"],
+        "backup_mwh": reserve["backup_mwh"],
         "units": list(reserve["units"]),
     })
     if not reserve["units"]:
@@ -188,7 +206,7 @@ def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limi
                      band_hz: tuple[float, float] = (0.1, 2.0)) -> dict:
     """The screen per envelope phase: ``{"verdict", "note", "phases": [{cod,
     step_mw, step_mwh, checkpoint_mwh, oscillation_mwh, need_mw, need_mwh,
-    reserve_mw, reserve_mwh, backup_mw, backup_mwh, units, verdict, note}]}``.
+    reserve_mw, reserve_mwh, backup_mwh, units, verdict, note}]}``.
     The overall verdict is the worst phase's (short over unknown over covered).
     ``None`` without an AI-training envelope: nothing to screen."""
     if not envelope or not envelope.get("phases"):

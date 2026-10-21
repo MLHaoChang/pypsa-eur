@@ -17,7 +17,6 @@ import pypsa
 import pytest
 
 from services.adequacy import smoothing as S
-from services.adequacy.site_peak import firm_battery_mw
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
@@ -118,26 +117,41 @@ def test_without_an_envelope_there_is_nothing_to_screen():
                               oscillation_limit_pct=1.0, connection_mw=200.0) is None
 
 
-def test_the_ride_through_batterys_firm_credit_is_not_smoothing_reserve():
-    """20 MW / 80 MWh deliverable, 24 h ride-through: the peak check counts
-    80/24 = 3.33 MW firm, held for 24 h = 80 MWh. Nothing is left in energy."""
-    n = _site([("rt", 20.0, 4.0, 1.0, False)])
-    island = {"units": {"rt": {"kind": "bess"}}, "requirements": {"sustained_h": {"value": 24.0}}}
-    firm, _ = firm_battery_mw(n, island)
-    (ph,) = _screen(n, island, [_phase(10.0)])["phases"]
-    assert ph["backup_mw"] == pytest.approx(firm) and ph["backup_mwh"] == pytest.approx(80.0)
-    assert ph["reserve_mw"] == pytest.approx(20.0 - firm)
-    assert ph["reserve_mwh"] == pytest.approx(0.0)
+def test_up_and_down_steps_share_one_soc_band():
+    """A battery with exactly S²/(2R) free MWh can give the up step or take
+    the down step, not both from one state of charge: it is short."""
+    e = S.step_mwh(100.0, 20.0)
+    n = _site([("ups", 150.0, e / 150.0, 1.0, False)], {"it": 0.0})
+    (ph,) = _screen(n, UPS, [_phase(100.0)])["phases"]
+    assert ph["reserve_mwh"] == pytest.approx(e)
     assert ph["verdict"] == "short" and ph["short"] == ["MWh"]
+    n = _site([("ups", 150.0, 2 * e / 150.0, 1.0, False)], {"it": 0.0})
+    assert _screen(n, UPS, [_phase(100.0)])["verdict"] == "covered"
 
 
-def test_a_power_bound_ride_through_battery_leaves_energy_but_no_power():
-    """10 MW / 40 MWh, 1 h ride-through: all 10 MW are firm, 30 MWh is left."""
-    n = _site([("rt", 10.0, 4.0, 1.0, False)])
-    island = {"units": {"rt": {"kind": "bess"}}, "requirements": {"sustained_h": {"value": 1.0}}}
-    (ph,) = _screen(n, island, [_phase(5.0)])["phases"]
-    assert ph["reserve_mw"] == pytest.approx(0.0) and ph["reserve_mwh"] == pytest.approx(30.0)
-    assert ph["short"] == ["MW"]
+def _rt(p_nom, max_hours, critical, sustained_h):
+    n = _site([("rt", p_nom, max_hours, 1.0, False)], {"critical": critical})
+    island = {"units": {"rt": {"kind": "bess"}, "critical": {"kind": "load", "critical": True}},
+              "requirements": {"sustained_h": {"value": sustained_h}}}
+    return n, island
+
+
+def test_the_ride_through_battery_keeps_the_outage_reserve_in_energy_only():
+    """20 MW / 80 MWh, a 3 MW critical load with no gensets for 24 h: R =
+    72 MWh is kept, 8 MWh and all 20 MW are left for smoothing."""
+    n, island = _rt(20.0, 4.0, 3.0, 24.0)
+    (ph,) = _screen(n, island, [_phase(10.0)])["phases"]
+    assert ph["backup_mwh"] == pytest.approx(72.0)
+    assert ph["reserve_mwh"] == pytest.approx(8.0)
+    assert ph["reserve_mw"] == pytest.approx(20.0)
+    assert "72 MWh outage reserve" in ph["note"]
+
+
+def test_a_reserve_that_takes_all_the_energy_leaves_nothing_to_smooth():
+    n, island = _rt(20.0, 4.0, 4.0, 24.0)                  # R = 96 MWh > 80 MWh
+    (ph,) = _screen(n, island, [_phase(10.0)])["phases"]
+    assert ph["reserve_mwh"] == 0.0
+    assert ph["verdict"] == "short" and ph["short"] == ["MWh"]
 
 
 def test_the_ups_keeps_its_bridge_energy_and_lends_its_power():
