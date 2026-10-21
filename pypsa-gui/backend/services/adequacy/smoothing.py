@@ -294,7 +294,11 @@ def after_mitigation(ph: dict) -> dict | None:
     residual_step_mw, amplitude_mw, residual_amplitude_mw, period_s}``, or None
     when the phase was not screened (no battery/UPS, no ramp limit). The
     batteries' share reaches the grid at the ramp limit, the UPSs' at their
-    walk-in rate, the rest unshaped."""
+    walk-in rate, the rest unshaped. The oscillation is covered up to its
+    whole amplitude A, not only its excess over the oscillation limit: the
+    ramp row's value carries the oscillation's slope 2π·A/T, so leaving A_lim
+    uncovered would keep the ramp failing with power and energy to spare;
+    the oscillation row is still judged against its own limit."""
     if ph.get("verdict") not in ("covered", "short"):
         return None
     s = ph["step_mw"]
