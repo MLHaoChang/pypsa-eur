@@ -1546,6 +1546,7 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
     {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
     {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+    {"error_kind": "library_reference_unknown"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -1652,6 +1653,31 @@ def get_library_item(kind: str, name: str, version: int | None = None,
     if kind == "tariff" and detail != "full":
         return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
     return out
+
+
+def list_library_references(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library_references import list_references as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_reference(technology: str, projection_year: int, component: str | None = None,
+                          asset: str | None = None) -> dict:
+    """One shipped reference beside the pack value it would otherwise be. With an asset,
+    the pack is the one that asset's overnight cost was priced from (its provenance)."""
+    from routers.library_references import get_reference as _h
+
+    pack_source = None
+    if (component is None) != (asset is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "library_reference_unknown",
+            "message": "pass component and asset together, or neither"})
+    if asset is not None:
+        from routers.network import get_asset_provenance as _p
+        fields = _route(_p, component, asset)["fields"]
+        pack_source = (fields.get("overnight_cost") or {}).get("source")
+    return _library_call(_h, technology, projection_year,
+                         pack_source=pack_source).model_dump(mode="json")
 
 
 def _urdb_rate(data, item_index: int | None = None):
@@ -7688,6 +7714,8 @@ DISPATCHERS: dict[str, Any] = {
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "list_library_references": list_library_references,
+    "get_library_reference": get_library_reference,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c

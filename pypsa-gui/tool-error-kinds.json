@@ -255,6 +255,10 @@
       "surface": "inline",
       "why": "An investment-case tool got an argument out of range (an empty owner, a page < 1, a target IRR or year outside the SolvePpa bounds). The model corrects the argument and retries, like invalid_tool_args."
     },
+    "library_reference_unknown": {
+      "surface": "inline",
+      "why": "get_library_reference named a technology/projection year the shipped references do not hold, or passed component without asset. The model re-reads list_library_references and retries; a route code surfaced by the Library references route."
+    },
     "library_ref_stale": {
       "surface": "inline",
       "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."

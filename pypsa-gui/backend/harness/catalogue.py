@@ -3559,6 +3559,42 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── Library references (2) — the shipped common cost references ───────
+    _t(
+        "list_library_references",
+        "List the shipped (common) technology cost references: published "
+        "benchmarks such as the Danish Energy Agency's August 2026 catalogue "
+        "for onshore wind, utility and commercial rooftop PV and 100 MW AEC/PEM "
+        "electrolysers, one row per technology and projection year. Each row "
+        "has its money year (currency_year), capacity_basis_code "
+        "(output_electric, output_electric_ac, input_electric), "
+        "includes_grid_connection (true, false or 'unknown'), licence and "
+        "attribution. They are opt-in references, never the project's "
+        "defaults. Paged: {items, total_count, offset, returned, has_more}. "
+        "Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "get_library_reference",
+        "Read one shipped cost reference (technology and projection_year from "
+        "list_library_references) with its source cells, and a comparison: "
+        "each parameter beside the defaults-pack value it would otherwise be, "
+        "both with their own source and money year, and differs=true where "
+        "value, unit, currency, money year or projection year differ. Nothing "
+        "is converted or written. With component and asset, the pack is the "
+        "one that asset's overnight cost was priced from; otherwise the "
+        "latest generic pack. `pack` names which. Report both values with "
+        "their money years; never present the reference as the default. "
+        "Safety: read.",
+        {
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "component": {"type": "string"},
+            "asset": {"type": "string"},
+        },
+        ["technology", "projection_year"],
+    ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
         "set_site_connection",
@@ -4238,6 +4274,10 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    # Library references (2): read-only; the asset's pack comes from its provenance.
+    "list_library_references": [("GET", "/api/library/references")],
+    "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
+                              ("GET", "/api/library/references/{technology}/{year}")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),
