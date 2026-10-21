@@ -36,7 +36,7 @@ stated before any solver time is spent.
     numbers are not changed (owner decision 2026-10-13).
   * `commercial.grid_connection_double_count` (warning, GS-2b): an asset priced from a pack row
     that includes the grid connection, on a project whose connection agreement charges a capacity
-    fee;
+    fee.
   * `commercial.group_fee_bypass` (warning): a capacity fee on `poc_link`
     while another group member is extendable (it takes capacity fee-free).
   * `commercial.meter_bypass` (warning, P2 WP2.2c round 2): a grid-side bus
@@ -170,8 +170,12 @@ def _connection_double_count(n, fee) -> list[tuple[str, str, str, str, str]]:
     for comp, cls in (("generators", "Generator"), ("storage_units", "StorageUnit"),
                       ("links", "Link"), ("stores", "Store")):
         for name in getattr(n, comp).index:
-            rec = provenance.get(n, cls, str(name)).get("overnight_cost") or {}
-            if rec.get("includes_grid_connection") is True:
+            recorded = provenance.get(n, cls, str(name))
+            # A battery records its two overnight parts; a field a person changed no longer
+            # carries the pack row's connection fact.
+            if any(recorded.get(f, {}).get("status") == "default"
+                   and recorded[f].get("includes_grid_connection") is True
+                   for f in ("overnight_cost", "inv_power_overnight", "inv_energy_overnight")):
                 out.append(("warning", "commercial.grid_connection_double_count", cls, str(name),
                             f"{name!r} is priced from a defaults-pack row whose overnight cost "
                             "already includes the grid connection, and the connection agreement "

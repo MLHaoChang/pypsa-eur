@@ -124,7 +124,7 @@
     },
     {
       "item": "unit commitment in planning",
-      "note": "the relaxation understates restarts, so the binary operational check runs after the plan and reports its per-period gap",
+      "note": "the relaxation understates restarts, so the binary operational check runs after the plan and reports its per-period gap. Measured on this plan (electrolysis priced per MW of electrical input, GS-2b, 2026-10-21): in 2027 no new electrolyser is built and the loop stays off for the whole 168 h week, so the 2027 binary check costs 41.2 M EUR against 6.9 M linearised",
       "source": "assumed",
       "value": "linearised (process_uc auto), then one binary check per period"
     },

@@ -544,3 +544,17 @@ def test_opening_a_saved_project_never_reprices_it_from_the_pack(client, api_pro
     gens = client.get("/api/network/generators").json()
     assert [g["capital_cost"] for g in gens if g["name"] == "G1"] == [123.0]
     assert calls == []
+
+
+def test_a_battery_that_includes_the_connection_warns_and_a_customised_field_does_not():
+    from services.asset_schema import provenance
+    from services.commercial.preflight import _connection_double_count
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = _net()
+    price_from_pack(n, "storage_units", "s", "battery", version=TYPED)
+    provenance.annotate(n, "StorageUnit", "s", "inv_power_overnight", includes_grid_connection=True)
+    assert [o[1] for o in _connection_double_count(n, object())] == [
+        "commercial.grid_connection_double_count"]
+    provenance.mark_customised(n, "StorageUnit", "s", ["inv_power_overnight"])
+    assert _connection_double_count(n, object()) == []

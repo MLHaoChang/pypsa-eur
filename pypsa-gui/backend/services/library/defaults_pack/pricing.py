@@ -173,6 +173,11 @@ def _stamp(n, component_class: str, name: str, pack, entries: dict, *, money=())
                           fallback="eu_fallback" if fell_back else None)
 
 
+def _review(flag) -> bool:
+    """`connection_fee_review`: the row includes the connection or does not say."""
+    return flag is not False
+
+
 def _annotate(n, component_class: str, name: str, field: str, row) -> None:
     """The row's typed cost units on the field's provenance: a row that includes the grid
     connection (or does not say) is flagged, so a separately priced connection can be checked
@@ -181,7 +186,7 @@ def _annotate(n, component_class: str, name: str, field: str, row) -> None:
 
     provenance.annotate(n, component_class, name, field, capacity_basis=row.capacity_basis,
                         includes_grid_connection=row.includes_grid_connection,
-                        connection_fee_review=row.includes_grid_connection is not False)
+                        connection_fee_review=_review(row.includes_grid_connection))
 
 
 def _value(pack, key: str) -> float:
@@ -221,7 +226,8 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
         _stamp(n, "StorageUnit", name, pack,
                {**{f"inv_{part}_{field}": (_row(pack, f"battery.{part}.{field}"), 1.0)
                    for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")},
-                "discount_rate": (None, 1.0)})
+                "discount_rate": (None, 1.0)},
+               money=tuple(f"inv_{part}_overnight" for part in rows))
         for part, row in rows.items():
             _annotate(n, "StorageUnit", name, f"inv_{part}_overnight", row)
         capital, fom = float(df.at[name, "capital_cost"]), float(df.at[name, "fom_cost"])
@@ -230,7 +236,7 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
                 "money_year": rows["power"].money_year,
                 "capacity_basis": {part: r.capacity_basis for part, r in rows.items()},
                 "includes_grid_connection": flags[0] if len(set(map(str, flags))) == 1 else "unknown",
-                "connection_fee_review": any(f is not False for f in flags),
+                "connection_fee_review": any(_review(f) for f in flags),
                 annual_key: capital + fom}
     over_row = _row(pack, f"{technology}.investment.overnight")
     scale = _scale_for(n, component, name, technology, over_row.capacity_basis)
@@ -259,5 +265,5 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
     return {**stamp, **written, "capital_cost": annuity, "scale": scale,
             "money_year": over_row.money_year, "capacity_basis": over_row.capacity_basis,
             "includes_grid_connection": over_row.includes_grid_connection,
-            "connection_fee_review": over_row.includes_grid_connection is not False,
+            "connection_fee_review": _review(over_row.includes_grid_connection),
             annual_key: annuity + written["fom_cost"]}
