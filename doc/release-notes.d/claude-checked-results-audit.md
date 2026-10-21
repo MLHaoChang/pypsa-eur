@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): audit of every result surface against the checked-answer harness, with the plan to check or explicitly withhold each one when Check answers is on (`.scratch/checked-results/audit.md`).

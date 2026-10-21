@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify one carrier's generator energy, combined peak output and StorageUnit charge/discharge (`carrier-energy/1`, opt-in via `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`); new profiles are off unless listed.

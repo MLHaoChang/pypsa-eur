@@ -990,14 +990,14 @@ def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(tmp_projects_dir, 
     turn1_events = [
         _tool_use_event("tu-activate", "activate_project", {"project_id": "scen1"}),
         _tool_use_event("tu-update", "update_component", {
-            "component_class": "Load", "name": "L1", "p_set": 250,
+            "component_class": "Bus", "name": "B1", "attrs": {"v_nom": 20.0},
         }),
     ]
     turn1_final = _FakeFinalMessage(
         content=[
             _tool_use_block("tu-activate", "activate_project", {"project_id": "scen1"}),
             _tool_use_block("tu-update", "update_component", {
-                "component_class": "Load", "name": "L1", "p_set": 250,
+                "component_class": "Bus", "name": "B1", "attrs": {"v_nom": 20.0},
             }),
         ],
         usage=_FakeUsage(),
@@ -1011,9 +1011,12 @@ def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(tmp_projects_dir, 
         (turn2_events, turn2_final),
     ])
 
-    events = list(chat_service.run_turn(
-        session, "switch then update", client=client,
-    ))
+    # LC-04 (owner Q3): the edit shows its card in Expert too; approve it.
+    events = []
+    for ev, p in chat_service.run_turn(session, "switch then update", client=client):
+        events.append((ev, p))
+        if ev == "tool_pending_confirmation":
+            session.record_decision(p["confirmation_token"], "approve")
     error_kinds = [
         p.get("error_kind") for ev, p in events if ev in ("error", "tool_error")
     ]
@@ -1024,7 +1027,7 @@ def test_agent_rebinding_tool_does_not_trigger_mid_turn_guard(tmp_projects_dir, 
     # Verify update_component DID run — the fix isn't just "no error" but
     # "the second tool actually executes".
     assert len(update_calls) == 1
-    assert update_calls[0]["name"] == "L1"
+    assert update_calls[0]["name"] == "B1"
 
 
 def test_agent_rebind_emits_project_rebound_frame(tmp_projects_dir, install_network, monkeypatch):

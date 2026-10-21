@@ -10,6 +10,9 @@ two faces" §3 rule 4). The pack holds:
 - from version 2026-10-13, the Energy Hub template technologies (IC S3 seeds): a gas genset (OCGT),
   a diesel genset (diesel engine farm), onshore wind, a fuel cell (LT-PEMFC) and an electrolyser
   (AEC), from technology-data v0.14.0 in 2020 EUR, one `investment` part per MW each;
+- from version 2026-10-20, the ammonia technologies the `eh_ammonia_staged` template prices from: the
+  Haber-Bosch loop (per MW of NH3 output), the liquid NH3 tank and the type 1 H2 tank, from
+  technology-data v0.14.0 in 2020 EUR, one `investment` part each;
 - finance defaults;
 - two illustrative tariffs;
 - two synthetic load profiles.
@@ -67,6 +70,8 @@ are:
 |---|---|---|
 | EUR/kW | EUR/MW | ×1000 |
 | EUR/kWh | EUR/MWh | ×1000 |
+| EUR/kW_NH3 | EUR/MW | ×1000 (technology-data's ammonia-output kW) |
+| EUR/MWh_NH3 | EUR/MWh | ×1 (technology-data's ammonia tank, LHV) |
 | %/year | share/year (the asset schema's `fom_share`) | ×0.01 |
 | EUR | EUR/unit (basis `lump`) | ×1 |
 | EUR/km | EUR/km (basis `per_km`) | ×1 |

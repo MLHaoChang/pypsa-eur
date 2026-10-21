@@ -113,6 +113,10 @@ from services.commercial.tariff_engine import (
 )
 
 EXPORT_PRICE_ATTR = "ic_export_price"
+# The wholesale import price on the import Link(s) (IPP ticket 07): a persisted input like
+# the export price, with its own axis record.
+IMPORT_PRICE_ATTR = "ic_import_price"
+META_IMPORT_PRICE_AXIS = "ic_import_price_axis"
 ENERGY_PRICE_ATTR = "ic_energy_price"
 META_LINKS = "ic_poc_links"
 META_PRICE_AXIS = "ic_export_price_axis"
@@ -974,6 +978,47 @@ def write_export_price(n, link: str, series: pd.Series, timezone: str | None = N
     return 0
 
 
+def write_import_price(n, links: list[str], series: pd.Series,
+                       timezone: str | None = None) -> int:
+    """Put a resolved Library price series on each import Link's `ic_import_price`
+    column (IPP ticket 07), as `write_export_price` does for export: aligns first and
+    writes ONLY when every snapshot is covered; returns the uncovered count (0 = written)."""
+    aligned = _aligned_once(n, series, timezone)
+    uncovered = int(aligned.isna().sum())
+    if uncovered:
+        return uncovered
+    store = _frame(n, IMPORT_PRICE_ATTR)
+    for link in links:
+        store[link] = aligned.to_numpy()
+    n.links_t[IMPORT_PRICE_ATTR] = store
+    n.meta[META_IMPORT_PRICE_AXIS] = _axis_hash(n.snapshots)
+    return 0
+
+
+def _import_price(n, cfg: CommercialConfig) -> np.ndarray:
+    """The wholesale import price (€/MWh per snapshot) the import Links carry; every
+    import Link carries the same series."""
+    store = n.links_t.get(IMPORT_PRICE_ATTR) if hasattr(n.links_t, "get") else None
+    if n.meta.get(META_IMPORT_PRICE_AXIS) not in (None, _axis_hash(n.snapshots)):
+        raise CommercialBindingError(
+            "the snapshots changed since the import price was materialised; re-apply the "
+            "commercial config to place the Library series on the current axis")
+    cols = []
+    for link in import_links(cfg):
+        col = None if store is None or link not in store.columns \
+            else store[link].reindex(n.snapshots)
+        if col is None or col.isna().any():
+            missing = len(n.snapshots) if col is None else int(col.isna().sum())
+            raise CommercialBindingError(
+                f"import price is not established for {missing} snapshot(s) of {link!r}; "
+                "re-apply the commercial config to materialise the Library series on the "
+                "current snapshot axis")
+        cols.append(col.to_numpy(dtype=float))
+    if any(not np.array_equal(c, cols[0]) for c in cols[1:]):
+        raise CommercialBindingError("the import Links carry different import prices")
+    return cols[0]
+
+
 def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
     store = n.links_t.get(EXPORT_PRICE_ATTR) if hasattr(n.links_t, "get") else None
     if n.meta.get(META_PRICE_AXIS) not in (None, _axis_hash(n.snapshots)):
@@ -1233,6 +1278,9 @@ def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION,
                                     if cfg.export_price_ref is not None else None),
                "timezone": cfg.timezone, "import": sorted(import_links(cfg)),
                "export": cfg.export_link, "axis": _axis_hash(n.snapshots)}
+    if cfg.import_price_ref is not None:
+        # Only when set, so a config without it hashes as before (IPP ticket 07).
+        payload["import_price_ref"] = _H.canonical(cfg.import_price_ref, version=version)
     if (recipe >= WINDOWED_TIERS_RECIPE and cfg.meter_history_energy_kwh
             and any(i.tiers for i in items)):
         payload["energy_history"] = sorted(cfg.meter_history_energy_kwh.items())
@@ -2143,6 +2191,10 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     ppa_adders = _ppa_dispatch_spec(n, cfg) or {}
     has_price = cfg.export_price_ref is not None
     price = _export_price(n, cfg) if has_price else None
+    if cfg.import_price_ref is not None:
+        # The wholesale import price joins the import side (IPP ticket 07); the commit
+        # below persists it inside `ic_energy_price`, so the rows carry it.
+        adders["import"] = adders["import"] + _import_price(n, cfg)
     risk = circulation_risk_snapshots(n, cfg, adders, price)
     if has_price:
         adders["export"] = adders["export"] - price
@@ -2323,7 +2375,9 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
-                             if cfg.export_price_ref is not None else None)}
+                             if cfg.export_price_ref is not None else None),
+        "import_price_ref": (cfg.import_price_ref.model_dump(mode="json")
+                             if cfg.import_price_ref is not None else None)}
     return applied
 
 

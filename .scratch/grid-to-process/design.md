@@ -380,8 +380,16 @@ conversion factor (D2).
   made, to 1e-6.
 - When it runs, the HB never runs below 0.4 × p_nom × u. Every stop lasts at least 8 snapshots.
   The binary operational check reports its objective gap against the linearised plan.
-- With the HB set to `p_min_pu` 1.0 and `min_down_time` 0 (inflexible, never stops), the solve
-  needs at least as much H2 storage or grid import as the flexible case. A test pins the sign.
+- **Inflexible HB (never stops).** A test pins the sign on the 2035 week alone, where the delivery
+  (150 t/d) lies between the minimum load (64 t/d) and the size (160 t/d). The flexible HB
+  (committable, min up/down 24 / 8 h, binary UC) is compared with a never-stopping HB (not
+  committable, `p_min_pu` 0.4), both without the ramp limit. A never-stopping HB is a restriction of a
+  flexible one, so it costs at least as much and needs at least as much H2 storage or grid import.
+  It is not tested on the three-period plan, for three measured reasons:
+  - The linearised plan flips the sign: `p_min_pu` 1.0 with a free fractional u is *more* flexible.
+  - A never-stopping HB is infeasible in 2027 (delivery 50 t/d, minimum load 64 t/d: no sink for the
+    surplus), and at the flexible plan's fixed capacities in 2035 (no H2 slack).
+  - A binary re-plan of the three periods hits a 600 s time limit at a 1 % gap.
 - With an infinite connection and free storage, lost production and buy-in are 0. With the
   electrolysers removed, buy-in = delivery and lost production = 0, because the lost-production
   value is above the buy-in price.
