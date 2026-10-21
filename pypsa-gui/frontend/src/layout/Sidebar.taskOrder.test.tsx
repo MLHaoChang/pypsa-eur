@@ -71,13 +71,13 @@ const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
   model: ['Campus electrical', 'Loads', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
   run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
-  results: ['Results', 'Decision study', 'Planning → dynamics', 'Reports'],
+  results: ['Results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots'],
 }
 
 // The project's actions, now behind the footer card's menu.
 const PROJECT_MENU_ROWS = [
-  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Projects home', 'Workspace panel',
+  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Workspace panel',
 ]
 
 function rowLabels(group: HTMLElement): string[] {
@@ -135,7 +135,7 @@ describe('M2 — Expert sidebar, expanded', () => {
     expect(reports.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // Outside the scrolling body, so it stays on screen.
     expect(container.querySelector('.overflow-y-auto')?.contains(card)).toBe(false)
-    expect(within(card).getByTitle('Rename project (header field)').textContent).toContain('Demo')
+    expect(within(card).getByText('Demo').textContent).toContain('Demo')
     expect(within(card).getByText(/Autosave/)).toBeTruthy()
   })
 
