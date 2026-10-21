@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "assessed_master": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+  "spec_integrity": "run validate_specs.py; no implementation readiness implied",
+  "baseline_tests": {
+    "purpose": "existing native foundations only; not future feature acceptance",
+    "result": "passed",
+    "tests": 161,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 38.229,
+    "files": [
+      "pypsa-gui/backend/tests/test_assistant_task_outcomes.py",
+      "pypsa-gui/backend/tests/test_study_findings.py",
+      "pypsa-gui/backend/tests/test_adequacy_campaign.py",
+      "pypsa-gui/backend/tests/test_series_io.py",
+      "pypsa-gui/backend/tests/test_chat_uploads.py",
+      "pypsa-gui/backend/tests/test_number_audit.py"
+    ],
+    "command": "PYTHONPATH=<worktree> NUMBA_CACHE_DIR=<isolated-cache> MPLCONFIGDIR=<isolated-cache> OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <test-env-python> -m pytest tests/test_assistant_task_outcomes.py tests/test_study_findings.py tests/test_adequacy_campaign.py tests/test_series_io.py tests/test_chat_uploads.py tests/test_number_audit.py -q -p no:warnings -o faulthandler_timeout=45 --junitxml=<isolated-output>/baseline-tests.xml",
+    "cwd": "pypsa-gui/backend",
+    "timestamp_utc": "2026-10-21T20:48:20.507640+00:00",
+    "junit_sha256": "6b0c818b02e392471e2119db7ebc07976ba0b2a4109c8bb380fd561feeb4d733",
+    "local_log": "/workspace/scratch/high-value-ai-specs/baseline-tests.log",
+    "local_junit": "/workspace/scratch/high-value-ai-specs/baseline-tests.xml"
+  },
+  "planned_acceptance": {
+    "cases": 48,
+    "result": "not_run_features_not_implemented"
+  },
+  "not_performed": [
+    "full regression",
+    "new-feature E2E",
+    "live paid model tests",
+    "measured ROI or calibrated confidence",
+    "external domain review",
+    "premerge certification"
+  ],
+  "paid_calls": 0,
+  "reviewers_contacted": false,
+  "runtime_modified": false,
+  "later_master_review": {
+    "sha": "49791da3e1197f3872b9273d37ca97c47c57b13d",
+    "result": "incoming title/description-only changes reviewed; baseline tests not relabeled or rerun",
+    "premerge_certified": false
+  },
+  "spec_checks": {
+    "offline_integrity": "passed",
+    "new_validator_ruff": "passed",
+    "new_validator_format": "passed",
+    "staged_diff_whitespace": "passed",
+    "scope": "specification only; no implementation certification"
+  }
+}
