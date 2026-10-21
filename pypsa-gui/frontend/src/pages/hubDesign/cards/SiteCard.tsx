@@ -17,6 +17,8 @@ import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStud
 import { Term, type TermKey } from '../shared/Term'
 import { useHubReadiness, useHubStudy, useHubTemplate } from '../useHubData'
 import { displayName } from '../../../utils/displayName'
+import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
+  from '../../../components/gridReadiness/GridReadinessScorecard'
 
 export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
   { id: 'strong_grid', label: 'Strong — import whenever needed' },
@@ -201,6 +203,33 @@ export function SiteCard() {
           </p>
         )}
       </div>
+
+      {!running && <SiteGridReadiness template={template} />}
     </CardShell>
+  )
+}
+
+/** The grid-readiness scorecard in Guided (DC 02), collapsed under the Site
+ *  rows: plain words, no jump out of Guided, Ask on each row. Paused while
+ *  the study runs, like the rows above. */
+function SiteGridReadiness({ template }: { template: EhTemplateMeta | null }) {
+  const { data } = useGridReadiness()
+  const open = useScorecardOpen(s => s.open['guided:card'] ?? false)
+  const toggle = useScorecardOpen(s => s.toggle)
+  if (!data) return null
+  // The ledger's own labels for the fields a row points at (UX: no item ids).
+  const fieldLabels: Record<string, string> = {}
+  for (const r of template?.ledger ?? []) {
+    if (r.label && r.field) fieldLabels[r.field] = r.label
+  }
+  return (
+    <section data-testid="hub-site-grid-readiness" className="flex flex-col rounded border border-border">
+      <button type="button" aria-expanded={open} data-testid="hub-site-grid-readiness-toggle"
+        onClick={() => toggle('guided:card', false)}
+        className="flex items-center gap-1 px-3 py-2 text-left text-[12px] text-text">
+        <span className="font-semibold">Grid readiness:</span> {summaryText(data.summary, 'guided')}
+      </button>
+      {open && <GridReadinessScorecard data={data} mode="guided" fieldLabels={fieldLabels} />}
+    </section>
   )
 }

@@ -135,10 +135,15 @@ def _says(rows: list[dict]) -> str:
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
 
 
+# Kept on the card for the receipt, outside the digest: a section's state can
+# move with edits elsewhere and does not change what the user approves.
+_UNBOUND = frozenset({"digest", "section_state"})
+
+
 def _digest(card: dict) -> str:
     """Binds what the card SHOWS: a different old, new or derived value is a
     different card. Edits elsewhere in the project leave it valid."""
-    body = {k: v for k, v in card.items() if k != "digest"}
+    body = {k: v for k, v in card.items() if k not in _UNBOUND}
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str, allow_nan=False).encode()).hexdigest()
 
 
@@ -152,19 +157,84 @@ def _fingerprint() -> str | None:
         return None
 
 
-def preview(tool_name: str, args: dict) -> dict:
-    """The card for one edit call, or a refusal (HTTPException) before any card."""
+def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
+    """The card for one edit call, or a refusal (HTTPException) before any card.
+    `with_state=False` skips the section-state read (outside the digest)."""
     adapter = ADAPTERS.get(tool_name, _ARGUMENTS)
     rows = adapter.preview(args or {})
+    sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+    if sections:
+        card["section"] = sections[0]
     card["digest"] = _digest(card)
+    if sections and with_state:
+        card["section_state"] = _section_state(sections[0]["id"])
     return card
+
+
+def _project_dir():
+    import pathlib
+
+    from services.pypsa_service import PyPSAService
+
+    storage = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    return pathlib.Path(storage) if storage else None
+
+
+def _attach_targets(rows: list[dict]) -> list[dict]:
+    """Each component row's FlowTarget `{section, panel, component, entity,
+    field}` by the flow's own class rule (`flow_service.section_for_component`);
+    returns the sections met, in row order. A project without a flow (a scratch
+    network, or the flow unavailable) leaves the rows without a target."""
+    from services import flow_service
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    project_dir, seen, sections = _project_dir(), {}, []
+    for row in rows:
+        klass, name = row.get("component_class"), row.get("name")
+        if not klass or not name or klass == "Settings" or row["role"] == "note":
+            continue
+        if (klass, name) not in seen:
+            try:
+                seen[(klass, name)] = flow_service.section_for_component(
+                    ctx.network, ctx.solver_state["solver_config"], project_dir, klass, name)
+            except Exception:  # noqa: BLE001 — a missing section names nothing; it never blocks an edit
+                seen[(klass, name)] = None
+        section = seen[(klass, name)]
+        if section is None:
+            continue
+        row["target"] = {"section": section["id"], "panel": section.get("panel"), "component": klass,
+                         "entity": name, "field": None if row["field"] == "exists" else row["field"]}
+        if section["id"] not in [s["id"] for s in sections]:
+            sections.append({"id": section["id"], "label": section["label"]})
+    return sections
+
+
+def _section_state(section_id: str) -> dict | None:
+    """The section's flow state (`flow_service.project_flow`), or None while the
+    flow is deferred or unavailable."""
+    from services import flow_service
+    from services.pypsa_service import PyPSAService
+
+    project_dir = _project_dir()
+    if project_dir is None:
+        return None
+    try:
+        payload = flow_service.project_flow(project_dir, cache_key=PyPSAService.get_active_context().registry_key)
+    except Exception:  # noqa: BLE001 — no state is claimed when the flow cannot be read
+        return None
+    if payload.get("deferred"):
+        return None
+    row = next((s for s in payload.get("sections") or [] if s.get("section") == section_id), None)
+    return None if row is None or row.get("state") is None else {"id": section_id, "label": row["label"],
+                                                                  "state": row["state"]}
 
 
 def require_current(tool_name: str, args: dict, card: dict) -> None:
     """Refuse when the inputs moved since the card was shown."""
-    if preview(tool_name, args)["digest"] != card["digest"]:
+    if preview(tool_name, args, with_state=False)["digest"] != card["digest"]:
         _refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
                 "Propose the edit again.", 409)
 
@@ -196,8 +266,14 @@ def receipt(card: dict, args: dict) -> dict:
     # solve-time row is what PyPSA will write later, not now.
     verified = card["complete"] and all(_same(row["readback"], row["new"]) for row in rows
                                         if row["role"] not in ("at_solve", "note"))
-    return {"version": VERSION, "digest": card["digest"], "outcome": "verified" if verified else "uncertain",
-            "rows": rows, "says": card["says"], "results_stale": _results_stale(), "undo": _undo(card["tool"])}
+    out = {"version": VERSION, "digest": card["digest"], "outcome": "verified" if verified else "uncertain",
+           "rows": rows, "says": card["says"], "results_stale": _results_stale(), "undo": _undo(card["tool"])}
+    if card.get("section"):
+        after = _section_state(card["section"]["id"])
+        if after is not None:
+            before = card.get("section_state")
+            out["section"] = {**after, "changed": before is None or before.get("state") != after["state"]}
+    return out
 
 
 # ── Components: update_component / bulk_update_components ──────────────────
@@ -249,6 +325,18 @@ def _check_value(component_class: str, key: str, value, field: dict) -> None:
             _refuse("invalid_edit_value", f"{component_class}.{key} takes a finite number.")
     elif kind.startswith("bool") and not isinstance(value, bool):
         _refuse("invalid_edit_value", f"{component_class}.{key} takes true or false.")
+
+
+# A rated capacity and its bounds are magnitudes; PyPSA stores a negative one
+# without complaint and the solve then reads it as a reversed limit.
+RATINGS = frozenset(f"{base}{suffix}" for base in ("s_nom", "p_nom", "e_nom") for suffix in ("", "_min", "_max"))
+
+
+def _check_rating(name: str, key: str, value, field: dict | None) -> None:
+    if key in RATINGS and isinstance(value, (int, float)) and not isinstance(value, bool) and value < 0:
+        unit = (field or {}).get("unit_storage") or ""
+        _refuse("invalid_edit_value", f"{name} {key} cannot be negative ({value:g} {unit}".rstrip()
+                + "); a rating is a magnitude, at least 0.")
 
 
 # PyPSA rewrites these from the standard type at solve time
@@ -318,6 +406,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
     for name, attrs in targets:
         for key, value in attrs.items():
             _check_value(component_class, key, value, fields.get(key))
+            _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
     attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
         "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]

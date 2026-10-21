@@ -390,6 +390,9 @@ def _as_series(value, n, sns_p) -> pd.Series:
 # The flag `services.adequacy.sweep.freeze_capacities` sets on an operational
 # re-solve (= services.commercial.connection.OPERATIONAL_ATTR; not imported).
 OPERATIONAL_ATTR = "_ic_operational"
+# A fixed-size run (F1; = sweep.FIXED_DESIGN_ATTR): nothing is sized, but the
+# linearised UC still runs (it is a real dispatch).
+FIXED_DESIGN_ATTR = "_fixed_design"
 
 
 def _sizable(n, island) -> list[tuple[str, str]]:
@@ -412,6 +415,8 @@ def dispatch_only(n, island) -> str | None:
     """Why this solve cannot buy the reserve, or None for a sizing solve."""
     if getattr(n, OPERATIONAL_ATTR, False):
         return "dispatch-only: operational re-solve"
+    if getattr(n, FIXED_DESIGN_ATTR, None):
+        return "dispatch-only: sizing off (fixed sizes)"
     for frame, name in _sizable(n, island):
         col = "e_nom_extendable" if frame == "stores" else "p_nom_extendable"
         if bool(getattr(n, frame).at[name, col]):
@@ -453,8 +458,10 @@ def linearised_uc(n, island):
     and the sidecar's ``p_min_pu`` are written for the solve and restored
     after it, so the project is unchanged. A dispatch-only solve, which
     skips the rows, commits nothing."""
+    # A fixed-size run (F1) is dispatch-only for the rows but still commits:
+    # its fixed gensets get real UC (#448 §3.1).
     if island is None or not island["requirements"].get("linearised_uc") \
-            or dispatch_only(n, island):
+            or (dispatch_only(n, island) and not getattr(n, FIXED_DESIGN_ATTR, None)):
         yield {}
         return
     committed, _ = uc_gensets(n, island)
