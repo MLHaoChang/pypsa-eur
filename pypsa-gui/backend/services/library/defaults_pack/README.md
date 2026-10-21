@@ -14,6 +14,7 @@ two faces" §3 rule 4). The pack holds:
   Haber-Bosch loop (per MW of NH3 output), the liquid NH3 tank and the type 1 H2 tank, from
   technology-data v0.14.0 in 2020 EUR, one `investment` part each;
 - finance defaults;
+- regional cost overlays (see [Regional versions](#regional-versions));
 - two illustrative tariffs;
 - two synthetic load profiles.
 
@@ -112,8 +113,11 @@ What each region carries (technologies: `solar-utility`, `onwind`, `gas-genset`;
 Not mapped (no clear key): battery power and energy parts (the sources price a whole battery system
 per kW, not the inverter and the storage block), the diesel genset (a diesel engine farm; CER and
 DESNZ give turbines or gas engines), electrolysis, fuel cell, ammonia and tanks, rooftop PV, the campus
-electrical equipment, and the efficiencies (heat rates are higher-heating-value or unstated). Asking a
-regional pack for any of them raises `MissingRegionalRow`.
+electrical equipment. Asking a regional pack for any of their money rows raises `MissingRegionalRow`.
+The gas genset's efficiency is not transcribed either (heat rates are higher-heating-value or
+unstated), so it comes from the EU row, flagged `eu_fallback`. Mapping caveat: the gas genset key is
+the EU's small OCGT; the regional rows are the sources' simple-cycle turbines (CER simple cycle, DESNZ
+OCGT 300 MW at 30 % load factor, EIA 419 MW H-class), which are larger plants.
 
 ## Units
 
@@ -133,6 +137,7 @@ are:
 | EUR/km | EUR/km (basis `per_km`) | ×1 |
 | EUR/bay | EUR/bay (basis `per_bay`) | ×1 |
 | share/year | share/year (a campus `opex_frac`) | ×1 |
+| USD/kW, CAD/kW, GBP/kW | USD/MW, CAD/MW, GBP/MW (regional packs) | ×1000 |
 
 Each row carries its own money year in `currency` and `currency_year`: 2020 for the catalogue rows
 (technology-data v0.14.0), 2026 for the campus equipment rows (the campus library's `price_year`).

@@ -261,8 +261,8 @@ def test_the_eu_pack_is_byte_identical_with_regions_present(with_region):
     pinned = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
     with_regions = D.load_defaults_pack(None)
     assert with_regions.hash == pinned[BASE]
-    assert D.canonical_payload(D.VERSIONS_DIR / BASE) == \
-        D.canonical_payload(D.VERSIONS_DIR / BASE)
+    assert D._canonical_hash(D.canonical_payload(D.VERSIONS_DIR / BASE)) == pinned[BASE]
+    assert with_regions.version == BASE
     assert with_regions.model_dump_json() == D.load_defaults_pack(BASE).model_dump_json()
     assert "region" not in with_regions.model_dump_json()      # the EU dump gained no field
 

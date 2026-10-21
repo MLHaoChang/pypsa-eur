@@ -113,11 +113,9 @@ class MissingRegionalRow(DefaultsPackLookupError):
     code = "defaults_pack_regional_row_missing"
 
     def __init__(self, key: str, region: str, currency: str):
-        LookupError.__init__(
-            self, f"region {region!r} ({currency}) has no row {key!r}; the EU row is in another "
-                  "currency and is not substituted")
+        super().__init__(f"region {region!r} ({currency}) has no row {key!r}; the EU row is in "
+                         "another currency and is not substituted", ())
         self.key, self.region, self.currency = key, region, currency
-        self.known = ()
 
 
 class UnknownTechnology(DefaultsPackLookupError):
@@ -185,16 +183,10 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/bay", "EUR/bay"): 1.0,
     ("share/year", "share/year"): 1.0,
     # Regional sources (GS-2) state money in their own currency; a conversion never changes it.
-    # Only the units the transcribed sources use are listed.
+    # Only the units the transcribed sources use are listed (per kW, to the pack's per MW).
     ("USD/kW", "USD/MW"): 1000.0,
     ("CAD/kW", "CAD/MW"): 1000.0,
     ("GBP/kW", "GBP/MW"): 1000.0,
-    ("USD/kW-year", "USD/MW/year"): 1000.0,
-    ("CAD/kW-year", "CAD/MW/year"): 1000.0,
-    ("GBP/MW/year", "GBP/MW/year"): 1.0,
-    ("USD/MWh", "USD/MWh"): 1.0,
-    ("CAD/MWh", "CAD/MWh"): 1.0,
-    ("GBP/MWh", "GBP/MWh"): 1.0,
 }
 
 
@@ -1165,8 +1157,9 @@ _SOURCE_KEYS = ("source_id", "title", "publisher", "url", "file", "sha256", "lic
 
 def _dimension(unit: str) -> str:
     """A unit without its currency: `USD/MW` and `EUR/MW` are the same dimension."""
-    return unit.split("/", 1)[1] if _money_currency(unit) and "/" in unit else \
-        ("" if _money_currency(unit) else unit)
+    if _money_currency(unit) is None:
+        return unit
+    return unit.split("/", 1)[1] if "/" in unit else ""
 
 
 def _region_payload(directory: Path, base: DefaultsPack) -> dict[str, Any]:
@@ -1212,7 +1205,8 @@ def parse_regional_dir(directory: Path) -> DefaultsPack:
         sources[src["source_id"]] = src
     cells = manifest["source_cells"]                   # the source figures each row came from
     cells_path = directory / str(cells.get("file") or "")
-    if not cells.get("file") or not cells_path.is_file() or _file_sha256(cells_path) != cells.get("sha256"):
+    if not (cells.get("file") and cells_path.is_file()
+            and _file_sha256(cells_path) == cells.get("sha256")):
         raise DefaultsPackError(f"{where}: source_cells file is missing or its sha256 differs")
     base = _cached(str(manifest["base_version"]))      # UnknownPackVersion when not vendored
     if base.hash != manifest["base_hash"]:
