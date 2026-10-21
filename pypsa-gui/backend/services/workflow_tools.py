@@ -420,16 +420,23 @@ def _exact_frame_json(frame):
         sort_keys=True, allow_nan=False)
 
 
-def inputs_changed_since_solve(ctx=None):
-    """LC-12: whether the inputs differ from the last solve's, by fingerprint.
+def solve_freshness(ctx=None):
+    """LC-12: whether results describe the current inputs, for result reads.
 
-    None when no solve recorded its fingerprint: no claim either way."""
+    `results_current` is Check answers' own guard (`calculations.
+    solve_matches_inputs`), so every read agrees on it. `inputs_changed_since_
+    solve` compares both recorded solve fingerprints with the current inputs,
+    None when no solve recorded them: no claim either way."""
+    from harness.calculations import solve_matches_inputs
     from services.pypsa_service import PyPSAService
     ctx = ctx or PyPSAService.get_active_context()
-    solved = ctx.network.meta.get("assistant_solve_input_fingerprint") if hasattr(ctx.network, "meta") else None
+    meta = getattr(ctx.network, "meta", None) or {}
+    solved = meta.get("assistant_solve_input_fingerprint")
     if not solved:
-        return None
-    return solved != _network_input_fingerprint(ctx)
+        return {"inputs_changed_since_solve": None, "results_current": False}
+    changed = (solved != _network_input_fingerprint(ctx)
+               or meta.get("assistant_solve_exact_input_fingerprint") != _network_input_fingerprint(ctx, exact=True))
+    return {"inputs_changed_since_solve": changed, "results_current": solve_matches_inputs(ctx)}
 
 
 def _network_input_fingerprint(ctx, *, exact=False):

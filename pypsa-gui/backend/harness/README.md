@@ -736,11 +736,13 @@ durable-task step resumption remains outside the checked-scope recovery tranche.
 
 A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
 `state` can still say `fresh`. `dispatch_status` and every dict answer of
-`get_results` therefore also carry `inputs_changed_since_solve`
-(`workflow_tools.inputs_changed_since_solve`): the solve-input fingerprint the
-last solve recorded compared with the current inputs, `null` when no solve
-recorded one. When true, `get_results` adds a `freshness_note` calling the
-results stale, as the load-flow, energy-flow and load-shape reads already do.
+`get_results` therefore also carry `workflow_tools.solve_freshness()`:
+`inputs_changed_since_solve` compares both recorded solve fingerprints with
+the current inputs (`null` when no solve recorded them), and `results_current`
+is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
+never disagree with it, also after an AC power flow. `get_results` adds a
+`freshness_note`: stale when the inputs changed, not current when the guard
+fails for another reason.
 
 ## Recorded runs, load flow, and experiment plans
 

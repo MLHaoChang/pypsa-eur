@@ -29,7 +29,9 @@ def test_reads_are_current_right_after_the_solve(oj_grid):  # noqa: F811
     assert calls == ['dispatch_status', 'get_results', None]
     status, lines = results
     assert status['state'] == 'fresh' and status['inputs_changed_since_solve'] is False
-    assert lines['inputs_changed_since_solve'] is False
+    assert status['results_current'] is True
+    assert lines['inputs_changed_since_solve'] is False and lines['results_current'] is True
+    assert 'freshness_note' not in lines
 
 
 @pytest.mark.parametrize('kind,model,base_url,auth', PROVIDERS, ids=[row[0] for row in PROVIDERS])
@@ -42,8 +44,8 @@ def test_after_a_chat_edit_the_reads_say_stale(oj_grid, kind, model, base_url, a
     calls, results, frames, _ = run_journey(kind, model, base_url, auth, _reads(), READ,
                                             session=session)
     status, lines = results
-    assert status['inputs_changed_since_solve'] is True
-    assert lines['inputs_changed_since_solve'] is True
+    assert status['inputs_changed_since_solve'] is True and status['results_current'] is False
+    assert lines['inputs_changed_since_solve'] is True and lines['results_current'] is False
     assert 'stale' in lines['freshness_note']
 
 
@@ -58,3 +60,38 @@ def test_an_unsolved_network_has_no_claim_either_way(client, session_ctx, instal
         assert chat_tools.dispatch_status()['inputs_changed_since_solve'] is None
     finally:
         PyPSAService.reset_request_context(binding)
+
+
+def _guard():
+    from harness.calculations import solve_matches_inputs
+    from services.pypsa_service import PyPSAService
+    return solve_matches_inputs(PyPSAService.get_active_context())
+
+
+def test_reads_agree_with_the_check_answers_guard(oj_grid):  # noqa: F811
+    """dispatch_status, get_results and Check answers never disagree on whether
+    a result is current: unedited, after an AC power flow, and edited."""
+    from services.pypsa_service import PyPSAService
+
+    def reads():
+        return chat_tools.dispatch_status(), chat_tools.get_results('generators')
+
+    status, gens = reads()
+    assert status['results_current'] is gens['results_current'] is _guard() is True
+
+    # An AC power flow replaces the live outputs: not current, though no input changed.
+    state = PyPSAService.get_active_context().solver_state
+    state['ac_pf_results'] = {'replaced': True}
+    try:
+        status, gens = reads()
+        assert status['results_current'] is gens['results_current'] is _guard() is False
+        assert status['inputs_changed_since_solve'] is False
+        assert gens['freshness_note'].startswith('not current')
+    finally:
+        state['ac_pf_results'] = None
+
+    PyPSAService.get_network().lines.at['L2', 's_nom'] = 400.0
+    status, gens = reads()
+    assert status['results_current'] is gens['results_current'] is _guard() is False
+    assert status['inputs_changed_since_solve'] is gens['inputs_changed_since_solve'] is True
+    assert gens['freshness_note'].startswith('stale')

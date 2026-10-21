@@ -704,12 +704,17 @@ def _with_freshness(result: Any) -> Any:
     """LC-12: a result read says whether the inputs changed since the solve."""
     if not isinstance(result, dict):
         return result
-    from services.workflow_tools import inputs_changed_since_solve
-    changed = inputs_changed_since_solve()
-    out = {**result, "inputs_changed_since_solve": changed}
-    if changed:
+    from services.workflow_tools import solve_freshness
+    freshness = solve_freshness()
+    out = {**result, **freshness}
+    if freshness["inputs_changed_since_solve"]:
         out["freshness_note"] = ("stale: the inputs changed after this solve, so these results "
                                  "describe the earlier inputs; re-run before relying on them.")
+    elif freshness["inputs_changed_since_solve"] is False and not freshness["results_current"]:
+        out["freshness_note"] = ("not current: these are not verified as this session's optimal LP "
+                                 "solve of the current inputs (an AC power flow replaced them, the "
+                                 "solve did not finish optimal, or it was loaded rather than solved "
+                                 "here); re-run before relying on them.")
     return out
 
 
@@ -2874,10 +2879,10 @@ def dispatch_status() -> dict:
     string).
     """
     from services.dispatch_status import dispatch_status_detail as _ds
-    from services.workflow_tools import inputs_changed_since_solve
+    from services.workflow_tools import solve_freshness
     n = PyPSAService.get_network()
     # LC-12: the axis check misses a parameter-only edit; the fingerprint does not.
-    return {**_ds(n), "inputs_changed_since_solve": inputs_changed_since_solve()}
+    return {**_ds(n), **solve_freshness()}
 
 
 # ── Simulation execution (4) ────────────────────────────────────────────────
