@@ -13,7 +13,7 @@
     {
       "id": "HV-D",
       "priority": 2,
-      "name": "Decision and robustness advisor"
+      "name": "Decision study explanations and robustness"
     },
     {
       "id": "HV-I",
@@ -26,7 +26,8 @@
       "id": "HV-S1",
       "title": "Study brief and support mapping",
       "existing_owners": [
-        "W9/W10",
+        "card-workspaces H1/W9",
+        "start_task/LC-05",
         "W0"
       ],
       "depends_on": [],
@@ -146,7 +147,7 @@
       "id": "HV-D3",
       "title": "Bounded recommendation and next evidence",
       "existing_owners": [
-        "S7",
+        "card-workspaces H2/S8",
         "LC-21"
       ],
       "depends_on": [
@@ -170,7 +171,8 @@
       "id": "HV-I1",
       "title": "Source/schema mapping and validation",
       "existing_owners": [
-        "Library/profile import",
+        "profile upload/TS-01/TS-04",
+        "LC-16 spreadsheet/equipment mapping",
         "W9/W10"
       ],
       "depends_on": [],
@@ -215,10 +217,10 @@
     },
     {
       "id": "HV-I3",
-      "title": "One richer document-family adapter",
+      "title": "Document-family extraction after spreadsheet mapping",
       "existing_owners": [
-        "Library family adapters",
-        "card workspace inputs"
+        "LC-16 slice 2: PDF/datasheet/tariff/PPA mapping",
+        "native engine field adapters"
       ],
       "depends_on": [
         "HV-I2"
@@ -275,16 +277,16 @@
       "id": "S05",
       "slice": "HV-S1",
       "level": "contract",
-      "stimulus": "Provider proposes 13 steps, nested task control, project-rebinding or invalid forward refs.",
-      "expected": "Native admission refuses; no splitting into hidden loops or crossing project scope.",
+      "stimulus": "Provider proposes a plan above the current admitted finite cap, nested task control, project-rebinding or invalid forward refs.",
+      "expected": "Native admission refuses; bounded cap increases land only in LC-05 with tests, no hidden loops or crossing project scope.",
       "status": "planned_not_run"
     },
     {
       "id": "S06",
       "slice": "HV-S2",
       "level": "integration",
-      "stimulus": "Inspect exact edit then deny normal confirmation.",
-      "expected": "Native write/queue counters stay zero; denial retained, no alternate tool or direct file route.",
+      "stimulus": "In Guided and Expert, inspect exact write/run step then deny its required card; attempt auto-approval from brief acceptance.",
+      "expected": "Native write/queue counters stay zero; every write/run needs its own click; no alternate tool, direct file route or brief-based grant.",
       "status": "planned_not_run"
     },
     {
@@ -323,8 +325,8 @@
       "id": "S11",
       "slice": "HV-S2",
       "level": "integration",
-      "stimulus": "Change objective or assumptions after proposal review.",
-      "expected": "Preview/affected approval invalidated; updated native review before effects; unchanged future actions not preapproved.",
+      "stimulus": "Reach a card boundary, then change objective or assumptions after proposal review.",
+      "expected": "Plan card pauses at Continue to card; boundary/brief grants no write/run approval; changed preview invalidated and reviewed again.",
       "status": "planned_not_run"
     },
     {
@@ -475,8 +477,8 @@
       "id": "D14",
       "slice": "HV-D3",
       "level": "browser",
-      "stimulus": "Open evidence map for verified calculation with assumed inputs and no domain review.",
-      "expected": "Dimensions stay distinct; assumptions/review gap visible, no green approval/certification score.",
+      "stimulus": "Inspect existing decision study/explanation source/status disclosures with assumed inputs and no domain review.",
+      "expected": "Assumptions and verification gaps visible inline; no separate evidence map/advisor panel, approval score or certification.",
       "status": "planned_not_run"
     },
     {
@@ -595,8 +597,8 @@
       "id": "I13",
       "slice": "HV-I3",
       "level": "contract",
-      "stimulus": "Admitted document-family fixture includes repeated values on different pages and extraction error.",
-      "expected": "Page/region/source digest correct; wrong extraction withheld; independent labeled extraction fixture used.",
+      "stimulus": "PDF datasheet, tariff or PPA fixture includes repeated values on different pages and extraction error.",
+      "expected": "Exact page/quote and full source digest; incorrect/unsupported extraction withheld; each admitted value confirmed before native write.",
       "status": "planned_not_run"
     },
     {
@@ -631,5 +633,6 @@
     "live operational control",
     "deferred cache/task-profile/price accounting",
     "independent domain approval or full coverage claim"
-  ]
+  ],
+  "owner_disposition": "OWNER-DISPOSITION.md; AI-567b amends AI-567; COP-1 step and card-boundary gates"
 }

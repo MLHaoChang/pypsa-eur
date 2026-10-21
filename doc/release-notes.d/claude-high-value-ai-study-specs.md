@@ -1,1 +1,1 @@
-* Docs(GridSpine): Assess higher-value AI study completion, decision robustness and data onboarding; add implementation specifications, planned acceptance tests and a session handoff without changing runtime behavior.
+* Docs(GridSpine): Assess higher-value AI study completion, decision robustness and data onboarding; add implementation specifications, planned acceptance tests, a current-source harness comparison with Claude Code's published capabilities and a session handoff without changing runtime behavior.

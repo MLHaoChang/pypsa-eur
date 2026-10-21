@@ -14,6 +14,8 @@ import ast
 import hashlib
 import json
 import re
+import subprocess
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -35,6 +37,129 @@ def unique_pairs(pairs: list[tuple[str, object]]) -> dict:
 
 def read_json(name: str) -> dict:
     return json.loads((HERE / name).read_text(), object_pairs_hook=unique_pairs)
+
+
+def check_harness_supplement(plan: dict) -> None:
+    supplement = read_json("harness-assessment.json")
+    require(supplement["status"] == "research_only", "Harness research scope changed")
+    sha = supplement["assessed_master"]
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", sha) is not None, "Invalid harness source pin"
+    )
+    findings = {item["id"]: item for item in supplement["findings"]}
+    checks = supplement["planned_checks"]
+    require(
+        set(findings) == {f"H{i:02}" for i in range(1, 9)}, "Harness findings changed"
+    )
+    declared = [key for item in findings.values() for key in item["checks"]]
+    ids = [case["id"] for case in checks]
+    require(
+        len(ids) == len(set(ids)) == len(declared) == 24, "Foundation check IDs/count"
+    )
+    require(set(ids) == set(declared), "Foundation check mapping mismatch")
+    slice_ids = {item["id"] for item in plan["slices"]}
+    table = (HERE / "07-HARNESS-GAPS-AND-ROADMAP.md").read_text()
+    for item in findings.values():
+        require(
+            item["status"] == "proposed_not_implemented", "Harness implementation claim"
+        )
+        require(
+            set(item["supports_slices"]) <= slice_ids, "Unknown capability dependency"
+        )
+    for case in checks:
+        require(case["status"] == "planned_not_run", "Foundation case reported as run")
+        require(case["finding"] in findings, "Unknown finding")
+        require(
+            case["id"] in findings[case["finding"]]["checks"], "Wrong finding mapping"
+        )
+        require(
+            table.count(f"| {case['id']} | {case['trigger']} | {case['expected']} |")
+            == 1,
+            f"Harness matrix drift: {case['id']}",
+        )
+    paths = [pin["path"] for pin in supplement["source_pins"]]
+    require(len(paths) == len(set(paths)), "Duplicate harness source")
+    for pin in supplement["source_pins"]:
+        require(
+            pin["path"].startswith(("pypsa-gui/", ".scratch/live-")),
+            "Unsafe source path",
+        )
+        require(".." not in Path(pin["path"]).parts, "Unsafe source path traversal")
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{pin['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        require(
+            result.returncode == 0,
+            f"Pinned source unavailable: fetch assessed commit {sha} before checking {pin['path']}",
+        )
+        require(
+            hashlib.sha256(result.stdout).hexdigest() == pin["sha256"],
+            "Harness source hash mismatch",
+        )
+        require(
+            pin["url"]
+            == f"https://github.com/MLHaoChang/pypsa-eur/blob/{sha}/{pin['path']}",
+            "Unpinned harness source URL",
+        )
+    for ref in supplement["public_references"]:
+        require(
+            ref["http_status"] == 200
+            and ref["url"].startswith("https://code.claude.com/docs/en/"),
+            "Unofficial or failed public reference",
+        )
+        require(
+            re.fullmatch(r"[0-9a-f]{64}", ref["sha256"]) is not None,
+            "Public reference hash",
+        )
+    validation = supplement["validation"]
+    require(
+        validation["runtime_changed"] is False
+        and validation["paid_model_calls"] == 0
+        and validation["reviewers_contacted"] is False,
+        "Harness research boundary changed",
+    )
+    for key in ("focused_baseline_tests", "offline_pilot"):
+        info = validation[key]
+        path = (HERE / info["report"]).resolve()
+        require(
+            path.is_relative_to(HERE) and path.is_file(),
+            "Missing/unsafe harness report",
+        )
+        require(
+            hashlib.sha256(path.read_bytes()).hexdigest() == info["sha256"],
+            "Harness report drift",
+        )
+        require(info["result"] == "passed", "Harness baseline validation did not pass")
+    baseline = validation["focused_baseline_tests"]
+    suite = ET.parse(HERE / baseline["report"]).getroot().find("testsuite")
+    require(suite is not None, "Missing baseline JUnit suite")
+    for key in ("tests", "failures", "errors", "skipped"):
+        require(
+            int(suite.attrib[key]) == baseline[key], f"Harness JUnit count drift: {key}"
+        )
+    require(
+        baseline["tests"] == 370
+        and baseline["failures"] == baseline["errors"] == baseline["skipped"] == 0,
+        "Unexpected baseline outcome",
+    )
+    pilot = read_json(validation["offline_pilot"]["report"])
+    require(
+        pilot["passed"] and pilot["required_cases"] == len(pilot["results"]) == 244,
+        "Incomplete pilot report",
+    )
+    require(
+        pilot["process_exit_code"] == 0
+        and not pilot["live_requested"]
+        and not pilot["source"]["dirty"]
+        and pilot["source"]["commit"] == sha,
+        "Pilot source/execution mismatch",
+    )
+    print(
+        "Harness supplement passed: 8 findings, 24 PLANNED checks; baseline 370 passed, offline gate 244 cases."
+    )
 
 
 def main() -> None:
@@ -178,10 +303,12 @@ def main() -> None:
         and validation["reviewers_contacted"] is False,
         "Research boundaries changed",
     )
+    check_harness_supplement(plan)
 
     markdown = [
         *HERE.glob("*.md"),
         ROOT / "docs/research/gridspine-high-value-ai-overview.md",
+        ROOT / "docs/research/gridspine-harness-gap-overview.md",
     ]
     for path in markdown:
         for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", path.read_text()):

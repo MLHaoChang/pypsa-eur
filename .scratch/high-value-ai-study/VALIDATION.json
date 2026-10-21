@@ -51,5 +51,15 @@
     "new_validator_format": "passed",
     "staged_diff_whitespace": "passed",
     "scope": "specification only; no implementation certification"
+  },
+  "harness_supplement": {
+    "manifest": "harness-assessment.json",
+    "assessed_master": "322df0cf495260442eb35bb9c0c5d8e11a274ffe",
+    "baseline_tests": 370,
+    "baseline_skipped": 0,
+    "offline_gate_cases": 244,
+    "planned_foundation_checks": 24,
+    "new_feature_tests_run": false,
+    "scope": "Separate tested baseline subsets; do not sum with historical 161 tests or claim new feature implementation"
   }
 }

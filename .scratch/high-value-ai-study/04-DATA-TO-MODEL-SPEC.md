@@ -3,8 +3,8 @@
 
 # HV-I: data-to-model onboarding assistant
 
-Status: proposed; initial scope structured files, richer documents staged separately.
-Owning work: existing Library/profile import, native asset/parameter editors, W9/W10 and S7. Does not create another data Library or a generic contract interpreter.
+Status: proposed; AI-567b includes documents as slice 2 after spreadsheet/equipment mapping.
+Owning work: existing profile upload/TS-01/TS-04 for profiles, LC-16 for equipment mapping and subsequent document extraction, native asset/parameter editors and W9/W10. Profiles are not Library items. Does not create another data Library or a generic contract interpreter.
 
 ## User need and experience
 
@@ -24,7 +24,7 @@ Show partial progress without implying completion: for example, “meter profile
 6. **Preview before effects.** Parsing and proposal do not update model state, attach a live profile or start a run. Material mapping changes revalidate the preview. Require source digest, target/baseline digest, exact typed operations, validation state and ordinary native confirmation. A generic “use my file” chat message is not permission to write arbitrary discovered fields.
 7. **Apply only through existing native tools.** Field edits, profile staging/apply and Library references use ordinary auth/locks/restrictions/confirmation and readback. Missing tool adapters mean unsupported, not direct filesystem edits by the model. Reuse exact native transaction/idempotency guarantees; a multi-row operation without a native transaction must report partial application and stop, not claim all-or-nothing or auto-rollback. Do not promise Safe restore until its independent defects are fixed and tested. A Saved snapshot is not a universal undo transaction.
 8. **Correct and audit.** After apply, show the accepted operations, readback, lineage and remaining gaps. Repeated requests cannot duplicate entities or series through a new request ID; use source/target-bound native idempotency and explicit duplicate choice. Corrections use the same reviewed edit path; no hidden deletion of the original evidence. Deletes/retention changes use the existing policy, not a second unmanaged copy of sensitive source material.
-9. **Stage rich documents by family.** PDF datasheets/tariff schedules/PPA clauses are later opt-in adapters. Demonstrate extraction, dimension/basis interpretation, unsupported clauses and native validation per family before enabling it. A successfully uploaded or readable PDF is not a billable tariff, executable PPA, grid asset or legally verified contract. Native unsupported tariff components keep the bill incomplete. External lookup feeds and source-terms clearance remain their own Library/owner decisions.
+9. **Stage rich documents by family.** PDF datasheets/tariff schedules/PPA clauses are the planned second extraction slice after spreadsheet/equipment-table mapping (AI-567b). Each extracted value appears beside its page/quote and needs confirmation before a native approved write. Demonstrate extraction, dimension/basis interpretation, unsupported clauses and native validation per family before enabling it. A successfully uploaded or readable PDF is not a billable tariff, executable PPA, grid asset or legally verified contract. Native unsupported tariff components keep the bill incomplete. External lookup feeds and source-terms clearance remain their own Library/owner decisions.
 
 ## Initial acceptance boundary
 
@@ -34,8 +34,8 @@ Expose existing limits rather than weakening them: bounded uploads (currently 25
 
 ## Slices and demonstration
 
-- HV-I1 (Library/W9/W10): read-only schema/source mapping proposal and native validation; ambiguity, DST, units and source lineage.
+- HV-I1 (profile upload/TS-01/TS-04 and LC-16/W9/W10): read-only schema/source mapping proposal and native validation; ambiguity, DST, units and source lineage.
 - HV-I2 (existing field/profile apply/S7): exact reviewed operations, stale-preview refusal, partial-effect honesty, duplicate protection and readback.
-- HV-I3 (Library family adapters): one explicitly admitted richer document family after extraction/semantics tests; otherwise remain manual-assisted. Does not enable all PDF/tariff/PPA support.
+- HV-I3 (LC-16 slice 2): PDF datasheet, tariff and PPA extraction in admitted families after spreadsheet mapping; source page/quote and per-value confirmation are required. Missing native tariff/PPA semantics remain incomplete, never enabled by extraction alone.
 
 Tests I01–I16 are required before each corresponding slice can be called implemented. Information extraction accuracy alone is insufficient: wrong source, unit, target, hidden repair or unsafe application is a failure.

@@ -20,7 +20,7 @@ Publication also reviewed the incoming master change to `49791da3e1197f3872b9273
 - Fit slices into W9/W10/LC-05/LC-12/LC-19/LC-20/LC-21/S5/S6/S7/Library as appropriate. Do not launch new top-level modules, runtime, preview path, deferred caches/endpoints or dollar-cost system. Do not start early or reorder queued owner work.
 - AI explains/proposes; native engines calculate, authorize, execute, record and verify. Ordinary approval and per-source provenance remain required.
 - BESS findings are domain-specific. LC-20/21 are planned boundaries; a number audit alone does not establish a correct recommendation. No fake confidence percentage.
-- Structured file onboarding first, per-parser semantics intact. PDF family support needs its own admitted adapter. No automatic file instruction execution, unknown-value fill, rights clearance, implicit uploads to paid providers or universal undo claim.
+- Structured file onboarding first, per-parser semantics intact. PDF/datasheet/tariff/PPA extraction is included as LC-16 slice 2 after spreadsheet mapping; each value needs page/quote and confirmation, plus admitted native semantics. No automatic file instruction execution, unknown-value fill, rights clearance, implicit uploads to paid providers or universal undo claim.
 
 ## Resume checklist
 
@@ -31,4 +31,14 @@ Publication also reviewed the incoming master change to `49791da3e1197f3872b9273
 5. Implement one admitted acceptance slice in the owning package, with its matrix cases, semantic tests, source-bound browser/effect evidence and normal CI/premerge requirements. Do not count baseline tests as new-feature acceptance.
 6. Update outcome measurements and scope honestly. Independent domain review and real-use calibration remain pending by owner choice; no paid calls or reviewer contact are authorized by this handoff.
 
+## Harness assessment supplement
+
+The owner's subsequent voice request asked how to make the harness more powerful. Read `07-HARNESS-GAPS-AND-ROADMAP.md` and `harness-assessment.json` for the newer assessment on master `322df0cf495260442eb35bb9c0c5d8e11a274ffe`, selected official Claude Code references and 24 additional planned foundation checks. It is research, not runtime work. The original 161-test baseline and 48 capability cases retain their original meaning and are not merged into a larger claimed coverage count.
+
+Priorities: complete native capability/evidence coverage and task-completion proof; improve structured context; widen checked analysis; extend admitted cross-domain study phases, with journey evidence throughout. Existing skills, MCP, replay, durable memory and browser continuation already exist. Do not propose them as entirely missing. Keep optional specialist reads/code workspaces conditional and later; no general terminal or new agent runtime is authorized.
+
+The current manual task reconciliation can record caller-supplied completion after confirmation. New verified claims must independently read native evidence; confirmation alone is not engineering proof. Source inventory/matrix counts do not prove every feature works. Consult the supplement's completed validation records before reporting results.
+
 This PR is not a merge/deployment request. No production activation, equipment control, two-case follow-up implementation or external account/data acquisition occurs here. Scope ends at publication of these specifications and their validation evidence.
+
+Read OWNER-DISPOSITION.md before implementation: AI-567b allows a cross-card brief on the existing plan card and a bounded LC-05 step-cap increase; COP-1 requires a click for every write/run and Continue at each card boundary. The newer decision supersedes earlier deferrals of document extraction; no evidence-map or advisor module is added. #566 now has a merged reviewed card-workspace design.

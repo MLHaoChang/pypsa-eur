@@ -1,16 +1,16 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# HV-D: decision and robustness advisor
+# HV-D: decision study explanations and robustness
 
 Status: proposed; no new scientific calculations or generic ranking delivered here.
-Owning work: native study/adequacy/commercial engines, LC-18/S6, LC-20/LC-21, per-card W10 results and S7 checked explanation.
+Owning work: native study/adequacy/commercial engines, LC-18/S6, LC-20/LC-21, per-card W10/H2 results and S8 explanations (with the existing S7 checked contracts).
 
 ## User need and experience
 
-“Which design would you choose, and what could change that answer?” is more useful than another chart summary. The advisor should state the decision criterion, identify feasible/comparable options, show a qualified preference only when the native evidence supports it, and expose key assumptions and missing assessments.
+“Which design would you choose, and what could change that answer?” is more useful than another chart summary. The existing decision study/explanation should state the decision criterion, identify feasible/comparable options, show a qualified preference only when the native evidence supports it, and expose key assumptions and missing assessments.
 
-Use the card's existing result-explanation action, opening one companion conversation. A compact native comparison displays: base case, compare cases, declared changes, objective and hard constraints, common basis, principal trade-offs, sensitivity evidence, unresolved gaps. The user can follow any fact to its native result/source. “No defensible preference yet” is a successful response when evidence is insufficient. Do not add an extra ranking dashboard or AI confidence badge.
+Use the single H2 result-explanation entry in the existing card workspace, opening the same companion conversation. A compact native comparison displays: base case, compare cases, declared changes, objective and hard constraints, common basis, principal trade-offs, sensitivity evidence, unresolved gaps. The user can follow any fact to its native result/source. “No defensible preference yet” is a successful response when evidence is insufficient. Do not add an extra ranking dashboard or AI confidence badge.
 
 ## Functional requirements
 
@@ -23,15 +23,15 @@ Use the card's existing result-explanation action, opening one companion convers
 7. **Publish bounded prose.** Admit at most 12 source facts under the existing explanation contract. Tie numerical and comparative claims to fact IDs and supported calculation IDs, not merely matching digit strings. Units, sign, time and alternative attribution must agree. Withhold unsupported numerical claims and causal explanations. Reuse report number audit as one check, plus semantic/source/basis checks; strict publication refuses on disagreement. Historical exports remain historical.
 8. **Make next work optional and inspectable.** Explain which missing input or assessment could affect the decision and why, without fabricating a dollar value of information. A proposal for more studies fills the existing composer/experiment preview, with existing case/edit caps and user ranges. It never starts a solve automatically.
 
-## Evidence map instead of false confidence
+## Inline evidence limits in existing explanations
 
-Display separate source-linked dimensions: (a) input/source provenance, (b) completeness of the inputs needed for this question, (c) selected model scope/fidelity and exclusions, (d) freshness and comparability, (e) native verification and independent/domain validation status. Each is established / partial / unavailable / outside scope with a reason. These are proposed presentation semantics mapped to native records, not replacements for native solver statuses.
+Within existing source/status disclosures, explain: (a) input/source provenance, (b) completeness of the inputs needed for this question, (c) selected model scope/fidelity and exclusions, (d) freshness and comparability, (e) native verification and independent/domain validation status. Each is established / partial / unavailable / outside scope with a reason. Use existing native source/status fields; per AI-567, no separate evidence map, confidence panel or advisor module.
 
 Do not collapse the dimensions into a percentage or count of green checks. A verified calculation can still have weak assumptions; complete inputs can still use a screening model. Preserve independent domain review and real-use calibration as pending unless actual review evidence is supplied.
 
 ## Slices and demonstration
 
-- HV-D1 (LC-18/S6/W10): evidence/basis comparison and coverage map using admitted A/B sources. Base + N is a dependency, not assumed shipped.
+- HV-D1 (LC-18/S6/W10): evidence/basis comparison and inline source/status limits using admitted A/B sources. Base + N is a dependency, not assumed shipped.
 - HV-D2 (native engines/LC-20): one supported investment or adequacy robustness explanation with independent numeric fixtures; extend domain by domain. Do not generalize BESS verdicts.
 - HV-D3 (S7/LC-21): source-bounded recommendation, refusal, optional proposed next study and report coverage. No new standalone scenario-preview module.
 

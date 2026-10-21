@@ -12,7 +12,7 @@ My next priorities, judging total benefit rather than lowest implementation cost
 | Priority | Capability | User outcome | Why it adds value beyond the first three | Relative effort / exposure |
 |---|---|---|---|---|
 | 1 | Goal-to-study copilot | Complete a supported, reviewed study from objective to evidence | Removes repeated navigation, setup coordination and job babysitting rather than only saying what to do | High; execution and recovery require native receipts |
-| 2 | Decision and robustness advisor | Understand which feasible option fits the objective, what changes the answer, and what is still unproved | Turns several results into a defensible decision instead of explaining each chart | High; domain-specific comparability and validated calculations |
+| 2 | Decision study explanations and robustness | Understand which feasible option fits the objective, what changes the answer, and what is still unproved | Turns several results into a defensible decision instead of explaining each chart | High; domain-specific comparability and validated calculations |
 | 3 | Data-to-model onboarding assistant | Turn user files into traceable, reviewed model inputs | Removes mapping, unit and time-basis work instead of merely identifying missing fields | Medium to high for structured files; higher for documents |
 
 This ranking is a product judgment, not measured ROI, model-quality evidence, or a price estimate. For an importer with messy meter data, onboarding may have the largest benefit and can precede the other capabilities. For a first-time user, the original next-step explanation may remain the single most useful change. Validate the ranking with task completion, decision comprehension and error measurements before widening rollout.
@@ -31,7 +31,7 @@ The evidence catalogue pins every file below to the assessed master. Code availa
 | Robustness | `services/study/findings.py`, tornado runner, assumptions ledger; adequacy sweeps/frontiers; native comparisons | BESS decision logic is specific to its supported question. There is no evidenced universal multi-card ranking, calibrated confidence score or generic multiobjective optimizer |
 | Result confidence | Source-bound result readers, checked publication, native report evidence and number audit | Number-token agreement is not proof of causal correctness. LC-20 native plausibility rules and LC-21 general network reporting are planned work; do not call removed result-tool stubs |
 | File onboarding | Owned bounded upload store, Library CSV/XLSX series parser, measured-load importer, native profile apply and QA | Uploading a PDF does not extract a valid asset model. Load and Library parsers have different time/coverage/repair semantics. Schema matching, per-cell lineage, reviewed cross-family mapping and document adapters remain work |
-| Workspace | Existing six-card model and workflow packages | Card-specific workspace/results design is pending. This spec integrates into that design; it does not assert all six workspaces or every sub-option are currently runnable |
+| Workspace | Existing six-card model and workflow packages | At the original baseline the card-workspace design was pending; #566 later merged the reviewed design. This spec follows it and does not assert all six workspaces/sub-options are already implemented |
 
 
 Before publication, master advanced to `49791da3e1197f3872b9273d37ca97c47c57b13d` (#557). The complete incoming diff was reviewed: native flow tool description now exposes item titles/blocker detail, and a fixed-nameplate title is clearer. These do not change tool schemas or execution. Use the native title/detail in walkthroughs. There are no file overlaps with this spec; the baseline 161-test result is not relabeled as a run on the newer source. See native-evidence.json for the exact comparison.
@@ -60,4 +60,8 @@ This separate PR is explicitly authorized research for subsequent value creation
 | Automatic commercial contract negotiation | Contract review/extraction | Legal context, rights, tariff coverage and obligations require narrow adapters and review; first enable sourced inputs |
 | Live operational control | Send setpoints to equipment | Different product and safety boundary. This proposal is planning/simulation; no production control, activation or equipment commands |
 
-A visible evidence map is cross-cutting: source, missing inputs, model scope, freshness, verification. It belongs next to every recommendation and in the Hand-off packet, not a fourth chat agent or an unexplained confidence percentage.
+Source, missing inputs, model scope, freshness and verification belong inline in existing native result explanations and supported Hand-off chapters. Per AI-567, do not build a separate evidence map or advisor surface.
+
+## Subsequent owner decisions
+
+[OWNER-DISPOSITION.md](OWNER-DISPOSITION.md) records the newer AI-567/AI-567b/COP-1/RC1–RC4 decisions and supersedes any conflicting original proposal. The cross-card brief uses the existing plan card, every write/run and card boundary is separately gated, decision study explanations reuse existing surfaces, and document extraction follows spreadsheet mapping. #566 has since merged its card-workspace design; the runtime is not implied complete.

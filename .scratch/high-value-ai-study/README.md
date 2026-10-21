@@ -14,7 +14,11 @@ The original three ideas improve understanding cheaply. The next three aim to sh
 4. [Data-to-model onboarding](04-DATA-TO-MODEL-SPEC.md)
 5. [Delivery sequence, measurement and validation matrix](05-IMPLEMENTATION-AND-TESTS.md)
 6. [Contracts and example journeys](06-CONTRACTS-AND-JOURNEYS.md)
-7. [Session handoff](HANDOFF.md)
+7. [Harness comparison, gaps and capability roadmap](07-HARNESS-GAPS-AND-ROADMAP.md)
+8. [Owner disposition and amendments](OWNER-DISPOSITION.md)
+9. [Session handoff](HANDOFF.md)
+
+The harness supplement assesses newer master `322df0cf495260442eb35bb9c0c5d8e11a274ffe` against Claude Code's published behavior. Its eight findings and 24 planned foundation checks are recorded in [harness-assessment.json](harness-assessment.json), separately from the original 48 capability cases. It recognizes newly merged browser continuation and preserves the earlier test records as historical evidence.
 
 Machine-readable records: [implementation-plan.json](implementation-plan.json), [native-evidence.json](native-evidence.json), [VALIDATION.json](VALIDATION.json). Run `python .scratch/high-value-ai-study/validate_specs.py` from the repository root. It checks this specification's integrity, not implementation readiness or engineering correctness.
 
