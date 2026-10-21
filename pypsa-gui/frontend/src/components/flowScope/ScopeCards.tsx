@@ -92,19 +92,26 @@ export function AddToScope({ card, option, testId }: {
 
 /** `collapsed`: Guided's density (a Guided card holds ≤ 3 decisions): one
  *  summary line, and "Change" opens the cards in place. Expert shows them. */
+/** Why a card cannot be added on this site, or null when it can: its lock,
+ *  or the reason its sub-options are not available (the registry's words). */
+export function cardNotOffered(def: ScopeCardDef): string | null {
+  if (def.locked_reason) return def.locked_reason
+  if (def.options.some(o => o.status === 'available' || o.status === 'required')) return null
+  return def.options.find(o => o.reason)?.reason ?? 'It is not available here.'
+}
+
 /** "Add <card>": switches a card on in place, restoring its kept sub-options
- *  (else the example's). Where the card cannot be added (locked, or nothing
- *  available) it says why instead. For an item that names only its card. */
+ *  (else the example's). Where the card cannot be added it says why instead,
+ *  never promising it back. For an item that names only its card. */
 export function AddCardToScope({ card, testId }: { card: ScopeCardId; testId: string }) {
   const { registry, scope, save } = useFlowScope()
   const def = registry?.cards.find(c => c.id === card)
   if (!scope || !def) return null
-  const pickable = def.options.some(o => o.status === 'available' || o.status === 'required')
-  if (def.locked_reason || !pickable) {
-    const why = def.locked_reason ?? def.options.find(o => o.reason)?.reason ?? null
+  const why = cardNotOffered(def)
+  if (why) {
     return (
       <span data-testid={`${testId}-why`} className="text-[11px] text-muted">
-        Comes back with {def.label}{why ? `: ${why}` : '.'}
+        Not offered for this site: {why}
       </span>
     )
   }

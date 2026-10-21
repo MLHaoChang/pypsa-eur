@@ -7,7 +7,7 @@ import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { FlowItem, FlowSectionId, ScopeCardId } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
-import { AddCardToScope } from './ScopeCards'
+import { AddCardToScope, cardNotOffered } from './ScopeCards'
 import { useFlowScope } from './useFlowScope'
 
 const outOfScope = (items: FlowItem[]) => items.filter(i => i.in_scope === false && !i.acknowledged)
@@ -52,7 +52,12 @@ export function SectionNotInScope({ section }: { section: FlowSectionId }) {
   const items = outOfScope(flowSection(section)?.items ?? [])
   if (items.length === 0 || !registry) return null
   const cards = [...new Set(items.map(i => i.card).filter((c): c is ScopeCardId => !!c))]
-  const names = cards.map(c => registry.cards.find(d => d.id === c)?.label ?? c)
+  // Only a card the site offers is promised back; the others say why.
+  const addable = cards.filter(c => {
+    const def = registry.cards.find(d => d.id === c)
+    return def && cardNotOffered(def) === null
+  })
+  const names = addable.map(c => registry.cards.find(d => d.id === c)?.label ?? c)
   const n = items.length
   return (
     <div data-testid="section-not-in-scope" className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">

@@ -306,7 +306,20 @@ describe('NotInScopeGroup', () => {
     await user.click(await screen.findByTestId('issues-not-in-scope-toggle'))
     expect(screen.queryByTestId('issues-not-in-scope-add-reliability')).toBeNull()
     expect((await screen.findByTestId('issues-not-in-scope-add-reliability-why')).textContent)
-      .toBe(`Comes back with Reliability: ${nothing}`)
+      .toBe(`Not offered for this site: ${nothing}`)
+  })
+
+  it('the Guided line promises nothing back on a site that cannot add the card', async () => {
+    getProjectFlow.mockResolvedValue({ sections: [{ section: 'scenarios', items: [OUT_ITEM] }] })
+    const reg = registry({ ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability') })
+    const nothing = "Nothing to make adequate: this site only generates and has no load."
+    reg.cards[3].options = reg.cards[3].options.map(o => ({ ...o, status: 'not_yet_available', reason: nothing }))
+    getFlowScope.mockResolvedValue(reg)
+    mount(<SectionNotInScope section="scenarios" />)
+    const line = await screen.findByTestId('section-not-in-scope')
+    expect(line.textContent).toContain('1 item is not in scope.')
+    expect(line.textContent).not.toContain('come back')
+    expect(line.textContent).toContain(`Not offered for this site: ${nothing}`)
   })
 })
 
