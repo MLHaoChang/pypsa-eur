@@ -165,6 +165,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "loss-of-load expectation against the reliability target", "adequacy",
                (_r("get_adequacy_results", kind="adequacy"),),
                guided_label="Adequacy",
+               checked_profiles=("copt-screening/1",),
                units="h (LOLE), MWh (EUE) over the modelled horizon"),
     ResultView("storage", _RESULTS, "storage", "Storage cycling",
                "storage cycles and state of charge", "results",
