@@ -32,7 +32,15 @@ on UNDELIVERED tonnes, since the lost-production value is the offtake's shortfal
   ``lost_production_value_missing`` (ADR-0001).
 
 Snapshots run cyclically within the period (each period is one representative week that repeats).
-Imports no router.
+
+The failure-mode sweep's link outages (ticket 08b) use ``expected_outage_loss``: the units an outage cuts off
+(``units_cut_off``, per period, following feedstocks), each period's mean event, times the occurrence per year.
+
+Flags (the module's constants): ``tier_unset:<unit>`` (``TIER_UNSET``), ``mttr_missing`` (``MTTR_MISSING``: no
+per-year figure), ``outage_longer_than_period`` (``OUTAGE_LONGER_THAN_PERIOD``: the event is capped at one cycle,
+so the per-year figures are at least what is reported, ``"bound": "lower"``) and
+``feedstock_inventory_not_credited`` (``FEEDSTOCK_INVENTORY_NOT_CREDITED``: a unit stops on a feedstock whose tank
+is not counted, conservative). Imports no router.
 """
 from __future__ import annotations
 
@@ -42,8 +50,15 @@ import numpy as np
 import pandas as pd
 
 from models.process_unit import CRITICALITY_TIERS
+from services.adequacy.metrics import HOURS_PER_YEAR
 from services import process_products as PP
 from services.solver.process_uc import process_mask
+
+#: The flags this module raises (module docstring).
+OUTAGE_LONGER_THAN_PERIOD = "outage_longer_than_period"
+MTTR_MISSING = "mttr_missing"
+TIER_UNSET = "tier_unset"
+FEEDSTOCK_INVENTORY_NOT_CREDITED = "feedstock_inventory_not_credited"
 
 
 def _period_index(n, period) -> pd.Index:
@@ -109,7 +124,7 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
     for u in stopped:
         tier = tiers.get(u, "")
         if tier not in CRITICALITY_TIERS:
-            flags.append(f"tier_unset:{u}")
+            flags.append(f"{TIER_UNSET}:{u}")
             tier = ""
         bus = str(links.at[u, "bus1"])
         restart_sn = int(links.at[u, "min_down_time"] or 0) if tier in ("process_critical", "") else 0
@@ -165,3 +180,213 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
         products.append(row)
     return {"period": period, "start": start, "hours": hours, "outage_snapshots": out_span,
             "units": rows, "products": products, "flags": flags}
+
+
+# ── the failure-mode sweep's link outages (ticket 08b, FMEA class B) ────────
+
+
+def _year_hours(period) -> float:
+    """The period year's hours (24 × 365 or 366); `metrics.HOURS_PER_YEAR` on a single-period network."""
+    try:
+        return 24.0 * (366 if pd.Timestamp(year=int(period), month=1, day=1).is_leap_year else 365)
+    except (TypeError, ValueError):
+        return HOURS_PER_YEAR
+
+
+def _active(n, comp: str, period) -> pd.Series:
+    """The frame's assets active in `period` (build_year/lifetime and ``active``; the static column on one period)."""
+    from services.adequacy.activity import active_mask
+
+    return active_mask(n, comp, "ALL" if period is None else int(period))
+
+
+def _with_capacity(df: pd.DataFrame, nom: str) -> pd.Series:
+    """Assets with a rating above 0: ``nom``, or its solved ``nom_opt`` when extendable. An unbuilt extendable
+    (0 and 0) is no path."""
+    fixed = pd.to_numeric(df[nom], errors="coerce").fillna(0.0)
+    if f"{nom}_opt" not in df.columns or f"{nom}_extendable" not in df.columns:
+        return fixed > 0
+    opt = pd.to_numeric(df[f"{nom}_opt"], errors="coerce").fillna(0.0)
+    return (fixed > 0) | (df[f"{nom}_extendable"].astype(bool) & (opt > 0))
+
+
+def _usable(n, comp: str, nom: str, period) -> list[str]:
+    df = getattr(n, comp.lower() + "s" if comp != "StorageUnit" else "storage_units")
+    if df.empty:
+        return []
+    keep = _active(n, comp, period).reindex(df.index).fillna(False).astype(bool) & _with_capacity(df, nom)
+    return [str(x) for x in df.index[keep.to_numpy()]]
+
+
+def _ports(links: pd.DataFrame, name) -> tuple[list[str], list[str]]:
+    """A Link's (inputs, outputs): bus0, then every busN (N ≥ 2) by the sign of its efficiencyN; bus1 is an output."""
+    ins, outs = [str(links.at[name, "bus0"])], [str(links.at[name, "bus1"])]
+    for col in links.columns:
+        if col.startswith("bus") and col[3:].isdigit() and int(col[3:]) >= 2:
+            bus = str(links.at[name, col] or "")
+            eff = pd.to_numeric(links.at[name, f"efficiency{col[3:]}"], errors="coerce") \
+                if f"efficiency{col[3:]}" in links.columns else float("nan")
+            if not bus or not math.isfinite(eff) or eff == 0:
+                continue
+            (ins if eff < 0 else outs).append(bus)
+    return ins, outs
+
+
+def _feedstock_buses(n, unit: str) -> list[str]:
+    """A process unit's input product buses: bus0 when it is a product bus, and every busN with efficiencyN < 0."""
+    ins, _ = _ports(n.links, unit)
+    return [b for i, b in enumerate(ins) if i > 0 or PP.is_product_bus(n, b)]
+
+
+def _cut_off(n, link: str, period=None) -> tuple[list[str], list[str]]:
+    """(units, flags) of `units_cut_off`, with the feedstock-inventory flag."""
+    from services.adequacy.slack import slack_generator_mask
+    from models.process_unit import product_roles
+
+    links = n.links
+    usable_links = _usable(n, "Link", "p_nom", period)
+    active = set(usable_links)
+    process = [u for u in (str(x) for x in links.index[process_mask(links)]) if u in active]
+    feed = {u: _feedstock_buses(n, u) for u in process}
+    feedstock = {b for bs in feed.values() for b in bs}
+    gens = n.generators
+    slack = set(gens.index[slack_generator_mask(gens).to_numpy()]) if len(gens) else set()
+    roles = product_roles(n)                      # a buy-in is a producer; the shortfall is an LP term, never one
+    sources = {str(gens.at[g, "bus"]) for g in _usable(n, "Generator", "p_nom", period)
+               if g not in slack and roles.get(g, PP.BUY_IN) == PP.BUY_IN}
+    sources |= {str(n.storage_units.at[s, "bus"]) for s in _usable(n, "StorageUnit", "p_nom", period)}
+    stored = {str(n.stores.at[s, "bus"]) for s in _usable(n, "Store", "e_nom", period)}
+    sources |= {b for b in stored if b not in feedstock and not PP.is_product_bus(n, b)}
+    base: dict[str, set[str]] = {}
+
+    def edge(edges, a, b):
+        edges.setdefault(a, set()).add(b)
+
+    for comp, nom in (("Line", "s_nom"), ("Transformer", "s_nom")):
+        df = getattr(n, comp.lower() + "s")
+        for name in _usable(n, comp, nom, period):
+            a, b = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
+            edge(base, a, b)
+            edge(base, b, a)
+    for name in usable_links:
+        if name == link or name in feed:
+            continue
+        ins, outs = _ports(links, name)
+        for b in outs:
+            edge(base, ins[0], b)
+        if float(links.at[name, "p_min_pu"]) < 0:
+            edge(base, outs[0], ins[0])
+    # A process unit's own outage stops it; any other stops when an input has no path from a source (its
+    # electricity bus0, or a feedstock with no producer left), to a fixed point: a stopped unit starves the next.
+    stopped = {link} & set(process)
+    while True:
+        edges = {a: set(bs) for a, bs in base.items()}
+        for u in process:
+            if u not in stopped:
+                ins, outs = _ports(links, u)
+                for b in outs:
+                    edge(edges, ins[0], b)
+        seen, todo = set(), list(sources)
+        while todo:
+            b = todo.pop()
+            if b in seen:
+                continue
+            seen.add(b)
+            todo.extend(edges.get(b, ()))
+        more = {u for u in process if u not in stopped and any(b not in seen for b in _ports(links, u)[0])}
+        if not more:
+            break
+        stopped |= more
+    flags = [FEEDSTOCK_INVENTORY_NOT_CREDITED] if any(
+        b in stored for u in stopped for b in feed[u]) else []
+    return [u for u in process if u in stopped], flags
+
+
+def units_cut_off(n, link: str, period=None) -> list[str]:
+    """The process units a forced outage of `link` leaves with no supply in `period`, first order: an input with no
+    path from a source over the components active in that period. Sources are Generators (no LP slack, no
+    shortfall), StorageUnits and Stores off product and feedstock buses; paths run over Lines, Transformers (both
+    ways) and the remaining Links (inputs → outputs, and back when p_min_pu < 0), each with a rating above 0. A
+    unit's inputs are its bus0 and its feedstocks (`_feedstock_buses`); a running process unit carries its inputs to
+    its outputs, so a stopped one can starve the next (closed to a fixed point). A process unit's own outage stops
+    it. A path is not a capacity: a unit still reachable counts as supplied; a feedstock tank is not credited
+    (`FEEDSTOCK_INVENTORY_NOT_CREDITED`, conservative)."""
+    return _cut_off(n, link, period)[0]
+
+
+def expected_outage_loss(n, link: str, mttr_hours: float, q: float, lost_load=None) -> dict:
+    """A class-B link outage's lost production per year, per period: the units it cuts off in that period
+    (`units_cut_off`), the event = the mean of `outage_loss` over every start snapshot (stores-weighted), and per
+    year = occurrence × event, occurrence = the year's hours × q / MTTR. An outage longer than the period's cycle is
+    capped at one cycle and flagged `OUTAGE_LONGER_THAN_PERIOD`, its per-year figures a lower bound (``"bound":
+    "lower"``: each further cycle loses at least the first's once inventory is gone; never wrapped twice)."""
+    periods = list(n.snapshots.get_level_values(0).unique()) if isinstance(n.snapshots, pd.MultiIndex) else [None]
+    cut = {p: _cut_off(n, link, p) for p in periods}
+    stopped = {u for units, _ in cut.values() for u in units}
+    out = {"stopped_units": [str(u) for u in n.links.index if str(u) in stopped], "flags": [],
+           "source_set": "Generators (no slacks or shortfalls), StorageUnits and Stores off product and feedstock "
+                         "buses, active in the period, reached over Lines, Transformers and the remaining Links",
+           "by_period": {}}
+    if not stopped:
+        return out
+    if not (mttr_hours and math.isfinite(mttr_hours) and mttr_hours > 0):
+        out["flags"].append(MTTR_MISSING)
+        return out
+    for p in periods:
+        units, cut_flags = cut[p]
+        if not units:
+            continue
+        sns = _period_index(n, p)
+        w = _weights(n, sns)
+        span = float(w.sum())
+        hours, flags = float(mttr_hours), list(cut_flags)
+        bound = None
+        if hours > span:
+            hours, bound = span, "lower"
+            flags.append(OUTAGE_LONGER_THAN_PERIOD)
+        acc: dict[str, dict] = {}
+        for start in range(len(sns)):
+            ev = outage_loss(n, p, start, hours, units=units, lost_load=lost_load)
+            for row in ev["products"]:
+                a = acc.setdefault(row["product"], {"t": 0.0, "eur": 0.0, "eur_known": True, "t_known": True,
+                                                    "flag": row["flag"]})
+                if row["undelivered_t"] is None:
+                    a["t_known"] = False
+                else:
+                    a["t"] += row["undelivered_t"] * w[start]
+                if row["lost_eur"] is None:
+                    a["eur_known"] = False
+                else:
+                    a["eur"] += row["lost_eur"] * w[start]
+        occ = _year_hours(p) * q / mttr_hours
+        key = "_" if p is None else str(int(p))
+        out["by_period"][key] = {
+            "stopped_units": units, "occurrence_per_year": occ, "outage_hours": hours, "flags": flags,
+            **({"bound": bound} if bound else {}),
+            "products": [{"product": b,
+                          "undelivered_t_per_event": a["t"] / span if a["t_known"] else None,
+                          "lost_t_per_year": occ * a["t"] / span if a["t_known"] else None,
+                          "lost_eur_per_year": occ * a["eur"] / span if a["eur_known"] else None,
+                          "flag": a["flag"]} for b, a in sorted(acc.items())]}
+    return out
+
+
+def lost_production_summary(n, lost_load=None) -> list[dict]:
+    """A solve's own lost production per product (the shortfall accessor, `process_products.shortfalls`): tonnes on
+    `snapshot_weightings.generators`, EUR on `objective` at the price the LP gave it. None and flagged when the
+    dispatch is not known (never 0). Empty on a network with no product shortfall."""
+    wg = n.snapshot_weightings.generators.reindex(n.snapshots).to_numpy(dtype=float)
+    wo = n.snapshot_weightings.objective.reindex(n.snapshots).to_numpy(dtype=float)
+    out = []
+    for s in PP.shortfalls(n, lost_load):
+        tpu = PP.t_per_unit(n, s.bus)
+        if s.p is None:
+            out.append({"product": s.bus, "source": s.source, "lost_t": None, "lost_eur": None, "flag": s.flag})
+            continue
+        p = s.p.to_numpy(dtype=float).clip(min=0.0)
+        out.append({"product": s.bus, "source": s.source,
+                    "lost_t": float((p * wg).sum()) * tpu if tpu is not None else None,
+                    "lost_eur": float((p * wo * s.cost.to_numpy(dtype=float)).sum()) if s.value is not None else None,
+                    "flag": s.flag or (None if tpu is not None else "tonne_factor_missing")
+                    or (None if s.value is not None else "lost_production_value_missing")})
+    return out

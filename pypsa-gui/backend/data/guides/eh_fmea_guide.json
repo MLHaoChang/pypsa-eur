@@ -193,8 +193,8 @@
           "enter": "3 hours per year is a common planning goal."
         },
         {
-          "target": "hub-goal-run",
-          "reveal": "hub-rail-step-goal",
+          "target": "hub-run-start",
+          "reveal": "hub-rail-section-readiness",
           "title": "6 · Run the study",
           "body": "The study sizes the equipment, then tests the design against random breakdowns. It takes a few minutes; the rail moves on when it finishes."
         },
