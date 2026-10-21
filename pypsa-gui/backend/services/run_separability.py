@@ -174,14 +174,16 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
                         "for the solve and undoes them on every exit; sets _fixed_design",
         implicit_steps="as optimisation (the process UC check and the island UC run); the "
                        "connection is pinned at the fixed size",
-        freshness="the sizing record: refused when the sizes or the topology changed since",
+        freshness="the sizing record (its topology hash and the 1e-4 MW size check) and "
+                  "dispatch_status: capacity_run is refused once either moved",
         evidence=(_T + "test_flipping_sizing_off_is_refused_by_preflight",
                   _T + "test_sizing_off_answers_for_its_source",
                   "tests/test_fixed_sizes.py::test_capacity_run_after_a_nameplate_run_is_refused",
                   "tests/test_fixed_sizes.py::test_capacity_run_reproduces_the_plans_sizes_after_a_cost_edit",
                   "tests/test_fixed_sizes.py::test_a_raise_at_the_commercial_binding_leaves_no_freeze_behind"),
-        note="no run kind of its own: the optimisation with fixed_sizes set. Refused with "
-             "the myopic and rolling strategies and in PF mode"),
+        note="no run kind of its own: the optimisation with fixed_sizes set. Combines with "
+             "SCLOPF (tests/test_fixed_sizes.py::test_sclopf_on_fixed_sizes_reproduces_the_"
+             "secure_plan); refused with the myopic and rolling strategies and in PF mode"),
 )}
 
 
@@ -282,10 +284,16 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
     ("capacity_run" or "nameplate"). A row that is not runnable reads
     ``ready: false`` with its classification."""
     from services import flow_service
+    from services.solver.fixed_sizes import MODES
 
     out: dict[str, dict] = {}
     flow: dict | None = None
     for kind in kinds:
+        if kind == "fixed_sizes" and size_source not in MODES[1:]:
+            out[kind] = _blocked("fixed_sizes_unknown",
+                                 f"Sizing source {size_source!r} is not one of "
+                                 f"{', '.join(MODES[1:])}.")
+            continue
         if kind in ("optimisation", "sclopf", "study", "fixed_sizes") or (
                 kind == "loadflow" and "optimisation" in kinds):
             if flow is None:
