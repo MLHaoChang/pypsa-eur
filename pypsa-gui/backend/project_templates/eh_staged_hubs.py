@@ -610,6 +610,14 @@ def _h2_meta(T, planning=None) -> dict:
          "source": "assumed",
          "note": f"assumed, held from {min(co2)}: the demo path starts in {min(co2)}, so the "
                  "first point is held from the start year; never extrapolated"}]
+    tariff_year = int(SYNTHETIC_TARIFF["valid_from"][:4])
+    if y0 < tariff_year:
+        held.append(
+            {"item": "import tariff before its year",
+             "value": f"{SYNTHETIC_TARIFF['id']}'s rates from {y0}-01-01", "source": "assumed",
+             "note": (f"assumed, held from {tariff_year}: the synthetic tariff is dated "
+                      f"{SYNTHETIC_TARIFF['valid_from']}, so its rates are held from the start "
+                      "year; replace with the site's tariff for those years")})
     return _planned_meta(T, meta, plan, "h2_offtake_mw", off, held)
 
 

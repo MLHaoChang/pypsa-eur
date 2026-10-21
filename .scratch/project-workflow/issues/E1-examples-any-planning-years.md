@@ -55,6 +55,8 @@ Read [workspace reconciliation](../workspace-reconciliation.md) §3.3, §12 (Q3 
 ## Open items
 
 - The report appendix: [E1-report-template-ledger.md](E1-report-template-ledger.md).
+- Setting a placeholder: [E1-set-growth-placeholders.md](E1-set-growth-placeholders.md) (gatekeeper review of #540, option (a)).
+- E1d: the planned-sidecar branch in `routers/projects.py` (~l.1737) skips the template_series `apply_refs`/pins step. Harmless for the DC (no price series); the IPP needs it (gatekeeper note).
 - The chat tool's catalogue description does not mention `planning`. Coordinator (2026-10-21, 16:15 CEST): its own tiny PR right after E1a merges, with `smoke/assistant_inventory.py --write`, GK review. TS #512 and GS-EU #514 also touch `harness/catalogue.py`; whoever lands later reruns the inventory.
 - The Builder's preview of the resulting periods is W2's (UI, with the UX reviewer).
 

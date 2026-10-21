@@ -116,9 +116,17 @@ def test_the_period_years_are_the_cases_operating_years(tid):
     assert set(new) <= set(fin["degradation_by_asset"])
 
 
-def test_the_h2_tariff_is_valid_from_the_start_year():
-    cfg = T.solver_config(H2, _plan(H2, UNEVEN))
+def test_the_h2_tariff_is_valid_from_the_start_year_and_held_ledgered():
+    """As the staged DC's (gatekeeper review of #540): a start before the
+    tariff's 2027 holds its rates, with an assumed ledger row."""
+    p = _plan(H2, UNEVEN)
+    cfg = T.solver_config(H2, p)
     assert cfg["commercial"]["import_tariff"]["valid_from"] == "2026-01-01"
+    row = next(r for r in T.template_meta(H2, p)["ledger"]
+               if r["item"] == "import tariff before its year")
+    assert row["source"] == "assumed" and row["note"].startswith("assumed, held from 2027")
+    assert not any(r["item"] == "import tariff before its year"
+                   for r in T.template_meta(H2, _plan(H2, SHIFTED))["ledger"])
 
 
 @pytest.mark.parametrize("tid", IDS)
@@ -201,7 +209,8 @@ def test_an_example_year_keeps_its_value_set():
                           "source": "unset"}
     row = next(r for r in meta["ledger"] if r["item"] == "placeholder load_scale 2038")
     assert row["value"] == "residential ×1.4, hospital_load ×1.2"
-    assert "peak check" in row["note"]
+    assert "it takes its stage 3 value, residential ×1.4, hospital_load ×1.2 (" in row["note"]
+    assert "peak check" in row["note"] and "stays unknown" in row["note"]
 
 
 def test_an_unset_h2_offtake_leaves_the_electric_peak_as_it_was():

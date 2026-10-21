@@ -163,6 +163,31 @@ def test_the_tariff_is_valid_from_the_start_year():
     assert tariff["valid_from"] == "2025-01-01"
 
 
+def test_a_start_before_the_tariffs_year_holds_it_with_a_ledger_row():
+    """Condition 5 on the tariff: its rates hold from the start year, and the
+    ledger says so (assumed, so the flow lists it to confirm)."""
+    p = _plan({"start_year": 2025, "end_year": 2040})
+    assert T.solver_config(TID, p)["commercial"]["import_tariff"]["valid_from"] == "2025-01-01"
+    row = next(r for r in T.template_meta(TID, p)["ledger"]
+               if r["item"] == "import tariff before its year")
+    assert row["source"] == "assumed" and row["note"].startswith("assumed, held from 2027")
+    for later in ({"start_year": 2027, "end_year": 2040}, {"start_year": 2029, "end_year": 2040}):
+        assert not any(r["item"] == "import tariff before its year"
+                       for r in T.template_meta(TID, _plan(later))["ledger"])
+
+
+def test_the_held_tariff_is_an_assumed_warning_in_the_flow(client, tmp_projects_dir):
+    r = _create(client, "dc_e1_tariff", {"planning": {"start_year": 2025, "end_year": 2040}})
+    assert r.status_code == 200, r.text
+    body = client.get("/api/projects/dc_e1_tariff/flow").json()
+    held = [(s["section"], i) for s in body["sections"] for i in s["items"]
+            if (i.get("target") or {}).get("entity") == "import tariff before its year"]
+    assert len(held) == 1
+    section, item = held[0]
+    assert section == "commercial" and item["severity"] == "warning"
+    assert "(assumed)" in item["message"]
+
+
 def test_the_ledger_says_the_pack_money_year_is_not_re_dated():
     meta = T.template_meta(TID, _plan(UNEVEN))
     row = next(r for r in meta["ledger"] if r["item"] == "money year")
@@ -208,6 +233,39 @@ def test_a_shifted_year_is_a_placeholder_with_the_examples_value_by_stage():
     # The energization the flow lists carries the year's placeholder, assumed.
     energ = {e["year"]: e for e in meta["energization"]}
     assert energ[2038]["source"] == "assumed" and "placeholder" in energ[2038]["note"]
+
+
+def test_an_example_year_in_another_stage_says_why_its_value_is_not_used():
+    """dates [2035]: 2035 is the example's third stage but this planning's
+    second, so it takes the second stage's 24 MW; the note says so, and says
+    the check stays unknown (setting a placeholder is a follow-up)."""
+    meta = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045, "dates": [2035]}))
+    row = next(r for r in meta["ledger"] if r["item"] == "placeholder it_mw 2035")
+    assert row["value"] == 24.0
+    assert "the example's 2035 value is not used: this planning puts 2035 in stage 2, so it " \
+           "takes 24 MW" in row["note"]
+    assert "IT load" in row["label"] and "it load" not in row["note"]
+    assert "stays unknown" in row["note"] and "E1-set-growth-placeholders" in row["note"]
+    other = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045,
+                                        "dates": [2030, 2038]}))
+    row = next(r for r in other["ledger"] if r["item"] == "placeholder it_mw 2038")
+    assert "the example has no IT load for 2038; it takes its stage 3 value, 36 MW" in row["note"]
+
+
+def test_the_growth_flag_format_is_pinned():
+    """``growth_placeholder:<kind>_<year>``, one per unset (kind, year), in
+    year order: E1b-E1d follow it (gatekeeper review of #540)."""
+    from routers import results as R
+
+    meta = {"growth_inputs": [
+        {"kind": "it_mw", "year": 2038, "set": False},
+        {"kind": "energized_mw", "year": 2031, "set": False},
+        {"kind": "it_mw", "year": 2030, "set": True}]}
+    flags = R._growth_flags_of(meta)
+    assert flags == ("growth_placeholder:energized_mw_2031", "growth_placeholder:it_mw_2038")
+    import re
+
+    assert all(re.fullmatch(r"growth_placeholder:[a-z0-9_]+_\d{4}", f) for f in flags)
 
 
 def test_an_example_year_keeps_its_value_set_when_only_the_horizon_moves():
@@ -392,7 +450,7 @@ def test_a_refused_planning_is_a_typed_422_and_creates_nothing(
     r = _create(client, "dc_e1_bad", body)
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert detail["code"] == "planning_invalid" and detail["field"] == field
+    assert detail["code"] == detail["error_kind"] == "planning_invalid" and detail["field"] == field
     assert client.get("/api/projects/dc_e1_bad/eh_template").status_code in (403, 404)
 
 
@@ -401,7 +459,7 @@ def test_dc_load_at_the_native_years_is_refused_against_entered_years(client, tm
                                      "dc_load": {}})
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert detail["code"] == "dc_load_invalid" and "[2028, 2031, 2036]" in detail["message"]
+    assert detail["code"] == detail["error_kind"] == "dc_load_invalid" and "[2028, 2031, 2036]" in detail["message"]
 
 
 def test_planning_is_not_a_parameter_of_a_template_without_native_years(client, tmp_projects_dir):
@@ -409,7 +467,7 @@ def test_planning_is_not_a_parameter_of_a_template_without_native_years(client, 
                     json={"planning": {"start_year": 2028, "end_year": 2040}})
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert detail["code"] == "template_params_invalid" and detail["field"] == "planning"
+    assert detail["code"] == detail["error_kind"] == "template_params_invalid" and detail["field"] == "planning"
 
 
 @pytest.mark.live_solve

@@ -909,26 +909,49 @@ def _growth_rows(kind: str, staged, *, source_set: str = "example", overrides=No
     return rows
 
 
+#: The follow-up that lets a placeholder be set (until then it stays one).
+PLACEHOLDER_FOLLOW_UP = "E1-set-growth-placeholders"
+
+
+def _in_words(label: str) -> str:
+    """``Energized import`` → ``energized import``; an acronym stays (``IT load``)."""
+    return label if label[1:2].isupper() or label[1:2].isdigit() else label[:1].lower() + label[1:]
+
+
 def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
     """One assumed ledger row per placeholder growth value (the flow lists it
-    as a warning to confirm; gatekeeper E1 condition 3)."""
+    as a warning to confirm; gatekeeper E1 condition 3). It says which stage
+    the value comes from, and that it stays a placeholder: nothing sets one
+    yet (``PLACEHOLDER_FOLLOW_UP``)."""
     out = []
+    years: dict[str, list[int]] = {}
+    for g in growth:
+        years.setdefault(g["kind"], []).append(g["year"])
     for g in growth:
         if g["set"]:
             continue
         label, unit, section, component, entity, field = _GROWTH_KINDS[g["kind"]]
+        y = g["year"]
+        stage = years[g["kind"]].index(y) + 1
+        value = (_growth_value_text(g["example_value"]) if isinstance(g["example_value"], dict)
+                 else f"{g['example_value']:g} {unit}")
+        if y in native.years:
+            why = (f"the example's {y} value is not used: this planning puts {y} in stage "
+                   f"{stage}, so it takes {value}")
+        else:
+            why = f"the example has no {_in_words(label)} for {y}; it takes its stage {stage} value, {value}"
         out.append({
-            "item": f"placeholder {g['kind']} {g['year']}",
-            "label": f"{label} {g['year']} (placeholder)",
+            "item": f"placeholder {g['kind']} {y}",
+            "label": f"{label} {y} (placeholder)",
             "value": (_growth_value_text(g["value"]) if isinstance(g["value"], dict)
                       else g["value"]), "unit": unit,
             "source": "assumed",
-            "note": (f"not set: the example has no {label.lower()} for {g['year']}; its "
-                     f"same-stage value {_growth_value_text(g['example_value'])} {unit} (built for "
-                     f"{_years_text(native.years)}) is a placeholder, never interpolated. "
-                     + ("The peak check and the scorecard read this period unknown until it "
-                        "is set" if g["kind"] in _PEAK_KINDS else
-                        "The investment case flags it until it is set")),
+            "note": (f"not set: {why} (the example is built for {_years_text(native.years)}). A "
+                     "placeholder, never interpolated: "
+                     + ("the peak check and the scorecard read this period unknown, and it "
+                        "stays unknown for this period" if g["kind"] in _PEAK_KINDS else
+                        "the investment case flags it, and it stays flagged")
+                     + f" (setting a placeholder is follow-up {PLACEHOLDER_FOLLOW_UP})"),
             "section": section, "panel": None, "component": component, "entity": entity,
             "field": field})
     return out
@@ -1085,13 +1108,20 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
     meta["growth_inputs"] = growth
     meta["planning"] = {"start_year": y0, "end_year": end, "periods": years,
                         "native_periods": list(native.years), "native_end_year": native.end_year}
+    tariff_year = int(DC_TARIFF["valid_from"][:4])
+    held = [] if y0 >= tariff_year else [
+        {"item": "import tariff before its year",
+         "value": f"{DC_TARIFF['id']}'s rates from {y0}-01-01", "source": "assumed",
+         "note": (f"assumed, held from {tariff_year}: the synthetic tariff is dated "
+                  f"{DC_TARIFF['valid_from']}, so its rates are held from the start year; "
+                  "replace with the site's tariff for those years")}]
     meta["ledger"] = [
         {"item": "planning period",
          "value": f"{' / '.join(map(str, years))} → {end} (entered)", "source": "entered",
          "note": (f"the example is built for {_years_text(native.years)} → {native.end_year}; "
                   "each period's years run to the next, the last to the end year, and the solve "
                   "discounts them (auto_discount_periods)")},
-        *meta["ledger"], *_placeholder_ledger(growth, native)]
+        *meta["ledger"], *held, *_placeholder_ledger(growth, native)]
     return meta
 
 

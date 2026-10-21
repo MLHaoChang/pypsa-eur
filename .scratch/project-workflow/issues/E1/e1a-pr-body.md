@@ -19,7 +19,8 @@ The staged data-center example can be created for any planning years entered at 
 
 **Placeholders (condition 3).** An IT MW or energized MW the example has no figure for in an entered year takes the example's value for the same stage. It is never interpolated.
 - `eh_template.json` gains `growth_inputs`, with `set: false` and `source: "unset"` for these values, plus a `planning` block.
-- Each placeholder gets an `assumed` ledger row with a section target, so the flow warns until it is confirmed. There is no flow code change.
+- Each placeholder gets an `assumed` ledger row with a section target, so the flow warns until it is confirmed. There is no flow code change. Its note says which stage the value comes from ("the example's 2035 value is not used: this planning puts 2035 in stage 2, so it takes 24 MW"), and that it stays a placeholder: nothing sets one yet, which is follow-up [E1-set-growth-placeholders.md](https://github.com/MLHaoChang/pypsa-eur/blob/claude/e1a-planning-years-staged-dc/.scratch/project-workflow/issues/E1-set-growth-placeholders.md) (`ready-for-agent`).
+- The flag format is `growth_placeholder:<kind>_<year>`, pinned by a test for E1b–E1d.
 - `site_peak.peak_check(…, unset=)`, the DC-01 create check and the scorecard's `energization_peak:<period>` read unknown for those periods. They never refuse on a placeholder.
 - The investment case gets `growth_placeholder:<kind>_<year>` flags. A live-solve test checks the IC report lists each flag, with one plain-words sentence per placeholder in its notes.
 - The chat tool's `solve_ppa_price` builds its case with the same flags and lists them in its result's `flags`, as it lists the campus flags (`services/chat_tools.py`; a test pins it).
@@ -27,9 +28,11 @@ The staged data-center example can be created for any planning years entered at 
 
 **Horizon (condition 4).** The case's `analysis_years = end − start`, `financial_close = start − 1` and every existing COD = start. A test checks that the operating years equal the periods' covered years. The pack's money year (2020) is not re-dated, and the ledger says so. The cost basis stays flat; per-period cost sourcing is the separate gated follow-up.
 
-**Paths by year (condition 5).** The staged DC reads one path by year, the import tariff, and it is now valid from the start year. Energization is read by stage, not by year: each period takes the example's same-stage value as a placeholder. So no "held from" step-back applies here. The CO₂ / H₂ / NH₃ paths come in E1b and E1c.
+**Paths by year (condition 5).** The staged DC reads one path by year, the import tariff, and it is now valid from the start year. A start before 2027 holds the 2027 rates from the start year, with an assumed ledger row "assumed, held from 2027" that the flow lists as a warning in Commercial. Energization is read by stage, not by year: each period takes the example's same-stage value as a placeholder. So no "held from" step-back applies here. The CO₂ / H₂ / NH₃ paths come in E1b and E1c.
 
 **DC-01.** `dc_load` phases must match the entered periods (the existing 422, now against the new years).
+
+**Behaviour change.** A `{}` body on `eh_datacenter` or `eh_datacenter_staged` was refused before (`dc_load_invalid`). It now creates the default project, like no body.
 
 Files:
 - `project_templates/eh_templates.py`: `Planning`, `planning_spec`, `_dc_plan`, `_dc_staged_meta`, and `template_meta` / `solver_config` / `island_config` / `write_sidecars` taking a plan.
