@@ -115,7 +115,7 @@ def test_expanded_gate_requires_every_additional_case_and_versions_its_manifest(
     partial = report(results, expanded=True)
     assert not partial["passed"]
     assert len(partial["missing_cases"]) == len(STRESS_CASES) == 80
-    assert partial["required_cases"] == 214
+    assert partial["required_cases"] == 234
     assert partial["manifest_sha256"] != report(results)["manifest_sha256"]
     for case in STRESS_CASES:
         frames, answer = observation(case)
