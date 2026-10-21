@@ -414,6 +414,18 @@ def test_a_battery_built_after_the_period_shaves_nothing_in_it():
     assert row["firm"][1]["mw"] == 0.0 and row["headroom_mw"] == pytest.approx(-10.0)
 
 
+@pytest.mark.parametrize("tid, product", [("eh_h2_hub", "h2_offtake"), ("eh_h2_hub_staged", "h2_offtake"),
+                                          ("eh_ammonia_staged", "nh3_delivery")])
+def test_a_product_offtake_is_not_electric_peak_load(tid, product):
+    """The H2 and NH3 offtakes sit on product buses: the electric peak check
+    counts the AC process load only."""
+    n = T.BUILDERS[tid]()
+    assert product in n.loads.index and SP.electric_loads(n) == ["process_load"]
+    for row in SP.peak_check(n, T.ISLAND_CONFIG.get(tid)):
+        mask = [str(s).startswith(row["period"]) or row["period"] in str(s) for s in n.snapshots]
+        assert row["peak_mw"] == pytest.approx(float(n.loads_t.p_set["process_load"][mask].max()))
+
+
 def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
     """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
     its critical process load, with no genset, needs its peak for the 1 h

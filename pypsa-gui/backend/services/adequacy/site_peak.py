@@ -10,7 +10,9 @@ and the grid-readiness scorecard reports the same rows (``grid_readiness``).
 Hour by hour: load(t) ≤ Σ energized import(t) × efficiency + firm gensets and batteries, and
 each period reports its binding hour (least headroom), where
 
-* the load is the hourly-mean sum of the fixed loads' ``p_set`` (a flexible
+* the load is the hourly-mean sum of the electric fixed loads' ``p_set``
+  (``electric_loads``: on an AC/DC bus, not a product bus; an H2 or NH3
+  offtake is not electric load; a flexible
   conversion unit such as an electrolyser is a decision and is not counted;
   the in-hour peak of an AI-training load is a few per cent higher, which the
   scorecard reports separately);
@@ -186,11 +188,32 @@ def _shave(short: np.ndarray, spare: np.ndarray, rt: dict, reserve: float, hours
     return out
 
 
+#: The bus carriers an electric load sits on (PyPSA's default carrier is "AC";
+#: an empty carrier is the same).
+ELECTRIC_CARRIERS = ("AC", "DC", "")
+
+
+def electric_loads(n) -> list[str]:
+    """The Loads on electric buses: carrier AC, DC or unset, and not a product
+    bus (``process_products.is_product_bus``). An H2 or NH3 offtake is a
+    product, not electric load."""
+    from services.process_products import is_product_bus
+
+    out = []
+    for load in n.loads.index:
+        bus = n.loads.at[load, "bus"]
+        carrier = str(n.buses.at[bus, "carrier"]) if bus in n.buses.index and "carrier" in n.buses.columns else ""
+        if carrier in ELECTRIC_CARRIERS and not is_product_bus(n, bus):
+            out.append(load)
+    return out
+
+
 def _fixed_load(n) -> pd.Series:
-    """The fixed loads' total p_set per snapshot (static p_set where a load
-    has no series)."""
-    ts = n.loads_t.p_set.reindex(columns=n.loads.index)
-    static = n.loads["p_set"] if "p_set" in n.loads.columns else pd.Series(0.0, index=n.loads.index)
+    """The electric fixed loads' total p_set per snapshot (static p_set where
+    a load has no series); a product offtake (H2, NH3) is not counted."""
+    names = electric_loads(n)
+    ts = n.loads_t.p_set.reindex(columns=names)
+    static = n.loads.loc[names, "p_set"] if "p_set" in n.loads.columns else pd.Series(0.0, index=names)
     return ts.fillna(static).reindex(n.snapshots).fillna(0.0).sum(axis=1)
 
 
