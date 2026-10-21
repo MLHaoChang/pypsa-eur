@@ -45,3 +45,12 @@ stale for most reads (`services/dispatch_status.py:103-131`).
 OJ-07, OJ-08 and OJ-10 pass in Tier A, including a fixture solve that takes
 longer than 25 s, a restart during the job (no second run, one continuation)
 and a cancelled job (no walk). LC-T22.
+
+## Rules folded in from #567 HV-S (study copilot)
+
+Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), research only; owner decision AI-567 (2026-10-21). Adopt the listed cases into this ticket's own numbering; each must name its token/packet limit.
+- Never mark a step done from a caller-supplied result alone (`resolve_task_step`); read the result back natively before the next step.
+- No replay on resume; an interrupted step resumes or is reported, never re-run silently.
+- A failed step yields a correction draft, never an automatic retry.
+- No cross-card study brief or separate progress line: the card workspace Next row and H1 are the entry points.
+- Cases: #567 S-series (see 05-IMPLEMENTATION-AND-TESTS.md).

@@ -54,3 +54,7 @@ Source: `.scratch/project-management-redesign/06-AI-PRIORITIES-AND-COST-SPEC.md`
 - Build on `start_experiment` / `prepare_experiment` or the edit-card preview; do not add a `sensitivity_preview.py` (no third path).
 - Execution only through the existing approvals; no model maths.
 - Test cases to adopt from #558: RI13, RI15–RI18.
+
+## Also from #567 HV-D (suggest cases)
+
+Rules above apply to robustness case suggestions from #567 (D-series), research only.
