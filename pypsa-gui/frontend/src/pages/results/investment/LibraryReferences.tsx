@@ -12,7 +12,8 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { ReferenceApplyDrawer } from './ReferenceApplyDrawer'
 import {
-  basisWords, creditBadge, fmtNumber, gridWords, parameterWords, spellOutNotes, targetClass, technologyWords,
+  basisWords, creditBadge, fmtNumber, gridWords, parameterWords, sourceWords, spellOutNotes, targetClass,
+  technologyWords,
 } from './referenceWords'
 
 function detailText(e: unknown): string {
@@ -30,6 +31,13 @@ function shown(value: number | null | undefined, unit: string): string {
 }
 
 const key = (r: ReferenceSummary) => `${r.technology}@${r.projection_year}`
+
+/** One group per technology, in list order; within it the projection years ascending. */
+function groups(rows: ReferenceSummary[]): ReferenceSummary[][] {
+  const by = new Map<string, ReferenceSummary[]>()
+  for (const r of rows) by.set(r.technology, [...(by.get(r.technology) ?? []), r])
+  return [...by.values()].map(g => [...g].sort((a, b) => a.projection_year - b.projection_year))
+}
 
 function ReferenceDetailView({ refRow }: { refRow: ReferenceSummary }) {
   const project = useUIStore(s => s.currentProject)
@@ -61,14 +69,14 @@ function ReferenceDetailView({ refRow }: { refRow: ReferenceSummary }) {
               {row.pack ? <>{shown(row.pack.value, row.pack.unit)}
                 {row.pack.currency_year != null && ` (${row.pack.currency_year} EUR)`}
                 <span className="block text-[10px] text-muted">
-                  {row.pack.projection_year != null && `${row.pack.projection_year} projection · `}{row.pack.source}</span></>
+                  {row.pack.projection_year != null && `${row.pack.projection_year} projection · `}{sourceWords(row.pack.source)}</span></>
                 : <span className="text-muted">No default for this</span>}
             </td>
             <td className="p-1 border-b border-border">
               {shown(row.reference.value, row.reference.unit)}
               {row.reference.currency_year != null && ` (${row.reference.currency_year} EUR)`}
               <span className="block text-[10px] text-muted">
-                {row.reference.projection_year} projection · {row.reference.source}</span>
+                {row.reference.projection_year} projection · {sourceWords(row.reference.source)}</span>
             </td>
           </tr>
         ))}</tbody>
@@ -112,21 +120,31 @@ export function LibraryReferences() {
         Published technology costs you can compare and, after a preview, apply to one asset. They never
         change a project on their own.</p>
       {list.isError && <p role="alert" className="text-danger">{detailText(list.error)}</p>}
-      <ul className="space-y-1" data-testid="lib-reference-list">
-        {(list.data ?? []).map(r => (
-          <li key={key(r)}>
-            <div className="flex flex-wrap items-center gap-x-2">
-              <button type="button" className="underline" aria-expanded={open === key(r)}
-                onClick={() => setOpen(open === key(r) ? null : key(r))}>
-                {technologyWords(r.technology)}, {r.projection_year}</button>
-              <span className="text-muted">{r.currency_year} {r.currency} {basisWords(r.capacity_basis_code)}</span>
-              <span className="text-muted">· {gridWords(r.includes_grid_connection)}</span>
-              <span className="rounded border border-border px-1 text-[10px]" data-testid="lib-reference-badge">
-                {creditBadge(r.publisher, r.licence)}</span>
-            </div>
-            {open === key(r) && <ReferenceDetailView refRow={r} />}
-          </li>
-        ))}
+      <ul className="space-y-2" data-testid="lib-reference-list">
+        {groups(list.data ?? []).map(rows => {
+          const first = rows[0]
+          const shown = rows.find(r => key(r) === open)
+          return (
+            <li key={first.technology} data-testid="lib-reference-group">
+              <div className="flex flex-wrap items-center gap-x-2">
+                <span className="font-medium">{technologyWords(first.technology)}</span>
+                <span className="text-muted">{first.currency_year} {first.currency} {basisWords(first.capacity_basis_code)}</span>
+                <span className="text-muted">· {gridWords(first.includes_grid_connection)}</span>
+                <span className="rounded border border-border px-1 text-[10px]" data-testid="lib-reference-badge">
+                  {creditBadge(first.publisher, first.licence)}</span>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-0.5" role="group" aria-label={`${technologyWords(first.technology)}: projection years`}>
+                {rows.map(r => (
+                  <button key={key(r)} type="button" aria-expanded={open === key(r)}
+                    aria-label={`${technologyWords(r.technology)}, ${r.projection_year}`}
+                    className={`rounded-full border px-2 py-0.5 ${open === key(r) ? 'border-accent text-accent' : 'border-border'}`}
+                    onClick={() => setOpen(open === key(r) ? null : key(r))}>{r.projection_year}</button>
+                ))}
+              </div>
+              {shown && <ReferenceDetailView refRow={shown} />}
+            </li>
+          )
+        })}
       </ul>
     </section>
   )

@@ -51,8 +51,10 @@ const ROWS = [{ field: 'overnight_cost', new: 556_220.85, differs: true,
   pack: { key: 'solar-utility.investment.overnight', value: 482_478.5, unit: 'EUR/MW', currency_year: 2020,
           projection_year: 2030, source: 'technology-data v0.14.0' } }]
 const NEEDS = [
-  { confirmation: 'dc_ac' as const, text: 'This PV cost is per MW of AC output. Unconfirmed, nothing is applied.' },
-  { confirmation: 'money_year' as const, text: 'x', disclosure: '2025 EUR price data, read as 2020 money: not adjusted for inflation.',
+  { confirmation: 'dc_ac' as const, text: 'This PV cost is per MW of AC output. Left unticked, nothing is applied.' },
+  { confirmation: 'money_year' as const,
+    text: '2025 EUR price data, read as 2020 money: not adjusted for inflation. Compared with the default it replaces (2020 EUR). Left unticked, nothing is applied.',
+    disclosure: '2025 EUR price data, read as 2020 money: not adjusted for inflation.',
     read_as_source: 'the default it replaces (2020 EUR)' },
 ]
 const CARD = { version: 1 as const, kind: 'parameter_edit', tool: 'apply_library_reference', says: 'pv overnight_cost', complete: true,
@@ -157,5 +159,16 @@ describe('ReferenceApplyDrawer', () => {
 describe('spellOutNotes', () => {
   it('spells out an abbreviation the first time only', () => {
     expect(spellOutNotes(['FOM a', 'FOM b', 'LHV c'])).toEqual(['fixed O&M (FOM) a', 'FOM b', 'lower heating value (LHV) c'])
+  })
+})
+
+describe('sourceWords', () => {
+  it('reads a workbook cell and a file path in words', async () => {
+    const { sourceWords } = await import('./referenceWords')
+    expect(sourceWords('Danish Energy Agency / Energinet; 22 Utility-scale PV!D17'))
+      .toBe('Danish Energy Agency / Energinet, sheet "22 Utility-scale PV", cell D17')
+    expect(sourceWords('Danish Energy Agency, inputs/technology_data_for_el_and_dh.xlsx'))
+      .toBe('Danish Energy Agency technology data')
+    expect(sourceWords('my quote')).toBe('my quote')
   })
 })

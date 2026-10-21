@@ -16,7 +16,7 @@ import {
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import {
-  CONFIRM_LABELS, basisWords, creditBadge, fmtNumber, parameterWords, targetClass, technologyWords,
+  CONFIRM_LABELS, basisWords, creditBadge, fmtNumber, parameterWords, sourceWords, targetClass, technologyWords,
 } from './referenceWords'
 
 const ROOT = { Generator: 'generators', Link: 'links' } as const
@@ -56,12 +56,12 @@ function ComparisonTable({ rows }: { rows: ReferencePlanRow[] }) {
             <th scope="row" className="p-1 border-b border-border font-normal">{parameterWords(r.reference.parameter)}</th>
             <td className="p-1 border-b border-border">
               {r.pack ? <>{packV} {packU}{money(r.pack.currency_year, r.pack.unit)}
-                <span className="block text-[10px] text-muted">{r.pack.source}</span></>
+                <span className="block text-[10px] text-muted">{sourceWords(r.pack.source)}</span></>
                 : <span className="text-muted">No default for this</span>}
             </td>
             <td className="p-1 border-b border-border">
               {refV} {refU}{money(r.reference.currency_year, r.reference.unit)}
-              <span className="block text-[10px] text-muted">{r.reference.source}, “{r.reference.label}”</span>
+              <span className="block text-[10px] text-muted">{sourceWords(r.reference.source)}, “{r.reference.label}”</span>
             </td>
           </tr>
         )
@@ -71,9 +71,11 @@ function ComparisonTable({ rows }: { rows: ReferencePlanRow[] }) {
 }
 
 export function ReferenceApplyDrawer({ open, onClose, componentClass, name, technology: initialTech,
-  projectionYear: initialYear }: {
+  projectionYear: initialYear, onApplied }: {
   open: boolean
   onClose: () => void
+  /** The stored values the apply wrote, e.g. for an open edit form to take them in. */
+  onApplied?: (written: Record<string, number>) => void
   componentClass: 'Generator' | 'Link'
   name: string
   technology?: string
@@ -115,6 +117,7 @@ export function ReferenceApplyDrawer({ open, onClose, componentClass, name, tech
     try {
       const out = await libraryReferencesApi.apply({ ...args, digest: preview.data.card.digest })
       setApplied(out)
+      onApplied?.(out.written)
       await qc.invalidateQueries({ queryKey: nk(project, ROOT[componentClass]) })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
     } catch (e) {
@@ -162,9 +165,7 @@ export function ReferenceApplyDrawer({ open, onClose, componentClass, name, tech
                       onChange={e => toggle(need.confirmation, e.target.checked)} />
                     <span>
                       <span className="font-medium">{CONFIRM_LABELS[need.confirmation]}</span>
-                      <span className="block text-muted">{need.disclosure
-                        ? `${need.disclosure} Compared with ${need.read_as_source}. Left unticked, nothing is applied.`
-                        : need.text}</span>
+                      <span className="block text-muted">{need.text}</span>
                     </span>
                   </label>
                 ))}

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 import fixture from '../../test/fixtures/assetSchema.json'
 import type { AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
-import { AssetFieldsEdit } from './AssetFields'
+import { AssetFieldsEdit, appliedFields } from './AssetFields'
 import type { FS } from './cardKit'
 
 const schemas = fixture as Record<string, unknown>
@@ -45,5 +45,13 @@ describe('Compare with references', () => {
     expect(chip.getAttribute('title')).toContain('Applied from a Library cost reference')
     expect(chip.getAttribute('title')).toContain('the Danish Energy Agency technology catalogue')
     expect(chip.getAttribute('title')).not.toContain('eu-dea-')
+  })
+})
+
+describe('an apply from the open form', () => {
+  it('re-seeds the applied fields in display units, so a later Save writes them back unchanged', () => {
+    const fs = appliedFields(schemas.Generator as AssetSchema,
+      { overnight_cost: 556_220.85, lifetime: 40, fom_cost: 9_880 })
+    expect(fs).toEqual({ overnight_cost: '556.22085', lifetime: '40', fom_cost: '9.88' })
   })
 })

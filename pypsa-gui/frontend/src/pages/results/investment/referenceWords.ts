@@ -98,3 +98,13 @@ export function valueWords(value: number, unit: string, currencyYear: number | n
   const money = currencyYear != null ? ` (${currencyYear} ${currency})` : ''
   return `${fmtNumber(value)} ${unit}${money}`
 }
+
+/** A source in words: a workbook cell "Publisher; Sheet!D17" → `Publisher, sheet "Sheet", cell D17`;
+ *  a file path after the publisher ("…, inputs/technology_data_for_el_and_dh.xlsx") → "… technology data". */
+export function sourceWords(source: string): string {
+  const cell = /^(.*?);\s*(.+)!([A-Z]{1,3}\d{1,5})$/.exec(source)
+  if (cell) return `${cell[1]}, sheet "${cell[2]}", cell ${cell[3]}`
+  const [publisher, rest] = source.split(/,\s*/, 2)
+  if (rest && /[\\/]|\.xlsx?$|\.csv$/i.test(rest)) return `${publisher} technology data`
+  return source
+}

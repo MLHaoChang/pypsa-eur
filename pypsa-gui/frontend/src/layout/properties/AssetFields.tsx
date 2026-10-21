@@ -8,7 +8,7 @@ import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/ass
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
 import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
-import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
+import { derivedStored, displayValue, isRevealed, tidy, unitLabel } from '../../utils/assetForm'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
@@ -183,10 +183,21 @@ function moneyYear(key: string, stamps: Stamps): string | null {
   return entry?.currency_year == null ? null : `${entry.currency_year} ${unitLabel(entry.currency ?? 'EUR')}`
 }
 
+/** The open form takes in what an applied reference wrote (stored → display), so a later
+ *  Save writes the applied values back unchanged instead of the form's stale ones. */
+export function appliedFields(schema: AssetSchema, written: Record<string, number>): FS {
+  const out: FS = {}
+  for (const f of schemaFields(schema)) {
+    if (f.key in written && !f.derived) out[f.key] = tidy(written[f.key] * f.scale)
+  }
+  return out
+}
+
 /** The asset-side entry to the Library's cost references: a link beside the investment
  *  cost that opens the compare-and-apply drawer for this asset, and returns to the form. */
-function CompareReferences({ componentClass, name, money }: {
+function CompareReferences({ componentClass, name, money, onApplied }: {
   componentClass: 'Generator' | 'Link'; name: string; money: string | null
+  onApplied: (written: Record<string, number>) => void
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -194,7 +205,8 @@ function CompareReferences({ componentClass, name, money }: {
       {money && <span className="text-muted" data-testid="asset-money-overnight_cost">In {money}</span>}
       <button type="button" className="text-[9px] text-accent underline" data-testid="asset-compare-references"
         onClick={() => setOpen(true)}>Compare with references</button>
-      {open && <ReferenceApplyDrawer open onClose={() => setOpen(false)} componentClass={componentClass} name={name} />}
+      {open && <ReferenceApplyDrawer open onClose={() => setOpen(false)} componentClass={componentClass} name={name}
+        onApplied={onApplied} />}
     </div>
   )
 }
@@ -258,7 +270,8 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help}
                       badge={chipOf(provenance, f.key)} />}
                 {f.key === 'overnight_cost' && referenceClass && assetName ? (
-                  <CompareReferences componentClass={referenceClass} name={assetName} money={moneyYear(f.key, provenance)} />
+                  <CompareReferences componentClass={referenceClass} name={assetName} money={moneyYear(f.key, provenance)}
+                    onApplied={written => set(prev => ({ ...prev, ...appliedFields(schema, written) }))} />
                 ) : MONEY_FIELDS.has(f.key) && moneyYear(f.key, provenance) && (
                   <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-money-${f.key}`}>
                     In {moneyYear(f.key, provenance)}</div>
