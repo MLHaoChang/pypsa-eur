@@ -27,7 +27,9 @@ stall. The verdicts are that start code, not copies of it:
 * ``loadflow``: ``routers.simulation.ac_pf_refusal``, the refusal
   ``/run_ac_pf`` raises, read in the preflight's lock span. Bundled: in a Run
   that also optimises it is Stage 2 of that solve (``run_ac_pf_after_lopf``),
-  so its verdict is the optimisation's.
+  so its verdict is the optimisation's with that option on;
+* an option (``sclopf``, Stage 2) answers for switching it ON, whatever the
+  current config says: its refusals in ``validate_for_run`` fire only then.
 
 Classes. **bundled** rows say with ``runnable_in_run`` whether their bundle can
 be part of the one Run (the load flow's dispatch is; the campus study's saved
@@ -105,6 +107,7 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
                   "the solve still reads fresh)",
         evidence=(_T + "test_loadflow_needs_a_fresh_dispatch",
                   _T + "test_loadflow_in_a_run_that_optimises_is_the_optimisations_verdict",
+                  _T + "test_the_bundled_load_flow_answers_for_stage_two_on",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
                   _T + "test_the_load_flow_overwrites_the_lp_flows")),
     Row("sclopf", "N-1 security (SCLOPF)", "supported", True,
@@ -114,9 +117,11 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         locks_and_state="as optimisation",
         implicit_steps="none beyond optimisation",
         freshness="as optimisation",
-        evidence=(_T + "test_sclopf_is_refused_where_the_engine_cannot_run_it",),
-        note="no run kind of its own: its verdict is the optimisation's. Refused with "
-             "transmission losses, with the rolling strategy and without branches."),
+        evidence=(_T + "test_sclopf_is_refused_where_the_engine_cannot_run_it",
+                  _T + "test_an_option_switched_off_answers_for_switching_it_on"),
+        note="no run kind of its own: its verdict is the optimisation's with sclopf on. "
+             "Refused with transmission losses, with the rolling strategy and without "
+             "branches."),
     Row("campus_electrical", "Campus electrical design (PCC, transformers, compensation)",
         "bundled", False,
         entry="POST /api/campus-electrical/{name}/run (solve-queue job) and /milp",
@@ -192,17 +197,72 @@ def loadflow_verdict() -> dict:
     return _blocked(*refusal)
 
 
+# The run option each optional kind switches on in the solver config. Its
+# refusals in `validate_for_run` fire only with the option on, so its verdict
+# asks the validator with it on (gatekeeper, #497).
+_OPTION_FLAG = {"sclopf": "sclopf", "loadflow": "run_ac_pf_after_lopf"}
+
+
+def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict) -> dict:
+    """The verdict on switching ``kind``'s option on: ``validate_for_run`` with
+    the flag set, in the preflight's lock span, its first error in flow order
+    (the section the flow files it to). With the flag already on it is the
+    optimisation's own (flow) verdict."""
+    from dataclasses import replace
+
+    from routers.simulation import preflight_validate
+    from services import flow_sections as F
+    from services import flow_service
+    from services.validation_service import validate_for_run
+
+    flag = _OPTION_FLAG[kind]
+
+    def under(n, cfg):
+        if getattr(cfg, flag, False):
+            return None
+        errors = [i for i in validate_for_run(n, replace(cfg, **{flag: True}))
+                  if i.severity == "error"]
+
+        def section(i) -> str:
+            by_code = F.section_for_code(i.code)
+            if by_code is not None and by_code != F.BY_COMPONENT:
+                return by_code
+            if not i.component_class:
+                return "readiness"
+            return flow_service.section_for_component(
+                n, cfg, project_dir, i.component_class, i.name or "")["id"]
+
+        ranked = sorted(((F.SECTION_IDS.index(section(i)), k, i) for k, i in enumerate(errors)),
+                        key=lambda t: t[:2])
+        return [] if not ranked else [(F.SECTION_IDS[ranked[0][0]], ranked[0][2])]
+
+    deferred, _issues, res = preflight_validate(under, validate=False)
+    if deferred is not None:
+        return {"ready": False, "deferred": True,
+                "blocker": {"code": "deferred",
+                            "message": deferred.get("deferred_reason") or "validation deferred"}}
+    if res is None:                                       # the option is already on
+        return flow_verdict
+    if not res:
+        return {"ready": True, "deferred": False, "blocker": None}
+    sec, issue = res[0]
+    return {"ready": False, "deferred": False,
+            "blocker": {"code": issue.code, "message": issue.message, "section": sec}}
+
+
 def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: str,
              db=None, org_id=None) -> dict[str, dict]:
     """``{kind: {ready, deferred, blocker}}`` for the open project at
     ``project_dir``. ``blocker`` carries at least ``message``.
 
-    ``optimisation`` (and ``sclopf``, its option) and ``study`` ARE the project
-    flow's verdicts (``flow_service.project_flow``, R1): one implementation, so
-    the blocker is the flow's first blocking item in flow order. ``loadflow``
-    is Stage 2 of the optimisation when ``optimisation`` is among ``kinds``,
-    else the standalone route's refusal. A row that is not runnable reads
-    ``ready: false`` with its classification."""
+    ``optimisation`` and ``study`` ARE the project flow's verdicts
+    (``flow_service.project_flow``, R1): one implementation, so the blocker is
+    the flow's first blocking item in flow order. ``sclopf``, and ``loadflow``
+    when ``optimisation`` is among ``kinds`` (Stage 2, the
+    ``run_ac_pf_after_lopf`` option), answer for switching their option ON:
+    the validator with the option set (the flow's verdict once it is set).
+    ``loadflow`` alone is the standalone route's refusal. A row that is not
+    runnable reads ``ready: false`` with its classification."""
     from services import flow_service
 
     out: dict[str, dict] = {}
@@ -217,6 +277,8 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
             out[kind] = (_blocked("no_study_request",
                                   "The project has no reliability study to run (no EH template).")
                          if v is None else {**v, "deferred": flow["deferred"]})
+            if kind in _OPTION_FLAG and not out[kind]["deferred"]:
+                out[kind] = _option_verdict(project_dir, kind, out[kind])
         elif kind == "loadflow":
             out[kind] = loadflow_verdict()
         else:

@@ -87,7 +87,7 @@ def _assert_golden(client, bound_ctx, project_storage_dir, name):
     """The verdicts are the flow's (master's B1 payload), blocker included."""
     flow = _pf._flow(client, name)
     v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "study", "sclopf")
-    assert v["optimisation"] == _flow_verdict(flow, "optimisation") == v["sclopf"]
+    assert v["optimisation"] == _flow_verdict(flow, "optimisation")
     if flow["verdicts"]["study"] is None:
         assert v["study"]["blocker"]["code"] == "no_study_request"
     else:
@@ -253,7 +253,8 @@ def test_loadflow_in_a_run_that_optimises_is_the_optimisations_verdict(
     with edit() as n:
         n.loads.loc["l", "p_set"] = float("nan")
     v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "loadflow")
-    assert v["loadflow"] == v["optimisation"] and v["loadflow"]["ready"] is False
+    assert v["loadflow"]["ready"] is v["optimisation"]["ready"] is False
+    assert v["loadflow"]["blocker"]["section"] == v["optimisation"]["blocker"]["section"] == "loads"
 
 
 def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
@@ -329,6 +330,34 @@ def test_sclopf_is_refused_where_the_engine_cannot_run_it(client, site, set_cfg,
     assert code in {i["code"] for i in issues if i["severity"] == "error"}
     v = _verdicts(client, bound_ctx, project_storage_dir, name, "sclopf")
     assert v["sclopf"]["ready"] is False
+
+
+def test_an_option_switched_off_answers_for_switching_it_on(client, site, set_cfg, bound_ctx,
+                                                            project_storage_dir):
+    """Gatekeeper (#497): with transmission losses and SCLOPF off, the
+    optimisation is ready but switching SCLOPF on is refused."""
+    name = site(_line_network(), name="sc_off")
+    set_cfg(transmission_losses=True, sclopf_include_all_lines=True)
+    v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "sclopf")
+    assert v["optimisation"]["ready"] is True
+    assert v["sclopf"]["ready"] is False
+    assert v["sclopf"]["blocker"]["code"] == "sclopf_with_transmission_losses"
+    assert v["sclopf"]["blocker"]["section"] == "scenarios"
+
+
+def test_the_bundled_load_flow_answers_for_stage_two_on(client, site, set_cfg, bound_ctx,
+                                                        project_storage_dir):
+    """With the rolling strategy and Stage 2 off, the optimisation is ready but
+    a Run that adds the load flow (Stage 2) is refused."""
+    name = site(_line_network(), name="lf_roll")
+    set_cfg(solve_strategy="rolling", run_ac_pf_after_lopf=False)
+    v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "loadflow")
+    assert v["optimisation"]["ready"] is True
+    assert v["loadflow"]["ready"] is False
+    assert v["loadflow"]["blocker"]["code"] == "rolling_with_ac_pf"
+    set_cfg(solve_strategy="full", run_ac_pf_after_lopf=True)
+    v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "loadflow")
+    assert v["loadflow"] == v["optimisation"]
 
 
 def test_sclopf_on_a_line_network_is_ready(client, site, set_cfg, bound_ctx, project_storage_dir):
