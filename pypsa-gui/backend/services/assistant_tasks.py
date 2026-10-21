@@ -394,11 +394,11 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
             step.pop(key, None)
         task["status"] = "ready" if _next(task) else "completed"
         _pause_at_boundary(task, step)
-        current = _fingerprint() if task.get("brief") else None
-        if outcome == "completed" and current and _effectful(step["tool"]):
-            task["fingerprint"] = current  # the user reconciled this effect as the plan's own
+        # The chain never advances on a reconcile: nothing tells the step's own
+        # effect from other edits made since it went uncertain, so inputs that
+        # differ now read stale and the user reviews a new brief (fail closed).
         _save(path, task)
-        return _view(task, current=current)
+        return _view(task, fresh=True)
 
 
 def _native_evidence(path, task, step):

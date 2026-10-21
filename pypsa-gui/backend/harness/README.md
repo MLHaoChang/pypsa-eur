@@ -838,7 +838,10 @@ brief grants nothing: every write or run step keeps its own card.
   the current inputs differ (an edit by the user or an off-plan call), the
   view says `brief_stale: "inputs_changed_outside_plan"` and the next
   effectful step is refused (`task_brief_stale`); the model drafts a new
-  brief for the user to review.
+  brief for the user to review. A reconcile never advances the chain, so a
+  reconciled effectful step leaves the brief stale (fail closed). An edit
+  that lands during a plan step's own call is taken into the chain with that
+  step; the window is one call long.
 - **Reconciliation (SC-12, all plans).** `resolve_task_step(completed)`
   ignores `result`. The step resolves from its late worker receipt (a timed
   out call whose worker went on to succeed, recorded by `register_worker`),

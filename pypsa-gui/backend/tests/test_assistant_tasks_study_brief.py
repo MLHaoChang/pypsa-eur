@@ -293,3 +293,19 @@ def test_activity_lists_a_long_paused_brief(session, baseline):
     rows, warnings = _tasks(baseline[2], baseline[1], owner)
     assert not warnings
     assert [(r['native_status'], r['status'], r['needs_you']) for r in rows] == [('paused_at_card', 'waiting_for_input', True)]
+
+
+def test_sc11_reconcile_never_adopts_an_off_plan_edit(session):
+    """GK probe: the step's write landed and the user also edited another field."""
+    steps = [{'id': 'cost', 'tool': 'update_component', 'args': edit(25.0)},
+             {'id': 'again', 'tool': 'update_component', 'args': edit(30.0)}]
+    task = chat_tools.start_task(title='Study', request_id='reconcile-chain', steps=steps, brief=brief(steps))
+    ticket = tasks.begin_step(session, 'update_component', edit(25.0))
+    card = edit_card.preview('update_component', edit(25.0))
+    assert tasks.finish_step(ticket, result={'_edit_receipt': edit_card.receipt(card, edit(25.0))})['status'] == 'needs_review'
+    network = PyPSAService.get_network()
+    network.generators.at['G1', 'marginal_cost'] = 25.0
+    network.generators.at['G1', 'p_nom'] += 7
+    view = chat_tools.resolve_task_step(task['task_id'], 'completed')
+    assert view['completed_steps'] == 1 and view['brief_stale'] == 'inputs_changed_outside_plan'
+    refused('task_brief_stale', tasks.begin_step, session, 'update_component', edit(30.0))
