@@ -13,22 +13,26 @@ The gate: no kind enters ``run_request`` and no card sub-option becomes
 selectable before its row says ``runnable_in_run``. Unknown and unsupported
 rows never do.
 
-``verdict(kind, …)`` answers "would this kind start now?" for every runnable
-row. It never waits on the network lock: each verdict is the server's own
-check, reached through the preflight's three gates (``preflight_validate``:
-no solver worker, no blocking study, the lock taken with ``blocking=False``),
-so a busy network answers ``deferred``, never a stall. The verdicts are the
-start code itself, not copies of it:
+``verdicts(project_dir, kinds, …)`` answers "would this kind start now?" for
+every runnable row. It never waits on the network lock: each verdict is the
+server's own start check, reached through the preflight's three gates
+(``preflight_validate``: no solver worker, no blocking study, the lock taken
+with ``blocking=False``), so a busy network answers ``deferred``, never a
+stall. The verdicts are that start code, not copies of it:
 
-* ``optimisation``: ``preflight_validate`` → ``validate_for_run``, the check
-  ``run_simulation`` repeats under the lock at Run start;
-* ``study``: ``check_eh_study_start(lock_blocking=False)``, the refusal
-  ``start_eh_study`` raises, on the body the Guided cards send
-  (``flow_service._study_start_items``);
-* ``loadflow``: ``ac_pf_refusal``, the refusal ``/run_ac_pf`` raises, read in
-  the preflight's lock span. Bundled: in a Run that also optimises it is
-  Stage 2 of that solve (``run_ac_pf_after_lopf``), so its verdict is the
-  optimisation's.
+* ``optimisation`` and ``study``: the project flow's own verdicts (B1, R1):
+  ``validate_for_run`` through the preflight (the check ``run_simulation``
+  repeats under the lock at Run start), and ``check_eh_study_start(
+  lock_blocking=False)``, the refusal ``start_eh_study`` raises;
+* ``loadflow``: ``routers.simulation.ac_pf_refusal``, the refusal
+  ``/run_ac_pf`` raises, read in the preflight's lock span. Bundled: in a Run
+  that also optimises it is Stage 2 of that solve (``run_ac_pf_after_lopf``),
+  so its verdict is the optimisation's.
+
+Classes. **bundled** rows say with ``runnable_in_run`` whether their bundle can
+be part of the one Run (the load flow's dispatch is; the campus study's saved
+file and the island study's own re-sizing solve are not, yet). The grid
+readiness scorecard is not a run kind and has no row (an advisory read, #435).
 """
 from __future__ import annotations
 
@@ -71,7 +75,7 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         freshness="dispatch_status (topology shape); dirty_state.revision",
         evidence=(_T + "test_the_optimisation_verdict_is_the_preflights",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
-                  _T + "test_the_binary_check_is_skipped_on_an_operational_solve",
+                  _T + "test_the_binary_check_runs_after_a_plan_and_not_on_an_operational_solve",
                   "tests/test_process_uc_solve_path.py::"
                   "test_a_failing_binary_check_leaves_the_run_ok_and_the_plan_unchanged",
                   "tests/test_preflight_toctou.py::test_preflight_does_not_block_on_a_held_lock")),
@@ -81,8 +85,9 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         outputs="_state['eh_study'] report; sibling stores; a run-evidence manifest",
         locks_and_state="check_eh_study_start takes the network lock briefly; the worker solves a "
                         "private copy; clears the sibling stores at start; study mesh",
-        implicit_steps="apply_pack and ens_solve are mandatory; ens_solve is a full run_simulation "
-                       "(validate_for_run included) on the copy",
+        implicit_steps="apply_pack and ens_solve are mandatory (validate_stages); ens_solve is a "
+                       "full run_simulation, validate_for_run included, on the copy "
+                       "(eh_study._stage_ens_solve)",
         freshness="study_state.edited_since (network revision at start)",
         evidence=(_T + "test_the_study_verdict_is_the_start_refusal",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
@@ -96,7 +101,8 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
                 "_state lopf_results / ac_pf_results",
         locks_and_state="the network lock for the whole PF; not abortable",
         implicit_steps="none; it needs a dispatch, so it is bundled with the optimisation",
-        freshness="dispatch_status must be 'fresh'; stale once the optimisation reruns",
+        freshness="dispatch_status must be 'fresh' (the topology shape: a parameter edit after "
+                  "the solve still reads fresh)",
         evidence=(_T + "test_loadflow_needs_a_fresh_dispatch",
                   _T + "test_loadflow_in_a_run_that_optimises_is_the_optimisations_verdict",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
@@ -111,11 +117,6 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         evidence=(_T + "test_sclopf_is_refused_where_the_engine_cannot_run_it",),
         note="no run kind of its own: its verdict is the optimisation's. Refused with "
              "transmission losses, with the rolling strategy and without branches."),
-    Row("grid_scorecard", "Grid-readiness scorecard", "unsupported", False,
-        entry="an advisory read (#435), shown in section 9",
-        inputs="the network", outputs="advisory verdicts",
-        locks_and_state="read-only", implicit_steps="none", freshness="read live",
-        evidence=(), note="not a run kind; outside run_ready"),
     Row("campus_electrical", "Campus electrical design (PCC, transformers, compensation)",
         "bundled", False,
         entry="POST /api/campus-electrical/{name}/run (solve-queue job) and /milp",
@@ -153,15 +154,16 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
         inputs="a planning_dynamics project", outputs="an external simulator's results",
         locks_and_state="files only", implicit_steps="none in-app",
         freshness="the read-back",
-        evidence=(), note="no in-app time-domain simulation; the island cuts are screening"),
+        evidence=(_T + "test_the_dynamics_hand_off_belongs_to_another_project_kind",),
+        note="no in-app time-domain simulation; the island cuts are screening"),
     Row("process_detail", "Detailed process (beyond unit commitment)", "unsupported", False,
         entry="none; services/solver/process_uc.py covers eh_process commitment only",
         inputs="-", outputs="-", locks_and_state="-", implicit_steps="-", freshness="-",
-        evidence=(), note="after GTP"),
+        evidence=(_T + "test_process_modelling_is_unit_commitment_only",), note="after GTP"),
     Row("fixed_sizes", "Dispatch on fixed sizes (sizing off)", "unsupported", False,
         entry="none yet: slice F1 (a solver-config option over sweep.freeze_capacities)",
         inputs="-", outputs="-", locks_and_state="-", implicit_steps="-", freshness="-",
-        evidence=(), note="F1"),
+        evidence=(_T + "test_flipping_sizing_off_is_refused_by_preflight",), note="F1"),
 )}
 
 
@@ -170,74 +172,57 @@ def runnable(kind: str) -> bool:
     return row is not None and row.runnable_in_run
 
 
-def _deferred(payload: dict) -> dict:
-    return {"ready": False, "deferred": True,
-            "blocker": {"code": "deferred",
-                        "message": payload.get("deferred_reason") or "validation deferred"}}
-
-
-def _ready() -> dict:
-    return {"ready": True, "deferred": False, "blocker": None}
-
-
 def _blocked(code: str, message: str) -> dict:
     return {"ready": False, "deferred": False, "blocker": {"code": code, "message": message}}
 
 
-def optimisation_verdict() -> dict:
-    from routers.simulation import preflight_validate
-
-    deferred, issues, _ = preflight_validate()
-    if deferred is not None:
-        return _deferred(deferred)
-    error = next((i for i in issues if i.severity == "error"), None)
-    return _ready() if error is None else _blocked(error.code, error.message)
-
-
-def study_verdict(project_dir: pathlib.Path) -> dict:
-    from routers.simulation import preflight_validate
-    from services import flow_service
-    from services.adequacy.eh_study_runner import EhStudyLockBusy
-
-    template = flow_service.read_template(project_dir)
-    if template is None:
-        return _blocked("no_study_request",
-                        "The project has no reliability study to run (no EH template).")
-    deferred, _issues, _ = preflight_validate(validate=False)
-    if deferred is not None:
-        return _deferred(deferred)
-    try:
-        items = flow_service._study_start_items(flow_service._request_for(template))
-    except EhStudyLockBusy:
-        return _deferred({"deferred_reason": flow_service._LOCK_BUSY_REASON})
-    return _ready() if not items else _blocked(items[0]["code"], items[0]["message"])
-
-
-def loadflow_verdict(*, with_optimisation: bool) -> dict:
-    if with_optimisation:
-        return optimisation_verdict()
+def loadflow_verdict() -> dict:
+    """The standalone load flow: `/run_ac_pf`'s own refusal (``ac_pf_refusal``)
+    read inside the preflight's lock span, so a busy network is ``deferred``."""
     from routers.simulation import ac_pf_refusal, preflight_validate
 
     deferred, _issues, refusal = preflight_validate(lambda n, _cfg: ac_pf_refusal(n),
                                                     validate=False)
     if deferred is not None:
-        return _deferred(deferred)
-    return _ready() if refusal is None else _blocked("loadflow_needs_dispatch", refusal)
+        return {"ready": False, "deferred": True,
+                "blocker": {"code": "deferred",
+                            "message": deferred.get("deferred_reason") or "validation deferred"}}
+    if refusal is None:
+        return {"ready": True, "deferred": False, "blocker": None}
+    return _blocked(*refusal)
 
 
-def verdict(kind: str, *, project_dir: pathlib.Path | None = None,
-            with_optimisation: bool = False) -> dict:
-    """``{ready, deferred, blocker}`` for ``kind`` on the open project. A row
-    that is not runnable answers ``ready: false`` with its classification."""
-    if kind in ("optimisation", "sclopf"):
-        return optimisation_verdict()
-    if kind == "study":
-        if project_dir is None:
-            raise ValueError("the study verdict reads the project's template")
-        return study_verdict(project_dir)
-    if kind == "loadflow":
-        return loadflow_verdict(with_optimisation=with_optimisation)
-    row = MATRIX.get(kind)
-    cls = row.classification if row is not None else "unknown"
-    return _blocked(f"kind_{cls}", f"{row.label if row else kind} is not runnable ({cls})"
-                    + (f": {row.note}" if row is not None and row.note else ""))
+def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: str,
+             db=None, org_id=None) -> dict[str, dict]:
+    """``{kind: {ready, deferred, blocker}}`` for the open project at
+    ``project_dir``. ``blocker`` carries at least ``message``.
+
+    ``optimisation`` (and ``sclopf``, its option) and ``study`` ARE the project
+    flow's verdicts (``flow_service.project_flow``, R1): one implementation, so
+    the blocker is the flow's first blocking item in flow order. ``loadflow``
+    is Stage 2 of the optimisation when ``optimisation`` is among ``kinds``,
+    else the standalone route's refusal. A row that is not runnable reads
+    ``ready: false`` with its classification."""
+    from services import flow_service
+
+    out: dict[str, dict] = {}
+    flow: dict | None = None
+    for kind in kinds:
+        if kind in ("optimisation", "sclopf", "study") or (
+                kind == "loadflow" and "optimisation" in kinds):
+            if flow is None:
+                flow = flow_service.project_flow(project_dir, cache_key=cache_key,
+                                                 db=db, org_id=org_id)
+            v = flow["verdicts"]["study" if kind == "study" else "optimisation"]
+            out[kind] = (_blocked("no_study_request",
+                                  "The project has no reliability study to run (no EH template).")
+                         if v is None else {**v, "deferred": flow["deferred"]})
+        elif kind == "loadflow":
+            out[kind] = loadflow_verdict()
+        else:
+            row = MATRIX.get(kind)
+            cls = row.classification if row is not None else "unknown"
+            out[kind] = _blocked(f"kind_{cls}",
+                                 f"{row.label if row else kind} is not runnable ({cls})"
+                                 + (f": {row.note}" if row is not None and row.note else ""))
+    return out

@@ -1412,20 +1412,23 @@ def abort():
     raise HTTPException(400, "No simulation running")
 
 
-def ac_pf_refusal(n) -> str | None:
-    """Why `/run_ac_pf` would refuse ``n`` (its 400), or None. Only a solved
-    network with ``fresh`` dispatch has an LP dispatch to fix. One copy for the
-    route and for the load-flow verdict (`services.run_separability`)."""
+def ac_pf_refusal(n) -> tuple[str, str] | None:
+    """``(error_kind, message)`` for why `/run_ac_pf` would refuse ``n`` (its
+    400), or None. Only a solved network with ``fresh`` dispatch has an LP
+    dispatch to fix. One copy for the route and for the load-flow verdict
+    (`services.run_separability`)."""
     from services.dispatch_status import dispatch_status
 
     if not getattr(n, "is_solved", False):
-        return "No LOPF solution to fix dispatch from. Run /run first."
+        return "ac_pf_not_solved", "No LOPF solution to fix dispatch from. Run /run first."
     # `dispatch_status` returns 'fresh'/'stale'/'none'; only 'fresh' is acceptable.
     status = dispatch_status(n)
     if status == "none":
-        return "n.generators_t.p is empty — re-run LOPF to populate dispatch."
+        return ("ac_pf_no_dispatch",
+                "n.generators_t.p is empty — re-run LOPF to populate dispatch.")
     if status == "stale":
-        return ("Dispatch tables exist but their column-set doesn't match the "
+        return ("ac_pf_stale_dispatch",
+                "Dispatch tables exist but their column-set doesn't match the "
                 "current topology (rows added/removed since the last solve). "
                 "Re-run LOPF to regenerate consistent dispatch before Stage 2.")
     return None
@@ -1523,7 +1526,7 @@ def run_ac_pf():
             # stale state (worker died) → fall through and claim
         _refusal = ac_pf_refusal(n)
         if _refusal is not None:
-            raise HTTPException(400, _refusal)
+            raise HTTPException(400, _refusal[1])
         # Atomic claim — lifecycle reset + thread handle in one apply, so no
         # window where status="running" but thread is unset.
         _state_update(
