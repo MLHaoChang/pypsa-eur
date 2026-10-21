@@ -263,6 +263,13 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Flow section (PR-2).** Each component row carries a FlowTarget
+  `{section, panel, component, entity, field}` from
+  `flow_service.section_for_component` (the flow's own class rule), and the
+  card names its `section`. The section's flow state before the write rides
+  the card outside the digest (`section_state`); the receipt adds `section`
+  with the state after the write and whether it `changed`. The browser's
+  "Show in Properties" selects the component in place; the chat stays open.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

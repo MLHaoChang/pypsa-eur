@@ -4,6 +4,8 @@
  * contract is `harness/edit_card.py`; any edit kind that registers an adapter
  * there arrives in this one shape, so this component is the only renderer.
  */
+import type { FlowTarget } from '../api/flow'
+import { useUIStore, type SlidePanel } from '../store/uiStore'
 
 type Scalar = string | number | boolean | null
 
@@ -20,6 +22,8 @@ export interface EditCardRow {
   note?: string
   display?: { old: number | null; new: number; unit: string }
   readback?: Scalar
+  /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
+  target?: FlowTarget
 }
 
 export interface EditCard {
@@ -30,6 +34,8 @@ export interface EditCard {
   says: string
   complete: boolean
   digest: string
+  /** The flow section the edit lands in ("Connection & grid"). */
+  section?: { id: string; label: string }
 }
 
 export interface EditReceipt {
@@ -40,6 +46,8 @@ export interface EditReceipt {
   says: string
   results_stale: boolean
   undo: { tool: string; available: boolean }
+  /** The section's flow state after the write; `changed` against the card. */
+  section?: { id: string; label: string; state: string; changed: boolean }
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -72,17 +80,32 @@ function show(value: Scalar | undefined, known = true): string {
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
-/** "Line > L2", or "Line > L1, L2" for a bulk edit: the plain header of PR-1 (the
- * flow-section header arrives with FlowTarget, after B1's flow-ledger-targets). */
+/** "Connection & grid > L2" (the edit's flow section), or "Line > L2" when the
+ * project has no flow; a bulk edit lists its names: "Connection & grid > L1, L2". */
 export function editCardHeader(card: EditCard): string {
-  const byClass = new Map<string, string[]>()
+  const byKey = new Map<string, string[]>()
   for (const r of card.rows) {
     if (r.role !== 'typed' || !r.component_class) continue
-    const names = byClass.get(r.component_class) ?? []
+    const key = card.section && r.target?.section === card.section.id ? card.section.label : r.component_class
+    const names = byKey.get(key) ?? []
     if (!names.includes(r.name)) names.push(r.name)
-    byClass.set(r.component_class, names)
+    byKey.set(key, names)
   }
-  return [...byClass].map(([klass, names]) => `${klass} > ${names.join(', ')}`).join('; ')
+  return [...byKey].map(([key, names]) => `${key} > ${names.join(', ')}`).join('; ')
+}
+
+/** Show the field where it lives, without leaving the chat: the component's own
+ * Properties (`panel` null) or the section's panel. */
+function showInProperties(target: FlowTarget) {
+  const ui = useUIStore.getState()
+  if (target.panel) {
+    ui.setSlidePanel(target.panel as SlidePanel)
+    return
+  }
+  if (!target.component || !target.entity) return
+  ui.setSelectedComponent({ type: target.component, name: target.entity })
+  ui.openRightPanel()
+  ui.setHighlightedComponent({ type: target.component, name: target.entity })
 }
 
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
@@ -114,6 +137,12 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                 <td className="p-1 border-b border-border break-words">{asset(r)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : r.field}
+                  {r.role === 'typed' && r.target && (r.target.panel || r.target.component) && (
+                    <button type="button" className="block text-[10px] text-accent underline"
+                      data-testid="chat-edit-show" onClick={() => showInProperties(r.target!)}>
+                      {r.target.panel ? 'Show in its panel' : 'Show in Properties'}
+                    </button>
+                  )}
                   {follows && <span className="block text-[10px]">
                     {r.role === 'derived' ? 'Follows from the change, read-only'
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
@@ -149,6 +178,9 @@ export function EditReceiptLine({ receipt, disabled, onRequest }: {
         {verified ? `${receipt.says}. Read back from the project.`
           : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
+      {receipt.section?.changed && <div data-testid="chat-edit-section">
+        {receipt.section.label}: {receipt.section.state}.
+      </div>}
       {receipt.results_stale && <div className="text-muted" data-testid="chat-edit-stale">
         Results are now stale: they were computed before this change.
       </div>}

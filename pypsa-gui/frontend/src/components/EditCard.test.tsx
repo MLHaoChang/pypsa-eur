@@ -91,3 +91,30 @@ it('a component the change creates reads as created, not as true/false', () => {
   expect(row.textContent).toContain('present')
   expect(row.textContent).not.toContain('true')
 })
+
+it('names the flow section and shows the field in Properties without leaving the chat (PR-2)', async () => {
+  const pending = useChatStore.getState().pending!
+  const target = { section: 'connection', panel: null, component: 'Line', entity: 'L2', field: 's_nom' }
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card,
+    section: { id: 'connection', label: 'Connection & grid' }, rows: [{ ...typed, target }] } } })
+  useUIStore.setState({ selectedComponent: null, activeSlidePanel: null, assistantDockOpen: true })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Connection & grid > L2')
+  await userEvent.click(screen.getByTestId('chat-edit-show'))
+  expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Line', name: 'L2' })
+  expect(useUIStore.getState().activeSlidePanel).toBeNull()
+  expect(useUIStore.getState().assistantDockOpen).toBe(true)
+})
+
+it('the receipt says the section state only when it changed (PR-2)', () => {
+  const base = { version: 1, digest: card.digest, outcome: 'verified', says: card.says, results_stale: false,
+    rows: [{ ...typed, readback: 400 }], undo: { tool: 'undo_last', available: false } }
+  const { rerender } = render(<AssistantResultCard result={{ _edit_receipt: { ...base,
+    section: { id: 'connection', label: 'Connection & grid', state: 'complete', changed: true } } }}
+    disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('chat-edit-section').textContent).toBe('Connection & grid: complete.')
+  rerender(<AssistantResultCard result={{ _edit_receipt: { ...base,
+    section: { id: 'connection', label: 'Connection & grid', state: 'complete', changed: false } } }}
+    disabled={false} onRequest={vi.fn()} />)
+  expect(screen.queryByTestId('chat-edit-section')).toBeNull()
+})
