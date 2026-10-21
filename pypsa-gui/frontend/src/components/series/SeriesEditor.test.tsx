@@ -113,6 +113,23 @@ describe('SeriesEditor', () => {
     }))
   })
 
+  it('sends an air source\'s ambient only when all three are stated', async () => {
+    renderEditor('cop')
+    expect(screen.getByTestId('air-ambient-note').textContent).toContain("project's site temperature")
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    await waitFor(() => expect(api.generateSeries).toHaveBeenLastCalledWith('Site A', {
+      kind: 'cop', components: ['hp1'], params: { source: 'air', sink_c: 45 },
+    }))
+    await userEvent.type(screen.getByLabelText('Mean outdoor °C'), '12')
+    await userEvent.type(screen.getByLabelText('Seasonal swing K'), '8')
+    await userEvent.type(screen.getByLabelText('Daily swing K'), '4')
+    await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
+    await waitFor(() => expect(api.generateSeries).toHaveBeenLastCalledWith('Site A', {
+      kind: 'cop', components: ['hp1'], params: { source: 'air', sink_c: 45,
+        ambient_annual_mean_c: 12, ambient_seasonal_amplitude_k: 8, ambient_diurnal_amplitude_k: 4 },
+    }))
+  })
+
   it('shows a refusal inline', async () => {
     api.generateSeries.mockRejectedValue({ response: { status: 422, data: { detail: {
       error_kind: 'cop_bus_not_electric', message: "bus0 'heat' carries heat, not electricity" } } } })

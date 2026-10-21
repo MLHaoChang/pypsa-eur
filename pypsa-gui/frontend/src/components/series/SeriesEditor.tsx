@@ -82,6 +82,11 @@ export default function SeriesEditor({ project, component, kind, componentType =
   const [ground, setGround] = useState('10')
   const [eta, setEta] = useState('')
   const [copMax, setCopMax] = useState('')
+  // An air source's ambient: empty uses the project's data-centre ambient
+  // (the backend refuses when the project has none).
+  const [ambMean, setAmbMean] = useState('')
+  const [ambSeason, setAmbSeason] = useState('')
+  const [ambDay, setAmbDay] = useState('')
 
   function params(): Record<string, unknown> {
     if (kind === 'tou') {
@@ -101,6 +106,11 @@ export default function SeriesEditor({ project, component, kind, componentType =
     }
     const p: Record<string, unknown> = { source, sink_c: Number(sink) }
     if (source === 'ground') p.source_c = Number(ground)
+    if (source === 'air' && [ambMean, ambSeason, ambDay].every(v => v.trim() !== '')) {
+      p.ambient_annual_mean_c = Number(ambMean)
+      p.ambient_seasonal_amplitude_k = Number(ambSeason)
+      p.ambient_diurnal_amplitude_k = Number(ambDay)
+    }
     if (opt(eta) != null) p.eta = opt(eta)
     if (opt(copMax) != null) p.cop_max = opt(copMax)
     return p
@@ -175,6 +185,22 @@ export default function SeriesEditor({ project, component, kind, componentType =
             <Row label="Ground at °C">
               <input aria-label="Ground at °C" className={`${INPUT} w-16`} value={ground} onChange={e => setGround(e.target.value)} />
             </Row>
+          )}
+          {source === 'air' && (
+            <>
+              <p className="text-[11px] text-muted" data-testid="air-ambient-note">
+                Outdoor air follows the project's site temperature. Leave these empty to use it, or state all three.
+              </p>
+              <Row label="Mean outdoor °C">
+                <input aria-label="Mean outdoor °C" className={`${INPUT} w-16`} value={ambMean} onChange={e => setAmbMean(e.target.value)} />
+              </Row>
+              <Row label="Seasonal swing K">
+                <input aria-label="Seasonal swing K" className={`${INPUT} w-16`} value={ambSeason} onChange={e => setAmbSeason(e.target.value)} />
+              </Row>
+              <Row label="Daily swing K">
+                <input aria-label="Daily swing K" className={`${INPUT} w-16`} value={ambDay} onChange={e => setAmbDay(e.target.value)} />
+              </Row>
+            </>
           )}
         </>
       )}
