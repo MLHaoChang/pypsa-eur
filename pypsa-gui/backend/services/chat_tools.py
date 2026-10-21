@@ -3563,7 +3563,7 @@ def generate_series_profile(project_id: str, kind: str, components: list,
     from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
     body = SeriesGenerateRequest(kind=kind, components=components, params=params,
                                  year=year)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # ── Project management (21) ─────────────────────────────────────────────────

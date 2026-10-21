@@ -131,8 +131,10 @@ def _local(idx: pd.DatetimeIndex, timezone: str | None) -> pd.DatetimeIndex:
         return idx
     try:
         return idx.tz_localize("UTC").tz_convert(timezone).tz_localize(None)
-    except Exception as exc:  # noqa: BLE001 — pytz/zoneinfo raise many types
-        raise InvalidSeriesParamsError(f"timezone {timezone!r}: {exc}") from None
+    except Exception:  # noqa: BLE001 — pytz/zoneinfo raise many types,
+        # and zoneinfo's text can carry the server's tzdata path
+        raise InvalidSeriesParamsError(
+            f"timezone {timezone!r} is not an IANA zone") from None
 
 
 def _tou(local: pd.DatetimeIndex, p: Mapping[str, Any]) -> tuple[np.ndarray, dict]:

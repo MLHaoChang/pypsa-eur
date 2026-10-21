@@ -464,3 +464,30 @@ def test_a_price_on_the_poc_link_is_refused_at_generation(client, heat_project,
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == "poc_tariff"
 
+
+def test_series_refusals_say_their_sentence_and_nothing_foreign(
+    client, heat_project, monkeypatch, bound_ctx,
+):
+    # The sanitiser's rule (#508) on ticket 03's series route, zone and chat tool.
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.profile_gen import series
+
+    resp = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "ground", "source_c": 5.0, "sink_c": 35.0,
+                           "timezone": "Europe"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["message"] == "timezone 'Europe' is not an IANA zone"
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(series, "generate_frame", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["generate_series_profile"](
+            project_id=heat_project, kind="inflow", components=["dam"],
+            params={"annual_mwh": 1000.0, "shape": "flat"})
+    assert err.value.detail == "unexpected error (ValueError); see the server log"

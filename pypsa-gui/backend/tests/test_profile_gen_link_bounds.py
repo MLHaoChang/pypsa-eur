@@ -156,3 +156,27 @@ def test_regenerating_a_two_way_shutdown_does_not_compound():
     lo = n.links_t.p_min_pu["electrolyser"]
     hi = n.links_t.p_max_pu["electrolyser"]
     assert (lo.to_numpy() == -hi.to_numpy()).all()
+
+
+def test_eh_ammonia_staged_2027_haber_bosch_floor_is_a_min_stable_level(install_network):
+    # g2p-05 hand-off: the committable Haber-Bosch loop at p_min_pu 0.4 makes
+    # 64 t/d while on, above the 2027 NH3 delivery of 50 t/d; the tank and the
+    # stops absorb it, so its floor is a min stable level, never a hard
+    # must-run that exceeds the sink.
+    import pathlib
+    import sys
+
+    tpl = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
+    sys.path.insert(0, str(tpl))
+    import eh_templates as T  # noqa: E402
+
+    install_network(T.BUILDERS["eh_ammonia_staged"]())
+    state = _ctx().solver_state.setdefault("solver_config", SimpleNamespace())
+    state.commercial = {"poc_link": "grid_import", "export_link": None}
+    res = generate_profile(points=["x"], technology="must_run", params={"share": 0.4},
+                           year=2027, now=NOW, family="availability")
+    out = _apply(res, link="haber_bosch")
+    assert out["attribute"] == "p_min_pu"
+    assert any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("links", "p_min_pu", "haber_bosch")]["kind"] == "min_stable_level"
