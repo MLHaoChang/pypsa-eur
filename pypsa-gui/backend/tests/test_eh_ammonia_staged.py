@@ -494,3 +494,12 @@ def test_a_shortfall_is_lost_production_at_its_value_never_o_and_m_or_a_purchase
         assert not [ln for c in case.counterfactual for ln in c.lines if "__lost_nh3" in ln.key]
         assert _line(case, BUY, y) == pytest.approx(-_cost_per_year(n, "__buy_nh3", y), rel=1e-9)
         assert not [ln for ln in t.lines if "__lost_nh3" in ln.key and ln.stream in ("vom", "fuel", "capex")]
+
+
+@pytest.mark.live_solve
+def test_operating_pin_ammonia():
+    """The ammonia case's operating cash is unchanged by the two-leg helper (IPP ticket 05)."""
+    from tests.test_operating_pin import check
+
+    _n, case = _case("base", site_today=False)
+    check("ammonia", case)

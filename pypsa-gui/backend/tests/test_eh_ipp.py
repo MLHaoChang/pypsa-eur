@@ -553,3 +553,13 @@ def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_projec
     _create(client)
     got = edit(client)
     assert got == pytest.approx(want) if isinstance(want, float) else got == want, label
+
+
+@pytest.mark.live_solve
+def test_operating_pin_ipp(solved):
+    """The IPP case's operating cash is unchanged by the two-leg helper (ticket 05, GK)."""
+    from tests.test_operating_pin import check
+
+    n, cfg, _da = solved
+    case, _res = _case(n, cfg)
+    check("ipp", case)

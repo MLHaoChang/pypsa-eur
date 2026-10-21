@@ -1,0 +1,87 @@
+{
+ "ammonia": {
+  "case_hash": "bcdc411a1ec99895",
+  "lines": {
+   "asset:fom:Generator:solar_new_2030": "526dc1164fbd58e690459f551461d5fe6cf406cf68f6bf1af2218aad5b80dc56",
+   "asset:fom:Generator:solar_new_2035": "b94ceb222ea4454638cf481c51fad5a193337942812d5078da6b509bdc53e927",
+   "asset:fom:Generator:wind_new_2030": "1b8b07e334dc119944cc2e6a82099ab8a90b71f8cb00428ed192dc56903dc940",
+   "asset:fom:Generator:wind_new_2035": "33123b0614e1823f77735c4dd75d4648736a73592e19ca7d5cc552ec8cd001f4",
+   "asset:fom:Link:electrolyser_new_2027": "1408e12d9d5ef9fc1b1ac600b6e03ff29f1085be95121ed3a9ba0a2c00ceaca7",
+   "asset:fom:Link:electrolyser_new_2030": "a49939853e4918b91b22a0a4d626cddd7e7b6294d3154be300667b0f5935fbee",
+   "asset:fom:Link:electrolyser_new_2035": "3cc75f853481a861d17d0e0812f10cfc42907d0907bfdc76110372c03f483d3f",
+   "asset:fom:Store:h2_storage": "7d00098e12edb28bec51e9e53e244119e43f80f2c4fe6f83abf511cf8b78877c",
+   "asset:fom:Store:nh3_tank": "a903c892ac076bdac07e0f927a9124069d9f2ef833ae5f31f1ae0c49fec2b8f7",
+   "asset:opex:Generator:__buy_nh3": "93359699afbfba4b5e6a943e6ae262fcc95e5c1969f6d6e7fd590c40bfaed2d6",
+   "asset:opex:Generator:grid_supply": "6a7c5beb7e791160fad9ccfdbc92645c9260b39d62114d0ac269fb51ed894062",
+   "bill:network_energy": "ad57bd649033a7cb1c0d0309cbf008e150808523652d465780a5d8af41efdbb1",
+   "bill_degradation:solar_new_2030": "bc26a56587f035f602f27fb6510f8b8e56268273af1d8aa6fd00383e0bbe6c3f",
+   "bill_degradation:solar_new_2035": "a2857acd4fb3b3957e62e788e1b1fe8d7a5f235b7853c23c81bc744619442ff0",
+   "bill_degradation:solar_park": "e2f940c80f7004520aaf19b143acd230e041dcf7bf8baa53fa569de12669847c",
+   "bill_degradation:wind_farm": "1aaa0a4136eff8c23d06e1acc1b758893d2e9bd1a0a48b3b52cefdae256bd931",
+   "bill_degradation:wind_new_2030": "5be04e5d8eac81115355f72d4e563baed055bcbc556c9f6315d2b85fe28d26c0",
+   "bill_degradation:wind_new_2035": "729712423f3735caa9107f1b1fde528edb37f216e880e68651ef731c0fd8e6ba",
+   "bill_degradation_base:solar_new_2030": "b7b610a394f1fee32f46750e168e9086aa98e1bb492994bafc575f585b4cbf2c",
+   "bill_degradation_base:solar_new_2035": "1508cd9e5b33bcace035f94dc45cc182258c4b4b27d166a9412a13d3a33e80ee",
+   "bill_degradation_base:solar_park": "86fe1e50019e0757082bf5b6ac2026025597eb47aa07b97dada69fbd489605b4",
+   "bill_degradation_base:wind_farm": "ee2de6c7222b15d80a304a98e89f9fc0db4ce4e6e0d06e4b0f93b6b4a727d39d",
+   "bill_degradation_base:wind_new_2030": "14edecf038faaf192b4a4c58386522894afbb7409b7194d81ef5d8ac44b8324a",
+   "bill_degradation_base:wind_new_2035": "4bcf1e791ec6c57e9c3b180e4308d835af5cfa03256c0c85addb82f418370c70"
+  }
+ },
+ "cfd": {
+  "case_hash": "ca89d5f8501a8893",
+  "lines": {
+   "contract:c:cfd_difference": "abb3a2b8dc6ea2c4804f5a9a517ab2b56f76cc3658cfd682ed9c8cfdde0743da",
+   "export_price:export_price": "028d2637291e5dabe099cc00b621bb76c001f7a20b712cc544e4c3a05dcb1597"
+  }
+ },
+ "cfd_escalating": {
+  "case_hash": "ea7852ffd0d31b99",
+  "lines": {
+   "contract:c:cfd_difference": "6ad88fe62c32eb3d6d762c9ce604500db80da545e329f570ae704610b3fb6834",
+   "export_price:export_price": "210c3346ac5f3914b92fe8436802d7ba76d8ef1f0edd71c6094e10122d051f5c"
+  }
+ },
+ "financial_ppa": {
+  "case_hash": "b042515d8bbe59b4",
+  "lines": {
+   "contract:c1:ppa_energy": "b4eabbc24c4598f9258fab4efed529203e40d3019f62447c6af2f41a6276da94",
+   "export_price:export_price": "028d2637291e5dabe099cc00b621bb76c001f7a20b712cc544e4c3a05dcb1597"
+  }
+ },
+ "financial_ppa_escalating": {
+  "case_hash": "2dfe26872d32b0fb",
+  "lines": {
+   "contract:c1:ppa_energy": "faab7496e2ba5b2ada6e06b2c1096077662df89897506f74b6f037edffe60019",
+   "export_price:export_price": "210c3346ac5f3914b92fe8436802d7ba76d8ef1f0edd71c6094e10122d051f5c"
+  }
+ },
+ "ipp": {
+  "case_hash": "c90f85f1835ac0a9",
+  "lines": {
+   "asset:fom:Generator:pv_plant": "64702b1ef92c48946330fce6c71aa0f82841c9b91a038fd5da9cd5bee21e1f44",
+   "asset:fom:Generator:wind_farm": "a0c5d561a556743c2aca8e66b352d9dee020b9f705b4a39e8fa070ab509171fb",
+   "asset:fom:StorageUnit:bess": "ba3334fb9fdf3b9320b305d4f6cc0fd389a2d1446f60ccb9a859a6cd10f94402",
+   "asset:opex:StorageUnit:bess": "1c75c7c032e6b11ccb02311b26fe659a13a9ce9056420349297191b28b2bb4ea",
+   "bill:injection:pv_plant": "a5645e7a3fa0866cde8842c4dab96567507c3d1a3c028b816bc63f6966367b70",
+   "bill:injection:wind_farm": "a5645e7a3fa0866cde8842c4dab96567507c3d1a3c028b816bc63f6966367b70",
+   "bill:network_charges": "7a55e7fca4f778da62588a47f8faf89685da08a5d0da5f70412e89aae102589a",
+   "bill_degradation:pv_plant": "e9b2809fd4253d75723975e302186e1154604caf68297032afe68f07f2d5337d",
+   "bill_degradation:wind_farm": "268b9e9d203a4f41276c626f5b1723787158de8c6dc23dfc15f483e1420beebc",
+   "bill_degradation_base:pv_plant": "6cf6f66ded094b0cf1244a57bd5202d476a24dd1d1ef5f188f90cd8387aed56f",
+   "bill_degradation_base:wind_farm": "b08d60e60af033c5c59c6b092fead2f05a0aaeccfac62994e8b81aff43eba33d",
+   "contract:ppa_pv:ppa_energy": "272c90b803e17351982054c9a9dcf37ba6109cb133d54f2e918b78efa86de87c",
+   "contract:ppa_wind:ppa_energy": "a2b8407b8b26fda68da56a606329d29c3b80b2a087fc540c91768eed1ffc09c7",
+   "export_price:export_price:pv_plant": "5facddc023936e6016ac3dee99d86f66c39e90f364b5f6ca67161ea66916a1ed",
+   "export_price:export_price:wind_farm": "a2ac500a4f7f1803ce6b3192a0a49b4d45be40361e0e6d8aab9d50cbfec2195b",
+   "import_price:import_price": "d2cac2d927c68501c8b08d9bac6a8a07af14ab6825102b4c06c47ed54d45af20"
+  }
+ },
+ "physical_ppa": {
+  "case_hash": "3665f7c73a965e25",
+  "lines": {
+   "contract:c1:ppa_energy": "1a3ab1f190e3f43e5561c90a56212564191de23fa8021b5f659b6eae327369d7",
+   "export_price:export_price": "81b45610b9bea2db849b0873c51a51c54150dfc0437522551504c6283ec409f7"
+  }
+ }
+}
