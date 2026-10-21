@@ -233,6 +233,13 @@ signature changes (`_counterfactual` is private). With a `baseline` (site today,
 baseline buys the non-electric load it sheds over the actual solve at its reference price and prices the CO2 the same
 way; such a load without a reference purchase leaves the counterfactual not established (`owner_conversion_load`).
 `_baseline_counterfactual` (private) gains `actual=` for the actual side's grid CO2 line.
+**Changes (2026-10-21, GS-2 regional cost packs):** `defaults_pack.loader.load_defaults_pack` gains the keyword-only
+`region=None`; omitting it keeps the EU behaviour byte for byte (`available_versions()` never lists a `+region`
+directory, so the latest stays the EU version). `defaults_pack.pricing.price_from_pack` gains the keyword
+`region=None`; a regional call returns `currency` and `annualised_cost_per_mw_yr` instead of
+`annualised_cost_eur_per_mw_yr`, and raises `MissingRegionalRow` for a money row the region lacks (no EU fallback
+across currencies). `asset_schema.provenance.record` gains the optional `currency` and `fallback` keywords, written only
+when given.
 
 ## 7. Coordination protocol
 
