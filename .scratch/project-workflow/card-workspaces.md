@@ -50,7 +50,7 @@ Sources: `frontend/src/pages/Results.tsx` (`TABS`, 17 ids), `pages/results/group
 | `prices` (Prices) | marginal price, duration curve, drivers | Expert | optimisation | bus-price/1 | Capacity expansion › Costs & prices |
 | `economics` (Asset economics, #543's rename) | per-asset revenue, cost, profit, LCOE/LCOS at model prices; LCOH | Expert | optimisation | withheld (S8 semantics) | Capacity expansion › Costs & prices (§3.1, decision D1) |
 | `loadflow` (Load Flow) | AC PF gate, line/transformer loading, voltages, reactive flows, losses, line duals, branch loading from evidence | Expert | optimisation + AC PF (`run_ac_pf_after_lopf`) | branch-loading/1, network-loading/1; v2 displayed-data ACK | AC power flow & grid › Load flow |
-| `lostload` (Lost load) | VoLL slack: unserved MWh and cost, per carrier, per bus | Expert | optimisation (VoLL capture) | lost-load/1 | Reliability › Lost load (§3.4, rule L) |
+| `lostload` (Lost load) | VoLL slack: unserved MWh and cost, per carrier, per bus | Expert | optimisation (VoLL capture) | lost-load/1 | Capacity expansion › Operation › Lost load (an operation result; Reliability › Adequacy links to it) |
 | `adequacy` (Adequacy) | COPT, reserve margin, frontier, Monte Carlo, loops, EH reference design (certification, DTC, levers) | both | EH study, COPT, MC, frontier, loops | copt-screening/1 (#483, open); MC withheld | Reliability › Adequacy and › Outage screening |
 | `fmea` (FMEA) | failure modes by EUR/a, expert rows, mitigability, sweep | both | FMEA sweep | withheld | Reliability › Stress & FMEA |
 | `investment` (Investment case) | bill, value flows, investment case (NPV, IRR, cash flows, counterfactual), revenue by stream and capture (#515); still hosts input editors until #533 | Expert | investment case; optimisation + tariff for the bill | investment-case/1 (#480), investment-lcoe/1 (#482), open | Commercial & finance › Bill, › Contracts & revenue, › Investment case, › Parties |
@@ -63,7 +63,7 @@ Sources: `frontend/src/pages/Results.tsx` (`TABS`, 17 ids), `pages/results/group
 | Campus electrical › Results (`CampusElectricalPanel.tsx` ~535; "Grid study results" after #545) | PCC compliance, transformers, reactive compensation, short circuit, critical hours | campus study | AC power flow & grid › Grid code & connection, › Electrical design |
 | Campus › Investment (`CampusInvestmentSection.tsx`) | campus investment, cost per period, joint optimisation (MILP) | campus MILP job | AC power flow & grid › Electrical design |
 | Campus › Island (`CampusIslandSection.tsx`, `CampusIslandCutsSection.tsx`, `CampusIslandGfmSection.tsx`) | island report, frequency cuts, grid-forming recommendation | island study, cuts job | Control › Island & ride-through, › Grid-forming |
-| Grid-readiness scorecard (`GridReadinessScorecard.tsx`, in Issues and the Guided Site card) | verdict rows, with DC 03's after-battery values | advisory read, no run | **Home stays 9** (it is a readiness read, R1–R4); 10 › AC power flow & grid › Grid code & connection shows a read-only copy as the record of the run |
+| Grid-readiness scorecard (`GridReadinessScorecard.tsx`, in Issues and the Guided Site card) | verdict rows, with DC 03's after-battery values | advisory read, no run | **One home: 9** (a readiness read, R1–R4). 10 › AC power flow & grid › Grid code & connection does not copy it; it links "Grid-code verdicts: see Readiness › Grid readiness ›" (UX review) |
 | Planning → dynamics (`GridspinePanel.tsx`) | connection capacity, connection-point assessment | gridspine planning study | AC power flow & grid › Grid code & connection |
 | Planning → dynamics | ranked snapshots, assumptions ledger, per-hour bundles, PowerFactory read-back | gridspine planning study | Hand-off › Specialist packet |
 | Reports (`ReportsPanel.tsx`, `ReportViewer.tsx`) | generated reports, versions, evidence hash | report job | Hand-off › Reports |
@@ -80,6 +80,7 @@ Duplicates (each gets one home in §3; the other places link):
 - **Investment case** read by Results › Investment and the Guided Investment tile; **bill and tariff preview** in Results › Investment and Economics (section 7).
 - **Asset costs** from three sources: Capacity Expansion (`/simulation/asset_costs`), Asset economics (`/results/asset_economics`), section 7's table (`/network/asset_costs`). Results keep one (Build); section 7's is an input view.
 - **Adequacy figures** read by Summary, Lost load, the Guided Results card, the Reliability tile and the EH panel.
+- **Reports and Export** after #556: the sidebar "Export…" chooser and section 10's Reports row are the one entry each today; Hand-off's tabs must *be* them, not copies (§3.6).
 - **Prices** fetched by both Prices and Load flow.
 - **The scorecard** mounted in Issues and the Guided Site card (one component, two mounts; W3a already plans 9 as its home).
 - **Reports** opened from three buttons (audit #16).
@@ -93,7 +94,7 @@ Orphans:
 
 Inputs still hosted by results (design §2.2 says none):
 - Results › Investment: participants, tariff, library, contracts, finance inputs, site connection. **#533 (W3b-1) moves them.**
-- Results › FMEA: stress-scenario editor (#535 moves it to 8); expert rows and mitigability stay as the worksheet's own annotations (they annotate a result, they are not model inputs; UX reviewer to confirm).
+- Results › FMEA: stress-scenario editor (#535 moves it to 8). Expert rows and mitigability stay on the worksheet: they annotate a result, they are not model inputs (UX ruling O4b). They are stored per project, and no run ever reads them.
 - Results › Adequacy: the EH pack settings, Loop and Margin-loop targets, MC draws. Audit #1's **W3b-R** moves the goal to 8; each panel keeps only its Run.
 - Solver settings › "Run AC power flow on current solution" (audit #4): becomes an action on AC power flow & grid › Load flow through the gate.
 
@@ -110,21 +111,22 @@ A card workspace is the card's path through the flow, in flow order:
 3. **Results**: 10 › *card*.
 4. **Next**: the visible next step (UX-flow rule 3): from the last input block to Run, from results to Hand-off or the next card in scope.
 
-It is entered from three places, which all land on the same thing:
-- **Section 8 › Scope** (W4a's `ScopeCards`): each card row gains "Open workspace ›".
-- **Results › *card*** header: "Inputs for this card ›" opens the workspace's input list.
-- **The card chip** on any section row (W3a): filters the section list to the card.
+It is entered from two places (UX review), which land on the same thing:
+- **The card chip**, wherever it appears: on a section row (W3a), and as the card name on section 8's scope cards (W4a's `ScopeCards`), which becomes the chip rather than a separate "Open workspace" link. It filters the rail or sidebar to the card.
+- **"Inputs for this card ›"** in the header of Results › *card*.
 
-It is shown, not built: the Guided rail and the Expert sidebar already list the ten sections with chips; "workspace" = the rail/sidebar **filtered to one card** plus a header strip:
+It is shown, not built (UX ruling O5): the Guided rail and the Expert sidebar already list the ten sections with chips. The workspace is the rail or sidebar **filtered to one card**, plus a header strip. The strip uses the rail's own words (`FLOW_STATE_WORDS`: "complete", "to check", "to do") and its `FlowStateDot` marks. The sketch below writes the dots as words:
 
 ```
-[ AC power flow & grid ]  Inputs 3 of 4 complete · Run: ready · Results: from the run of 21 Oct 21:40 (stale)
-  3 Connection & grid   ● complete   grid-code profile, PCC fault level
-  5 Assets & sizing     ◐ warning    2 STATCOMs, transformer taps
-  8 Scenarios           ● complete   load flow after the optimisation, N-1
+[ AC power flow & grid ]  Inputs: 3 of 4 complete · Run: ready · Results: from the run of 21 Oct 21:40, out of date · Walk me through this card
+  3 Connection & grid   complete   grid-code profile, PCC fault level
+  5 Assets & sizing     to check   2 STATCOMs, transformer taps
+  8 Scenarios           complete   load flow after the optimisation, N-1
   9 Run                 ready
   10 Results › AC power flow & grid   Load flow · Grid code & connection · Electrical design · N-1 security
 ```
+
+"Walk me through this card" (§6) lives in this header strip only.
 
 Rules:
 - **One entry point per feature** (UX-flow rule 1): a workspace lists links into sections; it holds no editor of its own.
@@ -158,7 +160,7 @@ From `components/ResultState.tsx` (UX overhaul S2), plus two this design adds:
 | not_applicable | Not applicable | nothing to apply to (no lines, no renewables) | — |
 | unavailable | Not available for this run | the payload can't tell | — |
 | study_only | From the study | figure from the EH study, the project not solved | — |
-| **outside_scope** (new) | Outside scope | the card or sub-option is off | `ScopeGate`'s "Add <sub-option>" in place; earlier results kept and shown below, dimmed, labelled "From the run of <date>, before <card> was switched off" |
+| **outside_scope** (new) | Outside scope | the card or sub-option is off | `ScopeGate`'s "Add <sub-option>" in place. Earlier results are kept and shown below, dimmed and read-only, labelled "From the run of <date>, before <card> was switched off". The greyed card in the group strip shows the same `ScopeGate` text, so there is one wording |
 | **failed** (new) | Did not complete | the job failed or the server refused it | the server's reason in words (RB-titles rule) and "Open <section>" for a refusal |
 | not offered | — | the site doesn't offer the sub-option | `ScopeGate`'s "Not offered for this site: <reason>"; "Not yet available" when W0 hasn't cleared it |
 
@@ -183,7 +185,7 @@ Sub-options: Asset sizing · Dispatch & economics · Process detail.
 | Tab | Displays | Units | Checked profiles | Notes |
 |---|---|---|---|---|
 | **Build** | Headline: total new build (MW, MWh), capex/a, system cost. Chart: capex by class; capacity by carrier (existing vs new); multi-period: per-period build and cost (today's Overview). Table: sized and retired assets, "built to its bound" flag | MW, MWh, EUR/a, EUR per period | capacity/1, generator-cost/1, storage-unit-cost/1; Overview withheld | With sizing off: header "Fixed sizes from <source>; not optimised" |
-| **Operation** | Sub-views (a segmented control, not tabs): Dispatch · Energy flow · Load shape · Storage cycling · Emissions · Products (only with Process detail on: make / buy / lose per product from `/results/process_view`, LCOH) | MW per snapshot, MWh, cycles, t CO₂, t or MWh of product | generator-dispatch/1, storage-unit-dispatch/1, carrier-energy/1, energy-balance/1, storage-cycles/1, generator-emissions/1, network-emissions/1 | Guided sees Energy flow and Load shape (as today) |
+| **Operation** | Sub-views (a segmented control, not tabs): Dispatch · Energy flow · Load shape · Storage cycling · Emissions · **Lost load** (VoLL slack: unserved MWh and cost per carrier and bus; Dispatch's stack already overlays it) · Products (only with Process detail on: make / buy / lose per product from `/results/process_view`, LCOH) | MW per snapshot, MWh, cycles, t CO₂, EUR, t or MWh of product | generator-dispatch/1, storage-unit-dispatch/1, carrier-energy/1, energy-balance/1, storage-cycles/1, generator-emissions/1, network-emissions/1, lost-load/1 | Guided sees Energy flow and Load shape (as today). Lost load is an operation result (UX ruling O4a), so it follows Capacity's scope like the rest |
 | **Curtailment** | Headline: curtailed MWh and % of available. Chart: by carrier over time. **By cause per plant** (#515: export at the limit / price < 0 / both, summing to the total). Link "Revenue lost to curtailment ›" to Commercial › Contracts & revenue (cross-link, no copy) | MWh, % | curtailment/1 | **The owner's "curtailment"** lives here (owner word → card, §3.8) |
 | **Costs & prices** | Headline: system cost, mean import price. Cost waterfall (objective decomposition). Bus prices: duration curve, drivers. **Asset value at model prices** (today's Asset economics: revenue, cost, profit, LCOE/LCOS per asset). LCOH when electrolysers exist | EUR, EUR/a, EUR/MWh, EUR/kg | bus-price/1; asset economics withheld (S8) | Decision D1 below |
 
@@ -222,7 +224,7 @@ Rules for these assets:
 | Tab | Displays | Units | Evidence | Notes |
 |---|---|---|---|---|
 | **Load flow** | Headline: max line and transformer loading, min/max voltage, losses. Charts: loading heatmap by branch × hour, voltage band per bus, reactive flows. Table: overloaded branches with weighted hours. Action: "Run AC power flow again" through the gate (audit #4) | %, p.u., MW / MVA, Mvar, MWh | branch-loading/1, network-loading/1 (LOPF proxy; refused once AC PF overwrote outputs); v2 displayed-data ACK | Sub-option Load flow. Without AC PF: the LOPF proxy, labelled "active-power proxy, not an AC assessment" |
-| **Grid code & connection** | Scorecard rows (read-only copy of 9) with DC 03's before / after-battery values; campus PCC compliance (PF, voltage, harmonics where modelled); connection capacity and connection-point assessment (planning → dynamics) | MW, MW/min, %, Mvar, kV, MVA | grid-readiness/1 (S9, #500, open) for the rows; campus and gridspine withheld | Sub-option Grid code |
+| **Grid code & connection** | What the scorecard doesn't show: campus PCC compliance (PF, voltage, harmonics where modelled), connection capacity and connection-point assessment (planning → dynamics). One link: "Grid-code verdicts: see Readiness › Grid readiness ›" (the scorecard, with DC 03's before / after-battery values, has its one home in 9) | MW, %, Mvar, kV, MVA | campus and gridspine withheld; the scorecard's own grid-readiness/1 (S9, #500, open) stays with 9 | Sub-option Grid code |
 | **Electrical design** | transformer loading and sizing, reactive compensation need and proposal, short circuit (IEC 60909: Ik″, ip, breaking), critical hours, campus investment and joint optimisation (MILP) | MVA, Mvar, kA, EUR | withheld (`outside_checked_scope`) | Sub-option Grid code (electrical design half). Proposals adopt through EditCards |
 | **N-1 security** | binding contingencies, the lines they load, the cost of security (SCLOPF vs plain LOPF objective) | MW, %, EUR | none | Sub-option N-1. **Gap: no view exists today** (ticket R-N1) |
 
@@ -276,12 +278,11 @@ Sub-options: Reliability goal & study · Stress conditions & FMEA · Outage-data
 
 | Tab | Displays | Units | Evidence | Notes |
 |---|---|---|---|---|
-| **Adequacy** | Headline: the verdict (pass / fail / inconclusive) of LOLE against the one goal, ENS. EH reference design certification, levers, DTC; Monte Carlo; frontier; the loops' result (inputs leave, W3b-R) | h/a, MWh/a, EUR | MC and EH per-year LOLE withheld (`samples_not_retained`) | Sub-option 1 |
+| **Adequacy** | Headline: the verdict (pass / fail / inconclusive) of LOLE against the one goal, ENS. EH reference design certification, levers, DTC; Monte Carlo; frontier; the loops' result (inputs leave, W3b-R). The dispatch's unserved energy is cited with a link to Capacity expansion › Operation › Lost load | h/a, MWh/a, EUR | MC and EH per-year LOLE withheld (`samples_not_retained`) | Sub-option 1 |
 | **Outage screening** | COPT LOLE and EUE, reserve margin per period, derating, binding hours | h/a, MWh/a, MW, % | copt-screening/1 (#483, open) | Sub-option 3; no solve |
-| **Stress & FMEA** | FMEA worksheet ranked by EUR/a, sweep results per stress condition, read-only list of the conditions with "Change in Scenarios & optimisation ›" | EUR/a, MW, h/a | withheld | Sub-option 2 |
-| **Lost load** | Unserved MWh and VoLL cost, per carrier and bus, from the dispatch | MWh, MW, EUR | lost-load/1 | Rule L |
+| **Stress & FMEA** | FMEA worksheet ranked by EUR/a, sweep results per stress condition, read-only list of the conditions with "Change in Scenarios & optimisation ›"; the worksheet's expert rows and mitigability stay as annotations (O4b) | EUR/a, MW, h/a | withheld | Sub-option 2 |
 
-**Rule L (lost load with Reliability off).** Lost load comes from the optimisation (VoLL slack), which runs whatever the scope (modular-cards §2 keeps VOLL shown in 8 for this reason). So **Reliability › Lost load never reads "Outside scope"**: with the card off, the group shows only this tab, headed "From the dispatch; Reliability is off", and Summary's Capacity headline shows unserved energy when non-zero. The other three tabs read "Outside scope". (UX reviewer to confirm; it is the only tab with this exception.)
+Lost load is not a Reliability tab: it comes from the optimisation's VoLL slack, so it is an operation result and lives under Capacity expansion › Operation (UX ruling O4a). Every Reliability tab follows the scope rule without exception.
 
 **D. Assistant.** `run-study` and `improve-design` workflows; reads `get_adequacy_results`, `get_study_findings`, `explain_verdict`; proposes a goal change or an outage-rate edit as EditCards (8 or 5); the FMEA sweep starts through the gate.
 
@@ -316,9 +317,11 @@ Sub-options: Reports · Data exports · Specialist packet.
 
 | Tab | Displays |
 |---|---|
-| **Reports** | generate (variant per party), viewer, versions, evidence hash, template picker, round trip (today's Reports panel) |
-| **Exports** | the one "Export…" chooser (SAVE-1: bundle, NetCDF, CSV, Excel, MATPOWER); per-view CSVs stay on their views |
+| **Reports** | generate (variant per party), viewer, versions, evidence hash, template picker, round trip. This tab **is** today's Reports panel (one component, moved), and section 10's sidebar Reports row opens it |
+| **Exports** | This tab **is** the one "Export…" chooser from #556 / SAVE-1 (bundle, NetCDF, CSV, Excel, MATPOWER), as one component. The sidebar "Export…" opens Hand-off › Exports, not a standalone dialog. Per-view CSVs stay on their views |
 | **Specialist packet** | planning → dynamics: dispatch source, ranked snapshots, assumptions ledger, per-hour bundles, PowerFactory read-back |
+
+So R6 adds no second Reports or Export (audit #10, #16): the existing entries now open these tabs.
 
 The last tab of every other group ends with "Next: Hand-off › Reports ›" (or the next card in scope). Hand-off is always on (`locked_reason="Always on."`).
 
@@ -326,7 +329,7 @@ The last tab of every other group ends with "Next: Hand-off › Reports ›" (or
 
 ### 3.7 Not a card's tab
 
-- **Asset results** (today's Asset Detail tab) becomes a **drawer** opened from any table row, the canvas or Properties' "View results"; it shows the asset's results from every card in scope, sectioned by card. It keeps its id `asset` for the assistant (`ui_open_asset_detail`).
+- **Asset results** (today's Asset Detail tab) becomes a **drawer**. It has three contextual entry points: a row in a results table, an asset on the canvas, and Properties' "View results". There is no general "Asset detail" entry anywhere (contextual entries are fine under UX-flow rule 1). It shows the asset's results from every card in scope, sectioned by card, and keeps its id `asset` for the assistant (`ui_open_asset_detail`).
 - **Compare** stays a rail across groups (base + N cases, integration-sensitivities §5.2); a card off in one case reads "outside scope" in that column.
 - **Run-bound view** stays an overlay.
 
@@ -352,8 +355,8 @@ The last tab of every other group ends with "Next: Hand-off › Reports ›" (or
 
 | Card | Headline (one line) |
 |---|---|
-| Capacity expansion | system cost; new build MW / MWh; curtailment % |
-| AC power flow & grid | max loading %; voltage band; scorecard "n of m pass" |
+| Capacity expansion | system cost; new build MW / MWh; curtailment %; unserved energy when not zero |
+| AC power flow & grid | max loading %; voltage band; scorecard "n of m pass", linking to Readiness › Grid readiness (its one home, 9) |
 | Control | island sustained h vs requirement; GFM margin |
 | Reliability | LOLE vs goal (verdict); ENS |
 | Commercial & finance | NPV, IRR; or the annual bill when no investment case |
@@ -380,7 +383,7 @@ What exists and is reused:
 What this design adds (one harness slice, R0 and H1 in §8):
 - `ResultView` gains `card` and `sub_option`; `list_result_views` filters by card, so "walk me through the Grid card" lists only that card's views with their status.
 - New view ids for the views that have no id today (§7.1); `RESULTS_TAB_ENUM` and `navigation.PANELS` follow.
-- A **"Walk me through this card"** entry (W9's "Help with this section", at card scope): the companion reads the workspace (`/flow` filtered to the card), says what is incomplete in the card's sections, opens each field in place, then runs the card through the gate, then opens the card's results group and explains the headline with `explain-results`. One workflow file per card is not needed: one workflow, `card-walkthrough`, takes the card id; its steps are the four workspace steps (§2.1).
+- A **"Walk me through this card"** entry (W9's "Help with this section", at card scope), in the workspace header strip only (§2.1): the companion reads the workspace (`/flow` filtered to the card), says what is incomplete in the card's sections, opens each field in place, then runs the card through the gate, then opens the card's results group and explains the headline with `explain-results`. One workflow file per card is not needed: one workflow, `card-walkthrough`, takes the card id; its steps are the four workspace steps (§2.1).
 - **Card assets**: the copilot can add a card asset only through an EditCard naming section 3 or 5, and only for assets the palette offers (§2.2); for one that isn't offered it says so.
 - Guided: the same walkthrough, with the Guided depth (key parameters only); Expert: every parameter.
 
@@ -392,9 +395,9 @@ Presets from W4a `TEMPLATE_PRESETS` (#496); "not yet" means W4a marks the sub-op
 
 | Example | Cards in scope (preset) | Opens on | Tabs it fills | Headline numbers (source) | Gaps → ticket |
 |---|---|---|---|---|---|
-| Data centre (`eh_datacenter`) | Capacity 1–2; Grid: grid code; Control: presets (+ island, not yet); Reliability 1–2; Commercial: tariffs (+ IC, not yet); Hand-off | **AC power flow & grid › Grid code & connection** (its question is "can the grid take it") | Build, Operation, Costs & prices; Grid code & connection (scorecard with after-battery rows), Electrical design (after a campus run); Island & ride-through, Grid-forming; Adequacy, Outage screening, Stress & FMEA, Lost load | DC 03: a 40 MW / 10 MWh UPS walks a 23.4 MW step in at 93.6 MW/min against a 4 MW/min limit, so ramp still fails after the battery; oscillation and voltage change pass; 2 rows pass after mitigation, 3 red flags stay (`tests/test_grid_readiness.py:737-756`). No cost or LOLE pinned | **X-DC1**: pin the example's headline (cost, LOLE) in a test. **X-DC2**: no tariff in the single-year template, so Commercial › Bill is empty although Tariffs is preset |
+| Data centre (`eh_datacenter`) | Capacity 1–2; Grid: grid code; Control: presets (+ island, not yet); Reliability 1–2; Commercial: tariffs (+ IC, not yet); Hand-off | **Summary** (its Grid row shows the scorecard's "n of m pass" with a link to 9; its Reliability row the LOLE verdict). Grid code & connection only once a campus run exists | Build, Operation (incl. Lost load), Costs & prices; Grid code & connection, Electrical design (after a campus run); Island & ride-through, Grid-forming; Adequacy, Outage screening, Stress & FMEA | DC 03: a 40 MW / 10 MWh UPS walks a 23.4 MW step in at 93.6 MW/min against a 4 MW/min limit, so ramp still fails after the battery; oscillation and voltage change pass; 2 rows pass after mitigation, 3 red flags stay (`tests/test_grid_readiness.py:737-756`). No cost or LOLE pinned | **X-DC1**: pin the example's headline (cost, LOLE) in a test. **X-DC2**: no tariff in the single-year template, so Commercial › Bill is empty although Tariffs is preset |
 | Data centre, staged | as above, multi-period | Commercial & finance › Investment case | + Build per period, Investment case (NPV with island break-even) | NPV < 0 and break-even > 0 (`test_eh_datacenter_staged_case.py:455-456`); −7,992,548 EUR only in a spec | X-DC1 (pin NPV) |
-| Island microgrid (`eh_microgrid`) | Capacity 1–2; Control 1 (+2 not yet); Reliability 1–3; Commercial: tariffs (+ IC not yet); Hand-off | **Reliability › Adequacy** | Build, Operation; Island & ride-through, Grid-forming (GFM recommender); Adequacy, Outage screening, Stress & FMEA, Lost load; Investment case | NPV 4,588,396 EUR; new battery 7.519 MW (`test_eh_microgrid_case.py:134,147`) | **X-MG1**: the investment case runs but the preset's IC sub-option is "not yet" (W4a/W0 mismatch, open item O3) |
+| Island microgrid (`eh_microgrid`) | Capacity 1–2; Control 1 (+2 not yet); Reliability 1–3; Commercial: tariffs (+ IC not yet); Hand-off | **Reliability › Adequacy** | Build, Operation (incl. Lost load); Island & ride-through, Grid-forming (GFM recommender); Adequacy, Outage screening, Stress & FMEA; Investment case | NPV 4,588,396 EUR; new battery 7.519 MW (`test_eh_microgrid_case.py:134,147`) | **X-MG1**: the investment case runs but the preset's IC sub-option is "not yet" (W4a/W0 mismatch, open item O3) |
 | Island microgrid, staged | as above | Reliability › Adequacy | + per period | NPV 43,231,055 EUR; battery 6.08 / 6.08 / 3.27 MW (`test_eh_staged_hubs.py:288`, `eh_staged_hubs.py:525`) | — |
 | Hydrogen hub (`eh_h2_hub`) | Capacity 1–3 (process not yet); Reliability 1; Commercial 1–3; Hand-off | **Capacity expansion › Operation › Products** | Build, Operation, Costs & prices (LCOH); Adequacy | objective 7.0 M EUR, 8.8 / 11.4 / 28.9 M at 1 / 4 / 24 h islanding (measured, `eh_templates.py:839-843`, not pinned) | **X-H2**: Products sub-view needs a UI for `/results/process_view` (orphan) |
 | Hydrogen hub, staged | as above | Commercial & finance › Investment case | + Investment case vs grey H2 | NPV +14.6 M EUR; grey H2 bought 51,041 / 112,361 MWh in 2030 / 2035 (`test_eh_staged_hubs.py:236-239`) | X-H2 |
@@ -412,6 +415,8 @@ Cross-example gaps:
 
 `initial_results_tab` takes the new `card` and `tab` ids (§8 R0), with the old ids as aliases. Every shipped example sets it (X-OPEN, template data, one small PR after R1).
 
+**Never open an example on a tab that will read "Not run yet"** (UX review). The opening tab is where Results lands after the example's first Run, so it must be a tab that this Run fills. A tab that needs a separate study (the campus run, the FMEA sweep) is never an opening tab; the example opens on Summary, whose row for that card links on. Before any run, a new project opens in the flow at its first incomplete section (audit #26), not in Results.
+
 ---
 
 ## 8. Slices
@@ -424,9 +429,9 @@ Order follows workspace-reconciliation §13 (W10 after W3a, W4a; W3b moves first
 | **R1 Results shell by card** | group strip = Summary + six cards from `/flow` scope; tabs per §3 mapping today's components; `outside_scope` and `failed` states (`ScopeGate`); freshness in each group header; Summary per-card rows (§4.1); Asset Detail as a drawer | Sonnet | UX | R0, W3a, #496 |
 | **R2 Grid group** | campus results (#545's "Grid study results"), campus investment, gridspine connection capacity/assessment into Grid tabs; Load flow's "Run AC power flow again" through the gate (audit #4, with GK on the run path) | Sonnet | UX; GK on the run path | R1, #545 |
 | **R3 Control group** | island report, cuts, pickup (#534), smoothing screen, GFM recommendation → Control tabs; GFM apply via EditCard | Sonnet | UX | R1; W0's Control row for "in the Run" |
-| **R4 Reliability group** | Adequacy / Outage screening / Stress & FMEA / Lost load; Rule L | Sonnet | UX | R1, W3b-R (inputs out of the panels), #535 |
+| **R4 Reliability group** | Adequacy / Outage screening / Stress & FMEA; Adequacy cites Lost load (which moves to Capacity › Operation in R1) | Sonnet | UX | R1, W3b-R (inputs out of the panels), #535 |
 | **R5 Commercial group** | Bill / Contracts & revenue (CFE score's UI) / Investment case / Parties | Sonnet | UX | R1, #533 |
-| **R6 Hand-off group** | Reports, Exports (the one chooser), Specialist packet; remove duplicate entries (audit #10, #16) | Sonnet | UX | R1 |
+| **R6 Hand-off group** | Reports (today's panel, moved), Exports (#556's chooser, moved), Specialist packet; the sidebar "Export…" and the Reports row open these tabs; remove the duplicate entries (audit #10, #16) | Sonnet | UX | R1 |
 | **R7 Guided card summaries** | chapter tiles → card summaries; Control tile; Improve unchanged | Sonnet | UX | R1 |
 | **R8 Capacity Products** | `process_view` and LCOH as Operation › Products (X-H2) | Sonnet | UX; GK told (reads only) | R1 |
 | **R-N1 N-1 view** | binding contingencies and security cost from an SCLOPF solve | Opus (engine read) then Sonnet (view) | **gatekeeper** | R1; W4b for the N-1 kind |
@@ -452,8 +457,8 @@ Dependencies outside this package: W4a #496 (scope, `ScopeGate`), W3b (#533 inve
 - **O1 (GK)**: confirm §3.2 B's engine column per asset (asked 22:1x CEST).
 - **O2 (GK, W0)**: W4a marks Control › Island "not yet available" while the campus island study runs today from its panel. Do its results show under Control as "From the campus study" until W0 adds it to the Run, or stay hidden?
 - **O3 (GK, W0)**: same for Commercial › Investment case on the microgrid and data-centre staged examples, which run an investment case today.
-- **O4 (UX)**: Rule L (Lost load visible with Reliability off); FMEA worksheet annotations as result annotations, not inputs.
-- **O5 (UX)**: the workspace as a filtered rail/sidebar (§2.1), not a page.
+- **O4 (UX, resolved 2026-10-21)**: (a) there is no Lost-load exception; Lost load moves to Capacity › Operation. (b) The FMEA expert rows and mitigability are result annotations, not inputs.
+- **O5 (UX, resolved)**: the workspace is the filtered rail or sidebar plus a header strip, not a page.
 
 ## 11. Pointers
 
