@@ -24,7 +24,16 @@ const SURFACES = [
   'pages/hubDesign/sectionLabels.ts',
   'pages/hubDesign/cards/*.tsx',
   'components/flowScope/**/*.{ts,tsx}',
-  '**/*Scope*.tsx',
+  'pages/hubDesign/SectionView.tsx',
+  'pages/hubDesign/HubDesignPanel.tsx',
+  'components/FieldDrawer.tsx',
+  'components/FlowStateDot.tsx',
+  'utils/flowItems.ts',
+  'utils/componentLabels.ts',
+  'layout/flowNavigation.ts',
+  'components/EditCard.tsx',
+  'components/CheckedEvidenceCard.tsx',
+  'components/CheckedChart.tsx',
 ]
 
 /** JSX attributes whose value is copy the user reads. */
