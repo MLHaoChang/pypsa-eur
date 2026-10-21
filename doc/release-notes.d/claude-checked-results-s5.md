@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify a bus's time-weighted marginal price, generator and network CO2 emissions with the cap's shadow price, and curtailment of variable generators (`bus-price/1`, `generator-emissions/1`, `network-emissions/1`, `curtailment/1`, opt-in).

@@ -34,6 +34,7 @@ harness/
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
+  continuation.py  LC-12: a plan's finished job continues its conversation once; no approval authority
   experiment_execution.py ordinary network-case admission and permanent no-replay receipts
   experiment_two_case.py sequential two-case admission with shared caps and failure policy
   experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
@@ -263,6 +264,13 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Flow section (PR-2).** Each component row carries a FlowTarget
+  `{section, panel, component, entity, field}` from
+  `flow_service.section_for_component` (the flow's own class rule), and the
+  card names its `section`. The section's flow state before the write rides
+  the card outside the digest (`section_state`); the receipt adds `section`
+  with the state after the write and whether it `changed`. The browser's
+  "Show in Properties" selects the component in place; the chat stays open.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -322,7 +330,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 214 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -335,7 +343,25 @@ external verification. See the [calibration and review guide](../../../.scratch/
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch
-and declared-basis direct StorageUnit costs.
+and declared-basis direct StorageUnit costs. A sixth, `carrier-energy/1`
+(`carrier_calculations.py`), sums one exact carrier's generator energy, combined
+peak and StorageUnit charge/discharge; it is opt-in (`calculations.OPT_IN_PROFILES`
+run only when listed in `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`), excludes Links and
+Stores and always discloses how many it excluded. `branch-loading/1` and
+`network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
+Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
+P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
+refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
+hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
+claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
+the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
+`bus-price/1`, `generator-emissions/1`, `network-emissions/1` and `curtailment/1`
+(opt-in, `price_calculations.py`, `emissions_calculations.py`,
+`curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
+time-weighted price, generator CO2 over the time-varying efficiency with the cap's
+dual as −mu, and curtailment of generators with a time-varying availability. Every
+profile refuses once an AC power flow has overwritten the LP outputs.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -380,7 +406,11 @@ shared harness. No new stream vocabulary or provider-specific guard path is used
 The actor-owned record store uses bounded cross-process transactions, but the live
 project runtime still supports one application worker. These checks do not certify
 all engineering domains, arbitrary request completeness or independent expert
-approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+approval. Unmapped strict tools fail closed: a checked turn runs only
+`assurance.CHECKED_TOOLS`, and `tests/test_checked_results_dispositions.py` proves
+every other catalogue tool is refused before its handler runs. Each result view
+declares `checked_profiles` and a `checked_gap` (`services/result_views.py`; plan in
+`.scratch/checked-results/audit.md`). Deployment remains opt-in. Read the
 [implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
 and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
@@ -703,11 +733,57 @@ so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
 still receives only its catalogue arguments; chat renders the preview table.
 
-Sequential durable tasks wait for a terminal solver outcome before advancing
-chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
-foreground solver calls retain the detached start receipt. A start or
-contradictory still-running receipt cannot complete a task; fully asynchronous
-durable-task step resumption remains outside the checked-scope recovery tranche.
+### Plan jobs and continuation (LC-05, LC-12)
+
+A plan runs in order. Before any card, `assistant_tasks.admit` refuses a call
+that matches a later pending step (`task_step_out_of_order`) or the step
+waiting on its job (`task_step_waiting`); other calls pass. An edit step
+completes only when its `_edit_receipt` is `verified`, otherwise it is
+`uncertain`. An edit card refuses a negative rating (`s_nom`, `p_nom`,
+`e_nom` and their `_min`/`_max`) as `invalid_edit_value`.
+
+A `run_simulation`/`run_ac_pf_stage` step is `waiting` on its `fg:` job, the
+plan `waiting_job`, durably in the task file. Its own thread
+(`continuation.follow_job`, not the session's progress monitor, which stops
+when the chat closes) follows the job and settles the step from that job's own
+record, never from live state, and without the network lock: `completed` only
+when the job's identity-bound native status is `completed` before and after its
+run manifest is published and the manifest carries its objective and input
+fingerprint, and that fingerprint is the one the solve recorded under its lock
+(the step keeps `run_id`, `objective` and `fingerprint`, so a later step can
+reference `$run.run_id`); `publish_foreground_run` records the solve's own
+fingerprint, and when an edit queued on the lock already landed it warns
+`inputs_changed_before_publish` and captures no load-flow section; `failed` for failed, aborted or unknown
+(including a job bound to no new worker); `uncertain` when it completed but its
+record cannot be verified, or this process never registered it (a restart). The
+turn waits up to `continuation.GRACE_SECONDS` (10 s): a quick solve settles and
+the plan goes on in the same turn, with no separate continuation; a longer one
+releases the turn like an ordinary foreground solve. Nothing re-runs by itself;
+`resolve_task_step` stays the only reconciliation. A start or contradictory
+still-running receipt without a job still cannot complete a step.
+
+When the job ends, one continuation is due to the session that started it
+(`continuation.py`). `GET /api/chat/{session_id}/continuations` lists them;
+`/stream` with `continuation_job_id` (no message, attachments, script or
+checked fields) claims one, at most once per job, and runs an ordinary turn
+whose user message the harness writes: `job <id> finished: <status> (plan:
+<title>)`. None is due after `cancel_task` or a user abort, and none for
+another session or project. The continuation approves nothing: every card in
+that turn still needs its click. `get_task` names the plan's verified edits in
+`changes`, and the OpenAI tool selection favours every tool the plan still
+has to run.
+
+### Stale result reads (LC-12)
+
+A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
+`state` can still say `fresh`. `dispatch_status` and every dict answer of
+`get_results` therefore also carry `workflow_tools.solve_freshness()`:
+`inputs_changed_since_solve` compares both recorded solve fingerprints with
+the current inputs (`null` when no solve recorded them), and `results_current`
+is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
+never disagree with it, also after an AC power flow. `get_results` adds a
+`freshness_note`: stale when the inputs changed, not current when the guard
+fails for another reason.
 
 ## Recorded runs, load flow, and experiment plans
 
@@ -849,6 +925,34 @@ exists. With no such section the result is
 `unavailable_kind=historical_loadflow_unavailable`. Omit `run_id` for the
 live results. `window_from` and `window_to` are snapshot indexes;
 `window_from` must not exceed `window_to`.
+
+### Current energy flows
+
+`get_energy_flows` (`services/energy_flows_read.py`) reads the current solve's
+Energy flow tab through the same `services/results/energy_flows.py` payload
+the tab draws: Source → Via → Destination MWh, the largest rows first (default
+12, maximum 40, trimmed under 3800 characters), the conservation check and the
+window. It computes nothing of its own. `not_delivered` carries
+`unserved_product_mwh` (process shortfall per load) and `unserved_mwh` (shed
+load) as energy NOT delivered; neither is ever a row or a source. Before a
+solve it is `unavailable_kind=not_solved`; an attribution the module cannot
+prove to conserve energy is `not_established`, with no rows. Current results
+only; `inputs_changed_since_solve` says when the inputs moved after the solve.
+The `flows` result view (`services/result_views.py`) goes live with this tool.
+
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
 
 ### Experiment plans
 

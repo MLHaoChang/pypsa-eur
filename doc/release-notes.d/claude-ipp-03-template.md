@@ -1,0 +1,7 @@
+* Feat(pypsa-gui): A new example, **Renewables IPP with battery** (`eh_ipp_hybrid`). A 60 MW wind farm and a 50 MWp PV plant (fixed new build) with a battery candidate (0–50 MW at 2 h) behind one 70 MW export limit, over one hourly 2030 year. The plan sizes the battery against an illustrative day-ahead price (shipped as three Library series, minted at create) and curtails at the export limit and at negative prices. Two financial pay-as-produced PPAs (70 % of each plant) settle after the solve. The 25-year investment case uses the German tax pack (illustrative assumptions, stated in the ledger), with the break-even wind PPA price at an 8 % equity IRR. Generation-only: no load, VoLL not applicable, and the Energy Hub adequacy study does not apply. Every price is illustrative.
+
+* Feat(pypsa-gui): An extendable asset may now have equal positive bounds (`p_nom_min = p_nom_max > 0`), an explicit forced size built exactly at that size and still carrying its capex. Equal bounds of 0, reversed bounds and non-finite bounds are still refused.
+
+* Feat(pypsa-gui): A template price series' money basis is checked against the template's finance block by an explicit rule table. Currency must match. Real series need the case's currency year. Nominal series must be the single base year. A nominal series in a real case is refused.
+
+* Fix(pypsa-gui): A project created from a template that ships price series now pins them in `library_refs.json`, so it no longer opens with a `library_ref_stale` ("unpinned") issue.

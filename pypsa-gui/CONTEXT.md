@@ -87,6 +87,16 @@ One optimisation run over the network — `n.optimize()`, driven through
 Always off the request thread; it blocks.
 _Avoid_: simulation, optimisation run, job
 
+**Sizing off** (fixed-size run):
+A solve that dispatches on fixed sizes instead of choosing them
+(`SolverConfig.fixed_sizes`; `services/solver/fixed_sizes.py`). The sizes come
+from the **capacity run** (the last solve with sizing on, whose sizes are
+recorded in `n.meta["sizing_record"]`) or from the **nameplate** (each asset's
+configured `p_nom` / `s_nom` / `e_nom`). It is a real run of a **fixed
+design**: its results and commercial records stand. The sweep's operational
+re-solve, which also freezes sizes, is a transient check and commits nothing.
+_Avoid_: dispatch-only, operational run (the sweep's term), extendable off
+
 **Unavailable**:
 The state of a figure the backend could not resolve, as distinct from a figure
 that resolved to zero. Zero is a legitimate result in an energy-system model,
@@ -212,6 +222,45 @@ from each unit's effective control: `grid_forming`, `synthetic_inertia`,
 mode the island study does not credit, such as a GFM on PV, is listed as
 `not_credited`, not offered. The grid-readiness check reads these.
 _Avoid_: ancillary service (that's a market product), capability
+
+## Project flow language
+
+**Project flow**:
+The one ordered list of flow sections that takes a project from greenfield to
+"ready to run", then to results and reports. The same for every project and
+every template (`.scratch/project-workflow/design.md` §2.1). Served by
+`GET /api/projects/{name}/flow` (`backend/services/flow_service.py`), a view
+over the existing checks; `/run` keeps its own validation. The assistant's
+workflows follow it (each step's `flow_section:`); they don't replace it.
+_Avoid_: workflow (unqualified: that is the assistant's **Workflow**), wizard, pipeline
+
+**Flow section**:
+One group of the project flow, such as "Connection & grid". Ten, in order:
+`project`, `carriers`, `connection`, `loads`, `assets`, `profiles`,
+`commercial`, `scenarios`, `readiness`, `results`
+(`backend/services/flow_sections.py` `SECTIONS`). Every validator issue code
+files to one (`CODE_SECTION`).
+_Avoid_: step (the hub-design rail and the Model Horizon page use it for their
+own sub-steps), stage (EH pipeline stages, growth stages), tab, page
+
+**Section state**:
+`complete`, `warning`, `incomplete` or `not_needed` for sections 1–8, plus
+`unknown` while the preflight is deferred (never `complete`). An error item or
+a failed presence rule makes a section `incomplete`; an unacknowledged warning
+(including a template default marked `assumed`) makes it `warning`. Warnings
+never block Run, and neither does a display-only gap (a flow `note`): Run is
+ready exactly when the server would accept the run (design §3.3 R1), so a
+section can read `incomplete` beside an enabled Run. `readiness` and `results`
+carry none of their own: readiness
+summarises 1–8, results reports its freshness (`not_run`, `running`, `fresh`,
+`stale`).
+_Avoid_: status (the solve's), done, valid
+
+**Instantiation**:
+What a template does to the project flow: it pre-fills sections and may mark
+one `not_needed` (an off-grid template's connection). It never adds, removes or
+reorders a section (design §2.3).
+_Avoid_: template flow, preset flow, variant
 
 ## Assistant language
 

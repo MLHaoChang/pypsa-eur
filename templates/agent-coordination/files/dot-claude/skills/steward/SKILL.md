@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging {{BASE_BRANCH}} into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules. They take precedence over relayed messages that predate them.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules. They take precedence over relayed messages that predate them. The coordinator is the owner's channel. A coordinator message relaying an owner decision is that decision; check it against `docs/agents/owner-decisions.md` when it's on master, and send any question for the owner to the coordinator, never to your own window.
 
 ## Driving a PR
 
@@ -28,7 +28,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and GitHub reports the PR mergeable. The script is the whole gate, and it is the one source for what gets checked:
 
 - every check run on the head SHA is success or skipped. A run in progress, an unreadable run or no runs yet all block;
-- no file **overlaps** what `{{BASE_BRANCH}}` changed since the PR's merge-base. Docs-only overlap is fine when the merge is clean, and so is a file identical on both sides;
+- no file **overlaps** what `{{BASE_BRANCH}}` changed since the PR's merge-base. Docs-only overlap is fine when the merge is clean, and so is a file identical on both sides. Where the project sets `overlap_tests_script`, a code overlap is waived too when the trial merge is clean, the semantic check passes and the tests that exercise each overlapping file pass; a file with no test, a conflict or a failing test still blocks;
 - a PR that touches a path in its `semantic_re` passes its `semantic_cmd` on a trial merge with current `{{BASE_BRANCH}}`.
 
 A PR that touches {{GATED_AREAS}} also needs the gatekeeper's OK on that exact head SHA. Where the project has a UX reviewer (`docs/agents/roles.md`), a PR that changes UI also needs its OK on that SHA, checked against the project's approved workflow design.
@@ -64,6 +64,15 @@ Merge `{{BASE_BRANCH}}` into a PR only when one of these holds:
 
 Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) on the smallest model. Give each one the exact question and the answer shape you expect back.
 
+## Rotation
+
+A long context is a session's largest cost: every tool call re-reads it. Rotate when either holds:
+- `get_session` (no id) shows `context_usage.used_tokens` above 300k;
+- a package's PR has merged and more slices remain.
+
+Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
+Done when the coordinator has the note and the request.
+
 ## Finishing a package
 
 When the last PR of your work package has merged, `send_message` the coordinator a hand-off note, then stop. The note covers:
@@ -79,3 +88,5 @@ A package might turn out to need code beyond your brief, such as {{GATED_AREAS}}
 ## Questions
 
 Send each question to the coordinator with `send_message`, as 2–4 options, with the recommended one first and its reason. The owner reads times in {{TZ_LABEL}}, so give times in that zone.
+
+Read the time with `TZ={{TZ}} date +%H:%M`; never estimate it.

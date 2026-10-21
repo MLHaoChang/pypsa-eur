@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Load shape heatmap cells with no snapshot are hatched, so they cannot be read as the lightest shade, and the Monthly section collapses to one line when the run has no calendar months.

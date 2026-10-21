@@ -136,6 +136,24 @@ describe('ContractsEditor', () => {
     expect(saved).toMatchObject({ kind: 'pay_as_produced', pricing: 'fixed', seller: 'Solar BV' })
   })
 
+  it('edits a PPA share and its financial settlement, whose negative-price clause defaults on (IPP 01)', async () => {
+    api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site', contracts: [
+      { ...CONTRACTS[0], pricing: 'fixed', premium_eur_per_mwh: undefined, seller: 'site',
+        buyer: 'Offtaker' }] } as never)
+    renderEditor()
+    await screen.findByTestId('ce-contract-0')
+    expect(screen.queryByLabelText('Contract ppa1 suspended at negative prices')).toBeNull()
+    fireEvent.change(screen.getByLabelText("Contract ppa1 share of the plant's output (0–1)"), { target: { value: '0.7' } })
+    fireEvent.change(screen.getByLabelText('Contract ppa1 settlement'), { target: { value: 'financial' } })
+    const clause = screen.getByLabelText('Contract ppa1 suspended at negative prices') as HTMLInputElement
+    expect(clause.checked).toBe(true)
+    fireEvent.click(clause)
+    fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalled())
+    const [saved] = (api.saveCommercial.mock.calls[0][0] as unknown as { contracts: Array<Record<string, unknown>> }).contracts
+    expect(saved).toMatchObject({ share: 0.7, settlement: 'financial', suspend_on_negative_price: false })
+  })
+
   it('refuses a blank required party before the server sees it (#2)', async () => {
     renderEditor()
     await screen.findByTestId('ce-contract-5')

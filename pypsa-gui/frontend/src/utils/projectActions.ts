@@ -46,6 +46,8 @@ export const ALL_NETWORK_KEYS = [
   // here alongside the rest — a load/restore/import must refetch the new
   // project's depth (it carries its own undo stack server-side, B3).
   'undoInfo',
+  // The project flow (`api/flow.ts`): section states over the network.
+  'flow',
 ] as const
 
 // Matches every per-project diagram-state localStorage key written by

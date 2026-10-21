@@ -7,6 +7,8 @@ You are a session for MLHaoChang/pypsa-eur, commissioned by the owner through th
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
+**Owner decisions.** <rows of docs/agents/owner-decisions.md this task rests on>
+
 **Read first.**
 - <file or doc>: <why>
 

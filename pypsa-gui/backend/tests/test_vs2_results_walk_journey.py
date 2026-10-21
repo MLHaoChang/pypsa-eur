@@ -106,7 +106,8 @@ def test_guided_lists_guided_tabs_first_with_their_labels(oj_grid):
     chat_tools.set_chat_session(session)
     listing = chat_tools.DISPATCHERS['list_result_views']()
     ids = [v['id'] for v in listing['views']]
-    assert ids[:3] == ['summary', 'adequacy', 'fmea']
+    # The Guided tabs in Results.tsx order; Energy flow and Load shape went live with their read tools.
+    assert ids[:5] == ['summary', 'flows', 'loadshape', 'adequacy', 'fmea']
     lf = next(v for v in listing['views'] if v['id'] == 'loadflow')
     assert lf['label'] == 'Load Flow (advanced)'
 

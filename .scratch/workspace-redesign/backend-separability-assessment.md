@@ -1,8 +1,30 @@
 # Required gate: backend separability and workflow dependencies
 
-Status: ready-for-agent — source reconnaissance started; runtime assessment not completed
+Status: ready-for-agent
+
+W0 proved the matrix on 2026-10-21 ("The matrix (W0)" below). The code copy is `pypsa-gui/backend/services/run_separability.py` (`MATRIX`), proven by `tests/test_run_separability.py`. What remains for agents is W4b: one run kind per PR, from the rows marked runnable.
 
 Owner request, 2026-10-20: assess whether the individual activities inside the three UI groups can actually be run separately. UI grouping, a preset or Select all is not proof of backend independence.
+
+## The matrix (W0)
+
+Proven against master d327f645 by `pypsa-gui/backend/tests/test_run_separability.py`; each row also names its tests in `MATRIX[kind].evidence`, and a test checks that every named test exists. **Runnable** = supported, or bundled where the bundle can be part of the one Run (a bundled row says which in `runnable_in_run`). Unknown and unsupported never run.
+
+| Kind / study | Class | Runnable in the one Run | Entry point | Locks and shared state | Implicit sub-steps | Freshness | Verdict (never waits on the lock) |
+|---|---|---|---|---|---|---|---|
+| `optimisation` | supported | yes | `POST /simulation/run` → `run_simulation` | network lock for validate + solve; `_state` claim; study mesh | `process_uc.binary_check` on a copy (never changes the plan; skipped when `_ic_operational`); AC-PF Stage 2 when `run_ac_pf_after_lopf` | `dispatch_status`; network revision | the flow's own verdict: `preflight_validate` → `validate_for_run` (the check `/run` repeats) |
+| `study` (EH reliability) | supported | yes | `POST /results/eh_study` → `start_eh_study` | `check_eh_study_start` takes the lock briefly; worker solves a copy; sibling stores cleared | `apply_pack`, `ens_solve` mandatory; `ens_solve` = full `run_simulation` on the copy | `edited_since` | the flow's own verdict: `check_eh_study_start(lock_blocking=False)` |
+| `loadflow` | bundled (needs a dispatch) | yes: with `optimisation` (Stage 2), or alone on a fresh dispatch | `POST /simulation/run_ac_pf`; Stage 2 of `/run` | network lock for the whole PF; overwrites `lines_t.p0/q0`, `buses_t.v_*`; not abortable | none | `dispatch_status == fresh` (topology shape only: a parameter edit after the solve still reads fresh) | with the optimisation: the validator with `run_ac_pf_after_lopf` on; alone: `ac_pf_refusal` (the route's own 400) in the preflight's lock span |
+| N-1 SCLOPF | supported (an option) | yes | `SolverConfig.sclopf` | as optimisation | none | as optimisation | the validator with `sclopf` on (the flow's own once it is on); refused with losses, rolling, no branches |
+| grid-readiness scorecard | not a run kind (no matrix row) | — | advisory read (#435) | read-only | — | live | — |
+| campus electrical | bundled | **no** | `/campus-electrical/{name}/run`, `/milp` (queue job) | the **saved** `network.nc`; NetCDF lock and run-dir lock; never the network lock | island checks, cuts, sizing, purchase in one job | `_stale` (nc sha, campus file, library) | — (needs a save step first) |
+| `control_checks` (island study) | bundled | **no** | `/campus-electrical/{name}/island/study` | inline in the request; saved `network.nc`; no lock, no mesh | its own HiGHS LOPF **re-sizes** extendables, ignoring solver_config | sidecar change | — (until #448 §3.1's fixed-size island mode) |
+| contingencies beyond N-1, connection capacity | unsupported here | no | `routers/gridspine.py` | files only | AC LF + N-1 per bisection step | the screened run | — (a `planning_dynamics` project) |
+| frequency & time domain | unsupported in-app | no | hand-off bundles; PowerFactory read-back | files only | — | read-back | — |
+| detailed process (beyond UC) | unsupported | no | none | — | — | — | — (after GTP) |
+| fixed sizes (sizing off) | unsupported | no | none yet | — | — | — | — (slice F1) |
+
+Tests named `*_current_behaviour` record the campus and island gaps as they stand; the fix PRs flip them (island: #448 §3.1's fixed-size island mode; campus: a save step before the study). A loadflow item `source` in the flow (§5.2) is W4b's, when `loadflow` enters `run_request`.
 
 ## Initial source evidence
 

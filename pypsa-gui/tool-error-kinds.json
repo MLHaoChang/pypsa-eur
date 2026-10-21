@@ -43,6 +43,10 @@
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
   "kinds": {
+    "flow_project_not_open": {
+      "surface": "inline",
+      "why": "get_project_flow was asked about a project that is not the open one: the flow is read from the loaded network. The detail names the project; the assistant opens it (activate_project) or says it must be opened first. There is no conversation-wide recovery action."
+    },
     "invalid_reference": {
       "surface": "inline",
       "why": "resolve_reference refused a malformed request (unknown target or component class, a blank or oversized name or run_id, or no class to resolve against). The per-call detail says which; the assistant asks for the missing piece instead of guessing. There is no conversation-wide recovery action."
@@ -839,6 +843,10 @@
       "surface": "inline",
       "why": "Load-profile generation named a load that is not on the open network, or a measured load upload has no column naming one. The detail lists the loads; the assistant asks which one, per call."
     },
+    "project_not_open": {
+      "surface": "inline",
+      "why": "A profile was generated or uploaded for a project that is not the open one (the foreground holds another). The detail names both; the assistant opens the project first or asks, per call."
+    },
     "unknown_archetype": {
       "surface": "inline",
       "why": "Load-profile generation named an archetype or preset that does not exist. The detail lists the available ones; the assistant picks one, per call."
@@ -950,6 +958,26 @@
     "malformed_job_id": {
       "surface": "inline",
       "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
+    },
+    "unknown_grid_code_profile": {
+      "surface": "inline",
+      "why": "campus_grid_readiness was asked for a grid-code profile that is neither shipped nor published in the project. The detail lists the known ones; the assistant picks one of them or asks the user. There is no conversation-wide recovery action."
+    },
+    "continuation_unavailable": {
+      "surface": "inline",
+      "why": "LC-12: a continuation turn named a job with no continuation due to this session (none finished, already continued, the plan was cancelled, the job was aborted, or another session or project). The turn does not start and nothing runs; the panel simply stops offering it."
+    },
+    "invalid_continuation": {
+      "surface": "inline",
+      "why": "LC-12: /stream carried continuation_job_id together with typed words, attachments, a script or checked fields. A continuation is written by the harness, never by the user; the request is refused before any turn."
+    },
+    "task_step_out_of_order": {
+      "surface": "inline",
+      "why": "LC-05: a plan step was called before an earlier step completed (for example the run after a refused edit). Refused before any card or job; the detail names the step it waits on, and the assistant says which earlier step failed and why."
+    },
+    "task_step_waiting": {
+      "surface": "inline",
+      "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
     }
   }
 }

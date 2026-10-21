@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A committed browser journey (`scripts/smoke-flow-shell.mjs`) walks the flow shell (Guided rail, Expert sidebar, mode switch, Issues by section, Run gate) on every example template. Fix: switching Expert to Guided with a component selected and no panel open now lands on that section's card instead of the bare canvas.
