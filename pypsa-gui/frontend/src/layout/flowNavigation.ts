@@ -16,6 +16,14 @@ export function openSectionInExpert(id: FlowSectionId): void {
   else if (open.table) { ui.setSlidePanel(null); ui.requestBottomTab(open.table) }
 }
 
+/** Show a section's card in Guided: set it active and open the Guided hub, so
+ *  the card is on screen (a closed panel would leave only the canvas). */
+export function openSectionInGuided(id: FlowSectionId): void {
+  const ui = useUIStore.getState()
+  ui.setActiveSection(id)
+  ui.setSlidePanel('hubDesign')
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {
