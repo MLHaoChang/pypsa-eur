@@ -57,7 +57,7 @@ async function renderSidebar() {
   return utils
 }
 
-const STEP_IDS = ['model', 'run', 'results', 'studies', 'reports']
+const STEP_IDS = ['setup', 'model', 'run', 'results', 'reports']
 
 // The six PROJECT rows Guided hides (§3.5) and the four it keeps. In Expert,
 // Snapshots and Scenarios are REPORTS rows and the rest sit behind the footer
@@ -90,9 +90,9 @@ describe('Sidebar in Guided mode — expanded', () => {
     expect(screen.queryByText('Select / Pan')).toBeNull()
   })
 
-  it('keeps the Assistant and adds Hub design above PROJECT', async () => {
+  it('adds Hub design above PROJECT, with no Assistant button (the companion is the one entry)', async () => {
     const { container } = await renderSidebar()
-    expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-assistant')).toBeNull()
     const hub = screen.getByTestId('sidebar-hub-design')
     const project = screen.getByTestId('sidebar-section-project')
     // DOM order: Hub design comes before the PROJECT header.
@@ -125,9 +125,9 @@ describe('Sidebar in Guided mode — expanded', () => {
 describe('Sidebar in Guided mode — icon strip', () => {
   beforeEach(() => useUIStore.setState({ uiMode: 'guided', sidebarMode: 'icon' }))
 
-  it('shows Assistant, Hub design and Project; hides the steps and the mode switcher', async () => {
+  it('shows Hub design and Project; hides the steps and the mode switcher', async () => {
     await renderSidebar()
-    expect(screen.getByTestId('sidebar-assistant')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-assistant')).toBeNull()
     expect(screen.getByTestId('sidebar-hub-design')).toBeTruthy()
     expect(screen.getByTestId('sidebar-section-project')).toBeTruthy()
     for (const id of STEP_IDS) expect(screen.queryByTestId(`sidebar-section-${id}`)).toBeNull()

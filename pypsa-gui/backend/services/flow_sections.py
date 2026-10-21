@@ -136,6 +136,10 @@ CODE_SECTION: Final[dict[str, str]] = {
     "unknown_mode": "scenarios",
     "co2_price_no_fossil": "scenarios",
     "voll_no_loads": "scenarios",
+    # Grid-to-process ticket 08 (design §5 table): the lost-production value lives
+    # in 8 beside VoLL; the criticality tier on the demand, in 4.
+    "lost_production_value_below_buy_in": "scenarios",
+    "safety_tier_off_critical_bus": "loads",
     "ens_cap_generous": "scenarios",
     "ens_cap_unsupported_strategy": "scenarios",
     "ens_cap_without_voll": "scenarios",

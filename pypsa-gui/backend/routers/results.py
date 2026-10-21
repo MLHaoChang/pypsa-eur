@@ -439,7 +439,7 @@ def get_process_view():
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return {"available": False, "products": [], "process_units": []}
-    return {"available": True, **compute_process_view(n)}
+    return {"available": True, **compute_process_view(n, _state.get("last_lost_load"))}
 
 
 @results_router.get("/statistics")

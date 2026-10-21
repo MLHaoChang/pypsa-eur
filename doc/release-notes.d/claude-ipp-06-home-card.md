@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): The design preview gains an original illustrative scene for the Renewables IPP with battery example (`ipp.svg`, from `create-industry-art.mjs`), and the example's Home card data (`.scratch/ipp-renewables-bess/home-card.json`) is ready for the workspace redesign to place.
