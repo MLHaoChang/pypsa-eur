@@ -1546,6 +1546,9 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
     {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
     {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+    {"error_kind": "library_reference_unknown"},
+    {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
+    {"error_kind": "reference_confirmation_needed"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -1652,6 +1655,43 @@ def get_library_item(kind: str, name: str, version: int | None = None,
     if kind == "tariff" and detail != "full":
         return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
     return out
+
+
+def list_library_references(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library_references import list_references as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_reference(technology: str, projection_year: int, component: str | None = None,
+                          asset: str | None = None) -> dict:
+    """One shipped reference beside the pack value it would otherwise be. With an asset,
+    the pack is the one that asset's overnight cost was priced from (its provenance)."""
+    from routers.library_references import get_reference as _h
+
+    pack_source = None
+    if (component is None) != (asset is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "library_reference_unknown",
+            "message": "pass component and asset together, or neither"})
+    if asset is not None:
+        from routers.network import get_asset_provenance as _p
+        fields = _route(_p, component, asset)["fields"]
+        pack_source = (fields.get("overnight_cost") or {}).get("source")
+    return _library_call(_h, technology, projection_year,
+                         pack_source=pack_source).model_dump(mode="json")
+
+
+def apply_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                            confirm: list[str] | None = None) -> dict:
+    """Write one shipped reference onto one asset through the network route (the
+    edit card is shown and confirmed before this runs)."""
+    from routers.network_library_reference import ReferenceApplyRun
+    from routers.network_library_reference import apply_library_reference as _h
+
+    body = ReferenceApplyRun(component_class=component_class, name=name, technology=technology,
+                             projection_year=projection_year, confirm=list(confirm or []))
+    return _route(_h, body)
 
 
 def _urdb_rate(data, item_index: int | None = None):
@@ -2421,7 +2461,8 @@ def solve_ppa_price(target_irr: float, target_year: int,
 
     from models.finance import SolvePpa
     from routers.results import (
-        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+        _dispatch_ready, _ic_build_case, _ic_growth_flags, _ic_read_campus,
+        _study_mesh_blocker,
     )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
@@ -2455,7 +2496,7 @@ def solve_ppa_price(target_irr: float, target_year: int,
     # IC G3 R-2: the campus study read the way the route reads it, so the solved
     # price and the report value the same case.
     build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
-                           campus=_ic_read_campus(raw))
+                           campus=_ic_read_campus(raw), growth_flags=_ic_growth_flags())
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2499,9 +2540,11 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
         # IC G3 gate C1: the case's campus flags too, so a price solved without the
-        # campus extras (a stale study, no engine, an unsaved network) says so.
+        # campus extras (a stale study, no engine, an unsaved network) says so; and
+        # E1's growth placeholders, so a price solved on them says so.
         "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
-                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
+                                         *(f for f in case.flags if f.startswith(
+                                             ("campus_study_", "growth_placeholder:")))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,
@@ -7727,6 +7770,9 @@ DISPATCHERS: dict[str, Any] = {
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "list_library_references": list_library_references,
+    "get_library_reference": get_library_reference,
+    "apply_library_reference": apply_library_reference,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c

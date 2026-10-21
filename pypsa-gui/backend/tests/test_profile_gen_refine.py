@@ -242,3 +242,42 @@ def test_replay_refuses_when_the_target_changed():
     ops = [{"op": "set_cap", "value": 0.5, "target": ["generators", "p_max_pu"]}]
     with pytest.raises(RefineReplayError, match="p_max_pu"):
         replay(_ctx(), s, meta, ops, component_type="loads", attribute="p_set")
+
+
+# ── the server resolves the connection ──────────────────────────────────────
+
+@pytest.mark.parametrize("smuggled", [{"resolved_mw": 500.0},
+                                      {"connection": {"value": 1000.0, "hash": "x"}}])
+def test_refine_refuses_a_caller_supplied_resolution(smuggled):
+    _net(poc_mw=100.0)
+    s, meta = _load()
+    with pytest.raises(InvalidRefineOpError, match="recorded by the server"):
+        _refine(s, meta, [{"op": "scale_peak_to", "fraction": 0.75, "of": "connection",
+                           **smuggled}])
+
+
+def test_a_fraction_names_what_it_is_a_fraction_of():
+    _net()
+    s, meta = _load()
+    with pytest.raises(InvalidRefineOpError, match="of must be current_peak or connection"):
+        _refine(s, meta, [{"op": "scale_peak_to", "fraction": 0.75}])
+
+
+def test_replay_refuses_a_non_positive_recorded_mw():
+    _net(tz="Europe/Berlin")
+    s, meta = _load("industrial", {"timezone": "Europe/Berlin"})
+    first = _refine(s, meta, [{"op": "scale_peak_to", "fraction": 0.75, "of": "connection"}])
+    ops = [{**first.meta["refinements"][0], "resolved_mw": -5.0}]
+    with pytest.raises(RefineReplayError, match="op 0.*scale_peak_to"):
+        replay(_ctx(), s, meta, ops, component_type="loads", attribute="p_set")
+
+
+def test_replay_keeps_the_recorded_mw_when_the_connection_link_is_gone():
+    n = _net(tz="Europe/Berlin", poc_mw=100.0)
+    s, meta = _load("industrial", {"timezone": "Europe/Berlin"})
+    first = _refine(s, meta, [{"op": "scale_peak_to", "fraction": 0.75, "of": "connection"}])
+    n.remove("Link", "poc")
+    again = replay(_ctx(), s, meta, first.meta["refinements"],
+                   component_type="loads", attribute="p_set")
+    assert float(again.series.max()) == pytest.approx(75.0)
+    assert any(w.startswith(CONNECTION_CHANGED_WARNING) for w in again.warnings)

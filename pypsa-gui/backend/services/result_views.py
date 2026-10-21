@@ -120,6 +120,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                requires_tools=("get_energy_flows",),
                claim_limits="Energy carriers only; a flow the server cannot prove to conserve "
                             "energy is unavailable, not zero.",
+               checked_profiles=("energy-balance/1",),
                units="MWh"),
     # Gated like flows: the copilot read lands with the catalogue work.
     ResultView("loadshape", _RESULTS, "loadshape", "Load shape",

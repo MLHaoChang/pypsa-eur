@@ -84,6 +84,9 @@ class Operating:
     stage_capex: np.ndarray | None = None
     # (asset, COD year, capex year, amount) per later-stage asset.
     stage_items: tuple[tuple[str, int, int, float], ...] = ()
+    # A difference line's (price leg, reference leg) per year, degraded, summing to its
+    # line (`_two_legs`): only for the revenue-by-stream reader (IPP ticket 05).
+    legs: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
 
     def established(self, section: str) -> bool:
         return self.status.get(section) == "ok"
@@ -126,6 +129,17 @@ def degradation_factor(spec, k: np.ndarray) -> np.ndarray:
     return np.where(k > 0, (1.0 - d) ** np.maximum(k - 1, 0), 0.0)
 
 
+def _two_legs(ln: TemplateLine, r: float, r_ref: float | None, dy: int) -> tuple[float, float]:
+    """A difference line's two legs escalated `dy` years from its money year, before
+    degradation: the price leg (price × volume) at the contract's rate `r`, the
+    reference leg (the rest of the amount, −ref × volume) at the market's `r_ref`
+    (REFERENCE_CLASS). The cash is their sum; the revenue-by-stream reader shows them
+    apart (IPP tickets 01, 05)."""
+    leg_p = ln.price_leg
+    leg_r = ln.amount - leg_p
+    return leg_p * (1.0 + r) ** dy, leg_r * (1.0 + (r_ref or 0.0)) ** dy
+
+
 def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     """Operating cash, capex, replacement, terminal value and EBITDA over the
     axis (plan WP4.1). Unknown inputs make their section not established with
@@ -137,6 +151,7 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
     flags: list[str] = []
     lines: dict[str, np.ndarray | None] = {}
     meta: dict[str, TemplateLine] = {}
+    legs: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     energy: dict[str, np.ndarray | None] = {}
     by_year = _templates_by_year(case, tl)
     line_by_year = [({ln.key: ln for ln in t.lines} if t is not None else {}) for t in by_year]
@@ -202,14 +217,15 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
             if leg_p is not None:
                 # Two legs in one line: the price leg at the contract's rate, the
                 # reference leg at the market's (REFERENCE_CLASS).
-                leg_r = ln.amount - leg_p
                 r_ref = fin.escalation.get(REFERENCE_CLASS)
-                if r_ref is None and leg_r != 0.0:
+                if r_ref is None and ln.amount - leg_p != 0.0:
                     reasons["operating"].append(f"escalation_missing:{REFERENCE_CLASS}:{key}")
                     ok = False
                     break
-                arr[i] = (leg_p * (1.0 + r) ** (int(y) - my)
-                          + leg_r * (1.0 + (r_ref or 0.0)) ** (int(y) - my)) * f_deg[i]
+                p_esc, r_esc = _two_legs(ln, r, r_ref, int(y) - my)
+                arr[i] = (p_esc + r_esc) * f_deg[i]
+                pl, rl = legs.setdefault(key, (np.zeros(tl.n), np.zeros(tl.n)))
+                pl[i], rl[i] = p_esc * f_deg[i], r_esc * f_deg[i]
             else:
                 arr[i] = ln.amount * (1.0 + r) ** (int(y) - my) * f_deg[i]
         lines[key] = arr if ok else None
@@ -344,4 +360,5 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
                      ebitda=ebitda, capex=capex, replacement=replacement, terminal=terminal,
                      energy_mwh=energy, status=status, reasons=reasons, flags=flags,
                      replacement_items=tuple(items), terminal_terms=terminal_terms,
-                     stage_capex=stage_capex, stage_items=tuple(stage_items))
+                     stage_capex=stage_capex, stage_items=tuple(stage_items),
+                     legs={k: v for k, v in legs.items() if lines.get(k) is not None})

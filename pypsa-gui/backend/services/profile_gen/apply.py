@@ -1184,7 +1184,7 @@ def prepare_profile(
     attribute: str = "p_max_pu",
     now: _dt.datetime | str | None = None,
     time_basis: str | None = None,
-) -> dict:
+) -> SimpleNamespace:
     """Everything `assign_profile` decides before it writes — target and
     family checks, alignment, values, warnings, the meta it would store —
     with NOTHING written. The edit card previews exactly this.
