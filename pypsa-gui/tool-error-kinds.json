@@ -255,6 +255,22 @@
       "surface": "inline",
       "why": "An investment-case tool got an argument out of range (an empty owner, a page < 1, a target IRR or year outside the SolvePpa bounds). The model corrects the argument and retries, like invalid_tool_args."
     },
+    "currency_mismatch": {
+      "surface": "inline",
+      "why": "A value in one currency would replace a value priced in another (an EUR Library reference on an asset priced from a non-EUR regional pack). Nothing is converted; the model explains and leaves the value as it is."
+    },
+    "reference_target_unsupported": {
+      "surface": "inline",
+      "why": "apply_library_reference named a class the reference does not price (wind/PV apply to a Generator, an electrolyser to a Link; a StorageUnit is not supported). The model names the right asset or explains."
+    },
+    "reference_confirmation_needed": {
+      "surface": "inline",
+      "why": "apply_library_reference needs the user's explicit confirmation (`missing`: dc_ac, grid_connection or money_year, each with its text). The model asks the user and calls again with confirm naming only what they confirmed."
+    },
+    "library_reference_unknown": {
+      "surface": "inline",
+      "why": "get_library_reference named a technology/projection year the shipped references do not hold, or passed component without asset. The model re-reads list_library_references and retries; a route code surfaced by the Library references route."
+    },
     "library_ref_stale": {
       "surface": "inline",
       "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant panel continues a plan by itself when its solve finishes: a muted "The solve finished · continuing" marker, never while you are typing or a card is open ("Continue now" instead), and a reopened chat still continues. The waiting task card shows the elapsed time and a "Stop waiting" action that leaves the solve running.

@@ -1,15 +1,14 @@
 import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight,
-  FolderOpen, Save, Copy, Upload, FileDown,
-  Download, X, Check, Clock,
+  FolderOpen, Copy, Upload, FileDown,
+  Download, X, Clock,
   MousePointer, ZoomIn, ZoomOut,
   LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  LayoutGrid, Users, Compass, MoreHorizontal,
+  Users, Compass, MoreHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -313,14 +312,13 @@ function SaveNameModal({
 // carries the button that opens the project's actions (the Expert footer).
 function ProjectHeaderCard({
   currentProject, lastSavedIso, dirty, autosaveEnabled, onToggleAutosave,
-  onRename, menu,
+  menu,
 }: {
   currentProject: string | null
   lastSavedIso: string | null
   dirty: boolean
   autosaveEnabled: boolean
   onToggleAutosave: () => void
-  onRename: () => void
   menu?: { open: boolean; onToggle: () => void; controls: string }
 }) {
   // Tick once per minute so "Saved Xm ago" updates without polling the
@@ -350,22 +348,18 @@ function ProjectHeaderCard({
   const savedLine = relative
     ? (dirty ? `Unsaved · last save ${relative}` : `Saved ${relative}`)
     : (dirty ? 'Unsaved changes' : 'Saved')
+  // Plain text: the project is renamed in the header field only (UX-flow #11).
   const renameButton = (
-    <button
-      type="button"
-      onClick={onRename}
-      title="Rename project (header field)"
-      className="flex items-center gap-1.5 w-full text-left group"
-    >
+    <div className="flex items-center gap-1.5 w-full" title={currentProject}>
       <span
         aria-hidden
         className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
         style={{ background: dirty ? '#d97706' : '#16a34a' }}
       />
-      <span className="text-[13px] font-semibold text-text truncate min-w-0 group-hover:underline">
+      <span className="text-[13px] font-semibold text-text truncate min-w-0">
         {currentProject}
       </span>
-    </button>
+    </div>
   )
 
   // The footer card (with `menu`) is one line shorter: the save state and the
@@ -449,8 +443,7 @@ function ProjectSectionContent({
   // section, the icon strip's flyout). 'footer': the Expert sidebar's footer
   // card, its actions behind the card's menu (M2, plan 2026-10-05 §11).
   variant?: 'section' | 'footer'
-  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
-  // home. The hidden rows stay reachable via the palette and the assistant.
+  // Guided mode (spec §3.5): only the header card and Recent. The hidden rows stay reachable via the palette and the assistant.
   guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
@@ -465,7 +458,6 @@ function ProjectSectionContent({
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
     readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
-  const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -479,7 +471,6 @@ function ProjectSectionContent({
   const [pendingReload, setPendingReload] = useState<{ name: string; depthKnown: boolean } | null>(null)
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
-  const navigate = useNavigate()
 
   // The footer card's action menu (variant 'footer' only).
   const [menuOpen, setMenuOpen] = useState(false)
@@ -758,16 +749,6 @@ function ProjectSectionContent({
     return () => clearInterval(id)
   }, [autosaveEnabled, currentProject, networkHasBuses, saveAndExportBundle])
 
-  const handleSave = () => {
-    if (currentProject) saveAndExportBundle(currentProject)
-    else setShowNameModal(true)
-  }
-
-  const handleNameConfirm = (name: string) => {
-    setShowNameModal(false)
-    saveAndExportBundle(name)
-  }
-
   const handleSaveCopy = () => {
     // Always prompt — a "copy" needs a name distinct from the current project.
     // The modal pre-fills "<current>_copy" as a starting point.
@@ -929,13 +910,6 @@ function ProjectSectionContent({
             }}
           />
           )}
-          <SItem
-            icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
-            label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
-            hint={dirty ? '●' : undefined}
-            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
-            onClick={handleSave}
-          />
           {!guided && (<>
           <SItem
             icon={<Copy size={15} />}
@@ -944,7 +918,8 @@ function ProjectSectionContent({
           />
           <SItem
             icon={<FileDown size={15} />}
-            label="Export bundle"
+            label="Export…"
+            title="Export the project: bundle (.pypsaproj.zip), NetCDF, CSV, Excel or MATPOWER."
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
           </>)}
@@ -970,23 +945,13 @@ function ProjectSectionContent({
         </>
       )}
 
-      {/* The old "Workspace" block (New project / Open from disk / Import /
-          From template) now lives on the projects home — creating a project
-          belongs to the workspace, not to whichever network is resident here.
-          All four are the tabs of the same NewProjectWizard, which that page
-          opens directly. What stays is the way BACK to the workspace. */}
-      <SubHdr title="Workspace" />
-      <SItem
-        icon={<LayoutGrid size={15} />}
-        label="Projects home"
-        title="Browse every project you can access, resume the last one, or create / import a new one."
-        onClick={() => { onCloseModal?.(); navigate('/projects') }}
-      />
+      {/* Creating, importing and duplicating a project live on the projects
+          home, reached from the header's breadcrumb (UX-flow #8). */}
       {!guided && (
       <SItem
         icon={<Users size={15} />}
         label="Workspace panel"
-        title="Ownership, edit lock, scenario tree, members, and recent projects for the open project."
+        title="Ownership, edit lock and members of the open project."
         active={activeSlidePanel === 'workspace'}
         onClick={() => {
           setSlidePanel(activeSlidePanel === 'workspace' ? null : 'workspace')
@@ -999,13 +964,6 @@ function ProjectSectionContent({
 
   const modals = (
     <>
-      {showNameModal && (
-        <SaveNameModal
-          initial={slugify(currentProject || pn)}
-          onSave={handleNameConfirm}
-          onClose={() => setShowNameModal(false)}
-        />
-      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}
@@ -1049,14 +1007,6 @@ function ProjectSectionContent({
       dirty={dirty}
       autosaveEnabled={autosaveEnabled}
       onToggleAutosave={() => setAutosaveEnabled(!autosaveEnabled)}
-      // Rename: focuses the header's project-name button. The button's
-      // onFocus handler (`startEditName`) flips to edit mode and schedules
-      // `nameRef.current?.focus().select()` on the new <input>, so a single
-      // .focus() here is enough — no DOM-selection juggling needed.
-      onRename={() => {
-        const el = document.querySelector<HTMLElement>('[data-project-name-editor]')
-        el?.focus()
-      }}
       menu={variant === 'footer'
         ? { open: menuOpen, onToggle: () => setMenuOpen(o => !o), controls: menuId }
         : undefined}

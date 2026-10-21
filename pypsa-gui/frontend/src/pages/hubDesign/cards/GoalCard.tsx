@@ -1,90 +1,31 @@
 // Step 3 — Goal (guided-mode spec §5.3): how much shortfall per year is
 // acceptable, how strict to be on energy (advanced), the price of undelivered
-// energy (read-only, with an assistant fix), then Run — the Expert panel's
-// own `buildEhStudyBody`, so both views start the same study.
-//
-// Running / failed / aborted are read from the study record (P24-BE gate
-// N2), and the running line is this card's own text — never the review
-// route's chat-oriented message (N3).
+// energy (read-only, with an assistant fix). The Run is in section 9,
+// Readiness → run (`shared/GoalStudyRun.tsx`): this card sets the goal.
 import { useEffect, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Play, Square } from 'lucide-react'
-import { resultsApi } from '../../../api/simulation'
-import { useUIStore } from '../../../store/uiStore'
-import { blockerMessage } from '../../../utils/blockerMessage'
-import { nk } from '../../../utils/queryKeys'
-import { buildEhStudyBody, ehStudyQueryKeys } from '../../results/EhReferenceDesignPanel'
+import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
-import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
-import {
-  templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
-} from '../useHubData'
+import { useGoalStudy } from '../useGoalStudy'
 
 export function GoalCard() {
-  const project = useUIStore(s => s.currentProject)
-  const qc = useQueryClient()
-  const { study, running, isPending: studyPending } = useHubStudy()
-  const { template, isPending: templatePending, isError: templateError,
-    refetch: refetchTemplate } = useHubTemplate()
-  const { readiness } = useHubReadiness(template, running, !studyPending && !templatePending)
+  const { project, running, readiness, voll, vollMissing } = useGoalStudy()
   const liveStudy = useLiveStudyRunning()
-  const { data: solverConfig } = useHubSolverConfig()
-  const archetype = useHubDesignStore(s => s.archetype)
   const loleTarget = useHubDesignStore(s => s.loleTarget)
   const ensCap = useHubDesignStore(s => s.ensCap)
   const setLoleTarget = useHubDesignStore(s => s.setLoleTarget)
   const setEnsCap = useHubDesignStore(s => s.setEnsCap)
   const [advanced, setAdvanced] = useState(false)
-  const [blocked, setBlocked] = useState<string | null>(null)
-
-  // Default goal: the template's own override (set on reset), else the pack
-  // default readiness reports for the chosen site type. A pack-seeded value
-  // follows the pack; the user's typing is never overwritten.
-  const packLole = readiness?.pack_defaults?.target_lole_h
+  // A link to the stress editor opens "More settings" once.
+  const advancedRequested = useHubDesignStore(s => s.goalAdvancedRequested)
   useEffect(() => {
-    if (packLole === undefined) return
-    const s = useHubDesignStore.getState()
-    if (s.loleSource === 'template' || s.loleSource === 'user') return
-    const v = packLole == null ? '' : String(packLole)
-    if (s.loleTarget !== v || s.loleSource !== 'pack') s.seedLoleFromPack(v)
-  }, [packLole])
-
-  const form = { ...templateForm(template), loleTarget, ensCap }
-  const built = buildEhStudyBody(archetype, form)
-  const voll = typeof solverConfig?.voll === 'number' ? solverConfig.voll : null
-  const vollMissing = voll != null && !(voll > 0)
-
-  const run = useMutation({
-    mutationFn: () => resultsApi.startEhStudy(built.body!),
-    onMutate: () => setBlocked(null),
-    onSuccess: () => {
-      for (const key of ehStudyQueryKeys(project)) void qc.invalidateQueries({ queryKey: key })
-    },
-    onError: (e: unknown) => setBlocked(blockerMessage(e)),
-  })
-  const abort = useMutation({
-    mutationFn: () => resultsApi.abortEhStudy(),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: nk(project, 'results', 'eh_study') }),
-  })
-
-  const status = study?.status
-  const again = status === 'failed' || status === 'aborted' || status === 'done'
-  const pipeline = study?.report?.pipeline
-  // Plain words, and a count only when the record has one — never "0 of N".
-  const budget = pipeline?.budget_solves ?? study?.budget_solves
-  const elapsed = formatElapsed(useElapsed(running))
-  const runningText = (pipeline?.budget_solves && typeof pipeline.solves_consumed === 'number'
-    ? `Studying… ${pipeline.solves_consumed} of ${pipeline.budget_solves} calculation steps`
-    : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…')
-    + ` · ${elapsed} elapsed`
-  const problem = built.error ?? blocked
-  // P24-FE re-gate note 2: without the template the card would silently run
-  // the default site type's study instead of the template's recommended one.
-  const templateUnknown = templateError && !template
+    if (!advancedRequested) return
+    setAdvanced(true)
+    useHubDesignStore.getState().setGoalAdvancedRequested(false)
+  }, [advancedRequested])
   const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
 
   return (
@@ -126,6 +67,14 @@ export function GoalCard() {
         )}
       </div>
 
+      {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
+      {advanced && (
+        <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
+          <span className="text-[12px] font-semibold text-text">Stress conditions</span>
+          <StressScenarioEditor project={project} />
+        </div>
+      )}
+
       {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
           (UX review L3). */}
       {(advanced || voll == null || vollMissing) && (
@@ -145,52 +94,9 @@ export function GoalCard() {
       </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" data-testid="hub-goal-run"
-          onClick={() => run.mutate()}
-          disabled={running || run.isPending || built.error !== null || vollMissing || !project
-            || templateUnknown}
-          title={templateUnknown ? 'The template could not be read — retry above.' : undefined}
-          className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
-          {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-          {running ? 'Studying…' : again ? 'Run again' : 'Run study'}
-        </button>
-        {running && (
-          <>
-            <span data-testid="hub-goal-running" className="text-[12px] text-muted">{runningText}</span>
-            <button type="button" data-testid="hub-goal-abort" onClick={() => abort.mutate()}
-              title="Stops at the next stage boundary; the network is left as it was."
-              className="inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-muted hover:border-danger hover:text-danger">
-              <Square size={10} /> Abort
-            </button>
-          </>
-        )}
-      </div>
-
-      {templateUnknown && (
-        <p data-testid="hub-goal-template-error" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
-          This project's recommended settings could not be read, so the study cannot start
-          with them yet.
-          <button type="button" data-testid="hub-goal-template-retry"
-            onClick={() => void refetchTemplate()}
-            className="rounded border border-warn/60 px-2 py-0.5 text-[11px] hover:bg-warn/10">
-            Retry
-          </button>
-        </p>
-      )}
-      {problem && (
-        <p data-testid="hub-goal-blocked" className="text-[12px] text-warn">{problem}</p>
-      )}
-      {!running && status === 'failed' && (
-        <p data-testid="hub-goal-error" className="text-[12px] text-danger">
-          The last study failed: {study?.error ?? 'no reason was given'}
-        </p>
-      )}
-      {!running && status === 'aborted' && (
-        <p data-testid="hub-goal-error" className="text-[12px] text-warn">
-          Stopped before the end — the results cover only the parts that finished.
-        </p>
-      )}
+      <p data-testid="hub-goal-run-hint" className="text-[12px] text-muted">
+        The study runs from Readiness → run, once the checks pass; the button below goes there.
+      </p>
     </CardShell>
   )
 }

@@ -22,7 +22,8 @@ class RequestScope(BaseModel):
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
-        "generator-emissions/1", "network-emissions/1", "curtailment/1",
+        "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
+        "storage-cycles/1", "energy-balance/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -35,7 +36,9 @@ class RequestScope(BaseModel):
     comparison_evidence_id: str | None = Field(
         default=None, min_length=36, max_length=36
     )
-    component_class: Literal["Line", "Transformer"] | None = None
+    component_class: Literal[
+        "Line", "Transformer", "Generator", "Link", "StorageUnit", "Store"
+    ] | None = None
 
 
 def validate(value):
@@ -76,8 +79,20 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_lost_load_cost_scope")
-    if scope.get("component_class") and scope["profile"] != "branch-loading/1":
-        raise ValueError("component_class_requires_branch_scope")
+    classed = {"branch-loading/1": ("Line", "Transformer"),
+               "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
+               "storage-cycles/1": ("StorageUnit", "Store")}
+    if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
+        raise ValueError("unsupported_component_class")
+    if scope["profile"] == "energy-balance/1" and (
+        scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("network_scope_required")
+    if scope["profile"] in ("capacity/1", "storage-cycles/1"):
+        if not scope.get("component_class"):
+            raise ValueError("component_class_required")
+        if scope.get("cost_basis") or scope.get("comparison_evidence_id"):
+            raise ValueError("unsupported_result_cost_scope")
     if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
         scope["profile"] in ("branch-loading/1", "network-loading/1")
     ) and not scope.get("component_class"):
@@ -144,6 +159,37 @@ def from_message(message, project_id, ui_context):
             value["component_class"] = loading[2].capitalize()
         if loading[4]:
             value.update(start=loading[4], end=loading[5])
+        return validate(value)
+    balance = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?energy (?:balance|flow totals)\s+for\s+network"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if balance:
+        value = {"version": 1, "profile": "energy-balance/1", "project_id": project_id,
+                 "entity_id": "network", "retain": False}
+        if balance[1]:
+            value.update(start=balance[1], end=balance[2])
+        return validate(value)
+    sized = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(capacity|cycles)\s+for\s+"
+        r"(generator|link|line|transformer|storage\s*unit|store)\s+([^;]{1,128}?)"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if sized:
+        classes = {"generator": "Generator", "link": "Link", "line": "Line", "transformer": "Transformer",
+                   "storageunit": "StorageUnit", "store": "Store"}
+        component_class = classes[re.sub(r"\s+", "", sized[2].lower())]
+        profile = "capacity/1" if sized[1].lower() == "capacity" else "storage-cycles/1"
+        if profile == "storage-cycles/1" and component_class not in ("StorageUnit", "Store"):
+            return None
+        value = {"version": 1, "profile": profile, "project_id": project_id, "entity_id": sized[3],
+                 "component_class": component_class, "retain": False}
+        if sized[4]:
+            if profile == "capacity/1":
+                return None  # a capacity has no window; never drop the request's words
+            value.update(start=sized[4], end=sized[5])
         return validate(value)
     result = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(price|emissions|curtailment)\s+for\s+"

@@ -77,6 +77,8 @@ export default function HubDesignPanel() {
       loleTarget: str(po.target_lole_h),
       ensCap: str(po.ens_cap_permyriad),
     })
+    // A project opened mid-study shows the study where it runs: section 9.
+    if (flow === 'running') useUIStore.getState().setActiveSection('readiness')
     resetWhileFailed.current = failed ? project : null
   }
   useEffect(() => {
@@ -98,7 +100,7 @@ export default function HubDesignPanel() {
   }
 
   // Auto-advance (§5.6): running → done opens Results unless the user moved
-  // the rail since; any → running opens Goal. Every transition re-arms it.
+  // the rail since; any → running opens Readiness → run, where the Run is. Every transition re-arms it.
   const prevStatus = useRef<string | null | undefined>(undefined)
   useEffect(() => { prevStatus.current = undefined }, [project])
   useEffect(() => {
@@ -109,7 +111,8 @@ export default function HubDesignPanel() {
     if (prev === 'running' && status === 'done') {
       if (!s.userMovedRail) s.setStep('results')
     } else if (status === 'running') {
-      s.setStep('goal')
+      // The Run is in section 9 now (design §3.3): show its progress there.
+      useUIStore.getState().setActiveSection('readiness')
     }
     s.clearUserMoved()
   }, [status])
@@ -159,7 +162,7 @@ export default function HubDesignPanel() {
           </div>
         )}
         {settled ? (
-          <SectionView id={viewSection}>
+          <SectionView id={viewSection} onNext={pickSection}>
             {Card ? <Card /> : <GenericSectionCard id={viewSection} />}
           </SectionView>
         ) : (

@@ -13,7 +13,7 @@ Read [E1](E1-examples-any-planning-years.md) and the E1a PR (#540) first.
 
 A staged example built for entered planning years marks a growth value it has no figure for as a placeholder: `growth_inputs` rows with `set: false` in `eh_template.json`, an assumed ledger row, `energization_peak:<period>` unknown in the scorecard, `site_peak.peak_check(unset=)` unknown, and a `growth_placeholder:<kind>_<year>` flag on the investment case and the chat tool's solved PPA price.
 
-Nothing sets one today. Only the template build writes `growth_inputs` (`eh_templates._dc_staged_meta`, and the staged hubs' metas from E1b), and a flow acknowledgement stores an ack, not a value. So editing `grid_import.eh_energization_mw` for 2038 and acknowledging leaves `energization_peak:2038` unknown and the case flagged for good. The notes say so and name this ticket (gatekeeper review of #540, 2026-10-21 20:07 CEST, option (a)).
+Nothing sets one today. Only the template build writes `growth_inputs` (`eh_templates._dc_staged_meta`, and the staged hubs' metas from E1b), and a flow acknowledgement stores an ack, not a value. So editing `grid_import.eh_energization_mw` for 2038 and acknowledging leaves `energization_peak:2038` unknown and the case flagged for good. The notes say so and name this ticket (gatekeeper review of #540, 2026-10-21 19:59 CEST, option (a)).
 
 ## Done when
 

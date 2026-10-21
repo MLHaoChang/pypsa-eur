@@ -340,7 +340,8 @@ def _settle(task, step, native_status, step_status, result):
         step["error"] = "The job's outcome cannot be verified; inspect the solver before retrying."
     step["job"]["outcome"] = native_status
     cancelled = task["status"] == "cancelled"
-    step["job"]["continuation"] = "withdrawn" if cancelled or native_status == "aborted" else "due"
+    stopped = cancelled or native_status == "aborted" or step["job"]["continuation"] == "withdrawn"
+    step["job"]["continuation"] = "withdrawn" if stopped else "due"
     if not cancelled:
         task["status"] = ("completed" if not _next(task) else
                           "needs_review" if step_status == "uncertain" else "ready")
@@ -399,6 +400,21 @@ def _continuation_message(task, job):
     # The plan's title carries the request's words, so the turn is offered the
     # tools its remaining steps need (the 128-tool selection reads the message).
     return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']})"
+
+
+def dismiss_continuation(session, job_id):
+    """"Stop waiting": this conversation will not continue for the job. The
+    job itself runs on; nothing is cancelled."""
+    with _LOCK:
+        for path, task in _owned_tasks():
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                if job.get("job_id") == job_id and job.get("session_id") == session.session_id \
+                        and job.get("continuation") in ("armed", "due"):
+                    job["continuation"] = "withdrawn"
+                    _save(path, task)
+                    return True
+    return False
 
 
 def claim_continuation(session, job_id):
