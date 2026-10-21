@@ -93,9 +93,11 @@ s=start('Renewables IPP with battery — original illustrative scene')+base('#5a
 s+=road(0,300,400,26)+road(250,0,24,300);
 for(const [x,z,h] of [[30,330,112],[40,250,104],[55,170,98],[70,90,92]])s+=turbine(x,z,h);
 s+=solar(110,120,10,3);
-s+=box(292,70,40,34,20,'#a6b5c3','#5d7088','#3a4d66')+batteries(292,130,4);
-for(let i=0;i<4;i++)s+=box(298+i*8,76,3,3,34,'#c4d2de','#7d93a8','#4d637c');
-s+=line([[312,87,36],[360,60,46],[396,40,52]],'#ff7f72',2.2,'opacity=".9"')+pylon(396,40,52);
+// The substation: a low control house, two transformers and a short gantry the line leaves from.
+s+=box(292,92,26,22,12,'#a6b5c3','#5d7088','#3a4d66')+batteries(292,130,4);
+for(const x of [296,312])s+=box(x,70,10,12,9,'#b9c7d3','#6b8199','#3f5570');
+s+=line([[300,64,0],[300,64,22]],'#c9d8e3',1.6)+line([[322,64,0],[322,64,22]],'#c9d8e3',1.6)+line([[300,64,22],[322,64,22]],'#c9d8e3',1.6);
+s+=line([[322,64,22],[360,52,40],[396,40,52]],'#ff7f72',2.2,'opacity=".9"')+pylon(396,40,52);
 for(let i=20;i<240;i+=34)s+=tree(i,392,8);
 for(let i=40;i<300;i+=36)s+=tree(392,i+40,8);
 s+=line([[8,8,4],[394,8,4],[394,394,4]],'#b4cad3',.9,'opacity=".6"');
