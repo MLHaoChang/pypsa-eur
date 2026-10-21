@@ -83,7 +83,7 @@ def validate(value):
                "capacity/1": ("Generator", "Link", "StorageUnit", "Store", "Line", "Transformer"),
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
-        raise ValueError("component_class_requires_branch_scope")
+        raise ValueError("unsupported_component_class")
     if scope["profile"] in ("capacity/1", "storage-cycles/1"):
         if not scope.get("component_class"):
             raise ValueError("component_class_required")
@@ -171,7 +171,9 @@ def from_message(message, project_id, ui_context):
             return None
         value = {"version": 1, "profile": profile, "project_id": project_id, "entity_id": sized[3],
                  "component_class": component_class, "retain": False}
-        if sized[4] and profile == "storage-cycles/1":
+        if sized[4]:
+            if profile == "capacity/1":
+                return None  # a capacity has no window; never drop the request's words
             value.update(start=sized[4], end=sized[5])
         return validate(value)
     result = re.fullmatch(

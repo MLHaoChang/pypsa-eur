@@ -19,6 +19,9 @@ REL_TOLERANCE = 1e-8
 REFUSALS = frozenset({
     "unknown_storage", "component_class_required", "unsupported_storage_boundary",
     "unsupported_snapshot_scope", "misaligned_source",
+    # Raised by the StorageUnit profile's own source, named here too.
+    "unknown_storage_unit", "unsupported_storage_inflow", "unsupported_storage_spill",
+    "misaligned_storage_output", "misaligned_storage_weights", "unsupported_storage_snapshot_scope",
 })
 METRICS = {
     "window_discharged_energy": {
@@ -49,10 +52,15 @@ def _store(ctx, entity):
     n = ctx.network
     index = n.snapshots
     component = n.components["Store"]
+    if not component.static.index.is_unique:
+        raise ValueError("misaligned_source")
     row = component.static.loc[entity]
+    if _number(row["sign"]) != 1:
+        raise ValueError("unsupported_storage_boundary")
     for attribute in ("p", "e"):
         table = component.dynamic.get(attribute)
-        if table is None or not table.index.equals(index) or entity not in table.columns:
+        if (table is None or not table.index.equals(index) or not table.columns.is_unique
+                or entity not in table.columns):
             raise ValueError("misaligned_source")
     return {
         "duration": [_number(v) for v in n.snapshot_weightings["stores"].reindex(index)],
@@ -115,19 +123,19 @@ def _store_energy(unit, a, b):
     capacity = unit["capacity"]
     if not common.finite([capacity]) or capacity < 0:
         return None
-    previous = unit["initial"]
+    # PyPSA's cyclic rule closes the loop: the first snapshot follows the last.
+    previous = unit["e"][-1] if unit["cyclic"] else unit["initial"]
     for i in range(len(unit["p"])):
         dt, p, e, lo, hi, loss = (unit[k][i] for k in ("duration", "p", "e", "e_min_pu", "e_max_pu", "standing_loss"))
         if not common.finite([dt, p, e, lo, hi, loss]) or dt <= 0:
             return None
         if not lo * capacity - ABS_TOLERANCE <= e <= hi * capacity + ABS_TOLERANCE:
             return None
-        if not unit["cyclic"]:
-            if previous is None:
-                return None
-            expected = (1 - loss) ** dt * previous - dt * p
-            if not math.isclose(e, expected, rel_tol=REL_TOLERANCE, abs_tol=ABS_TOLERANCE):
-                return None
+        if previous is None:
+            return None
+        expected = (1 - loss) ** dt * previous - dt * p
+        if not math.isclose(e, expected, rel_tol=REL_TOLERANCE, abs_tol=ABS_TOLERANCE):
+            return None
         previous = e
     return math.fsum(unit["duration"][i] * max(unit["p"][i], 0.0) for i in range(a, b + 1)), capacity
 
@@ -153,6 +161,8 @@ def calculate(raw, scope):
 
 
 def notes(raw):
-    if raw["unit"]["cyclic"]:
+    # A cyclic Store's balance is checked around the loop; only a cyclic
+    # StorageUnit is limited to its bounds.
+    if raw["component_class"] == "StorageUnit" and raw["unit"]["cyclic"]:
         return ["Cyclic unit: the state-of-charge trajectory is not verified, only its bounds."]
     return []

@@ -135,3 +135,41 @@ def test_a_store_state_off_its_balance_is_unavailable(tank, checked):
     ctx.network.stores_t.e.iloc[0, 0] = 3  # the balance says 4
     assert reasons(ask(checked, ctx, "storage-cycles/1", "Tank", "Store", {})) == {
         "invalid_or_missing_storage_trajectory"}
+
+
+def test_a_cyclic_store_is_checked_around_its_loop(tank, checked):
+    tank.network.stores.at["Tank", "e_cyclic"] = True
+    ctx = solve(tank)
+    e = list(ctx.network.stores_t.e.Tank)
+    assert e[-1] == pytest.approx(0)  # the loop closes where it started
+    values = {"window_discharged_energy": 4, "energy_capacity": 10, "equivalent_cycles": 0.4}
+    frames = ask(checked, ctx, "storage-cycles/1", "Tank", "Store", values)
+    assert answered(checked, frames) == pytest.approx(values)
+    assert "not verified" not in public_text(frames)
+
+
+def test_a_store_with_a_reversed_sign_is_refused(tank, checked):
+    tank.network.stores.at["Tank", "sign"] = -1
+    ctx = solve(tank)
+    assert reasons(ask(checked, ctx, "storage-cycles/1", "Tank", "Store", {})) == {"unsupported_storage_boundary"}
+
+
+def test_a_line_states_mva_and_an_unbounded_build_never_reads_as_at_its_bound(built, checked):
+    n = built.network
+    n.add("Bus", "B2", v_nom=110)
+    n.add("Line", "L12", bus0="B1", bus1="B2", s_nom=8, x=0.1)
+    n.add("Generator", "G3", bus="B1", p_nom_extendable=True, capital_cost=1, marginal_cost=0)
+    ctx = solve(built)
+    frames = ask(checked, ctx, "capacity/1", "L12", "Line", {"optimal_capacity": 8, "capacity_change": 0})
+    assert "Line s_nom in MVA: apparent power." in public_text(frames)
+    built_g3 = float(ctx.network.generators.at["G3", "p_nom_opt"])
+    frames = ask(checked, ctx, "capacity/1", "G3", "Generator",
+                 {"optimal_capacity": built_g3, "capacity_change": built_g3})
+    assert answered(checked, frames) == pytest.approx({"optimal_capacity": built_g3, "capacity_change": built_g3})
+    assert "upper bound" not in public_text(frames)
+
+
+def test_a_window_on_a_capacity_question_is_not_silently_dropped():
+    from harness import assurance_scope
+
+    assert assurance_scope.from_message("Show the capacity for generator G2; from a to b", "p", {}) is None
