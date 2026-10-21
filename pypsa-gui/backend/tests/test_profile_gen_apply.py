@@ -8,7 +8,8 @@ Spec §4's alignment table is implemented EXACTLY — never silent reindexing:
     ``leap_day: dropped``);
   * non-leap weather year onto a leap target → typed refusal (fabricating
     24 h is worse than refusing);
-  * partial-year / sub-hourly / segmented snapshots → typed refusal naming
+  * a partial-year or segmented hourly window → sliced from the weather
+    year (test_profile_gen_snapshot_window.py); sub-hourly → typed refusal naming
     the supported shapes;
   * MultiIndex (multi-investment-period) snapshots → tile the weather year
     into EVERY period by month-day-hour, leap rules per period (owner
@@ -125,7 +126,7 @@ def test_nonleap_source_on_leap_target_refuses():
     assert KEY not in _user_ts_meta
 
 
-def test_partial_year_snapshots_refuse():
+def test_partial_year_snapshots_take_the_weather_years_same_hours():
     n = PyPSAService.get_network()
     idx = pd.date_range("2024-01-01T00:00", "2024-01-31T23:00", freq="h")
     idx.name = "snapshot"
@@ -134,8 +135,11 @@ def test_partial_year_snapshots_refuse():
     n.add("Carrier", "solar")
     n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
     series, meta = _weather(year=2024)
-    with pytest.raises(UnsupportedSnapshotsError, match="full calendar year"):
-        assign_profile(_ctx(), "Solar", series, meta)
+    out = assign_profile(_ctx(), "Solar", series, meta)
+    assert out["window"] == {"first": "2024-01-01 00:00:00",
+                             "last": "2024-01-31 23:00:00", "hours": 744, "runs": 1}
+    assert float(_user_ts[KEY].loc["2024-01-15T12:00"]) == float(
+        series.loc["2024-01-15T12:00"])
 
 
 def test_subhourly_snapshots_refuse():
@@ -151,7 +155,7 @@ def test_subhourly_snapshots_refuse():
         assign_profile(_ctx(), "Solar", series, meta)
 
 
-def test_segmented_snapshots_refuse():
+def test_segmented_snapshots_are_a_window_of_two_runs():
     n = PyPSAService.get_network()
     week1 = pd.date_range("2024-01-01T00:00", periods=168, freq="h")
     week2 = pd.date_range("2024-07-01T00:00", periods=168, freq="h")
@@ -162,8 +166,8 @@ def test_segmented_snapshots_refuse():
     n.add("Carrier", "solar")
     n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
     series, meta = _weather(year=2024)
-    with pytest.raises(UnsupportedSnapshotsError, match="contiguous"):
-        assign_profile(_ctx(), "Solar", series, meta)
+    out = assign_profile(_ctx(), "Solar", series, meta)
+    assert (out["window"]["hours"], out["window"]["runs"]) == (336, 2)
 
 
 # ── multi-investment-period tiling (owner ruling D7=B) ──────────────────────
@@ -565,7 +569,7 @@ def test_an_unknown_time_basis_is_a_typed_refusal():
     assert KEY not in _user_ts_meta
 
 
-def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
+def test_a_template_week_takes_an_hourly_profile_and_refuses_a_daily_one():
     n = PyPSAService.get_network()
     idx = pd.date_range("2025-01-06T00:00", periods=168, freq="h")
     idx.name = "snapshot"
@@ -574,12 +578,13 @@ def test_the_partial_year_refusal_says_what_to_do_on_a_template_week():
     n.add("Carrier", "solar")
     n.add("Generator", "Solar", bus="B1", carrier="solar", p_nom=100.0)
     series, meta = _weather(year=2025)
+    assert assign_profile(_ctx(), "Solar", series, meta)["window"]["hours"] == 168
+    daily, dmeta = _weather_res(year=2025, resolution="daily")
     with pytest.raises(UnsupportedSnapshotsError) as err:
-        assign_profile(_ctx(), "Solar", series, meta)
+        assign_profile(_ctx(), "Solar", daily, dmeta)
     msg = str(err.value)
-    assert "full-year hourly" in msg
-    assert "representative" in msg
-    assert "upload" in msg
+    assert "daily or weekly" in msg
+    assert "hourly profile, sliced to its snapshot window" in msg
 
 
 # ── gatekeeper notes on #396 (2026-10-20) ───────────────────────────────────
