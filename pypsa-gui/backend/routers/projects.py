@@ -1454,7 +1454,9 @@ _TEMPLATE_DEFAULT_NAMES = {
 _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "solver_config.json",
                       # The island sidecar (plan 2026-10-07 campus island, I1).
-                      "island_config.json")
+                      "island_config.json",
+                      # Pre-built sensitivity cases, data only until S5 (IPP ticket 04).
+                      "cases.json")
 
 
 def _eh_templates_module():
