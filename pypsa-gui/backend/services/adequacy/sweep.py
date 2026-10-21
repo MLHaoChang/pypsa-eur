@@ -601,7 +601,8 @@ def _process_loss_rows(network, rows, *, restored) -> None:
     from services.adequacy.process_loss import expected_outage_loss
     from services.solver.process_uc import process_mask
 
-    if network.links.empty or not process_mask(network.links).any():
+    links = getattr(network, "links", None)
+    if links is None or links.empty or not process_mask(links).any():
         return
     for row in rows:
         if row["failure_mode"] is None:
