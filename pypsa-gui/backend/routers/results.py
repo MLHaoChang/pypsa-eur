@@ -914,7 +914,11 @@ def get_curtailment_by_cause():
     if not _dispatch_ready(n):
         return _not_solved()
     commercial = getattr(_state.get("solver_config"), "commercial", None)
-    payload = curtailment_by_cause(n, commercial)
+    try:
+        payload = curtailment_by_cause(n, commercial)
+    except Exception:                                   # noqa: BLE001 — as /curtailment does
+        logger.exception("results endpoint failed; returning 204 (see traceback)")
+        payload = None
     return _not_solved() if payload is None else payload
 
 

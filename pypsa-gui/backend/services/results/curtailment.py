@@ -169,7 +169,7 @@ def compute_curtailment(n, from_, to_):
 #: The causes, in display order. `other` is curtailment at neither cause (a full
 #: battery, an import-side limit), so the causes always sum to the total.
 CURTAILMENT_CAUSES = ("export_limit", "negative_price", "both", "other")
-# The export Link counts as at its limit within this share of its capacity.
+# The export Link counts as at its limit within this share of its effective limit.
 _AT_LIMIT_REL = 1e-6
 
 
@@ -201,25 +201,25 @@ def curtailment_by_cause(n, commercial):
                  "available_mwh": float(((p[g] + frame[g]).to_numpy() * w).sum())}
         for g in frame.columns}
 
-    def refused(reason: str) -> dict:
+    def not_established(reason: str) -> dict:
         return {"status": "not_established", "reason": reason, "plants": plants}
 
     cfg = LP._parse(commercial) if commercial else None
     link = cfg.export_link if cfg is not None else None
     if link is None or link not in n.links.index:
-        return refused("export_link_missing")
+        return not_established("export_link_missing")
     prices = n.links_t.get(LP.EXPORT_PRICE_ATTR)
     if prices is None or link not in getattr(prices, "columns", ()):
-        return refused("export_price_missing")
+        return not_established("export_price_missing")
     record = (getattr(n, "meta", None) or {}).get(LP.META_LINKS)
     if not record:
-        return refused("no_commercial_solve_record")
+        return not_established("no_commercial_solve_record")
     if LP.energy_record_state(n, cfg, record) == "config":
         # The price frame is the current config's, not the one this dispatch was solved with.
-        return refused("export_price_changed_since_solve")
+        return not_established("export_price_changed_since_solve")
     price = prices[link].reindex(frame.index).to_numpy(dtype=float)
     if np.isnan(price).any():
-        return refused("export_price_missing")
+        return not_established("export_price_missing")
     cap = float(n.links.at[link, "p_nom_opt" if n.links.at[link, "p_nom_extendable"]
                            else "p_nom"])
     pu_t = n.links_t.p_max_pu
@@ -228,7 +228,7 @@ def curtailment_by_cause(n, commercial):
                                                   index=frame.index)).to_numpy(dtype=float)
     limit = cap * pu
     flow = n.links_t.p0[link].reindex(frame.index).fillna(0.0).to_numpy(dtype=float)
-    at_limit = flow >= limit - _AT_LIMIT_REL * cap
+    at_limit = flow >= limit * (1.0 - _AT_LIMIT_REL) - 1e-9
     negative = price < 0.0
     masks = {"export_limit": at_limit & ~negative, "negative_price": negative & ~at_limit,
              "both": at_limit & negative, "other": ~at_limit & ~negative}

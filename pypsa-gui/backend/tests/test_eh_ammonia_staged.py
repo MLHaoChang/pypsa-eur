@@ -514,5 +514,8 @@ def test_revenue_by_stream_names_what_it_cannot_place():
     from services.finance.timeline import build_timeline
 
     _n, case = _case("base", site_today=False)
-    out = revenue_by_stream(build_operating(case, build_timeline(case)))
+    op = build_operating(case, build_timeline(case))
+    out = revenue_by_stream(op)
     assert out["other_keys"] == ["asset:opex:Generator:__buy_nh3"]
+    rows = sum(np.array(r["values"], dtype=float) for r in out["rows"])
+    np.testing.assert_allclose(rows, op.revenue - op.costs, rtol=1e-9, atol=1e-6)
