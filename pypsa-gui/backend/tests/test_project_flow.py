@@ -355,7 +355,8 @@ def _assert_equivalent(client, monkeypatch, name) -> dict:
 
 
 R4_TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
-                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
+                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged",
+                "eh_ipp_hybrid"]
 
 
 @pytest.mark.parametrize("tid", R4_TEMPLATES)
@@ -511,6 +512,12 @@ TEMPLATE_STATES = {
                   "connection": "warning", "loads": "complete",
                   "assets": "warning", "profiles": "complete",
                   "commercial": "complete", "scenarios": "complete"},
+    # Generation-only (IPP ticket 03): no Load, so loads `not_needed` and no study.
+    # Assumed limits (connection) and finance, tax and charges (commercial) read warning.
+    "eh_ipp_hybrid": {"project": "warning", "carriers": "complete",
+                      "connection": "warning", "loads": "not_needed",
+                      "assets": "complete", "profiles": "complete",
+                      "commercial": "warning", "scenarios": "complete"},
 }
 
 
@@ -675,3 +682,29 @@ def test_section_for_component_uses_the_flows_connection(client, site, bound_ctx
         assert section_for_component(n, cfg, None, "Link", "grid_import")["id"] == "connection"
         assert section_for_component(n, cfg, None, "Generator", "gas") == {
             "id": "assets", "label": "Assets & sizing", "panel": None}
+
+
+def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_projects_dir,
+                                                                  edit, bound_ctx):
+    """The generation-only rule is keyed on the network too: a Load added to an IPP project
+    brings the loads rules, the VOLL rule and the study back, as on any EH template. The flag
+    is the PROJECT's stored template meta (`read_template`), so a created project carries it."""
+    from services import flow_service
+
+    name = _create(client, "eh_ipp_hybrid", "ipp")
+    from services import network_lengths
+
+    with bound_ctx(client):
+        project_dir = network_lengths.active_project_dir()
+    assert flow_service.read_template(project_dir)["generation_only"] is True
+    fresh = _flow(client, name)
+    assert _states(fresh)["loads"] == "not_needed"
+    assert fresh["run_request"]["study"] is False
+    with edit() as n:
+        n.add("Load", "aux", bus="poi", p_set=1.0)
+    body = _flow(client, name)
+    assert _states(body)["loads"] in ("incomplete", "warning", "complete")
+    assert "presence_loads" not in _codes(body, "loads")
+    assert body["run_request"]["study"] is True
+    assert "presence_voll" in _codes(body, "scenarios")      # the template ships VoLL 0
+

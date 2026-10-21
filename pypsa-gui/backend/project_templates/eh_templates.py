@@ -1202,6 +1202,27 @@ def _register_ammonia() -> None:
 
 _register_ammonia()
 
+#: Templates that ship price series (`price_series/`, minted at create; IPP ticket 02): id →
+#: a writer of the directory, called by `write_sidecars`.
+PRICE_SERIES: dict = {}
+
+
+def _register_ipp() -> None:
+    """The renewables IPP (``eh_ipp.py``, IPP renewables + BESS ticket 03)."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_ipp.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_ipp", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_ipp()
 
 # ── Grid-readiness markings (DC grid readiness 02, UX review) ───────────────
 #
@@ -1305,6 +1326,8 @@ def write_sidecars(out_dir, template_id: str) -> None:
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
         json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
+    if template_id in PRICE_SERIES:
+        PRICE_SERIES[template_id](out_dir)
     if template_id in ISLAND_CONFIG:
         (out_dir / ISLAND_FILE).write_text(
             json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

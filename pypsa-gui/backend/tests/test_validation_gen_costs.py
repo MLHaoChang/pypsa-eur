@@ -133,6 +133,8 @@ _EXEMPT = {
     "eh_microgrid_staged": {"pv_plant", "wind_turbines"},
     # The ammonia hub (grid-to-process 05) is the staged H2 hub's generators plus two priced slacks.
     "eh_ammonia_staged": {"grid_supply", "wind_farm", "solar_park"},
+    # The renewables IPP (IPP ticket 03): the market-side slack (the prices are on the meter).
+    "eh_ipp_hybrid": {"grid"},
 }
 
 
