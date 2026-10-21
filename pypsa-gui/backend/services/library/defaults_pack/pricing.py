@@ -41,7 +41,9 @@ class CapacityBasisMismatch(ValueError):
     unambiguously to what the row's capacity measures."""
 
 
-#: Bus carriers that are electricity, and the carrier of a product-priced technology's output.
+#: Bus carriers that are electricity (a bus with any other carrier, e.g. "low voltage", is refused,
+#: which errs safe: a refusal, never a misprice), and the carrier of a product-priced technology's
+#: output.
 ELECTRIC_CARRIERS = frozenset({"AC", "DC", "electricity"})
 PRODUCT_CARRIER = {"haber-bosch": "NH3"}
 
@@ -80,14 +82,16 @@ def _carrier(n, bus) -> str:
 
 
 def _link_outputs(n, df, name) -> list[tuple[str, float]]:
-    """(carrier, efficiency) of each bus a Link delivers to, bus1 upwards."""
+    """(carrier, efficiency) of each bus a Link delivers to, bus1 upwards. A bus with an efficiency
+    of zero or less (e.g. `efficiency2` -0.3) is drawn from, an input, and never an output."""
     out = []
     for i in range(1, 10):
         col = f"bus{i}"
         if col not in df.columns or not str(df.at[name, col]).strip():
             continue
-        eff = df.at[name, "efficiency" if i == 1 else f"efficiency{i}"]
-        out.append((_carrier(n, df.at[name, col]), float(eff)))
+        eff = float(df.at[name, "efficiency" if i == 1 else f"efficiency{i}"])
+        if eff > 0:
+            out.append((_carrier(n, df.at[name, col]), eff))
     return out
 
 

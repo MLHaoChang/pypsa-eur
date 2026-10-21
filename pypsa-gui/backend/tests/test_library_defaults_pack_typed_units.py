@@ -558,3 +558,17 @@ def test_a_battery_that_includes_the_connection_warns_and_a_customised_field_doe
         "commercial.grid_connection_double_count"]
     provenance.mark_customised(n, "StorageUnit", "s", ["inv_power_overnight"])
     assert _connection_double_count(n, object()) == []
+
+
+def test_an_electric_input_bus_never_matches_an_output_basis():
+    """A Link's bus2 at efficiency2 < 0 is an INPUT: an `output_electric` row must not scale by
+    it (it wrote a negative overnight cost)."""
+    from services.library.defaults_pack.pricing import CapacityBasisMismatch, price_from_pack
+
+    n = _net()
+    n.add("Link", "mix", bus0="h2", bus1="nh3", bus2="ac", p_nom_extendable=True,
+          efficiency=0.5, efficiency2=-0.3)
+    before = n.links.copy()
+    with pytest.raises(CapacityBasisMismatch):
+        price_from_pack(n, "links", "mix", "fuel-cell", version=TYPED)
+    assert n.links.equals(before), "a refusal writes nothing"
