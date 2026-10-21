@@ -271,6 +271,15 @@ component (`frontend/src/components/EditCard.tsx`).
   the card outside the digest (`section_state`); the receipt adds `section`
   with the state after the write and whether it `changed`. The browser's
   "Show in Properties" selects the component in place; the chat stays open.
+- **Equipment tables (data-to-model slice 1).** `apply_equipment_mapping`
+  writes a mapped CSV/XLSX table onto assets of one class
+  (`services/equipment_table.py`). Each typed row also carries `source`
+  (upload id, filename, full sha256, sheet, row, column, cell, raw value and
+  unit) and, for a cost, `money`; left-out cells ride as `note` rows with
+  `gap`. Changed table bytes refuse (`source_changed`). The live write loops
+  the native update per asset, so a refusal part-way returns `partial` with
+  `written`, `failed` and `not_attempted`; the turn's undo snapshot reverts
+  the whole table in one step.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
