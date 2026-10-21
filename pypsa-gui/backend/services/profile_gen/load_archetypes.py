@@ -96,9 +96,10 @@ class _Clock:
         if timezone:
             try:
                 local = idx.tz_localize("UTC").tz_convert(timezone).tz_localize(None)
-            except Exception as exc:  # noqa: BLE001 — pytz/zoneinfo raise many types
+            except Exception:  # noqa: BLE001 — pytz/zoneinfo raise many types,
+                # and zoneinfo's text can carry the server's tzdata path
                 raise InvalidArchetypeParamsError(
-                    f"timezone {timezone!r} is not an IANA zone ({exc})") from None
+                    f"timezone {timezone!r} is not an IANA zone") from None
         else:
             local = idx
         self.hour = local.hour.to_numpy()

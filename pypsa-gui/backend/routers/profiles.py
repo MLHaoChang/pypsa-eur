@@ -57,6 +57,7 @@ from services.profile_gen.apply import (
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.engine import ProfileGenError
+from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
 from services.profile_gen.job import KEEP_PENDING, pending_io_lock, write_pending
 from services.profile_gen.availability import (
@@ -394,7 +395,8 @@ def list_profile_presets(technology: str | None = None):
     try:
         found = presets.list_presets(technology)
     except ProfileGenError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422,
+                            detail=public_message(exc, route="presets")) from exc
     return {
         "presets": [
             {
@@ -439,7 +441,8 @@ def estimate_profile(body: EstimateRequest):
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="estimate")},
         ) from exc
     # Hourly previews are downsampled to daily means for the map; coarser
     # resolutions are already compact enough to return as-is.
@@ -516,12 +519,14 @@ def generate_profiles(
     except CdsCredentialError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": "cds_credential", "message": str(exc)},
+            detail={"error_kind": "cds_credential",
+                    "message": public_message(exc, route="generate")},
         ) from exc
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={"error_kind": _error_kind(exc), "message": str(exc)},
+            detail={"error_kind": _error_kind(exc),
+                    "message": public_message(exc, route="generate")},
         ) from exc
 
     project = _row(proj, db)
@@ -574,7 +579,7 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
                                 component_type="loads", attribute="p_set")
         except ProfileApplyError as exc:
             stats[col]["modelled_mwh"] = None
-            warnings.add(f"not_applicable: {exc}")
+            warnings.add(f"not_applicable: {public_message(exc, route='load_preview')}")
             continue
         stats[col]["modelled_mwh"] = pv["modelled_mwh"]
         warnings.update(pv["warnings"])
@@ -630,7 +635,8 @@ def generate_load_profiles(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_generate")},
         ) from exc
 
     job_id = str(uuid.uuid4())
@@ -680,7 +686,8 @@ async def upload_load_profiles(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="load_upload")},
         ) from exc
     matched = list(up.frame.columns)
     unmatched = up.unmatched
@@ -832,7 +839,8 @@ def apply_profile(
     except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
         raise HTTPException(
             status_code=422,
-            detail=f"pending profile for job {body.job_id!r} is unreadable: {exc}",
+            detail=(f"pending profile for job {body.job_id!r} is unreadable: "
+                    f"{public_message(exc, route='apply', job_id=body.job_id)}"),
         ) from exc
     series = pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
                        name=body.component, dtype=float)
@@ -889,7 +897,8 @@ def apply_profile(
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="apply", job_id=body.job_id)},
         ) from exc
 
     from routers.simulation import _state_update
@@ -942,14 +951,16 @@ def shape_profile(
             raise HTTPException(
                 status_code=422,
                 detail={"error_kind": "unreachable_target",
-                        "message": f"{point}: {exc}",
+                        "message": f"{point}: "
+                                   f"{public_message(exc, route='reshape', job_id=body.job_id)}",
                         "point": point,
                         "reachable_max": exc.reachable_max},
             ) from exc
         except ProfileGenError as exc:
             raise HTTPException(
                 status_code=422,
-                detail={"error_kind": _error_kind(exc), "message": str(exc)},
+                detail={"error_kind": _error_kind(exc),
+                        "message": public_message(exc, route="reshape", job_id=body.job_id)},
             ) from exc
 
     # Reshaping a shaped artifact extends its chain: the ops accumulate in
