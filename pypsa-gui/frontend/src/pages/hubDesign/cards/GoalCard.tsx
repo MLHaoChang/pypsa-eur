@@ -23,6 +23,11 @@ import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import {
   templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
 } from '../useHubData'
+import { ScopeCards } from '../../../components/flowScope/ScopeCards'
+import { useInScope } from '../../../components/flowScope/useFlowScope'
+
+export const RELIABILITY_OUT_OF_SCOPE =
+  'Outside scope: add Reliability › Reliability goal & study above to set a goal and run the study.'
 
 export function GoalCard() {
   const project = useUIStore(s => s.currentProject)
@@ -40,6 +45,10 @@ export function GoalCard() {
   const setEnsCap = useHubDesignStore(s => s.setEnsCap)
   const [advanced, setAdvanced] = useState(false)
   const [blocked, setBlocked] = useState<string | null>(null)
+  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
+  // hides and the study is not run. VOLL stays: the optimisation prices lost
+  // load with it (modular-cards §2).
+  const reliabilityOn = useInScope('reliability', 'goal_study')
 
   // Default goal: the template's own override (set on reset), else the pack
   // default readiness reports for the chosen site type. A pack-seeded value
@@ -89,6 +98,13 @@ export function GoalCard() {
 
   return (
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
+      <ScopeCards testId="hub-scope-cards" />
+      {!reliabilityOn && (
+        <p data-testid="hub-goal-out-of-scope" className="text-[12px] text-muted">
+          {RELIABILITY_OUT_OF_SCOPE}
+        </p>
+      )}
+      {reliabilityOn && <>
       <label className="flex flex-col gap-1 text-[12px]">
         <span className="font-semibold text-text">
           <Term k="shortfall_hours">Allowed shortfall (hours per year)</Term>
@@ -125,6 +141,7 @@ export function GoalCard() {
           </label>
         )}
       </div>
+      </>}
 
       {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
           (UX review L3). */}
@@ -149,8 +166,9 @@ export function GoalCard() {
         <button type="button" data-testid="hub-goal-run"
           onClick={() => run.mutate()}
           disabled={running || run.isPending || built.error !== null || vollMissing || !project
-            || templateUnknown}
-          title={templateUnknown ? 'The template could not be read — retry above.' : undefined}
+            || templateUnknown || !reliabilityOn}
+          title={templateUnknown ? 'The template could not be read — retry above.'
+            : !reliabilityOn ? RELIABILITY_OUT_OF_SCOPE : undefined}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {running ? 'Studying…' : again ? 'Run again' : 'Run study'}

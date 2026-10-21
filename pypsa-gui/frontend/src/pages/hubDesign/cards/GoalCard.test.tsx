@@ -14,7 +14,7 @@ import { buildEhStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../resul
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
-import { GoalCard } from './GoalCard'
+import { GoalCard, RELIABILITY_OUT_OF_SCOPE } from './GoalCard'
 import { nk } from '../../../utils/queryKeys'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
@@ -30,7 +30,16 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The scope (W4a): unread by default, so every block shows; one test reads
+// a scope with Reliability off.
+const getFlowScope = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+})
+
 beforeEach(() => {
+  getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
@@ -305,5 +314,26 @@ describe('GoalCard while a risk check runs (A1-FE)', () => {
       client.setQueryData(nk('Demo', 'results', 'fmea_modes'), { per_mode: [], sweep_status: 'done' })
     })
     await waitFor(() => expect(fix.disabled).toBe(false))
+  })
+})
+
+describe('GoalCard scope (W4a)', () => {
+  it('with Reliability off the goal hides, VOLL stays and the study cannot start', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [], preset_id: 'eh_datacenter',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
+    mount()
+    expect((await screen.findByTestId('hub-goal-out-of-scope')).textContent)
+      .toBe(RELIABILITY_OUT_OF_SCOPE)
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
+    const run = screen.getByTestId('hub-goal-run') as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(run.title).toBe(RELIABILITY_OUT_OF_SCOPE)
   })
 })

@@ -12,6 +12,7 @@ import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
+import { ScopeCards } from '../components/flowScope/ScopeCards'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
 // touch, and an "advanced" key:value table that flows straight into
@@ -283,6 +284,10 @@ export default function SolverSettings() {
         Solver-specific knobs (HiGHS / Gurobi options, presolve, raw <code>solver_options</code>)
         live under the <span className="font-medium text-text">Solver</span> tab.
       </p>
+
+      {/* Section 8's first decision (W4a): the work cards the Run computes,
+          the same component Guided and the Builder mount. */}
+      <ScopeCards testId="expert-scope-cards" />
 
       {/* ── Clustering ─────────────────────────────────────── */}
       <ClusteringSection />

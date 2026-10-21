@@ -50,6 +50,17 @@ warning. Errors cannot be acknowledged.
 
 eh_readiness copies the network; its result is cached per (network revision,
 VOLL, template hash, solver-config hash).
+
+The scope (W4a, ``services/flow_scope.py``): the cards and sub-options the Run
+computes, from ``flow_scope.json`` or the template's preset. The study is
+requested only with Reliability › goal & study. Each item carries ``card`` and
+``in_scope``; an item outside the scope (``in_scope: false``) does not count
+toward its section's state, is not in ``notes`` or the "to do / to check"
+count, and never blocks. Only items whose kind or card the scope removes are
+outside it: the study's and its readiness preview's when the study is not
+requested, the finance and value-flow bind checks when Commercial is off, and a
+ledger row naming a ``card`` that is off. ``validate_for_run`` items are what
+``/run`` refuses, so they always stay in scope.
 """
 from __future__ import annotations
 
@@ -62,6 +73,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from services import flow_scope as S
 from services import flow_sections as F
 
 logger = logging.getLogger(__name__)
@@ -117,6 +129,20 @@ PRESENCE_RULES: dict[str, tuple[str, str]] = {
     "presence_loads": ("loads", "c"),
     "presence_assets": ("assets", "c"),
     "presence_voll": ("scenarios", "c"),
+}
+
+# A solver option the scope leaves out but the solver settings still switch on
+# (W4a): the Run still does it, so it is said, display-only, beside Run. The
+# run kinds that turn these into scope-driven requests are W4b's.
+_SCOPE_CONFIG_OPTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("sclopf", "grid", "n1_sclopf", "N-1 security (SCLOPF)"),
+    ("run_ac_pf_after_lopf", "grid", "load_flow", "the load flow after the optimisation"),
+)
+
+# Bind checks owned by a card: outside the scope while that card is off.
+_BIND_CARD: dict[str, str] = {
+    "finance_inputs_invalid": "commercial", "finance_bind_failed": "commercial",
+    "value_flows_invalid": "commercial",
 }
 
 
@@ -183,6 +209,10 @@ def _item(code: str, severity: str, message: str, source: str, section: str, *,
         # A server refusal (R1): it, and only it, makes `run_ready` false.
         "blocking": blocking,
         "acknowledged": False,
+        # The work card the item belongs to (W4a), and whether the scope holds
+        # it; set by `_apply_scope`.
+        "card": None,
+        "in_scope": True,
         # The acknowledgement key's value: stripped before the payload leaves.
         "_value": message if value is None else value,
     }
@@ -573,6 +603,7 @@ def _assumed_items(template: dict) -> list[dict]:
         label = str(row.get("label") or _humanise(item))
         message = f"{label}: {shown} (assumed) — confirm it or set your own."
         section = row.get("section")
+        card = row.get("card") if row.get("card") in S.CARD_BY_ID else None
         if section in F.INPUT_SECTIONS:
             # A row that names its own target (DC-02's rows): filed there, and
             # coded per item so two rows on one entity keep separate acks.
@@ -581,10 +612,12 @@ def _assumed_items(template: dict) -> list[dict]:
                              entity=str(row.get("entity") or ""),
                              fld=str(row.get("field") or ""),
                              panel=row.get("panel"), value=str(value or "")))
+            out[-1]["card"] = card
             continue
         out.append(_item("assumed_default", "warning", message, "template",
                          ledger_section(item) or "project", entity=item,
                          value=str(value or "")))
+        out[-1]["card"] = card
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
     if energ:
@@ -625,6 +658,41 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool) -> list[d
             "The reliability study needs a value of lost load (VOLL > 0) for its "
             "frontier and stress stages.", fld="voll")
     return out
+
+
+# ── Scope (W4a) ─────────────────────────────────────────────────────────────
+
+def _scope_config_items(cfg: dict, scope: dict) -> list[dict]:
+    """A solver option switched on in the settings while its sub-option is out
+    of scope: the Run still does it, so say so (display-only)."""
+    out = []
+    for key, card, option, what in _SCOPE_CONFIG_OPTIONS:
+        if cfg.get(key) and not S.selected(scope, card, option):
+            label = S.CARD_BY_ID[card].label
+            out.append(_item("scope_option_configured", "warning",
+                             f"The solver settings switch on {what}, but {label} › "
+                             f"{dict(S.CARD_BY_ID[card].options)[option]} is not in scope: "
+                             "the Run still includes it. Select it, or switch it off in "
+                             "the solver settings.", "flow", "scenarios", fld=key,
+                             entity=key))
+            out[-1]["card"] = card
+    return out
+
+
+def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> None:
+    """Tag each item with its card and whether the scope holds it. An item
+    outside the scope never blocks."""
+    for it in items:
+        if it["source"] in ("eh_study", "eh_readiness"):
+            it["card"] = "reliability"
+            it["in_scope"] = study_requested
+        elif it["code"] in _BIND_CARD:
+            it["card"] = _BIND_CARD[it["code"]]
+            it["in_scope"] = S.selected(scope, it["card"])
+        elif it["card"] is not None and it["code"] != "scope_option_configured":
+            it["in_scope"] = S.selected(scope, it["card"])
+        if not it["in_scope"]:
+            it["blocking"] = False
 
 
 # ── Acknowledgements ────────────────────────────────────────────────────────
@@ -753,6 +821,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     from services.pypsa_service import PyPSAService
 
     template = read_template(project_dir)
+    scope = S.read_scope(project_dir, template)
     body = _request_for(template) if template is not None else None
     islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
@@ -773,10 +842,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
 
     # What the one Run does (design §3.3, W4): the optimisation always; the
     # reliability study too for a project made from an EH template (the
-    # hub-design Guided flow). Until section 8 has a run-mode setting (B2),
-    # that is the whole rule; its study refusal is checked and its VOLL noted
-    # for exactly those projects.
-    study_requested = template is not None
+    # hub-design Guided flow) whose scope selects Reliability › goal & study
+    # (W4a). Its VOLL is noted for exactly those projects; its refusal is
+    # checked for every EH project and kept, out of scope, when not requested.
+    study_requested = template is not None and S.selected(scope, "reliability", "goal_study")
     run_request = {"optimisation": True, "study": study_requested}
 
     if deferred is not None:
@@ -794,7 +863,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                  "run_request": run_request,
                  "verdicts": {"optimisation": not_ready,
                               "study": not_ready if study_requested else None},
-                 "notes": [], "deferred": True, "deferred_reason": reason}, [])
+                 "notes": [], "scope": scope, "deferred": True,
+                 "deferred_reason": reason}, [])
 
     items: list[dict] = []
     presence = _presence(facts, islanded=islanded, study_requested=study_requested)
@@ -807,7 +877,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template)
     items += _bind_items(facts, db, org_id, project_dir, n)
+    items += _scope_config_items(facts.cfg_dict, scope)
+    _apply_scope(items, scope, study_requested=study_requested)
     _apply_acks(items, read_acks(project_dir))
+    needed = S.needed_sections(scope)
 
     required = {s: True for s in F.INPUT_SECTIONS}
     required["profiles"] = facts.snapshots > 1
@@ -820,11 +893,15 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                                "items": [_strip(it) for it in mine],
                                "summary": _summary(s, facts)}
         if s in F.INPUT_SECTIONS:
-            errors = any(it["severity"] == "error" for it in mine)
-            blocking = any(it["blocking"] for it in mine)
+            # Only what the scope holds counts (W4a, §5.2).
+            counted = [it for it in mine if it["in_scope"]]
+            errors = any(it["severity"] == "error" for it in counted)
+            blocking = any(it["blocking"] for it in counted)
             warnings = any(it["severity"] == "warning" and not it["acknowledged"]
-                           for it in mine)
-            if s == "connection" and islanded and not blocking:
+                           for it in counted)
+            if s not in needed and not blocking:
+                state = "not_needed"
+            elif s == "connection" and islanded and not blocking:
                 state = "not_needed"
             elif errors:
                 state = "incomplete"
@@ -834,13 +911,14 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                 state = "complete"
             row.update(state=state, required=required[s] and state != "not_needed")
             if state == "not_needed":
-                row["summary"] = "Off-grid: no grid connection needed"
+                row["summary"] = ("Not needed by the cards in scope" if s not in needed
+                                  else "Off-grid: no grid connection needed")
         else:
             row.update(state=None, required=False)
         rows.append(row)
 
     by_id = {r["section"]: r for r in rows}
-    shown = [it for r in rows for it in r["items"]]
+    shown = [it for r in rows for it in r["items"] if it["in_scope"]]
     todo = sum(1 for it in shown if it["severity"] == "error")
     check = sum(1 for it in shown if it["severity"] == "warning" and not it["acknowledged"])
     by_id["readiness"]["summary"] = f"{todo} to do, {check} to check"
@@ -853,7 +931,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # `run_ready` is the AND over the kinds the Run requests (R1).
     def first_blocking(sources: tuple[str, ...]) -> dict | None:
         return next((_pointer(r["label"], it) for r in rows for it in r["items"]
-                     if it["blocking"] and it["source"] in sources), None)
+                     if it["blocking"] and it["in_scope"] and it["source"] in sources), None)
 
     opt_blocker = first_blocking(("validation",))
     study_blocker = first_blocking(("eh_study",))
@@ -865,12 +943,13 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # Notes: every display-only gap (a non-blocking error, or a presence rule's
     # warning such as the missing site location) not yet acknowledged.
     notes = [_pointer(r["label"], it) for r in rows for it in r["items"]
-             if not it["blocking"] and not it["acknowledged"]
+             if not it["blocking"] and not it["acknowledged"] and it["in_scope"]
              and (it["severity"] == "error" or it["code"] in PRESENCE_RULES)
              and r.get("state") != "not_needed"]
     return ({"sections": rows, "run_ready": blocker is None, "run_blocker": blocker,
              "run_request": run_request, "verdicts": verdicts,
-             "notes": notes, "deferred": False, "deferred_reason": None}, items)
+             "notes": notes, "scope": scope, "deferred": False, "deferred_reason": None},
+            items)
 
 
 def acknowledge_item(project_dir: pathlib.Path, code: str, entity: str | None, *,

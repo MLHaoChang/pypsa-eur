@@ -129,8 +129,9 @@ def test_an_item_carries_its_target(client, site, edit):
     row = next(s for s in body["sections"] if s["section"] == "loads")
     item = next(i for i in row["items"] if i["severity"] == "error")
     assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
-                         "acknowledged"}
+                         "acknowledged", "card", "in_scope"}
     assert item["source"] == "validation" and item["blocking"] is True
+    assert item["card"] is None and item["in_scope"] is True
     assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
                               "entity": "it", "field": None}
     assert body["run_blocker"]["section"] == "loads"

@@ -4,6 +4,9 @@ The project flow routes (project-workflow B1, design §3.1).
   * ``GET  /api/projects/{name}/flow``: one row per flow section with its state
     and items, plus ``run_ready`` / ``run_blocker`` (``services/flow_service``).
   * ``POST /api/projects/{name}/flow/ack``: acknowledge a standing warning.
+  * ``GET  /api/projects/{name}/flow/scope``: the work cards, this project's
+    availability and preset, and its scope (W4a, ``services/flow_scope``).
+  * ``PUT  /api/projects/{name}/flow/scope``: store the scope.
 
 Read-only over the existing checks: ``/run`` keeps its own ``validate_for_run``.
 The flow reads the FOREGROUND network, so a project that is not the open one
@@ -87,3 +90,43 @@ def ack_flow_item(body: FlowAck,
         raise HTTPException(exc.status, {"error_kind": exc.error_kind,
                                           "message": exc.message}) from exc
     return {"ack": ack}
+
+
+@router.get("/{name}/flow/scope")
+def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """``{scope, cards, preset_id, preset}``: the project's scope (stored, or its
+    template's preset) and the cards the scope component draws. Reads only the
+    project's sidecars, so the project need not be open."""
+    from services import flow_scope
+
+    template = flow_service.read_template(project.directory)
+    return {"scope": flow_scope.read_scope(project.directory, template),
+            **flow_scope.registry(template)}
+
+
+@router.put("/{name}/flow/scope")
+def put_flow_scope(body: dict,
+                   project: AuthorizedProject = ProjectAccessDep,
+                   db: DBSession = Depends(get_db),
+                   user: User | None = Depends(optional_user)) -> dict:
+    """Store ``{version, groups, options}`` in ``flow_scope.json``. 422 with a
+    typed kind: ``flow_scope_invalid`` (shape), ``flow_scope_unknown`` (an id),
+    ``flow_scope_unavailable`` (a sub-option not yet available),
+    ``flow_scope_required`` (a locked card or sub-option switched off). 409:
+    another user's edit lock."""
+    from routers.projects import _check_project_lock
+    from services import flow_scope
+
+    try:
+        lock_target = SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
+    except (TypeError, ValueError):
+        lock_target = None
+    if lock_target is not None:
+        _check_project_lock(db, lock_target, user)
+    template = flow_service.read_template(project.directory)
+    try:
+        scope = flow_scope.write_scope(project.directory, body, template)
+    except flow_scope.ScopeError as exc:
+        raise HTTPException(422, {"error_kind": exc.error_kind,
+                                  "message": exc.message}) from exc
+    return {"scope": scope}

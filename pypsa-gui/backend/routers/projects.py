@@ -121,7 +121,10 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  "library_refs.json",
                  # The project flow's acknowledged warnings (B1).
                  # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
-                 "flow_acks.json")
+                 "flow_acks.json",
+                 # The project's scope: the work cards the Run computes (W4a).
+                 # `test_flow_scope` pins it equal to flow_scope.SCOPE_FILE.
+                 "flow_scope.json")
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the
