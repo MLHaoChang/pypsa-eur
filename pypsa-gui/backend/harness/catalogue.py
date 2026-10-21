@@ -1579,16 +1579,52 @@ TOOLS: list[dict[str, Any]] = [
         "refused (their weather profile). Apply warns when it replaces an "
         "existing series, when a must-run floor exceeds what the bus can "
         "absorb, and that a floor on a committable unit is a min stable "
-        "level; relay those. `project_id` is the project NAME and must be "
-        "the open project. Safety: execution.",
+        "level; relay those. With component_type \"links\" the same kinds "
+        "act on process links (bounds on p0): a shutdown on a two-way link "
+        "closes both directions; a floor on a two-way or point-of-connection "
+        "link is refused. `generators` then names the links. "
+        "`project_id` is the project NAME and must be the open project. "
+        "Safety: execution.",
         {"project_id": {"type": "string"},
          "kind": {"type": "string",
                   "enum": ["maintenance", "must_run", "derating",
                            "forced_outages"]},
          "generators": {"type": "array", "items": {"type": "string"}},
+         "component_type": {"type": "string", "enum": ["generators", "links"]},
          "params": {"type": "object"},
          "year": {"type": "integer"}},
         ["project_id", "kind", "generators"],
+    ),
+    _t(
+        "generate_series_profile",
+        "Generate another model series into the pending store (nothing "
+        "changes until apply_generated_profile writes it to the target it "
+        "states). Kinds: tou → marginal_cost of generators (or links with "
+        "params.component_type \"links\", per MWh of p0): params.periods "
+        "are tariff periods {name, rate, months, weekdays, start_hour, "
+        "end_hour}, first match wins, every hour priced, plus currency, "
+        "price_basis and currency_year: a currency, basis or year the "
+        "project's finance inputs set and that differs is refused; one they "
+        "leave unset is accepted with a money_basis_unverified warning; "
+        "inflow → storage-unit inflow: annual_mwh with shape "
+        "snowmelt|rain_fed|flat or 12 monthly shares; cop → link efficiency "
+        "of a heat pump whose bus0 is electricity: source air|ground, "
+        "sink_c, source_c (ground), eta, cop_max; an air source takes the "
+        "project's data-centre ambient, or ambient_annual_mean_c, "
+        "ambient_seasonal_amplitude_k and ambient_diurnal_amplitude_k "
+        "stated, else it is refused (cop_ambient_unknown); hours whose "
+        "COP falls below 1 are raised to 1 and warned. market is refused until "
+        "market price bundles exist; part_load is refused (it depends on "
+        "the dispatch). A price on a point-of-connection link is refused: "
+        "set the tariff. `project_id` is the project NAME and must be the "
+        "open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "kind": {"type": "string",
+                  "enum": ["tou", "inflow", "cop", "market", "part_load"]},
+         "components": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "kind", "components"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -3161,6 +3197,11 @@ TOOLS: list[dict[str, Any]] = [
         "smoothing), reactive range, frequency support and the profile's "
         "dynamic requirements (always unknown: an EMT study is needed), grid "
         "former, island ride-through per scenario, LOLE against the goal. "
+        "With an AI-training load and a committed battery/UPS, the ramp, "
+        "oscillation and voltage-change rows also carry after_battery {value, "
+        "verdict, units, note}: the value after the battery/UPS smooths, judged "
+        "by the same limit; the row's own verdict stays before mitigation, so "
+        "give both. "
         "unknown means an input is missing, never a pass; say which. Say which "
         "limits are assumed. It never blocks a run. 422 for an unknown "
         "profile. Safety: read.",
@@ -3873,7 +3914,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4113,7 +4154,7 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (9)
+    # profile generator (10)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
@@ -4124,6 +4165,8 @@ TOOL_ROUTES: dict[str, list] = {
     "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     "generate_availability_profile": [
         ("POST", "/api/projects/{name}/profiles/availability/generate")],
+    "generate_series_profile": [
+        ("POST", "/api/projects/{name}/profiles/series/generate")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
