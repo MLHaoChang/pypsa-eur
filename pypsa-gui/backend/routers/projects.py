@@ -121,7 +121,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  "library_refs.json",
                  # The project flow's acknowledged warnings (B1).
                  # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
-                 "flow_acks.json")
+                 "flow_acks.json",
+                 # The user's own grid-readiness limits (DC 03 slice 6):
+                 # services/adequacy/grid_limits.py owns it; the walk in
+                 # `test_bundle_sidecars` pins it to its SIDECAR_NAME.
+                 "grid_readiness_limits.json")
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the

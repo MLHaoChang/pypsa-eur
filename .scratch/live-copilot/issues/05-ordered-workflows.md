@@ -29,3 +29,12 @@ neighbors. Record actual source/commands/results and remaining gates here.
 No new capability is enabled by this issue. Paid calls, reviewer contact,
 deployment and full-coverage/domain-approval claims remain outside this package.
 
+
+## Rules folded in from #567 HV-S (study copilot)
+
+Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), research only; owner decision AI-567 (2026-10-21). Adopt the listed cases into this ticket's own numbering; each must name its token/packet limit.
+- Never mark a step done from a caller-supplied result alone (`resolve_task_step`); read the result back natively before the next step.
+- No replay on resume; an interrupted step resumes or is reported, never re-run silently.
+- A failed step yields a correction draft, never an automatic retry.
+- Superseded by AI-567b: the cross-card study brief is built by the study copilot (ticket 23, #569) on these plans; no separate progress line, the plan card is its one entry point and the card workspace Next row stays the per-card next step.
+- Cases: #567 S-series (see 05-IMPLEMENTATION-AND-TESTS.md).
