@@ -405,6 +405,15 @@ def test_no_battery_shaves_without_a_committed_unit_or_a_ride_through_time(chang
     assert row["firm"][1]["rule"] == "no island sidecar: no battery is counted as firm"
 
 
+def test_a_battery_built_after_the_period_shaves_nothing_in_it():
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load)
+    n.storage_units.at["rt", "build_year"] = 2035
+    (row,) = SP.peak_check(n, island)                               # the 2030 period
+    assert row["firm"][1]["mw"] == 0.0 and row["headroom_mw"] == pytest.approx(-10.0)
+
+
 def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
     """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
     its critical process load, with no genset, needs its peak for the 1 h

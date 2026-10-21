@@ -72,15 +72,39 @@ def firm_genset_mw(n, island: dict | None) -> tuple[float, str]:
     return sum(sizes), "the whole genset fleet (no genset redundancy required)"
 
 
-def ride_through_batteries(n, island: dict | None) -> dict:
-    """The committed ride-through batteries the peak check may shave with:
-    ``{names, p_mw, e_mwh, eta_store, eta_dispatch, reason}``. ``e_mwh`` is
-    deliverable (after ``efficiency_dispatch``); the efficiencies are
-    energy-weighted. The requirements' ``ride_through_storage`` names them
-    (every bess when it is absent, as the schema fills it); an extendable unit
-    counts 0, as an extendable genset does. ``reason`` says why there are
-    none."""
-    none = {"names": [], "p_mw": 0.0, "e_mwh": 0.0, "eta_store": 1.0, "eta_dispatch": 1.0}
+def in_service(df, name: str, year: int | None) -> bool:
+    """A component in service in ``year`` by its build year and lifetime (a
+    build year of 0 is always in service; no year: always)."""
+    if year is None:
+        return True
+    built = float(df.at[name, "build_year"]) if "build_year" in df.columns else 0.0
+    life = float(df.at[name, "lifetime"]) if "lifetime" in df.columns else float("inf")
+    return built <= 0 or built <= year < built + life
+
+
+def committed_storage(n, names, year: int | None = None) -> tuple[list[str], list[str]]:
+    """(committed, unsized) StorageUnits among ``names`` in service in
+    ``year``: committed is fixed with a rating; unsized is extendable, sized
+    by the run, which counts 0 as an extendable genset does."""
+    su = n.storage_units
+    live = [u for u in names if u in su.index and in_service(su, u, year)]
+    unsized = [u for u in live if bool(su.at[u, "p_nom_extendable"])]
+    return [u for u in live if u not in unsized and float(su.at[u, "p_nom"]) > 0], unsized
+
+
+def deliverable_mwh(su, u: str) -> float:
+    """A StorageUnit's deliverable energy: efficiency_dispatch × p_nom × max_hours."""
+    return float(su.at[u, "efficiency_dispatch"]) * float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"])
+
+
+def ride_through_batteries(n, island: dict | None, year: int | None = None) -> dict:
+    """The committed ride-through batteries in service in ``year``:
+    ``{names, unsized, p_mw, e_mwh, eta_store, eta_dispatch, sustained_h,
+    reason}``. ``e_mwh`` is deliverable; the efficiencies are energy-weighted.
+    The requirements' ``ride_through_storage`` names them (every bess when it
+    is absent, as the schema fills it). ``reason`` says why there are none."""
+    none = {"names": [], "unsized": [], "p_mw": 0.0, "e_mwh": 0.0, "eta_store": 1.0,
+            "eta_dispatch": 1.0, "sustained_h": None}
     if not island:
         return {**none, "reason": "no island sidecar: no battery is counted as firm"}
     req = island.get("requirements") or {}
@@ -88,24 +112,24 @@ def ride_through_batteries(n, island: dict | None) -> dict:
     if names is None:
         names = [u for u, d in (island.get("units") or {}).items() if d.get("kind") == "bess"]
     su = n.storage_units
-    names = [u for u in names if u in su.index and not bool(su.at[u, "p_nom_extendable"])
-             and float(su.at[u, "p_nom"]) > 0]
+    names, unsized = committed_storage(n, names, year)
     if not names:
-        return {**none, "reason": "no committed ride-through battery"}
+        return {**none, "unsized": unsized, "reason": "no committed ride-through battery"}
     d = _value(req.get("sustained_h"))
     if not d or float(d) <= 0:
-        return {**none, "reason": "no sustained ride-through time in the island requirements: "
-                                  "no battery is counted as firm"}
+        return {**none, "unsized": unsized,
+                "reason": "no sustained ride-through time in the island requirements: "
+                          "no battery is counted as firm"}
     stored = {u: float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"]) for u in names}
     total = sum(stored.values()) or 1.0
     eta_d = sum(float(su.at[u, "efficiency_dispatch"]) * stored[u] for u in names) / total
     eta_s = sum(float(su.at[u, "efficiency_store"]) * stored[u] for u in names) / total
-    return {"names": names, "p_mw": sum(float(su.at[u, "p_nom"]) for u in names),
-            "e_mwh": eta_d * sum(stored.values()), "eta_store": eta_s, "eta_dispatch": eta_d,
-            "sustained_h": float(d), "reason": None}
+    return {"names": names, "unsized": unsized, "p_mw": sum(float(su.at[u, "p_nom"]) for u in names),
+            "e_mwh": sum(deliverable_mwh(su, u) for u in names), "eta_store": eta_s,
+            "eta_dispatch": eta_d, "sustained_h": float(d), "reason": None}
 
 
-def _named_load(n, names) -> np.ndarray:
+def named_load(n, names) -> np.ndarray:
     """The named loads' total p_set per snapshot (0 where none is in the network)."""
     names = [x for x in names if x in n.loads.index]
     if not names:
@@ -115,20 +139,22 @@ def _named_load(n, names) -> np.ndarray:
     return ts.fillna(static).reindex(n.snapshots).fillna(0.0).sum(axis=1).to_numpy(dtype=float)
 
 
-def outage_reserve_mwh(n, island: dict | None, mask=None, delivered=None) -> tuple[float, str]:
+def outage_reserve_mwh(n, island: dict | None, mask=None, delivered=None,
+                       year: int | None = None) -> tuple[float, str]:
     """The energy the island study keeps in the ride-through batteries at
     every hour (row (a)): max over the hours in ``mask`` of (critical load −
     firm gensets)⁺ × ``sustained_h``, plus the seamless bridge B when a
     grid-forming ride-through battery is in the set: max ``delivered`` import
-    × the slowest genset's (start_s + sync_s). Deliverable MWh, and the words."""
-    rt = ride_through_batteries(n, island)
+    × the slowest genset's (start_s + sync_s). Deliverable MWh, and the words.
+    The batteries are those in service in ``year``."""
+    rt = ride_through_batteries(n, island, year)
     if not rt["names"]:
         return 0.0, rt["reason"]
     units = island.get("units") or {}
     mask = np.ones(len(n.snapshots), dtype=bool) if mask is None else mask
     critical = [u for u, d in units.items() if d.get("kind") == "load" and d.get("critical")]
     g, _ = firm_genset_mw(n, island)
-    short = np.clip(_named_load(n, critical)[mask] - g, 0.0, None)
+    short = np.clip(named_load(n, critical)[mask] - g, 0.0, None)
     d = rt["sustained_h"]
     r = float(short.max()) * d if short.size else 0.0
     words = f"{r:.4g} MWh outage reserve (critical load less firm gensets for {d:g} h)"
@@ -204,6 +230,20 @@ def _energized(n, link: str) -> np.ndarray:
     return capped_mw(n, link, own)
 
 
+def delivered_mw(n) -> np.ndarray | None:
+    """The energized import after each import Link's efficiency, per
+    snapshot; None without an import Link."""
+    links = import_links(n)
+    if not links:
+        return None
+    return sum(_energized(n, l) * float(n.links.at[l, "efficiency"]) for l in links)
+
+
+def period_year(label: str) -> int | None:
+    """The year a period label names (``_periods``), or None."""
+    return int(label) if str(label).isdigit() else None
+
+
 def peak_check(n, island: dict | None) -> list[dict]:
     """One row per period, evaluated hour by hour (gatekeeper review of #435):
     cap(t) = Σ_l E_l(t) × efficiency_l + firm gensets + the batteries' discharge(t),
@@ -228,7 +268,6 @@ def peak_check(n, island: dict | None) -> list[dict]:
     total_e = sum(energized.values())
     delivered = sum(energized[l] * eff[l] for l in links)
     cap0 = delivered + firm_mw
-    rt = ride_through_batteries(n, island)
     hours = _snapshot_hours(n)
     snaps = list(n.snapshots)
     out = []
@@ -237,8 +276,9 @@ def peak_check(n, island: dict | None) -> list[dict]:
         if not idx.size:
             continue
         shave = np.zeros(idx.size)
+        rt = ride_through_batteries(n, island, period_year(label))
         if rt["names"]:
-            reserve, words = outage_reserve_mwh(n, island, mask, delivered)
+            reserve, words = outage_reserve_mwh(n, island, mask, delivered, period_year(label))
             free = max(0.0, rt["e_mwh"] - reserve)
             shave = _shave(load[idx] - cap0[idx], cap0[idx] - load[idx], rt, reserve, hours)
             bess_rule = (f"{rt['p_mw']:g} MW / {rt['e_mwh']:.4g} MWh, {free:.4g} MWh above the "
