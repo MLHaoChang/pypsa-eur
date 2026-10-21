@@ -294,16 +294,17 @@ def test_the_network_charge_in_7a_reaches_the_solve(_module_backend):
 # ── create from template ───────────────────────────────────────────────────
 
 
-def test_from_template_mints_the_series_and_binds_every_block(
-        client, tmp_path, monkeypatch, tmp_projects_dir, bound_ctx):
-    import shutil
-
-    from routers import projects as projects_router
-
-    shutil.copytree(TPL_DIR / TID, tmp_path / TID)
-    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
-    r = client.post(f"/api/projects/from_template/{TID}", params={"name": "ipp"})
+def _create(client, name: str = "ipp"):
+    """From the shipped template directory, as the app does: `network.nc` is a gitignored
+    build artefact, so the route builds the network when it is absent (CI)."""
+    r = client.post(f"/api/projects/from_template/{TID}", params={"name": name})
     assert r.status_code == 200, r.text
+    return r
+
+
+def test_from_template_mints_the_series_and_binds_every_block(client, tmp_projects_dir,
+                                                             bound_ctx):
+    r = _create(client)
     assert r.json().get("solver_config_issues", []) == []
     com = client.get("/api/simulation/solver_config").json()["commercial"]
     assert com["export_price_ref"]["id"] == M.SERIES["base"]
@@ -325,11 +326,11 @@ def test_from_template_mints_the_series_and_binds_every_block(
     assert "library_ref_stale" not in {i["code"] for s in flow["sections"] for i in s["items"]}
 
 
-def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_path, monkeypatch, tmp_projects_dir):
+def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_projects_dir):
     """Issue 03's acceptance (spec §8.2), through GET /flow on the created project. `assumed`
     rows read `warning` until confirmed, as on every template (B1's rule), where the table says
     "complete, with assumed badges"."""
-    name = _created(client, tmp_path, monkeypatch)
+    name = _create(client).json().get("name", "ipp")
     body = client.get(f"/api/projects/{name}/flow").json()
     states = {s["section"]: s["state"] for s in body["sections"]}
     codes = {s["section"]: [i["code"] for i in s["items"]] for s in body["sections"]}
@@ -398,18 +399,6 @@ def test_a_negative_price_hour_settles_nothing_and_the_plants_curtail(solved):
 
 
 # ── both modes: every pre-filled value is editable (spec §8.3) ─────────────
-
-
-def _created(client, tmp_path, monkeypatch, name="ipp"):
-    import shutil
-
-    from routers import projects as projects_router
-
-    shutil.copytree(TPL_DIR / TID, tmp_path / TID)
-    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
-    r = client.post(f"/api/projects/from_template/{TID}", params={"name": name})
-    assert r.status_code == 200, r.text
-    return name
 
 
 def _row(client, path: str, name: str) -> dict:
@@ -524,11 +513,10 @@ BOTH_MODES = [
 
 
 @pytest.mark.parametrize("label,edit,want", BOTH_MODES, ids=[r[0] for r in BOTH_MODES])
-def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_path, monkeypatch,
-                                           tmp_projects_dir):
+def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_projects_dir):
     """Spec §8.3: each value is edited through the route its editor writes (one editor
     component serves Guided and Expert, #444 §4) and reads back as set. The locks of §8.3
     (the meter roles, the grid slack, a baseload share) are not in the table."""
-    _created(client, tmp_path, monkeypatch)
+    _create(client)
     got = edit(client)
     assert got == pytest.approx(want) if isinstance(want, float) else got == want, label
