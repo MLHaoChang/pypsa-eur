@@ -3588,13 +3588,24 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
 
 def generate_availability_profile(project_id: str, kind: str, generators: list,
                                   params: dict | None = None,
-                                  year: int | None = None) -> dict:
+                                  year: int | None = None,
+                                  component_type: str = "generators") -> dict:
     from routers.profiles import (
         AvailabilityGenerateRequest,
         generate_availability_profiles as _h,
     )
-    body = AvailabilityGenerateRequest(kind=kind, generators=generators,
+    body = AvailabilityGenerateRequest(kind=kind, components=generators,
+                                       component_type=component_type,
                                        params=params, year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def generate_series_profile(project_id: str, kind: str, components: list,
+                            params: dict | None = None,
+                            year: int | None = None) -> dict:
+    from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
+    body = SeriesGenerateRequest(kind=kind, components=components, params=params,
+                                 year=year)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7687,6 +7698,7 @@ DISPATCHERS: dict[str, Any] = {
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,
+    "generate_series_profile": generate_series_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
