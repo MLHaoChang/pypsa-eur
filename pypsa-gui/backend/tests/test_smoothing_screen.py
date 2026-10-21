@@ -272,3 +272,32 @@ def test_after_battery_oscillation_is_energy_limited_after_the_step():
     ph["reserve_mwh"] = band + 1.0                                   # energy no longer binds
     ph["reserve_mw"] = 14.0                                          # the power term does: 14 − 10
     assert S.after_mitigation(ph)["residual_amplitude_mw"] == pytest.approx(6.0)
+
+
+def test_a_ups_also_named_for_ride_through_is_counted_once():
+    """40 MW / 10 MWh, a UPS and in ride_through_storage, no critical load:
+    its MW counts once (40, not 80) and it keeps its 5 MWh bridge."""
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 30.0})
+    island = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}},
+              "requirements": {"bridge_s": {"value": 600.0}, "sustained_h": {"value": 1.0},
+                               "ride_through_storage": ["ups"]}}
+    (ph,) = _screen(n, island, [_phase(5.0)])["phases"]
+    assert ph["units"] == ["ups"]
+    assert ph["reserve_mw"] == pytest.approx(40.0)
+    assert ph["backup_mwh"] == pytest.approx(5.0) and ph["reserve_mwh"] == pytest.approx(5.0)
+
+
+def test_the_ups_keeps_the_whole_it_load_even_above_its_rating():
+    """Island row (b) holds P_it·bridge_s, not the rating: 50 MW for 600 s is
+    8.33 MWh from a 40 MW UPS."""
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 50.0})
+    (ph,) = _screen(n, UPS, [_phase(5.0)])["phases"]
+    assert ph["backup_mwh"] == pytest.approx(50.0 * 600.0 / 3600.0)
+    assert ph["reserve_mwh"] == pytest.approx(10.0 - 50.0 / 6.0)
+
+
+def test_a_dip_deeper_than_the_swing_sets_the_band():
+    n = _site([("ups", 500.0, 1.0, 1.0, False)], {"it": 0.0})
+    (ph,) = _screen(n, UPS, [_phase(10.0, depth=100.0, duration=600.0)])["phases"]
+    assert ph["checkpoint_mwh"] > ph["step_mwh"]
+    assert ph["need_mwh"] == pytest.approx(2.0 * ph["checkpoint_mwh"])
