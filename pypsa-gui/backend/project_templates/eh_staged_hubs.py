@@ -83,8 +83,26 @@ def _site():
     return mod
 
 
-def _period_years() -> dict[int, int]:
-    return _site().period_years(list(YEARS), HORIZON_END)
+def _period_years(planning=None) -> dict[int, int]:
+    years, end = (YEARS, HORIZON_END) if planning is None else (planning.years, planning.end_year)
+    return _site().period_years(list(years), end)
+
+
+class _HubPlan:
+    """A staged hub for one ``Planning`` (E1b): the periods, the horizon and
+    each growth value by period (the example's same-stage value), with
+    whether it is the example's own (``set``) or a placeholder."""
+
+    def __init__(self, T, template_id: str, planning, values: dict):
+        native = T.NATIVE_PLANNING[template_id]
+        self.planning = planning or native
+        self.native = native
+        self.is_native = self.planning == native
+        staged = T._by_stage(self.planning, native, values)
+        self.years = list(self.planning.years)
+        self.end = self.planning.end_year
+        self.values = {y: v for y, v, _set in staged}
+        self.set = {y: is_set for y, _v, is_set in staged}
 
 
 def _sink_stores(n, existing) -> None:
@@ -107,7 +125,17 @@ def _in_service(n, existing) -> None:
 # ── Industrial Hydrogen Hub, staged ─────────────────────────────────────────
 
 
-def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
+def _h2_plan(T, planning=None) -> _HubPlan:
+    return _HubPlan(T, "eh_h2_hub_staged", planning, H2_OFFTAKE_MW)
+
+
+def _mg_plan(T, planning=None) -> _HubPlan:
+    return _HubPlan(T, "eh_microgrid_staged", planning, MG_LOAD_SCALE)
+
+
+def build_eh_h2_hub_staged(T, planning=None) -> "pypsa.Network":  # noqa: F821
+    plan = _h2_plan(T, planning)
+    years, offtake = plan.years, plan.values
     n = T.build_eh_h2_hub()
     # The single-year candidates give way to one row per period; the fuel
     # cell is the existing 10 MW unit (the pack's fuel cell lives 10 years,
@@ -121,7 +149,7 @@ def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
                 df.drop(columns=name, inplace=True)
     n.links.loc["fuel_cell", ["p_nom_extendable", "p_nom"]] = [False, 10.0]
     # The offtake as a series, so each period scales it.
-    n.loads_t.p_set["h2_offtake"] = np.full(len(n.snapshots), H2_OFFTAKE_MW[YEARS[-1]])
+    n.loads_t.p_set["h2_offtake"] = np.full(len(n.snapshots), offtake[years[-1]])
     n.loads.at["h2_offtake", "p_set"] = 0.0
     # Loss-free PoC: the investment case's counterfactual is the served load
     # at the meter (the ledger says so).
@@ -136,7 +164,7 @@ def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
             net.add("Generator", g, bus="hub", carrier=carrier, p_nom=0.0,
                     p_nom_extendable=True, p_nom_max=pmax, build_year=y)
             T._price(net, "generators", g, tech)
-            net.generators_t.p_max_pu[g] = np.tile(prof, len(YEARS))
+            net.generators_t.p_max_pu[g] = np.tile(prof, len(years))
         b = f"bess_new_{y}"
         net.add("StorageUnit", b, bus="hub", carrier="battery", p_nom=0.0,
                 p_nom_extendable=True, p_nom_max=80.0, max_hours=4.0, efficiency_store=0.95,
@@ -151,29 +179,34 @@ def build_eh_h2_hub_staged(T) -> "pypsa.Network":  # noqa: F821
 
     # The existing electrolyser is 30 MW: 20 MW of H2, the 2027 offtake with room.
     n.links.at["electrolyser", "p_nom"] = 30.0
-    last = H2_OFFTAKE_MW[YEARS[-1]]
+    last = offtake[years[-1]]
     _site().stage_network(
-        n, list(YEARS),
-        load_scale={y: {"h2_offtake": H2_OFFTAKE_MW[y] / last} for y in YEARS},
-        energization={}, weights=_period_years(), existing=H2_EXISTING, candidates=candidates)
+        n, years,
+        load_scale={y: {"h2_offtake": offtake[y] / last} for y in years},
+        energization={}, weights=_period_years(planning), existing=H2_EXISTING,
+        candidates=candidates)
     _sink_stores(n, H2_EXISTING)
     _in_service(n, H2_EXISTING)
     n.name = "Industrial Hydrogen Hub (staged growth)"
     return n
 
 
-def _h2_finance() -> dict:
-    cand = [f"{k}_new_{y}" for y in YEARS for k in ("wind", "solar", "bess")]
+def _h2_finance(planning=None) -> dict:
+    """The finance inputs over the planning horizon (None: the example's
+    years): close the year before the first period, the existing hub in
+    service then, the case running to the end year."""
+    years, end = (YEARS, HORIZON_END) if planning is None else (planning.years, planning.end_year)
+    cand = [f"{k}_new_{y}" for y in years for k in ("wind", "solar", "bess")]
     return {
         "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
-        "financial_close": f"{YEARS[0] - 1}-01-01",
-        "cod_by_asset": {a: f"{YEARS[0]}-01-01" for a in H2_EXISTING},
+        "financial_close": f"{years[0] - 1}-01-01",
+        "cod_by_asset": {a: f"{years[0]}-01-01" for a in H2_EXISTING},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
         "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
         "degradation_by_asset": {
             "wind_farm": 0.0, "solar_park": 0.005, "site_battery": 0.0,
             **{a: (0.005 if a.startswith("solar") else 0.0) for a in cand}},
-        "analysis_years": HORIZON_END - YEARS[0],
+        "analysis_years": end - years[0],
         "annualise": False,
         "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
         "replacement_rule": "part_lifetimes",
@@ -188,6 +221,26 @@ GREY_H2 = {"load": "h2_offtake", "price_eur_per_kg": 2.0, "lhv_kwh_per_kg": 33.3
            "co2_t_per_kg": 0.010, "source": "synthetic demo value (grey H2 by SMR)"}
 CO2_PRICE = {"eur_per_t_by_year": {2027: 80.0, 2030: 120.0}, "money_year": 2020,
              "source": "synthetic demo path"}
+
+
+def _co2_price(planning=None) -> dict:
+    """The CO2 path for ``planning``: a start before the path's first year
+    holds the first point from the start year (ledgered "assumed, held from
+    <year>"; gatekeeper E1 condition 5); otherwise the path as shipped. The
+    case's CO2 lines and the baseline's grey-H2 cost both read this one path
+    from the commercial config."""
+    path = CO2_PRICE["eur_per_t_by_year"]
+    first = min(path)
+    if planning is None or planning.start_year >= first:
+        return CO2_PRICE
+    return {**CO2_PRICE, "eur_per_t_by_year": {planning.start_year: path[first], **path}}
+
+
+def _tariff(planning=None) -> dict:
+    """The synthetic tariff, valid from the first period."""
+    if planning is None:
+        return SYNTHETIC_TARIFF
+    return {**SYNTHETIC_TARIFF, "valid_from": f"{planning.start_year}-01-01"}
 
 
 #: The staged H2 hub's island-rows ledger row, measured on the staged plan
@@ -205,24 +258,26 @@ H2_ISLAND_ROWS = {
             "off, the user opts in)"}
 
 
-def _h2_commercial_and_finance(T) -> dict:
+def _h2_commercial_and_finance(T, planning=None) -> dict:
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": SYNTHETIC_TARIFF, "timezone": "UTC",
-         "reference_purchases": [GREY_H2], "co2_price": CO2_PRICE})
-    vf = VFT.build("single_owner", build_eh_h2_hub_staged(T), base).config
+        {"poc_link": "grid_import", "import_tariff": _tariff(planning), "timezone": "UTC",
+         "reference_purchases": [GREY_H2], "co2_price": _co2_price(planning)})
+    vf = VFT.build("single_owner", build_eh_h2_hub_staged(T, planning), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(_h2_finance()).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(_h2_finance(planning)).model_dump(mode="json")}
 
 
 # ── Island Microgrid, staged ────────────────────────────────────────────────
 
 
-def build_eh_microgrid_staged(T) -> "pypsa.Network":  # noqa: F821
+def build_eh_microgrid_staged(T, planning=None) -> "pypsa.Network":  # noqa: F821
+    plan = _mg_plan(T, planning)
+    years = plan.years
     n = T.build_eh_microgrid()
     for comp, name in (("Generator", "diesel_new"), ("StorageUnit", "bess_new")):
         n.remove(comp, name)
@@ -248,29 +303,30 @@ def build_eh_microgrid_staged(T) -> "pypsa.Network":  # noqa: F821
             net.add("Generator", v, bus="island", carrier=carrier, p_nom=0.0,
                     p_nom_extendable=True, p_nom_max=pmax, build_year=y)
             T._price(net, "generators", v, tech)
-            net.generators_t.p_max_pu[v] = np.tile(prof, len(YEARS))
+            net.generators_t.p_max_pu[v] = np.tile(prof, len(years))
 
     _site().stage_network(
-        n, list(YEARS), load_scale=MG_LOAD_SCALE, energization={}, weights=_period_years(),
+        n, years, load_scale=plan.values, energization={}, weights=_period_years(planning),
         existing=MG_EXISTING, candidates=candidates)
     _in_service(n, MG_EXISTING)
     n.name = "Island Microgrid (staged growth)"
     return n
 
 
-def _mg_finance() -> dict:
-    cand = [f"{k}_new_{y}" for y in YEARS for k in ("diesel", "bess", "pv", "wind")]
+def _mg_finance(planning=None) -> dict:
+    years, end = (YEARS, HORIZON_END) if planning is None else (planning.years, planning.end_year)
+    cand = [f"{k}_new_{y}" for y in years for k in ("diesel", "bess", "pv", "wind")]
     owned_gen = [a for a in MG_EXISTING if a != "hospital_feeder"]
     return {
         "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
-        "financial_close": f"{YEARS[0] - 1}-01-01",
-        "cod_by_asset": {a: f"{YEARS[0]}-01-01" for a in MG_EXISTING},
+        "financial_close": f"{years[0] - 1}-01-01",
+        "cod_by_asset": {a: f"{years[0]}-01-01" for a in MG_EXISTING},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
         "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
         "degradation_by_asset": {
             **{a: (0.005 if a == "pv_plant" else 0.0) for a in owned_gen},
             **{a: (0.005 if a.startswith("pv") else 0.0) for a in cand}},
-        "analysis_years": HORIZON_END - YEARS[0],
+        "analysis_years": end - years[0],
         "annualise": False,
         "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
         "replacement_rule": "part_lifetimes",
@@ -279,7 +335,7 @@ def _mg_finance() -> dict:
     }
 
 
-def _mg_commercial_and_finance(T) -> dict:
+def _mg_commercial_and_finance(T, planning=None) -> dict:
     """The island's commercial config: the open subsea tie is the PoC (the
     site/grid split seeds from it; it carries nothing), no tariff, and the
     single-owner value flows. The case compares against the island as it
@@ -289,10 +345,10 @@ def _mg_commercial_and_finance(T) -> dict:
     from services.commercial import value_flow_templates as VFT
 
     base = CommercialConfig.model_validate({"poc_link": "subsea_tie", "timezone": "UTC"})
-    vf = VFT.build("single_owner", build_eh_microgrid_staged(T), base).config
+    vf = VFT.build("single_owner", build_eh_microgrid_staged(T, planning), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(_mg_finance()).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(_mg_finance(planning)).model_dump(mode="json")}
 
 
 #: The island's transition RoCoF limit (Hz/s over the 500 ms window): a demo
@@ -325,16 +381,16 @@ def _mg_requirements(T, ride_through_storage: list[str]) -> dict:
     }
 
 
-def _mg_island(T) -> dict:
+def _mg_island(T, years=YEARS) -> dict:
     """The island's own sidecar: diesel droop and a grid-forming battery
     holding the steady island (``seamless``; the tie is open, so there is no
-    import to lose at 0⁺)."""
+    import to lose at 0⁺), with one candidate of each kind per period."""
     bess, pv, wind = _mg_island_blocks(T)
     units: dict[str, dict] = {f"diesel_{i}": T._genset_island() for i in range(1, 4)}
     units["island_battery"] = copy.deepcopy(bess)
     units["pv_plant"] = copy.deepcopy(pv)
     units["wind_turbines"] = copy.deepcopy(wind)
-    for y in YEARS:
+    for y in years:
         units[f"diesel_new_{y}"] = T._genset_island(unit_mw=T._a(3.0))
         units[f"bess_new_{y}"] = copy.deepcopy(bess)
         units[f"pv_new_{y}"] = copy.deepcopy(pv)
@@ -342,7 +398,7 @@ def _mg_island(T) -> dict:
     units["hospital_load"] = {"kind": "load", "critical": True}
     units["residential"] = {"kind": "load", "critical": False}
     return {"units": units,
-            "requirements": _mg_requirements(T, ["island_battery", *[f"bess_new_{y}" for y in YEARS]])}
+            "requirements": _mg_requirements(T, ["island_battery", *[f"bess_new_{y}" for y in years]])}
 
 
 def _mg_island_single_year(T) -> dict:
@@ -363,64 +419,138 @@ def _mg_island_single_year(T) -> dict:
 # ── The registries ──────────────────────────────────────────────────────────
 
 
-def _stages_meta(peaks: dict[int, float], note: str) -> list[dict]:
-    return [{"year": y, "peak_mw": round(peaks[y], 2), "note": note} for y in YEARS]
+def _stages_meta(peaks: dict[int, float], note: str, plan: _HubPlan | None = None) -> list[dict]:
+    """The projected-load stages (``plan`` None: the example's years, as the ammonia hub reads)."""
+    if plan is None:
+        return [{"year": y, "peak_mw": round(peaks[y], 2), "note": note} for y in YEARS]
+    return [{"year": y, "peak_mw": round(peaks[y], 2),
+             "note": note if plan.set[y] else
+             f"placeholder: the example's same-stage value; not set for {y}"}
+            for y in plan.years]
 
 
-_COMMON_LEDGER = [
-    {"item": "discount rate", "value": "7 % nominal", "source": "assumed",
-     "note": "the solve discounts each period's costs at it"},
-    {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+def _common_ledger(plan: _HubPlan | None = None) -> list[dict]:
+    """The ledger rows both staged hubs share (``plan`` None: the example's years)."""
+    native = plan is None or plan.is_native
+    y0, end = (YEARS[0], HORIZON_END) if plan is None else (plan.years[0], plan.end)
+    return [
+        {"item": "discount rate", "value": "7 % nominal", "source": "assumed",
+         "note": "the solve discounts each period's costs at it"},
+        {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+             "source": "assumed",
+             "note": "held flat to the base year, then escalated from it at the case's rates; "
+                     "nothing is converted with a price index"
+                     + ("" if native else
+                        "; entering other planning years does not re-date the pack's money "
+                        "year (per-period cost sourcing is a separate follow-up)")},
+        {"item": "finance inputs", "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, "
+                                            f"close {y0 - 1}-01-01, to {end}",
          "source": "assumed",
-         "note": "held flat to the base year, then escalated from it at the case's rates; "
-                 "nothing is converted with a price index"},
-    {"item": "finance inputs", "value": "nominal EUR, escalation 2 %/yr, all equity at 7 %, close 2026-01-01, to 2045", "source": "assumed",
-     "note": "pre-tax; a later stage's capex is paid a year before its COD"},
-]
+         "note": "pre-tax; a later stage's capex is paid a year before its COD"},
+    ]
+
+
+#: The example's shared rows (the ammonia hub reads them).
+_COMMON_LEDGER = _common_ledger()
+
+
+def _planned_meta(T, meta: dict, plan: _HubPlan, kind: str, values: dict,
+                  extra_ledger: list[dict]) -> dict:
+    """``meta`` built for entered years (E1): ``growth_inputs`` (each growth
+    value set or a placeholder), the planning block, and the planning-period
+    and placeholder ledger rows. The example's own years: ``meta`` as is."""
+    if plan.is_native:
+        return meta
+    native = plan.native
+    growth = T._growth_rows(kind, [(y, values[y], plan.set[y]) for y in plan.years])
+    meta["growth_inputs"] = growth
+    meta["planning"] = {"start_year": plan.years[0], "end_year": plan.end,
+                        "periods": plan.years, "native_periods": list(native.years),
+                        "native_end_year": native.end_year}
+    meta["ledger"] = [
+        {"item": "planning period",
+         "value": f"{' / '.join(map(str, plan.years))} → {plan.end} (entered)",
+         "source": "entered",
+         "note": (f"the example is built for {T._years_text(native.years)} → "
+                  f"{native.end_year}; each period's years run to the next, the last to the end "
+                  "year, and the solve discounts them (auto_discount_periods)")},
+        *meta["ledger"], *extra_ledger, *T._placeholder_ledger(growth, native)]
+    return meta
+
+
+def _measured(text: str, plan: _HubPlan) -> str:
+    """A note measured on the example's plan, said so when built for other years."""
+    if plan.is_native:
+        return text
+    return text.replace("on this plan", "on the example's plan (" + " / ".join(
+        map(str, plan.native.years)) + ")")
 
 
 def register(T) -> None:
     """Add both staged hubs to ``eh_templates``' registries (``T`` is that
     module, passed in so this one never imports it)."""
-    T.BUILDERS["eh_h2_hub_staged"] = lambda: build_eh_h2_hub_staged(T)
-    T.BUILDERS["eh_microgrid_staged"] = lambda: build_eh_microgrid_staged(T)
+    T.BUILDERS["eh_h2_hub_staged"] = \
+        lambda load_spec=None, planning=None: build_eh_h2_hub_staged(T, planning)
+    T.BUILDERS["eh_microgrid_staged"] = \
+        lambda load_spec=None, planning=None: build_eh_microgrid_staged(T, planning)
     T.STRESS_SCENARIOS["eh_h2_hub_staged"] = copy.deepcopy(T.STRESS_SCENARIOS["eh_h2_hub"])
     T.STRESS_SCENARIOS["eh_microgrid_staged"] = copy.deepcopy(T.STRESS_SCENARIOS["eh_microgrid"])
     staged = {"multi_investment_periods": True, "auto_discount_periods": True,
               "discount_rate": DISCOUNT_RATE}
     T.SOLVER_CONFIG_EXTRA["eh_h2_hub_staged"] = dict(staged)
     T.SOLVER_CONFIG_EXTRA["eh_microgrid_staged"] = {**staged, "island_constraints": True}
-    T._SOLVER_CONFIG_BUILT["eh_h2_hub_staged"] = lambda: _h2_commercial_and_finance(T)
-    T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = lambda: _mg_commercial_and_finance(T)
+    T._SOLVER_CONFIG_BUILT["eh_h2_hub_staged"] = \
+        lambda planning=None: _h2_commercial_and_finance(T, planning)
+    T._SOLVER_CONFIG_BUILT["eh_microgrid_staged"] = \
+        lambda planning=None: _mg_commercial_and_finance(T, planning)
     T.ISLAND_CONFIG["eh_microgrid_staged"] = _mg_island(T)
     # Island data on, rows off (the template's solve is unchanged): the grid checks read it.
     T.ISLAND_CONFIG["eh_microgrid"] = _mg_island_single_year(T)
-    T.ISLAND_CONFIG["eh_h2_hub_staged"] = T._h2_hub_island(
-        [f"bess_new_{y}" for y in YEARS], [f"wind_new_{y}" for y in YEARS],
-        [f"solar_new_{y}" for y in YEARS])
+    T.ISLAND_CONFIG["eh_h2_hub_staged"] = _h2_island(T)
+    # Built for entered planning years too (E1b).
+    for tid in ("eh_h2_hub_staged", "eh_microgrid_staged"):
+        T.NATIVE_PLANNING[tid] = T.Planning(YEARS, HORIZON_END)
+    T.TEMPLATE_META["eh_h2_hub_staged"] = _h2_meta(T)
+    T.TEMPLATE_META["eh_microgrid_staged"] = _mg_meta(T)
+    T._PLANNED_META["eh_h2_hub_staged"] = lambda p, _spec: _h2_meta(T, p)
+    T._PLANNED_META["eh_microgrid_staged"] = lambda p, _spec: _mg_meta(T, p)
+    T._PLANNED_ISLAND["eh_h2_hub_staged"] = lambda p: _h2_island(T, p.years)
+    T._PLANNED_ISLAND["eh_microgrid_staged"] = lambda p: _mg_island(T, p.years)
 
-    py = _period_years_static()
-    T.TEMPLATE_META["eh_h2_hub_staged"] = {
+
+def _h2_island(T, years=YEARS) -> dict:
+    return T._h2_hub_island([f"bess_new_{y}" for y in years], [f"wind_new_{y}" for y in years],
+                            [f"solar_new_{y}" for y in years])
+
+
+def _h2_meta(T, planning=None) -> dict:
+    """The staged H2 hub's ``eh_template.json`` for ``planning`` (None: the example's years)."""
+    plan = _h2_plan(T, planning)
+    years, off, y0 = plan.years, plan.values, plan.years[0]
+    py = plan.planning.period_years      # eh_site is not loaded while registering
+    meta = {
         "id": "eh_h2_hub_staged",
         "name": "Industrial Hydrogen Hub (staged growth)",
         "description": (
-            "The hydrogen hub planned from a projected H2 demand: the offtake grows 10 → 18 → "
-            "25 MW over 2027, 2030 and 2035 beside a 40 MW process load on a 200 MW connection. "
+            "The hydrogen hub planned from a projected H2 demand: the offtake grows "
+            f"{' → '.join(f'{off[y]:g}' for y in years)} MW over {T._years_text(years)} beside a "
+            "40 MW process load on a 200 MW connection. "
             "Wind, solar, battery and electrolyser candidates per period. Multi-period; tagged "
             "for an Energy Hub study."),
         "recommended_archetype": "strong_grid",
         "pack_overrides": {},
         "stages": None,
         "dtc_attribution": None,
-        "projected_load": _stages_meta({y: 40.0 + H2_OFFTAKE_MW[y] / 0.68 for y in YEARS},
+        "projected_load": _stages_meta({y: 40.0 + off[y] / 0.68 for y in years},
                                        "process load plus the electrolysis the offtake needs; "
-                                       "synthetic"),
+                                       "synthetic", plan),
         "energization": [{"year": y, "available_import_mw": 200.0, "connection_mw": 200.0,
-                          "source": "assumed", "note": "fully energized"} for y in YEARS],
-        "period_years": {str(y): py[y] for y in YEARS},
+                          "source": "assumed", "note": "fully energized"} for y in years],
+        "period_years": {str(y): py[y] for y in years},
         "ledger": [
-            *_COMMON_LEDGER,
-            {"item": "H2 offtake", "value": "10 → 18 → 25 MW (LHV)", "source": "synthetic",
+            *_common_ledger(plan),
+            {"item": "H2 offtake", "value": f"{' → '.join(f'{off[y]:g}' for y in years)} MW (LHV)",
+             "source": "synthetic",
              "note": "the customer's demand ramp; replace with the offtake contract"},
             {"item": "PoC losses", "value": "efficiency 1.0 on grid_import", "source": "assumed",
              "note": "not modelled, so the counterfactual bill is the served load at the meter"},
@@ -447,7 +577,7 @@ def register(T) -> None:
             {"item": "grey H2 reference price",
              "value": "2 EUR/kg (LHV 33.33 kWh/kg), 0.010 t CO2/kg",
              "source": "synthetic",
-             "note": "synthetic demo value, in the case's base-year (2027) money, escalating "
+             "note": f"synthetic demo value, in the case's base-year ({y0}) money, escalating "
                      "2 %/yr as fuel; a real study uses the site's SMR supply contract and "
                      "its certified carbon intensity"},
             {"item": "CO2 price", "value": "80 EUR/t from 2027, 120 EUR/t from 2030",
@@ -460,7 +590,7 @@ def register(T) -> None:
              "source": "assumed",
              "note": "grid imports carry no CO2 cost, so the avoided CO2 is the grey-H2 "
                      "purchase's alone"},
-            *T.H2_ISLAND_LEDGER, H2_ISLAND_ROWS,
+            *T.H2_ISLAND_LEDGER, {**H2_ISLAND_ROWS, "note": _measured(H2_ISLAND_ROWS["note"], plan)},
         ],
         "study_notes": [
             "Each period is the same representative week, with the period's H2 offtake.",
@@ -474,26 +604,48 @@ def register(T) -> None:
         ],
         "provenance": T.PROVENANCE,
     }
-    T.TEMPLATE_META["eh_microgrid_staged"] = {
+    co2 = CO2_PRICE["eur_per_t_by_year"]
+    held = [] if _co2_price(plan.planning) is CO2_PRICE else [
+        {"item": "CO2 price before the path", "value": f"{co2[min(co2)]:g} EUR/t in {y0}",
+         "source": "assumed",
+         "note": f"assumed, held from {min(co2)}: the demo path starts in {min(co2)}, so the "
+                 "first point is held from the start year; never extrapolated"}]
+    return _planned_meta(T, meta, plan, "h2_offtake_mw", off, held)
+
+
+def _mg_meta(T, planning=None) -> dict:
+    """The staged microgrid's ``eh_template.json`` for ``planning`` (None: the example's years)."""
+    plan = _mg_plan(T, planning)
+    years, scale, y0 = plan.years, plan.values, plan.years[0]
+    py = plan.planning.period_years      # eh_site is not loaded while registering
+    last = scale[years[-1]]
+    later = years[1:]
+    res = " / ".join(f"×{scale[y]['residential']:g}" for y in later)
+    hosp = " / ".join(f"×{scale[y]['hospital_load']:g}" for y in later)
+    growth = (f"residential {res}, hospital {hosp} by {' / '.join(map(str, later))}"
+              if later else "none (one period)")
+    meta = {
         "id": "eh_microgrid_staged",
         "name": "Island Microgrid (staged growth)",
         "description": (
-            "The island microgrid planned from a growing load: residential demand grows 40 % and "
-            "the hospital 20 % by 2035. Diesel, battery, PV and wind candidates per period; the "
-            "island runs without its subsea tie. Multi-period; tagged for an off-grid study."),
+            "The island microgrid planned from a growing load: residential demand grows "
+            f"{round((last['residential'] - 1) * 100):g} % and the hospital "
+            f"{round((last['hospital_load'] - 1) * 100):g} % by {years[-1]}. Diesel, battery, PV "
+            "and wind candidates per period; the island runs without its subsea tie. "
+            "Multi-period; tagged for an off-grid study."),
         "recommended_archetype": "off_grid",
         "pack_overrides": {},
         "stages": None,
         "dtc_attribution": None,
         "projected_load": _stages_meta(
-            {y: 7.5 * MG_LOAD_SCALE[y]["residential"] + 1.7 * MG_LOAD_SCALE[y]["hospital_load"]
-             for y in YEARS}, "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic"),
+            {y: 7.5 * scale[y]["residential"] + 1.7 * scale[y]["hospital_load"]
+             for y in years}, "sum of peaks (upper bound): the residential and hospital peaks do not coincide; synthetic",
+            plan),
         "energization": [],
-        "period_years": {str(y): py[y] for y in YEARS},
+        "period_years": {str(y): py[y] for y in years},
         "ledger": [
-            *_COMMON_LEDGER,
-            {"item": "load growth", "value": "residential ×1.2 / ×1.4, hospital ×1.1 / ×1.2 by "
-                                             "2030 / 2035", "source": "synthetic",
+            *_common_ledger(plan),
+            {"item": "load growth", "value": growth, "source": "synthetic",
              "note": "replace with the island's load forecast"},
             {"item": "hospital feeder losses", "value": "efficiency 1.0", "source": "assumed",
              "note": "not modelled in the staged plan"},
@@ -510,7 +662,7 @@ def register(T) -> None:
                      "kept (no flow, so the solve is unchanged)"},
             {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
              "source": "synthetic",
-             "note": "the single-year template's marginal cost, in base-year (2027) money, "
+             "note": f"the single-year template's marginal cost, in base-year ({y0}) money, "
                      "escalating 2 %/yr as fuel; replace with the island's fuel contract"},
             {"item": "transition RoCoF limit",
              "value": f"{MG_TRANSITION_ROCOF:g} Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
@@ -522,12 +674,12 @@ def register(T) -> None:
              "value": "on, seamless: the islanding step and the island's own events (the largest "
                       "load step, any one unit's trip, the PV lost)",
              "source": "assumed",
-             "note": "measured 2026-10-16 on this plan: battery 6 (existing) + 6.08 / 6.08 / 3.27 MW "
+             "note": _measured("measured 2026-10-16 on this plan: battery 6 (existing) + 6.08 / 6.08 / 3.27 MW "
                      "built in 2027 / 2030 / 2035, demo pre-tax NPV +43.2 M EUR (+43.9 M EUR when "
                      "the rows held the islanding step alone); the GFM settings recommender then "
-                     "finds settings at the Guided defaults"},
+                     "finds settings at the Guided defaults", plan)},
             {"item": "existing island", "value": ", ".join(a for a in MG_EXISTING)
-                                                 + f": COD {YEARS[0]}-01-01, overnight cost 0",
+                                                 + f": COD {y0}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
         ],
         "study_notes": [
@@ -545,6 +697,7 @@ def register(T) -> None:
         ],
         "provenance": T.PROVENANCE,
     }
+    return _planned_meta(T, meta, plan, "load_scale", scale, [])
 
 
 def _period_years_static() -> dict[int, int]:

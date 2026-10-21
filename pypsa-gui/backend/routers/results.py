@@ -1787,11 +1787,15 @@ def _ic_growth_flags() -> tuple[str, ...]:
 
 
 def _growth_flags_of(meta: dict | None) -> tuple[str, ...]:
-    """The ``growth_placeholder`` flags of one template metadata dict."""
-    from services.adequacy.site_peak import unset_periods
-
-    return tuple(f"growth_placeholder:{kind}_{year}"
-                 for year, kinds in sorted(unset_periods(meta).items()) for kind in kinds)
+    """The ``growth_placeholder`` flags of one template metadata dict: one
+    per (kind, year) its ``growth_inputs`` mark not set, every kind (the
+    H2 offtake too, which the electric peak check does not read)."""
+    flags: dict[str, None] = {}
+    rows = [g for g in (meta or {}).get("growth_inputs") or []
+            if isinstance(g, dict) and g.get("set") is False]
+    for g in sorted(rows, key=lambda g: str(g.get("year"))):
+        flags[f"growth_placeholder:{g.get('kind')}_{g.get('year')}"] = None
+    return tuple(flags)
 
 
 def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource | None = None,

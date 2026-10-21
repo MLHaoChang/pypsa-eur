@@ -875,7 +875,23 @@ _GROWTH_KINDS = {
     "it_mw": ("IT load", "MW", "loads", "Load", "it_load", "p_set"),
     "energized_mw": ("Energized import", "MW", "connection", "Link", "grid_import",
                      "eh_energization_mw"),
+    # The staged hubs (E1b): the H2 offtake (MW of H2, not an electric load) and
+    # the microgrid's load scale per load (×, the example's 2027 load = 1).
+    "h2_offtake_mw": ("H2 offtake", "MW", "loads", "Load", "h2_offtake", "p_set"),
+    "load_scale": ("Load scale", "×", "loads", "Load", None, "p_set"),
 }
+
+
+#: The growth kinds the site's electric peak reads (``site_peak.PEAK_INPUTS``;
+#: a test pins the two equal). The H2 offtake is not one: it is a load on the H2 bus.
+_PEAK_KINDS = ("it_mw", "energized_mw", "load_scale")
+
+
+def _growth_value_text(value) -> str:
+    """A growth value in the ledger's words: a number, or ``load ×scale`` per load."""
+    if isinstance(value, dict):
+        return ", ".join(f"{k} ×{v:g}" for k, v in value.items())
+    return f"{value:g}"
 
 
 def _growth_rows(kind: str, staged, *, source_set: str = "example", overrides=None):
@@ -903,12 +919,16 @@ def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
         label, unit, section, component, entity, field = _GROWTH_KINDS[g["kind"]]
         out.append({
             "item": f"placeholder {g['kind']} {g['year']}",
-            "label": f"{label} {g['year']} (placeholder)", "value": g["value"], "unit": unit,
+            "label": f"{label} {g['year']} (placeholder)",
+            "value": (_growth_value_text(g["value"]) if isinstance(g["value"], dict)
+                      else g["value"]), "unit": unit,
             "source": "assumed",
             "note": (f"not set: the example has no {label.lower()} for {g['year']}; its "
-                     f"same-stage value {g['example_value']:g} {unit} (built for "
+                     f"same-stage value {_growth_value_text(g['example_value'])} {unit} (built for "
                      f"{_years_text(native.years)}) is a placeholder, never interpolated. "
-                     "The peak check and the scorecard read this period unknown until it is set"),
+                     + ("The peak check and the scorecard read this period unknown until it "
+                        "is set" if g["kind"] in _PEAK_KINDS else
+                        "The investment case flags it until it is set")),
             "section": section, "panel": None, "component": component, "entity": entity,
             "field": field})
     return out
@@ -1466,6 +1486,12 @@ def _staged_island(cfg: dict, years=None) -> dict:
 
 ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacenter"])
 
+#: Staged examples built for entered years: id → (meta, island) for a Planning
+#: (the staged hubs add theirs when they register).
+_PLANNED_META = {"eh_datacenter_staged": lambda p, spec: _dc_staged_meta(_dc_plan(p), spec)}
+_PLANNED_ISLAND = {"eh_datacenter_staged":
+                   lambda p: _staged_island(ISLAND_CONFIG["eh_datacenter"], p.years)}
+
 
 def _register_staged_hubs() -> None:
     """The staged H2 hub and microgrid (``eh_staged_hubs.py``, generic-site
@@ -1617,12 +1643,6 @@ ISLAND_FILE = "island_config.json"
 # services.adequacy.stress.SCHEMA — not imported, so this module loads
 # without the backend's packages at import time. A test pins the two equal.
 SCHEMA = 1
-
-
-#: Staged examples built for entered years: id → (meta, island) for a Planning.
-_PLANNED_META = {"eh_datacenter_staged": lambda p, spec: _dc_staged_meta(_dc_plan(p), spec)}
-_PLANNED_ISLAND = {"eh_datacenter_staged":
-                   lambda p: _staged_island(ISLAND_CONFIG["eh_datacenter"], p.years)}
 
 
 def template_meta(template_id: str, planning: Planning | None = None, *, load_spec=None) -> dict:
