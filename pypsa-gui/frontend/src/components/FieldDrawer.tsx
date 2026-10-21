@@ -2,6 +2,7 @@ import { X } from 'lucide-react'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { sectionMeta } from '../layout/flowSections'
 import { fieldWords } from '../utils/flowItems'
+import { useFieldLabels } from '../hooks/useFieldLabels'
 import { useUIStore } from '../store/uiStore'
 
 /** Guided: a section item's field, opened in place over the card (design
@@ -10,6 +11,7 @@ import { useUIStore } from '../store/uiStore'
  *  Properties, or the panel the item points at. `children` is that editor. */
 export function FieldDrawer({ children }: { children: (t: NonNullable<ReturnType<typeof useUIStore.getState>['fieldDrawer']>) => React.ReactNode }) {
   const target = useUIStore(s => s.fieldDrawer)
+  const labels = useFieldLabels()
   const close = useUIStore(s => s.setFieldDrawer)
   if (!target) return null
   const label = sectionMeta(target.section).label
@@ -18,7 +20,7 @@ export function FieldDrawer({ children }: { children: (t: NonNullable<ReturnType
       className="fixed bottom-0 right-0 top-11 z-[60] flex w-[min(520px,100%)] flex-col border-l border-border bg-bg shadow-xl">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border bg-bg-2 px-3">
         <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-text">
-          {fieldWords(target) ?? label}
+          {fieldWords(target, labels) ?? label}
         </span>
         <button type="button" data-testid="field-drawer-expert"
           onClick={() => openSectionInExpert(target.section)}

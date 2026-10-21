@@ -10,6 +10,7 @@
 //
 // Nothing here blocks Run (project workflow R1). A row's verdict is a word and
 // an icon, never a colour alone; an unknown row says first what is missing.
+import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
   MessageCircleQuestion } from 'lucide-react'
@@ -35,15 +36,6 @@ export const SECTION_LABELS: Record<string, string> = {
   scenarios: 'Scenarios & optimisation',
   readiness: 'Readiness → run',
   results: 'Results → reports',
-}
-
-/** The inputs that are a field a user can edit in Expert today. A ledger
- *  item id (connection_ramp, oscillation) is not one until B2 adds it. */
-const EXPERT_FIELDS: Record<string, string> = {
-  efficiency: 'Efficiency',
-  eh_sk_mva: 'Short-circuit level (MVA)',
-  target_lole_h: 'LOLE target',
-  p_nom: 'Capacity',
 }
 
 const VERDICT: Record<GridReadinessVerdict, { word: string; Icon: typeof CheckCircle2; cls: string }> = {
@@ -108,8 +100,8 @@ export function summaryText(s: GridReadiness['summary'], mode: ScorecardMode): s
 
 function editableIn(row: GridReadinessRow, labels: Record<string, string>): string | null {
   const t = row.target
-  if (!t.field || !(t.field in EXPERT_FIELDS)) return null
-  const field = labels[t.field] ?? EXPERT_FIELDS[t.field]
+  if (!t.field || !(t.field in FIELD_LABELS)) return null
+  const field = labels[t.field] ?? FIELD_LABELS[t.field]
   return [SECTION_LABELS[t.section] ?? t.section, t.entity, field].filter(Boolean).join(' › ')
 }
 

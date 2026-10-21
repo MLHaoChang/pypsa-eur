@@ -76,11 +76,39 @@ def _target(section, component=None, entity=None, field=None, panel=None) -> dic
 
 
 def _row(id_, requirement, *, limit, unit, source, project_value, verdict, assumed, note,
-         section, target) -> dict:
+         section, target, rule=None) -> dict:
     assert verdict in VERDICTS, verdict
-    return {"id": id_, "requirement": requirement, "limit": limit, "unit": unit,
-            "source": source, "project_value": project_value, "verdict": verdict,
-            "assumed": bool(assumed), "note": note, "section": section, "target": target}
+    row = {"id": id_, "requirement": requirement, "limit": limit, "unit": unit,
+           "source": source, "project_value": project_value, "verdict": verdict,
+           "assumed": bool(assumed), "note": note, "section": section, "target": target}
+    if rule is not None:
+        row["rule"] = dict(rule)
+    return row
+
+
+#: A row's declared rule (checked results S9): the project value is compared with the
+#: row's own `limit` within the rule's own `tolerance`; a value that meets it passes,
+#: any other value is `otherwise`. The rule holds no threshold of its own, so it
+#: cannot drift from the limit shown. SCR's tolerance is 0, as the SCR gate compares
+#: exactly, so the scorecard and the gate cannot split.
+RULE_SCR = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
+RULE_RAMP = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
+RULE_RVC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
+
+
+def _judge(value: float, limit: float, rule: dict) -> str:
+    """The verdict of a value against a limit under a declared rule and its tolerance."""
+    c, tol = rule["comparator"], float(rule["tolerance"])
+    if c == "<=":
+        met = value <= limit + tol
+    elif c == "<":
+        met = value < limit
+    elif c == ">=":
+        met = value >= limit - tol
+    else:
+        raise ValueError(f"unknown comparator {c!r}")
+    return "pass" if met else rule["otherwise"]
 
 
 def _num(v) -> float | None:
@@ -176,7 +204,7 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
     fault = inp.marking("fault_level")
     fault_assumed = _marking_assumed(fault)
     target = _target("connection", "Bus", (fault or {}).get("entity"), "eh_sk_mva")
-    base = dict(limit=PASS_SCR, unit=None,
+    base = dict(limit=PASS_SCR, unit=None, rule=RULE_SCR,
                 source=("Screening rule: an SCR of 3.0, the edge between moderate and strong grids; "
                         "assumed, not a grid-code value"),
                 section="connection", target=target)
@@ -190,7 +218,7 @@ def _scr_rows(inp: _Inputs) -> list[dict]:
                      verdict="unknown", assumed=True,
                      note=("No short-circuit level and inverter capacity at every point of connection, "
                            "so the SCR is not known"), **base)]
-    verdict = "pass" if gates.scr == "pass" else "warn"
+    verdict = _judge(float(payload["min_scr"]), PASS_SCR, RULE_SCR)
     extra = "; below it an EMT study is recommended" if gates.emt_recommended else ""
     return [_row("scr", "Short-circuit ratio at the PoC", project_value=round(payload["min_scr"], 3),
                  verdict=verdict, assumed=True,
@@ -293,14 +321,14 @@ def _ramp_row(inp: _Inputs) -> dict:
     target = _target("connection", "Link", inp.link, "connection_ramp")
     req = "Load ramp rate at the PoC within the connection ramp limit"
     if inp.envelope is None or limit is None:
-        return _row("ramp_rate", req, limit=limit, unit="MW/min", source=source,
+        return _row("ramp_rate", req, rule=RULE_RAMP, limit=limit, unit="MW/min", source=source,
                     project_value=None, verdict="unknown", assumed=assumed,
                     note=_NO_ENVELOPE if inp.envelope is None else "No grid connection to scale the limit by",
                     section="connection", target=target)
     per_s = float(inp.envelope["max"]["max_dp_dt_mw_per_s"])
     per_min = mw_per_s_to_mw_per_min(per_s)
-    return _row("ramp_rate", req, limit=limit, unit="MW/min", source=source,
-                project_value=round(per_min, 4), verdict="pass" if per_min <= limit else "fail",
+    return _row("ramp_rate", req, rule=RULE_RAMP, limit=limit, unit="MW/min", source=source,
+                project_value=round(per_min, 4), verdict=_judge(per_min, limit, RULE_RAMP),
                 assumed=assumed or _envelope_assumed(inp),
                 note=(f"Steepest load change {per_s:.4g} MW/s = {per_min:.4g} MW/min (the steeper of the "
                       f"training step and the oscillation); {_BEFORE_MITIGATION}"),
@@ -345,7 +373,7 @@ def _rvc_row(inp: _Inputs) -> dict:
     req = "Rapid voltage change at the PoC on the AI-training load step"
     lim = (inp.profile or {}).get("rvc_limit_pct")
     if not isinstance(lim, dict):
-        return _row("rapid_voltage_change", req, limit=None, unit="% of nominal",
+        return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=None, unit="% of nominal",
                     source=inp.profile_error or "The grid code sets no rapid-voltage-change limit",
                     project_value=None, verdict="unknown", assumed=True,
                     note="The grid code sets no rapid-voltage-change limit", section="connection", target=target)
@@ -354,15 +382,15 @@ def _rvc_row(inp: _Inputs) -> dict:
     sk = _poc_sk_mva(inp.n) if inp.n is not None else None
     fault_assumed = _marking_assumed(inp.marking("fault_level"))
     if inp.envelope is None or sk is None:
-        return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
+        return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
                     project_value=None, verdict="unknown", assumed=lim_assumed or fault_assumed,
                     note=_NO_ENVELOPE if inp.envelope is None
                     else "No short-circuit level at the point of connection",
                     section="connection", target=target)
     swing = float(inp.envelope["max"]["swing_mw"])
     d = swing / sk * 100.0
-    return _row("rapid_voltage_change", req, limit=limit, unit="% of nominal", source=source,
-                project_value=round(d, 4), verdict="pass" if d <= limit else "warn",
+    return _row("rapid_voltage_change", req, rule=RULE_RVC, limit=limit, unit="% of nominal", source=source,
+                project_value=round(d, 4), verdict=_judge(d, limit, RULE_RVC),
                 assumed=lim_assumed or fault_assumed or _envelope_assumed(inp),
                 note=(f"Voltage change ≈ load step / fault level × 100 = {swing:.4g} MW / {sk:g} MVA: a screening upper bound "
                       "(IEC 61000-3-7 style) that ignores the grid X/R; above the limit a power-flow "
@@ -410,7 +438,7 @@ def _reactive_row(inp: _Inputs) -> dict:
     lim = (inp.profile or {}).get("q_range_demand")
     target = _target("assets", None, None, "control")
     if not isinstance(lim, dict):
-        return _row("reactive_range", req, limit=None, unit="Mvar",
+        return _row("reactive_range", req, rule=RULE_REACTIVE, limit=None, unit="Mvar",
                     source=inp.profile_error or "The grid code sets no reactive range",
                     project_value=None, verdict="unknown", assumed=True, note="The grid code sets no reactive range",
                     section="assets", target=target)
@@ -418,7 +446,7 @@ def _reactive_row(inp: _Inputs) -> dict:
     assumed = lim.get("source") != "code"
     services = _services(inp)
     if services is None or not inp.connection_mw:
-        return _row("reactive_range", req, limit=None, unit="Mvar", source=source,
+        return _row("reactive_range", req, rule=RULE_REACTIVE, limit=None, unit="Mvar", source=source,
                     project_value=None, verdict="unknown", assumed=assumed,
                     note=_no_island_note(inp) if services is None else "No grid connection is tagged on this project",
                     section="assets", target=target)
@@ -438,7 +466,7 @@ def _reactive_row(inp: _Inputs) -> dict:
         q = rating * math.tan(math.acos(pf))
         have += q
         parts.append(f"{name} {q:.3g}")
-    if have >= need - 1e-9:
+    if _judge(have, need, RULE_REACTIVE) == "pass":
         verdict = "pass"
     elif unsized:
         verdict = "unknown"
@@ -460,7 +488,7 @@ def _reactive_row(inp: _Inputs) -> dict:
         note = f"Short by {need - have:.4g} Mvar"
     else:
         note = "Covered by the units offering voltage control"
-    return _row("reactive_range", req, limit=round(need, 4), unit="Mvar", source=source,
+    return _row("reactive_range", req, rule=RULE_REACTIVE, limit=round(need, 4), unit="Mvar", source=source,
                 project_value=round(have, 4), verdict=verdict, assumed=True, note=note,
                 section="assets", target=target)
 

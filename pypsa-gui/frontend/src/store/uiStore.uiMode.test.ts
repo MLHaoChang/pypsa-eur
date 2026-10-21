@@ -195,6 +195,15 @@ describe('switching to guided prunes a hidden slide panel (§3.7)', () => {
     }
   })
 
+  it('a selection with no panel lands on its section card, not the bare canvas (§7)', async () => {
+    const s = await freshStore({ 'network-diagram:current-project': 'P' })
+    s.setState({ currentProject: 'P', activeSlidePanel: null, uiMode: 'expert' })
+    s.getState().setSelectedComponent({ type: 'Bus', name: 'grid' })
+    s.getState().setUiMode('guided', { explicit: true })
+    expect(s.getState().activeSlidePanel).toBe('hubDesign')
+    expect(s.getState().activeSection).toBe('connection')
+  })
+
   it('switching to expert closes the Guided hub design panel (W4) and opens nothing', async () => {
     const s = await freshStore({ 'network-diagram:current-project': 'P' })
     s.setState({ currentProject: 'P', activeSlidePanel: 'hubDesign', uiMode: 'guided' })
