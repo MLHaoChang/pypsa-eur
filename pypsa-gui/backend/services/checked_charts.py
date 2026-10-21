@@ -125,6 +125,14 @@ def readable(start, end):
     return f"{day(a)}, {a:%H:%M}–{b:%H:%M}" if day(a) == day(b) else f"{day(a)}, {a:%H:%M} – {day(b)}, {b:%H:%M}"
 
 
+def readable_stamp(stamp):
+    """"21 Oct 2026, 04:20 UTC" for an ISO time in UTC."""
+    import pandas as pd
+
+    t = pd.Timestamp(stamp)
+    return f"{t.day} {t:%b %Y}, {t:%H:%M} UTC"
+
+
 def caption(slots, window):
     lines = [f"Chart drawn from checked evidence · {sum(s['disposition'] == 'drawn' for s in slots)} series · "
              f"{readable(window['start'], window['end'])}"]
@@ -155,7 +163,7 @@ def render(ctx, record, requested):
 
     drawn_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     # The drawing is as of this solve; an image outlives its evidence and must say when.
-    lines = caption(slots, window) + [f"Checked against the solve of {drawn_at} · evidence {record['evidence_id']}"]
+    lines = caption(slots, window) + [f"Drawn {readable_stamp(drawn_at)} from checked evidence · evidence {record['evidence_id']}"]
     png = _draw(record, data, lines)
     project, root, _owner = assistant_tools._project()
     byte_hash = hashlib.sha256(png).hexdigest()
@@ -218,7 +226,7 @@ def _draw(record, data, lines):
         step = max(1, math.ceil(len(x) / 8))
         ticks = x[::step]
         try:
-            labels = [f"{pd.Timestamp(data['index'][i]):%d %b %H:%M}" for i in ticks]
+            labels = [f"{pd.Timestamp(data['index'][i]).day} {pd.Timestamp(data['index'][i]):%b %H:%M}" for i in ticks]
         except (TypeError, ValueError):
             labels = [str(data["index"][i]) for i in ticks]
         for axis in axes:
@@ -234,7 +242,7 @@ def _draw(record, data, lines):
     return buffer.getvalue()
 
 
-EXPIRED_NOTE = "checked against the solve of {drawn_at}; evidence expired, not re-verified now"
+EXPIRED_NOTE = "drawn {drawn_at}; its evidence has expired, so it was not re-verified now"
 
 
 def verify(manifest):
