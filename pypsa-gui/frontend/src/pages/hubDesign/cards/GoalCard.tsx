@@ -3,6 +3,7 @@
 // energy (read-only, with an assistant fix). The Run is in section 9,
 // Readiness → run (`shared/GoalStudyRun.tsx`): this card sets the goal.
 import { useState } from 'react'
+import { useUIStore } from '../../../store/uiStore'
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -79,7 +80,13 @@ export function GoalCard() {
       )}
 
       <p data-testid="hub-goal-run-hint" className="text-[12px] text-muted">
-        The study runs from Readiness → run, once the checks pass.
+        The study runs from{' '}
+        <button type="button" data-testid="hub-goal-open-readiness"
+          onClick={() => {
+            useUIStore.getState().setActiveSection('readiness')
+            if (useUIStore.getState().guidedTourHolds === 0) useHubDesignStore.setState({ userMovedRail: true })
+          }}
+          className="text-accent hover:underline">Readiness → run</button>, once the checks pass.
       </p>
     </CardShell>
   )

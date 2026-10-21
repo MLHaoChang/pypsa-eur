@@ -128,6 +128,8 @@ describe('GoalCard voll line', () => {
     mount()
     await screen.findByTestId('hub-goal-run-hint')
     expect(screen.queryByTestId('hub-goal-run')).toBeNull()
+    await userEvent.click(screen.getByTestId('hub-goal-open-readiness'))
+    expect(useUIStore.getState().activeSection).toBe('readiness')
   })
 
   it('keeps a set VOLL under More settings, not loose on the card (UX review L3)', async () => {
