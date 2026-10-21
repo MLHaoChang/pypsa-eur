@@ -3,8 +3,10 @@ import { AlertTriangle, ArrowRight, Info, XCircle } from 'lucide-react'
 import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
-import { openFlowTarget, openSectionInExpert, sectionMeta } from '../../layout/flowSections'
+import { openFlowTarget, openSectionInExpert } from '../../layout/flowNavigation'
+import { sectionMeta } from '../../layout/flowSections'
 
 // One flow section in Guided: its name and state, the items that are still to
 // do or to check (a Guided user never has a blocker hidden: the field is named
@@ -74,9 +76,29 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   const meta = sectionMeta(id)
   const { flow, section } = useProjectFlow()
   const setActiveSection = useUIStore(s => s.setActiveSection)
+  const gate = useRunGate('all')
   if (id === 'readiness') {
     return (
       <div data-testid="hub-card-readiness" className="flex flex-col gap-2 rounded border border-border bg-panel p-4">
+        {/* The same verdict the Run button uses: blocked only when the server
+            would refuse, with the reason by section; gaps that do not block
+            show as notes. */}
+        {gate.blocked ? (
+          <p data-testid="readiness-blocked" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
+            Not ready to run: {gate.reason}
+            {gate.blocker && (
+              <button type="button" onClick={() => openFlowTarget(gate.blocker!.target)}
+                className="inline-flex items-center gap-1 text-accent hover:underline">
+                Edit in Expert <ArrowRight size={11} />
+              </button>
+            )}
+          </p>
+        ) : (
+          <p data-testid="readiness-ready" className="text-[12px] text-text">
+            {flow ? 'Ready to run.' : 'Not known yet: the readiness could not be read.'}
+            {gate.notes.length > 0 && ` ${gate.notes.length} note${gate.notes.length === 1 ? '' : 's'}: ${gate.notes.map(n => n.message).join('; ')}`}
+          </p>
+        )}
         <p className="text-[12px] text-muted">
           Each section's state, in flow order. Open one to see what is left in it.
         </p>

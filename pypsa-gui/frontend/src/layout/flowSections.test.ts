@@ -45,3 +45,34 @@ describe('activeSection', () => {
     expect(useUIStore.getState().activeSection).toBeNull()
   })
 })
+
+describe('the Guided ↔ Expert switch keeps the section (§7)', () => {
+  beforeEach(() => useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'hubDesign', activeSection: null, currentProject: 'p' }))
+
+  it('Guided → Expert opens the section the user was in, not a blank workbench', () => {
+    useUIStore.setState({ activeSection: 'commercial' })
+    useUIStore.getState().setUiMode('expert')
+    expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
+  })
+
+  it('a table section opens its bottom table', () => {
+    useUIStore.setState({ activeSection: 'loads' })
+    useUIStore.getState().setUiMode('expert')
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(useUIStore.getState().bottomTabRequest).toBe('Loads')
+  })
+
+  it('with no section yet it closes the hub design as before', () => {
+    useUIStore.getState().setUiMode('expert')
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+  })
+
+  it('Expert → Guided lands on the card of the panel the user was in', () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null, activeSection: null })
+    useUIStore.getState().setSlidePanel('simparams')
+    useUIStore.getState().setUiMode('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(useUIStore.getState().activeSection).toBe('scenarios')
+  })
+})
