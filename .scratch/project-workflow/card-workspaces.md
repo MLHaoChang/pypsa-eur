@@ -309,7 +309,7 @@ Sub-options: Tariffs & bill · Contracts & PPAs · Investment case & parties.
 
 Sub-options: Reports · Data exports · Specialist packet.
 
-**A. Workspace.** Results-only (no input section). Its deliverable choices (report variant per party, formats) live in its own tabs as actions, not model inputs.
+**A. Workspace.** Results-only (no input section). Its deliverable choices (a report per party, formats) live in its own tabs as actions, not model inputs.
 
 **B. Card assets.** None.
 
@@ -317,7 +317,7 @@ Sub-options: Reports · Data exports · Specialist packet.
 
 | Tab | Displays |
 |---|---|
-| **Reports** | generate (variant per party), viewer, versions, evidence hash, template picker, round trip. This tab **is** today's Reports panel (one component, moved), and section 10's sidebar Reports row opens it |
+| **Reports** | generate (one report per party), viewer, versions, evidence hash, template picker, round trip. This tab **is** today's Reports panel (one component, moved), and section 10's sidebar Reports row opens it |
 | **Exports** | This tab **is** the one "Export…" chooser from #556 / SAVE-1 (bundle, NetCDF, CSV, Excel, MATPOWER), as one component. The sidebar "Export…" opens Hand-off › Exports, not a standalone dialog. Per-view CSVs stay on their views |
 | **Specialist packet** | planning → dynamics: dispatch source, ranked snapshots, assumptions ledger, per-hour bundles, PowerFactory read-back |
 
@@ -380,12 +380,25 @@ What exists and is reused:
 - **Edits**: LC-04's EditCard (old → new, section named) for every change; the copilot never edits a results tab (there are no inputs there).
 - **Check answers**: per view `checked_profiles`; copilot content carries its check state, native views their freshness (§5.4).
 
-What this design adds (one harness slice, R0 and H1 in §8):
+What this design adds (harness slices R0, H1 and H2 in §8):
 - `ResultView` gains `card` and `sub_option`; `list_result_views` filters by card, so "walk me through the Grid card" lists only that card's views with their status.
-- New view ids for the views that have no id today (§7.1); `RESULTS_TAB_ENUM` and `navigation.PANELS` follow.
-- A **"Walk me through this card"** entry (W9's "Help with this section", at card scope), in the workspace header strip only (§2.1): the companion reads the workspace (`/flow` filtered to the card), says what is incomplete in the card's sections, opens each field in place, then runs the card through the gate, then opens the card's results group and explains the headline with `explain-results`. One workflow file per card is not needed: one workflow, `card-walkthrough`, takes the card id; its steps are the four workspace steps (§2.1).
+- New view ids for the views that have no id today (§8 R0); `RESULTS_TAB_ENUM` and `navigation.PANELS` follow.
+- **"Walk me through this card"** (H1), in the workspace header strip only (§2.1). It follows the owner's cost rules for "explain what to do next" (ROI-A, #558 `06-AI-PRIORITIES-AND-COST-SPEC.md`, decision PM-558):
+  - **Native first.** The strip first shows the native reason for each incomplete item in the card's sections, with "Open here" to its owning field (from `/flow` filtered to the card). The model is called only when the user explicitly clicks.
+  - **Bounded.** The answer offers at most 3 actions, each opening the owning field; nothing is edited by the walkthrough itself, and changes still go through EditCards. The evidence packet is small and built from `/flow` (about 8 KiB / 6 items), the answer about 320 output tokens, at most 2 rounds.
+  - **Fallback.** If the model is unavailable or the budget is spent, only the native text shows; there is no provider fallback.
+  - **One entry point per card.** It fills the composer and never sends on its own (W9 rule).
+  - One workflow, `card-walkthrough`, takes the card id; its steps are the four workspace steps (§2.1). No new modules beyond it.
+  - Acceptance cases from the spec: RI01 (same native verdict, blocking order and owning targets; no invented blocker), RI03 (context changed between preparation and publication: recheck, withhold stale, refuse the wrong target), RI04 (a suggested new assumption is labelled a suggestion, never a fabricated defect), RI06 (a model attempt to edit or call a tool, or a malformed or oversized claim, is refused or withheld).
+- **"Explain these results"** per results group (R0 then H2), from the group header. It follows ROI-B:
+  - It builds on `harness/workflows/explain-results.md` and Check answers, over the card's views from R0's registry.
+  - At most 12 native fact blocks (about 12 KiB), an answer of about 512 tokens.
+  - Every number the model writes must match an admitted fact, or the claim is withheld.
+  - Under strict checking it refuses explicitly rather than downgrading the check.
+  - Acceptance cases: RI07 (exact native units, basis, value and source; unavailable sections are not zero), RI08 (an injected number, delta, ranking or stronger conclusion is withheld), RI09 (an unsupported profile under strict checking is an explicit scoped refusal), RI10 (energy-balance totals don't certify the Source → Via → Destination rows), RI12 (a failure, timeout or moved source keeps the native facts, with no automatic rerun and no larger-model fallback).
+- **Not added** (PM-558): no task-profile endpoint, no answer cache, no price-based cost accounting, and no new modules such as `task_profiles.py`, `assistant_help_packets.py` or `ContextualAssistAction.tsx`. Suggesting sensitivity cases (ROI-C) belongs to LC-17 / S7, not here.
 - **Card assets**: the copilot can add a card asset only through an EditCard naming section 3 or 5, and only for assets the palette offers (§2.2); for one that isn't offered it says so.
-- Guided: the same walkthrough, with the Guided depth (key parameters only); Expert: every parameter.
+- Guided: the same walkthrough and explanation, at the Guided depth (key parameters only); Expert: every parameter.
 
 ## 7. Examples
 
@@ -435,7 +448,8 @@ Order follows workspace-reconciliation §13 (W10 after W3a, W4a; W3b moves first
 | **R7 Guided card summaries** | chapter tiles → card summaries; Control tile; Improve unchanged | Sonnet | UX | R1 |
 | **R8 Capacity Products** | `process_view` and LCOH as Operation › Products (X-H2) | Sonnet | UX; GK told (reads only) | R1 |
 | **R-N1 N-1 view** | binding contingencies and security cost from an SCLOPF solve | Opus (engine read) then Sonnet (view) | **gatekeeper** | R1; W4b for the N-1 kind |
-| **H1 Card walkthrough** | `card-walkthrough` workflow over `/flow` + `list_result_views(card)`; EditCards for every change | Opus | **gatekeeper** (harness), UX | R0, W9 |
+| **H1 Card walkthrough** | `card-walkthrough` workflow over `/flow` filtered to the card; native reason and "Open here" first, model only on click, ≤ 3 actions, ≈ 8 KiB / 6 items, ≈ 320 tokens, ≤ 2 rounds, native-only fallback (§6, ROI-A); tests RI01, RI03, RI04, RI06 | Opus | **gatekeeper** (harness), UX | R0, W9 |
+| **H2 Explain these results** | per-group explanation on `explain-results` + Check answers over R0's views; ≤ 12 fact blocks, ≈ 512 tokens; unmatched numbers withheld; explicit refusal under strict checking (§6, ROI-B); tests RI07–RI10, RI12 | Opus | **gatekeeper** (harness, checked answers), UX | R0 |
 | **X-OPEN, X-DC1, X-DC2, X-IPP, X-NH3** | example opening tabs; pinned headline tests; DC tariff | Sonnet (data/tests) | GK told for pinned numbers | R1 (X-OPEN); independent (pins) |
 | **X-LF, X-RC** | an example with load flow on; an example with compensation assets | Opus | **gatekeeper** | P0/P2 (X-RC) |
 | **Card assets** | already sliced as **P0 → P1 → P2, P3** (workspace-reconciliation §13): P1 adds bus, line, transformer, shunt to the palette; P2 the campus assets (STATCOM, banks, taps, switchgear, PCC data) via the sidecar; P3 one gated engine plan per missing element (SVC, 3-winding, switch, OLTC, converter V/Q, Q limits) | Opus (P0, P2, P3), Sonnet (P1 UI) | gatekeeper; UX | as §13 |
