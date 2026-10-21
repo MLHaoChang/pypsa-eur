@@ -83,7 +83,8 @@ The sizes below are recommendation A of Q-IPP2 (§11).
 
 | Element | Model | Value (Q-IPP2 A) | Source label |
 |---|---|---|---|
-| `poi` bus | AC, the site side of the meter (`eh_poc`) | — | — |
+| `poi` bus | AC, the site side of the meter | — | — |
+| `grid` bus | AC, the market side; carries `eh_poc` (the Energy Hub convention: the grid-side bus, as every EH template; amended at ticket 03) | — | — |
 | `grid` bus + `grid` Generator | two-way slack, `p_min_pu −1`, cost 0 | — | as `packs.py` |
 | `grid_export` Link | `poi → grid`, `p_nom` = **export limit** | 70 MW | assumed (connection offer) |
 | `grid_import` Link | `grid → poi`, `p_nom` = import limit (auxiliaries and any battery grid charging). It carries no private price: its cost is the 7a import tariff | 20 MW | assumed |
@@ -99,7 +100,7 @@ Combined nameplate 110 MW on a 70 MW export limit gives an overbuild of 1.57. Th
 - **One modelled year, full hourly chronology (8 760 h, 2030)** (Q-IPP4 recommendation A). A representative week can't carry negative-price hours, the seasonal capture-price spread or battery arbitrage across days.
 - The LP is small: 3 generators, 1 storage unit, 2 Links. Build time is checked in `_build.py`'s feasibility solve, and the issue records the solve time.
 - **Native horizon** until E1: financial close 2028, COD 2030-01-01, 25 analysis years. The Builder says "This example is built for 2030" (#444 §3.3) and never snaps silently.
-- Real prices, held flat to the 2030 base year (label only, #447 §7d).
+- The price series are real 2030 money. The case is nominal and escalates them from 2030 (gatekeeper at ticket 03: nominal like the other templates, checked by the money-basis rule table).
 
 ### 2.3 Prices (illustrative, assumed)
 
@@ -171,10 +172,10 @@ Compare (S6) shows these for base + 8 with deltas. Until S6, the existing A/B Co
 - Value flows: `custom`. One participant, **`ipp`**, the site party and owner of every asset. The externals are `offtaker` (PPA buyer, CfD counterparty) and `market` (export, import). `export_revenue_to: site_party`.
 - The owner is the site party, so the IC builds a counterfactual: the site without its candidates (G5). The plants are new builds with a forced size (G5), so the counterfactual is empty and "incremental = total", which is the developer's standalone case.
 - Finance (`FinanceInputs`, illustrative, `assumed`):
-  - EUR, real, base year 2030;
+  - EUR, nominal, currency year 2030 (gatekeeper at ticket 03; the series are real 2030 money, escalated from that year);
   - financial close 2028, COD 2030 for every asset;
   - 25 analysis years;
-  - WACC, debt share and tenor and the tax pack from the 2026-10-20 pack's `finance.yaml` where present, else assumed with the source stated;
+  - WACC, debt share and tenor and the tax pack from the 2026-10-20 pack's `finance.yaml` where present, else assumed with the source stated. The pack's 7 % discount rate is real and pre-tax, so the 7 % nominal WACC, 9 % cost of equity and 2 % inflation are `assumed` (ticket 03);
   - degradation: PV 0.5 %/yr, wind 0.3 %/yr (assumed, cited range);
   - battery replacement via `part_lifetimes` at the pack's battery lifetime.
 - The LP discount rate defaults to the WACC (#447 K0 rule) and is labelled "Discount rate for the optimisation (annuity)".
@@ -267,7 +268,7 @@ Owner rule (about 19:43 CEST): "all examples should enable user to change parame
 
 **Locks**, each shown read-only with its reason and listed in ticket 03's PR:
 - **Engine-required:** a baseload PPA's share is fixed at 1 ("the volume is the baseload MW"; model validator).
-- **Engine-required:** the meter roles. `grid_import` and `grid_export` carry `eh_role` `grid_import` / `grid_export`, and `poi` carries `eh_poc`. The commercial meter, the export price and the settlement bind by them (`commercial.binding`), so the Link form shows the role read-only: "the commercial meter is identified by this role". The Links' sizes stay editable.
+- **Engine-required:** the meter roles. `grid_import` carries `eh_role` `grid_import` and the `grid` bus carries `eh_poc`. The export meter is named by 7a's `export_link`: `grid_export` is not an Energy Hub role, and the Link form refuses one (amended at ticket 03). The commercial meter, the export price and the settlement bind by them (`commercial.binding`), so the Link form shows the role read-only: "the commercial meter is identified by this role". The Links' sizes stay editable.
 - **Engine-required:** the grid slack (`grid`) is beyond the meter. It is not an `ipp` asset and its cost is 0 both ways (G5), so its form shows it read-only: "the market side of the meter".
 - **This template's form, not an engine refusal:** the 7b editor offers `settlement: financial` as the IPP PPA's form. Switching to `physical` is allowed; the preflight then warns `commercial.ppa_export_double_count` and names the reason. The engine still accepts a physical PPA, so existing projects stay valid (gatekeeper).
 
