@@ -5,7 +5,9 @@
 // source for literal `data-testid=` / `testId=` strings, and neither a
 // template string nor a lookup table would be found. The other five sections
 // carry `hub-rail-section-*` ids.
-import { Check, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
+import { FlowStateDot } from '../../components/FlowStateDot'
+import { countOpen, countWords } from '../../utils/flowItems'
 import type { FlowSectionId, FlowSectionState } from '../../api/flow'
 import { FLOW_STATE_WORDS } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
@@ -59,20 +61,25 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
         : bs === 'blocked' ? 'border-border/60 text-muted/50 cursor-not-allowed'
           : bs === 'not_needed' ? 'border-border/60 text-muted/70'
             : 'border-border text-muted hover:border-accent hover:text-accent'
-  const stateWord = isError ? 'not known yet' : state ? FLOW_STATE_WORDS[state] : null
+  const stateless = id === 'readiness' || id === 'results'
+  const counts = countWords(countOpen(flowSection?.items ?? []))
+  const stateWord = stateless ? null : isError || !flowSection ? FLOW_STATE_WORDS.unknown
+    : counts || FLOW_STATE_WORDS[state ?? 'unknown']
+  const label = `${meta.label}${stateWord ? `: ${stateWord}` : ''}`
   return (
     <div className="flex items-center gap-1">
       {id !== 'project' && <span aria-hidden className="h-px w-3 bg-border" />}
       <button type="button" data-testid={testId} data-state={bs}
         aria-current={bs === 'current' ? 'step' : undefined}
         disabled={bs === 'blocked'}
-        title={why ?? `${meta.label}${stateWord ? `: ${stateWord}` : ''}`}
+        title={why ?? label} aria-label={why ? undefined : label}
         onClick={() => props.onPick(id)}
         className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] ${tone}`}>
         <span className="font-mono text-[10px]">{meta.number}</span>
-        {meta.label}
-        {bs === 'done' && <Check size={11} />}
-        {bs === 'warning' && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-warn" />}
+        {/* Narrow windows keep the number and dot; the label stays on the
+            current pill and in every pill's title. */}
+        <span className={bs === 'current' ? '' : 'hidden min-[900px]:inline'}>{meta.label}</span>
+        {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} />}
         {id === 'scenarios' && props.flow === 'running' && (
           <Loader2 size={11} className="animate-spin" data-testid="hub-rail-spinner" />
         )}

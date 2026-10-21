@@ -439,7 +439,7 @@ describe('the rail is the ten flow sections', () => {
     expect(useUIStore.getState().activeSection).toBe('loads')
     const item = await screen.findByTestId('section-item')
     expect(item.textContent).toContain('Add a demand')
-    expect(item.textContent).toContain('Loads & demand > Load dc_it')
+    expect(item.textContent).toContain("Loads & demand > Load 'dc_it'")
     expect(item.textContent).not.toContain('p_set')
     // The primary action opens the field here, in Guided (design §3.5).
     await user.click(screen.getByTestId('section-item-open'))
@@ -459,5 +459,53 @@ describe('the rail is the ten flow sections', () => {
     await user.click(rail('goal'))
     expect(await screen.findByTestId('hub-card-goal')).toBeTruthy()
     expect(useUIStore.getState().activeSection).toBe('scenarios')
+  })
+})
+
+describe('one set of marks and one count (design §3.2)', () => {
+  const item = (severity: string, extra: Record<string, unknown> = {}) => ({
+    code: `c_${severity}_${Math.random()}`, severity, message: `${severity} item`, source: 'validation',
+    blocking: false, acknowledged: false, target: { section: 'loads', panel: null, component: null, entity: null, field: null },
+    ...extra,
+  })
+
+  it('the rail pill carries the dot and the open counts in its label; incomplete and unknown differ', async () => {
+    const payload = flowPayload()
+    const loads = payload.sections.find(x => x.section === 'loads')!
+    loads.state = 'incomplete'
+    loads.items = [item('error'), item('error'), item('warning'), item('info'),
+      item('error', { acknowledged: true }), item('error', { in_scope: false })] as never
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
+    mount()
+    await screen.findByTestId('hub-card-site')
+    const pill = await vi.waitFor(() => {
+      const b = screen.getByTestId('hub-rail-section-loads')
+      expect(b.getAttribute('aria-label')).toBe('Loads & demand: 2 to do · 1 to check')
+      return b
+    })
+    expect(pill.querySelector('[data-state="incomplete"]')).toBeTruthy()
+    // Sections 9 and 10 stay without a dot.
+    expect(screen.getByTestId('hub-rail-step-results').querySelector('[data-state]')).toBeNull()
+  })
+
+  it('a flow that cannot be read shows "?" in every pill with a state, never a tick', async () => {
+    vi.mocked(flowApi.getProjectFlow).mockRejectedValue(new Error('x'))
+    mount()
+    await screen.findByTestId('hub-card-site')
+    await vi.waitFor(() => expect(screen.getByTestId('hub-rail-section-loads')
+      .querySelector('[data-state="unknown"]')).toBeTruthy())
+    expect(screen.getByTestId('hub-rail-section-loads').getAttribute('aria-label')).toBe('Loads & demand: not known yet')
+  })
+
+  it('the section list counts only open items and keeps info as a muted line', async () => {
+    const payload = flowPayload()
+    const loads = payload.sections.find(x => x.section === 'loads')!
+    loads.items = [item('error'), item('info'), item('error', { in_scope: false })] as never
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-rail-section-loads'))
+    expect(await screen.findAllByTestId('section-item')).toHaveLength(1)
+    expect(screen.getByTestId('section-infos').textContent).toContain('info item')
   })
 })

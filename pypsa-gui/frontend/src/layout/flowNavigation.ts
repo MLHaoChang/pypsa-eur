@@ -48,6 +48,9 @@ export function openFlowTargetInPlace(target: FlowTarget): void {
     ui.setHighlightedComponent({ type: target.component, name: target.entity })
     ui.openRightPanel()
     ui.setFieldDrawer(target)
+    // The item's own section, not the component class's: a Link on the site
+    // fence is Connection & grid, not Assets.
+    ui.setActiveSection(target.section)
     return
   }
   if (target.panel) { ui.setFieldDrawer(target); return }
