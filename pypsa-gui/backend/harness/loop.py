@@ -3008,12 +3008,16 @@ def _dispatch_real_tool_call(
         try:
             from harness import continuation
             jobs = continuation.queue_jobs(result)
-            task_path = assistant_tasks.await_job(task_ticket, jobs, session.session_id) if jobs else None
+            assistant_tasks.track_queue_follower(task_ticket)  # before the step reads waiting
+            task_path = assistant_tasks.await_job(task_ticket, None, session.session_id, jobs=jobs) if jobs else None
             if task_path:
                 continuation.follow_queue_job(task_path, task_ticket)
+            else:
+                assistant_tasks.forget_queue_follower(task_ticket)
                 result = {**result, "waiting": True, "job_id": jobs[0]["job_id"],
                           "note": "The plan waits on these queued jobs; the conversation continues when they end."}
         except Exception as exc:  # noqa: BLE001 — the step then stays a start receipt: uncertain
+            assistant_tasks.forget_queue_follower(task_ticket)
             logger.exception("chat: plan step could not wait on queued jobs: %s", _redact_for_log(exc))
 
     # Issue 11 — adequacy/study mesh handoff. Starters already return

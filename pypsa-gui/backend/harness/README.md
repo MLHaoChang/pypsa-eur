@@ -869,11 +869,15 @@ brief grants nothing: every write or run step keeps its own card.
   follower and settles uncertain (SC-09); nothing is re-enqueued. Queue
   steps write no parent inputs, so they never advance the SC-11 chain;
   `_gate_brief` still runs before every effectful step after one settles.
+  The evidence read takes the network lock the refresh takes; a busy lock is
+  retried at the next poll, never judged. A receipt that started a job never
+  completes the step by itself; a sweep whose every case was reused from a
+  solved child (no job) completes from its receipt.
   A queued step that ends a card's phase pauses the plan; the continuation
   turn cannot pass `paused_at_card`.
 - **What a brief can run (SC-10).** `start_task` refuses
   `brief_cases_not_runnable` unless the brief's cases and every
-  `start_experiment` step fit `experiment_execution.runnable` (1 or 2
+  `start_experiment` and `run_sensitivity_sweep` step fit `experiment_execution.runnable` (1 or 2
   network cases), the rule `advance_experiment` applies. Under a brief
   `wait_for_job` is no step (`invalid_task_tool`): run steps wait by
   themselves. A `refresh_experiment` step completes only on a `completed`

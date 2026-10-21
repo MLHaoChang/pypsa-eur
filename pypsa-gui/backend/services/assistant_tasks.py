@@ -29,6 +29,15 @@ QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue"})
 _QUEUE_FOLLOWERS = set()  # (task_id, step_id, attempt_id) of steps this process follows
 
 
+def track_queue_follower(ticket):
+    """Before the step is saved waiting, so no reconcile sees it unfollowed."""
+    _QUEUE_FOLLOWERS.add(tuple(ticket))
+
+
+def forget_queue_follower(ticket):
+    _QUEUE_FOLLOWERS.discard(tuple(ticket))
+
+
 def _refuse(kind, message, status=409):
     raise HTTPException(status, {"error_kind": kind, "message": message})
 
@@ -142,7 +151,7 @@ def _check_runnable(brief, steps):
     if any(step["tool"] == "wait_for_job" for step in steps):
         _refuse("invalid_task_tool", "Under a brief a run step waits by itself; drop the wait_for_job step.", 422)
     asked = [(step["args"].get("domain", "network"), len(step["args"].get("cases") or []))
-             for step in steps if step["tool"] == "start_experiment"]
+             for step in steps if step["tool"] in ("start_experiment", "run_sensitivity_sweep")]
     if (brief["cases"] and not runnable("network", len(brief["cases"]))) or any(not runnable(*a) for a in asked):
         _refuse("brief_cases_not_runnable", RUNNABLE_RULE + " Propose the first two network cases as this brief "
                 "and the rest as a follow-up brief.", 422)
@@ -442,7 +451,10 @@ def _native_evidence(path, task, step):
         return True, step["late_receipt"]["result"]
     if (step.get("job") or {}).get("kind") == "queue":
         from harness import continuation
-        status, _, result = continuation.queue_outcome(step["job"]["jobs"])
+        try:
+            status, _, result = continuation.queue_outcome(step["job"]["jobs"])
+        except continuation.QueueBusy:
+            return False, None  # no verdict now; the user can reconcile again
         return (True, {"job_id": step["job"]["job_id"], "final_status": "completed", **result}) \
             if status == "completed" else (False, None)
     if step.get("job"):
@@ -518,16 +530,15 @@ def _gate_brief(task, step):
                 "draft a new brief for the user to review.")
 
 
-def await_job(ticket, job_id, session_id):
+def await_job(ticket, job_id, session_id, *, jobs=None):
     """A run step whose solve is still running waits on its job, durably.
 
     The turn is released; `settle_job` records the outcome when the job ends,
     and the conversation continues once (`claim_continuation`). A queued step
-    passes its jobs as a list (`continuation.queue_jobs`); the first one keys
-    its continuation."""
-    if ticket is None or job_id == []:
+    passes `jobs` (`continuation.queue_jobs`) and `job_id=None`; the first job
+    keys its continuation."""
+    if ticket is None or jobs == []:
         return None
-    jobs = job_id if isinstance(job_id, list) else None
     with _LOCK:
         path, task = _read(ticket[0])
         step = next(s for s in task["steps"] if s["id"] == ticket[1])
@@ -613,7 +624,9 @@ def _reconcile_lost(path, task):
             continue
         if step["job"].get("kind") == "queue":
             # Followed by a thread of this process, or lost with a restart (SC-09).
-            lost = (task["task_id"], step["id"], step.get("attempt_id")) not in _QUEUE_FOLLOWERS
+            # A cancelled plan's job runs on and is reported as it is (SC-13).
+            lost = task["status"] != "cancelled" and \
+                (task["task_id"], step["id"], step.get("attempt_id")) not in _QUEUE_FOLLOWERS
         else:
             lost = not job_adapters.is_registered(step["job"]["job_id"])
         if lost:
@@ -722,7 +735,7 @@ def _outcome(tool, result, error):
         return ("failed" if _retryable_read(tool) else "uncertain"), str(error)[:300]
     if tool == "refresh_experiment" and isinstance(result, dict) and result.get("status") != "completed":
         # Only a completed case with intact evidence completes the step (issue 23).
-        if result.get("status") in ("ready", "submitted", "running"):
+        if result.get("status") in ("ready", "submitting", "submitted", "running"):
             return "failed", "Case not finished; retry after it completes."
         return "failed", f"Case result unavailable: {str(result.get('last_error') or result.get('status'))[:120]}."
     if isinstance(result, dict) and (result.get("final_status") in ("failed", "aborted", "idle")
@@ -738,9 +751,11 @@ def _outcome(tool, result, error):
     ):
         return "uncertain", "Solver start is not completion; inspect its outcome before advancing or retrying."
     if tool in QUEUE_WAIT_TOOLS and isinstance(result, dict) and (
-        result.get("status") in ("queued", "running", "submitted")
-        or any(isinstance(c, dict) and c.get("status") != "completed" for c in result.get("cases") or [])
+        any(isinstance(c, dict) and c.get("status") != "completed" for c in result.get("cases") or [])
+        if "cases" in result else True
     ):
+        # Only a sweep whose every case was reused from a solved child completes
+        # from its receipt; a started job settles from its own record.
         return "uncertain", "A queued job is not completion; inspect its outcome before advancing or retrying."
     if receipt is not None and (not isinstance(receipt, dict) or receipt.get("outcome") != "verified"):
         # An edit counts only when its native read-back equals the card.

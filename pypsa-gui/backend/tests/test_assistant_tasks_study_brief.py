@@ -330,7 +330,7 @@ def sweep_step(session, project_id, request_id, cases):
     task = chat_tools.start_task(title='Sweep', request_id=request_id, steps=steps, brief=brief(steps))
     ticket = tasks.begin_step(session, 'run_sensitivity_sweep', args)
     submitted = chat_tools.run_sensitivity_sweep(project_id, cases)
-    path = tasks.await_job(ticket, continuation.queue_jobs(submitted), session.session_id)
+    path = tasks.await_job(ticket, None, session.session_id, jobs=continuation.queue_jobs(submitted))
     assert path is not None
     for case in submitted['cases']:
         assert chat_tools.wait_for_job(case['job']['id'], 25)['completed']
@@ -442,6 +442,7 @@ def test_loop_queued_step_waits_settles_and_continues_once_pausing_at_the_next_c
     assert [d['job_id'] for d in due] == [step['job']['job_id']]
     continuation.claim(session, step['job']['job_id'])
     assert continuation.due(session) == []
+    refused('task_paused_at_card', tasks.admit, session, 'validate_network', {})
     refused('task_paused_at_card', tasks.begin_step, session, 'validate_network', {})
 
 
@@ -468,8 +469,8 @@ def test_sc13_cancel_during_a_queued_job_stops_the_plan_and_leaves_the_job_runni
     assert follower.wait(10)
     record = stored(root, task['task_id'])
     assert record['status'] == 'cancelled'
-    assert record['steps'][0]['status'] == 'waiting'  # the job is reported as it is, nothing settled it
     assert continuation.due(session) == []
+    assert stored(root, task['task_id'])['steps'][0]['status'] == 'waiting'  # reported as it is, nothing settled it
 
 
 # ── Slice 2: SC-08, SC-10, SC-14, refresh rule ───────────────────────────────
@@ -525,6 +526,7 @@ def test_wait_for_job_is_no_step_under_a_brief_but_stays_in_a_plain_plan(session
 
 @pytest.mark.parametrize('native,status,words', [
     ('running', 'failed', 'Case not finished; retry after it completes.'),
+    ('submitting', 'failed', 'Case not finished; retry after it completes.'),
     ('unavailable', 'failed', 'experiment_evidence_unavailable'),
     ('completed', 'completed', None)])
 def test_refresh_experiment_completes_only_a_completed_case(session, native, status, words):
@@ -552,3 +554,32 @@ def test_sc14_failed_solve_drafts_a_correction_and_never_retries_by_itself(sessi
     refused('task_step_needs_retry', tasks.admit, session, 'run_simulation', {})
     assert chat_tools.resolve_task_step(task['task_id'], 'retry')['next_step']['status'] == 'pending'
     assert tasks.begin_step(session, 'run_simulation', {}) is not None
+
+
+def test_a_sweep_whose_cases_were_all_reused_completes_from_its_receipt(session, baseline):
+    _, project_id, _ = baseline
+    first = chat_tools.run_sensitivity_sweep(project_id, [sweep_case()])
+    assert chat_tools.wait_for_job(first['cases'][0]['job']['id'], 25)['completed']
+    args = {'baseline_project_id': project_id, 'cases': [sweep_case()]}
+    steps = [{'id': 'sweep', 'tool': 'run_sensitivity_sweep', 'args': args}]
+    chat_tools.start_task(title='Reuse', request_id='q-reuse', steps=steps, brief=brief(steps))
+    ticket = tasks.begin_step(session, 'run_sensitivity_sweep', args)
+    again = chat_tools.run_sensitivity_sweep(project_id, [sweep_case()])
+    assert again['cases'][0]['reused'] and 'job' not in again['cases'][0]
+    assert tasks.finish_step(ticket, result=again)['status'] == 'completed'
+
+
+def test_an_enqueue_receipt_is_never_completion_without_its_record(session, baseline):
+    _, project_id, _ = baseline
+    steps = [{'id': 'enq', 'tool': 'solve_queue_enqueue', 'args': {'project_id': project_id}}]
+    chat_tools.start_task(title='Enqueue', request_id='q-enq', steps=steps)
+    ticket = tasks.begin_step(session, 'solve_queue_enqueue', {'project_id': project_id})
+    view = tasks.finish_step(ticket, result={'id': str(uuid.uuid4()), 'status': 'completed'})
+    assert view['steps'][0]['status'] == 'uncertain'
+
+
+def test_sc10_a_direct_sweep_step_is_held_to_the_same_rule(session, baseline):
+    _, project_id, _ = baseline
+    cases = [sweep_case(f'Case {n}', 20 + n) for n in range(3)]
+    steps = [{'id': 'sweep', 'tool': 'run_sensitivity_sweep', 'args': {'baseline_project_id': project_id, 'cases': cases}}]
+    refused('brief_cases_not_runnable', chat_tools.start_task, title='Three', request_id='sweep-3', steps=steps, brief=brief(steps))
