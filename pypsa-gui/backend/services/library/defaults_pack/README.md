@@ -97,7 +97,7 @@ Rules:
 - **Units.** Conversions stay in the closed `UNIT_CONVERSIONS` table, per currency; none changes
   currency. Mixed money years within one currency stay allowed.
 - **Hash.** The regional hash covers the overlay manifest, `values.csv` and the base version's
-  hash. It is pinned under `generic_defaults_regional` in `tests/fixtures/defaults_pack/pack_hashes.json`.
+  hash. It is pinned under `generic_defaults_regional` in `tests/fixtures/defaults_pack/regional_pack_hashes.json`.
 - **A new version, never an edit**, as for the EU versions.
 
 What each region carries (technologies: `solar-utility`, `onwind`, `gas-genset`; each with overnight,

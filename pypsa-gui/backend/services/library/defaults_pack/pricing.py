@@ -29,11 +29,18 @@ _CLASS = {"generators": "Generator", "storage_units": "StorageUnit", "links": "L
           "stores": "Store"}
 
 
+def _refuse_unpriced(pack, key: str) -> None:
+    """A regional pack's missing money row: `MissingRegionalRow`, never the EU row."""
+    info = pack.region_info
+    if info is not None and key in info.unpriced:
+        pack.value(key)               # raises MissingRegionalRow
+
+
 def _row(pack, key: str):
     for row in pack.cost_values:
         if row.key == key:
             return row
-    pack.value(key)               # a regional pack's missing money row: MissingRegionalRow
+    _refuse_unpriced(pack, key)
     raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
 
 
@@ -67,7 +74,7 @@ def _value(pack, key: str) -> float:
     for row in pack.cost_values:
         if row.key == key:
             return float("nan") if row.value is None else float(row.value)
-    pack.value(key)               # a regional pack's missing money row: MissingRegionalRow
+    _refuse_unpriced(pack, key)
     raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
 
 

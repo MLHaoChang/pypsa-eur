@@ -318,7 +318,8 @@ def test_regional_hashes_are_pinned_and_the_eu_pins_are_unchanged(shipped_caches
     pins = json.loads((FIXTURES / "pack_hashes.json").read_text())
     assert pins["generic_defaults"]["2026-10-20"] == \
         "1266cc82fb8826c33281317f8916a7bf10f95c1bf72437e3ba0f77bd993ab231"
-    regional = pins["generic_defaults_regional"]
+    regional = json.loads((FIXTURES / "regional_pack_hashes.json").read_text())[
+        "generic_defaults_regional"]
     assert set(regional) == {f"{SHIPPED}+{r}" for r in REGIONS}
     for region in REGIONS:
         pack = D.load_defaults_pack(region=region)
