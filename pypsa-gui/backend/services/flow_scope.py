@@ -105,6 +105,10 @@ CARDS: Final[tuple[Card, ...]] = (
 CARD_BY_ID: Final[dict[str, Card]] = {c.id: c for c in CARDS}
 
 _NEEDS_TEMPLATE = "Needs an Energy Hub site: a project made from an example or your own site."
+# A generation-only template whose network has no Load (the IPP plant, #485's
+# rule in `flow_service`): the study has nothing to make adequate, so the Run
+# never requests it and Reliability is not offered (UX gate).
+_NO_LOAD = "Nothing to make adequate: this site only generates and has no load."
 
 # (card, option) → (status, reason). modular-cards §1, last column; "per W0"
 # reads not yet available until W0 classifies it supported.
@@ -133,11 +137,13 @@ AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
 _TEMPLATE_ONLY: Final[frozenset[str]] = frozenset({"reliability"})
 
 
-def option_status(card: str, option: str, *, has_template: bool) -> tuple[str, str | None]:
+def option_status(card: str, option: str, *, has_template: bool, no_load: bool = False) -> tuple[str, str | None]:
     """``(status, reason)`` of a sub-option for this project."""
     status, reason = AVAILABILITY[(card, option)]
     if card in _TEMPLATE_ONLY and not has_template and status == AVAILABLE:
         return NOT_YET, _NEEDS_TEMPLATE
+    if card in _TEMPLATE_ONLY and no_load and status == AVAILABLE:
+        return NOT_YET, _NO_LOAD
     return status, reason
 
 
@@ -218,26 +224,26 @@ def preset_for(template: dict | None) -> tuple[str, Preset]:
     return (tid, TEMPLATE_PRESETS[tid]) if tid in TEMPLATE_PRESETS else ("eh_generic", _OWN_SITE)
 
 
-def _storable(card: str, option: str, *, has_template: bool) -> bool:
+def _storable(card: str, option: str, *, has_template: bool, no_load: bool = False) -> bool:
     """A sub-option the stored scope may hold: not one that is not yet
     available, nor one its solver setting decides."""
-    return option_status(card, option, has_template=has_template)[0] in (AVAILABLE, REQUIRED)
+    return option_status(card, option, has_template=has_template, no_load=no_load)[0] in (AVAILABLE, REQUIRED)
 
 
-def _required(card: str, *, has_template: bool) -> list[str]:
+def _required(card: str, *, has_template: bool, no_load: bool = False) -> list[str]:
     return [o for o, _ in CARD_BY_ID[card].options
-            if option_status(card, o, has_template=has_template)[0] == REQUIRED]
+            if option_status(card, o, has_template=has_template, no_load=no_load)[0] == REQUIRED]
 
 
-def effective_preset(preset: Preset, *, has_template: bool) -> dict:
+def effective_preset(preset: Preset, *, has_template: bool, no_load: bool = False) -> dict:
     """The stored form of a preset: not-yet-available sub-options dropped,
     required ones and locked cards added."""
     groups, options = [], {}
     for card in CARDS:
         intended = preset.get(card.id, ())
         chosen = [o for o, _ in card.options
-                  if (o in intended or o in _required(card.id, has_template=has_template))
-                  and _storable(card.id, o, has_template=has_template)]
+                  if (o in intended or o in _required(card.id, has_template=has_template, no_load=no_load))
+                  and _storable(card.id, o, has_template=has_template, no_load=no_load)]
         options[card.id] = chosen
         if chosen and (card.id in preset or card.locked_reason):
             groups.append(card.id)
@@ -266,7 +272,7 @@ def _read_raw(project_dir: pathlib.Path) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
-def normalise(raw: dict, *, has_template: bool) -> dict:
+def normalise(raw: dict, *, has_template: bool, no_load: bool = False) -> dict:
     """A stored scope read leniently: unknown ids dropped, not-yet-available
     and settings-driven sub-options dropped, required ones and locked cards put
     back. A stored
@@ -277,16 +283,16 @@ def normalise(raw: dict, *, has_template: bool) -> dict:
     for card in CARDS:
         want = opts_in.get(card.id)
         want = want if isinstance(want, list) else []
-        req = _required(card.id, has_template=has_template)
+        req = _required(card.id, has_template=has_template, no_load=no_load)
         options[card.id] = [o for o, _ in card.options
                             if (o in want or o in req)
-                            and _storable(card.id, o, has_template=has_template)]
+                            and _storable(card.id, o, has_template=has_template, no_load=no_load)]
         if card.locked_reason or card.id in groups_in:
             groups.append(card.id)
     return {"version": SCOPE_VERSION, "groups": groups, "options": options}
 
 
-def validate(raw: Any, *, has_template: bool) -> dict:
+def validate(raw: Any, *, has_template: bool, no_load: bool = False) -> dict:
     """The strict check for a write. Raises ``ScopeError``. A settings-driven
     sub-option may be sent (the component sends what it shows) and is not
     stored."""
@@ -309,7 +315,7 @@ def validate(raw: Any, *, has_template: bool) -> dict:
         for o in chosen:
             if o not in known:
                 raise ScopeError("flow_scope_unknown", f"unknown sub-option {card_id}.{o!r}")
-            status, reason = option_status(card_id, o, has_template=has_template)
+            status, reason = option_status(card_id, o, has_template=has_template, no_load=no_load)
             if status == NOT_YET:
                 raise ScopeError("flow_scope_unavailable",
                                  f"{card.label} › {dict(card.options)[o]} is not yet "
@@ -318,12 +324,12 @@ def validate(raw: Any, *, has_template: bool) -> dict:
         label = card.label
         if card.locked_reason and card.id not in groups:
             raise ScopeError("flow_scope_required", f"{label}: {card.locked_reason}")
-        for o in _required(card.id, has_template=has_template):
+        for o in _required(card.id, has_template=has_template, no_load=no_load):
             if o not in (options.get(card.id) or []):
                 raise ScopeError("flow_scope_required",
                                  f"{label} › {dict(card.options)[o]}: "
-                                 f"{option_status(card.id, o, has_template=has_template)[1]}")
-    return normalise(raw, has_template=has_template)
+                                 f"{option_status(card.id, o, has_template=has_template, no_load=no_load)[1]}")
+    return normalise(raw, has_template=has_template, no_load=no_load)
 
 
 def apply_settings(scope: dict, settings: dict | None) -> dict:
@@ -344,7 +350,7 @@ def apply_settings(scope: dict, settings: dict | None) -> dict:
 
 
 def read_scope(project_dir: pathlib.Path, template: dict | None,
-               settings: dict | None = None) -> dict:
+               settings: dict | None = None, *, no_load: bool = False) -> dict:
     """The project's scope: ``{version, groups, options, source, preset_id}``.
     ``source`` is ``project`` (the stored file) or ``preset`` (none stored).
     ``settings``: the solver config, for the settings-driven sub-options."""
@@ -352,24 +358,24 @@ def read_scope(project_dir: pathlib.Path, template: dict | None,
     preset_id, preset = preset_for(template)
     raw = _read_raw(project_dir)
     if raw is None:
-        scope = effective_preset(preset, has_template=has_template)
+        scope = effective_preset(preset, has_template=has_template, no_load=no_load)
         source = "preset"
     else:
-        scope = normalise(raw, has_template=has_template)
+        scope = normalise(raw, has_template=has_template, no_load=no_load)
         source = "project"
     return apply_settings({**scope, "source": source, "preset_id": preset_id}, settings)
 
 
 def write_scope(project_dir: pathlib.Path, raw: Any, template: dict | None,
-                settings: dict | None = None) -> dict:
+                settings: dict | None = None, *, no_load: bool = False) -> dict:
     """Check and store a scope atomically; returns what ``read_scope`` now reads."""
     from services.atomic_io import atomic_write_text
 
-    scope = validate(raw, has_template=template is not None)
+    scope = validate(raw, has_template=template is not None, no_load=no_load)
     with _write_lock:
         atomic_write_text(project_dir / SCOPE_FILE,
                           json.dumps(scope, indent=2, sort_keys=True) + "\n")
-    return read_scope(project_dir, template, settings)
+    return read_scope(project_dir, template, settings, no_load=no_load)
 
 
 def selected(scope: dict, card: str, option: str | None = None) -> bool:
@@ -380,7 +386,8 @@ def selected(scope: dict, card: str, option: str | None = None) -> bool:
     return bool(chosen) if option is None else option in chosen
 
 
-def registry(template: dict | None, settings: dict | None = None) -> dict:
+def registry(template: dict | None, settings: dict | None = None, *,
+             no_load: bool = False) -> dict:
     """The cards as the scope component draws them, with this project's
     availability, the effective preset and what the preset intends. A card
     holding a settings-driven sub-option that is on cannot be switched off
@@ -391,7 +398,7 @@ def registry(template: dict | None, settings: dict | None = None) -> dict:
     for card in CARDS:
         opts = []
         for o, label in card.options:
-            status, reason = option_status(card.id, o, has_template=has_template)
+            status, reason = option_status(card.id, o, has_template=has_template, no_load=no_load)
             opts.append({"id": o, "label": label, "status": status, "reason": reason})
         locked = card.locked_reason
         if locked is None and settings and any(
@@ -401,10 +408,16 @@ def registry(template: dict | None, settings: dict | None = None) -> dict:
                       "locked_reason": locked,
                       "intended": list(preset.get(card.id, ()))})
     return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(template),
-            "preset": effective_preset(preset, has_template=has_template)}
+            "preset": effective_preset(preset, has_template=has_template, no_load=no_load)}
 
 
 def needed_sections(scope: dict) -> set[str]:
     """The input sections some card in scope needs (§5.2: a section none needs
     is ``not_needed``)."""
     return {s for card in CARDS if selected(scope, card.id) for s in card.sections}
+
+
+def no_load_plant(template: dict | None, loads: int | None) -> bool:
+    """#485's generation-only rule: the template says it only generates and
+    the network has no Load (``loads`` None, not read: the template decides)."""
+    return bool(template and template.get("generation_only")) and not loads

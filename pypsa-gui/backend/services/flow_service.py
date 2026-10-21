@@ -833,6 +833,9 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # rule keeps a load-less plant's loads not needed and its study items unbuilt.
     loads_not_needed = (template is not None and bool(template.get("generation_only"))
                         and facts is not None and facts.loads == 0)
+    if loads_not_needed:
+        # Reliability is not offered on such a plant (flow_scope's no-load rule).
+        scope = S.read_scope(project_dir, template, no_load=True)
     # What the one Run does (design §3.3, W4): the optimisation always; the
     # reliability study too for a project made from an EH template (the
     # hub-design Guided flow) whose scope selects Reliability › goal & study

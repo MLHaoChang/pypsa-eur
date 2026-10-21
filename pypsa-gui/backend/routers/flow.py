@@ -115,6 +115,25 @@ def _solver_settings(project: AuthorizedProject) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
+def _no_load(project: AuthorizedProject, template: dict | None) -> bool:
+    """#485's generation-only rule, as the flow applies it: the template only
+    generates and the network has no Load. The loaded network when the project
+    is open, else the template alone (a created plant has no Load)."""
+    from services import flow_scope, network_lengths
+    from services.pypsa_service import PyPSAService
+
+    if not (template and template.get("generation_only")):
+        return False
+    loads = None
+    active = network_lengths.active_project_dir()
+    if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
+        try:
+            loads = len(PyPSAService.get_network().loads)
+        except Exception:                                # noqa: BLE001 — the template decides
+            loads = None
+    return flow_scope.no_load_plant(template, loads)
+
+
 @router.get("/{name}/flow/scope")
 def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """``{scope, cards, preset_id, preset}``: the project's scope (stored, or its
@@ -124,8 +143,10 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
 
     template = flow_service.read_template(project.directory)
     settings = _solver_settings(project)
-    return {"scope": flow_scope.read_scope(project.directory, template, settings),
-            **flow_scope.registry(template, settings)}
+    no_load = _no_load(project, template)
+    return {"scope": flow_scope.read_scope(project.directory, template, settings,
+                                           no_load=no_load),
+            **flow_scope.registry(template, settings, no_load=no_load)}
 
 
 @router.put("/{name}/flow/scope")
@@ -150,7 +171,8 @@ def put_flow_scope(body: dict,
     template = flow_service.read_template(project.directory)
     try:
         scope = flow_scope.write_scope(project.directory, body, template,
-                                       _solver_settings(project))
+                                       _solver_settings(project),
+                                       no_load=_no_load(project, template))
     except flow_scope.ScopeError as exc:
         raise HTTPException(422, {"error_kind": exc.error_kind,
                                   "message": exc.message}) from exc

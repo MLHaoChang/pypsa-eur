@@ -23,6 +23,7 @@ import re
 import pytest
 
 from services import flow_scope as S
+from tests.test_project_flow import edit  # noqa: F401, F811 — the shared fixture
 
 TEMPLATES_DIR = pathlib.Path(__file__).resolve().parent.parent / "project_templates"
 INPUTS = ("project", "carriers", "connection", "loads", "assets", "profiles",
@@ -508,3 +509,35 @@ def test_a_scope_write_keeps_a_solved_projects_results_fresh(client, install_net
     after = _flow(client, "solved")
     assert next(s for s in after["sections"] if s["section"] == "results")["freshness"] == fresh
     assert session_state(client).get("objective") == objective is not None
+
+
+def test_a_load_less_generation_only_plant_is_not_offered_reliability(
+        client, tmp_projects_dir, project_storage_dir, edit):  # noqa: F811
+    """UX gate on the #485 merge: on the IPP plant (generation only, no Load)
+    the study never runs, so Reliability reads not available with its reason,
+    a write selecting it is refused, a stored one is dropped, and run_request
+    never holds the study. A Load added brings it back."""
+    name = _create(client, "eh_ipp_hybrid", "ipp_scope")
+    reg = client.get(f"/api/projects/{name}/flow/scope").json()
+    rel = next(c for c in reg["cards"] if c["id"] == "reliability")
+    assert {o["status"] for o in rel["options"]} == {S.NOT_YET}
+    assert rel["options"][0]["reason"] == S._NO_LOAD
+    scope = reg["scope"]
+    r = client.put(f"/api/projects/{name}/flow/scope", json={
+        "version": 1, "groups": [*scope["groups"], "reliability"],
+        "options": {**scope["options"], "reliability": ["goal_study"]}})
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "flow_scope_unavailable"
+    # A stored scope that selected it (an older file) is normalised away.
+    (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps({
+        "version": 1, "groups": ["capacity", "reliability", "handoff"],
+        "options": {"capacity": ["sizing", "dispatch"], "reliability": ["goal_study"],
+                    "handoff": ["reports"]}}))
+    body = _flow(client, name)
+    assert body["run_request"]["study"] is False
+    assert not S.selected(body["scope"], "reliability")
+    with edit() as n:
+        n.add("Load", "aux", bus="poi", p_set=1.0)
+    rel = next(c for c in client.get(f"/api/projects/{name}/flow/scope").json()["cards"]
+               if c["id"] == "reliability")
+    assert next(o for o in rel["options"] if o["id"] == "goal_study")["status"] == S.AVAILABLE
