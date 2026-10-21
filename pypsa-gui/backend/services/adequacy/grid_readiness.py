@@ -253,7 +253,8 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
 
     loss = inp.marking("import_efficiency")
     target = _target("connection", "Link", inp.link, "eh_energization_mw")
-    req = "Load within the energized import (after its efficiency) plus firm gensets, hour by hour"
+    req = ("Load within the energized import (after its efficiency) plus firm gensets and batteries, "
+           "hour by hour")
     if inp.n is None or not inp.links:
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
@@ -293,8 +294,8 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
         rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
                          limit=round(r["cap_mw"], 4), unit="MW",
                          source=("The energization schedule (a template assumption) and the island "
-                                 "requirements' genset N+k" if r["scheduled"]
-                                 else "The connection's capacity and the island requirements' genset N+k"),
+                                 "requirements' genset N+k and ride-through" if r["scheduled"]
+                                 else "The connection's capacity and the island requirements' genset N+k and ride-through"),
                          project_value=round(r["load_mw"], 4), verdict=verdict,
                          assumed=_marking_assumed(loss) or bool(inp.meta.get("energization")),
                          note="; ".join(notes), section="connection", target=target))

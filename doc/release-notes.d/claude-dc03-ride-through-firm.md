@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The site peak check (data-centre create-time refusal and the grid-readiness scorecard's peak row) now counts committed ride-through batteries as firm, at the MW they hold through the island requirements' sustained ride-through time (DC 03).

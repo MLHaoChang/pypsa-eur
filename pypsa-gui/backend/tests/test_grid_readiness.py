@@ -324,6 +324,68 @@ def test_the_peak_cap_takes_the_poc_links_losses():
     assert row["cap_mw"] == pytest.approx(40.0 * 0.995 + 30.0)       # 4 × 10 MW gensets, N+1
 
 
+# ── firm ride-through batteries (DC 03) ─────────────────────────────────────
+
+
+def _rt_site(p_nom=10.0, max_hours=2.0, eff=0.9, extendable=False, sustained_h=4.0, rts=("rt",)):
+    """A flat 50 MW site on a 40 MW connection with one ride-through battery."""
+    n = _one_period(load=np.full(48, 50.0))
+    n.add("StorageUnit", "rt", bus="site", p_nom=p_nom, max_hours=max_hours,
+          efficiency_dispatch=eff, p_nom_extendable=extendable)
+    island = {"units": {"rt": {"kind": "bess"}},
+              "requirements": {"sustained_h": {"value": sustained_h, "source": "assumed"}}}
+    if rts is not None:
+        island["requirements"]["ride_through_storage"] = list(rts)
+    return n, island
+
+
+@pytest.mark.parametrize("p_nom, max_hours, sustained_h, firm", [
+    (10.0, 2.0, 4.0, 10.0 * 2.0 * 0.9 / 4.0),     # energy-bound: 18 MWh over 4 h = 4.5 MW
+    (10.0, 8.0, 4.0, 10.0),                        # power-bound: 72 MWh over 4 h > 10 MW
+])
+def test_a_ride_through_battery_is_firm_for_what_it_holds_through_the_ride_through(
+        p_nom, max_hours, sustained_h, firm):
+    n, island = _rt_site(p_nom=p_nom, max_hours=max_hours, sustained_h=sustained_h)
+    mw, rule = SP.firm_battery_mw(n, island)
+    assert mw == pytest.approx(firm)
+    assert f"{sustained_h:g} h ride-through" in rule
+    (row,) = SP.peak_check(n, island)
+    assert row["cap_mw"] == pytest.approx(40.0 + firm)
+    assert row["firm"][1] == {"source": "ride-through batteries", "mw": mw, "rule": rule}
+    assert "of firm ride-through batteries" in SP.describe(row)
+
+
+def test_without_ride_through_storage_named_every_bess_is_ride_through():
+    n, island = _rt_site(rts=None)
+    assert SP.firm_battery_mw(n, island)[0] == pytest.approx(4.5)
+
+
+@pytest.mark.parametrize("change, why", [
+    ({"extendable": True}, "no committed ride-through battery"),
+    ({"rts": ()}, "no committed ride-through battery"),
+    ({"sustained_h": 0}, "no sustained ride-through time"),
+])
+def test_no_battery_is_firm_without_a_committed_unit_or_a_ride_through_time(change, why):
+    n, island = _rt_site(**change)
+    mw, rule = SP.firm_battery_mw(n, island)
+    assert mw == 0.0 and why in rule
+    assert "batteries" not in SP.describe(SP.peak_check(n, island)[0])
+    assert SP.firm_battery_mw(n, None) == (0.0, "no island sidecar: no battery is counted as firm")
+
+
+def test_the_h2_hubs_site_battery_is_firm_and_the_data_centres_cap_is_unchanged():
+    """The H2 hub's 20 MW / 40 MWh site battery holds 20 MW through its 1 h
+    ride-through; the data-centre campus names only its extendable bess_new,
+    so its cap stays the import plus the gensets."""
+    n = T.BUILDERS["eh_h2_hub"]()
+    (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_h2_hub"])
+    assert row["firm"][1]["mw"] == pytest.approx(20.0)
+    assert row["cap_mw"] == pytest.approx(row["delivered_mw"] + 20.0)
+    n = T.BUILDERS["eh_datacenter"]()
+    (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_datacenter"])
+    assert row["firm"][1]["mw"] == 0.0
+
+
 def _at_cap_spec(tid, it_mw):
     return {"phases": [{"cod": "2030-01-01", "it_mw": it_mw}]}
 
