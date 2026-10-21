@@ -87,6 +87,16 @@ One optimisation run over the network — `n.optimize()`, driven through
 Always off the request thread; it blocks.
 _Avoid_: simulation, optimisation run, job
 
+**Sizing off** (fixed-size run):
+A solve that dispatches on fixed sizes instead of choosing them
+(`SolverConfig.fixed_sizes`; `services/solver/fixed_sizes.py`). The sizes come
+from the **capacity run** (the last solve with sizing on, whose sizes are
+recorded in `n.meta["sizing_record"]`) or from the **nameplate** (each asset's
+configured `p_nom` / `s_nom` / `e_nom`). It is a real run of a **fixed
+design**: its results and commercial records stand. The sweep's operational
+re-solve, which also freezes sizes, is a transient check and commits nothing.
+_Avoid_: dispatch-only, operational run (the sweep's term), extendable off
+
 **Unavailable**:
 The state of a figure the backend could not resolve, as distinct from a figure
 that resolved to zero. Zero is a legitimate result in an energy-system model,

@@ -86,3 +86,17 @@ def test_saved_content_blocks(tmp_path):
     lines = run(tmp_path, json.dumps([{"type": "text", "text": wrapped}]))
     assert len(lines) == 2
     assert "PR #1 merged" in lines[0]
+
+
+def test_context_over_300k_is_flagged_rotate(tmp_path):
+    payload = {"data": [
+        {"id": "session_01AAAAAAAAbig001", "status": "running", "title": "Big",
+         "context_usage": {"used_tokens": 412_000}},
+        {"id": "session_01AAAAAAAAsmall02", "status": "running", "title": "Small",
+         "context_usage": {"used_tokens": 120_000}},
+        {"id": "session_01AAAAAAAAnone003", "status": "running", "title": "None"},
+    ]}
+    big, small, none = run(tmp_path, json.dumps(payload))
+    assert "412k ROTATE" in big
+    assert "120k" in small and "ROTATE" not in small
+    assert "ROTATE" not in none
