@@ -1,0 +1,1163 @@
+{
+  "schema_version": 1,
+  "reference_id": "eu-dea-2026-08",
+  "publisher": "Danish Energy Agency and Energinet",
+  "retrieved_on": "2026-10-21",
+  "source_release": "August 2026",
+  "licence": "CC-BY-4.0",
+  "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+  "licence_evidence": "Both inspected XLSX Intro sheets explicitly state Attribution 4.0 International",
+  "attribution": "Danish Energy Agency / Energinet technology catalogues, August 2026; selected cached cells extracted and transformed by GridSpine. No endorsement is implied.",
+  "modifications": "Selected central projection cells only; native reader converts units and derives absolute FOM/capex shares. No interpolation or inflation/FX conversion.",
+  "status": "curated_benchmark_reference_not_project_defaults",
+  "sources": {
+    "power": {
+      "url": "https://ens.dk/media/8615/download",
+      "sha256": "afb78dede13a17d17dca371ce74689bad98e55149ca58996fb3a535ac2704bb9",
+      "landing_page": "https://ens.dk/en/analyses-and-statistics/technology-data-generation-electricity-and-district-heating"
+    },
+    "fuels": {
+      "url": "https://ens.dk/media/6444/download",
+      "sha256": "07ac3ef166883591a438e739ac69c7768b5419964abdd43e668130bd7a55ffee",
+      "landing_page": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels"
+    }
+  },
+  "entries": [
+    {
+      "technology": "onwind",
+      "projection_year": 2025,
+      "source": "power",
+      "sheet": "20 Onshore turbines",
+      "year_cell": "D3",
+      "estimate_cell": "D4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
+      "unmapped_terms": [
+        "Variable O&M must be priced separately",
+        "Source forced/planned outage estimates are not a site-specific failure/repair law"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "D17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 1.18463198962,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "D25",
+          "label_cell": "B25",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 17386.63391824554,
+          "number_format": "#,##0"
+        },
+        "lifetime": {
+          "cell": "D10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 27,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "onwind",
+      "projection_year": 2030,
+      "source": "power",
+      "sheet": "20 Onshore turbines",
+      "year_cell": "E3",
+      "estimate_cell": "E4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
+      "unmapped_terms": [
+        "Variable O&M must be priced separately",
+        "Source forced/planned outage estimates are not a site-specific failure/repair law"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "E17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 1.14664489966,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "E25",
+          "label_cell": "B25",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 16662.66796409161,
+          "number_format": "#,##0"
+        },
+        "lifetime": {
+          "cell": "E10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 30,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "onwind",
+      "projection_year": 2040,
+      "source": "power",
+      "sheet": "20 Onshore turbines",
+      "year_cell": "F3",
+      "estimate_cell": "F4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
+      "unmapped_terms": [
+        "Variable O&M must be priced separately",
+        "Source forced/planned outage estimates are not a site-specific failure/repair law"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "F17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 1.1096904384,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "F25",
+          "label_cell": "B25",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 15965.364846295015,
+          "number_format": "#,##0"
+        },
+        "lifetime": {
+          "cell": "F10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 30,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "onwind",
+      "projection_year": 2050,
+      "source": "power",
+      "sheet": "20 Onshore turbines",
+      "year_cell": "G3",
+      "estimate_cell": "G4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e output",
+      "capacity_basis_code": "output_electric",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Total nominal investment includes source-specific grid connection, land/neighbour settlements and decommissioning of existing turbines.",
+      "unmapped_terms": [
+        "Variable O&M must be priced separately",
+        "Source forced/planned outage estimates are not a site-specific failure/repair law"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "G17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 1.09028817467,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "G25",
+          "label_cell": "B25",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 15602.06928231802,
+          "number_format": "#,##0"
+        },
+        "lifetime": {
+          "cell": "G10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 30,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-utility",
+      "projection_year": 2025,
+      "source": "power",
+      "sheet": "22 Utility-scale PV",
+      "year_cell": "C3",
+      "estimate_cell": "C4",
+      "estimate_label": null,
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+      "unmapped_terms": [
+        "PV degradation is a separate profile/finance assumption",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "C17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.5954,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "C26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 10030,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "C10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-utility",
+      "projection_year": 2030,
+      "source": "power",
+      "sheet": "22 Utility-scale PV",
+      "year_cell": "D3",
+      "estimate_cell": "D4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+      "unmapped_terms": [
+        "PV degradation is a separate profile/finance assumption",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "D17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.5562208489115281,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "D26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 9880,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "D10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-utility",
+      "projection_year": 2035,
+      "source": "power",
+      "sheet": "22 Utility-scale PV",
+      "year_cell": "E3",
+      "estimate_cell": "E4",
+      "estimate_label": null,
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+      "unmapped_terms": [
+        "PV degradation is a separate profile/finance assumption",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "E17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.5224355088835896,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "E26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 9740,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "E10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-utility",
+      "projection_year": 2040,
+      "source": "power",
+      "sheet": "22 Utility-scale PV",
+      "year_cell": "F3",
+      "estimate_cell": "F4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+      "unmapped_terms": [
+        "PV degradation is a separate profile/finance assumption",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "F17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.4953904402914328,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "F26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 9650,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "F10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-utility",
+      "projection_year": 2050,
+      "source": "power",
+      "sheet": "22 Utility-scale PV",
+      "year_cell": "G3",
+      "estimate_cell": "G4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": true,
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Fixed-tilt total investment includes modules, inverter, balance of plant, installation, soft costs and grid connection; FOM includes land rent.",
+      "unmapped_terms": [
+        "PV degradation is a separate profile/finance assumption",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "G17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.461075448657299,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "G26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 9580,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "G10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-rooftop-commercial",
+      "projection_year": 2025,
+      "source": "power",
+      "sheet": "22 Rooftop PV comm.&industrial",
+      "year_cell": "C3",
+      "estimate_cell": "C4",
+      "estimate_label": null,
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
+      "unmapped_terms": [
+        "PV inverter replacement and degradation need separate project treatment",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "C17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.7001760500446828,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "C26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 2410,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "C10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-rooftop-commercial",
+      "projection_year": 2030,
+      "source": "power",
+      "sheet": "22 Rooftop PV comm.&industrial",
+      "year_cell": "D3",
+      "estimate_cell": "D4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
+      "unmapped_terms": [
+        "PV inverter replacement and degradation need separate project treatment",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "D17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.6473466413938957,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "D26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 2330,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "D10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-rooftop-commercial",
+      "projection_year": 2035,
+      "source": "power",
+      "sheet": "22 Rooftop PV comm.&industrial",
+      "year_cell": "E3",
+      "estimate_cell": "E4",
+      "estimate_label": null,
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
+      "unmapped_terms": [
+        "PV inverter replacement and degradation need separate project treatment",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "E17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.6037413077962204,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "E26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 2270,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "E10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-rooftop-commercial",
+      "projection_year": 2040,
+      "source": "power",
+      "sheet": "22 Rooftop PV comm.&industrial",
+      "year_cell": "F3",
+      "estimate_cell": "F4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
+      "unmapped_terms": [
+        "PV inverter replacement and degradation need separate project treatment",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "F17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.5692609192259375,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "F26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 2220,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "F10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "solar-rooftop-commercial",
+      "projection_year": 2050,
+      "source": "power",
+      "sheet": "22 Rooftop PV comm.&industrial",
+      "year_cell": "G3",
+      "estimate_cell": "G4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2025,
+      "price_basis": "real",
+      "capacity_basis": "MW_e AC output",
+      "capacity_basis_code": "output_electric_ac",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "Commercial/industrial rooftop total system investment; separate from residential PV and from the historical 50/50 blend.",
+      "unmapped_terms": [
+        "PV inverter replacement and degradation need separate project treatment",
+        "Do not substitute DC module capacity for AC capacity"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "G17",
+          "label_cell": "B17",
+          "label": "Nominal investment (*total) [MEUR/MW_e]",
+          "value": 0.5262685503667518,
+          "number_format": "0.00"
+        },
+        "fom_share": {
+          "cell": "G26",
+          "label_cell": "B26",
+          "label": "Fixed O&M (*total) [EUR/MW_e/y]",
+          "value": 2190,
+          "number_format": "0"
+        },
+        "lifetime": {
+          "cell": "G10",
+          "label_cell": "B10",
+          "label": "Technical lifetime [years]",
+          "value": 40,
+          "number_format": "General"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-aec-100mw",
+      "projection_year": 2025,
+      "source": "fuels",
+      "sheet": "80 AEC 100 MW",
+      "year_cell": "C3",
+      "estimate_cell": "C4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "C27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 1254.04085660402,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "C38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "C23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 25,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "C15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 60.60545454545454,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-aec-100mw",
+      "projection_year": 2030,
+      "source": "fuels",
+      "sheet": "80 AEC 100 MW",
+      "year_cell": "D3",
+      "estimate_cell": "D4",
+      "estimate_label": "crtl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "D27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 989.5694620642815,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "D38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 4.5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "D23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 25,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "D15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 61.16146788990825,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-aec-100mw",
+      "projection_year": 2035,
+      "source": "fuels",
+      "sheet": "80 AEC 100 MW",
+      "year_cell": "E3",
+      "estimate_cell": "E4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "E27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 897.9886959943815,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "E38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 4,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "E23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 30,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "E15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 62.304672897196255,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-aec-100mw",
+      "projection_year": 2040,
+      "source": "fuels",
+      "sheet": "80 AEC 100 MW",
+      "year_cell": "F3",
+      "estimate_cell": "F4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "F27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 806.4079299244817,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "F38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 3,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "F23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 30,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "F15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 64.10192307692307,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-aec-100mw",
+      "projection_year": 2050,
+      "source": "fuels",
+      "sheet": "80 AEC 100 MW",
+      "year_cell": "G3",
+      "estimate_cell": "G4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW AEC system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "G27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 652.3620405106578,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "G38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 2.5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "G23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 35,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "G15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 64.10192307692307,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-pem-100mw",
+      "projection_year": 2025,
+      "source": "fuels",
+      "sheet": "80 PEMEC 100 MW",
+      "year_cell": "C3",
+      "estimate_cell": "C4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "C27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 1765.26543998952,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "C38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "C23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 25,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "C15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 60.059459459459454,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-pem-100mw",
+      "projection_year": 2030,
+      "source": "fuels",
+      "sheet": "80 PEMEC 100 MW",
+      "year_cell": "D3",
+      "estimate_cell": "D4",
+      "estimate_label": "crtl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "D27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 1249.722102635491,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "D38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 4.5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "D23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 25,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "D15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 60.88219178082191,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-pem-100mw",
+      "projection_year": 2035,
+      "source": "fuels",
+      "sheet": "80 PEMEC 100 MW",
+      "year_cell": "E3",
+      "estimate_cell": "E4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "E27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 1035.1127752623206,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "E38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 4,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "E23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 30,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "E15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 62.304672897196255,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-pem-100mw",
+      "projection_year": 2040,
+      "source": "fuels",
+      "sheet": "80 PEMEC 100 MW",
+      "year_cell": "F3",
+      "estimate_cell": "F4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "F27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 851.1543782755587,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "F38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 3,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "F23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 30,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "F15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 64.10192307692307,
+          "number_format": "#,##0.0"
+        }
+      }
+    },
+    {
+      "technology": "electrolysis-pem-100mw",
+      "projection_year": 2050,
+      "source": "fuels",
+      "sheet": "80 PEMEC 100 MW",
+      "year_cell": "G3",
+      "estimate_cell": "G4",
+      "estimate_label": "ctrl",
+      "currency": "EUR",
+      "currency_year": 2020,
+      "price_basis": "real",
+      "capacity_basis": "MW_e total electricity input",
+      "capacity_basis_code": "input_electric",
+      "includes_grid_connection": "unknown",
+      "applicability": "DEA Danish representative technology benchmark; not country-calibrated EU vendor/site data",
+      "included_costs": "100 MW PEM system investment and FOM, source system boundary; published planning estimates, not OEM quotations.",
+      "unmapped_terms": [
+        "Stack replacement is excluded from FOM (source note P)",
+        "Water/electricity input prices are excluded",
+        "Operating-hour degradation, heat and water flows need separate modelling"
+      ],
+      "cells": {
+        "overnight": {
+          "cell": "G27",
+          "label_cell": "B27",
+          "label": "Specific investment [€/kW of total input_e]",
+          "value": 563.4726302476439,
+          "number_format": "#,##0"
+        },
+        "fom_share": {
+          "cell": "G38",
+          "label_cell": "B38",
+          "label": "Fixed O&M [% of specific investment/year] ",
+          "value": 2.5,
+          "number_format": "#,##0.0"
+        },
+        "lifetime": {
+          "cell": "G23",
+          "label_cell": "B23",
+          "label": "Technical lifetime of plant [years]",
+          "value": 35,
+          "number_format": "#,##0"
+        },
+        "efficiency": {
+          "cell": "G15",
+          "label_cell": "B15",
+          "label": "LHV-based efficiency (% total input_e [MWh/MWh])",
+          "value": 64.10192307692307,
+          "number_format": "#,##0.0"
+        }
+      }
+    }
+  ]
+}

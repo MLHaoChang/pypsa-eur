@@ -17,7 +17,7 @@ describe('FieldDrawer', () => {
   it('opens a component target in place, names it in words, and closes', () => {
     render(<FieldDrawer>{t => <p>editor for {t.entity}</p>}</FieldDrawer>)
     act(() => openFlowTargetInPlace(target))
-    expect(screen.getByTestId('field-drawer').textContent).toContain("Connection & grid > Link 'grid_import'")
+    expect(screen.getByTestId('field-drawer').textContent).toContain("Connection & grid › Link 'grid_import'")
     expect(screen.getByText('editor for grid_import')).toBeTruthy()
     expect(useUIStore.getState().uiMode).toBe('guided')
     // The item's section stays active, not the Link class's own (Assets).

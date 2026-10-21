@@ -269,7 +269,7 @@ def test_q5_single_owner_owns_the_poc_meter_links():
         owned = {(o["component"], o["asset_id"]) for o in vf["asset_owners"]}
         assert owned == expect, (option, owned)
         assert {p["id"] for p in vf["participants"]} == {"site"}
-        assert vf["template_version"] == "single_owner@3"
+        assert vf["template_version"] == "single_owner@4"
 
 
 @pytest.mark.live_solve
