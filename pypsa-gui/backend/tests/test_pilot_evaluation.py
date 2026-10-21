@@ -18,7 +18,26 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile.startswith("lost-"):
+    if case.profile == "bus-price/1":
+        n.add("Generator", "G2", bus="B1", p_nom=20, marginal_cost=30)
+        n.loads_t.p_set = pd.DataFrame({"L1": [5, 25]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [1, 3]
+    elif case.profile.endswith("-emissions/1"):
+        n.add("Carrier", "gas", co2_emissions=0.25)
+        n.generators.at["G1", "carrier"] = "gas"
+        n.generators.at["G1", "efficiency"] = 0.5
+        n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1]
+        if case.profile == "network-emissions/1":
+            n.add("Carrier", "clean", co2_emissions=0)
+            n.add("Generator", "G2", bus="B1", p_nom=20, marginal_cost=50, carrier="clean")
+            n.add("GlobalConstraint", "co2", type="primary_energy", carrier_attribute="co2_emissions",
+                  sense="<=", constant=6)
+    elif case.profile == "curtailment/1":
+        n.generators_t.p_max_pu = pd.DataFrame({"G1": [1.0, 0.5]}, index=n.snapshots)
+        n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1]
+    elif case.profile.startswith("lost-"):
         n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
         n.snapshot_weightings.loc[:, "generators"] = [2, 3]
         n.snapshot_weightings.loc[:, "objective"] = [1, 2]
@@ -60,6 +79,8 @@ def evaluation_project(baseline, request):
     assert n.optimize(solver_name="highs", include_objective_constant=False) == ("ok", "optimal")
     ctx.solver_state.update(status="completed", condition="optimal")
     workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
+    if case.profile == "bus-price/1":
+        ctx.solver_state["last_solve_settings"] = {"voll_eur_per_mwh": 1000.0}
     if case.profile.startswith("lost-"):
         # The VoLL capture a solve with slacks writes; hand-set, as n.optimize adds none.
         ctx.solver_state["last_lost_load"] = {
@@ -118,6 +139,8 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
     if case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile == "bus-price/1":
+        n.buses_t.marginal_price.loc[:, "B1"] = float("nan")
     elif case.fault == "missing" and case.profile.startswith("lost-"):
         evaluation_project.solver_state["last_lost_load"]["lost_load_t"].iloc[1, 0] = float("nan")
     elif case.fault == "missing" and case.profile.endswith("-loading/1"):
