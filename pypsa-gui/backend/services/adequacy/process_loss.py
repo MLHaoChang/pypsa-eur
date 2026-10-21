@@ -165,3 +165,132 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
         products.append(row)
     return {"period": period, "start": start, "hours": hours, "outage_snapshots": out_span,
             "units": rows, "products": products, "flags": flags}
+
+
+# ── the failure-mode sweep's link outages (ticket 08b, FMEA class B) ────────
+
+
+def _year_hours(period) -> float:
+    """The period year's hours (24 × 365 or 366), never a literal 8760; 8760 on a single-period network."""
+    try:
+        return 24.0 * (366 if pd.Timestamp(year=int(period), month=1, day=1).is_leap_year else 365)
+    except (TypeError, ValueError):
+        return 8760.0
+
+
+def _source_buses(n) -> set[str]:
+    """Buses with a source of electricity: a Generator (not an LP slack, not a product's buy-in or shortfall), a
+    StorageUnit, or a Store that is not on a product bus."""
+    from services.adequacy.slack import slack_generator_mask
+    from models.process_unit import product_roles
+
+    gens = n.generators
+    roles = product_roles(n)
+    keep = ~slack_generator_mask(gens) if len(gens) else pd.Series([], dtype=bool)
+    out = {str(gens.at[g, "bus"]) for g in gens.index[keep.to_numpy()] if str(g) not in roles}
+    out |= {str(b) for b in n.storage_units.bus}
+    out |= {str(n.stores.at[s, "bus"]) for s in n.stores.index if not PP.is_product_bus(n, str(n.stores.at[s, "bus"]))}
+    return out
+
+
+def units_cut_off(n, link: str) -> list[str]:
+    """The process units a forced outage of `link` leaves with no supply, first order: no path to their bus0 from a
+    source bus (`_source_buses`) over Lines, Transformers (both ways) and the remaining Links (bus0 → bus1, and back
+    when p_min_pu < 0), process units excluded. A path is not a capacity: a unit still reachable counts as supplied."""
+    edges: dict[str, set[str]] = {}
+
+    def edge(a, b):
+        edges.setdefault(a, set()).add(b)
+
+    for comp in ("lines", "transformers"):
+        df = getattr(n, comp)
+        for name in df.index:
+            a, b = str(df.at[name, "bus0"]), str(df.at[name, "bus1"])
+            edge(a, b)
+            edge(b, a)
+    process = set(n.links.index[process_mask(n.links)])
+    for name in n.links.index:
+        if name == link or name in process:
+            continue
+        a, b = str(n.links.at[name, "bus0"]), str(n.links.at[name, "bus1"])
+        edge(a, b)
+        if float(n.links.at[name, "p_min_pu"]) < 0:
+            edge(b, a)
+    seen, todo = set(), list(_source_buses(n))
+    while todo:
+        b = todo.pop()
+        if b in seen:
+            continue
+        seen.add(b)
+        todo.extend(edges.get(b, ()))
+    return [str(u) for u in n.links.index[process_mask(n.links)] if str(n.links.at[u, "bus0"]) not in seen]
+
+
+def expected_outage_loss(n, link: str, mttr_hours: float, q: float, lost_load=None) -> dict:
+    """A class-B link outage's lost production per year: the units it cuts off (`units_cut_off`), each period's
+    event = the mean of `outage_loss` over every start snapshot (stores-weighted), and per year = occurrence × event,
+    occurrence = the year's hours × q / MTTR. An outage longer than the period's cycle is capped at one cycle and
+    flagged `outage_longer_than_period` (never wrapped twice)."""
+    units = units_cut_off(n, link)
+    out = {"stopped_units": units, "flags": [],
+           "source_set": "Generators (no slacks, buy-ins or shortfalls), StorageUnits and Stores off product buses, "
+                         "reached over Lines, Transformers and the remaining Links",
+           "by_period": {}}
+    if not units:
+        return out
+    if not (mttr_hours and math.isfinite(mttr_hours) and mttr_hours > 0):
+        out["flags"].append("mttr_missing")
+        return out
+    periods = list(n.snapshots.get_level_values(0).unique()) if isinstance(n.snapshots, pd.MultiIndex) else [None]
+    for p in periods:
+        sns = _period_index(n, p)
+        w = _weights(n, sns)
+        span = float(w.sum())
+        hours, flags = float(mttr_hours), []
+        if hours > span:
+            hours, flags = span, ["outage_longer_than_period"]
+        acc: dict[str, dict] = {}
+        for start in range(len(sns)):
+            ev = outage_loss(n, p, start, hours, units=units, lost_load=lost_load)
+            for row in ev["products"]:
+                a = acc.setdefault(row["product"], {"t": 0.0, "eur": 0.0, "eur_known": True, "t_known": True,
+                                                    "flag": row["flag"]})
+                if row["undelivered_t"] is None:
+                    a["t_known"] = False
+                else:
+                    a["t"] += row["undelivered_t"] * w[start]
+                if row["lost_eur"] is None:
+                    a["eur_known"] = False
+                else:
+                    a["eur"] += row["lost_eur"] * w[start]
+        occ = _year_hours(p) * q / mttr_hours
+        key = "_" if p is None else str(int(p))
+        out["by_period"][key] = {
+            "occurrence_per_year": occ, "outage_hours": hours, "flags": flags,
+            "products": [{"product": b,
+                          "undelivered_t_per_event": a["t"] / span if a["t_known"] else None,
+                          "lost_t_per_year": occ * a["t"] / span if a["t_known"] else None,
+                          "lost_eur_per_year": occ * a["eur"] / span if a["eur_known"] else None,
+                          "flag": a["flag"]} for b, a in sorted(acc.items())]}
+    return out
+
+
+def lost_production_summary(n, lost_load=None) -> list[dict]:
+    """A solve's own lost production per product (the shortfall accessor, `process_products.shortfalls`): tonnes on
+    `snapshot_weightings.generators`, EUR on `objective` at the price the LP gave it. None and flagged when the
+    dispatch is not known (never 0). Empty on a network with no product shortfall."""
+    wg = n.snapshot_weightings.generators.reindex(n.snapshots).to_numpy(dtype=float)
+    wo = n.snapshot_weightings.objective.reindex(n.snapshots).to_numpy(dtype=float)
+    out = []
+    for s in PP.shortfalls(n, lost_load):
+        tpu = PP.t_per_unit(n, s.bus)
+        if s.p is None:
+            out.append({"product": s.bus, "source": s.source, "lost_t": None, "lost_eur": None, "flag": s.flag})
+            continue
+        p = s.p.to_numpy(dtype=float).clip(min=0.0)
+        out.append({"product": s.bus, "source": s.source,
+                    "lost_t": float((p * wg).sum()) * tpu if tpu is not None else None,
+                    "lost_eur": float((p * wo * s.cost.to_numpy(dtype=float)).sum()) if s.value is not None else None,
+                    "flag": s.flag or (None if tpu is not None else "tonne_factor_missing")
+                    or (None if s.value is not None else "lost_production_value_missing")})
+    return out

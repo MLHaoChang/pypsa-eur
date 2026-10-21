@@ -178,3 +178,128 @@ def test_a_12_hour_grid_outage_at_full_haber_bosch_load_in_the_ammonia_template(
     level_t = float(n.stores_t.e["nh3_tank"].loc[2035].to_numpy()[(start - 1) % len(sns)]) / A.MWH_PER_T
     assert p["undelivered_t"] == pytest.approx(max(0.0, delivered_t - level_t), rel=1e-9, abs=1e-9)
     assert p["lost_eur"] == pytest.approx(p["undelivered_t"] * A.LOST_EUR_PER_T, rel=1e-9, abs=1e-6)
+
+
+# ── the failure-mode sweep's link outages (ticket 08b) ─────────────────────
+
+from services.adequacy.process_loss import (  # noqa: E402
+    expected_outage_loss,
+    lost_production_summary,
+    units_cut_off,
+)
+
+
+def _supplied(n, *, local=False):
+    """`_net`'s unit fed through an import Link from a grid Generator; `local` adds a battery on the unit's bus."""
+    n.add("Bus", "grid")
+    n.add("Generator", "supply", bus="grid", p_nom=100.0)
+    n.add("Link", "imp", bus0="grid", bus1="hub", p_nom=100.0)
+    n.links.loc["imp", ["eh_process", "criticality_tier"]] = [False, ""]
+    if local:
+        n.add("StorageUnit", "bess", bus="hub", p_nom=10.0)
+    return n
+
+
+def test_an_import_outage_cuts_off_the_units_with_no_other_source():
+    assert units_cut_off(_supplied(_net()), "imp") == ["hb"]
+    assert units_cut_off(_supplied(_net(), local=True), "imp") == []      # a path is not a capacity: stated
+    assert units_cut_off(_supplied(_net()), "elsewhere") == []
+
+
+def _period_net(year, **kw):
+    """`_net` as one investment period `year` (a MultiIndex), the dispatch carried over."""
+    n = _net(**kw)
+    p1, p0, e, lp = (n.links_t.p1.copy(), n.links_t.p0.copy(), n.stores_t.e.copy(), n.loads_t.p.copy())
+    idx = pd.MultiIndex.from_arrays([[year] * H, n.snapshots], names=["period", "timestep"])
+    n.set_snapshots(idx)
+    n.investment_periods = [year]
+    for frame, src in ((n.links_t.p1, p1), (n.links_t.p0, p0), (n.stores_t.e, e), (n.loads_t.p, lp)):
+        for c in src.columns:
+            frame[c] = src[c].to_numpy()
+    return n
+
+
+def test_the_expected_loss_is_the_mean_event_times_the_occurrence_on_the_years_own_hours():
+    """Constant dispatch: every start gives the same event, so the mean is that event; occurrence = the year's
+    hours × q / MTTR (8784 in a leap year, never a literal 8760)."""
+    n = _supplied(_period_net(2028))
+    out = expected_outage_loss(n, "imp", 12.0, 0.001)
+    assert out["stopped_units"] == ["hb"]
+    (row,) = out["by_period"]["2028"]["products"]
+    event = outage_loss(n, 2028, 5, 12.0, units=["hb"])["products"][0]["undelivered_t"]
+    occ = 8784.0 * 0.001 / 12.0
+    assert out["by_period"]["2028"]["occurrence_per_year"] == pytest.approx(occ)
+    assert row["undelivered_t_per_event"] == pytest.approx(event)
+    assert row["lost_t_per_year"] == pytest.approx(occ * event)
+    assert row["lost_eur_per_year"] == pytest.approx(occ * event * 800.0)
+    assert "supplied" not in out["source_set"] and "StorageUnits" in out["source_set"]
+
+
+def test_an_outage_longer_than_the_period_is_one_cycle_and_flagged():
+    n = _supplied(_period_net(2027))
+    p = expected_outage_loss(n, "imp", 100.0, 0.001)["by_period"]["2027"]
+    assert p["outage_hours"] == float(H) and p["flags"] == ["outage_longer_than_period"]
+
+
+def test_no_unit_cut_off_gives_no_period_rows():
+    out = expected_outage_loss(_supplied(_net(), local=True), "imp", 12.0, 0.001)
+    assert out["stopped_units"] == [] and out["by_period"] == {}
+
+
+def test_a_solves_own_lost_production_per_product():
+    n = _net()
+    n.generators_t.p["short"] = pd.Series(2.0, index=n.snapshots)
+    (row,) = lost_production_summary(n)
+    assert row["lost_t"] == pytest.approx(2.0 * H / MWH_PER_T)
+    assert row["lost_eur"] == pytest.approx(2.0 * H * 800.0 / MWH_PER_T)
+    assert lost_production_summary(_net(value=None)) == []     # no shortfall, no bus value: nothing to report
+
+
+def test_the_sweep_row_is_not_established_without_the_base_dispatch():
+    from services.adequacy.sweep import _process_loss_rows
+
+    n = _supplied(_net())
+    rows = [{"failure_mode": {}, "meta": {"name": "imp", "mttr_hours": 12.0, "q": 0.001}},
+            {"failure_mode": None, "meta": {"name": "imp"}}]
+    _process_loss_rows(n, rows, restored=False)
+    assert rows[0]["process_loss"] == {"status": "not_established", "reason": "base_not_restored"}
+    assert "process_loss" not in rows[1]
+    _process_loss_rows(n, rows, restored=True)
+    assert rows[0]["process_loss"]["status"] == "ok" and rows[0]["process_loss"]["stopped_units"] == ["hb"]
+
+
+@pytest.mark.live_solve
+def test_the_class_b_sweep_reports_the_lost_production_of_an_import_outage(reset_backend):
+    """A site whose only supply is its import Link (FOR 0.001, MTTR 12 h): the sweep's row for that outage carries
+    the unit it cuts off and its lost NH3 per year at the lost-production value, beside the electrical figures."""
+    import threading
+
+    from services.adequacy.sweep import run_class_b_sweep
+    from services.solver_service import SolverConfig
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2035-01-01", periods=H, freq="h"))
+    for b in ("grid", "hub"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Bus", "nh3", carrier="NH3", unit="MWh")
+    n.buses["mwh_per_t"] = [float("nan"), float("nan"), MWH_PER_T]
+    n.add("Generator", "supply", bus="grid", p_nom=100.0, marginal_cost=50.0)
+    n.add("Link", "imp", bus0="grid", bus1="hub", p_nom=100.0)
+    n.links["outage_rate_value"] = float("nan")
+    n.links["mttr_hours"] = float("nan")
+    n.links.loc["imp", ["outage_rate_value", "mttr_hours"]] = [0.001, 12.0]
+    n.add("Link", "hb", bus0="hub", bus1="nh3", p_nom=10.0, efficiency=RATE_MWH / 8.5, min_down_time=8)
+    n.links["eh_process"] = n.links.index == "hb"
+    n.links["criticality_tier"] = ["", "process_critical"]
+    n.add("Load", "delivery", bus="nh3", p_set=0.5 * RATE_MWH)
+    n.add("Generator", "short", bus="nh3", p_nom=100.0, marginal_cost=800.0 / MWH_PER_T)
+    n.generators["process_role"] = ["", "shortfall"]
+    rows, restore = run_class_b_sweep(n, threading.Lock(), SolverConfig(voll=1000.0))
+    (row,) = [r for r in rows if r["meta"]["name"] == "imp"]
+    pl = row["process_loss"]
+    assert pl["status"] == "ok" and pl["stopped_units"] == ["hb"]
+    (prod,) = pl["by_period"]["_"]["products"]
+    occ = 8760.0 * 0.001 / 12.0
+    # No tank: the 12 h outage plus the 8 h restart leaves 20 h of the delivery undelivered, whatever the start.
+    assert prod["undelivered_t_per_event"] == pytest.approx(20 * 0.5 * RATE_MWH / MWH_PER_T, rel=1e-6)
+    assert prod["lost_eur_per_year"] == pytest.approx(occ * prod["undelivered_t_per_event"] * 800.0, rel=1e-6)
