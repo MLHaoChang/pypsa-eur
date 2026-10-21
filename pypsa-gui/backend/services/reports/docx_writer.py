@@ -87,6 +87,7 @@ SECTION_TITLES: dict[str, str] = {
     # The investment-case and island chapters (D8; ``chapters``).
     "investment_case": "Investment case",
     "island": "Islanding and control",
+    "grid_readiness": "Grid readiness (screening)",
 }
 
 # WP0's ``figures=`` argument is keyed by EH section; the document's figure

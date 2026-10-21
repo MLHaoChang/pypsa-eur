@@ -125,7 +125,8 @@ def test_without_the_ai_profile_the_envelope_rows_are_unknown(tmp_path, tid):
     for rid in ENVELOPE_ROWS:
         assert rows[rid]["verdict"] == "unknown", rid
         if rid != "rapid_voltage_change" or rows[rid]["limit"] is not None:
-            assert "dc_load" in rows[rid]["note"] or "eh_sk_mva" in rows[rid]["note"]
+            assert "AI-training load profile" in rows[rid]["note"] \
+                or "short-circuit level" in rows[rid]["note"]
 
 
 @pytest.mark.parametrize("tid", DC_IDS)
@@ -170,7 +171,7 @@ def test_a_sidecar_removed_makes_its_rows_unknown(tmp_path):
     (d / "island_config.json").unlink()
     rows = _rows(G.grid_readiness(d, n, PROFILE))
     for rid in ("reactive_range", "frequency_support", "grid_former"):
-        assert rows[rid]["verdict"] == "unknown" and "island sidecar" in rows[rid]["note"], rid
+        assert rows[rid]["verdict"] == "unknown" and "island requirements" in rows[rid]["note"], rid
 
 
 def test_an_unknown_profile_is_reported_and_its_rows_unknown(tmp_path):
@@ -450,7 +451,7 @@ def test_the_grid_former_applies_only_when_the_site_is_asked_to_island(tmp_path)
     assert _rows(G.grid_readiness(d, n, PROFILE))["grid_former"]["verdict"] == "fail"
     (d / "island_config.json").unlink()
     row = _rows(G.grid_readiness(d, n, PROFILE))["grid_former"]
-    assert row["verdict"] == "unknown" and "not assessed" in row["note"]
+    assert row["verdict"] == "unknown" and "Not assessed" in row["note"]
 
 
 @pytest.mark.parametrize("status, verdict", [(None, "unknown"), ("ok", "pass"),
@@ -496,7 +497,7 @@ def test_the_lole_row(tmp_path, study, edited, verdict):
         assert row["project_value"]["horizon_years"] == study["report"]["sections"]["certification"][
             "payload"]["horizon_years"]
     if edited:
-        assert "stale" in row["note"]
+        assert "Stale" in row["note"]
 
 
 def test_the_lole_goal_is_the_one_the_study_certified_against(tmp_path):
@@ -560,3 +561,27 @@ def test_the_copilot_tool_is_a_read_service_call(hub, monkeypatch):
     assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="Readiness Hub",
                                                     profile="generic_assumed") == {"ok": 1}
     assert calls == [("Readiness Hub", "generic_assumed")]
+
+
+RAW_IDS = ("eh_", "/api/", "p_max_pu", "p_nom", "island_config", "sidecar", "dc_load", "ups_bridged",
+           "IBR", "pf_rated", "offered_services", "gridspine", "rvc_limit_pct", "q_range_demand",
+           "eu_rfg_dcc_ce", "generic_assumed", "DC 0", "has_grid_former", "_mva")
+
+
+@pytest.mark.parametrize("tid, dc_load", [(t, None) for t in TIDS] + [(t, {}) for t in DC_IDS])
+def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
+    """What the panel and the report show (requirement, limit, project value,
+    source, note) carries no attribute ids, file names, API paths, profile or
+    scenario ids (UX review, checklist 6.9). Asset names are the user's own and
+    stay. An unknown row's note, shown first, starts as a sentence."""
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    (d / "campus_electrical").mkdir()
+    (d / "campus_electrical" / "island_study.json").write_text(json.dumps(
+        {"variants": {"ups_bridged": {"status": "infeasible"}, "seamless": {"status": "ok"}}}))
+    for r in G.grid_readiness(d, n, PROFILE)["rows"]:
+        text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
+                        if r[k] is not None)
+        for word in RAW_IDS:
+            assert word not in text, (r["id"], word, text)
+        if r["verdict"] == "unknown":
+            assert r["note"][0].isupper(), (r["id"], r["note"])
