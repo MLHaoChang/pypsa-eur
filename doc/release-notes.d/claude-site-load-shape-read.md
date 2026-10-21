@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can read the Load shape tab with `get_load_shape` (one view per call: summary, heatmap, week, monthly, annual). A group the network does not model, or the run cannot establish, reaches it as that state with its reason, never as zero.
