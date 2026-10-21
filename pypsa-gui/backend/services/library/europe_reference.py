@@ -14,15 +14,19 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, StrictBool
 
-from services.library.defaults_pack.loader import CostPart, DefaultsPackError, PackValue
+from services.library.defaults_pack.loader import CostPart, DefaultsPack, DefaultsPackError, PackValue
 
 _DATA_FILE = Path(__file__).with_name("reference_data") / "eu-dea-2026-08.json"
 _EXPECTED_SHA256 = "902258be6632a18bc050b604eae1275b3c181124e88af6a6e9bcd3f67a18a11c"
 
-# Typed cost units, the same vocabulary as defaults-pack values. A price per
-# `input_electric` MW is never scaled by efficiency; `output_electric_ac` PV is
-# not interchangeable with a DC-rated asset.
-CapacityBasisCode = Literal["output_electric", "output_electric_ac", "output_electric_dc", "input_electric"]
+# Typed cost units, one vocabulary with defaults-pack values' `capacity_basis`
+# (agreed with GS-2, 2026-10-21). A price per `input_electric` MW is never scaled
+# by efficiency; `output_electric_ac` PV is not interchangeable with a DC-rated
+# asset. This reference ships only the first three codes; the rest serve pack rows.
+CapacityBasisCode = Literal[
+    "output_electric", "output_electric_ac", "input_electric", "output_electric_dc",
+    "output_product", "storage_energy", "not_applicable",
+]
 GridConnection = StrictBool | Literal["unknown"]
 
 
@@ -156,12 +160,12 @@ class ReferenceComparison(BaseModel):
 
 
 def compare_europe_reference_with_pack(reference: EuropeanTechnologyReference,
-                                       pack) -> list[ReferenceComparison]:
+                                       pack: DefaultsPack) -> list[ReferenceComparison]:
     """Show `reference` beside `pack` (a `DefaultsPack`, e.g. `load_defaults_pack()`).
 
     Matching is by the pack's own key for the reference technology (or its listed
     counterpart). The pack is only read. A pack value differs when its value, unit,
-    currency or money year is not the reference's."""
+    currency, money year or projection year is not the reference's."""
     technology = _PACK_COUNTERPART.get(reference.technology, reference.technology)
     by_key = {v.key: v for v in pack.cost_values}
     rows = []
@@ -172,8 +176,8 @@ def compare_europe_reference_with_pack(reference: EuropeanTechnologyReference,
         pack_value = by_key.get(f"{technology}.investment.{parameter}")
         differs = pack_value is not None and (
             not math.isclose(pack_value.value, ref_value.value, rel_tol=1e-9)
-            or (pack_value.unit, pack_value.currency, pack_value.currency_year)
-            != (ref_value.unit, ref_value.currency, ref_value.currency_year))
+            or (pack_value.unit, pack_value.currency, pack_value.currency_year, pack_value.projection_year)
+            != (ref_value.unit, ref_value.currency, ref_value.currency_year, ref_value.projection_year))
         rows.append(ReferenceComparison(parameter=parameter, reference=ref_value,
                                         pack_stamp=pack.stamp, pack=pack_value, differs=differs))
     return rows

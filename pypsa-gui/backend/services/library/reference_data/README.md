@@ -21,7 +21,7 @@ Some keys exist in both (`onwind.*`, `solar-utility.*`; the reference AEC stands
 
 Each entry also carries typed cost units, the same vocabulary as defaults-pack values:
 
-- `capacity_basis_code`: `output_electric` (wind), `output_electric_ac` (both PV archetypes) or `input_electric` (AEC/PEM; never scaled by efficiency). `output_electric_dc` is reserved for DC-rated rows; this reference ships none.
+- `capacity_basis_code`: `output_electric` (wind), `output_electric_ac` (both PV archetypes) or `input_electric` (AEC/PEM; never scaled by efficiency). The shared set also has `output_electric_dc`, `output_product`, `storage_energy` and `not_applicable` for pack rows; this reference ships none of them.
 - `includes_grid_connection`: `true` where the source says its investment includes grid connection (wind, utility PV), otherwise `"unknown"`.
 
 Important boundaries:

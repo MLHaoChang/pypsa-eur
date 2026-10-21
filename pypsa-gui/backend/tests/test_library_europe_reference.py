@@ -3,6 +3,7 @@ import hashlib
 import json
 
 import pytest
+from pydantic import ValidationError
 
 from services.library import europe_reference as R
 from services.library.defaults_pack.loader import CostPart, DefaultsPackError, load_defaults_pack
@@ -100,6 +101,11 @@ def test_calls_are_independent_and_do_not_replace_default_pack():
 def test_only_explicit_source_projection_years_are_available():
     selectors = R.available_europe_technology_references()
     assert len(selectors) == len(set(selectors)) == 24
+    # The source's dated central columns; onshore wind has no 2035 column.
+    assert selectors == tuple(sorted(
+        [(t, y) for t in ("electrolysis-aec-100mw", "electrolysis-pem-100mw", "solar-rooftop-commercial",
+                          "solar-utility") for y in (2025, 2030, 2035, 2040, 2050)]
+        + [("onwind", y) for y in (2025, 2030, 2040, 2050)]))
     assert ("onwind", 2035) not in selectors
     assert ("solar-utility", 2035) in selectors
 
@@ -128,7 +134,7 @@ def test_grid_connection_flag_is_strict(tmp_path, monkeypatch):
     replacement.write_text(json.dumps(raw))
     monkeypatch.setattr(R, "_DATA_FILE", replacement)
     monkeypatch.setattr(R, "_EXPECTED_SHA256", hashlib.sha256(replacement.read_bytes()).hexdigest())
-    with pytest.raises(ValueError):
+    with pytest.raises(ValidationError):
         R.load_europe_technology_reference(raw["entries"][0]["technology"], raw["entries"][0]["projection_year"])
 
 
@@ -143,7 +149,11 @@ def test_comparison_shows_reference_and_pack_with_their_own_money_years():
     assert overnight.pack.key == overnight.reference.key == "solar-utility.investment.overnight"
     assert overnight.reference.source != overnight.pack.source
     assert overnight.pack_stamp == pack.stamp
-    assert not rows["lifetime"].differs  # 40 years on both sides
+    assert not rows["lifetime"].differs  # 40 years on both sides, both for 2030
+    later = R.compare_europe_reference_with_pack(R.load_europe_technology_reference("solar-utility", 2040), pack)
+    lifetime_2040 = next(r for r in later if r.parameter == "lifetime")
+    assert lifetime_2040.reference.value == lifetime_2040.pack.value == 40
+    assert lifetime_2040.differs  # same number, different projection year: show both
 
 
 def test_comparison_maps_aec_to_the_pack_electrolyser_and_leaves_others_unpaired():
