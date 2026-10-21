@@ -55,7 +55,7 @@ Read [workspace reconciliation](../workspace-reconciliation.md) §3.3, §12 (Q3 
 ## Open items
 
 - The report appendix: [E1-report-template-ledger.md](E1-report-template-ledger.md).
-- The chat tool's catalogue description does not mention `planning`. That is a catalogue change and needs the coordinator's go.
+- The chat tool's catalogue description does not mention `planning`. Coordinator (2026-10-21, 16:15 CEST): its own tiny PR right after E1a merges, with `smoke/assistant_inventory.py --write`, GK review. TS #512 and GS-EU #514 also touch `harness/catalogue.py`; whoever lands later reruns the inventory.
 - The Builder's preview of the resulting periods is W2's (UI, with the UX reviewer).
 
 ## Comments
