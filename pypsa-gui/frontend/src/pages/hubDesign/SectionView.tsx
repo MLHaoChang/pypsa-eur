@@ -4,6 +4,7 @@ import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
 import { sectionMeta } from '../../layout/flowSections'
@@ -16,7 +17,8 @@ import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../.
 function ItemRow({ item }: { item: FlowItem }) {
   const Icon = item.severity === 'error' ? XCircle : item.severity === 'warning' ? AlertTriangle : Info
   const tone = item.severity === 'error' ? 'text-danger' : item.severity === 'warning' ? 'text-warn' : 'text-muted'
-  const field = fieldWords(item.target)
+  const labels = useFieldLabels()
+  const field = fieldWords(item.target, labels, item.message)
   return (
     <li data-testid="section-item" data-severity={item.severity}
       className="flex items-start gap-2 text-[12px] text-text">
