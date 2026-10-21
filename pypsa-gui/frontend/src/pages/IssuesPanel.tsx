@@ -8,7 +8,6 @@ import { useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
-import { issueTitle } from '../utils/issueTitles'
 import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
@@ -467,7 +466,7 @@ function IssueRow({ issue, onJumpTo, carriers }: {
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
           <span className="text-[12px] font-semibold text-text" data-testid="issue-title">
-            {issueTitle(issue.code)}
+            {issue.title}
           </span>
           {issue.component_class && issue.name && (
             <span className="text-[10px] text-muted truncate">

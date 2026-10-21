@@ -129,13 +129,20 @@ def test_an_item_carries_its_target(client, site, edit):
     row = next(s for s in body["sections"] if s["section"] == "loads")
     item = next(i for i in row["items"] if i["severity"] == "error")
     assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
-                         "acknowledged", "card", "in_scope"}
+                         "acknowledged", "title", "card", "in_scope"}
+    assert item["title"] and "_" not in item["title"]
     assert item["source"] == "validation" and item["blocking"] is True
     assert item["card"] is None and item["in_scope"] is True
     assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
                               "entity": "it", "field": None}
     assert body["run_blocker"]["section"] == "loads"
-    assert body["run_blocker"]["message"].startswith("Loads & demand: ")
+    # The blocker reads in the plain title and the entity, not the validator's
+    # detail text ("p_set must be finite ...").
+    assert body["run_blocker"]["message"] == f"Loads & demand: {item['title']} (it)"
+    # The detail the user fixes from stays reachable, unchanged, on the pointer
+    # and on the item.
+    assert body["run_blocker"]["detail"] == item["message"]
+    assert item["message"] != item["title"]
     assert body["run_blocker"]["target"] == item["target"]
 
 
@@ -282,6 +289,9 @@ def test_a_warning_acknowledged_is_complete_until_its_value_changes(
     assert _states(body)["project"] == "complete"
     row = next(s for s in body["sections"] if s["section"] == "project")
     assert row["items"][0]["acknowledged"] is True               # still listed, as checked
+    # The title is added beside the message; the message (the acknowledged
+    # value) is the validator's own text, not the title.
+    assert row["items"][0]["title"] and row["items"][0]["message"] != row["items"][0]["title"]
 
     with edit() as n:
         n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 5.0

@@ -14,6 +14,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { blockerMessage } from '../../../utils/blockerMessage'
 import { nk } from '../../../utils/queryKeys'
 import { buildEhStudyBody, ehStudyQueryKeys } from '../../results/EhReferenceDesignPanel'
+import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -44,6 +45,13 @@ export function GoalCard() {
   const setLoleTarget = useHubDesignStore(s => s.setLoleTarget)
   const setEnsCap = useHubDesignStore(s => s.setEnsCap)
   const [advanced, setAdvanced] = useState(false)
+  // A link to the stress editor opens "More settings" once.
+  const advancedRequested = useHubDesignStore(s => s.goalAdvancedRequested)
+  useEffect(() => {
+    if (!advancedRequested) return
+    setAdvanced(true)
+    useHubDesignStore.getState().setGoalAdvancedRequested(false)
+  }, [advancedRequested])
   const [blocked, setBlocked] = useState<string | null>(null)
   // Section 8's scope (W4a): with Reliability › goal & study off, the goal
   // hides and the study is not run. VOLL stays: the optimisation prices lost
@@ -140,6 +148,14 @@ export function GoalCard() {
         )}
       </div>
       </>}
+
+      {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
+      {advanced && (
+        <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
+          <span className="text-[12px] font-semibold text-text">Stress conditions</span>
+          <StressScenarioEditor project={project} />
+        </div>
+      )}
 
       {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
           (UX review L3). */}

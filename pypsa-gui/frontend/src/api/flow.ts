@@ -46,6 +46,8 @@ export interface FlowItem {
   code: string
   severity: 'error' | 'warning' | 'info'
   message: string
+  /** Plain title of the check where the server has one (validation codes). */
+  title?: string | null
   source: FlowItemSource
   target: FlowTarget
   /** A server refusal (`validate_for_run`, or the study's own start refusal):
@@ -77,8 +79,10 @@ export interface FlowSection {
 /** A pointer to one item: the Run's blocker, or a display-only note. */
 export interface FlowRunBlocker {
   section: FlowSectionId
-  /** "Connection & grid: …", ready for the disabled Run's reason. */
+  /** "Connection & grid: Bus voltage must be positive (grid)", ready for the disabled Run's reason. */
   message: string
+  /** The item's own message, the detail to fix from (unchanged by the title). */
+  detail?: string
   target: FlowTarget
 }
 export type FlowNote = FlowRunBlocker
