@@ -761,7 +761,8 @@ def generate_availability_profiles(
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="availability_generate")},
         ) from exc
 
     job_id = str(uuid.uuid4())

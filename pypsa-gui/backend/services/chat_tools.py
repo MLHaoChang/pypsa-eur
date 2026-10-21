@@ -3533,7 +3533,7 @@ def generate_availability_profile(project_id: str, kind: str, generators: list,
     )
     body = AvailabilityGenerateRequest(kind=kind, generators=generators,
                                        params=params, year=year)
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # ── Project management (21) ─────────────────────────────────────────────────

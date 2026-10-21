@@ -350,3 +350,30 @@ def test_must_run_stats_count_the_floored_hours(client, plant_project):
                   params={"share": 0.2}).json()
     assert body["stats"]["chp"]["hours_floored"] == 8760
     assert "hours_reduced" not in body["stats"]["chp"]
+
+
+def test_availability_refusals_say_their_sentence_and_nothing_foreign(
+    client, plant_project, monkeypatch, bound_ctx,
+):
+    # The sanitiser's rule (#508) on ticket 02's route, zone and chat tool.
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.profile_gen import availability
+
+    resp = _avail(client, plant_project, kind="must_run",
+                  params={"share": 0.4, "timezone": "Europe"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["message"] == "timezone 'Europe' is not an IANA zone"
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(availability, "generate_frame", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["generate_availability_profile"](
+            project_id=plant_project, kind="maintenance", generators=["chp"],
+            params={"windows": [{"from": "07-03", "to": "07-16"}]})
+    assert err.value.detail == "unexpected error (ValueError); see the server log"
