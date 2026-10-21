@@ -49,6 +49,9 @@ export const COMPONENT_QUERY_ROOTS = [
   // allowlist and could only ever contain classes someone remembered.
   'global_constraints',
   'meta',
+  // The project flow's section states (`api/flow.ts`, B1) are read from the
+  // network, so every asset write refreshes them.
+  'flow',
 ] as const
 
 export type ComponentRoot = (typeof COMPONENT_QUERY_ROOTS)[number]

@@ -170,6 +170,8 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
     # 1. Resolve + check everything (no writes yet).
     price = (aligned(commercial.export_price_ref, "export_price_coverage")
              if commercial.export_price_ref is not None else None)
+    import_price = (aligned(commercial.import_price_ref, "import_price_coverage")
+                    if commercial.import_price_ref is not None else None)
     agreement = commercial.connection
     envelope = (aligned(agreement.envelope, "envelope_coverage")
                 if agreement is not None and agreement.envelope is not None else None)
@@ -211,6 +213,9 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
     with (lock if lock is not None else nullcontext()):
         if price is not None:
             lp_bindings.write_export_price(n, commercial.export_link, price, None)
+        if import_price is not None:
+            lp_bindings.write_import_price(n, lp_bindings.import_links(commercial),
+                                           import_price, None)
         if envelope is not None:
             conn.write_envelope(n, commercial.poc_link, envelope, None)
         # The frames hold exactly the config's references: a contract that
