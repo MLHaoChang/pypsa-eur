@@ -8,11 +8,14 @@ edit.
 """
 from __future__ import annotations
 
+import inspect
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from services.library import europe_reference as R
+from services.library.defaults_pack import loader
 from services.library.defaults_pack.loader import (
     DefaultsPack,
     DefaultsPackError,
@@ -98,15 +101,29 @@ def list_references() -> list[ReferenceSummary]:
     return rows
 
 
-def _load_shipped_pack(version: str) -> DefaultsPack | None:
-    """The shipped pack `version`, or None. The version string handed to the loader is
-    the shipped one from `available_versions()`, never the caller's (which may come from
-    a request), so no request value reaches a file path."""
-    shipped = next((v for v in available_versions() if v == version), None)
-    if shipped is None:
-        return None
+def _load_named_pack(version: str) -> DefaultsPack | None:
+    """The pack a provenance stamp names, or None when this build cannot load it.
+
+    No caller value reaches the loader (it may come from a request): a plain version is
+    the matching entry of `available_versions()`; a regional `<date>+<region>` version
+    (GS-2, #499) needs the loader's `region=`, takes the region from the loader's own
+    list and the date rebuilt from integers. A build without regional packs cannot load
+    one and says so (None)."""
+    date, plus, region = version.partition("+")
     try:
-        return load_defaults_pack(shipped)
+        if not plus:
+            shipped = next((v for v in available_versions() if v == version), None)
+            return None if shipped is None else load_defaults_pack(shipped)
+        listed = getattr(loader, "available_regions", None)
+        if listed is None or "region" not in inspect.signature(load_defaults_pack).parameters:
+            return None
+        names = [getattr(r, "region", r) for r in listed()]
+        shipped_region = next((r for r in names if isinstance(r, str) and r == region), None)
+        parts = date.split("-")
+        if shipped_region is None or len(parts) != 3 or not all(p.isdigit() for p in parts):
+            return None
+        year, month, day = (int(p) for p in parts)
+        return load_defaults_pack(f"{year:04d}-{month:02d}-{day:02d}", region=shipped_region)
     except (DefaultsPackError, DefaultsPackLookupError):
         return None
 
@@ -115,11 +132,14 @@ def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, Pa
     """The pack an asset would be priced from: the one its `overnight_cost` provenance
     names, else the latest generic version. A named pack this build cannot load falls
     back to the latest generic, and the note says so."""
-    source = ((provenance or {}).get("overnight_cost") or {}).get("source") or ""
+    # After a reference was applied, the pack it replaced is what the asset "would
+    # otherwise get" (`replaces`), not the reference itself.
+    entry = (provenance or {}).get("overnight_cost") or {}
+    source = entry.get("replaces") or entry.get("source") or ""
     m = _parse_pack_source(source)
     if m is not None:
         pack_id, version, digest = m
-        pack = _load_shipped_pack(version)
+        pack = _load_named_pack(version)
         if pack is not None and pack.pack_id == pack_id and pack.hash.startswith(digest):
             return pack, PackChoice(stamp=pack.stamp, version=pack.version,
                                     chosen_by="asset_provenance")
