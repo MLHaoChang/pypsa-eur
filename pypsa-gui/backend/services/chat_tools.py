@@ -3516,10 +3516,31 @@ def generate_renewable_profile(project_id: str, points: list | None = None,
 
 def apply_generated_profile(project_id: str, job_id: str, component: str,
                             point_id: str | None = None,
-                            time_basis: str | None = None) -> dict:
+                            time_basis: str | None = None,
+                            component_type: str | None = None,
+                            attribute: str | None = None) -> dict:
     from routers.profiles import ApplyRequest, apply_profile as _h
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
-                        time_basis=time_basis)
+                        time_basis=time_basis, component_type=component_type,
+                        attribute=attribute)
+    return _route(_h, body, proj=_authorized_project(project_id))
+
+
+# Load profiles (time-series generators ticket 01): the archetype catalogue and
+# synchronous generation into the same pending store; apply is the tool above.
+
+
+def list_load_profile_archetypes() -> dict:
+    from routers.profiles import list_load_archetypes as _h
+    return _route(_h)
+
+
+def generate_load_profile(project_id: str, archetype: str, loads: list,
+                          params: dict | None = None,
+                          year: int | None = None) -> dict:
+    from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
+    body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
+                               year=year)
     return _route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7609,6 +7630,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_pending_profiles": list_pending_profiles,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
+    "list_load_profile_archetypes": list_load_profile_archetypes,
+    "generate_load_profile": generate_load_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): the run separability matrix (W0): every run kind and study is classified supported, bundled, unsupported or unknown with native tests, and each runnable kind has a verdict that never waits on the network lock (`services/run_separability.py`).

@@ -8,7 +8,6 @@ edit.
 """
 from __future__ import annotations
 
-import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -23,8 +22,22 @@ from services.library.defaults_pack.loader import (
 
 SCOPE = "common"
 
-# `price_from_pack` stamps `<pack id>@<version>#<hash16>` on what it wrote.
-_PACK_SOURCE_RE = re.compile(r"(?P<id>[^@#\s]+)@(?P<version>[^#\s]+)#(?P<hash>[0-9a-f]{16})")
+_HEX = frozenset("0123456789abcdef")
+
+
+def _parse_pack_source(source: str) -> tuple[str, str, str] | None:
+    """`(pack id, version, hash16)` from the `<pack id>@<version>#<hash16>` stamp
+    `price_from_pack` writes, else None. Plain string splitting on a capped length:
+    the source can arrive from a request (`pack_source`)."""
+    if not isinstance(source, str) or len(source) > 200:
+        return None
+    head, sep, digest = source.rpartition("#")
+    pack_id, at, version = head.partition("@")
+    if not sep or not at or len(digest) != 16 or not set(digest) <= _HEX:
+        return None
+    if not pack_id or not version or any(c.isspace() or c in "@#" for c in pack_id + version):
+        return None
+    return pack_id, version, digest
 
 
 class ReferenceSummary(BaseModel):
@@ -92,13 +105,14 @@ def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, Pa
     # otherwise get" (`replaces`), not the reference itself.
     entry = (provenance or {}).get("overnight_cost") or {}
     source = entry.get("replaces") or entry.get("source") or ""
-    m = _PACK_SOURCE_RE.fullmatch(source)
+    m = _parse_pack_source(source)
     if m is not None:
+        pack_id, version, digest = m
         try:
-            pack = load_defaults_pack(m["version"])
+            pack = load_defaults_pack(version)
         except (DefaultsPackError, DefaultsPackLookupError):
             pack = None
-        if pack is not None and pack.pack_id == m["id"] and pack.hash.startswith(m["hash"]):
+        if pack is not None and pack.pack_id == pack_id and pack.hash.startswith(digest):
             return pack, PackChoice(stamp=pack.stamp, version=pack.version,
                                     chosen_by="asset_provenance")
         note = f"the asset's pack {source!r} is not available here; compared with the latest generic pack"

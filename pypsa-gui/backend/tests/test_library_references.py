@@ -127,3 +127,12 @@ def test_tool_refuses_half_an_asset_and_unknown_selectors():
         chat_tools.DISPATCHERS["get_library_reference"](technology="onwind", projection_year=2035)
     assert exc.value.status_code == 404
     assert exc.value.detail["error_kind"] == "library_reference_unknown"
+
+
+@pytest.mark.parametrize("source", [
+    "!" * 5000, "!@" + "!@!" * 3000, "a@b#" + "0" * 15, "a@b#" + "g" * 16, "@v#" + "0" * 16,
+    "a b@v#" + "0" * 16, "id@v#" + "0" * 16 + "x", None,
+])
+def test_a_malformed_pack_source_falls_back_quickly(source):
+    detail = C.reference_detail("onwind", 2030, {"overnight_cost": {"source": source}})
+    assert detail.pack.chosen_by == "latest_generic"
