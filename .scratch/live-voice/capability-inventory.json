@@ -6405,7 +6405,8 @@
     "campusElectrical",
     "decision",
     "economics",
-    "profiles"
+    "profiles",
+    "library"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6470,7 +6471,9 @@
     "ProfileStudio",
     "profiles"
   ],
-  "slide_panels_not_in_tool_enum": [],
+  "slide_panels_not_in_tool_enum": [
+    "library"
+  ],
   "requested_aliases": {
     "AR": "unresolved label; map against actual UI/module vocabulary during coverage audit, do not infer expansion"
   }
