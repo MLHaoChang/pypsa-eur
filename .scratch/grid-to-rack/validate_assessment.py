@@ -48,6 +48,26 @@ def validate():
         assert item['gap_ids'] and set(item['gap_ids']) <= gaps
         covered.update(item['gap_ids'])
     assert covered == gaps and len(gaps) == 14
+    fit = load('workflow-fit-decision.json')
+    workflow = load('workflow-fit-evidence.json')
+    assert fit['runtime_implementation'] is False
+    assert fit['initial_new_external_runtime_dependencies'] == []
+    assert fit['new_mandatory_flow_sections'] == []
+    assert set(fit['native_near_term_packages'] + fit['conditional_native_followup']
+               + fit['deferred_packages']) == ids
+    assert len({t['id'] for t in fit['tools']}) == len(fit['tools']) == 10
+    assert all(t['implemented'] is False and t['revisit_gate'] for t in fit['tools'])
+    ux = set(re.findall(r'^\| (UX\d{2}) \|',
+                        (here / '06-INTEGRATED-JOURNEY.md').read_text(), re.MULTILINE))
+    assert ux == set(fit['ux_acceptance_ids']) and len(ux) == 16
+    assert workflow['frontend_section_ids'] == [s['id'] for s in workflow['section_contract']]
+    assert len(workflow['section_contract']) == 10
+    for entry in workflow['native_files']:
+        data = subprocess.check_output(
+            ['git', 'show', workflow['baseline'] + ':' + entry['path']], cwd=repo)
+        assert hashlib.sha256(data).hexdigest() == entry['sha256'], entry['path']
+    for entry in workflow['new_page_observations']:
+        assert entry.get('error') or re.fullmatch('[a-f0-9]{64}', entry['sha256'])
     example = load('illustrative-balance.json')
     assert math.isclose(example['energy_mwh'], example['pulse_mw'] * example['duration_s'] / 3600)
     assert math.isclose(example['energy_kwh'], example['energy_mwh'] * 1000)
@@ -60,6 +80,7 @@ def validate():
     print(json.dumps({'status': 'pass', 'scope': 'research consistency only',
                       'native_files_hash_checked': len(native['files']), 'gap_ids': len(gaps),
                       'proposed_packages': len(packages), 'validation_scenarios_documented': len(tests),
+                      'workflow_sections_checked': 10, 'ux_acceptance_tasks_documented': len(ux),
                       'external_engine_executed': False, 'domain_approval': False}, indent=2))
 
 

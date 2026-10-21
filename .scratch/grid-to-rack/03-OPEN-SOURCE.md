@@ -2,12 +2,14 @@
 
 Primary repository metadata, pinned README/licence files and selected source files were retrieved read-only on 21 October 2026. Exact commits/hashes and failed URLs are retained in [source-observations.json](source-observations.json). Selected source inspection is not successful installation, benchmark reproduction, independent validation or permission to deploy. No external examples, pretrained models, FMUs or equipment-control code were executed.
 
-## Recommended evaluation order
+**Revised disposition:** the [workflow-fit decision](05-WORKFLOW-FIT-DECISION.md) supersedes the original integration order. These are capability candidates; no external engine is recommended for the initial native release.
+
+## Candidate capabilities, not near-term integrations
 
 | Candidate | Observed licence / source | What to reuse or evaluate | What is not established |
 | --- | --- | --- | --- |
-| [OpenG2G](https://github.com/gpu2grid/openg2g) | Apache 2.0; README, dependency file and six implementation files inspected at pinned commit | Optional workload/grid coordination adapter: independent-rate coordinator, offline workload state, synthetic training overlays and OpenDSS power-flow backend | Not a rack/UPS EMT model, calibrated campus training trace or proof of stability. Example inference data is gated; no access request/download. |
-| [DPsim](https://github.com/sogno-platform/dpsim) | MPL2.0; pinned README/licence and two averaged inverter headers inspected | Bounded electrical-engine spike using EMT/dynamic-phasor and averaged converter building blocks | A suitable solver library does not automatically supply a validated grid-to-rack chain, physical storage coupling, protection or vendor control model. |
+| [OpenG2G](https://github.com/gpu2grid/openg2g) | Apache 2.0; README, dependency file and six implementation files inspected at pinned commit | Deferred workload/grid research candidate: independent-rate coordinator, offline workload state, synthetic training overlays and OpenDSS power-flow backend | Not a rack/UPS EMT model, calibrated campus training trace or proof of stability. Example inference data is gated; no access request/download. |
+| [DPsim](https://github.com/sogno-platform/dpsim) | MPL2.0; pinned README/licence and two averaged inverter headers inspected | Deferred specialist-engine candidate using EMT/dynamic-phasor and averaged converter building blocks | A suitable solver library does not automatically supply a validated grid-to-rack chain, physical storage coupling, protection or vendor control model. |
 | [Three-mode UPS research implementation](https://github.com/mshams8/Three-Mode-Supervisory-Control-Framework-for-Centralized-UPS) | MIT; pinned README/licence inspected | A small Python averaged-dq/switching reference to assess as an independent prototype/benchmark candidate | Author's study, not independently reproduced here; do not import its assumed gains or claim hardware validation. |
 | [Zeus](https://github.com/ml-energy/zeus) | Apache 2.0; source measurement paths inspected | Optional GPU energy/power acquisition and workload-side control/performance characterization | Measurement bandwidth, board/server/rack planes, device support and actual control delay require calibration. Never assume 1 ms polling creates 1 ms electrical telemetry. |
 | [HELICS](https://github.com/GMLC-TDC/HELICS) | BSD3-Clause; pinned README/licence | Later cross-process coordination when actual concurrent solvers require it | No electrical equations, stable coupling or hardware real-time guarantee simply by selecting this framework. |
@@ -15,7 +17,7 @@ Primary repository metadata, pinned README/licence files and selected source fil
 | [Modelica Buildings](https://simulationresearch.lbl.gov/modelica/) | Official open-source library documentation; exact component/tool terms still need deployment review | Later thermal/cooling/control refinement and explicit auxiliary loads | No automatic rack converter model, measured liquid-cooling performance or loss calibration. |
 | [PyBaMM](https://github.com/pybamm-team/PyBaMM) | BSD3-Clause; pinned repository README/licence | Optional offline cell-aging/thermal study to build a bounded surrogate | Not a ready campus PCS/UPS electrical model; cell parameterization and pack/service-duty calibration required. |
 
-These are evaluation candidates, not eight mandatory integrations. The initial product can use native trace/analytical screening with no new engine dependency. Recommend **OpenG2G as an optional workload/grid adapter and DPsim as the first detailed electrical spike**, with the MIT UPS study as a comparison candidate. Stop the spike if the required model/initialisation/current-limit tests cannot be demonstrated.
+**Use native input, envelope/trace and reserve screening without a new external runtime dependency.** Keep OpenG2G as R&D, DPsim as a conditional specialist candidate and the MIT UPS study as reference evidence. Revisit an integration only when its decision, inputs, native project continuity, independent validation, experience and deployment gates pass. No default engine is committed.
 
 ### OpenG2G: particularly relevant, with important scope limits
 

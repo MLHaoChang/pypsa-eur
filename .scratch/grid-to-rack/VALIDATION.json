@@ -1,6 +1,6 @@
 {
-  "checked_at_utc": "2026-10-21T12:05:37.610611+00:00",
-  "scope": "read-only code/source assessment and proposed design",
+  "checked_at_utc": "2026-10-21T12:35:38.938181+00:00",
+  "scope": "Code/source and workflow-fit research with existing targeted frontend tests; proposed native journey, no runtime integration",
   "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
   "runtime_implementation": false,
   "checks": {
@@ -10,7 +10,10 @@
     "all_authored_json_parse": "pass",
     "research_python_compile": "pass",
     "illustrative_arithmetic": "pass",
-    "diff_whitespace": "pass"
+    "diff_whitespace": "pass",
+    "workflow_sections_and_source_hashes": "pass",
+    "tool_dispositions_and_ux_references": "pass",
+    "existing_targeted_frontend_tests": "pass (76 tests in 6 files)"
   },
   "not_performed": [
     "engine installation or execution",
@@ -23,20 +26,25 @@
     "fresh full application/backend/UI regression",
     "full CI/premerge certification",
     "independent domain approval or real-use calibration",
-    "production activation"
+    "production activation",
+    "representative user usability study for the proposed journey"
   ],
   "artifacts": {
     "01-CURRENT-GAPS.md": "ae16d5a14aa3516b26779d0f7e65704f441d2034ffa844710548ae69809cbe84",
-    "02-ARCHITECTURE.md": "4561c07ba4345170f4bed3d91f4268dd05ff274317f959d4db4b887a6999c81e",
-    "03-OPEN-SOURCE.md": "23e9a21400ad69807f68aadebea9d37daff227e78cb2141d6eb8c7a2e9e7e547",
-    "04-IMPLEMENTATION-TESTS.md": "c9b07f8071967af09fa6014d09d7f51254c66eb1572dd5f7b5f609f4272d64af",
-    "HANDOFF.md": "6336ccb440cedc46cf6f6e17bd718411e750a62df356ea1e58fb67583261b420",
-    "README.md": "fcd2ef95d5af42fdcc72112b91c1f75ccf2bdcc73ec594973e6f88625e666aa3",
+    "02-ARCHITECTURE.md": "8435bf491c27821d218bbc5bc46459487e3c785b6d13b3504817053d24012611",
+    "03-OPEN-SOURCE.md": "2df3565fe2aff02793a0fbd2f212277af4826c7fc322fcece16a2d5b48bbb384",
+    "04-IMPLEMENTATION-TESTS.md": "c07a9ad3ad8024e98a48c88dd28bd72369199b147641bff39614936cc9e836a4",
+    "05-WORKFLOW-FIT-DECISION.md": "6b2191fdfaa1ed401a0dd8fcba71a17548526f3e9f0fe98ebc5f417e9fc50683",
+    "06-INTEGRATED-JOURNEY.md": "9fe01b9a313bd6cb6846851a8c999da8c8767adca4bd4817b942cf397febaed9",
+    "HANDOFF.md": "84c72e9405a913070e528ff3ae669565b973ea52940351321771dd70943f0450",
+    "README.md": "0c50c7597e0f8491e84ebdecb7be9c6f996873aaf71dc30c761103051e571340",
     "illustrative-balance.json": "45bc4ddb97844f9a97ed11e6706775f5ac20ee847b9d788eb28f923bceeeb778",
-    "implementation-plan.json": "14fb383240ee5d82f461fdae1ea02dc8a8d48ad3f12aa70bc62fef5315055bf4",
+    "implementation-plan.json": "bf4e068aab88077417a086549eaab7b8cf7718ee8d9db953bdc7829cfb9d3b10",
     "native-evidence.json": "cbe5c3a3ae34d32316f8cbe7acd335db839e58457644556069799be9169d48d8",
     "source-observations.json": "de803e1d5ac16300de6dfe2cc38c21f94269c1f6f836b95a10746248da59bd23",
-    "validate_assessment.py": "acf92988828a6dc48218152aa6e8cb0e642ee1bbe2667cadf69095b4e4623ca9"
+    "validate_assessment.py": "85140ab760bb0c129f1c4f378abe252a9319f75b35de691f01c957d94d324cc4",
+    "workflow-fit-decision.json": "b3fb96e279737fac271c4ff28a6b421cb52776e274fc8c45e02de4579aeafe9f",
+    "workflow-fit-evidence.json": "06c6cf2a33ba5616fd23cf7064b6b48e79fcf9f5bffffb68302039a7b7c85dd7"
   },
   "reviewed_master": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
   "assessed_native_paths_changed_since_baseline": [],
@@ -48,6 +56,32 @@
     "repository_lookups": 21,
     "successful_pinned_repository_snapshots": 18,
     "selected_source_files": 13,
-    "primary_page_observations": 12
-  }
+    "primary_page_observations": 12,
+    "workflow_native_and_test_files": 19,
+    "workflow_sections_checked": 10,
+    "additional_primary_page_observations": 10,
+    "ux_acceptance_tasks_documented": 16,
+    "integration_dispositions": 10
+  },
+  "recommendation_version": 2,
+  "existing_targeted_frontend_tests": {
+    "command": "node node_modules/vitest/vitest.mjs run src/layout/flowSections.test.ts src/layout/sidebar/FlowSectionBlock.test.tsx src/pages/hubDesign/HubDesignPanel.flow.test.tsx src/components/gridReadiness/GridReadinessScorecard.test.tsx src/pages/hubDesign/ChaptersSection.test.tsx src/App.guidedBack.test.tsx --maxWorkers=2",
+    "files": [
+      "src/layout/flowSections.test.ts",
+      "src/layout/sidebar/FlowSectionBlock.test.tsx",
+      "src/pages/hubDesign/HubDesignPanel.flow.test.tsx",
+      "src/components/gridReadiness/GridReadinessScorecard.test.tsx",
+      "src/pages/hubDesign/ChaptersSection.test.tsx",
+      "src/App.guidedBack.test.tsx"
+    ],
+    "files_passed": 6,
+    "tests_passed": 76,
+    "tests_failed": 0,
+    "duration_seconds": 13.12,
+    "classification": "existing component/helper tests with fixtures/mocks",
+    "new_feature_usability_validation": false,
+    "live_browser_validation": false,
+    "external_engine_execution": false
+  },
+  "new_feature_usability_study": "pending"
 }

@@ -1,6 +1,6 @@
 {
   "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
-  "decision": "Feasible design extension; proceed with bounded screening proposal, detailed engine conditional on model validation and existing scope/licensing review.",
+  "decision": "Native contextual capability first; no new external runtime dependency or top-level workflow section in the initial proposal.",
   "runtime_implementation": false,
   "packages": [
     {
@@ -15,7 +15,7 @@
         "G12",
         "G14"
       ],
-      "deliverable": "Approved fidelity/measurement-plane/source-state contract; no engine activation.",
+      "deliverable": "Current native workflow/input ownership and fidelity contract, with fit gates; no new engine selection.",
       "acceptance_test_ids": [
         "C01",
         "C02",
@@ -23,7 +23,8 @@
         "U03",
         "U04"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "near_term_native_proposal"
     },
     {
       "id": "GTR-01",
@@ -38,7 +39,7 @@
         "G03",
         "G04"
       ],
-      "deliverable": "Local assumed/authorized trace path plus planning aggregates; legacy unchanged.",
+      "deliverable": "Reuse the assumed envelope; optional bounded authorized event trace and planning references. Detailed cohorts only when needed.",
       "acceptance_test_ids": [
         "C01",
         "C02",
@@ -49,7 +50,8 @@
         "W04",
         "W05"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "near_term_native_proposal"
     },
     {
       "id": "GTR-02",
@@ -74,7 +76,8 @@
         "L02",
         "U03"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "near_term_native_proposal"
     },
     {
       "id": "GTR-03",
@@ -91,7 +94,7 @@
         "G10",
         "G12"
       ],
-      "deliverable": "Explicit grid/UPS/DC-link/load physical chain, with benchmark and convergence results.",
+      "deliverable": "Only after fit gates: a supplied, source-backed physical model for an explicit specialist requirement; no default engine committed.",
       "acceptance_test_ids": [
         "C01",
         "C05",
@@ -105,7 +108,8 @@
         "P10",
         "U04"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "deferred_specialist_or_research"
     },
     {
       "id": "GTR-04",
@@ -120,7 +124,7 @@
         "G06",
         "G12"
       ],
-      "deliverable": "Deterministic local-trace control with delays and service penalties; use a validated appropriate model path.",
+      "deliverable": "Only for a validated computing-service question; local data and native project continuity, no mandatory second coordinator.",
       "acceptance_test_ids": [
         "C04",
         "C05",
@@ -133,7 +137,8 @@
         "P03",
         "U04"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "deferred_specialist_or_research"
     },
     {
       "id": "GTR-05",
@@ -159,7 +164,8 @@
         "L07",
         "U05"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "conditional_native_followup"
     },
     {
       "id": "GTR-06",
@@ -172,7 +178,7 @@
         "G10",
         "G14"
       ],
-      "deliverable": "Optional view and ordinary approved native study orchestration with exact provenance and unknown metrics.",
+      "deliverable": "Optional contextual inputs/results in existing flow, no engine picker or mandatory extra setup; preserve run-readiness and evidence.",
       "acceptance_test_ids": [
         "C05",
         "C07",
@@ -182,12 +188,26 @@
         "U04",
         "U05"
       ],
-      "status": "proposed_not_implemented"
+      "status": "proposed_not_implemented",
+      "product_disposition": "near_term_native_proposal"
     }
   ],
   "conditional_dependencies": {
     "GTR-04": "Needs the validated screening/electrical model contract used for its claimed outputs; no direct dependency on a particular optional engine.",
     "GTR-05": "Requires GTR-03/04 evidence if feedback claims those detailed/coupled capabilities.",
     "GTR-06": "First release is screen-only; later detailed result views depend on passed GTR-03."
-  }
+  },
+  "recommendation_version": 2,
+  "workflow_fit_decision": "workflow-fit-decision.json",
+  "near_term_native_packages": [
+    "GTR-00",
+    "GTR-01",
+    "GTR-02",
+    "GTR-06"
+  ],
+  "deferred_packages": [
+    "GTR-03",
+    "GTR-04"
+  ],
+  "initial_new_external_runtime_dependencies": []
 }

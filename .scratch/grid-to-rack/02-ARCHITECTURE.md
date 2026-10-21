@@ -2,6 +2,8 @@
 
 This is a design proposal, not a list of existing classes or a certified solver. Reuse the [current native seams](01-CURRENT-GAPS.md). The detailed-engine path is an extension beyond the earlier data-centre-readiness scope and must be reviewed before implementation.
 
+This document describes possible capabilities. The [revised workflow-fit decision](05-WORKFLOW-FIT-DECISION.md) controls near-term scope: native contextual screening first; external engines, live measurement and full rack models are deferred. The [journey specification](06-INTEGRATED-JOURNEY.md) owns user-facing placement and integration gates.
+
 ## Timescales and question ownership
 
 | Level | Representative horizon / resolution | Questions / appropriate model |

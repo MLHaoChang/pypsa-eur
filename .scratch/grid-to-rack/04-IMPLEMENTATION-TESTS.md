@@ -2,15 +2,17 @@
 
 Scope: a proposed extension to the existing data-centre example, not a new standalone design platform. No runtime implementation in this PR. The earlier readiness spec excluded in-app EMT; the proposed detailed-engine increment must pass current design/engine/licensing review before implementation. Do not reopen parked ANDES or activate equipment as a side effect.
 
+The [workflow-fit decision](05-WORKFLOW-FIT-DECISION.md) and [integrated journey](06-INTEGRATED-JOURNEY.md) supersede the initial tool shortlist. GTR-03/04 are deferred research/specialist scopes, not automatic next integrations. The first native release preserves existing input ownership, run-readiness and results; it needs no external engine.
+
 ## Bounded work packages
 
 | ID | Deliverable | Reuse / likely seams | Acceptance / dependency |
 | --- | --- | --- | --- |
 | GTR-00 | Review model boundaries and engine requirements; agree measurement planes, output labels and trace/state contract | Existing DC envelope, island schema, study artifacts, Library pins, current workflow and approval controls | No runtime change. Resolve which quantities each fidelity level can compute and which source/model parameters are missing. |
-| GTR-01 | Offline trace/cohort ingestion or assumed synthetic generator, with hourly reconciliation and planning/event references | `DataCentreLoadSpec`, `dc_load_profile.py`, existing series import/source metadata and example creation | GTR-00; preserve default template behavior, trace sample/averaging/synchronization evidence, no invented higher-frequency measurement. |
+| GTR-01 | Reuse the existing assumed envelope and add optional bounded event-trace import; expose detailed cohorts only when needed | `DataCentreLoadSpec`, `dc_load_profile.py`, existing series import/source metadata and example creation | GTR-00; preserve default template behavior, trace sample/averaging/synchronization evidence, no invented higher-frequency measurement. |
 | GTR-02 | Energy-conserving buffer/PoC analytical screen and frequency-only replay where useful | Native callable `frequency.simulate` event seam and simplified UPS/asset state interfaces | GTR-01; compare no mitigation versus explicitly limited buffer; show saturation, residual, reserve and recharge. Voltage/harmonics remain not established. |
-| GTR-03 | One external detailed electrical-engine spike; DPsim first candidate, MIT UPS study as comparison candidate | New narrow adapter using native jobs/artifact conventions; no embedding in solver/assistant loop | GTR-00/01 and scope/licensing review. One explicit grid–UPS/DC-link–load chain initialized at a consistent operating point. Pass physical balance, limits and convergence benchmarks before expanding. |
-| GTR-04 | Optional deterministic workload/grid/control coupling | Evaluate OpenG2G local synthetic path; native adapters first; HELICS only if concurrent models require it | GTR-01 and validated electrical/screening contracts. Demonstrate control delay, performance constraints and energy-consistent exchange; no gated download/model API calls. |
+| GTR-03 | Deferred specialist electrical-engine evaluation for a demonstrated question/requirement; no default engine selected | New narrow adapter using native jobs/artifact conventions; no embedding in solver/assistant loop | GTR-00/01 and scope/licensing review. One explicit grid–UPS/DC-link–load chain initialized at a consistent operating point. Pass physical balance, limits and convergence benchmarks before expanding. |
+| GTR-04 | Deferred workload/grid/control research for an explicit computing-performance question | OpenG2G remains a research reference; no mandatory second topology/coordinator | GTR-01 and validated electrical/screening contracts. Demonstrate control delay, performance constraints and energy-consistent exchange; no gated download/model API calls. |
 | GTR-05 | Dispatch-linked reserve/aging and planning feedback | Existing investment periods, adequacy/stress studies and heuristic island-frequency cut/apply path | GTR-02 and appropriate GTR-03/04 evidence. Feedback has source, applicability and heuristic/exact status; rerun to validate after changes. |
 | GTR-06 | Guided/Expert comparison, results/evidence and assistant orchestration | Existing workflow sections, result provenance and bounded harness jobs/approvals | Expose only supported metrics; exact input/engine/state pins and stale behavior. No new live equipment control authority. |
 
@@ -26,7 +28,7 @@ Start with one source-tagged training workload and explicit correlation/measurem
 
 - A: no additional fast smoothing.
 - B: limited local UPS/BBU/DC-link or campus storage smoothing; topology and response capability explicit.
-- C: coordinated permitted workload action and storage, with workload penalty/limits reported.
+- C (deferred): coordinated workload/storage control only after performance evidence and fit gates pass; its penalty/limits must be reported.
 
 Compare **actual achieved** PoC response, required/available power and energy, reserve state, losses/costs and useful-work outcomes. A target filter is not the achieved result. Include increasing and decreasing load, repeated oscillations/checkpoint events, grid-loss/weak-grid conditions and low initial SOC. Add phase unbalance and converter faults only under a suitable detailed model.
 
