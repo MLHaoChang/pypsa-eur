@@ -27,5 +27,5 @@ export function fieldWords(t: Pick<FlowItem['target'], 'section' | 'component' |
   if (!t.component && !t.entity) return null
   const thing = [t.component ? componentLabel(t.component) : null, t.entity ? `'${t.entity}'` : null]
     .filter(Boolean).join(' ')
-  return `${sectionMeta(t.section).label} > ${thing}`
+  return `${sectionMeta(t.section).label} › ${thing}`
 }
