@@ -40,8 +40,9 @@ from datetime import UTC, datetime
 
 MODES = ("off", "capacity_run", "nameplate")
 META_RECORD = "sizing_record"
-# The size tolerance of the source check, and of the connection fee carrying
-# over (`commercial.connection`): far above the freeze's +1e-6 MW headroom.
+# The size tolerance of the source check, far above the freeze's +1e-6 MW
+# headroom. `commercial.connection.FEE_SIZE_TOLERANCE_MW` repeats it (the
+# commercial package may not import the solver); a test pins them equal.
 TOLERANCE_MW = 1e-4
 # Every component table whose rows make the topology the record was solved on.
 _TOPOLOGY_TABLES = ("buses", "generators", "loads", "storage_units", "stores", "links",
