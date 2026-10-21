@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 273,
+  "tool_count": 276,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5151,6 +5151,77 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_references",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/references"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/asset_schema/{component}/provenance/{name}"
+        ],
+        [
+          "GET",
+          "/api/library/references/{technology}/{year}"
+        ]
+      ],
+      "input_keys": [
+        "technology",
+        "projection_year",
+        "component",
+        "asset"
+      ],
+      "required": [
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d0bb21532317ba1c4c749f14f1728a4d2bbc9a1fe3c8d786f7c82ad4dbd6fb60",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/library_reference/apply"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year",
+        "confirm"
+      ],
+      "required": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
       "behavioral_fixture": "pending"
     },
     {
