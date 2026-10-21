@@ -159,7 +159,7 @@ export default function HubDesignPanel() {
           </div>
         )}
         {settled ? (
-          <SectionView id={viewSection}>
+          <SectionView id={viewSection} onNext={pickSection}>
             {Card ? <Card /> : <GenericSectionCard id={viewSection} />}
           </SectionView>
         ) : (
