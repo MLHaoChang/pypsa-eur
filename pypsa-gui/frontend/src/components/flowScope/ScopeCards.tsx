@@ -6,7 +6,7 @@
 // same component is mounted by section 8 in Guided and Expert, and by the
 // Builder (W2). Which sub-options are available or locked, and why, is the
 // server's (`GET …/flow/scope`, W0's classification), never a table here.
-import type React from 'react'
+import { useState } from 'react'
 import { Lock } from 'lucide-react'
 import type { FlowScopeValue, ScopeCardDef, ScopeCardId } from '../../api/flow'
 import { inScope } from '../../api/flow'
@@ -14,6 +14,16 @@ import { blockerMessage } from '../../utils/blockerMessage'
 import { useFlowScope } from './useFlowScope'
 
 const NOT_YET = 'Not yet available'
+
+/** What the scope stores: without the sub-options its solver settings decide. */
+function stored(scope: FlowScopeValue, cards: ScopeCardDef[]): FlowScopeValue {
+  const settings = new Set(cards.flatMap(c => c.options.filter(o => o.status === 'from_settings')
+    .map(o => `${c.id}.${o.id}`)))
+  const options = Object.fromEntries(Object.entries(scope.options).map(([c, os]) =>
+    [c, os.filter(o => !settings.has(`${c}.${o}`))])) as FlowScopeValue['options']
+  const groups = scope.groups.filter(g => (options[g] ?? []).length > 0)
+  return { ...scope, groups, options }
+}
 
 function sameScope(a: FlowScopeValue, b: FlowScopeValue): boolean {
   const norm = (s: FlowScopeValue) => JSON.stringify(
@@ -27,7 +37,8 @@ export function toggleCard(scope: FlowScopeValue, card: ScopeCardDef, on: boolea
   const groups = scope.groups.filter(g => g !== card.id)
   let options = scope.options[card.id] ?? []
   if (on && options.length === 0) {
-    const pickable = card.options.filter(o => o.status !== 'not_yet_available').map(o => o.id)
+    const pickable = card.options.filter(o => o.status === 'available' || o.status === 'required')
+      .map(o => o.id)
     const intended = pickable.filter(o => card.intended.includes(o))
     options = intended.length ? intended : pickable.slice(0, 1)
   }
@@ -54,16 +65,15 @@ export function toggleOption(scope: FlowScopeValue, card: ScopeCardId, option: s
 
 /** "Outside scope: add …" as a button that adds the card (and the
  *  sub-option) in place: the block's saved values come back with it (§2). */
-export function AddToScope({ card, option, children, testId }: {
+export function AddToScope({ card, option, testId }: {
   card: ScopeCardId
   option: string
-  children: React.ReactNode
   testId: string
 }) {
   const { registry, scope, save } = useFlowScope()
   const def = registry?.cards.find(c => c.id === card)
-  const status = def?.options.find(o => o.id === option)?.status
-  if (!scope || !def || status === 'not_yet_available') return null
+  const opt = def?.options.find(o => o.id === option)
+  if (!scope || !def || !opt || opt.status !== 'available') return null
   const add = () => {
     const on = inScope(scope, card) ? scope : toggleCard(scope, def, true)
     save.mutate(inScope(on, card, option) ? on : toggleOption(on, card, option, true))
@@ -73,15 +83,21 @@ export function AddToScope({ card, option, children, testId }: {
       <span>Outside scope.</span>
       <button type="button" data-testid={`${testId}-add`} onClick={add} disabled={save.isPending}
         className="rounded border border-accent/60 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50">
-        {children}
+        Add {opt.label}
       </button>
       {save.isError && <span role="alert" className="text-danger">{blockerMessage(save.error)}</span>}
     </p>
   )
 }
 
-export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
+/** `collapsed`: Guided's density (a Guided card holds ≤ 3 decisions): one
+ *  summary line, and "Change" opens the cards in place. Expert shows them. */
+export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
+  testId?: string
+  collapsed?: boolean
+}) {
   const { registry, scope, save, isError, refetch } = useFlowScope()
+  const [open, setOpen] = useState(!collapsed)
   if (isError) {
     return (
       <p data-testid={`${testId}-error`} className="text-[12px] text-warn">
@@ -92,7 +108,19 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
   }
   if (!registry || !scope) return <p className="text-[12px] text-muted">Loading the scope…</p>
   const write = (next: FlowScopeValue) => save.mutate(next)
-  const atPreset = sameScope(scope, registry.preset)
+  const atPreset = sameScope(stored(scope, registry.cards), registry.preset)
+  const summary = registry.cards.filter(c => inScope(scope, c.id)).map(c => c.label).join(', ')
+
+  if (!open) {
+    return (
+      <p data-testid={`${testId}-summary`} className="text-[12px] text-muted">
+        <span className="font-semibold text-text">The Run computes:</span> {summary}
+        {' · '}
+        <button type="button" data-testid={`${testId}-change`} aria-expanded={false}
+          onClick={() => setOpen(true)} className="text-accent hover:underline">Change</button>
+      </p>
+    )
+  }
 
   return (
     <section data-testid={testId} aria-labelledby={`${testId}-title`}
@@ -101,14 +129,22 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
         <h3 id={`${testId}-title`} className="text-[12.5px] font-semibold text-text">
           What the Run computes
         </h3>
-        {/* Switches cards only; values are never touched (UX review 4). */}
-        {!atPreset && (
-          <button type="button" data-testid={`${testId}-preset`} disabled={save.isPending}
-            onClick={() => write(registry.preset)}
-            className="rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
-            Reset to {registry.preset_label}'s cards
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Switches cards only; values are never touched (UX review 4). */}
+          {!atPreset && (
+            <button type="button" data-testid={`${testId}-preset`} disabled={save.isPending}
+              onClick={() => write(registry.preset)}
+              className="rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
+              Reset to {registry.preset_label}'s setup
+            </button>
+          )}
+          {collapsed && (
+            <button type="button" data-testid={`${testId}-done`} aria-expanded
+              onClick={() => setOpen(false)} className="text-[11px] text-accent hover:underline">
+              Done
+            </button>
+          )}
+        </div>
       </div>
       <p className="text-[11px] text-muted">
         Switch off what you don't need: its inputs hide and it is not run. Your values stay.
@@ -138,14 +174,17 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
               <ul className="flex flex-col gap-0.5 pl-5">
                 {card.options.map(o => {
                   const unavailable = o.status === 'not_yet_available'
+                  // A switched-off card keeps its sub-options: shown checked
+                  // and dimmed, so the user sees what switching it on restores.
                   const checked = !unavailable && (scope.options[card.id] ?? []).includes(o.id)
+                  const dim = unavailable || (!on && checked)
                   return (
                     <li key={o.id}>
-                      <label className={`flex flex-wrap items-center gap-1.5 text-[11.5px] ${unavailable ? 'text-muted/70' : 'text-text'}`}>
+                      <label className={`flex flex-wrap items-center gap-1.5 text-[11.5px] ${dim ? 'text-muted/70' : 'text-text'}`}>
                         <input type="checkbox" data-testid={`${testId}-option-${card.id}-${o.id}`}
                           aria-describedby={o.reason ? `${testId}-why-${card.id}-${o.id}` : undefined}
-                          checked={checked && on}
-                          disabled={unavailable || o.status === 'required' || !on || save.isPending}
+                          checked={checked}
+                          disabled={o.status !== 'available' || !on || save.isPending}
                           onChange={e => write(toggleOption(scope, card.id, o.id, e.target.checked))} />
                         {o.label}
                         {unavailable && (

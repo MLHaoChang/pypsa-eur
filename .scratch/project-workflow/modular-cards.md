@@ -53,14 +53,16 @@ Encoded as each template's default scope in `pypsa-gui/backend/services/flow_sco
 
 | Example (template id) | Capacity | Grid | Control | Reliability | Commercial | Hand-off |
 |---|---|---|---|---|---|---|
-| Data centre (`eh_datacenter`, `eh_datacenter_staged`) | 1, 2 | 1, 2 | 1, *2* | 1, 2 | 1, *3* | 1 |
-| Island microgrid (`eh_microgrid`, `eh_microgrid_staged`) | 1, 2 | 1 | 1, *2* | 1, 2, 3 | 1, *3* | 1 |
+| Data centre (`eh_datacenter`, `eh_datacenter_staged`) | 1, 2 | 2 | 1, *2* | 1, 2 | 1, *3* | 1 |
+| Island microgrid (`eh_microgrid`, `eh_microgrid_staged`) | 1, 2 | — | 1, *2* | 1, 2, 3 | 1, *3* | 1 |
 | Hydrogen hub (`eh_h2_hub`, `eh_h2_hub_staged`) | 1, 2, *3* | — | — | 1 | 1, 2, *3* | 1 |
 | Ammonia (`eh_ammonia_staged`) | 1, 2, *3* | — | — | 1 | 1, *3* | 1 |
 | IPP hybrid (`eh_ipp_hybrid`, #485) | 1, 2 | — | — | — | 1, 2, *3* | 1 |
 | Own site: industrial / commercial / campus / other (`eh_site`) | 1, 2 | — | — | 1 | 1, *3* | 1 |
 | Own site: hospital (`eh_site`) | 1, 2 | — | — | 1, 2 | 1, *3* | 1 |
 | Blank / import / legacy networks | 1, 2 | — | — | — | 1 | 1 |
+
+Grid 1 (load flow) and Grid 3 (N-1 security) are on exactly when their solver settings are. Until W4b makes them run kinds, Solver settings is their one editor, so no preset names them. This follows the UX gate on W4a: a checked box never means "not computed".
 
 Alignment with the research mapping (`FIVE-CARD-MODULARITY.md` §3):
 - The H₂ hub and ammonia examples intend Process detail (research: "S capacity/process").

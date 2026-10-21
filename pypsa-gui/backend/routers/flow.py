@@ -92,6 +92,29 @@ def ack_flow_item(body: FlowAck,
     return {"ack": ack}
 
 
+def _solver_settings(project: AuthorizedProject) -> dict | None:
+    """The project's solver config, for the sub-options it decides (load flow,
+    N-1 security): the loaded one when the project is open, else its saved
+    ``solver_config.json``. None when neither can be read."""
+    import json
+    from dataclasses import asdict
+
+    from services import network_lengths
+    from services.pypsa_service import PyPSAService
+
+    active = network_lengths.active_project_dir()
+    if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
+        try:
+            return asdict(PyPSAService.get_solver_state()["solver_config"])
+        except Exception:                                # noqa: BLE001 — read the file
+            pass
+    try:
+        raw = json.loads((project.directory / "solver_config.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
 @router.get("/{name}/flow/scope")
 def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """``{scope, cards, preset_id, preset}``: the project's scope (stored, or its
@@ -100,8 +123,9 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     from services import flow_scope
 
     template = flow_service.read_template(project.directory)
-    return {"scope": flow_scope.read_scope(project.directory, template),
-            **flow_scope.registry(template)}
+    settings = _solver_settings(project)
+    return {"scope": flow_scope.read_scope(project.directory, template, settings),
+            **flow_scope.registry(template, settings)}
 
 
 @router.put("/{name}/flow/scope")
@@ -125,7 +149,8 @@ def put_flow_scope(body: dict,
         _check_project_lock(db, lock_target, user)
     template = flow_service.read_template(project.directory)
     try:
-        scope = flow_scope.write_scope(project.directory, body, template)
+        scope = flow_scope.write_scope(project.directory, body, template,
+                                       _solver_settings(project))
     except flow_scope.ScopeError as exc:
         raise HTTPException(422, {"error_kind": exc.error_kind,
                                   "message": exc.message}) from exc

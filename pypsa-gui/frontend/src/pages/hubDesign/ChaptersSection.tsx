@@ -94,9 +94,7 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
               gridInScope
                 ? <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
-                : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope">
-                    Add AC power flow &amp; grid to run grid checks
-                  </AddToScope>
+                : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope" />
             )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">

@@ -142,8 +142,10 @@ export interface FlowScope extends FlowScopeValue {
   preset_id: string
 }
 
-/** `available`; `required`: on and locked; `not_yet_available`: shown, never selectable. */
-export type ScopeOptionStatus = 'available' | 'required' | 'not_yet_available'
+/** `available`; `required`: on and locked; `not_yet_available`: shown, never
+ *  selectable; `from_settings`: read-only, on exactly when its solver setting
+ *  is (load flow, N-1 security) until W4b makes it a run kind. */
+export type ScopeOptionStatus = 'available' | 'required' | 'not_yet_available' | 'from_settings'
 
 export interface ScopeCardDef {
   id: ScopeCardId

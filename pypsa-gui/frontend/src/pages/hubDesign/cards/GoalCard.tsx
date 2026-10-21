@@ -98,11 +98,9 @@ export function GoalCard() {
 
   return (
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
-      <ScopeCards testId="hub-scope-cards" />
+      <ScopeCards testId="hub-scope-cards" collapsed />
       {!reliabilityOn && (
-        <AddToScope card="reliability" option="goal_study" testId="hub-goal-out-of-scope">
-          Add Reliability to set a goal
-        </AddToScope>
+        <AddToScope card="reliability" option="goal_study" testId="hub-goal-out-of-scope" />
       )}
       {reliabilityOn && <>
       <label className="flex flex-col gap-1 text-[12px]">

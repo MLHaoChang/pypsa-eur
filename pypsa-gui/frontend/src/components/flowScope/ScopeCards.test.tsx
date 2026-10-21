@@ -121,7 +121,7 @@ describe('ScopeCards', () => {
     expect(sent.options.grid).toEqual(['load_flow', 'grid_code'])
   })
 
-  it('switching a card on picks the example’s available sub-options', async () => {
+  it('switching a card on picks the example\'s available sub-options', async () => {
     const user = mount()
     await user.click(await screen.findByTestId('scope-cards-toggle-control'))
     await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
@@ -134,7 +134,7 @@ describe('ScopeCards', () => {
     getFlowScope.mockResolvedValue(registry({ ...PRESET, groups: ['capacity', 'handoff'] }))
     const user = mount()
     const reset = await screen.findByTestId('scope-cards-preset')
-    expect(reset.textContent).toBe("Reset to Data Center Energy Hub's cards")
+    expect(reset.textContent).toBe("Reset to Data Center Energy Hub's setup")
     await user.click(reset)
     await waitFor(() => expect(putFlowScope).toHaveBeenCalledWith('Demo', PRESET))
   })
@@ -146,6 +146,41 @@ describe('ScopeCards', () => {
     await user.click(await screen.findByTestId('scope-cards-option-grid-n1_sclopf'))
     expect((await screen.findByTestId('scope-cards-save-error')).textContent)
       .toMatch(/not yet available/)
+  })
+})
+
+describe('ScopeCards states', () => {
+  it('a switched-off card shows its kept sub-options checked and dimmed', async () => {
+    getFlowScope.mockResolvedValue(registry({ ...PRESET,
+      groups: PRESET.groups.filter(g => g !== 'grid') }))
+    mount()
+    const box = await screen.findByTestId('scope-cards-option-grid-grid_code') as HTMLInputElement
+    expect(box.checked).toBe(true)
+    expect(box.disabled).toBe(true)
+  })
+
+  it('a settings-driven sub-option is read-only and says where it is set', async () => {
+    const reg = registry()
+    reg.cards[1].options[2] = { id: 'n1_sclopf', label: 'N-1 security (SCLOPF)',
+      status: 'from_settings', reason: 'Set in Solver settings for now.' }
+    getFlowScope.mockResolvedValue(reg)
+    mount()
+    const box = await screen.findByTestId('scope-cards-option-grid-n1_sclopf') as HTMLInputElement
+    expect(box.disabled).toBe(true)
+    expect(screen.getByTestId('scope-cards-why-grid-n1_sclopf').textContent)
+      .toBe('Set in Solver settings for now.')
+  })
+
+  it('collapsed (Guided) shows one summary line; Change opens the cards in place', async () => {
+    const user = mount(<ScopeCards collapsed />)
+    const line = await screen.findByTestId('scope-cards-summary')
+    expect(line.textContent).toBe('The Run computes: Capacity expansion, AC power flow & grid, '
+      + 'Reliability, Commercial & finance, Hand-off · Change')
+    expect(screen.queryByTestId('scope-cards-card-grid')).toBeNull()
+    await user.click(screen.getByTestId('scope-cards-change'))
+    expect(screen.getByTestId('scope-cards-card-grid')).toBeTruthy()
+    await user.click(screen.getByTestId('scope-cards-done'))
+    expect(screen.getByTestId('scope-cards-summary')).toBeTruthy()
   })
 })
 
@@ -185,8 +220,10 @@ describe('AddToScope', () => {
       options: { ...PRESET.options, reliability: ['stress'] } }
     getFlowScope.mockResolvedValue(registry(off))
     const user = mount(
-      <AddToScope card="reliability" option="goal_study" testId="add">Add Reliability</AddToScope>)
-    await user.click(await screen.findByTestId('add-add'))
+      <AddToScope card="reliability" option="goal_study" testId="add" />)
+    const add = await screen.findByTestId('add-add')
+    expect(add.textContent).toBe('Add goal_study')
+    await user.click(add)
     await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
     const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
     expect(sent.groups).toContain('reliability')
@@ -194,7 +231,7 @@ describe('AddToScope', () => {
   })
 
   it('offers nothing for a sub-option not yet available', async () => {
-    mount(<AddToScope card="control" option="dynamics" testId="add">Add</AddToScope>)
+    mount(<AddToScope card="control" option="dynamics" testId="add" />)
     await waitFor(() => expect(getFlowScope).toHaveBeenCalled())
     expect(screen.queryByTestId('add')).toBeNull()
   })

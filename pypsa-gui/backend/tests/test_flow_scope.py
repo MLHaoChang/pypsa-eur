@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 
 import pytest
 
@@ -89,7 +90,7 @@ def test_data_centre_preset_exemplifies_grid_control_and_reliability():
     eff = S.effective_preset(S.TEMPLATE_PRESETS["eh_datacenter"], has_template=True)
     assert eff["groups"] == ["capacity", "grid", "control", "reliability", "commercial",
                              "handoff"]
-    assert eff["options"]["grid"] == ["load_flow", "grid_code"]
+    assert eff["options"]["grid"] == ["grid_code"]           # load flow: Solver settings
     assert eff["options"]["control"] == ["presets"]            # island checks: not yet
     assert eff["options"]["commercial"] == ["tariffs"]         # investment case: not yet
 
@@ -128,11 +129,12 @@ def test_the_strict_check_refuses_with_a_typed_kind(raw, kind):
 def test_a_stored_scope_is_read_leniently(tmp_path):
     (tmp_path / S.SCOPE_FILE).write_text(json.dumps({
         "version": 1, "groups": ["grid", "nope"],
-        "options": {"grid": ["n1_sclopf", "magic"], "control": ["dynamics"]}}))
+        "options": {"grid": ["grid_code", "n1_sclopf", "magic"], "control": ["dynamics"]}}))
     scope = S.read_scope(tmp_path, {"id": "eh_datacenter"})
     assert scope["source"] == "project"
     assert scope["groups"] == ["capacity", "grid", "handoff"]
-    assert scope["options"]["grid"] == ["n1_sclopf"]
+    # N-1 security is never stored: its solver setting decides it.
+    assert scope["options"]["grid"] == ["grid_code"]
     assert scope["options"]["control"] == []
     assert scope["options"]["capacity"] == ["sizing", "dispatch"]
 
@@ -143,7 +145,7 @@ def test_a_card_switched_off_keeps_its_sub_options(tmp_path):
     off = {**scope, "groups": [g for g in scope["groups"] if g != "grid"]}
     stored = S.write_scope(tmp_path, off, tpl)
     assert not S.selected(stored, "grid")
-    assert stored["options"]["grid"] == ["load_flow", "grid_code"]
+    assert stored["options"]["grid"] == ["grid_code"]
     on = S.write_scope(tmp_path, {**stored, "groups": [*stored["groups"], "grid"]}, tpl)
     assert S.selected(on, "grid", "grid_code")
 
@@ -246,24 +248,46 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
         {(i["code"], True) for i in rel_before}
 
 
-def test_a_solver_option_outside_the_scope_is_said(client, tmp_projects_dir, bound_ctx):
+def test_load_flow_and_n1_follow_the_solver_settings(client, tmp_projects_dir, bound_ctx):
+    """"What the Run computes" is true: load flow and N-1 security are on
+    exactly when their solver settings are, read-only in the scope (UX gate)."""
     from dataclasses import replace
 
     from services.pypsa_service import PyPSAService
 
-    name = _create(client, "eh_h2_hub", "sclopf_note")
+    name = _create(client, "eh_h2_hub", "sclopf_mirror")
+    reg = client.get(f"/api/projects/{name}/flow/scope").json()
+    assert not S.selected(reg["scope"], "grid")
+    grid = next(c for c in reg["cards"] if c["id"] == "grid")
+    assert {o["id"]: o["status"] for o in grid["options"]} == {
+        "load_flow": "from_settings", "grid_code": "available", "n1_sclopf": "from_settings"}
     with bound_ctx(client):
         state = PyPSAService.get_solver_state()
         state["solver_config"] = replace(state["solver_config"], sclopf=True)
-    # With no stored scope the payload reads as before W4a: nothing said.
-    assert "scope_option_configured" not in [
-        i["code"] for s in _flow(client, name)["sections"] for i in s["items"]]
-    _put(client, name, client.get(f"/api/projects/{name}/flow/scope").json()["scope"])
-    body = _flow(client, name)
-    row = next(s for s in body["sections"] if s["section"] == "scenarios")
-    item = next(i for i in row["items"] if i["code"] == "scope_option_configured")
-    assert item["card"] == "grid" and item["in_scope"] and not item["blocking"]
-    assert "N-1 security" in item["message"]
+    reg = client.get(f"/api/projects/{name}/flow/scope").json()
+    assert S.selected(reg["scope"], "grid", "n1_sclopf")
+    assert not S.selected(reg["scope"], "grid", "load_flow")
+    assert next(c for c in reg["cards"] if c["id"] == "grid")["locked_reason"]
+    assert S.selected(_flow(client, name)["scope"], "grid", "n1_sclopf")
+    # A write cannot switch it off (the settings decide), nor store it.
+    off = _put(client, name, {**reg["scope"],
+                              "groups": [g for g in reg["scope"]["groups"] if g != "grid"]})
+    assert S.selected(off, "grid", "n1_sclopf")
+    assert "n1_sclopf" not in S.normalise(off, has_template=True)["options"]["grid"]
+
+
+_INTERNAL = re.compile(r"§|\bW\d|\bQ\d|\(owner")
+
+
+def test_every_reason_and_label_is_in_the_users_words():
+    texts = [c.label for c in S.CARDS] + [c.locked_reason or "" for c in S.CARDS]
+    texts += [label for c in S.CARDS for _o, label in c.options]
+    texts += [r or "" for _s, r in S.AVAILABILITY.values()]
+    texts += [S.option_status("reliability", "goal_study", has_template=False)[1] or ""]
+    reg = S.registry({"id": "eh_datacenter"}, {"sclopf": True})
+    texts += [c["locked_reason"] or "" for c in reg["cards"]]
+    for t in texts:
+        assert not _INTERNAL.search(t), t
 
 
 # ── gatekeeper's conditions (W4a plan review) ───────────────────────────────
@@ -416,3 +440,67 @@ def test_deselecting_changes_no_input_and_no_result_state(client, tmp_projects_d
     after_flow = _flow(client, name)
     results_row = lambda b: next(s for s in b["sections"] if s["section"] == "results")  # noqa: E731
     assert results_row(after_flow)["freshness"] == results_row(before_flow)["freshness"]
+
+
+def test_a_busy_study_lock_defers_only_a_run_that_requests_the_study(
+        client, tmp_projects_dir, monkeypatch):
+    """Gatekeeper #1: with Reliability off, a held study lock does not defer
+    the flow; run_ready is the optimisation's verdict."""
+    from services.adequacy import eh_study_runner
+
+    name = _create(client, "eh_datacenter", "lock_busy")
+
+    def busy(*_a, **_k):
+        raise eh_study_runner.EhStudyLockBusy()
+
+    monkeypatch.setattr(eh_study_runner, "check_eh_study_start", busy)
+    assert _flow(client, name)["deferred"] is True
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    _put(client, name, {**scope, "groups": [g for g in scope["groups"] if g != "reliability"]})
+    body = _flow(client, name)
+    assert body["deferred"] is False
+    pre = client.post("/api/simulation/preflight").json()
+    assert body["run_ready"] is pre["ok"]
+    assert body["verdicts"]["study"] is None
+
+
+def test_a_ledger_row_with_a_network_target_stays_in_scope(client, tmp_projects_dir,
+                                                           project_storage_dir):
+    """Gatekeeper #5: a row that names a component field (as DC-02's rows do)
+    stays in scope whatever its card."""
+    name = _create(client, "eh_h2_hub", "row_target")
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    meta["ledger"].append({"item": "probe_target", "value": 1, "source": "assumed",
+                           "card": "commercial", "section": "connection",
+                           "component": "Link", "entity": "grid_import", "field": "p_nom"})
+    path.write_text(json.dumps(meta))
+    body = _flow(client, name)
+    row = next(i for s in body["sections"] for i in s["items"]
+               if i["code"] == "assumed_probe_target")
+    assert row["card"] == "commercial" and row["in_scope"] is True
+
+
+def test_a_scope_write_keeps_a_solved_projects_results_fresh(client, install_network,
+                                                             tmp_projects_dir, session_state):
+    """Gatekeeper #5: on a solved project a scope change neither stales nor
+    clears the results."""
+    from tests.test_project_flow import _site_network
+
+    install_network(_site_network(), name="solved")
+    assert client.post("/api/projects/solved", params={"force": True,
+                                                       "rebind": True}).status_code == 200
+    r = client.post("/api/simulation/run")
+    assert r.status_code == 200, r.text
+    t = session_state(client).get("thread")
+    if t is not None:
+        t.join(timeout=120)
+    before = _flow(client, "solved")
+    fresh = next(s for s in before["sections"] if s["section"] == "results")["freshness"]
+    assert fresh == "fresh"
+    objective = session_state(client).get("objective")
+    scope = client.get("/api/projects/solved/flow/scope").json()["scope"]
+    _put(client, "solved", {**scope, "groups": ["capacity", "handoff"]})
+    after = _flow(client, "solved")
+    assert next(s for s in after["sections"] if s["section"] == "results")["freshness"] == fresh
+    assert session_state(client).get("objective") == objective is not None

@@ -331,7 +331,7 @@ describe('GoalCard scope (W4a)', () => {
     vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
     mount()
     expect((await screen.findByTestId('hub-goal-out-of-scope-add')).textContent)
-      .toBe('Add Reliability to set a goal')
+      .toBe('Add Reliability goal & study')
     expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
     expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
     const run = screen.getByTestId('hub-goal-run') as HTMLButtonElement

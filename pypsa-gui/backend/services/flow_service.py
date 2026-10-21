@@ -59,8 +59,10 @@ toward its section's state, is not in ``notes`` or the "to do / to check"
 count, and never blocks. Only items whose kind or card the scope removes are
 outside it: the study's and its readiness preview's when the study is not
 requested, the finance and value-flow bind checks when Commercial is off, and a
-ledger row naming a ``card`` that is off. ``validate_for_run`` items are what
-``/run`` refuses, so they always stay in scope.
+finance or study-only ledger row (no network target) whose ``card`` is off.
+``validate_for_run`` items are what ``/run`` refuses, so they always stay in
+scope. Grid › load flow and N-1 security are on exactly when their solver
+settings are (``flow_scope.apply_settings``) until W4b makes them run kinds.
 """
 from __future__ import annotations
 
@@ -131,14 +133,6 @@ PRESENCE_RULES: dict[str, tuple[str, str]] = {
     "presence_voll": ("scenarios", "c"),
 }
 
-# A solver option the scope leaves out but the solver settings still switch on
-# (W4a): the Run still does it, so it is said, display-only, beside Run. The
-# run kinds that turn these into scope-driven requests are W4b's.
-_SCOPE_CONFIG_OPTIONS: tuple[tuple[str, str, str, str], ...] = (
-    ("sclopf", "grid", "n1_sclopf", "N-1 security (SCLOPF)"),
-    ("run_ac_pf_after_lopf", "grid", "load_flow", "the load flow after the optimisation"),
-)
-
 # Bind checks owned by a card: outside the scope while that card is off. Only
 # checks of what the optimisation does not read: the finance inputs (the
 # investment case) and the value flows (post-solve settlement). The tariff and
@@ -152,9 +146,10 @@ _BIND_CARD: dict[str, str] = {
 
 # A template ledger row may name its `card`. Only a row whose value feeds
 # nothing the remaining Run reads can leave the scope: the investment case's
-# (finance) and the study's. A row the network or the optimisation reads stays
-# in scope whatever card it names, so an assumption that moves the solve is
-# never hidden.
+# (finance) and the study's, and only when it targets no network field (no
+# `component` / `field`, as DC-02's rows have). A row the network or the
+# optimisation reads stays in scope whatever card it names, so an assumption
+# that moves the solve is never hidden.
 _LEDGER_CARD_OPTION: dict[str, str] = {
     "commercial": "investment_case", "reliability": "goal_study",
 }
@@ -678,23 +673,6 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool) -> list[d
 
 # ── Scope (W4a) ─────────────────────────────────────────────────────────────
 
-def _scope_config_items(cfg: dict, scope: dict) -> list[dict]:
-    """A solver option switched on in the settings while its sub-option is out
-    of scope: the Run still does it, so say so (display-only)."""
-    out = []
-    for key, card, option, what in _SCOPE_CONFIG_OPTIONS:
-        if cfg.get(key) and not S.selected(scope, card, option):
-            label = S.CARD_BY_ID[card].label
-            out.append(_item("scope_option_configured", "warning",
-                             f"The solver settings switch on {what}, but {label} › "
-                             f"{dict(S.CARD_BY_ID[card].options)[option]} is not in scope: "
-                             "the Run still includes it. Select it, or switch it off in "
-                             "the solver settings.", "flow", "scenarios", fld=key,
-                             entity=key))
-            out[-1]["card"] = card
-    return out
-
-
 def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> None:
     """Tag each item with its card and whether the scope holds it. The
     sources already build an out-of-scope item as non-blocking
@@ -707,7 +685,8 @@ def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> No
         elif it["code"] in _BIND_CARD:
             it["card"] = _BIND_CARD[it["code"]]
             it["in_scope"] = S.selected(scope, it["card"])
-        elif it["source"] == "template" and it["card"] in _LEDGER_CARD_OPTION:
+        elif (it["source"] == "template" and it["card"] in _LEDGER_CARD_OPTION
+              and it["target"]["component"] is None and it["target"]["field"] is None):
             option = _LEDGER_CARD_OPTION[it["card"]]
             it["in_scope"] = (study_requested if it["card"] == "reliability"
                               else S.selected(scope, it["card"], option))
@@ -897,10 +876,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template)
     items += _bind_items(facts, db, org_id, project_dir, n)
-    # Said only once the user has set the scope: a project with no
-    # `flow_scope.json` reads exactly as before W4a.
-    if scope["source"] == "project":
-        items += _scope_config_items(facts.cfg_dict, scope)
+    # Load flow and N-1 security are on exactly when their solver settings are.
+    scope = S.apply_settings(scope, facts.cfg_dict)
     _apply_scope(items, scope, study_requested=study_requested)
     _apply_acks(items, read_acks(project_dir))
     needed = S.needed_sections(scope)
