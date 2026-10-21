@@ -483,7 +483,8 @@ def register(T) -> None:
         "groups": {"capacity": True, "commercial": True, "handoff": True,
                    "grid": False, "control": False},
         "not_needed": {"loads": "generation-only: export through the POI in section 3"},
-        "initial_results_tab": "commercial",
+        "initial_results_tab": "investment",            # the Investment case view (ticket 05)
+        "initial_results_section": "case",
         "ledger": _ledger(),
         "study_notes": [
             "One hourly year: the battery is sized against the day-ahead price and the curtailment "

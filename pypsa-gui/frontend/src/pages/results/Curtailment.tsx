@@ -18,6 +18,7 @@ import {
 import { resolveRange, useResultsFilter } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import NotSolved from './NotSolved'
+import CurtailmentByCause from './CurtailmentByCause'
 
 // ── Curtailment result tab ──────────────────────────────────────────────────
 // Standalone view of renewable-curtailment data the LP rejected (cost-
@@ -180,6 +181,9 @@ export default function Curtailment() {
           )}
         </div>
       </section>
+
+      {/* Per-plant split by cause (IPP ticket 05): horizon-wide, not windowed */}
+      <CurtailmentByCause />
 
       {/* Time series — aggregated curtailment over renewables */}
       <section className="rounded-[10px] border border-border bg-bg overflow-hidden">
