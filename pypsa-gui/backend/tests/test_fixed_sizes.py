@@ -329,14 +329,127 @@ def test_a_fixed_run_performs_the_binary_check_and_leaves_the_plan(reset_backend
     assert n.links.p_nom_opt.to_dict() == pytest.approx(plan, abs=EPS)
 
 
-def test_the_sweep_freeze_still_skips_the_check_and_pins_the_connection():
-    from services.adequacy.sweep import freeze_capacities
+def test_the_sweep_stays_operational_and_f1_carries_the_fixed_design():
+    from services.adequacy.sweep import FIXED_DESIGN_ATTR, freeze_capacities
 
     n = _plan_net()
     undo = freeze_capacities(n)
-    assert n._ic_operational is True and n._skip_process_uc_check is True
+    assert n._ic_operational is True and not hasattr(n, FIXED_DESIGN_ATTR)
     undo()
-    assert not getattr(n, "_skip_process_uc_check", False)
-    undo = freeze_capacities(n, skip_uc_check=False)
-    assert n._ic_operational is True and not getattr(n, "_skip_process_uc_check", False)
+    assert not hasattr(n, "_ic_operational")
+    undo = freeze_capacities(n, source="nom", transient=False)
+    assert not hasattr(n, "_ic_operational")
+    assert getattr(n, FIXED_DESIGN_ATTR)["sizes"]["generators/gas"] == 40.0
     undo()
+    assert not hasattr(n, FIXED_DESIGN_ATTR)
+
+
+@pytest.mark.live_solve
+def test_repeated_capacity_runs_freeze_at_the_record_and_never_drift(reset_backend):
+    """Gatekeeper (2): each run freezes at the recorded vector, so the +1e-6
+    a run may build never accumulates into a refusal."""
+    n = _install(_plan_net())
+    _solve()
+    rec = dict(n.meta["sizing_record"]["sizes"])
+    for _ in range(3):
+        assert _solve(fixed_sizes="capacity_run")[0] in ("ok", "optimal")
+    assert "fixed_sizes_source_changed" not in _errors(fixed_sizes="capacity_run")
+    with PyPSAService.get_lock():
+        n.generators.loc["gas", "p_nom_min"] = 0.0      # the bounds are the user's again
+    from services.adequacy.sweep import freeze_capacities
+
+    undo = freeze_capacities(n, sizes=n.meta["sizing_record"]["sizes"], transient=False)
+    assert n.generators.at["gas", "p_nom_min"] == pytest.approx(rec["generators/gas"], abs=0)
+    undo()
+
+
+def test_the_island_uc_runs_on_a_fixed_design_and_not_on_an_operational_solve():
+    from services.adequacy.sweep import FIXED_DESIGN_ATTR
+    from services.solver.island import dispatch_only, linearised_uc
+    from tests.test_island_study import _committed_genset, _hub, _uc, _units
+
+    island = _uc(_units(gensets={"g": _committed_genset()}))
+    n = _hub(load=10.0, gensets=[("g", 6.0)])
+    setattr(n, FIXED_DESIGN_ATTR, {"source": "opt", "sizes": {}})
+    assert dispatch_only(n, island) == "dispatch-only: sizing off (fixed sizes)"
+    with linearised_uc(n, island) as kw:
+        assert kw == {"linearized_unit_commitment": True}
+    n = _hub(load=10.0, gensets=[("g", 6.0)])
+    n._ic_operational = True
+    with linearised_uc(n, island) as kw:
+        assert kw == {}
+
+
+# ── the commercial records (gatekeeper, option A) ───────────────────────────
+
+def _edge():
+    from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+    return _install(build_edge_15min())
+
+
+def _fee_commercial():
+    from tests.test_connection_agreement import _agreement, _conn, _fee
+
+    return _conn(_agreement(fee=_fee(500.0)))
+
+
+@pytest.mark.live_solve
+def test_an_f1_run_commits_its_records_and_keeps_the_designs_fee(reset_backend):
+    from services.commercial import connection as C
+
+    n = _edge()
+    com = _fee_commercial()
+    assert _solve(commercial=com)[0] in ("ok", "optimal")
+    fee = dict(n.meta[C.META_FEE])
+    assert fee["size_mw"] == pytest.approx(float(n.links.at["import", "p_nom_opt"]))
+    n.meta.pop(C.META_AGREEMENT)
+    assert _solve(commercial=com, fixed_sizes="capacity_run")[0] in ("ok", "optimal")
+    assert C.META_AGREEMENT in n.meta                           # an F1 run commits
+    assert n.meta[C.META_FEE] == fee                            # the design's fee stands
+    assert n.links.at["import", "p_nom_opt"] == pytest.approx(fee["size_mw"], abs=EPS)
+
+
+@pytest.mark.live_solve
+def test_an_f1_run_at_another_connection_size_does_not_state_the_fee(reset_backend):
+    from services.commercial import connection as C
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _edge()
+    com = _fee_commercial()
+    _solve(commercial=com)
+    with PyPSAService.get_lock():
+        n.links.at["import", "p_nom"] = n.meta[C.META_FEE]["size_mw"] + 5.0
+    assert _solve(commercial=com, fixed_sizes="nameplate")[0] in ("ok", "optimal")
+    fee = n.meta[C.META_FEE]
+    assert fee["not_established"] == "connection size changed since the design run"
+    terms = commercial_cost_terms(n, com)
+    assert "network_capacity_not_established" in terms["flags"]
+    assert not any(label == "network_capacity" for label, *_ in terms["items"])
+
+
+@pytest.mark.live_solve
+def test_the_sweeps_operational_solve_still_commits_nothing(reset_backend):
+    from services.adequacy.sweep import freeze_capacities
+    from services.commercial import connection as C
+
+    n = _edge()
+    com = _fee_commercial()
+    _solve(commercial=com)
+    fee = dict(n.meta[C.META_FEE])
+    n.meta.pop(C.META_AGREEMENT)
+    undo = freeze_capacities(n)
+    try:
+        assert _solve(commercial=com)[0] in ("ok", "optimal")
+    finally:
+        undo()
+    assert C.META_AGREEMENT not in n.meta and n.meta[C.META_FEE] == fee
+
+
+@pytest.mark.live_solve
+def test_a_nameplate_run_does_not_touch_the_sizing_record(reset_backend):
+    n = _install(_plan_net())
+    _solve()
+    rec = n.meta["sizing_record"]
+    _solve(fixed_sizes="nameplate")
+    assert n.meta["sizing_record"] == rec

@@ -163,15 +163,16 @@ def preserve_bus_topology(n, lock=None):
                 "values")
 
 
-# Set by `freeze_capacities(skip_uc_check=True)` (the sweep and the DtC, many
-# operational re-solves): `run_simulation` skips the process binary UC check.
-# A fixed-size run (F1) freezes without it and gets the check (gatekeeper,
-# 2026-10-21: the flag is split from `_ic_operational`).
-SKIP_UC_CHECK_ATTR = "_skip_process_uc_check"
+# Set instead of `_ic_operational` by a fixed-size run (F1, `transient=False`):
+# the design is fixed but the run is a real one. The connection is pinned and
+# the island rows buy nothing (as on an operational solve), but the commercial
+# records commit and both UC checks run (gatekeeper, 2026-10-21, option A).
+# Its value is ``{"source", "sizes"}``: what was pinned, keyed "<table>/<name>".
+FIXED_DESIGN_ATTR = "_fixed_design"
 
 
-def freeze_capacities(n, lock=None, *, source: str = "opt",
-                      skip_uc_check: bool = True) -> Callable[[], None]:
+def freeze_capacities(n, lock=None, *, source: str = "opt", sizes: dict | None = None,
+                      transient: bool = True) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
     current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
@@ -193,11 +194,14 @@ def freeze_capacities(n, lock=None, *, source: str = "opt",
     ``lock`` (P27a, A1): the runner's captured lock; when given, the undo
     runs inside ``with lock:``. ``None`` (a private copy) stays unlocked.
 
-    ``source="nom"`` pins at the configured ``*_nom`` instead (the fixed-size
-    run's nameplate source, F1); ``*_nom_opt`` is then left alone, so a failed
-    solve keeps the previous sizes. ``skip_uc_check`` sets
-    ``SKIP_UC_CHECK_ATTR``."""
+    The fixed-size run (F1) passes ``transient=False``: it sets
+    ``FIXED_DESIGN_ATTR`` instead of ``_ic_operational``. Its size is
+    ``sizes["<table>/<name>"]`` where given (the sizing record's vector, so
+    repeated runs never drift by the +1e-6), else ``*_nom`` for
+    ``source="nom"`` (the nameplate). ``*_nom_opt`` is never written here, so a
+    failed solve keeps the previous sizes."""
     undo_ops: list[Callable[[], None]] = []
+    pinned: dict[str, float] = {}
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
         ext_col = f"{nom}_extendable"
@@ -231,7 +235,13 @@ def freeze_capacities(n, lock=None, *, source: str = "opt",
             opt = df.loc[idx, opt_col].astype(float)
             good = opt.notna() & opt.map(math.isfinite)
             size[good] = opt[good]
+        if sizes is not None:
+            for name in idx:
+                key = f"{attr}/{name}"
+                if key in sizes:
+                    size[name] = float(sizes[key])
         size = size.fillna(0.0).clip(lower=0.0)
+        pinned.update({f"{attr}/{name}": float(v) for name, v in size.items()})
         df.loc[idx, min_col] = size
         df.loc[idx, max_col] = size + 1e-6
 
@@ -239,14 +249,12 @@ def freeze_capacities(n, lock=None, *, source: str = "opt",
     # solve, so a connection agreement pins the designed connection instead of
     # re-sizing it per contingency (WP1.4 review round 2 #1). Set LAST, once
     # the pins are in place, so a raise above can never leave it behind.
-    setattr(n, "_ic_operational", True)
-    if skip_uc_check:
-        setattr(n, SKIP_UC_CHECK_ATTR, True)
+    flag = "_ic_operational" if transient else FIXED_DESIGN_ATTR
+    setattr(n, flag, True if transient else {"source": source, "sizes": pinned})
 
     def _clear_operational(n=n):
-        for attr in ("_ic_operational", SKIP_UC_CHECK_ATTR):
-            if hasattr(n, attr):
-                delattr(n, attr)
+        if hasattr(n, flag):
+            delattr(n, flag)
 
     undo_ops.append(_clear_operational)
 

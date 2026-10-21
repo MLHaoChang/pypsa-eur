@@ -826,8 +826,7 @@ def run_simulation(
                 # no commercial config as well — its commit clears stale frames.
                 # Capacity › sizing off (F1): pin every extendable size to the
                 # chosen source BEFORE the commercial binding, so the
-                # connection agreement sees an operational (fixed-design)
-                # solve. The bounds are always restored, last of all, by
+                # connection agreement pins the connection (a fixed design). The bounds are always restored, last of all, by
                 # `_real_restore`; `*_nom_opt` is never stashed (a failed
                 # solve writes none, so the previous sizes stay).
                 _unfreeze = lambda: None   # noqa: E731
@@ -835,9 +834,11 @@ def run_simulation(
                 if _fixed != "off":
                     from services.adequacy.sweep import freeze_capacities
 
+                    _rec = network.meta.get(_fixed_sizes.META_RECORD) or {}
                     _unfreeze = freeze_capacities(
                         network, source="opt" if _fixed == "capacity_run" else "nom",
-                        skip_uc_check=False)
+                        sizes=_rec.get("sizes") if _fixed == "capacity_run" else None,
+                        transient=False)
                     phase(f"Sizing off: dispatching on fixed sizes from "
                           f"{'the capacity run' if _fixed == 'capacity_run' else 'the nameplate'}.")
                 _emit_state(sizing=_fixed_sizes.run_label(network, config))
@@ -1234,7 +1235,7 @@ def run_simulation(
                     if (status in ("ok", "optimal") and config.mode == "lopf"
                             and plan_uc_kwargs.get("linearized_unit_commitment")
                             and len(_process_uc.process_committable(network))
-                            and not getattr(network, "_skip_process_uc_check", False)):
+                            and not getattr(network, "_ic_operational", False)):
                         _proc_check = _run_process_uc_check(
                             network, config, merged_solver_options, phase)
                     _emit_state(last_process_uc_check=_proc_check)
