@@ -48,7 +48,7 @@ def test_a_dispatch_chart_draws_the_evidence_and_names_what_it_did_not_draw(solv
         {"series": "p", "disposition": "drawn", "unit": "MW"},
         {"series": "marginal_cost", "disposition": "not_drawn", "reason": "not_in_evidence",
          "title": "Not part of this answer's checked evidence"}]
-    assert chart["caption"][0].startswith("Chart drawn from checked evidence · 1 series · ")
+    assert chart["caption"][0] == "Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00"
     assert chart["caption"][1] == "Not drawn: marginal cost — Not part of this answer's checked evidence"
     manifest = sidecar(chart)
     record = evidence(receipt)
