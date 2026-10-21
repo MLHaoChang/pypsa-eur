@@ -474,6 +474,10 @@ Dependencies outside this package: W4a #496 (scope, `ScopeGate`), W3b (#533 inve
 - **O2, O3 (GK, resolved)**: results of a study the Run doesn't request yet (the campus island study under Control; the investment case under Commercial while W4a marks it "not yet available") **are shown**, read-only, labelled "From the <study> (run <date>)", current only when the inputs fingerprint matches (LC-05), and never styled as a Run output until W0 adds the kind to the Run. Hiding results the user already has is worse.
 - **O4 (UX, resolved 2026-10-21)**: (a) there is no Lost-load exception; Lost load moves to Capacity › Operation. (b) The FMEA expert rows and mitigability are result annotations, not inputs.
 - **O5 (UX, resolved)**: the workspace is the filtered rail or sidebar plus a header strip, not a page.
+- **Build-gate conditions (UX reviewer, OK on the design 2026-10-21)**: these bind the slices, not this doc.
+  1. **H2** is the one explain entry per results group. The panel-level "Ask the assistant" in `EhReferenceDesignPanel.tsx` (~1192), which lands in Reliability › Adequacy, folds into the group-header entry. Row-scoped asks (scorecard rows) stay, because they are contextual. Labels reuse the `decisionVocabulary` wording ("Let the assistant explain…", "Ask about…").
+  2. **O2/O3 read-only results** use the same "Out of date" pill as the strip when the fingerprint doesn't match; there is no second stale wording.
+  3. **A UI caveat for the Link `p_set` bug**, if one ships before the fix, uses plain words and a next step, for example "Flows on links are not yet in this load flow; figures on those paths are wrong until the fix lands."
 
 ## 11. Pointers
 
