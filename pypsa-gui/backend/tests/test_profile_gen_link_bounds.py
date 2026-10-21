@@ -180,3 +180,44 @@ def test_eh_ammonia_staged_2027_haber_bosch_floor_is_a_min_stable_level(install_
     assert any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
     assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
     assert _user_ts_meta[("links", "p_min_pu", "haber_bosch")]["kind"] == "min_stable_level"
+
+
+# ── review round 2 (gatekeeper on #554) ─────────────────────────────────────
+
+def test_a_committable_link_whose_floor_crosses_its_shutdown_is_forced_off():
+    from services.profile_gen.apply import BOUND_FORCES_OFF_WARNING
+
+    _net(committable=True)
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    out = _apply(_gen("must_run", {"share": 0.3}))
+    assert any(w.startswith(BOUND_FORCES_OFF_WARNING) for w in out["warnings"])
+
+
+def test_an_input_on_bus2_is_not_counted_as_output_in_the_sink_check():
+    # efficiency2 < 0: bus2 is an input (e.g. H2 drawn by a synthesis loop).
+    n = _net(sink_mw=500.0)
+    n.add("Bus", "X", carrier="X")
+    n.links.at["electrolyser", "bus2"] = "X"
+    n.links.at["electrolyser", "efficiency2"] = -0.5
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_an_output_on_bus2_that_overflows_it_warns_naming_bus2():
+    n = _net(sink_mw=500.0)
+    n.add("Bus", "O2", carrier="O2")
+    n.add("Load", "o2_offtake", bus="O2", p_set=5.0)
+    n.links.at["electrolyser", "bus2"] = "O2"
+    n.links.at["electrolyser", "efficiency2"] = 0.5   # 0.8 x 100 x 0.5 = 40 MW
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    warn = [w for w in out["warnings"] if w.startswith(MUST_RUN_SINK_WARNING)]
+    assert warn and "'O2'" in warn[0] and "40" in warn[0]
+
+
+def test_an_all_zero_floor_is_not_labelled_a_min_stable_level():
+    # A p_min_pu of zero everywhere is no floor (and a two-way link's
+    # companion bound is never positive): no floor semantics, no label.
+    _net(committable=True)
+    out = _apply(_gen("must_run", {"share": 0.0}))
+    assert not any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("links", "p_min_pu", "electrolyser")].get("kind") != "min_stable_level"

@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/5"
+SUITE_VERSION = "checked-pilot-evaluation/6"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -77,6 +77,10 @@ NETWORK_EMISSIONS = {"total_emissions": (6, "tCO2"), "co2_cap_shadow_price": (40
 # available 40 + 10 = 50; curtailed 30 + 3 = 33; 66 %.
 CURTAILMENT = {"available_energy": (50, "MWh"), "curtailed_energy": (33, "MWh"),
                "curtailment_share": (66, "%")}
+# A free extendable G2 capped at 3 MW is built to its bound: 3 MW, +3 MW.
+CAPACITY = {"optimal_capacity": (3, "MW"), "capacity_change": (3, "MW")}
+# The StorageUnit fixture above discharges 4 MWh of a 10 MW x 2 h = 20 MWh unit: 0.2 cycles.
+CYCLES = {"window_discharged_energy": (4, "MWh"), "energy_capacity": (20, "MWh"), "equivalent_cycles": (0.2, "cycles")}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -105,7 +109,11 @@ ADDED = {
                               "generator_emissions"),
     "network-emissions/1": ("network", "Show the emissions for", NETWORK_EMISSIONS, "total_emissions"),
     "curtailment/1": ("generator G1", "Show the curtailment for", CURTAILMENT, "curtailed_energy"),
+    "capacity/1": ("generator G2", "Show the capacity for", CAPACITY, "optimal_capacity"),
+    "storage-cycles/1": ("storage unit Battery", "Show the cycles for", CYCLES, "window_discharged_energy"),
 }
+# Profiles whose scope names the component's class.
+SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
 EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, **{p: tuple(v[2]) for p, v in ADDED.items()}}
 # These are public contract labels, not calculated values from the runtime.
 LABELS = {
@@ -140,6 +148,9 @@ LABELS = {
     "co2_cap_shadow_price": "CO2 cap shadow price",
     "available_energy": "Available variable energy", "curtailed_energy": "Curtailed energy",
     "curtailment_share": "Curtailed share of available energy",
+    "optimal_capacity": "Capacity after the solve", "capacity_change": "Change from the input capacity",
+    "window_discharged_energy": "Discharged energy over the window", "energy_capacity": "Energy capacity",
+    "equivalent_cycles": "Equivalent full cycles over the window",
 }
 
 
