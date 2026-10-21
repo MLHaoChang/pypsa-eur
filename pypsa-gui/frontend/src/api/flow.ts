@@ -112,7 +112,9 @@ export interface FlowAck {
 const flowPath = (project: string) => `/projects/${encodeURIComponent(project)}/flow`
 
 export function getProjectFlow(project: string): Promise<ProjectFlow> {
-  return client.get<ProjectFlow>(flowPath(project)).then(r => r.data)
+  // Read ambiently by the rail, the sidebar and the Run: a failure shows as
+  // "not known yet" on the state dots, never as a toast on every poll.
+  return client.get<ProjectFlow>(flowPath(project), { skipErrorToast: true }).then(r => r.data)
 }
 
 /** Acknowledge a standing warning. 404: no such item; 422: an error. */
