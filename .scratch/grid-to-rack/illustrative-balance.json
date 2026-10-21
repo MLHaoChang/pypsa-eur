@@ -1,0 +1,17 @@
+{
+  "classification": "illustrative ideal arithmetic only",
+  "pulse_mw": 20,
+  "duration_s": 0.1,
+  "energy_mwh": 0.0005555555555555556,
+  "energy_kwh": 0.5555555555555556,
+  "formula": "energy_MWh = power_MW * duration_s / 3600",
+  "not_included": [
+    "conversion losses",
+    "converter response/current limits",
+    "reserve margins",
+    "voltage constraints",
+    "repeat events/recharge",
+    "hardware calibration"
+  ],
+  "claim": "Small event energy does not remove the peak power requirement."
+}

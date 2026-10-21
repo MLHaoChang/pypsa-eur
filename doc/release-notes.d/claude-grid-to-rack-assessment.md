@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Assess data-centre grid-to-rack modeling from workload and UPS/converter dynamics to long-term capacity planning, with code-backed gaps, open-source candidates, interface design, implementation sequence and validation matrix. No runtime engine or equipment control is activated.

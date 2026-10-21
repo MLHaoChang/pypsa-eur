@@ -1,0 +1,601 @@
+{
+  "checked_date": "2026-10-21",
+  "meaning": "Pinned read-only source observations; no library/engine installed, admitted or independently validated. Raw third-party files stay outside Git.",
+  "repositories": [
+    {
+      "repo": "gpu2grid/openg2g",
+      "url": "https://github.com/gpu2grid/openg2g",
+      "default_branch": "master",
+      "pushed_at": "2026-05-11T03:11:31Z",
+      "archived": false,
+      "metadata_sha256": "2061c1c181e765df5461a2f67963fef4f2ea7677c7812bfaf578091fccd7d632",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "readme": {
+        "path": "README.md",
+        "sha256": "6974b2590d89ea69a7813b6723082582a763b22de7974dc49348ea49cb840f8d",
+        "bytes": 7422
+      },
+      "observed_spdx_id": "Apache-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "bytes": 11357
+      }
+    },
+    {
+      "repo": "ml-energy/zeus",
+      "url": "https://github.com/ml-energy/zeus",
+      "default_branch": "master",
+      "pushed_at": "2026-10-21T05:19:39Z",
+      "archived": false,
+      "metadata_sha256": "62f1dc3e89d52ac4f0af015b2f9994a16655161dadd573c762973b05cb484482",
+      "commit": "5202270e8721a1b323befea600391595353841d9",
+      "readme": {
+        "path": "README.md",
+        "sha256": "d6b41d1c4b1add6b0a629b56ae92a5b44002ac776cb9192db5c279a3930ccdbd",
+        "bytes": 7409
+      },
+      "observed_spdx_id": "Apache-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "bytes": 11357
+      }
+    },
+    {
+      "repo": "dos-group/vessim",
+      "url": "https://github.com/dos-group/vessim",
+      "default_branch": "main",
+      "pushed_at": "2026-10-20T09:42:02Z",
+      "archived": false,
+      "metadata_sha256": "2762fd6a99beae214d111666dc9ccdd87587967e09c80bd259f762f86ca4d0de",
+      "commit": "3feef2de3b2f90d9fae8f3f2f19f2075ac67bec9",
+      "readme": {
+        "path": "README.md",
+        "sha256": "839408a169cd515b8eaf70c35565c18800e961404eade49aa6258b39a11bc40e",
+        "bytes": 5089
+      },
+      "observed_spdx_id": "MIT",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "a7dcf4001fa70e02947150bdd8cc9038c8fbeb8c95aad28ba929668ac5bbe7e6",
+        "bytes": 1085
+      }
+    },
+    {
+      "repo": "sogno-platform/dpsim",
+      "url": "https://github.com/sogno-platform/dpsim",
+      "default_branch": "master",
+      "pushed_at": "2026-10-16T13:12:12Z",
+      "archived": false,
+      "metadata_sha256": "48600c503fa28e1f2bce321fd9c8058719b86e014489cf4522196e056bf3baee",
+      "commit": "e36c6308b9e0d5b4512cbbeaeebf067307a5dca7",
+      "readme": {
+        "path": "README.md",
+        "sha256": "dc6c1cdc7293021119701db1a5bc9f7af74bce11a4838283d92ce7e30b1c699f",
+        "bytes": 3384
+      },
+      "observed_spdx_id": "MPL-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+        "bytes": 16725
+      }
+    },
+    {
+      "repo": "GMLC-TDC/HELICS",
+      "url": "https://github.com/GMLC-TDC/HELICS",
+      "default_branch": "main",
+      "pushed_at": "2026-09-09T23:29:45Z",
+      "archived": false,
+      "metadata_sha256": "d7799692b25c693851a5f54796056a1c2b7e46e88c3f88cb55c8a552fa309228",
+      "commit": "80ca80830f8213aa46c135d5d86b1a13ede02634",
+      "readme": {
+        "path": "README.md",
+        "sha256": "bf86f85ba2e15cc9785d3587031df67d1b75f99d95b5f4694d985ed8f8fa45e2",
+        "bytes": 17768
+      },
+      "observed_spdx_id": "BSD-3-Clause",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "ec449d4ce635b8b6375793acf6f63821b98ad7a8c7f62b6556542bdb6398d43f",
+        "bytes": 1605
+      }
+    },
+    {
+      "repo": "mosaik-api/mosaik",
+      "error": "HTTP Error 404: Not Found"
+    },
+    {
+      "repo": "dynawo/dynawo",
+      "url": "https://github.com/dynawo/dynawo",
+      "default_branch": "master",
+      "pushed_at": "2026-10-20T14:58:03Z",
+      "archived": false,
+      "metadata_sha256": "36ff8acd6538e690b40d73cf22efa2dcc5c884f6018c394980bee692f99fcb30",
+      "commit": "6e26b2b06f8dc04fa7b41b6aed3bfad9d10ece02",
+      "readme": {
+        "path": "README.md",
+        "sha256": "b6f2d540ab7f8a1a0347debbf55fd5c0e4aa256d25800763341eda249ce3f471",
+        "bytes": 30542
+      },
+      "observed_spdx_id": "MPL-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE.txt",
+        "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+        "bytes": 16725
+      }
+    },
+    {
+      "repo": "OpenIPSL/OpenIPSL",
+      "url": "https://github.com/OpenIPSL/OpenIPSL",
+      "default_branch": "master",
+      "pushed_at": "2026-10-18T03:03:04Z",
+      "archived": false,
+      "metadata_sha256": "f9691232425819b829b4647fa8ece07fcdd1afcfbe3ea49222c8b3406b82e550",
+      "commit": "ef5b9fa4157e76ef26b6412acff9418b4820bc5f",
+      "readme": {
+        "path": "README.md",
+        "sha256": "0e2ee8356f33fac43a7f8cff953b42b01d78a8c304a1b9bb9785b3528527ced2",
+        "bytes": 9125
+      },
+      "observed_spdx_id": "BSD-3-Clause",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "1e406172c855f2a340d97ef4cac69f9d4758a86321e22f7ce295313df0fcab74",
+        "bytes": 1569
+      }
+    },
+    {
+      "repo": "CURENT/andes",
+      "url": "https://github.com/CURENT/andes",
+      "default_branch": "master",
+      "pushed_at": "2026-03-12T17:01:07Z",
+      "archived": false,
+      "metadata_sha256": "c8edc4efadbe03537d38653a11b0e3085a637b7513b3a45fbb6a1e845d21a24a",
+      "commit": "eda5163c9ee8d19945a1dd5d1771fec5da608c27",
+      "readme": {
+        "path": "README.md",
+        "sha256": "75e9f5a015427be2293708856c30c2ef8e165e329211065a003265274ef78d8f",
+        "bytes": 6536
+      },
+      "observed_spdx_id": "NOASSERTION",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "1c58769980265b766285d56eeec473e30273aa3b5ea7fd95851395522533dec4",
+        "bytes": 35915
+      }
+    },
+    {
+      "repo": "JuliaEnergy/PowerDynamics.jl",
+      "url": "https://github.com/JuliaEnergy/PowerDynamics.jl",
+      "default_branch": "main",
+      "pushed_at": "2026-10-02T08:08:41Z",
+      "archived": false,
+      "metadata_sha256": "a9de15ff7cf2c211053d53c9a78e97c86ff860d1d54544a12e4035736d571468",
+      "commit": "93792632ae7862f9c0fdaf681763c9c89b4cece4",
+      "readme": {
+        "path": "README.md",
+        "sha256": "6ad036a43edfe85fb02e0142159419ec6d0dca05e3441cc8c29d2b9a5eea9c25",
+        "bytes": 3010
+      },
+      "observed_spdx_id": "NOASSERTION",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "e66ee9f5b50cb1a752e04a4828bcbf63f6efbe7d7912b5f50a16f4b8fa654e77",
+        "bytes": 18556
+      }
+    },
+    {
+      "repo": "mlcommons/chakra",
+      "url": "https://github.com/mlcommons/chakra",
+      "default_branch": "main",
+      "pushed_at": "2026-08-20T03:08:52Z",
+      "archived": false,
+      "metadata_sha256": "04061f516f88c8c03ccff9479648bcdb2d99fb3cef5cad40650afae2be50aac7",
+      "commit": "9ff3e3e2f276b4c0554a83f8747bf00b2786fa85",
+      "readme": {
+        "path": "README.md",
+        "sha256": "1aa17785c4e4890cb2895937b48dc2ef593718cb48a6d107cf834ad9005e6d3c",
+        "bytes": 2191
+      },
+      "observed_spdx_id": "Apache-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE.md",
+        "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+        "bytes": 10174
+      }
+    },
+    {
+      "repo": "NVIDIA/DCGM",
+      "url": "https://github.com/NVIDIA/DCGM",
+      "default_branch": "master",
+      "pushed_at": "2026-10-15T06:34:56Z",
+      "archived": false,
+      "metadata_sha256": "cab20dbb256b8e11c49c99699b7231447d9ee60fd5196cd759fb0b80b86ad5ae",
+      "commit": "64df9f894541e426e416131a9820cae97aa4dd81",
+      "readme": {
+        "path": "README.md",
+        "sha256": "e616fdf1dad63cf9e2b7b4484e5ebc037cd7cdf239ce672b0132d5b3d96bc6f0",
+        "bytes": 7835
+      },
+      "observed_spdx_id": "Apache-2.0",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+        "bytes": 11357
+      }
+    },
+    {
+      "repo": "e2nIEE/pandapower",
+      "url": "https://github.com/e2nIEE/pandapower",
+      "default_branch": "develop",
+      "pushed_at": "2026-10-21T11:45:23Z",
+      "archived": false,
+      "metadata_sha256": "fc2813df98ddfb2eb224f1f93e99bca385dc9d501de9f7332608bbe119b4dfdd",
+      "commit": "43ffc09c669d8cb44a24989650ff0504a4699f16",
+      "readme": {
+        "path": "README.rst",
+        "sha256": "253ca33ea9d4e88bb3277cee3210e84b19d60bbf26f0d60f4797167d79c3e194",
+        "bytes": 4362
+      },
+      "observed_spdx_id": "NOASSERTION",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "115ae3808a950626b17b5549a3512743b5c81d7d87a654f41258537364845afc",
+        "bytes": 1702
+      }
+    },
+    {
+      "repo": "pybamm-team/PyBaMM",
+      "url": "https://github.com/pybamm-team/PyBaMM",
+      "default_branch": "main",
+      "pushed_at": "2026-10-21T11:22:12Z",
+      "archived": false,
+      "metadata_sha256": "40a804369e5890911052744c00e0275ce43ec509d6e2f5602cb76c6b15e83c10",
+      "commit": "fe6784fb08d386950d546f75c95849a7edeb5fa8",
+      "readme": {
+        "path": "README.md",
+        "sha256": "113526795bf33f287bca228261feeb0f0d9645096e4db2b30572cba86a51e4b8",
+        "bytes": 10306
+      },
+      "observed_spdx_id": "BSD-3-Clause",
+      "license_file_evidence": {
+        "path": "LICENSE.txt",
+        "sha256": "e32e218b9184b0c498c1e13a8e66c1e67df9ef48ba9071bd2a5ebe04efdb303a",
+        "bytes": 1494
+      }
+    },
+    {
+      "repo": "OpenModelica/OpenModelica",
+      "url": "https://github.com/OpenModelica/OpenModelica",
+      "default_branch": "master",
+      "pushed_at": "2026-10-21T11:44:38Z",
+      "archived": false,
+      "metadata_sha256": "67d8440525f819feba177a30b9ceeacad25bb5ffc45813a0da8d23c3143ed2e8",
+      "commit": "7e0c03154443a103eda22b0b29420716878b6b69",
+      "readme": {
+        "path": "README.md",
+        "sha256": "effec36b09a69ce2310980c0de145a892a1417f5bae5f50f55dfeab60b3f2050",
+        "bytes": 2864
+      },
+      "observed_spdx_id": "NOASSERTION",
+      "license_file_evidence": {
+        "path": "OSMC-License.txt",
+        "sha256": "0839c8f6294b5082f6d04374e8d67f54a94f91db0dd1d97a1f81339b7283ab76",
+        "bytes": 13296
+      }
+    },
+    {
+      "repo": "lbl-srg/modelica-buildings",
+      "url": "https://github.com/lbl-srg/modelica-buildings",
+      "default_branch": "master",
+      "pushed_at": "2026-10-21T02:08:03Z",
+      "archived": false,
+      "metadata_sha256": "8eb5fd043d4019fd4f3d6c4c35ce129504f73fbc551fa7a7e2b1b88bbcbac383",
+      "commit": "169f8cfd68e62a9fbeb78a98ac58d0b4207ef70c",
+      "readme": {
+        "path": "README.md",
+        "sha256": "462da82da8394c6ad62dd0a90b596d4be15c023a9867732afb012d9642f9b1ac",
+        "bytes": 4539
+      },
+      "license_error": "HTTP Error 404: Not Found",
+      "observed_spdx_id": null,
+      "license_file_evidence": null
+    },
+    {
+      "repo": "cooling-singapore/dcsim",
+      "error": "HTTP Error 404: Not Found"
+    },
+    {
+      "repo": "claysiusd/generic-emt-modeling-of-data-center-load",
+      "url": "https://github.com/claysiusd/generic-emt-modeling-of-data-center-load",
+      "default_branch": "main",
+      "pushed_at": "2026-09-29T20:37:29Z",
+      "archived": false,
+      "metadata_sha256": "03db19248dc05b9cf5937ab0ceafee7d181751dfa8bd341cd22f3d443492f665",
+      "commit": "06685e65866e53a58156c172b722bfdae489a22a",
+      "readme": {
+        "path": "README.md",
+        "sha256": "a281edbdd0e021d94813f8f8aa73d433a0451d4bec51015b8a7f47a2d0e2e9b4",
+        "bytes": 9523
+      },
+      "license_error": "HTTP Error 404: Not Found",
+      "observed_spdx_id": null,
+      "license_file_evidence": null
+    },
+    {
+      "repo": "mshams8/Three-Mode-Supervisory-Control-Framework-for-Centralized-UPS",
+      "url": "https://github.com/mshams8/Three-Mode-Supervisory-Control-Framework-for-Centralized-UPS",
+      "default_branch": "main",
+      "pushed_at": "2026-05-08T15:18:30Z",
+      "archived": false,
+      "metadata_sha256": "c1347dfed63cf26152f36ad36755a28659bc3cc100ef21ccb4423c12f13c1748",
+      "commit": "2554d2a651d533f1f16d579cf5618bb51e71dc7c",
+      "readme": {
+        "path": "README.md",
+        "sha256": "0a4bfc161dc514631ff39aa5e291aab98a439a02fe278ec8ab9878b4fa175ae6",
+        "bytes": 4676
+      },
+      "observed_spdx_id": "MIT",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "de0b25dd1ab38845d8035cd25e24b398ddd3d6bf8590b8b689cd42f13b200caa",
+        "bytes": 1076
+      }
+    },
+    {
+      "repo": "dss-extensions/DSS-Python",
+      "url": "https://github.com/dss-extensions/DSS-Python",
+      "default_branch": "master",
+      "pushed_at": "2026-02-26T05:57:04Z",
+      "archived": false,
+      "metadata_sha256": "807527d40b2a75b8ade5344a5e3b985de40f4b3fdbd0d312b43ede435c18f969",
+      "commit": "85783cf811568dae931d06d3f434a34424599817",
+      "readme": {
+        "path": "README.md",
+        "sha256": "121f8200b9b733940535e55bfbdcd08d442758345e073e2104179807df653717",
+        "bytes": 10844
+      },
+      "observed_spdx_id": "BSD-3-Clause",
+      "license_file_evidence": {
+        "path": "LICENSE",
+        "sha256": "a6457704ca16744c91be3571fb309de80e8a82ace0d56dd9956f78857da16741",
+        "bytes": 1565
+      }
+    },
+    {
+      "repo": "modelon-community/fmpy",
+      "error": "HTTP Error 404: Not Found"
+    }
+  ],
+  "selected_files": [
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "pyproject.toml",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/pyproject.toml",
+      "sha256": "3f6867b8394ac4f0d28e4b195665f4efdd8afce78194bc399f6fab97c44bb2a7",
+      "bytes": 2281,
+      "cache_file": "gpu2grid__openg2g--pyproject.toml"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/coordinator.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/coordinator.py",
+      "sha256": "48e768dbdc4bdeaf2fbe5aaafbc70cafebbdcfd9176db2afdae96a06cbf15e67",
+      "bytes": 16049,
+      "cache_file": "gpu2grid__openg2g--openg2g__coordinator.py"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/datacenter/config.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/datacenter/config.py",
+      "sha256": "857b48bb48d45ec52f97ad371bc37428da5536dd8d74e9408ea5cf7c4383f948",
+      "bytes": 17993,
+      "cache_file": "gpu2grid__openg2g--openg2g__datacenter__config.py"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/datacenter/offline.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/datacenter/offline.py",
+      "sha256": "2225a01a04bf6ae5077360a94b1c0bbad81154d61cea6ebd4cd25d000ec7b431",
+      "bytes": 17289,
+      "cache_file": "gpu2grid__openg2g--openg2g__datacenter__offline.py"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/datacenter/workloads/training.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/datacenter/workloads/training.py",
+      "sha256": "9fb9a7ecb93dced67934d190e7764e9c5e4bf117c03b0190b11c54303776a940",
+      "bytes": 6572,
+      "cache_file": "gpu2grid__openg2g--openg2g__datacenter__workloads__training.py"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/datacenter/workloads/inference.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/datacenter/workloads/inference.py",
+      "sha256": "6f21f3824df2d99d8e851969693e7381e2d47294a7c9f5724021f3c20697777e",
+      "bytes": 55700,
+      "cache_file": "gpu2grid__openg2g--openg2g__datacenter__workloads__inference.py"
+    },
+    {
+      "repo": "gpu2grid/openg2g",
+      "commit": "c582a5115cfd49dcdfb140f1837224e7cbf0cfb1",
+      "path": "openg2g/grid/opendss.py",
+      "url": "https://raw.githubusercontent.com/gpu2grid/openg2g/c582a5115cfd49dcdfb140f1837224e7cbf0cfb1/openg2g/grid/opendss.py",
+      "sha256": "2a9ab4a1a002cd4573cca8619f44d26c9a478c30139b76b62c92bd703d8aef99",
+      "bytes": 32150,
+      "cache_file": "gpu2grid__openg2g--openg2g__grid__opendss.py"
+    },
+    {
+      "repo": "sogno-platform/dpsim",
+      "commit": "e36c6308b9e0d5b4512cbbeaeebf067307a5dca7",
+      "path": "dpsim-models/include/dpsim-models/EMT/EMT_Ph3_AvVoltageSourceInverterDQ.h",
+      "url": "https://raw.githubusercontent.com/sogno-platform/dpsim/e36c6308b9e0d5b4512cbbeaeebf067307a5dca7/dpsim-models/include/dpsim-models/EMT/EMT_Ph3_AvVoltageSourceInverterDQ.h",
+      "sha256": "8df0a9562408de3c995be9da4a99fbfbda28c37c8c2783783207c7c41868b93f",
+      "bytes": 8775,
+      "cache_file": "sogno-platform__dpsim--dpsim-models__include__dpsim-models__EMT__EMT_Ph3_AvVoltageSourceInverterDQ.h"
+    },
+    {
+      "repo": "sogno-platform/dpsim",
+      "commit": "e36c6308b9e0d5b4512cbbeaeebf067307a5dca7",
+      "path": "dpsim-models/include/dpsim-models/EMT/EMT_Ph3_AvVoltSourceInverterStateSpace.h",
+      "url": "https://raw.githubusercontent.com/sogno-platform/dpsim/e36c6308b9e0d5b4512cbbeaeebf067307a5dca7/dpsim-models/include/dpsim-models/EMT/EMT_Ph3_AvVoltSourceInverterStateSpace.h",
+      "sha256": "2e1b5b77853543ae25411d667e171669f91af44e565e5ceb05cb880157ea45c6",
+      "bytes": 2637,
+      "cache_file": "sogno-platform__dpsim--dpsim-models__include__dpsim-models__EMT__EMT_Ph3_AvVoltSourceInverterStateSpace.h"
+    },
+    {
+      "repo": "dos-group/vessim",
+      "commit": "3feef2de3b2f90d9fae8f3f2f19f2075ac67bec9",
+      "path": "docs/concepts/coupling.md",
+      "url": "https://raw.githubusercontent.com/dos-group/vessim/3feef2de3b2f90d9fae8f3f2f19f2075ac67bec9/docs/concepts/coupling.md",
+      "sha256": "dd8174a57bc195329eab44218ca938876bdd9abadac9e032eae2b1df9d794ddd",
+      "bytes": 2880,
+      "cache_file": "dos-group__vessim--docs__concepts__coupling.md"
+    },
+    {
+      "repo": "dos-group/vessim",
+      "commit": "3feef2de3b2f90d9fae8f3f2f19f2075ac67bec9",
+      "path": "pyproject.toml",
+      "url": "https://raw.githubusercontent.com/dos-group/vessim/3feef2de3b2f90d9fae8f3f2f19f2075ac67bec9/pyproject.toml",
+      "sha256": "257a0bc71364c65f9da92db15e837aca84460f21e9fe7076d684d7f239da3007",
+      "bytes": 3900,
+      "cache_file": "dos-group__vessim--pyproject.toml"
+    },
+    {
+      "repo": "ml-energy/zeus",
+      "commit": "5202270e8721a1b323befea600391595353841d9",
+      "path": "zeus/monitor/power.py",
+      "url": "https://raw.githubusercontent.com/ml-energy/zeus/5202270e8721a1b323befea600391595353841d9/zeus/monitor/power.py",
+      "sha256": "14c948894922be80d81db9ab4be5b86effa74a981e7913b98a5704f7d2c9a94a",
+      "bytes": 39485,
+      "cache_file": "ml-energy__zeus--zeus__monitor__power.py"
+    },
+    {
+      "repo": "ml-energy/zeus",
+      "commit": "5202270e8721a1b323befea600391595353841d9",
+      "path": "zeus/device/gpu/nvidia.py",
+      "url": "https://raw.githubusercontent.com/ml-energy/zeus/5202270e8721a1b323befea600391595353841d9/zeus/device/gpu/nvidia.py",
+      "sha256": "1f5b64b0a65bba609c6d3c8671435bf47181e76d413705580d83b9d95228128d",
+      "bytes": 19835,
+      "cache_file": "ml-energy__zeus--zeus__device__gpu__nvidia.py"
+    }
+  ],
+  "pages": [
+    {
+      "id": "power_stabilization_paper",
+      "url": "https://arxiv.org/html/2508.14318v2",
+      "final_url": "https://arxiv.org/html/2508.14318v2",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 115507,
+      "sha256": "d13c0282777cfe4aa2dcebd7a2751f45a0c5afb795a39bab51100fab14fa2aca"
+    },
+    {
+      "id": "openg2g_paper",
+      "url": "https://arxiv.org/abs/2605.05519",
+      "final_url": "https://arxiv.org/abs/2605.05519",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 43966,
+      "sha256": "f96307090995616c3b97a95d65a319f1bb574b16d59ebf59227ed1013b2dc91f"
+    },
+    {
+      "id": "openg2g_quickstart",
+      "url": "https://gpu2grid.io/openg2g/getting-started/quickstart/",
+      "final_url": "https://gpu2grid.io/openg2g/getting-started/quickstart/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 37397,
+      "sha256": "309f46dfe89755872569f858533c3bc76930dbc13863fceecbe363416fa5a4ad"
+    },
+    {
+      "id": "nvml_queries",
+      "url": "https://docs.nvidia.com/deploy/nvml-api/latest/api/group__nvmlDeviceQueries.html",
+      "final_url": "https://docs.nvidia.com/deploy/nvml-api/latest/api/group__nvmlDeviceQueries.html",
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 931879,
+      "sha256": "8039ca413e8c8ab5b00b7344c39cf75e13f2bea9add4db95e2e7b54d3620e521"
+    },
+    {
+      "id": "nerc_large_loads",
+      "url": "https://www.nerc.com/globalassets/who-we-are/standing-committees/rstc/whitepaper-characteristics-and-risks-of-emerging-large-loads.pdf",
+      "final_url": "https://www.nerc.com/globalassets/who-we-are/standing-committees/rstc/whitepaper-characteristics-and-risks-of-emerging-large-loads.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 4155789,
+      "sha256": "e68ac29523f2bee7078af6d69654c92af994bf45e141a4af856709c496a7be02"
+    },
+    {
+      "id": "ocp_bbu",
+      "url": "https://www.opencompute.org/documents/open-rack-v3-bbu-shelf-spec-rev1-1-pdf-1",
+      "final_url": "https://www.opencompute.org/documents/open-rack-v3-bbu-shelf-spec-rev1-1-pdf-1/",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 1985005,
+      "sha256": "553f23c7c7286968ebee67543e94181eafc127426d2448e6028bca6d4020df57"
+    },
+    {
+      "id": "pnnl_dml",
+      "url": "https://www.pnnl.gov/publications/electromagnetic-transient-modeling-large-data-centers-grid-level-studies",
+      "final_url": "https://www.pnnl.gov/publications/electromagnetic-transient-modeling-large-data-centers-grid-level-studies",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 81628,
+      "sha256": "2c3f443dc8a06253be9b364be7495c9da9bd714362a423aac1a0de653d980b9e"
+    },
+    {
+      "id": "pnnl_report",
+      "url": "https://www.pnnl.gov/main/publications/external/technical_reports/PNNL-38817.pdf",
+      "final_url": "https://www.pnnl.gov/main/publications/external/technical_reports/PNNL-38817.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 7406631,
+      "sha256": "375e2a1a681cd1e6752ca8410dc9338cfe69be0956b09dbe8d0c7dc74b1f3ce9"
+    },
+    {
+      "id": "lbl_datacenters",
+      "url": "https://datacenters.lbl.gov/facility-performance-modeling-simulation",
+      "final_url": "https://datacenters.lbl.gov/facility-performance-modeling-simulation",
+      "status": 200,
+      "content_type": "text/html; charset=UTF-8",
+      "bytes": 50247,
+      "sha256": "06662d6f87249b0ff54118d6efbddd5f8c6a66f7c19d9556e951537bc8c6cc07"
+    },
+    {
+      "id": "lbl_modelica",
+      "url": "https://simulationresearch.lbl.gov/modelica/",
+      "final_url": "https://simulationresearch.lbl.gov/modelica/",
+      "status": 200,
+      "content_type": "text/html",
+      "bytes": 11584,
+      "sha256": "8a80718c5151f40bf04e7484d73cbccdaf5bcc53959fd10d7cee37e44837d275"
+    },
+    {
+      "id": "mosaik_docs",
+      "url": "https://mosaik.readthedocs.io/en/latest/",
+      "final_url": "https://mosaik.readthedocs.io/en/latest/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 35810,
+      "sha256": "623e7474effbf305212c1fdee987202e998c090a8702b641b4acf9da4308539b"
+    },
+    {
+      "id": "pscad_model",
+      "url": "https://zenodo.org/records/21004140",
+      "final_url": "https://zenodo.org/records/21004140",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 113140,
+      "sha256": "126e34a613057bda458ee954cf261eb2771d0863e03d3cd7ffa38647a15d6281"
+    }
+  ]
+}

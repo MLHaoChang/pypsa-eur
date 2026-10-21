@@ -1,0 +1,53 @@
+{
+  "checked_at_utc": "2026-10-21T12:05:37.610611+00:00",
+  "scope": "read-only code/source assessment and proposed design",
+  "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "runtime_implementation": false,
+  "checks": {
+    "native_file_hashes": "pass",
+    "gap_package_test_references": "pass",
+    "relative_document_links": "pass",
+    "all_authored_json_parse": "pass",
+    "research_python_compile": "pass",
+    "illustrative_arithmetic": "pass",
+    "diff_whitespace": "pass"
+  },
+  "not_performed": [
+    "engine installation or execution",
+    "actual grid-to-rack case execution",
+    "external code/example/FMU execution",
+    "gated dataset access or account registration",
+    "GPU/site measurement or actuation",
+    "paid model/media calls",
+    "independent electrical/hardware calibration",
+    "fresh full application/backend/UI regression",
+    "full CI/premerge certification",
+    "independent domain approval or real-use calibration",
+    "production activation"
+  ],
+  "artifacts": {
+    "01-CURRENT-GAPS.md": "ae16d5a14aa3516b26779d0f7e65704f441d2034ffa844710548ae69809cbe84",
+    "02-ARCHITECTURE.md": "4561c07ba4345170f4bed3d91f4268dd05ff274317f959d4db4b887a6999c81e",
+    "03-OPEN-SOURCE.md": "23e9a21400ad69807f68aadebea9d37daff227e78cb2141d6eb8c7a2e9e7e547",
+    "04-IMPLEMENTATION-TESTS.md": "c9b07f8071967af09fa6014d09d7f51254c66eb1572dd5f7b5f609f4272d64af",
+    "HANDOFF.md": "6336ccb440cedc46cf6f6e17bd718411e750a62df356ea1e58fb67583261b420",
+    "README.md": "fcd2ef95d5af42fdcc72112b91c1f75ccf2bdcc73ec594973e6f88625e666aa3",
+    "illustrative-balance.json": "45bc4ddb97844f9a97ed11e6706775f5ac20ee847b9d788eb28f923bceeeb778",
+    "implementation-plan.json": "14fb383240ee5d82f461fdae1ea02dc8a8d48ad3f12aa70bc62fef5315055bf4",
+    "native-evidence.json": "cbe5c3a3ae34d32316f8cbe7acd335db839e58457644556069799be9169d48d8",
+    "source-observations.json": "de803e1d5ac16300de6dfe2cc38c21f94269c1f6f836b95a10746248da59bd23",
+    "validate_assessment.py": "acf92988828a6dc48218152aa6e8cb0e642ee1bbe2667cadf69095b4e4623ca9"
+  },
+  "reviewed_master": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "assessed_native_paths_changed_since_baseline": [],
+  "evidence_counts": {
+    "native_files": 25,
+    "gaps_assessed": 14,
+    "proposed_work_packages": 7,
+    "validation_scenarios_documented": 34,
+    "repository_lookups": 21,
+    "successful_pinned_repository_snapshots": 18,
+    "selected_source_files": 13,
+    "primary_page_observations": 12
+  }
+}

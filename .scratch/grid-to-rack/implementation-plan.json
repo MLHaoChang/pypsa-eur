@@ -1,0 +1,193 @@
+{
+  "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "decision": "Feasible design extension; proceed with bounded screening proposal, detailed engine conditional on model validation and existing scope/licensing review.",
+  "runtime_implementation": false,
+  "packages": [
+    {
+      "id": "GTR-00",
+      "priority": 0,
+      "title": "Boundary and model-contract review",
+      "depends_on": [],
+      "gap_ids": [
+        "G01",
+        "G03",
+        "G07",
+        "G12",
+        "G14"
+      ],
+      "deliverable": "Approved fidelity/measurement-plane/source-state contract; no engine activation.",
+      "acceptance_test_ids": [
+        "C01",
+        "C02",
+        "C07",
+        "U03",
+        "U04"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-01",
+      "priority": 1,
+      "title": "Trace and cohort artifacts",
+      "depends_on": [
+        "GTR-00"
+      ],
+      "gap_ids": [
+        "G01",
+        "G02",
+        "G03",
+        "G04"
+      ],
+      "deliverable": "Local assumed/authorized trace path plus planning aggregates; legacy unchanged.",
+      "acceptance_test_ids": [
+        "C01",
+        "C02",
+        "C03",
+        "C04",
+        "W01",
+        "W02",
+        "W04",
+        "W05"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-02",
+      "priority": 1,
+      "title": "Active buffer and native-frequency screening",
+      "depends_on": [
+        "GTR-01"
+      ],
+      "gap_ids": [
+        "G05",
+        "G06",
+        "G08"
+      ],
+      "deliverable": "Energy-conserving target/achieved PoC comparison; omitted metrics unknown.",
+      "acceptance_test_ids": [
+        "P01",
+        "P02",
+        "P03",
+        "P05",
+        "P08",
+        "L01",
+        "L02",
+        "U03"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-03",
+      "priority": 2,
+      "title": "One external electrical-engine spike",
+      "depends_on": [
+        "GTR-00",
+        "GTR-01"
+      ],
+      "gap_ids": [
+        "G05",
+        "G07",
+        "G09",
+        "G10",
+        "G12"
+      ],
+      "deliverable": "Explicit grid/UPS/DC-link/load physical chain, with benchmark and convergence results.",
+      "acceptance_test_ids": [
+        "C01",
+        "C05",
+        "C06",
+        "P04",
+        "P05",
+        "P06",
+        "P07",
+        "P08",
+        "P09",
+        "P10",
+        "U04"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-04",
+      "priority": 2,
+      "title": "Optional workload/controller coupling",
+      "depends_on": [
+        "GTR-01"
+      ],
+      "gap_ids": [
+        "G02",
+        "G04",
+        "G06",
+        "G12"
+      ],
+      "deliverable": "Deterministic local-trace control with delays and service penalties; use a validated appropriate model path.",
+      "acceptance_test_ids": [
+        "C04",
+        "C05",
+        "C06",
+        "W01",
+        "W02",
+        "W03",
+        "W04",
+        "P02",
+        "P03",
+        "U04"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-05",
+      "priority": 2,
+      "title": "Reserve/aging and planning feedback",
+      "depends_on": [
+        "GTR-02"
+      ],
+      "gap_ids": [
+        "G08",
+        "G11",
+        "G13"
+      ],
+      "deliverable": "Dispatch-state-bound constraints/costs with declared local validity and explicit proposed apply.",
+      "acceptance_test_ids": [
+        "C07",
+        "L01",
+        "L02",
+        "L03",
+        "L04",
+        "L05",
+        "L06",
+        "L07",
+        "U05"
+      ],
+      "status": "proposed_not_implemented"
+    },
+    {
+      "id": "GTR-06",
+      "priority": 1,
+      "title": "Workflow, comparison and evidence integration",
+      "depends_on": [
+        "GTR-02"
+      ],
+      "gap_ids": [
+        "G10",
+        "G14"
+      ],
+      "deliverable": "Optional view and ordinary approved native study orchestration with exact provenance and unknown metrics.",
+      "acceptance_test_ids": [
+        "C05",
+        "C07",
+        "U01",
+        "U02",
+        "U03",
+        "U04",
+        "U05"
+      ],
+      "status": "proposed_not_implemented"
+    }
+  ],
+  "conditional_dependencies": {
+    "GTR-04": "Needs the validated screening/electrical model contract used for its claimed outputs; no direct dependency on a particular optional engine.",
+    "GTR-05": "Requires GTR-03/04 evidence if feedback claims those detailed/coupled capabilities.",
+    "GTR-06": "First release is screen-only; later detailed result views depend on passed GTR-03."
+  }
+}
