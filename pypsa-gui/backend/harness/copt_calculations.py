@@ -24,8 +24,9 @@ SNAP = 1e-12  # the engine's grid snap
 REL_TOLERANCE = 1e-9
 REFUSALS = frozenset({
     "network_scope_required", "no_copt_fleet", "unusable_outage_rate", "copt_conventions_not_reproduced",
-    "unsupported_snapshot_scope",
+    "unsupported_snapshot_scope", "copt_inputs_not_finite",
 })
+GRID_TOLERANCE = 1e-12  # the engine splits any larger fraction across two grid points
 METRICS = {
     "screening_lole": {
         "formula_id": "copt-screening-lole/1",
@@ -81,6 +82,25 @@ def _residual(n, cfg):
     return demand - take
 
 
+def _weights(n):
+    """Generator weights times the period's years, rebuilt from the network."""
+    w = n.snapshot_weightings["generators"].reindex(n.snapshots).to_numpy(dtype=float)
+    if getattr(n.snapshots, "nlevels", 1) > 1:
+        years = n.investment_period_weightings["years"]
+        w = w * np.array([float(years.loc[p]) for p in n.snapshots.get_level_values(0)])
+    return w
+
+
+def _must_take_varies(n):
+    """True when the walk gives any must-take generator a per-period capacity."""
+    from services.adequacy.copt import _membership_walk
+    from services.adequacy.metrics import electrical_columns
+
+    electrical = set(electrical_columns(n, list(n.buses.index)))
+    return any(row["source"] == "missing" and series is not None
+               for _g, _cap, series, row in _membership_walk(n, electrical))
+
+
 def source(ctx, entity):
     from services.adequacy.copt import fleet_and_residual
     from services.adequacy.copt_endpoint import build_copt_payload
@@ -99,10 +119,15 @@ def source(ctx, entity):
     if payload["fleet"]["delta_mw"] != DELTA_MW or any(
         u.profile is not None or u.capacity_series is not None
         or (u.folded_constant is not None and u.folded_constant != 1)
-        or abs(u.capacity_mw - round(u.capacity_mw)) > 1e-9
+        or abs(u.capacity_mw - round(u.capacity_mw)) >= GRID_TOLERANCE
         for u in units
-    ):
+    ) or _must_take_varies(n):
         raise ValueError("copt_conventions_not_reproduced")
+    residual, weights_here = _residual(n, cfg), _weights(n)
+    engine_weights = weights.reindex(n.snapshots).to_numpy(dtype=float)
+    if not (np.isfinite(residual).all() and np.isfinite(weights_here).all()
+            and np.isfinite(engine_residual.to_numpy(dtype=float)).all() and np.isfinite(engine_weights).all()):
+        raise ValueError("copt_inputs_not_finite")
     metrics = payload["metrics"]
     return {
         "version": 1,
@@ -110,8 +135,9 @@ def source(ctx, entity):
         "entity_id": entity,
         "index": [str(v) for v in n.snapshots],
         "units": [{"name": u.name, "capacity_mw": int(round(u.capacity_mw)), "q": float(u.q)} for u in units],
-        "weights": [float(v) for v in weights.reindex(n.snapshots).fillna(0.0)],
-        "residual": [float(v) for v in _residual(n, cfg)],
+        "weights": [float(v) for v in weights_here],
+        "engine_weights": [float(v) for v in engine_weights],
+        "residual": [float(v) for v in residual],
         "engine_residual": [float(v) for v in engine_residual.reindex(n.snapshots)],
         "engine": {"screening_lole": metrics["lole_hours"], "screening_eue": metrics["eue_mwh"],
                    "screening_lolp_max": metrics["lolp_max"]},
@@ -137,7 +163,8 @@ def hourly(p, r):
         return 0.0, 0.0
     k0 = min(int(math.ceil(r / DELTA_MW - SNAP)), len(p))
     k = np.arange(k0)
-    return math.fsum(p[:k0]), math.fsum(p[:k0] * (r - k * DELTA_MW))
+    # A probability: summation can land an ulp above 1 when r exceeds the whole fleet.
+    return min(max(math.fsum(p[:k0]), 0.0), 1.0), math.fsum(p[:k0] * (r - k * DELTA_MW))
 
 
 def calculate(raw, scope):
@@ -151,6 +178,8 @@ def calculate(raw, scope):
     if (len(residual) != len(engine_residual) or not common.finite(residual + engine_residual + raw["weights"])
             or any(abs(a - b) > REL_TOLERANCE * scale for a, b in zip(residual, engine_residual))):
         reasons = dict.fromkeys(METRICS, "residual_mismatch")
+    elif any(abs(a - b) > REL_TOLERANCE * max(1.0, abs(b)) for a, b in zip(raw["weights"], raw["engine_weights"])):
+        reasons = dict.fromkeys(METRICS, "weights_mismatch")
     else:
         p = distribution(raw["units"])
         hours = [hourly(p, r) for r in residual]

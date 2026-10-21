@@ -137,3 +137,31 @@ def test_a_residual_that_does_not_reproduce_gives_no_figure(classical, checked, 
     real = copt_calculations._residual
     monkeypatch.setattr(copt_calculations, "_residual", lambda n, cfg: real(n, cfg) + 1.0)
     assert refused(checked, classical) == {"residual_mismatch"}
+
+
+def test_a_residual_beyond_the_fleet_is_a_probability_of_one(baseline, checked):
+    ctx = fleet(baseline[0], load=[1000.0, 100.0], wind=[0.0, 0.0])
+    values = published(ctx, {"screening_lole": 3 * 1 + 3 * 0.28, "screening_eue": 3 * (1000 - 0.72 * 100 - 0.18 * 60
+                                                                                       - 0.08 * 40) + 3 * 14,
+                             "screening_lolp_max": 1.0})
+    assert values["screening_lolp_max"] == 1.0
+
+
+def test_a_capacity_a_fraction_off_the_grid_is_refused(classical, checked):
+    classical.network.generators.at["thermal1", "p_nom"] = 60 + 5e-10
+    assert refused(checked, classical) == {"copt_conventions_not_reproduced"}
+
+
+def test_a_must_take_built_in_a_later_period_is_refused_by_name(baseline, checked):
+    ctx = baseline[0]
+    n = ctx.network
+    n.set_snapshots(pd.MultiIndex.from_product([[2030, 2040], n.snapshots]))
+    n.set_investment_periods([2030, 2040])
+    fleet(ctx, load=[100.0] * 4, wind=[0.6] * 4)
+    n.generators.at["windfarm", "build_year"] = 2040
+    assert refused(checked, ctx) == {"copt_conventions_not_reproduced"}
+
+
+def test_an_infinite_availability_is_refused_by_name(classical, checked):
+    classical.network.generators_t.p_max_pu["windfarm"] = [float("inf"), 0.0]
+    assert refused(checked, classical) == {"copt_inputs_not_finite"}
