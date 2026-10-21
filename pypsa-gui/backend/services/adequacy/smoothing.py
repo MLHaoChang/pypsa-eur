@@ -47,8 +47,8 @@ from services.adequacy.site_peak import (_periods, _value, committed_storage, de
 
 NO_BATTERY = "unknown, no battery/UPS"
 #: The screen's own limits, on every result.
-CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; deliverable MWh, "
-           "the charging side's 1/η_store not added")
+CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; energies as "
+           "delivered, charging losses not added")
 
 
 def step_mwh(step_mw: float, ramp_mw_per_min: float) -> float:

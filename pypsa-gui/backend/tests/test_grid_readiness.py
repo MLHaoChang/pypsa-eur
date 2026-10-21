@@ -690,6 +690,7 @@ def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
     for r in G.grid_readiness(d, n, PROFILE)["rows"]:
         text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
                         if r[k] is not None)
+        text += " " + str((r.get("after_battery") or {}).get("note", ""))     # DC 03
         for word in RAW_IDS:
             assert word not in text, (r["id"], word, text)
         if r["verdict"] == "unknown":
@@ -752,3 +753,30 @@ def test_without_a_battery_or_ups_there_is_no_after_value(tmp_path):
 def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
     _, rows = _envelope_rows(tmp_path, tid)
     assert not any("after_battery" in r for r in rows.values())
+
+
+def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):
+    out, _ = _envelope_rows(tmp_path, dc_load={})
+    counts = {v: sum(r["verdict"] == v for r in out["rows"]) for v in G.VERDICTS}
+    assert {v: out["summary"][v] for v in G.VERDICTS} == counts
+    assert out["summary"]["red_flags"] == counts["fail"] + counts["warn"]
+
+
+def test_the_after_value_survives_every_consumer(tmp_path, monkeypatch):
+    """The key round-trips through JSON (the route and the assistant tool
+    return the dict as is), the assistant tool's dispatcher and the report
+    chapter, which reads the rows it lists and ignores the rest."""
+    from services import chat_tools
+    from services.reports import chapters as C
+
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    back = json.loads(json.dumps(out))
+    assert back["rows"] == out["rows"] and "after_battery" in _rows(back)["ramp_rate"]
+    monkeypatch.setattr(G, "grid_readiness_for", lambda p, prof: out)
+    monkeypatch.setattr(chat_tools, "_acting", lambda: __import__("contextlib").nullcontext((None, None)))
+    monkeypatch.setattr(chat_tools, "_gridspine_project", lambda db, user, pid: pid)
+    assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="p") is out
+    payload = C.grid_readiness_payload(out)
+    assert [r["verdict"] for r in payload["rows"]] == [r["verdict"] for r in out["rows"]]
+    C.grid_readiness_table(payload, "/sections/grid_readiness/payload")
+    C.grid_readiness_disclosures(payload)

@@ -693,8 +693,8 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
         before, max(min(ramp["limit"], before) + s_frac * before, osc_per_min))
     attach(ramp, ramp_after, RULE_RAMP,
            f"the battery/UPS covers {after['covered_step_mw']:.3g} of the {w:.3g} MW step at the "
-           f"{ramp['limit']:g} MW/min limit; {after['residual_step_mw']:.3g} MW and a "
-           f"{a_res:.3g} MW oscillation reach the grid unshaped")
+           f"{ramp['limit']:g} MW/min limit; the uncovered part ({after['residual_step_mw']:.3g} MW) is "
+           f"counted at the envelope's rate, conservatively, and a {a_res:.3g} MW oscillation remains")
     if osc is not None and in_band and inp.connection_mw:
         attach(osc, 2.0 * a_res / inp.connection_mw * 100.0, RULE_OSC,
                f"{after['amplitude_mw'] - a_res:.3g} of the {after['amplitude_mw']:.3g} MW amplitude held by "
