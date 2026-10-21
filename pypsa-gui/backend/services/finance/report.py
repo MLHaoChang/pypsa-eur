@@ -281,6 +281,14 @@ def _island_breakeven(result, case) -> dict[str, Any] | None:
                                      for k, v in got.items()}
 
 
+def _lcoe_inputs_block(result, case) -> dict[str, Any] | None:
+    got = getattr(result, "lcoe_inputs", None) or {}
+    if not got:
+        return None
+    return {"energy_mwh": _series(got["energy_mwh"]), "value": _series(got["value"]),
+            "inflation": _num(case.inputs.inflation)}
+
+
 def _project_payload(result, case) -> dict[str, Any]:
     m, fin = result.metrics, case.inputs
     cash = result.cash
@@ -314,6 +322,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         "lcos_nominal_per_mwh": _num(m.get("lcos_nominal_per_mwh")),
         "lcos_real_per_mwh": _num(m.get("lcos_real_per_mwh")),
         "lcos": _lcos_block(result),
+        # The LCOE's per-year generation and value and the inflation its real
+        # figure uses (checked-results S8b); readers use `.get` (reports stored
+        # before this lack the key: their LCOE cannot be rebuilt until re-run).
+        "lcoe_inputs": _lcoe_inputs_block(result, case),
         "solved_ppa_price": _num(m.get("solved_ppa_price")),
         "solve_ppa_status": m.get("solve_ppa_status"),
         # A price that zeroes the NPV but not at the case's own IRR (several
