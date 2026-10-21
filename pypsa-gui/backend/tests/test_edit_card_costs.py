@@ -10,6 +10,8 @@ the hand formula overnight × annuity(r, lifetime) × nyears × e_nom.
 """
 import json
 
+import pandas as pd
+
 import pytest
 
 from project_templates import eh_templates
@@ -68,8 +70,19 @@ def _store_fixed_cost(name):
     while solving)."""
     from services.solver.periodized_costs import periodized_capital_costs
 
+    from services.solver.periodized_costs import with_periodized_cost_defaults
+
     ctx = PyPSAService.get_active_context()
-    return periodized_capital_costs(ctx.network, ctx.solver_state['solver_config'])['stores'][name]['fixed_cost']
+    config = ctx.solver_state['solver_config']
+    reported = periodized_capital_costs(ctx.network, config)['stores'][name]['fixed_cost']
+    # GK: also pin the coefficient the LP objective multiplies (PyPSA's own
+    # periodized_cost), under the same defaults the solve fills in.
+    with with_periodized_cost_defaults(ctx.network, config):
+        charged = ctx.network.components['Store'].periodized_cost.to_series()
+    charged = charged.xs(name, level=-1) if isinstance(charged.index, pd.MultiIndex) else charged[name]
+    values = list(charged) if hasattr(charged, '__iter__') else [charged]
+    assert values and all(float(v) == pytest.approx(float(reported), rel=1e-9) for v in values), (values, reported)
+    return reported
 
 
 def _nyears(network):
