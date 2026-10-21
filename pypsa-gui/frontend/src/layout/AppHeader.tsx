@@ -23,6 +23,7 @@ import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 import { useRunGate } from '../hooks/useRunGate'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
+import { componentLabel } from '../utils/componentLabels'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -58,10 +59,6 @@ interface SearchResult { type: ResultType; name: string; busName?: string }
 const TAB_FOR_TYPE: Record<ResultType, string> = {
   Bus: 'Buses', Line: 'Lines', Generator: 'Generators',
   StorageUnit: 'Storage', Load: 'Loads', Link: 'Links',
-}
-const TYPE_LABEL: Record<ResultType, string> = {
-  Bus: 'Bus', Line: 'Line', Generator: 'Generator',
-  StorageUnit: 'Storage', Load: 'Load', Link: 'Link',
 }
 
 function TypeIcon({ type }: { type: ResultType }) {
@@ -986,7 +983,7 @@ export default function AppHeader() {
                 <span className="flex-1 min-w-0">
                   <span className="text-[12px] font-semibold text-text block truncate">{r.name}</span>
                   <span className="text-[10px] text-muted">
-                    {TYPE_LABEL[r.type]}{r.busName ? ` · → ${r.busName}` : ''}
+                    {componentLabel(r.type)}{r.busName ? ` · → ${r.busName}` : ''}
                   </span>
                 </span>
               </button>

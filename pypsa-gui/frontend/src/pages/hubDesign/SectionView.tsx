@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { AlertTriangle, ArrowRight, Info, XCircle } from 'lucide-react'
 import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
+import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
@@ -12,17 +13,10 @@ import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../.
 // do or to check (a Guided user never has a blocker hidden: the field is named
 // and one button shows it in Expert, design §3.5), then the section's card.
 
-/** The field an item points at, in words ("Connection & grid > Link grid_import"). */
-export function fieldWords(item: FlowItem): string | null {
-  const { component, entity } = item.target
-  const thing = [component, entity].filter(Boolean).join(' ')
-  return thing ? `${sectionMeta(item.target.section).label} > ${thing}` : null
-}
-
 function ItemRow({ item }: { item: FlowItem }) {
   const Icon = item.severity === 'error' ? XCircle : item.severity === 'warning' ? AlertTriangle : Info
   const tone = item.severity === 'error' ? 'text-danger' : item.severity === 'warning' ? 'text-warn' : 'text-muted'
-  const field = fieldWords(item)
+  const field = fieldWords(item.target)
   return (
     <li data-testid="section-item" data-severity={item.severity}
       className="flex items-start gap-2 text-[12px] text-text">
@@ -39,7 +33,7 @@ function ItemRow({ item }: { item: FlowItem }) {
       </button>
       <button type="button" data-testid="section-item-expert"
         onClick={() => openFlowTarget(item.target)}
-        title="Open it in Expert; switching back returns you to this section"
+        title="Open this section in Expert"
         className="shrink-0 text-[11px] text-muted hover:text-accent hover:underline">
         Open in Expert
       </button>
@@ -52,7 +46,8 @@ export function SectionView({ id, children }: { id: FlowSectionId; children?: Re
   const { section, isError } = useProjectFlow()
   const s = section(id)
   const stateless = id === 'readiness' || id === 'results'
-  const items = (s?.items ?? []).filter(i => !i.acknowledged)
+  const items = (s?.items ?? []).filter(isOpenItem)
+  const infos = (s?.items ?? []).filter(i => !i.acknowledged && i.severity === 'info')
   return (
     <div data-testid={`section-view-${id}`} className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
@@ -69,6 +64,11 @@ export function SectionView({ id, children }: { id: FlowSectionId; children?: Re
         <ul data-testid="section-items"
           className="flex flex-col gap-1.5 rounded border border-border bg-panel px-3 py-2">
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
+        </ul>
+      )}
+      {infos.length > 0 && (
+        <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">
+          {infos.map((it, i) => <li key={`${it.code}-${i}`}>{it.message}</li>)}
         </ul>
       )}
       {children}
@@ -117,8 +117,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
                 {sectionMeta(s.section).number} {s.label}
               </button>
               <span className="text-muted">
-                {s.items.filter(i => !i.acknowledged).length > 0
-                  ? `${s.items.filter(i => !i.acknowledged).length} open` : ''}
+                {countWords(countOpen(s.items))}
               </span>
             </li>
           ))}
@@ -130,8 +129,8 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <p className="text-[12px] text-muted">
-        {s?.summary ? `${s.summary}. ` : ''}What this section needs is listed above when something is missing, and each item opens here.
-        The full {meta.label.toLowerCase()} editor is in Expert, or you can ask the assistant.
+        {s?.summary ? `${s.summary}. ` : ''}Anything this section still needs is listed above, and each item opens here.
+        The full {meta.label.toLowerCase()} editor is in Expert.
       </p>
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}

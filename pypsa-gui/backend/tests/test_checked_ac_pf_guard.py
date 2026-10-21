@@ -45,3 +45,25 @@ def test_storage_profile_refuses_after_an_ac_power_flow(storage, checked):
 
 def test_without_a_power_flow_the_profile_still_answers(solved, checked):
     assert approval(run(checked, LP))["verdict"] == "passed"
+
+
+def test_a_fresh_solve_after_a_power_flow_answers_again(baseline, checked, client, session_state):
+    """The guard never latches: every solve claim wipes the PF result keys."""
+    from services.solver_service import SolverConfig
+
+    state = session_state(client)
+
+    def solve():
+        state["solver_config"] = SolverConfig()
+        assert client.post("/api/simulation/run").status_code == 200
+        state["thread"].join(timeout=90)
+        assert state["status"] == "completed", state.get("condition")
+
+    solve()
+    state["ac_pf_results"], state["lopf_results"] = {}, {}
+    # G1 serves L1's 5 MW for two unit-weight hours at 10 EUR/MWh.
+    values = {"dispatch_energy": 10, "marginal_expenditure": 100, "peak_dispatch": 5}
+    assert approval(run(checked, values))["verdict"] == "limited"
+    solve()
+    assert state["ac_pf_results"] is None and state["lopf_results"] is None
+    assert approval(run(checked, values))["verdict"] == "passed"

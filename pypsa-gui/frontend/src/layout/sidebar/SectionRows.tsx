@@ -12,6 +12,7 @@ import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useSolveQueue } from '../../hooks/useSolveQueue'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
+import { isOpenItem } from '../../utils/flowItems'
 import AssetPaletteInline from './AssetPaletteInline'
 import { SItem, usePanelToggle } from './SidebarRows'
 

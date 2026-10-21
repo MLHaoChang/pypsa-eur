@@ -10,6 +10,10 @@ import pandas as pd
 from services import workflow_tools
 from harness import branch_calculations as branch
 from harness import carrier_calculations as carrier
+from harness import curtailment_calculations as curtailment
+from harness import emissions_calculations as emissions
+from harness import lost_load_calculations as lost_load
+from harness import price_calculations as price
 from harness import storage_calculations as storage
 from harness import storage_costs
 
@@ -70,7 +74,9 @@ COMPARISON_METRICS = {
     },
 }
 DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS,
-               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS}
+               **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS,
+               **lost_load.METRICS, **price.METRICS, **emissions.GENERATOR_METRICS,
+               **emissions.NETWORK_METRICS, **curtailment.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -82,10 +88,16 @@ PROFILES = {
     carrier.PROFILE: tuple(carrier.METRICS),
     branch.PROFILE: tuple(branch.METRICS),
     branch.NETWORK_PROFILE: tuple(branch.NETWORK_METRICS),
+    lost_load.PROFILE: tuple(lost_load.METRICS),
+    price.PROFILE: tuple(price.METRICS),
+    emissions.GENERATOR_PROFILE: tuple(emissions.GENERATOR_METRICS),
+    emissions.NETWORK_PROFILE: tuple(emissions.NETWORK_METRICS),
+    curtailment.PROFILE: tuple(curtailment.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
-OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES})
+OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE, price.PROFILE,
+                             *emissions.PROFILES, curtailment.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -308,6 +320,14 @@ def scoped_source(ctx, scope, owner=None):
     """Capture complete raw populations under the existing project lock."""
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.source(ctx, scope["entity_id"])
+    if scope["profile"] == price.PROFILE:
+        return price.source(ctx, scope["entity_id"])
+    if scope["profile"] in emissions.PROFILES:
+        return emissions.source(ctx, scope["entity_id"], scope["profile"] == emissions.NETWORK_PROFILE)
+    if scope["profile"] == curtailment.PROFILE:
+        return curtailment.source(ctx, scope["entity_id"])
     if scope["profile"] in branch.PROFILES:
         return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
                              scope.get("component_class"))
@@ -412,25 +432,25 @@ def _balance_mask(raw):
                 valid = False
             else:
                 terms[load["bus"]].append(sign * p)
-        for branch in balance["branches"]:
+        for flow in balance["branches"]:
             p0, p1, capacity, maximum = (
-                branch["p0"][i],
-                branch["p1"][i],
-                branch["capacity"],
-                branch["maximum"][i],
+                flow["p0"][i],
+                flow["p1"][i],
+                flow["capacity"],
+                flow["maximum"][i],
             )
             if (
                 any(v is None for v in (p0, p1, capacity, maximum))
                 or capacity < 0
                 or maximum < 0
                 or max(abs(p0), abs(p1)) > capacity * maximum + 1e-6
-                or branch["bus0"] not in terms
-                or branch["bus1"] not in terms
+                or flow["bus0"] not in terms
+                or flow["bus1"] not in terms
             ):
                 valid = False
             else:
-                terms[branch["bus0"]].append(-p0)
-                terms[branch["bus1"]].append(-p1)
+                terms[flow["bus0"]].append(-p0)
+                terms[flow["bus1"]].append(-p1)
         try:
             valid = valid and all(
                 abs(math.fsum(values))
@@ -486,6 +506,14 @@ def scoped_calculate(raw, scope):
         return carrier.calculate(raw, scope)
     if scope["profile"] in branch.PROFILES:
         return branch.calculate(raw, scope)
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.calculate(raw, scope)
+    if scope["profile"] == price.PROFILE:
+        return price.calculate(raw, scope)
+    if scope["profile"] in emissions.PROFILES:
+        return emissions.calculate(raw, scope)
+    if scope["profile"] == curtailment.PROFILE:
+        return curtailment.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -638,6 +666,14 @@ def disclosure(scope):
         return carrier.DISCLOSURE
     if scope["profile"] in branch.PROFILES:
         return branch.DISCLOSURE
+    if scope["profile"] == lost_load.PROFILE:
+        return lost_load.DISCLOSURE
+    if scope["profile"] == price.PROFILE:
+        return price.DISCLOSURE
+    if scope["profile"] in emissions.PROFILES:
+        return emissions.DISCLOSURE
+    if scope["profile"] == curtailment.PROFILE:
+        return curtailment.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:
