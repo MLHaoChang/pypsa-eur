@@ -159,6 +159,15 @@ ISSUE_TITLES: dict[str, str] = {
 
     # Decision study
     "study_network_tariff_in_links": "Study network from an earlier version prices its tariff on the meter links",
+    # Fixed-size runs ("sizing off")
+    "fixed_sizes_unknown": "Sizing source not recognised",
+    "fixed_sizes_pf_mode": "Sizing off needs the optimisation mode, not power flow",
+    "fixed_sizes_with_myopic": "Sizing off cannot run with the myopic strategy",
+    "fixed_sizes_with_rolling": "Sizing off cannot run with the rolling strategy",
+    "fixed_sizes_no_capacity_run": "Sizing off needs a capacity run of this network first",
+    "fixed_sizes_source_changed": "Network sizes no longer match the capacity run",
+    "fixed_sizes_nameplate_empty": "Sizing off on the nameplate: every nameplate is 0",
+    "fixed_sizes_zero_nameplate": "Asset with a nameplate of 0 is not built when sizing is off",
 }
 
 
