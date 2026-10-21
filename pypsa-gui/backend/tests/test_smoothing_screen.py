@@ -190,3 +190,17 @@ def test_the_data_centre_campus_end_to_end():
     assert 0 < ph["reserve_mwh"] < 10.0 * 0.95
     assert out["verdict"] == "covered"
     assert np.isfinite(ph["need_mwh"])
+
+
+def test_a_ride_through_shortfall_does_not_eat_the_ups_energy():
+    """R = 96 MWh over an 80 MWh ride-through battery leaves it 0, and the
+    UPS still has its own 10 MWh less its bridge."""
+    n = _site([("rt", 20.0, 4.0, 1.0, False), ("ups", 40.0, 0.25, 1.0, False)],
+              {"critical": 4.0, "it": 6.0})
+    island = {"units": {"rt": {"kind": "bess"}, "critical": {"kind": "load", "critical": True},
+                        "ups": {"kind": "ups", "it_load": ["it"]}},
+              "requirements": {"sustained_h": {"value": 24.0}, "bridge_s": {"value": 600.0}}}
+    (ph,) = _screen(n, island, [_phase(10.0)])["phases"]
+    assert ph["reserve_mwh"] == pytest.approx(10.0 - 6.0 * 600.0 / 3600.0)
+    assert ph["reserve_mw"] == pytest.approx(60.0)
+    assert "blind to in-hour ramps" in ph["note"]

@@ -41,14 +41,14 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
+from services.adequacy.site_peak import (_periods, _value, committed_storage, deliverable_mwh, delivered_mw,
+                                         named_load, outage_reserve_mwh, period_year,
+                                         ride_through_batteries)
 
-from services.adequacy.site_peak import _energized, _periods, _value, import_links, outage_reserve_mwh
-
-#: The screen's verdicts: the reserve covers the need, falls short, or the
-#: screen lacks an input.
-VERDICTS = ("covered", "short", "unknown")
 NO_BATTERY = "unknown, no battery/UPS"
+#: The screen's own limits, on every result.
+CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; deliverable MWh, "
+           "the charging side's 1/η_store not added")
 
 
 def step_mwh(step_mw: float, ramp_mw_per_min: float) -> float:
@@ -75,85 +75,52 @@ def _year(cod: str) -> int | None:
         return None
 
 
-def _active(su, name: str, year: int | None) -> bool:
-    """A StorageUnit in service in ``year`` (its build year and lifetime)."""
-    if year is None:
-        return True
-    built = float(su.at[name, "build_year"]) if "build_year" in su.columns else 0.0
-    life = float(su.at[name, "lifetime"]) if "lifetime" in su.columns else math.inf
-    return built <= year < built + life if built > 0 else True
-
-
-def _it_peak_mw(n, loads: list[str]) -> float | None:
-    """The highest hourly total of the named loads, or None when none is in the network."""
-    names = [x for x in loads if x in n.loads.index]
-    if not names:
-        return None
-    ts = n.loads_t.p_set.reindex(columns=names)
-    static = n.loads.loc[names, "p_set"] if "p_set" in n.loads.columns else 0.0
-    return float(ts.fillna(static).reindex(n.snapshots).fillna(0.0).sum(axis=1).max())
-
-
-def _delivered(n) -> np.ndarray | None:
-    """The energized import after its efficiency per snapshot, as the peak check reads it."""
-    links = import_links(n)
-    if not links:
-        return None
-    return sum(_energized(n, l) * float(n.links.at[l, "efficiency"]) for l in links)
-
-
-def _mask(n, year: int | None):
-    """The snapshots of the investment period named for ``year``; the whole
-    horizon when no period is (the reserve's maximum over it, conservative)."""
-    for label, mask in _periods(n):
-        if year is not None and label == str(year):
-            return mask
-    return None
+def _period(n, year: int | None):
+    """(year, mask) of the investment period a phase falls in, as the peak
+    check labels them: the last period starting at or before ``year`` (the
+    first when none does); the one period of a single-period network."""
+    periods = _periods(n)
+    if year is None or len(periods) == 1:
+        label, mask = periods[0]
+        return period_year(label), mask
+    dated = [(period_year(lab), m) for lab, m in periods if period_year(lab) is not None]
+    before = [(y, m) for y, m in dated if y <= year]
+    return (before[-1] if before else dated[0]) if dated else (None, periods[0][1])
 
 
 def _reserve(n, island: dict, year: int | None) -> dict:
-    """What the committed ride-through batteries and UPSs hold for smoothing
-    in ``year``, after their backup duty (energy only): ``{mw, mwh,
-    backup_mwh, units, unsized, notes}``."""
+    """What the committed ride-through batteries and UPSs in service in
+    ``year`` (the phase's) hold for smoothing after their backup duty, read
+    over the hours of the period the phase falls in (energy only, each group
+    clamped at 0 on its own): ``{mw, mwh, backup_mwh, units, unsized, notes}``."""
     su = n.storage_units
     units = island.get("units") or {}
     req = island.get("requirements") or {}
-    rts = req.get("ride_through_storage")
-    if rts is None:
-        rts = [u for u, d in units.items() if d.get("kind") == "bess"]
-    upss = [u for u, d in units.items() if d.get("kind") == "ups"]
+    _, mask = _period(n, year)
     out = {"mw": 0.0, "mwh": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [], "notes": []}
-
-    def committed(names):
-        live = [u for u in names if u in su.index and _active(su, u, year)]
-        out["unsized"] += [u for u in live if bool(su.at[u, "p_nom_extendable"])]
-        return [u for u in live if not bool(su.at[u, "p_nom_extendable"])
-                and float(su.at[u, "p_nom"]) > 0]
-
-    def deliverable(u):
-        return float(su.at[u, "efficiency_dispatch"]) * float(su.at[u, "p_nom"]) * float(su.at[u, "max_hours"])
-
-    rt = committed(rts)
-    if rt:
-        keep, words = outage_reserve_mwh(n, island, _mask(n, year), _delivered(n))
-        out["mw"] += sum(float(su.at[u, "p_nom"]) for u in rt)
-        out["mwh"] += sum(deliverable(u) for u in rt) - keep
+    rt = ride_through_batteries(n, island, year)
+    out["unsized"] += rt["unsized"]
+    if rt["names"]:
+        keep, words = outage_reserve_mwh(n, island, mask, delivered_mw(n), year)
+        out["mw"] += rt["p_mw"]
+        out["mwh"] += max(0.0, rt["e_mwh"] - keep)
         out["backup_mwh"] += keep
-        out["units"] += rt
-        out["notes"].append(f"ride-through {', '.join(rt)} keeps the {words}")
+        out["units"] += rt["names"]
+        out["notes"].append(f"ride-through {', '.join(rt['names'])} keeps the {words}")
+    upss, unsized = committed_storage(n, [u for u, d in units.items() if d.get("kind") == "ups"], year)
+    out["unsized"] += unsized
     bridge_s = float(_value(req.get("bridge_s")) or 0.0)
-    for u in committed(upss):
-        p, e = float(su.at[u, "p_nom"]), deliverable(u)
-        load = _it_peak_mw(n, list(units[u].get("it_load") or []))
-        carried = min(p, load) if load is not None else p
+    for u in upss:
+        p = float(su.at[u, "p_nom"])
+        it = [x for x in units[u].get("it_load") or [] if x in n.loads.index]
+        carried = min(p, float(named_load(n, it)[mask].max())) if it else p
         keep = carried * bridge_s / 3600.0
         out["mw"] += p
-        out["mwh"] += e - keep
+        out["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
         out["backup_mwh"] += keep
         out["units"].append(u)
         out["notes"].append(f"UPS {u}: {keep:.3g} MWh kept to bridge {carried:.3g} MW for {bridge_s:g} s"
-                            + ("" if load is not None else " (its IT load is not in the network: its rating)"))
-    out["mwh"] = max(out["mwh"], 0.0)
+                            + ("" if it else " (its IT load is not in the network: its rating)"))
     return out
 
 
@@ -174,6 +141,8 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
              if osc_limit_pct is not None and connection_mw else None)
     a_x = (max(0.0, amp - a_lim) if a_lim is not None else amp) if in_band else 0.0
     e_osc = oscillation_mwh(a_x, period) if a_x > 0 else 0.0
+    # The checkpoint dip charges and gives back at most S²/(2R) (≤ e_step): it
+    # sits inside the step's band, so it adds to the repeat rate, not the band.
     need_mw, need_mwh = s + a_x, 2.0 * e_step + e_osc
     row.update({
         "ramp_limit_mw_per_min": ramp, "ramp_minutes": s / ramp,
@@ -195,7 +164,7 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
              (f"oscillation {a_x:.3g} MW above the limit, {e_osc:.2g} MWh of swing" if a_x > 0
               else "the oscillation needs no smoothing" + ("" if in_band else " (outside the band of concern)")),
              f"need {need_mw:.3g} MW / {need_mwh:.3g} MWh against {reserve['mw']:.3g} MW / "
-             f"{reserve['mwh']:.3g} MWh left after backup", *reserve["notes"]]
+             f"{reserve['mwh']:.3g} MWh left after backup", *reserve["notes"], CAVEATS]
     if reserve["unsized"]:
         words.append(f"{', '.join(reserve['unsized'])} sized by the run, not counted")
     return {**row, "verdict": "short" if short else "covered", "short": short, "note": "; ".join(words)}
@@ -203,7 +172,7 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
 
 def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limit_mw_per_min: float | None,
                      oscillation_limit_pct: float | None, connection_mw: float | None,
-                     band_hz: tuple[float, float] = (0.1, 2.0)) -> dict:
+                     band_hz: tuple[float, float] = (0.1, 2.0)) -> dict | None:
     """The screen per envelope phase: ``{"verdict", "note", "phases": [{cod,
     step_mw, step_mwh, checkpoint_mwh, oscillation_mwh, need_mw, need_mwh,
     reserve_mw, reserve_mwh, backup_mwh, units, verdict, note}]}``.
@@ -212,9 +181,9 @@ def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limi
     if not envelope or not envelope.get("phases"):
         return None
     if n is None or not island:
-        return {"verdict": "unknown", "note": NO_BATTERY, "phases": []}
+        return {"verdict": "unknown", "note": NO_BATTERY, "phases": [], "caveats": CAVEATS}
     phases = [_phase(ph, _reserve(n, island, _year(ph.get("cod"))), ramp_limit_mw_per_min,
                      oscillation_limit_pct, connection_mw, band_hz) for ph in envelope["phases"]]
     order = {"short": 0, "unknown": 1, "covered": 2}
     worst = min(phases, key=lambda p: order[p["verdict"]])
-    return {"verdict": worst["verdict"], "note": worst["note"], "phases": phases}
+    return {"verdict": worst["verdict"], "note": worst["note"], "phases": phases, "caveats": CAVEATS}
