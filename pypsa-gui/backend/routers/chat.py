@@ -2011,6 +2011,30 @@ def chat_continuations(session_id: str, actor: User = Depends(require_user)) -> 
         raise
 
 
+@router.post("/{session_id}/continuations/{job_id}/dismiss")
+def chat_dismiss_continuation(session_id: str, job_id: str,
+                              actor: User = Depends(require_user)) -> dict[str, Any]:
+    """LC-12 "Stop waiting": this conversation will not continue for the job.
+    The job is not cancelled. Never 404s, like /abort."""
+    from harness import continuation
+    from services import chat_tools
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return {"ok": False}
+        raise
+    if session is None or len(job_id) > 64:
+        return {"ok": False}
+    chat_tools.set_acting_user(actor.id)
+    try:
+        return {"ok": continuation.dismiss(session, job_id)}
+    except HTTPException as exc:
+        if exc.status_code in (404, 409):
+            return {"ok": False}
+        raise
+
+
 @router.get("/{session_id}/progress")
 async def chat_progress(
     session_id: str,

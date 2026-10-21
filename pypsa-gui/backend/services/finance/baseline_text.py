@@ -1,6 +1,7 @@
-"""The site-today baseline's flags in plain words (`services.results.baseline`
-plans the baseline; the finance report states its flags, so the wording lives
-here, on the finance side of the tripwire)."""
+"""The investment case's flags in plain words: the site-today baseline's
+(`services.results.baseline` plans the baseline; the finance report states its
+flags, so the wording lives here, on the finance side of the tripwire) and the
+growth placeholders of an example built for entered planning years (E1)."""
 from __future__ import annotations
 
 _PLAIN = {
@@ -22,9 +23,19 @@ _PLAIN = {
                              "avoided CO2 cost is not established.",
 }
 
+#: ``growth_placeholder:<kind>_<year>`` (``routers.results._ic_growth_flags``):
+#: the growth input in words.
+_GROWTH_LABELS = {"it_mw": "The IT load", "energized_mw": "The energized import"}
+_GROWTH_TEXT = ("{label} in {year} is a placeholder (the example's value for the same stage, "
+                "not set for this year): the plan and this case rest on it.")
+
 
 def flag_text(flag: str) -> str | None:
-    """A baseline flag in plain words for the IC view; None for any other flag."""
+    """A baseline or growth-placeholder flag in plain words for the IC view;
+    None for any other flag."""
     code, _sep, asset = flag.partition(":")
+    if code == "growth_placeholder":
+        kind, _sep, year = asset.rpartition("_")
+        return _GROWTH_TEXT.format(label=_GROWTH_LABELS.get(kind, kind), year=year)
     tpl = _PLAIN.get(code)
     return tpl.format(a=asset) if tpl else None
