@@ -1075,6 +1075,7 @@ def pickup_sequence(n, period=None) -> list[dict]:
     ``p_set`` in the period; a process unit's its largest SOLVED draw ``p0`` (None before a solve), never its p_nom.
     E2 steps on the largest block, so the order is reported, not optimised."""
     from models.process_unit import CRITICALITY_TIERS
+    from services.adequacy.process_loss import TIER_UNSET
 
     sns = n.snapshots if period is None else n.snapshots[n.snapshots.get_level_values(0) == period]
     out = []
@@ -1090,7 +1091,7 @@ def pickup_sequence(n, period=None) -> list[dict]:
                  "basis": "solved_p0_max" if solved else "not_solved",
                  "block_mw": float(p0[u].reindex(sns).max()) if solved else None}
         if tier not in CRITICALITY_TIERS:
-            block["flag"] = "tier_unset"
+            block["flag"] = TIER_UNSET
         out.append(block)
     order = {"load": 4, "process_unit": _TIER_ORDER["process_critical"]}
     return sorted(out, key=lambda b: (_TIER_ORDER.get(b["tier"] or "", order[b["kind"]]),

@@ -210,6 +210,66 @@ def test_a_process_units_own_outage_stops_that_unit_however_well_its_bus_is_supp
     assert units_cut_off(_supplied(_net(), local=True), "hb") == ["hb"]
 
 
+def _two_step(n, *, tank=False):
+    """`n`'s unit also takes N2 (efficiency2 < 0) from an air separation unit, itself a process unit on the hub."""
+    n.add("Bus", "n2", carrier="N2")
+    n.add("Link", "asu", bus0="hub", bus1="n2", p_nom=1.0)
+    n.links.loc["asu", ["eh_process", "criticality_tier"]] = [True, "process_critical"]
+    n.links.loc["hb", ["bus2", "efficiency2"]] = ["n2", -0.1]
+    if tank:
+        n.add("Store", "n2_tank", bus="n2", e_nom=10.0)
+    return n
+
+
+def test_a_unit_that_stops_starves_the_unit_its_product_feeds():
+    """A feedstock with no producer left stops its consumer, to a fixed point; its tank is not credited, flagged."""
+    from services.adequacy.process_loss import FEEDSTOCK_INVENTORY_NOT_CREDITED, _cut_off
+
+    n = _two_step(_supplied(_net(), local=True))
+    assert units_cut_off(n, "asu") == ["hb", "asu"]
+    assert units_cut_off(n, "imp") == []
+    assert _cut_off(n, "asu")[1] == []
+    assert _cut_off(_two_step(_supplied(_net(), local=True), tank=True), "asu") == (
+        ["hb", "asu"], [FEEDSTOCK_INVENTORY_NOT_CREDITED])
+
+
+def test_an_electrolyser_outage_stops_the_haber_bosch_it_feeds():
+    """The staged ammonia template in its first period: the fixed electrolyser is Haber-Bosch's only H2 source
+    (the 2027 build is extendable and unbuilt), so its outage stops the loop; a built H2 tank is not credited."""
+    tpl = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
+    sys.path.insert(0, str(tpl))
+    import eh_templates as T  # noqa: PLC0415
+
+    from services.adequacy.process_loss import FEEDSTOCK_INVENTORY_NOT_CREDITED, _cut_off
+
+    n = T.BUILDERS["eh_ammonia_staged"]()
+    first = int(n.investment_periods[0])
+    assert _cut_off(n, "electrolyser", first) == (["haber_bosch"], [])      # the H2 tank is not built yet
+    n.stores.loc["h2_storage", "e_nom_opt"] = 100.0
+    assert _cut_off(n, "electrolyser", first) == (["haber_bosch"], [FEEDSTOCK_INVENTORY_NOT_CREDITED])
+    assert units_cut_off(n, "grid_import", first) == []         # wind, solar and the battery stay on the hub
+    n.links.loc["electrolyser_new_2027", "p_nom_opt"] = 10.0    # once a second electrolyser is built: supplied
+    assert units_cut_off(n, "electrolyser", first) == []
+
+
+def test_reachability_reads_each_periods_own_components():
+    """A second feeder built after the first period: the import outage cuts the unit off in the first period only."""
+    n = pypsa.Network()
+    idx = pd.MultiIndex.from_product([[2030, 2035], range(2)], names=["period", "timestep"])
+    n.set_snapshots(idx)
+    n.investment_periods = [2030, 2035]
+    for b in ("grid", "hub"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Bus", "nh3", carrier="NH3", unit="MWh")
+    n.add("Generator", "supply", bus="grid", p_nom=100.0)
+    n.add("Link", "imp", bus0="grid", bus1="hub", p_nom=100.0)
+    n.add("Link", "feeder2", bus0="grid", bus1="hub", p_nom=100.0, build_year=2035, lifetime=30)
+    n.add("Link", "hb", bus0="hub", bus1="nh3", p_nom=10.0)
+    n.links["eh_process"] = n.links.index == "hb"
+    assert units_cut_off(n, "imp", 2030) == ["hb"]
+    assert units_cut_off(n, "imp", 2035) == []
+
+
 def _period_net(year, **kw):
     """`_net` as one investment period `year` (a MultiIndex), the dispatch carried over."""
     n = _net(**kw)
@@ -243,6 +303,8 @@ def test_an_outage_longer_than_the_period_is_one_cycle_and_flagged():
     n = _supplied(_period_net(2027))
     p = expected_outage_loss(n, "imp", 100.0, 0.001)["by_period"]["2027"]
     assert p["outage_hours"] == float(H) and p["flags"] == ["outage_longer_than_period"]
+    assert p["bound"] == "lower"                 # each further cycle loses at least the first's: at least this
+    assert "bound" not in expected_outage_loss(n, "imp", 12.0, 0.001)["by_period"]["2027"]
 
 
 def test_no_unit_cut_off_gives_no_period_rows():
