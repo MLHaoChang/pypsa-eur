@@ -2461,7 +2461,8 @@ def solve_ppa_price(target_irr: float, target_year: int,
 
     from models.finance import SolvePpa
     from routers.results import (
-        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+        _dispatch_ready, _ic_build_case, _ic_growth_flags, _ic_read_campus,
+        _study_mesh_blocker,
     )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
@@ -2495,7 +2496,7 @@ def solve_ppa_price(target_irr: float, target_year: int,
     # IC G3 R-2: the campus study read the way the route reads it, so the solved
     # price and the report value the same case.
     build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
-                           campus=_ic_read_campus(raw))
+                           campus=_ic_read_campus(raw), growth_flags=_ic_growth_flags())
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2539,9 +2540,11 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
         # IC G3 gate C1: the case's campus flags too, so a price solved without the
-        # campus extras (a stale study, no engine, an unsaved network) says so.
+        # campus extras (a stale study, no engine, an unsaved network) says so; and
+        # E1's growth placeholders, so a price solved on them says so.
         "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
-                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
+                                         *(f for f in case.flags if f.startswith(
+                                             ("campus_study_", "growth_placeholder:")))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,

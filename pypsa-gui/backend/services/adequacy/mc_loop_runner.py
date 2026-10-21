@@ -152,6 +152,10 @@ def start_mc(
         # worker never touches `n` (plan A9), and the must-take half of the
         # disclosure is not in the fleet (shipped-code review, finding 1).
         activity_block = _activity_summary(n, inputs.periods)
+        # Grid-to-process ticket 08b: the sequential MC samples no Link or
+        # PoC outage, so it cannot say what one costs in tonnes.
+        from services.solver.process_uc import process_mask
+        has_process = bool(len(n.links)) and bool(process_mask(n.links).any())
         if want_portfolio:
             # Everything the worker needs from the NETWORK and from request-
             # scoped state is captured here (plan 12c v3.1 A9): the
@@ -269,6 +273,9 @@ def start_mc(
                     # every other consumer parses (spec §4, recorded decision).
                     "engine": "mc",
                     "fidelity": "sequential_mc",
+                    **({"process_loss": {"status": "not_established",
+                                         "reason": "no_link_outages_in_sequential_mc"}}
+                       if has_process else {}),
                     "metrics": metrics,
                     "elcc": rows,
                     # Phase 12c: a SIBLING of `elcc`, never a row in it.
