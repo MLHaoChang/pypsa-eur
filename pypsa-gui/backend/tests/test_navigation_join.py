@@ -81,3 +81,4 @@ def test_another_profile_or_tab_is_not_joined(client, grid):
     assert navigation_join.join(ctx, {**action, "target": {"panel_id": "results", "results_tab": "prices"}},
                                 scope, record) is None
     assert navigation_join.join(ctx, action, {**scope, "profile": "bus-price/1"}, record) is None
+

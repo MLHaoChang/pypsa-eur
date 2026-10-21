@@ -12,7 +12,9 @@ values whatever the binding says.
 
 PROFILES = frozenset({"branch-loading/1", "network-loading/1"})
 TARGET = {"panel_id": "results", "results_tab": "loadflow"}
-LIMITATION = "Load flow was opened on a different window or solve than the one checked."
+# Shown on the card for a mismatch; the answer's verdict is unchanged (the checked
+# numbers are still checked; only the tab differs).
+NOTE = "Load flow was opened on a different window or solve than the one checked."
 
 
 def join(ctx, action, scope, evidence):

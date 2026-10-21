@@ -832,9 +832,8 @@ class Turn:
                         ctx, records.load(self.owner, entry["action_id"], "ui_action"),
                         self.request_scope, self.request_evidence)
                     if joined:
+                        # A note about the tab, not about the answer: the verdict is unchanged.
                         entry.update(joined)
-                        if joined["shows"] == "different_view" and navigation_join.LIMITATION not in limitations:
-                            limitations.append(navigation_join.LIMITATION)
             if (
                 not public_blocks
                 and self.operation_contract is None

@@ -81,7 +81,10 @@ describe('the Load flow line (S3b)', () => {
       window: { start: '2026-01-01T00:00:00', end: '2026-01-01T23:00:00' } }))
       .toBe('Load flow is showing the solve and window that were checked (1 Jan 2026, 00:00–23:00).')
     expect(loadflowLine({ ...base, shows: 'different_view', reason: 'window_differs' }))
-      .toBe('Load flow opened. It shows a different time window, so the numbers there are not the checked ones.')
+      .toBe('Load flow was opened on a different window or solve than the one checked. It shows a different time '
+        + 'window, so the numbers there are not the checked ones.')
+    expect(loadflowLine({ ...base, shows: 'different_view', reason: 'fingerprint_basis_unknown' }))
+      .toContain("It shows a solve that can't be matched to the checked one, so the numbers there may not be the checked ones.")
     expect(loadflowLine({ ...base, outcome: 'submitted', shows: 'not_confirmed' })).toBe('Load flow opened.')
     expect(loadflowLine(base)).toBeNull()
   })

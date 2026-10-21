@@ -7,7 +7,7 @@ const VIEW_REASON: Record<NonNullable<NavigationEntry['reason']>, string> = {
   window_differs: 'a different time window',
   source_not_lopf: "results other than the optimisation's",
   inputs_changed: 'inputs changed since the checked run',
-  fingerprint_basis_unknown: 'a solve that cannot be matched to the checked one',
+  fingerprint_basis_unknown: "a solve that can't be matched to the checked one",
   project_differs: 'another project',
 }
 
@@ -17,7 +17,9 @@ export function loadflowLine(entry: NavigationEntry): string | null {
     return `Load flow is showing the solve and window that were checked (${readableWindow(entry.window.start, entry.window.end)}).`
   }
   if (entry.shows === 'different_view' && entry.reason) {
-    return `Load flow opened. It shows ${VIEW_REASON[entry.reason]}, so the numbers there are not the checked ones.`
+    // Unknown basis: the mismatch itself is not known, so "may not be".
+    const verb = entry.reason === 'fingerprint_basis_unknown' ? 'may not be' : 'are not'
+    return `Load flow was opened on a different window or solve than the one checked. It shows ${VIEW_REASON[entry.reason]}, so the numbers there ${verb} the checked ones.`
   }
   return entry.shows === 'not_confirmed' ? 'Load flow opened.' : null
 }
