@@ -30,6 +30,7 @@ import { createPortal } from 'react-dom'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import { CheckedChart } from './CheckedChart'
 import { CheckedAnswerControl } from './CheckedAnswerControl'
 import ChatAccess from './ChatAccess'
 import { SourceGapFollowupCard } from './SourceGapFollowupCard'
@@ -3501,6 +3502,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
+            {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} />}
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
