@@ -154,12 +154,12 @@ describe('Sidebar in Expert mode', () => {
 
   // The Expert order itself (BUILD … REPORTS, the footer project card) is
   // pinned by Sidebar.taskOrder.test.tsx; this file pins what Guided removes.
-  it('expanded: every step, the mode switcher and every project row; no Hub design', async () => {
+  it('expanded: every step and every project row, and no canvas tools (they live on the canvas); no Hub design', async () => {
     useUIStore.setState({ sidebarMode: 'expanded' })
     await renderSidebar()
     for (const id of STEP_IDS) expect(screen.getByTestId(`sidebar-section-${id}`)).toBeTruthy()
     expect(screen.getByTestId('sidebar-project-card')).toBeTruthy()
-    expect(screen.getByTestId('sidebar-mode-switcher')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-mode-switcher')).toBeNull()
     expect(screen.queryByTestId('sidebar-hub-design')).toBeNull()
     // Snapshots and Scenarios moved to REPORTS; the rest sit behind the card menu.
     expect(screen.getByText('Snapshots')).toBeTruthy()
@@ -168,11 +168,11 @@ describe('Sidebar in Expert mode', () => {
     for (const label of [...KEPT_PROJECT_ROWS, ...HIDDEN_PROJECT_ROWS]) expect(screen.getByText(label)).toBeTruthy()
   })
 
-  it('icon strip: every step button, Project and the mode switcher; no Hub design', async () => {
+  it('icon strip: every step button and Project, no canvas tools; no Hub design', async () => {
     useUIStore.setState({ sidebarMode: 'icon' })
     await renderSidebar()
     for (const id of [...STEP_IDS, 'project']) expect(screen.getByTestId(`sidebar-section-${id}`)).toBeTruthy()
-    expect(screen.getByTestId('sidebar-mode-switcher')).toBeTruthy()
+    expect(screen.queryByTestId('sidebar-mode-switcher')).toBeNull()
     expect(screen.queryByTestId('sidebar-hub-design')).toBeNull()
   })
 
