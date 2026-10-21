@@ -15,6 +15,7 @@ import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type
 import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
 import { useInScope } from '../../components/flowScope/useFlowScope'
+import { AddToScope } from '../../components/flowScope/ScopeCards'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusElectrical' ? 'Open the grid checks' : 'Open the detail'
@@ -93,10 +94,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
               gridInScope
                 ? <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
-                : <p className="text-[11.5px] text-muted" data-testid="hub-run-grid-checks-out-of-scope">
-                    Outside scope: add AC power flow &amp; grid › Grid code &amp; electrical design to run
-                    the grid checks.
-                  </p>
+                : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope">
+                    Add AC power flow &amp; grid to run grid checks
+                  </AddToScope>
             )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">

@@ -255,8 +255,164 @@ def test_a_solver_option_outside_the_scope_is_said(client, tmp_projects_dir, bou
     with bound_ctx(client):
         state = PyPSAService.get_solver_state()
         state["solver_config"] = replace(state["solver_config"], sclopf=True)
+    # With no stored scope the payload reads as before W4a: nothing said.
+    assert "scope_option_configured" not in [
+        i["code"] for s in _flow(client, name)["sections"] for i in s["items"]]
+    _put(client, name, client.get(f"/api/projects/{name}/flow/scope").json()["scope"])
     body = _flow(client, name)
     row = next(s for s in body["sections"] if s["section"] == "scenarios")
     item = next(i for i in row["items"] if i["code"] == "scope_option_configured")
     assert item["card"] == "grid" and item["in_scope"] and not item["blocking"]
     assert "N-1 security" in item["message"]
+
+
+# ── gatekeeper's conditions (W4a plan review) ───────────────────────────────
+
+_ADDED_KEYS = ("card", "in_scope")
+
+
+def _strip_scope(body: dict) -> dict:
+    """The payload as master built it: without `scope` and the item keys W4a adds."""
+    out = {k: v for k, v in body.items() if k != "scope"}
+    out["sections"] = [{**row, "items": [{k: v for k, v in it.items() if k not in _ADDED_KEYS}
+                                         for it in row["items"]]}
+                       for row in body["sections"]]
+    return out
+
+
+def _all_on(template: dict | None) -> dict:
+    """Every card on with every sub-option it may take: master's behaviour
+    (study requested for every EH project, every item counted)."""
+    has = template is not None
+    return S.normalise({"version": 1, "groups": [c.id for c in S.CARDS],
+                        "options": {c.id: [o for o, _ in c.options] for c in S.CARDS}},
+                       has_template=has)
+
+
+def _golden_cases() -> list[tuple[str, dict]]:
+    tids = [t for t in _eh_template_ids() if t != "eh_site"]
+    return ([(t, {}) for t in tids]
+            + [("eh_site", {"json": {"site_type": st}}) for st in S.SITE_TYPE_PRESETS])
+
+
+@pytest.mark.parametrize("tid, kw", _golden_cases(),
+                         ids=[f"{t}-{kw.get('json', {}).get('site_type', '')}"
+                              for t, kw in _golden_cases()])
+def test_no_scope_file_reads_exactly_as_before(client, tmp_projects_dir, project_storage_dir,
+                                               tid, kw):
+    """No `flow_scope.json`: the payload equals the one with every card on,
+    which is master's rule (study requested for every EH template, every item
+    counted), apart from the added keys."""
+    name = _create(client, tid, f"g_{tid}", **kw)
+    preset = _flow(client, name)
+    assert preset["scope"]["source"] == "preset"
+    assert preset["run_request"] == {"optimisation": True, "study": True}
+    items = [i for s in preset["sections"] for i in s["items"]]
+    assert all(i["in_scope"] for i in items)
+    template = json.loads((project_storage_dir(name) / "eh_template.json").read_text())
+    (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps(_all_on(template)))
+    everything = _flow(client, name)
+    assert _strip_scope(preset) == _strip_scope(everything)
+    # Only the islanded connection reads not_needed.
+    nn = {s["section"] for s in preset["sections"] if s["state"] == "not_needed"}
+    assert nn == ({"connection"} if template.get("recommended_archetype") == "off_grid" else set())
+
+
+def test_a_project_without_a_template_keeps_its_payload(client, install_network,
+                                                        tmp_projects_dir):
+    from tests.test_project_flow import _site_network
+
+    install_network(_site_network(), name="plain")
+    assert client.post("/api/projects/plain", params={"force": True,
+                                                      "rebind": True}).status_code == 200
+    body = _flow(client, "plain")
+    assert body["scope"]["preset_id"] == "blank"
+    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert all(i["in_scope"] for s in body["sections"] for i in s["items"])
+    assert not any(s["state"] == "not_needed" for s in body["sections"])
+
+
+def _no_out_of_scope_blocker(body: dict) -> None:
+    for s in body["sections"]:
+        for i in s["items"]:
+            assert not (i["in_scope"] is False and i["blocking"]), i
+
+
+def test_a_study_refusal_with_reliability_off_blocks_nothing(client, tmp_projects_dir,
+                                                             project_storage_dir):
+    """The invariant (gatekeeper #3, #7): no `in_scope: false` item blocks, and
+    run_ready is the verdict of the Run run_request describes. The study's
+    refusal is listed, out of scope; the study-start route itself is unchanged."""
+    name = _create(client, "eh_datacenter", "refused_off")
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
+    path.write_text(json.dumps(meta))
+    links = client.get("/api/network/links").json()
+    grid = next(r for r in links if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    on = _flow(client, name)
+    assert on["run_ready"] is False and on["run_blocker"]["section"] == "scenarios"
+
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    _put(client, name, {**scope, "groups": [g for g in scope["groups"] if g != "reliability"]})
+    off = _flow(client, name)
+    refused = next(i for s in off["sections"] for i in s["items"]
+                   if i["code"] == "eh_study_refused")
+    assert refused["in_scope"] is False and refused["blocking"] is False
+    _no_out_of_scope_blocker(off)
+    pre = client.post("/api/simulation/preflight").json()
+    assert off["run_request"] == {"optimisation": True, "study": False}
+    assert off["run_ready"] is pre["ok"] is True
+    assert off["run_blocker"] is None
+
+
+@pytest.mark.parametrize("card, in_scope", [("grid", True), ("commercial", False)])
+def test_an_assumed_row_leaves_the_scope_only_when_it_feeds_nothing_the_run_reads(
+        client, tmp_projects_dir, project_storage_dir, card, in_scope):
+    """A row tagged with a card the network reads (grid) stays in scope with
+    that card off; a finance row (the investment case, not in the Run) leaves."""
+    name = _create(client, "eh_h2_hub", f"row_{card}")
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    meta["ledger"].append({"item": f"probe {card}", "value": 1, "unit": "x",
+                           "source": "assumed", "card": card})
+    path.write_text(json.dumps(meta))
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    assert not S.selected(scope, "grid") and not S.selected(scope, "commercial",
+                                                            "investment_case")
+    body = _flow(client, name)
+    row = next(i for s in body["sections"] for i in s["items"]
+               if i["target"]["entity"] == f"probe {card}")
+    assert row["card"] == card and row["in_scope"] is in_scope
+
+
+def test_deselecting_changes_no_input_and_no_result_state(client, tmp_projects_dir,
+                                                         project_storage_dir, bound_ctx):
+    """A scope write touches only flow_scope.json: no network revision, no
+    other sidecar, no result state, no freshness change."""
+    from services import dirty_state
+    from services.project_context import RESULT_STATE_KEYS
+    from services.pypsa_service import PyPSAService
+
+    name = _create(client, "eh_microgrid", "no_input")
+    before_flow = _flow(client, name)
+    pdir = project_storage_dir(name)
+    files = {p.name: p.read_bytes() for p in pdir.iterdir() if p.is_file()}
+    with bound_ctx(client):
+        rev = dirty_state.revision()
+        state = PyPSAService.get_solver_state()
+        results = {k: id(state.get(k)) for k in RESULT_STATE_KEYS}
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    _put(client, name, {**scope, "groups": ["capacity", "handoff"]})
+    with bound_ctx(client):
+        assert dirty_state.revision() == rev
+        state = PyPSAService.get_solver_state()
+        assert {k: id(state.get(k)) for k in RESULT_STATE_KEYS} == results
+    after = {p.name: p.read_bytes() for p in pdir.iterdir() if p.is_file()}
+    assert set(after) - set(files) == {S.SCOPE_FILE}
+    assert {k: v for k, v in after.items() if k != S.SCOPE_FILE} == files
+    after_flow = _flow(client, name)
+    results_row = lambda b: next(s for s in b["sections"] if s["section"] == "results")  # noqa: E731
+    assert results_row(after_flow)["freshness"] == results_row(before_flow)["freshness"]

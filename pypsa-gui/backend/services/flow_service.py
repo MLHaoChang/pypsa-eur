@@ -139,10 +139,24 @@ _SCOPE_CONFIG_OPTIONS: tuple[tuple[str, str, str, str], ...] = (
     ("run_ac_pf_after_lopf", "grid", "load_flow", "the load flow after the optimisation"),
 )
 
-# Bind checks owned by a card: outside the scope while that card is off.
+# Bind checks owned by a card: outside the scope while that card is off. Only
+# checks of what the optimisation does not read: the finance inputs (the
+# investment case) and the value flows (post-solve settlement). The tariff and
+# PoC binding the LP reads stay in scope with Commercial off (#447 §2.0: they
+# show under Capacity › Dispatch & economics as "Prices the optimisation
+# uses"); any later Commercial-off hiding follows that rule.
 _BIND_CARD: dict[str, str] = {
     "finance_inputs_invalid": "commercial", "finance_bind_failed": "commercial",
     "value_flows_invalid": "commercial",
+}
+
+# A template ledger row may name its `card`. Only a row whose value feeds
+# nothing the remaining Run reads can leave the scope: the investment case's
+# (finance) and the study's. A row the network or the optimisation reads stays
+# in scope whatever card it names, so an assumption that moves the solve is
+# never hidden.
+_LEDGER_CARD_OPTION: dict[str, str] = {
+    "commercial": "investment_case", "reliability": "goal_study",
 }
 
 
@@ -387,11 +401,13 @@ def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
     return out
 
 
-def _study_start_items(body: dict) -> list[dict]:
+def _study_start_items(body: dict, *, requested: bool = True) -> list[dict]:
     """The study start endpoint's own refusal (R1): `check_eh_study_start` on
-    the Goal card's body. A refusal blocks Run; it files to section 8, the run
-    request it refuses. Never waits on the network lock: a held lock raises
-    `EhStudyLockBusy`, which the collector answers as `deferred`."""
+    the Goal card's body. A refusal blocks Run when the Run requests the study
+    (`requested`); otherwise it is listed, outside the scope, and blocks
+    nothing. It files to section 8, the run request it refuses. Never waits on
+    the network lock: a held lock raises `EhStudyLockBusy`, which the collector
+    answers as `deferred`."""
     from fastapi import HTTPException
 
     from services.adequacy.eh_study_runner import EhStudyRequest, check_eh_study_start
@@ -405,7 +421,7 @@ def _study_start_items(body: dict) -> list[dict]:
         detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail)
         return [_item("eh_study_refused", "error",
                       f"The reliability study would not start: {detail}", "eh_study",
-                      "scenarios", blocking=True)]
+                      "scenarios", blocking=requested)]
     return []
 
 
@@ -680,8 +696,10 @@ def _scope_config_items(cfg: dict, scope: dict) -> list[dict]:
 
 
 def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> None:
-    """Tag each item with its card and whether the scope holds it. An item
-    outside the scope never blocks."""
+    """Tag each item with its card and whether the scope holds it. The
+    sources already build an out-of-scope item as non-blocking
+    (`_study_start_items(requested=…)`); `test_flow_scope` pins that no item
+    with ``in_scope: false`` blocks."""
     for it in items:
         if it["source"] in ("eh_study", "eh_readiness"):
             it["card"] = "reliability"
@@ -689,10 +707,10 @@ def _apply_scope(items: list[dict], scope: dict, *, study_requested: bool) -> No
         elif it["code"] in _BIND_CARD:
             it["card"] = _BIND_CARD[it["code"]]
             it["in_scope"] = S.selected(scope, it["card"])
-        elif it["card"] is not None and it["code"] != "scope_option_configured":
-            it["in_scope"] = S.selected(scope, it["card"])
-        if not it["in_scope"]:
-            it["blocking"] = False
+        elif it["source"] == "template" and it["card"] in _LEDGER_CARD_OPTION:
+            option = _LEDGER_CARD_OPTION[it["card"]]
+            it["in_scope"] = (study_requested if it["card"] == "reliability"
+                              else S.selected(scope, it["card"], option))
 
 
 # ── Acknowledgements ────────────────────────────────────────────────────────
@@ -822,6 +840,12 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
 
     template = read_template(project_dir)
     scope = S.read_scope(project_dir, template)
+    # What the one Run does (design §3.3, W4): the optimisation always; the
+    # reliability study too for a project made from an EH template (the
+    # hub-design Guided flow) whose scope selects Reliability › goal & study
+    # (W4a). Its VOLL is noted for exactly those projects; its refusal is
+    # checked for every EH project and kept, out of scope, when not requested.
+    study_requested = template is not None and S.selected(scope, "reliability", "goal_study")
     body = _request_for(template) if template is not None else None
     islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
@@ -831,21 +855,17 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
         from services.adequacy.eh_study_runner import EhStudyLockBusy
 
         try:
-            study_items = _study_start_items(body)
+            study_items = _study_start_items(body, requested=study_requested)
         except EhStudyLockBusy:
             # The lock was taken between the preflight's span and this one: the
-            # same answer as the preflight's own gate 3.
-            deferred = {"deferred_reason": _LOCK_BUSY_REASON}
+            # same answer as the preflight's own gate 3. A study the Run does
+            # not request has nothing to wait for.
+            if study_requested:
+                deferred = {"deferred_reason": _LOCK_BUSY_REASON}
     n = PyPSAService.get_network()
     running = _solver_in_flight() or study_state.running_study() is not None
     freshness = _freshness(n, running=running)
 
-    # What the one Run does (design §3.3, W4): the optimisation always; the
-    # reliability study too for a project made from an EH template (the
-    # hub-design Guided flow) whose scope selects Reliability › goal & study
-    # (W4a). Its VOLL is noted for exactly those projects; its refusal is
-    # checked for every EH project and kept, out of scope, when not requested.
-    study_requested = template is not None and S.selected(scope, "reliability", "goal_study")
     run_request = {"optimisation": True, "study": study_requested}
 
     if deferred is not None:
@@ -877,7 +897,10 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             i["code"] == "presence_voll" for i in presence))
         items += _assumed_items(template)
     items += _bind_items(facts, db, org_id, project_dir, n)
-    items += _scope_config_items(facts.cfg_dict, scope)
+    # Said only once the user has set the scope: a project with no
+    # `flow_scope.json` reads exactly as before W4a.
+    if scope["source"] == "project":
+        items += _scope_config_items(facts.cfg_dict, scope)
     _apply_scope(items, scope, study_requested=study_requested)
     _apply_acks(items, read_acks(project_dir))
     needed = S.needed_sections(scope)

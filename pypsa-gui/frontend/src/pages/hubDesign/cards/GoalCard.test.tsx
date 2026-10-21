@@ -323,13 +323,15 @@ describe('GoalCard scope (W4a)', () => {
       scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
         options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
           reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
-      cards: [], preset_id: 'eh_datacenter',
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
       preset: { version: 1, groups: [], options: {} },
     })
     vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
     mount()
-    expect((await screen.findByTestId('hub-goal-out-of-scope')).textContent)
-      .toBe(RELIABILITY_OUT_OF_SCOPE)
+    expect((await screen.findByTestId('hub-goal-out-of-scope-add')).textContent)
+      .toBe('Add Reliability to set a goal')
     expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
     expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
     const run = screen.getByTestId('hub-goal-run') as HTMLButtonElement

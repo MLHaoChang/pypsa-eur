@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { FlowScopeRegistry, FlowScopeValue } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
-import { ScopeCards, toggleCard, toggleOption } from './ScopeCards'
+import { AddToScope, ScopeCards, toggleCard, toggleOption } from './ScopeCards'
 import { useInScope } from './useFlowScope'
 
 const getFlowScope = vi.fn()
@@ -24,7 +24,9 @@ vi.mock('../../api/flow', async (importOriginal) => {
 })
 
 const opt = (id: string, status: 'available' | 'required' | 'not_yet_available' = 'available') =>
-  ({ id, label: id, status, reason: status === 'not_yet_available' ? 'not classified (W0)' : null })
+  ({ id, label: id, status,
+    reason: status === 'not_yet_available' ? "can't be run yet"
+      : status === 'required' ? 'Always part of the run.' : null })
 
 const PRESET: FlowScopeValue = {
   version: 1,
@@ -39,6 +41,7 @@ function registry(scope: FlowScopeValue = PRESET): FlowScopeRegistry {
   return {
     scope: { ...scope, source: 'preset', preset_id: 'eh_datacenter' },
     preset_id: 'eh_datacenter',
+    preset_label: 'Data Center Energy Hub',
     preset: PRESET,
     cards: [
       { id: 'capacity', label: 'Capacity expansion', locked_reason: 'needs a dispatch source',
@@ -86,8 +89,8 @@ describe('ScopeCards', () => {
     }
     expect(screen.getByTestId('scope-cards-card-control').dataset.on).toBe('false')
     expect((screen.getByTestId('scope-cards-option-grid-grid_code') as HTMLInputElement).checked).toBe(true)
-    // "Use example preset" is idle at the preset.
-    expect((screen.getByTestId('scope-cards-preset') as HTMLButtonElement).disabled).toBe(true)
+    // At the preset there is nothing to reset.
+    expect(screen.queryByTestId('scope-cards-preset')).toBeNull()
   })
 
   it('shows a sub-option not yet available, disabled, and says the example intends it', async () => {
@@ -99,9 +102,12 @@ describe('ScopeCards', () => {
       .toMatch(/Not yet available · in this example once available/)
   })
 
-  it('locks Capacity and Hand-off on', async () => {
+  it('locks Capacity and Hand-off on, with the reasons as visible text', async () => {
     mount()
     expect((await screen.findByTestId('scope-cards-toggle-capacity') as HTMLInputElement).disabled).toBe(true)
+    expect(screen.getByTestId('scope-cards-why-capacity').textContent).toBe('needs a dispatch source')
+    expect(screen.getByTestId('scope-cards-why-capacity-dispatch').textContent).toBe('Always part of the run.')
+    expect(screen.getByTestId('scope-cards-why-control-dynamics').textContent).toBe("can't be run yet")
     expect((screen.getByTestId('scope-cards-toggle-handoff') as HTMLInputElement).disabled).toBe(true)
     expect((screen.getByTestId('scope-cards-option-capacity-sizing') as HTMLInputElement).disabled).toBe(true)
   })
@@ -124,10 +130,12 @@ describe('ScopeCards', () => {
     expect(sent.options.control).toEqual(['presets'])
   })
 
-  it('"Use example preset" writes the preset', async () => {
+  it('"Reset to <example>\'s cards" writes the preset', async () => {
     getFlowScope.mockResolvedValue(registry({ ...PRESET, groups: ['capacity', 'handoff'] }))
     const user = mount()
-    await user.click(await screen.findByTestId('scope-cards-preset'))
+    const reset = await screen.findByTestId('scope-cards-preset')
+    expect(reset.textContent).toBe("Reset to Data Center Energy Hub's cards")
+    await user.click(reset)
     await waitFor(() => expect(putFlowScope).toHaveBeenCalledWith('Demo', PRESET))
   })
 
@@ -168,5 +176,26 @@ describe('useInScope', () => {
     expect(screen.getByTestId('probe').textContent).toBe('on')
     resolve(registry({ ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability') }))
     await waitFor(() => expect(screen.getByTestId('probe').textContent).toBe('off'))
+  })
+})
+
+describe('AddToScope', () => {
+  it('adds the card and its sub-option in place, keeping the other sub-options', async () => {
+    const off = { ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability'),
+      options: { ...PRESET.options, reliability: ['stress'] } }
+    getFlowScope.mockResolvedValue(registry(off))
+    const user = mount(
+      <AddToScope card="reliability" option="goal_study" testId="add">Add Reliability</AddToScope>)
+    await user.click(await screen.findByTestId('add-add'))
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.groups).toContain('reliability')
+    expect(sent.options.reliability).toEqual(['stress', 'goal_study'])
+  })
+
+  it('offers nothing for a sub-option not yet available', async () => {
+    mount(<AddToScope card="control" option="dynamics" testId="add">Add</AddToScope>)
+    await waitFor(() => expect(getFlowScope).toHaveBeenCalled())
+    expect(screen.queryByTestId('add')).toBeNull()
   })
 })

@@ -4,7 +4,9 @@
 // of the count and its kinds out of the Run; values stay. A sub-option the
 // engine cannot run yet reads "Not yet available" and cannot be picked. The
 // same component is mounted by section 8 in Guided and Expert, and by the
-// Builder (W2).
+// Builder (W2). Which sub-options are available or locked, and why, is the
+// server's (`GET …/flow/scope`, W0's classification), never a table here.
+import type React from 'react'
 import { Lock } from 'lucide-react'
 import type { FlowScopeValue, ScopeCardDef, ScopeCardId } from '../../api/flow'
 import { inScope } from '../../api/flow'
@@ -50,6 +52,34 @@ export function toggleOption(scope: FlowScopeValue, card: ScopeCardId, option: s
   }
 }
 
+/** "Outside scope: add …" as a button that adds the card (and the
+ *  sub-option) in place: the block's saved values come back with it (§2). */
+export function AddToScope({ card, option, children, testId }: {
+  card: ScopeCardId
+  option: string
+  children: React.ReactNode
+  testId: string
+}) {
+  const { registry, scope, save } = useFlowScope()
+  const def = registry?.cards.find(c => c.id === card)
+  const status = def?.options.find(o => o.id === option)?.status
+  if (!scope || !def || status === 'not_yet_available') return null
+  const add = () => {
+    const on = inScope(scope, card) ? scope : toggleCard(scope, def, true)
+    save.mutate(inScope(on, card, option) ? on : toggleOption(on, card, option, true))
+  }
+  return (
+    <p data-testid={testId} className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+      <span>Outside scope.</span>
+      <button type="button" data-testid={`${testId}-add`} onClick={add} disabled={save.isPending}
+        className="rounded border border-accent/60 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50">
+        {children}
+      </button>
+      {save.isError && <span role="alert" className="text-danger">{blockerMessage(save.error)}</span>}
+    </p>
+  )
+}
+
 export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
   const { registry, scope, save, isError, refetch } = useFlowScope()
   if (isError) {
@@ -71,13 +101,14 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
         <h3 id={`${testId}-title`} className="text-[12.5px] font-semibold text-text">
           What the Run computes
         </h3>
-        <button type="button" data-testid={`${testId}-preset`}
-          disabled={atPreset || save.isPending}
-          title={atPreset ? "This is the example's setup" : undefined}
-          onClick={() => write(registry.preset)}
-          className="rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
-          Use example preset
-        </button>
+        {/* Switches cards only; values are never touched (UX review 4). */}
+        {!atPreset && (
+          <button type="button" data-testid={`${testId}-preset`} disabled={save.isPending}
+            onClick={() => write(registry.preset)}
+            className="rounded border border-border px-2 py-0.5 text-[11px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
+            Reset to {registry.preset_label}'s cards
+          </button>
+        )}
       </div>
       <p className="text-[11px] text-muted">
         Switch off what you don't need: its inputs hide and it is not run. Your values stay.
@@ -90,23 +121,29 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
               data-on={on ? 'true' : 'false'}
               className={`flex flex-col gap-1 rounded border px-3 py-2 ${on ? 'border-accent/60 bg-accent/5' : 'border-border'}`}>
               <legend className="sr-only">{card.label}</legend>
-              <label className="flex items-center gap-2 text-[12px] font-semibold text-text"
-                title={card.locked_reason ?? undefined}>
+              <label className="flex items-center gap-2 text-[12px] font-semibold text-text">
                 <input type="checkbox" data-testid={`${testId}-toggle-${card.id}`}
                   checked={on} disabled={!!card.locked_reason || save.isPending}
+                  aria-describedby={card.locked_reason ? `${testId}-why-${card.id}` : undefined}
                   onChange={e => write(toggleCard(scope, card, e.target.checked))} />
                 {card.label}
-                {card.locked_reason && <Lock size={10} aria-label="always on" className="text-muted" />}
+                {card.locked_reason && <Lock size={10} aria-hidden className="text-muted" />}
               </label>
+              {/* Reasons are visible text: a disabled control's title is out of
+                  reach of the keyboard and screen readers (UX review 1). */}
+              {card.locked_reason && (
+                <p id={`${testId}-why-${card.id}`} data-testid={`${testId}-why-${card.id}`}
+                  className="pl-5 text-[10.5px] text-muted">{card.locked_reason}</p>
+              )}
               <ul className="flex flex-col gap-0.5 pl-5">
                 {card.options.map(o => {
                   const unavailable = o.status === 'not_yet_available'
                   const checked = !unavailable && (scope.options[card.id] ?? []).includes(o.id)
                   return (
                     <li key={o.id}>
-                      <label className={`flex flex-wrap items-center gap-1.5 text-[11.5px] ${unavailable ? 'text-muted/70' : 'text-text'}`}
-                        title={o.reason ?? undefined}>
+                      <label className={`flex flex-wrap items-center gap-1.5 text-[11.5px] ${unavailable ? 'text-muted/70' : 'text-text'}`}>
                         <input type="checkbox" data-testid={`${testId}-option-${card.id}-${o.id}`}
+                          aria-describedby={o.reason ? `${testId}-why-${card.id}-${o.id}` : undefined}
                           checked={checked && on}
                           disabled={unavailable || o.status === 'required' || !on || save.isPending}
                           onChange={e => write(toggleOption(scope, card.id, o.id, e.target.checked))} />
@@ -118,10 +155,12 @@ export function ScopeCards({ testId = 'scope-cards' }: { testId?: string }) {
                             {card.intended.includes(o.id) ? ' · in this example once available' : ''}
                           </span>
                         )}
-                        {o.status === 'required' && (
-                          <span className="text-[10px] text-muted">always on</span>
-                        )}
                       </label>
+                      {o.reason && (
+                        <p id={`${testId}-why-${card.id}-${o.id}`}
+                          data-testid={`${testId}-why-${card.id}-${o.id}`}
+                          className="pl-5 text-[10.5px] text-muted">{o.reason}</p>
+                      )}
                     </li>
                   )
                 })}

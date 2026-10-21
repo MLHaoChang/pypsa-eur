@@ -23,11 +23,11 @@ import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import {
   templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
 } from '../useHubData'
-import { ScopeCards } from '../../../components/flowScope/ScopeCards'
+import { AddToScope, ScopeCards } from '../../../components/flowScope/ScopeCards'
 import { useInScope } from '../../../components/flowScope/useFlowScope'
 
 export const RELIABILITY_OUT_OF_SCOPE =
-  'Outside scope: add Reliability › Reliability goal & study above to set a goal and run the study.'
+  'Outside scope: add Reliability to set a goal and run the study.'
 
 export function GoalCard() {
   const project = useUIStore(s => s.currentProject)
@@ -100,9 +100,9 @@ export function GoalCard() {
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
       <ScopeCards testId="hub-scope-cards" />
       {!reliabilityOn && (
-        <p data-testid="hub-goal-out-of-scope" className="text-[12px] text-muted">
-          {RELIABILITY_OUT_OF_SCOPE}
-        </p>
+        <AddToScope card="reliability" option="goal_study" testId="hub-goal-out-of-scope">
+          Add Reliability to set a goal
+        </AddToScope>
       )}
       {reliabilityOn && <>
       <label className="flex flex-col gap-1 text-[12px]">

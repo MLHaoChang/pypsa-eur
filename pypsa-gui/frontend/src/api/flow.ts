@@ -159,6 +159,8 @@ export interface FlowScopeRegistry {
   scope: FlowScope
   cards: ScopeCardDef[]
   preset_id: string
+  /** The example's name, for "Reset to <name>'s cards". */
+  preset_label: string
   preset: FlowScopeValue
 }
 

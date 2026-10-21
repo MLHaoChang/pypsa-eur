@@ -20,6 +20,8 @@ listed as ``intended`` so the card can show them.
 Availability (``AVAILABILITY``) follows modular-cards §1's last column, with
 every "per W0" entry not yet available until W0's separability matrix marks it
 supported (§11.1: unknown stays non-runnable). W0 owns flipping these rows.
+Once W0's ``services/run_separability.py`` lands, "available" derives from its
+``MATRIX`` (agreed with W0); until then the rows below are the source.
 
 Pure data plus the sidecar's read and write; ``flow_service`` reads it.
 """
@@ -50,14 +52,16 @@ class Card:
     sections: tuple[str, ...] = ()
 
 
-_SIZING_OFF = ("Sizing off needs the fixed-size run option, which is not yet available "
-               "(modular-cards §4).")
+# Reasons are UI text, shown under the option (UX review of W4a): plain words,
+# no run-kind ids. Sizing off needs the fixed-size run option (modular-cards §4).
+_SIZING_OFF = ("Turning sizing off isn't available yet (dispatch on fixed sizes is still "
+               "being built).")
 
 CARDS: Final[tuple[Card, ...]] = (
     Card("capacity", "Capacity expansion",
          (("sizing", "Asset sizing"), ("dispatch", "Dispatch & economics"),
           ("process_detail", "Process detail")),
-         locked_reason="Capacity off needs a dispatch source, which is not yet available.",
+         locked_reason="Not yet available: needs a dispatch source.",
          sections=("project", "carriers", "connection", "loads", "assets", "profiles",
                    "commercial", "scenarios")),
     Card("grid", "AC power flow & grid",
@@ -80,7 +84,7 @@ CARDS: Final[tuple[Card, ...]] = (
     Card("handoff", "Hand-off",
          (("reports", "Reports"), ("exports", "Data exports"),
           ("specialist_packet", "Specialist packet")),
-         locked_reason="Hand-off is always on (owner Q1).",
+         locked_reason="Always on.",
          sections=()),
 )
 CARD_BY_ID: Final[dict[str, Card]] = {c.id: c for c in CARDS}
@@ -91,15 +95,15 @@ _NEEDS_TEMPLATE = "Needs an Energy Hub site (a project made from an example or y
 # reads not yet available until W0 classifies it supported.
 AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
     ("capacity", "sizing"): (REQUIRED, _SIZING_OFF),
-    ("capacity", "dispatch"): (REQUIRED, "Dispatch runs with every capacity run."),
-    ("capacity", "process_detail"): (NOT_YET, "Detailed process modelling is not yet "
-                                     "classified as runnable (W0)."),
+    ("capacity", "dispatch"): (REQUIRED, "Always part of the run."),
+    ("capacity", "process_detail"): (NOT_YET, "Detailed process modelling can't be run "
+                                     "yet."),
     ("grid", "load_flow"): (AVAILABLE, None),
     ("grid", "grid_code"): (AVAILABLE, None),
     ("grid", "n1_sclopf"): (AVAILABLE, None),
     ("control", "presets"): (AVAILABLE, None),
-    ("control", "island_checks"): (NOT_YET, "The island and ride-through checks are not yet "
-                                   "classified as runnable (W0)."),
+    ("control", "island_checks"): (NOT_YET, "The island and ride-through checks can't be "
+                                   "run from here yet."),
     ("control", "dynamics"): (NOT_YET, "Frequency and time-domain studies are not yet "
                               "available."),
     ("reliability", "goal_study"): (AVAILABLE, None),
@@ -107,8 +111,8 @@ AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
     ("reliability", "outage_screening"): (AVAILABLE, None),
     ("commercial", "tariffs"): (AVAILABLE, None),
     ("commercial", "contracts"): (AVAILABLE, None),
-    ("commercial", "investment_case"): (NOT_YET, "The investment case is not yet classified "
-                                        "as runnable (W0)."),
+    ("commercial", "investment_case"): (NOT_YET, "The investment case can't be run as part "
+                                        "of the Run yet."),
     ("handoff", "reports"): (AVAILABLE, None),
     ("handoff", "exports"): (AVAILABLE, None),
     ("handoff", "specialist_packet"): (AVAILABLE, None),
@@ -179,6 +183,16 @@ SITE_TYPE_PRESETS: Final[dict[str, Preset]] = {
     "industrial": _OWN_SITE, "commercial": _OWN_SITE, "hospital": _HOSPITAL,
     "campus": _OWN_SITE, "other": _OWN_SITE,
 }
+
+
+def preset_label(template: dict | None) -> str:
+    """The example's name for "Reset to <name>'s cards"."""
+    if template is None:
+        return "a blank project"
+    if template.get("id") == "eh_site":
+        kind = str(template.get("site_type_label") or "").lower()
+        return f"your own site ({kind})" if kind else "your own site"
+    return str(template.get("name") or "the example")
 
 
 def preset_for(template: dict | None) -> tuple[str, Preset]:
@@ -341,7 +355,7 @@ def registry(template: dict | None) -> dict:
         cards.append({"id": card.id, "label": card.label, "options": opts,
                       "locked_reason": card.locked_reason,
                       "intended": list(preset.get(card.id, ()))})
-    return {"cards": cards, "preset_id": preset_id,
+    return {"cards": cards, "preset_id": preset_id, "preset_label": preset_label(template),
             "preset": effective_preset(preset, has_template=has_template)}
 
 
