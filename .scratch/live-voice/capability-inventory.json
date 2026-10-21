@@ -3224,7 +3224,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
+      "schema_sha256": "18bbd36d44651d1ec4d68ceb1a456c81e3b7143e3b2e478828e544164e815741",
       "behavioral_fixture": "pending"
     },
     {
@@ -6277,6 +6277,8 @@
     "hubDesign",
     "reports",
     "campusElectrical",
+    "campusStudy",
+    "campusResults",
     "decision",
     "economics",
     "profiles"
@@ -6337,6 +6339,10 @@
     "reports",
     "CampusElectrical",
     "campusElectrical",
+    "CampusStudy",
+    "campusStudy",
+    "CampusResults",
+    "campusResults",
     "DecisionStudy",
     "decision",
     "Economics",

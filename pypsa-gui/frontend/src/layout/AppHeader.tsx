@@ -658,14 +658,24 @@ export default function AppHeader() {
         // leaves the network's results alone, so it neither reports an optimum nor
         // opens Results; it says which study finished and where its results are.
         if (kind != null && kind !== 'solve') {
-          const what = kind === 'campus' ? 'Campus electrical study' : 'Planning → dynamics study'
+          const what = kind === 'campus' ? 'Grid study' : 'Planning → dynamics study'
           setStatus(finalStatus === 'completed' ? 'idle' : finalStatus)
           if (jobId != null) setFinishedJobId(jobId)
           if (finalStatus === 'completed') {
             appLog('INFO', `${what} finished`)
-            toast.success(kind === 'campus'
-              ? 'Campus electrical study finished — the results are in Campus electrical'
-              : `${what} finished`, { duration: 6000 })
+            if (kind === 'campus') {
+              toast.success(t => (
+                <span>
+                  Grid study finished.{' '}
+                  <button type="button" className="underline"
+                    onClick={() => { toast.dismiss(t.id); useUIStore.getState().setSlidePanel('campusResults') }}>
+                    Open the results →
+                  </button>
+                </span>
+              ), { duration: 8000 })
+            } else {
+              toast.success(`${what} finished`, { duration: 6000 })
+            }
           } else {
             appLog(finalStatus === 'aborted' ? 'WARN' : 'ERROR', `${what} ${finalStatus}`)
           }
