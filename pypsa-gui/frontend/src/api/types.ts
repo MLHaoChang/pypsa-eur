@@ -499,7 +499,7 @@ export type ValueStreamKind =
   | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
   | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
   | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
-  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'other'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'energy_wholesale' | 'other'
 export interface Participant {
   id: string; name: string; role: ParticipantRole; currency?: string
 }
@@ -562,6 +562,8 @@ export interface CommercialConfig {
   site_party?: string
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
+  /** IPP ticket 07: the wholesale import price, a Library series on the import Link(s). */
+  import_price_ref?: LibraryRef | null
   export_link?: string | null
   timezone?: string | null
   connection?: ConnectionAgreement | null
