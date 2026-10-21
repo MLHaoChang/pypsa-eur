@@ -21,3 +21,4 @@ Every decision the owner (haochang.1029@gmail.com) has made that sessions act on
 | 2026-10-21 08:24 | EU | #501 | Integrate #501's EU research and references into the common Library for Europe | owner, in chat |
 | 2026-10-21 09:05 | Q-IPP6 | IPP case 5 | Replace "Baseload PPA" with "Longer PPA" (tenor 10 → 15 y on both PPAs); 8 cases; a financial baseload PPA is a gated engine follow-up | coordinator |
 | 2026-10-21 | R-1021 | Retro | Land all eight: typed cost units; UI copy guard test; server-verdict UI rule; wider overlap waiver; rotate work sessions past 300k context; this log; owner questions also as reply text; premerge zero-check hint and coordinator tool hints | coordinator |
+| 2026-10-21 09:40 | E1-stages | Staged example periods when only start/end years are entered | Keep the example's spacing shifted to the start year; drop stages at or after the end year; the Builder shows the periods before Create | coordinator |
