@@ -375,6 +375,12 @@ generation and value the report retains (reports stored before that read
 `copt-screening/1` (opt-in) reconvolves the COPT's two-state fleet in plain numpy on the
 1 MW grid (strict LOLP, the engine's 1e-12 snap, generator weights, horizon totals) against a
 residual it recomputes; profiled, period-varying, folded or off-grid fleets are refused.
+A checked request may add `chart` (or end with "; chart <series>, ..."): `services/checked_charts.py`
+draws only per-snapshot series the request's evidence holds (generator `p`; StorageUnit `p_store`,
+`p_dispatch`, `state_of_charge`; bus `marginal_price`; branch `p0`, `p1`, and `loading` from the branch
+profile's own `utilisation_series`), every value as stored, and binds the PNG to the answer's receipt
+(`receipt.chart`: series slots, the not-drawn list, the evidence id). The evidence is re-checked at render
+time, and `verify_chart` re-extracts the dataset from the evidence on every download.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
