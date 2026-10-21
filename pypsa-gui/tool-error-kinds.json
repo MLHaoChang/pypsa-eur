@@ -53,7 +53,7 @@
     },
     "invalid_result_views": {
       "surface": "inline",
-      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false). The per-call detail says which; the assistant retries with a valid flag. There is no conversation-wide recovery action."
+      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false, or a card that is not a card id). The per-call detail says which; the assistant retries with a valid value. There is no conversation-wide recovery action."
     },
     "schema_field_too_large": {
       "surface": "inline",

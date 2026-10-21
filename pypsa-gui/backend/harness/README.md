@@ -42,7 +42,7 @@ harness/
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
-  budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
+  budget.py       the per-turn / per-session / daily caps, the task caps that lower them for a bounded task (the card explanation), the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
