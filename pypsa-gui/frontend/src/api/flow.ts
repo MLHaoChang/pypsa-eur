@@ -17,6 +17,15 @@ export type FlowSectionId = (typeof FLOW_SECTIONS)[number]
 /** Sections 1–8. `unknown` only while the preflight is deferred; never `complete`. */
 export type FlowSectionState = 'complete' | 'warning' | 'incomplete' | 'not_needed' | 'unknown'
 
+/** A section state in the user's words (project-workflow design §3.2, the rail). */
+export const FLOW_STATE_WORDS: Record<FlowSectionState, string> = {
+  complete: 'complete',
+  warning: 'to check',
+  incomplete: 'to do',
+  not_needed: 'not needed',
+  unknown: 'not known yet',
+}
+
 /** Section 10's own vocabulary (`results.freshness`). */
 export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale'
 
