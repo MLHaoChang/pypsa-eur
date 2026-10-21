@@ -176,13 +176,17 @@ _AT_LIMIT_REL = 1e-6
 def curtailment_by_cause(n, commercial):
     """
     Each curtailable plant's curtailed energy (MWh, snapshot-weighted) split by why
-    (IPP renewables + BESS ticket 05, spec §5): the export Link at its limit, a
-    negative export price, both, or neither. Splits `curtailment_frame` per
-    snapshot, so the causes sum to the curtailment total exactly. Without an export
-    Link or an export price on it, the totals are given and nothing is split
-    (`status: not_established` with the reason). None before a solve (204).
+    (IPP renewables + BESS ticket 05, spec §5): the export Link at its effective limit
+    (`p_nom_opt`, or `p_nom` when not extendable, × `p_max_pu` per snapshot), a negative
+    export price, both, or neither. Splits `curtailment_frame` per snapshot, so the
+    causes sum to the curtailment total exactly; a multi-period run is also split per
+    period. The price is the one the dispatch was solved with: the solve's commercial
+    record (`ic_poc_links`) must match the current config, else nothing is split.
+    Without an export Link, an export price or that record, the totals are given and
+    `status` is `not_established` with the reason. None before a solve (204).
     """
     import numpy as np
+    import pandas as pd
 
     from services.commercial import lp_bindings as LP
     from services.period_utils import snapshot_weights
@@ -196,23 +200,48 @@ def curtailment_by_cause(n, commercial):
         str(g): {"total_mwh": float((frame[g].to_numpy() * w).sum()),
                  "available_mwh": float(((p[g] + frame[g]).to_numpy() * w).sum())}
         for g in frame.columns}
-    link = LP._parse(commercial).export_link if commercial else None
+
+    def refused(reason: str) -> dict:
+        return {"status": "not_established", "reason": reason, "plants": plants}
+
+    cfg = LP._parse(commercial) if commercial else None
+    link = cfg.export_link if cfg is not None else None
     if link is None or link not in n.links.index:
-        return {"status": "not_established", "reason": "export_link_missing", "plants": plants}
+        return refused("export_link_missing")
     prices = n.links_t.get(LP.EXPORT_PRICE_ATTR)
     if prices is None or link not in getattr(prices, "columns", ()):
-        return {"status": "not_established", "reason": "export_price_missing", "plants": plants}
+        return refused("export_price_missing")
+    record = (getattr(n, "meta", None) or {}).get(LP.META_LINKS)
+    if not record:
+        return refused("no_commercial_solve_record")
+    if LP.energy_record_state(n, cfg, record) == "config":
+        # The price frame is the current config's, not the one this dispatch was solved with.
+        return refused("export_price_changed_since_solve")
     price = prices[link].reindex(frame.index).to_numpy(dtype=float)
-    cap_col = "p_nom_opt" if n.links.at[link, "p_nom_extendable"] else "p_nom"
-    limit = float(n.links.at[link, cap_col]) * float(n.links.at[link, "p_max_pu"])
+    if np.isnan(price).any():
+        return refused("export_price_missing")
+    cap = float(n.links.at[link, "p_nom_opt" if n.links.at[link, "p_nom_extendable"]
+                           else "p_nom"])
+    pu_t = n.links_t.p_max_pu
+    pu = (pu_t[link].reindex(frame.index).fillna(float(n.links.at[link, "p_max_pu"]))
+          if link in pu_t.columns else pd.Series(float(n.links.at[link, "p_max_pu"]),
+                                                  index=frame.index)).to_numpy(dtype=float)
+    limit = cap * pu
     flow = n.links_t.p0[link].reindex(frame.index).fillna(0.0).to_numpy(dtype=float)
-    at_limit = flow >= limit * (1.0 - _AT_LIMIT_REL) - 1e-9
+    at_limit = flow >= limit - _AT_LIMIT_REL * cap
     negative = price < 0.0
     masks = {"export_limit": at_limit & ~negative, "negative_price": negative & ~at_limit,
              "both": at_limit & negative, "other": ~at_limit & ~negative}
+    periods = (frame.index.get_level_values(0) if isinstance(frame.index, pd.MultiIndex)
+               else None)
     for g in frame.columns:
         mwh = frame[g].to_numpy() * w
-        plants[str(g)]["by_cause_mwh"] = {c: float(mwh[masks[c]].sum())
-                                          for c in CURTAILMENT_CAUSES}
-    return {"status": "ok", "export_link": str(link), "export_limit_mw": limit,
+        row = plants[str(g)]
+        row["by_cause_mwh"] = {c: float(mwh[masks[c]].sum()) for c in CURTAILMENT_CAUSES}
+        if periods is not None:
+            row["by_period"] = {
+                str(per): {c: float(mwh[masks[c] & (periods == per)].sum())
+                           for c in CURTAILMENT_CAUSES}
+                for per in pd.unique(periods)}
+    return {"status": "ok", "export_link": str(link), "export_capacity_mw": cap,
             "negative_price_hours": float((negative * w).sum()), "plants": plants}

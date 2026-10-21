@@ -216,7 +216,7 @@ def test_curtailment_splits_by_cause_on_the_base_case(solved):
 
     n, cfg, _da = solved
     out = curtailment_by_cause(n, cfg.commercial)
-    assert out["status"] == "ok" and out["export_limit_mw"] == pytest.approx(70.0)
+    assert out["status"] == "ok" and out["export_capacity_mw"] == pytest.approx(70.0)
     hourly = compute_curtailment(n, None, None)
     w = n.snapshot_weightings.generators.to_numpy()
     for i, plant in enumerate(hourly["columns"]):
@@ -225,6 +225,21 @@ def test_curtailment_splits_by_cause_on_the_base_case(solved):
     causes = {c: sum(p["by_cause_mwh"][c] for p in out["plants"].values())
               for c in ("export_limit", "negative_price")}
     assert causes["export_limit"] > 0 and causes["negative_price"] > 0, causes
+
+
+@pytest.mark.live_solve
+def test_curtailment_by_cause_survives_a_reload(solved, tmp_path):
+    """The split reads the price the dispatch was solved with; the solve's record and the
+    price frame travel in network.nc, so a saved and reopened project splits the same."""
+    import pypsa
+
+    from services.results.curtailment import curtailment_by_cause
+
+    n, cfg, _da = solved
+    n.export_to_netcdf(str(tmp_path / "n.nc"))
+    reopened = pypsa.Network(str(tmp_path / "n.nc"))
+    assert curtailment_by_cause(reopened, cfg.commercial) == curtailment_by_cause(
+        n, cfg.commercial)
 
 
 @pytest.mark.live_solve
