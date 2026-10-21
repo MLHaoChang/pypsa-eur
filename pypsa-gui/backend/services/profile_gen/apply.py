@@ -22,7 +22,8 @@ reindexing:
     weeks, a month) → the weather year sliced to it by month-day-hour, the
     window recorded as ``window: {first, last, hours, runs}``; an hour the
     source does not have (Feb 29, a DST-gap hour) is refused, never filled;
-  * sub-hourly / off-the-hour snapshots, or a window that repeats a
+  * sub-hourly / off-the-hour snapshots, a window coarser than hourly
+    (3-hourly, daily — no one-hour step), or a window that repeats a
     calendar hour → typed refusal naming the supported shapes;
   * MultiIndex (multi-investment-period) snapshots → tile the weather year
     into EVERY period by month-day-hour, leap rules applied per period
@@ -222,9 +223,12 @@ def _hourly_window(idx: pd.DatetimeIndex, *, what: str) -> dict | None:
     """None when ``idx`` is one full calendar year (`_validate_year_block`);
     else the window record ``{first, last, hours, runs}`` of an hourly sample
     of the year: tz-naive, on the hour, strictly increasing, no calendar hour
-    twice (a window covers at most one year). ``runs`` counts the contiguous
-    blocks, so two sampled weeks read as two. Anything else is refused with
-    the full-year check's own reason."""
+    twice (a window covers at most one year), and at least one step of exactly
+    one hour. ``runs`` counts the contiguous blocks, so two sampled weeks read
+    as two. A coarser axis (3-hourly, daily) has no one-hour step and is
+    refused: the label hour would be written and then counted for the whole
+    step (a daily solar profile becomes the midnight hour, weighted ×24).
+    Anything else is refused with the full-year check's own reason."""
     try:
         _validate_year_block(idx, what=what)
         return None
@@ -235,6 +239,12 @@ def _hourly_window(idx: pd.DatetimeIndex, *, what: str) -> dict | None:
         raise full_year_error
     steps = idx.to_series().diff().dropna()
     if (steps < _ONE_HOUR).any():
+        raise full_year_error
+    # Coarser than hourly (3h, 6h, daily, weekly): every step is longer than
+    # one hour, so the sub-hourly check above does not catch it. Filling the
+    # label hour and letting the snapshot weighting stretch it over the step
+    # silently drops the other hours (midnight solar, weighted ×24, is zero).
+    if not (steps == _ONE_HOUR).any():
         raise full_year_error
     off = idx[idx != idx.floor("h")]
     if len(off):

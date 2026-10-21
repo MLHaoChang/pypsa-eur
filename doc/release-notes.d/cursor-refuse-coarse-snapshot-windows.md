@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Generated profiles refuse a snapshot axis coarser than hourly (3-hourly, 6-hourly, daily). Those axes were accepted as a snapshot window and filled with the label hour only, so a daily solar profile became the midnight hour counted for 24 hours.
