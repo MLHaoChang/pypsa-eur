@@ -146,6 +146,13 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     from services.asset_schema import provenance
 
     stamps = provenance.get(n, component_class, name)
+    # The currency the asset is priced in, as its provenance records it (a regional pack
+    # stamps it). Checked before any pack is loaded: a pack this build cannot load falls
+    # back to the generic EUR pack, and that fallback must never turn a mismatch into a match.
+    recorded = (stamps.get("overnight_cost") or {}).get("currency")
+    if recorded and recorded != ref.currency:
+        _refuse("currency_mismatch", f"This asset is priced in {recorded}; the reference is in "
+                f"{ref.currency}. Nothing is converted.")
     detail = C.reference_detail(technology, projection_year, stamps)
     by_parameter = {row.parameter: row for row in detail.comparison}
     pack_overnight = by_parameter["overnight"].pack

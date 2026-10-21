@@ -334,3 +334,23 @@ def test_no_default_and_no_case_is_a_note_not_a_silent_skip():
     p = A.plan(_net(), {}, "Link", "electrolyser", "electrolysis-pem-100mw", 2030)
     assert "money_year" not in p["missing"]
     assert any("No investment case or default value" in note for note in p["notes"])
+
+
+def test_a_regionally_priced_asset_refuses_on_its_recorded_currency():
+    """GK: a `<date>+<region>` pack this build may not load must not fall back to EUR and pass."""
+    n = _net()
+    P.record(n, "Generator", "wind", "overnight_cost", status="default",
+             source="generic_defaults@2026-10-21+uk#0123456789abcdef", source_year=2025,
+             currency_year=2025, currency="GBP")
+    before = n.generators.copy()
+    with pytest.raises(HTTPException) as exc:
+        A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    assert exc.value.detail["error_kind"] == "currency_mismatch"
+    assert n.generators.equals(before)
+
+
+def test_a_regional_version_this_build_cannot_load_is_named_not_silently_eur():
+    detail = A.C.reference_detail("onwind", 2030, {"overnight_cost": {
+        "source": "generic_defaults@2026-10-21+uk#0123456789abcdef"}})
+    assert detail.pack.chosen_by == "latest_generic"
+    assert "not available" in detail.pack.note

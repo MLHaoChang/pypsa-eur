@@ -8,6 +8,8 @@ edit.
 """
 from __future__ import annotations
 
+import inspect
+
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -97,6 +99,21 @@ def list_references() -> list[ReferenceSummary]:
     return rows
 
 
+def _load_named_pack(version: str) -> DefaultsPack | None:
+    """The pack a provenance stamp names, or None when this build cannot load it. A
+    regional version is `<date>+<region>` and needs `load_defaults_pack(date, region=…)`
+    (GS-2, #499); a build without regional packs cannot load it and says so (None)."""
+    date, plus, region = version.partition("+")
+    try:
+        if not plus:
+            return load_defaults_pack(version)
+        if "region" not in inspect.signature(load_defaults_pack).parameters:
+            return None
+        return load_defaults_pack(date, region=region)
+    except (DefaultsPackError, DefaultsPackLookupError):
+        return None
+
+
 def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, PackChoice]:
     """The pack an asset would be priced from: the one its `overnight_cost` provenance
     names, else the latest generic version. A named pack this build cannot load falls
@@ -108,10 +125,7 @@ def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, Pa
     m = _parse_pack_source(source)
     if m is not None:
         pack_id, version, digest = m
-        try:
-            pack = load_defaults_pack(version)
-        except (DefaultsPackError, DefaultsPackLookupError):
-            pack = None
+        pack = _load_named_pack(version)
         if pack is not None and pack.pack_id == pack_id and pack.hash.startswith(digest):
             return pack, PackChoice(stamp=pack.stamp, version=pack.version,
                                     chosen_by="asset_provenance")
