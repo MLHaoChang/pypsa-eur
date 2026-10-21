@@ -88,7 +88,7 @@ CARDS: Final[tuple[Card, ...]] = (
          sections=("connection", "assets", "scenarios"), chip="Grid"),
     Card("control", "Control",
          (("presets", "Converter control presets"),
-          ("island_checks", "Island & ride-through checks"),
+          ("island_checks", "Island, ride-through & load smoothing"),
           ("dynamics", "Frequency & dynamics")),
          sections=("assets", "scenarios"), chip="Control"),
     Card("reliability", "Reliability",
