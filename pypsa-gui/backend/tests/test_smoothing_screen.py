@@ -358,4 +358,9 @@ def test_a_ups_without_a_walk_in_is_not_counted_as_shaping():
     n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
     island = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}}, "requirements": {}}
     (ph,) = _screen(n, island, [_phase(5.0)])["phases"]
-    assert ph["covered_ups_mw"] == 0.0 and "UPS walk-in not known" in ph["short"]
+    assert ph["covered_ups_mw"] == 0.0
+    assert ph["verdict"] == "unknown" and ph["missing"] == ["UPS walk-in not known"] and ph["short"] == []
+    assert ph["note"].startswith("UPS walk-in not known")
+    # A measured shortfall still wins over the missing input.
+    (ph,) = _screen(_site([("ups", 1.0, 0.01, 1.0, False)], {"it": 0.1}), island, [_phase(5.0)])["phases"]
+    assert ph["verdict"] == "short" and ph["missing"] == ["UPS walk-in not known"]
