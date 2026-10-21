@@ -407,6 +407,20 @@ def test_a_weekly_shape_records_the_source_years_energy():
     assert out["profile_annual_mwh"] == pytest.approx(50.0 * 8760)
 
 
+def test_a_leap_source_year_records_366_days_of_energy():
+    """A leap weather year is 366 × 24 h. Twenty-four hours short of that is
+    under the 2 % energy warning, so the year length has to be the assertion."""
+    _net(2024)
+    out = assign_profile(
+        _ctx(), "L1", pd.Series(1.0, index=_year(2024)),
+        _load_meta(unit="MW", scale_mw=None),
+        component_type="loads", attribute="p_set", now=NOW,
+    )
+    assert out["profile_annual_mwh"] == pytest.approx(8784.0)
+    assert out["modelled_mwh"] == {"total": pytest.approx(8784.0)}
+    assert not any(w.startswith(ENERGY_MISMATCH_WARNING) for w in out["warnings"])
+
+
 # ── gatekeeper review 1 ─────────────────────────────────────────────────────
 
 def test_a_crossing_bound_on_a_committable_unit_writes_and_warns():
