@@ -15,6 +15,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       ...actual.resultsApi,
       getCurtailment: vi.fn(),
       getGeneratorResults: vi.fn(),
+      getCurtailmentByCause: vi.fn(),
     },
   }
 })
@@ -42,6 +43,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['SolarGen'], data: [[424.24]],
   })
+  vi.mocked(resultsApi.getCurtailmentByCause).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getGeneratorResults).mockReset().mockResolvedValue({
     index: ['2026-01-01T00:00:00'], columns: ['SolarGen'], data: [[0]],
   })
@@ -120,4 +122,16 @@ it('shows a computed zero with what makes it zero, and a sentence instead of an 
   expect(tile?.textContent).toMatch(/all available renewable energy used/)
   expect(screen.getByText(/No curtailment in this range/)).toBeTruthy()
   expect(document.querySelector('.recharts-responsive-container')).toBeNull()
+})
+
+// IPP ticket 05: the split by cause sits above the hourly chart.
+it('shows the curtailment by cause above the hourly chart', async () => {
+  vi.mocked(resultsApi.getCurtailmentByCause).mockResolvedValue({
+    status: 'not_established', reason: 'export_link_missing',
+    plants: { SolarGen: { total_mwh: 424.24, available_mwh: 424.24 } },
+  })
+  renderPage()
+  const table = await screen.findByTestId('curtailment-by-cause')
+  const chart = screen.getByText('Curtailment over time')
+  expect(table.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })

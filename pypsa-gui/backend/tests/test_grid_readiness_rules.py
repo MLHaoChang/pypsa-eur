@@ -35,6 +35,9 @@ def test_every_numeric_verdict_is_its_declared_rule_or_named(tmp_path, tid, dc_l
     for row in G.grid_readiness(d, n, PROFILE)["rows"]:
         if row["id"] in RULED:
             assert row["rule"] == RULED[row["id"]], row["id"]
+        after = row.get("after_battery")
+        if after and after["value"] is not None:               # DC 03: its own declared rule
+            assert G._judge(after["value"], row["limit"], after["rule"]) == after["verdict"], row["id"]
         if not isinstance(row["project_value"], (int, float)) or row["verdict"] == "unknown":
             continue
         if "rule" in row:
