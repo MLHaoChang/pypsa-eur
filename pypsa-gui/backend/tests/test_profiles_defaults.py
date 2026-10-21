@@ -156,3 +156,22 @@ def test_the_assistant_previews_the_batch_on_one_card_and_applies_it(client, sit
         back = edit_card.ADAPTERS["apply_default_series"].readback(args, card["rows"])
     typed = [(r, v) for r, v in zip(card["rows"], back) if r["role"] == "typed"]
     assert typed and all(v == pytest.approx(r["new"], rel=1e-6) for r, v in typed)
+
+
+def test_the_defaults_tools_say_only_the_type_of_a_foreign_error(client, site, bound_ctx,
+                                                                monkeypatch):
+    # The sanitiser's rule (#508) on the UI's defaults route and chat tools.
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.profile_gen import defaults
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(defaults, "preview_defaults", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["preview_default_series"](project_id=site)
+    assert err.value.detail == "unexpected error (ValueError); see the server log"

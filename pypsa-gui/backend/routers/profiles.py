@@ -722,7 +722,7 @@ def _dry_run(ctx, frame: pd.DataFrame, record: dict) -> tuple[list[str], dict[st
                                        component_type=component_type,
                                        attribute=attribute)
         except ProfileApplyError as exc:
-            warnings.add(f"not_applicable: {exc}")
+            warnings.add(f"not_applicable: {public_message(exc, route='dry_run')}")
             continue
         warnings.update(prepared.warnings)
         weeks[col] = _preview_week(ctx.network, prepared)
@@ -1093,7 +1093,8 @@ def pending_from_current(
     except ProfileApplyError as exc:
         raise HTTPException(
             status_code=422,
-            detail={**_apply_refusal_kind(exc), "message": str(exc)},
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="from_current")},
         ) from exc
     frame = series.to_frame(body.component)
     job_id = str(uuid.uuid4())
@@ -1188,7 +1189,9 @@ def apply_default_series(
                                      component_type=component_type, attribute=attribute)
         except ProfileApplyError as exc:
             results.append({"job_id": job_id, "component": component, "applied": False,
-                            **_apply_refusal_kind(exc), "message": str(exc)})
+                            **_apply_refusal_kind(exc),
+                            "message": public_message(exc, route="defaults_apply",
+                                                      job_id=job_id)})
             continue
         results.append({"job_id": job_id, "component": component, "applied": True,
                         "warnings": summary.get("warnings", []),

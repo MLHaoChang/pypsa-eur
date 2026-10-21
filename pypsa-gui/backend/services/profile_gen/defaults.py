@@ -188,8 +188,11 @@ def preview_defaults(ctx, project_dir: str, project: str, *,
             try:
                 frame, meta, seen = generate(ctx, row, row["component"] in peak_sized)
             except (ProfileGenError, ProfileApplyError) as exc:
+                from services.profile_gen.refusals import public_message
+
+                reason = public_message(exc, route="defaults_preview")
                 out.append({**{k: v for k, v in row.items() if k != "plan"},
-                            "skipped": f"cannot generate: {exc}"})
+                            "skipped": f"cannot generate: {reason}"})
                 continue
             job_id = str(uuid.uuid4())
             record = {**meta, "job_id": job_id, "project_id": project,

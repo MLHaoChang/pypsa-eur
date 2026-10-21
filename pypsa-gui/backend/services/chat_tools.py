@@ -3534,13 +3534,13 @@ def preview_default_series(project_id: str, replace_generated: bool = False,
     from routers.profiles import DefaultsPreviewRequest, preview_default_series as _h
     body = DefaultsPreviewRequest(replace_generated=replace_generated,
                                   peak_sized=list(peak_sized or []))
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def apply_default_series(project_id: str, job_ids: list) -> dict:
     from routers.profiles import DefaultsApplyRequest, apply_default_series as _h
     body = DefaultsApplyRequest(job_ids=list(job_ids))
-    return _route(_h, body, proj=_authorized_project(project_id))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 # Load profiles (time-series generators ticket 01): the archetype catalogue and
