@@ -1205,6 +1205,10 @@ _register_ammonia()
 #: Templates that ship price series (`price_series/`, minted at create; IPP ticket 02): id →
 #: a writer of the directory, called by `write_sidecars`.
 PRICE_SERIES: dict = {}
+#: Templates that ship pre-built sensitivity cases (IPP ticket 04): id → a builder of the
+#: `cases.json` document (declared changes, data only until the sensitivities slice, S5).
+CASES: dict = {}
+CASES_FILE = "cases.json"
 
 
 def _register_ipp() -> None:
@@ -1328,6 +1332,9 @@ def write_sidecars(out_dir, template_id: str) -> None:
         json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
     if template_id in PRICE_SERIES:
         PRICE_SERIES[template_id](out_dir)
+    if template_id in CASES:
+        (out_dir / CASES_FILE).write_text(
+            json.dumps(CASES[template_id](), indent=1, ensure_ascii=False) + "\n")
     if template_id in ISLAND_CONFIG:
         (out_dir / ISLAND_FILE).write_text(
             json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")

@@ -942,7 +942,13 @@ export interface EhTemplateMeta {
   projected_load?: { year: number; peak_mw?: number; it_mw?: number; pue?: number; note?: string }[]
   energization?: { year: number; available_import_mw: number; connection_mw: number;
     source?: string; note?: string }[]
-  ledger?: { item: string; value: string; source: string; note?: string }[]
+  /** Template assumptions. The grid-readiness rows (DC 02) are numbers with
+   *  a unit, a label and the flow target of the field they belong to. */
+  ledger?: {
+    item: string; value: string | number; source: string; note?: string
+    label?: string; unit?: string; section?: string; panel?: string | null
+    component?: string | null; entity?: string | null; field?: string | null
+  }[]
   /** The Results tab a project made from this template opens on (IPP
    *  ticket 05); a `ResultsTab` id. */
   initial_results_tab?: string | null

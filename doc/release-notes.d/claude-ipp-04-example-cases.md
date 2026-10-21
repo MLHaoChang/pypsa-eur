@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Renewables IPP with battery example ships its eight pre-built cases (`cases.json`: low price, cannibalised shape, PPA price −10 %, merchant-heavy, longer PPA, cheap battery, tight connection, faster degradation) as declared changes in the experiment contract's rules. They are data only until the sensitivities slice turns them into editable cases.

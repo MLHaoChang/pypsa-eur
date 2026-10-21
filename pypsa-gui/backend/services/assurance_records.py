@@ -368,7 +368,9 @@ def capture_scoped(owner, scope):
         facts, slots = calculations.scoped_calculate(raw, scope)
         first = (raw["storage_unit"] if scope["profile"] in calculations.STORAGE_PROFILES
                  else raw if scope["profile"] in (calculations.carrier.PROFILE, *calculations.branch.PROFILES,
-                                                  calculations.lost_load.PROFILE)
+                                                  calculations.lost_load.PROFILE, calculations.price.PROFILE,
+                                                  *calculations.emissions.PROFILES,
+                                                  calculations.curtailment.PROFILE)
                  else next(iter(raw["generators"].values())))
         record = {
             "version": 1,
