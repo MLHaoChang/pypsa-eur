@@ -7,7 +7,7 @@
 export type ResultsTab =
   | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
-  | 'asset' | 'fmea' | 'investment' | 'flows'
+  | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
 
@@ -26,7 +26,7 @@ export const RESULT_GROUPS: ReadonlyArray<{
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
     tabs: ['adequacy', 'lostload', 'fmea'] },
   { id: 'operation', label: 'Operation', question: 'How it runs hour by hour',
-    tabs: ['dispatch', 'flows', 'storage', 'curtailment', 'emissions'] },
+    tabs: ['dispatch', 'flows', 'loadshape', 'storage', 'curtailment', 'emissions'] },
 ]
 
 export function groupOf(tab: ResultsTab): ResultsGroup | null {

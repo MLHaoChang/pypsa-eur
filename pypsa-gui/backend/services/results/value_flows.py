@@ -233,6 +233,30 @@ def _export_revenue(n, parsed) -> tuple[dict[str, float | None], dict | None]:
     return out, intervals
 
 
+def _import_cost(n, parsed) -> dict[str, float | None]:
+    """The wholesale import cost per period (IPP ticket 07): Σ w · p0(import Links) ·
+    `links_t["ic_import_price"]`, unweighted by the period's years; {} when the config
+    prices no import series; a period whose price column or flow is missing is None."""
+    if parsed.import_price_ref is None:
+        return {}
+    store = n.links_t.get(_lp.IMPORT_PRICE_ATTR) if hasattr(n.links_t, "get") else None
+    p0 = getattr(n.links_t, "p0", None)
+    links = _lp.import_links(parsed)
+    if store is None or p0 is None or any(
+            link not in getattr(store, "columns", []) or link not in p0.columns
+            for link in links):
+        return {_key(p): None for p in _periods(n)}
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    per_interval = sum(w * p0[link].reindex(n.snapshots).to_numpy(dtype=float)
+                       * store[link].reindex(n.snapshots).to_numpy(dtype=float)
+                       for link in links)
+    out = {}
+    for p in _periods(n):
+        vals = per_interval[_period_mask(n, p)]
+        out[_key(p)] = None if np.isnan(vals).any() else float(vals.sum())
+    return out
+
+
 def export_revenue(n, commercial) -> dict[str, float | None]:
     """The export-price revenue per period key ("_" on a flat axis, "YYYY"
     per investment period): Σ w · p0(export_link) · `links_t["ic_export_price"]`,
@@ -474,7 +498,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         curtailment_compensation=bool(
             agreement is not None
             and agreement.curtailment_compensation_eur_per_mwh is not None),
-        export_revenue=export_revenue, export_split=split,
+        export_revenue=export_revenue, export_split=split, import_cost=_import_cost(n, parsed),
         assets=_asset_costs(n, cfg, parsed, sides, shortfall_costs),
         cost_breakdown_total=cb_total,
         lp_commercial=_lp_commercial(n, commercial),
