@@ -255,6 +255,22 @@
       "surface": "inline",
       "why": "An investment-case tool got an argument out of range (an empty owner, a page < 1, a target IRR or year outside the SolvePpa bounds). The model corrects the argument and retries, like invalid_tool_args."
     },
+    "currency_mismatch": {
+      "surface": "inline",
+      "why": "A value in one currency would replace a value priced in another (an EUR Library reference on an asset priced from a non-EUR regional pack). Nothing is converted; the model explains and leaves the value as it is."
+    },
+    "reference_target_unsupported": {
+      "surface": "inline",
+      "why": "apply_library_reference named a class the reference does not price (wind/PV apply to a Generator, an electrolyser to a Link; a StorageUnit is not supported). The model names the right asset or explains."
+    },
+    "reference_confirmation_needed": {
+      "surface": "inline",
+      "why": "apply_library_reference needs the user's explicit confirmation (`missing`: dc_ac, grid_connection or money_year, each with its text). The model asks the user and calls again with confirm naming only what they confirmed."
+    },
+    "library_reference_unknown": {
+      "surface": "inline",
+      "why": "get_library_reference named a technology/projection year the shipped references do not hold, or passed component without asset. The model re-reads list_library_references and retries; a route code surfaced by the Library references route."
+    },
     "library_ref_stale": {
       "surface": "inline",
       "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
@@ -887,6 +903,46 @@
       "surface": "inline",
       "why": "A dated maintenance window does not fall in the year it would apply to, or the network is multi-period. The detail says so; the assistant uses MM-DD windows or the network's year, per call."
     },
+    "unknown_component": {
+      "surface": "inline",
+      "why": "Profile generation named a component (link, storage unit, generator) that is not on the open network. The detail names it; the assistant asks which one, per call."
+    },
+    "poc_tariff": {
+      "surface": "inline",
+      "why": "A price series was aimed at a point-of-connection link, whose energy price the tariff in the commercial configuration sets. The detail says so; the assistant points to the tariff, per call."
+    },
+    "cop_ambient_unknown": {
+      "surface": "inline",
+      "why": "An air-source heat-pump COP was asked for on a project with no data-centre load spec and no ambient stated, so there is no site temperature to draw it from (never a default). The detail names both remedies; the assistant asks for the site's ambient or uses a ground source, per call."
+    },
+    "cop_bus": {
+      "surface": "inline",
+      "why": "A heat-pump COP was aimed at a link whose bus0 is not electricity, so it would scale the wrong input. The detail names the bus; the assistant picks the right link, per call."
+    },
+    "two_way_floor": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a two-way link, where it would forbid reverse flow. The detail says so; the assistant picks another link or a shutdown instead, per call."
+    },
+    "poc_bound": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a point-of-connection link, which is the grid connection, not a process. The detail says so; the assistant picks the process link, per call."
+    },
+    "part_load_not_a_series": {
+      "surface": "inline",
+      "why": "A part-load efficiency curve was asked for as a series; it depends on the dispatch, which the linear model cannot take as a time series. The detail says so; the assistant explains, per call."
+    },
+    "unknown_series_kind": {
+      "surface": "inline",
+      "why": "Series generation named a kind that does not exist. The detail lists the kinds (tou, inflow, cop, and market and part_load, which are refused with their reasons); the assistant picks one, per call."
+    },
+    "market_bundles_unavailable": {
+      "surface": "inline",
+      "why": "A market price series was asked for, but market price bundles (package C2) are not available yet. The detail suggests a time-of-use price or an upload; the assistant offers those, per call."
+    },
+    "invalid_series_params": {
+      "surface": "inline",
+      "why": "A series kind's parameters are missing, unknown or out of range (an unpriced hour, a malformed period, a bad COP temperature). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
@@ -930,6 +986,18 @@
     "task_step_waiting": {
       "surface": "inline",
       "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
+    },
+    "dc_load_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template on a data center with a dc_load the template refuses (a phase off the investment periods, a peak above the energized import plus firm gensets; DC-01). The detail names the field; the model corrects the argument and retries, like invalid_tool_args. Nothing is created."
+    },
+    "planning_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template on a staged example with a planning entry it refuses (a year out of range, dates not increasing, start equal to end, or a build that fails the template rules; E1). The detail names the field; the model corrects the years and retries. Nothing is created."
+    },
+    "template_params_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template with a body key the template does not take (planning on a template without staged years, dc_load off a data center). The detail names the key; the model drops it and retries. Nothing is created."
     }
   }
 }

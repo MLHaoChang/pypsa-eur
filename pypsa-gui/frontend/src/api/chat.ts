@@ -42,6 +42,12 @@ export interface ChatStreamRequest {
   session_id?: string
   message?: string
   /**
+   * LC-12: continue this conversation after a plan's job ended (one listed by
+   * `listContinuations`). Sent with no message: the server writes the turn's
+   * message and accepts each job once.
+   */
+  continuation_job_id?: string
+  /**
    * Which configured profile to bind this session to. Preferred over
    * `model`; the server resolves it and refuses an unconfigured id — as a
    * typed `unknown_profile_id` error frame on a 200 SSE stream, not a 4xx,
@@ -515,4 +521,26 @@ export interface ChatHistory {
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {
   const r = await client.get('/chat/history', { params: { limit } })
   return r.data
+}
+
+/** LC-12: a plan's job that ended and has not continued its conversation. */
+export interface PlanContinuation {
+  job_id: string
+  /** The job's native outcome: completed | failed | aborted | unknown. */
+  status: string
+  task_id: string
+  /** The model-visible message; never shown raw in the transcript. */
+  message: string
+}
+
+export async function listContinuations(sessionId: string): Promise<PlanContinuation[]> {
+  const r = await client.get(`/chat/${encodeURIComponent(sessionId)}/continuations`)
+  return Array.isArray(r.data?.items) ? r.data.items : []
+}
+
+/** "Stop waiting": no continuation for this job. The job itself runs on. */
+export async function dismissContinuation(sessionId: string, jobId: string): Promise<boolean> {
+  const r = await client.post(
+    `/chat/${encodeURIComponent(sessionId)}/continuations/${encodeURIComponent(jobId)}/dismiss`)
+  return r.data?.ok === true
 }

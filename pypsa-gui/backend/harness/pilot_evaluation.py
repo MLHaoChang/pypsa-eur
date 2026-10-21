@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/6"
+SUITE_VERSION = "checked-pilot-evaluation/7"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -81,6 +81,10 @@ CURTAILMENT = {"available_energy": (50, "MWh"), "curtailed_energy": (33, "MWh"),
 CAPACITY = {"optimal_capacity": (3, "MW"), "capacity_change": (3, "MW")}
 # The StorageUnit fixture above discharges 4 MWh of a 10 MW x 2 h = 20 MWh unit: 0.2 cycles.
 CYCLES = {"window_discharged_energy": (4, "MWh"), "energy_capacity": (20, "MWh"), "equivalent_cycles": (0.2, "cycles")}
+# A 3 MW process unit cannot make a 5 MW delivery for two unit-weight hours:
+# generation 6, served 6, shortfall 4 MWh; nothing stored, a lossless link.
+BALANCE = {"generation_energy": (6, "MWh"), "served_energy": (6, "MWh"), "unserved_energy": (4, "MWh"),
+           "storage_change": (0, "MWh"), "export_losses_and_conversion": (0, "MWh")}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -111,6 +115,7 @@ ADDED = {
     "curtailment/1": ("generator G1", "Show the curtailment for", CURTAILMENT, "curtailed_energy"),
     "capacity/1": ("generator G2", "Show the capacity for", CAPACITY, "optimal_capacity"),
     "storage-cycles/1": ("storage unit Battery", "Show the cycles for", CYCLES, "window_discharged_energy"),
+    "energy-balance/1": ("network", "Show the energy balance for", BALANCE, "generation_energy"),
 }
 # Profiles whose scope names the component's class.
 SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
@@ -151,6 +156,10 @@ LABELS = {
     "optimal_capacity": "Capacity after the solve", "capacity_change": "Change from the input capacity",
     "window_discharged_energy": "Discharged energy over the window", "energy_capacity": "Energy capacity",
     "equivalent_cycles": "Equivalent full cycles over the window",
+    "generation_energy": "Generation (excluding VoLL slacks and process shortfall)",
+    "served_energy": "Demand served", "unserved_energy": "Demand not served (shed and process shortfall)",
+    "storage_change": "Change in stored energy",
+    "export_losses_and_conversion": "Export, branch and storage losses, and conversion to other carriers (not split)",
 }
 
 

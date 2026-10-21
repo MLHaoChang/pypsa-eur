@@ -164,7 +164,7 @@ def test_generate_maps_working_hours_on_the_projects_commercial_timezone(
 ):
     import services.profile_gen.apply as apply_mod
 
-    monkeypatch.setattr(apply_mod, "_commercial_timezone", lambda ctx: "Europe/Berlin")
+    monkeypatch.setattr(apply_mod, "commercial_timezone", lambda ctx: "Europe/Berlin")
     body = _generate(client, load_project).json()
     assert body["params"]["timezone"] == "Europe/Berlin"
     explicit = _generate(client, load_project,
@@ -242,7 +242,7 @@ def test_an_archetype_lands_once_converted_on_utc_snapshots(
 ):
     import services.profile_gen.apply as apply_mod
 
-    monkeypatch.setattr(apply_mod, "_commercial_timezone", lambda ctx: zone)
+    monkeypatch.setattr(apply_mod, "commercial_timezone", lambda ctx: zone)
     job = _generate(client, load_project,
                     params={"shifts": 1, "peak_mw": 1.0}).json()
     resp = client.post(f"/api/projects/{load_project}/profiles/apply",
@@ -377,3 +377,176 @@ def test_availability_refusals_say_their_sentence_and_nothing_foreign(
             project_id=plant_project, kind="maintenance", generators=["chp"],
             params={"windows": [{"from": "07-03", "to": "07-16"}]})
     assert err.value.detail == "unexpected error (ValueError); see the server log"
+
+
+# ---------------------------------------------------------------------------
+# other series + link bounds (ticket 03)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def heat_project(client, install_network):
+    n = _load_network()
+    n.buses.loc["B1", "carrier"] = "AC"
+    n.add("Bus", "H", carrier="heat")
+    n.add("Link", "hp", bus0="B1", bus1="H", p_nom=5.0)
+    n.add("StorageUnit", "dam", bus="B1", p_nom=5.0, max_hours=100.0)
+    install_network(n)
+    resp = client.post("/api/projects/Heat Site",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+    return "Heat Site"
+
+
+def _series(client, project, **body):
+    return client.post(f"/api/projects/{project}/profiles/series/generate", json=body)
+
+
+def test_a_cop_series_generates_and_applies_to_the_links_efficiency(
+    client, heat_project, session_ctx,
+):
+    gen = _series(client, heat_project, kind="cop", components=["hp"],
+                  params={"source": "ground", "source_c": 5.0, "sink_c": 35.0})
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    assert body["target"] == ["links", "efficiency"]
+    applied = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "hp",
+                                "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    eff = session_ctx(client).network.links_t.efficiency["hp"]
+    assert float(eff.iloc[0]) == pytest.approx(0.45 * 308.15 / 30.0)
+
+
+def test_an_inflow_series_reports_its_energy(client, heat_project):
+    body = _series(client, heat_project, kind="inflow", components=["dam"],
+                   params={"annual_mwh": 1000.0, "shape": "flat"}).json()
+    assert body["stats"]["dam"]["annual_mwh"] == pytest.approx(1000.0)
+
+
+@pytest.mark.parametrize("over, kind", [
+    ({"kind": "part_load", "components": ["hp"], "params": {}}, "part_load_not_a_series"),
+    ({"kind": "tides", "components": ["hp"], "params": {}}, "unknown_series_kind"),
+    ({"kind": "market", "components": ["hp"], "params": {}}, "market_bundles_unavailable"),
+    ({"kind": "cop", "components": ["hp"], "params": {"source": "water"}},
+     "invalid_series_params"),
+    ({"kind": "cop", "components": ["nope"], "params": {}}, "unknown_component"),
+])
+def test_series_refusals_are_typed(client, heat_project, over, kind):
+    resp = _series(client, heat_project, **over)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == kind
+
+
+def test_availability_on_a_link_through_the_route(client, heat_project, session_ctx):
+    gen = _avail(client, heat_project, generators=None, components=["hp"],
+                 component_type="links")
+    assert gen.status_code == 200, gen.text
+    body = gen.json()
+    applied = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                          json={"job_id": body["job_id"], "component": "hp",
+                                "component_type": "links", "time_basis": "UTC"})
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["component_type"] == "links"
+
+
+def test_a_price_on_the_poc_link_is_refused_at_generation(client, heat_project,
+                                                         session_ctx):
+    from types import SimpleNamespace
+
+    ctx = session_ctx(client)
+    state = ctx.solver_state.setdefault("solver_config", SimpleNamespace())
+    state.commercial = {"poc_link": "hp"}
+    resp = _series(client, heat_project, kind="tou", components=["hp"],
+                   params={"component_type": "links", "currency": "EUR",
+                           "price_basis": "nominal", "currency_year": 2025,
+                           "periods": [{"name": "flat", "rate": 50.0}]})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "poc_tariff"
+
+
+def test_series_refusals_say_their_sentence_and_nothing_foreign(
+    client, heat_project, monkeypatch, bound_ctx,
+):
+    # The sanitiser's rule (#508) on ticket 03's series route, zone and chat tool.
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.profile_gen import series
+
+    resp = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "ground", "source_c": 5.0, "sink_c": 35.0,
+                           "timezone": "Europe"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["message"] == "timezone 'Europe' is not an IANA zone"
+
+    foreign = "CDSAPI_KEY=abc123 at /srv/secret/path"
+
+    def boom(*a, **k):
+        raise ValueError(foreign)
+
+    monkeypatch.setattr(series, "generate_frame", boom)
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["generate_series_profile"](
+            project_id=heat_project, kind="inflow", components=["dam"],
+            params={"annual_mwh": 1000.0, "shape": "flat"})
+    assert err.value.detail == "unexpected error (ValueError); see the server log"
+
+
+def test_an_air_cop_needs_the_projects_ambient_or_a_stated_one(client, heat_project,
+                                                               monkeypatch):
+    # Gatekeeper D4: no default ambient; the project's DC load spec or the
+    # stated ambient, else refused.
+    from services import dc_load_profile
+
+    monkeypatch.setattr(dc_load_profile, "read_ambient", lambda d: None)
+    resp = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "air", "sink_c": 45.0})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "cop_ambient_unknown"
+
+    amb = {"ambient_annual_mean_c": 12.0, "ambient_seasonal_amplitude_k": 8.0,
+           "ambient_diurnal_amplitude_k": 4.0}
+    monkeypatch.setattr(dc_load_profile, "read_ambient", lambda d: dict(amb))
+    body = _series(client, heat_project, kind="cop", components=["hp"],
+                   params={"source": "air", "sink_c": 45.0}).json()
+    assert body["ambient_from"] == "dc_load_profile"
+    assert body["ambient"] == amb
+
+
+def test_read_ambient_takes_the_stored_dc_load_spec(tmp_path):
+    import json
+
+    from services import dc_load_profile
+
+    assert dc_load_profile.read_ambient(tmp_path) is None
+    spec = {"ambient_annual_mean_c": 11.0, "ambient_seasonal_amplitude_k": 7.5,
+            "ambient_diurnal_amplitude_k": 3.0}
+    (tmp_path / "eh_template.json").write_text(
+        json.dumps({dc_load_profile.META_KEY: {"spec": spec}}))
+    assert dc_load_profile.read_ambient(tmp_path) == spec
+
+
+def test_a_series_on_a_table_that_is_not_a_component_is_a_typed_refusal(client,
+                                                                       heat_project):
+    resp = _series(client, heat_project, kind="tou", components=["hp"],
+                   params={"component_type": "snapshots"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_series_params"
+
+
+def test_a_cop_on_a_non_electric_bus0_is_refused_at_apply(client, heat_project,
+                                                          session_ctx):
+    gen = _series(client, heat_project, kind="cop", components=["hp"],
+                  params={"source": "ground", "source_c": 5.0, "sink_c": 35.0}).json()
+    with_heat_bus0 = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                                 json={"job_id": gen["job_id"], "component": "hp",
+                                       "time_basis": "UTC"})
+    assert with_heat_bus0.status_code == 200   # B1 is AC: the electric input
+    # Move the link's input onto the heat bus: the COP would scale heat, refused.
+    session_ctx(client).network.links.at["hp", "bus0"] = "H"
+    resp = client.post(f"/api/projects/{heat_project}/profiles/apply",
+                       json={"job_id": gen["job_id"], "component": "hp",
+                             "time_basis": "UTC"})
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "cop_bus"

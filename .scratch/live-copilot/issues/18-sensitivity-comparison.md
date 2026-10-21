@@ -49,3 +49,11 @@ answer.
 OJ-29 and OJ-30 pass in Tier A with hand-computed deltas for three cases;
 LC-D19 comparison cases (zero baseline, incompatible basis, partial failure)
 pass; LC-T19 injection of an extra number is withheld.
+
+## Rules folded in from #567 HV-D1 (decision robustness: comparison)
+
+Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), research only; owner decision AI-567 (2026-10-21). Adopt the listed cases into this ticket's own numbering; each must name its token/packet limit.
+- Refuse incomparable cases (reuse `compare_project_runs` refusals); show a qualified preference or "no defensible preference", never a bare winner.
+- Native calculations only; at most 12 admitted facts in any explanation (H2 rules).
+- Robustness verdicts stay in the existing decision study (services/study/findings.py) and adequacy engines; no new evidence map (reuse card-workspaces §2.3 states, Run evidence, S8).
+- Cases: #567 D-series.

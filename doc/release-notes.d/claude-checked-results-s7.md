@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the Energy flow tab's totals for the network (generation, demand served and unserved, storage change, and export with losses and conversion, unsplit; `energy-balance/1`, opt-in), gated by a per-bus energy balance; the flow-by-route rows stay unchecked.

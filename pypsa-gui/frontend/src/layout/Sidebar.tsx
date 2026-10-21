@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight,
-  FolderOpen, Save, Copy, Upload, FileDown,
-  Download, X, Check, Clock,
+  FolderOpen, Copy, Upload, FileDown,
+  Download, X, Clock,
   LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   Users, Compass, MoreHorizontal,
@@ -442,8 +442,7 @@ function ProjectSectionContent({
   // section, the icon strip's flyout). 'footer': the Expert sidebar's footer
   // card, its actions behind the card's menu (M2, plan 2026-10-05 §11).
   variant?: 'section' | 'footer'
-  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
-  // home. The hidden rows stay reachable via the palette and the assistant.
+  // Guided mode (spec §3.5): only the header card and Recent. The hidden rows stay reachable via the palette and the assistant.
   guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
@@ -458,7 +457,6 @@ function ProjectSectionContent({
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
     readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
-  const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -750,16 +748,6 @@ function ProjectSectionContent({
     return () => clearInterval(id)
   }, [autosaveEnabled, currentProject, networkHasBuses, saveAndExportBundle])
 
-  const handleSave = () => {
-    if (currentProject) saveAndExportBundle(currentProject)
-    else setShowNameModal(true)
-  }
-
-  const handleNameConfirm = (name: string) => {
-    setShowNameModal(false)
-    saveAndExportBundle(name)
-  }
-
   const handleSaveCopy = () => {
     // Always prompt — a "copy" needs a name distinct from the current project.
     // The modal pre-fills "<current>_copy" as a starting point.
@@ -921,13 +909,6 @@ function ProjectSectionContent({
             }}
           />
           )}
-          <SItem
-            icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
-            label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
-            hint={dirty ? '●' : undefined}
-            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
-            onClick={handleSave}
-          />
           {!guided && (<>
           <SItem
             icon={<Copy size={15} />}
@@ -936,7 +917,8 @@ function ProjectSectionContent({
           />
           <SItem
             icon={<FileDown size={15} />}
-            label="Export bundle"
+            label="Export…"
+            title="Export the project: bundle (.pypsaproj.zip), NetCDF, CSV, Excel or MATPOWER."
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
           </>)}
@@ -981,13 +963,6 @@ function ProjectSectionContent({
 
   const modals = (
     <>
-      {showNameModal && (
-        <SaveNameModal
-          initial={slugify(currentProject || pn)}
-          onSave={handleNameConfirm}
-          onClose={() => setShowNameModal(false)}
-        />
-      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}

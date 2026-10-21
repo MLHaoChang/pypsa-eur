@@ -75,6 +75,15 @@ class MaintenanceYearError(AvailabilityError):
     """A dated maintenance window does not fall in the year it would apply to."""
 
 
+class TwoWayFloorError(AvailabilityError):
+    """A floor on a two-way link would forbid its reverse flow."""
+
+
+class PocBoundError(AvailabilityError):
+    """A floor on a point-of-connection link: the grid connection is not a
+    process to run at a minimum."""
+
+
 _DEFAULTS: dict[str, dict[str, Any]] = {
     "maintenance": {"windows": None, "rule": None},
     "must_run": {"share": None, "winter_share": None, "summer_share": None,
