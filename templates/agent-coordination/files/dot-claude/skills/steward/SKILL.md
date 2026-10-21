@@ -88,3 +88,5 @@ A package might turn out to need code beyond your brief, such as {{GATED_AREAS}}
 ## Questions
 
 Send each question to the coordinator with `send_message`, as 2–4 options, with the recommended one first and its reason. The owner reads times in {{TZ_LABEL}}, so give times in that zone.
+
+Read the time with `TZ={{TZ}} date +%H:%M`; never estimate it.

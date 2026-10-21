@@ -100,3 +100,5 @@ A package that turns out to need code beyond your brief, such as gridspine or in
 ## Questions
 
 Send each question to the coordinator with `send_message`, as 2–4 options, the recommended one first with its reason. The owner reads times in CET/CEST, so give times in that zone.
+
+Read the time with `TZ=Europe/Berlin date +%H:%M`; never estimate it.
