@@ -739,8 +739,11 @@ when the chat closes) follows the job and settles the step from that job's own
 record, never from live state, and without the network lock: `completed` only
 when the job's identity-bound native status is `completed` before and after its
 run manifest is published and the manifest carries its objective and input
-fingerprint (the step keeps `run_id`, `objective` and `fingerprint`, so a later
-step can reference `$run.run_id`); `failed` for failed, aborted or unknown
+fingerprint, and that fingerprint is the one the solve recorded under its lock
+(the step keeps `run_id`, `objective` and `fingerprint`, so a later step can
+reference `$run.run_id`); `publish_foreground_run` records the solve's own
+fingerprint, and when an edit queued on the lock already landed it warns
+`inputs_changed_before_publish` and captures no load-flow section; `failed` for failed, aborted or unknown
 (including a job bound to no new worker); `uncertain` when it completed but its
 record cannot be verified, or this process never registered it (a restart). The
 turn waits up to `continuation.GRACE_SECONDS` (10 s): a quick solve settles and

@@ -2946,8 +2946,14 @@ def _dispatch_real_tool_call(
                 )
                 if task_path:
                     from harness import continuation
+                    # The turn's pinned context can be an older copy of the live
+                    # one (same solver state, but a network an earlier step
+                    # replaced); the solve ran on the live network, so its
+                    # record is read there.
+                    live_ctx = PyPSAService.get_active_context()
+                    solve_ctx = live_ctx if live_ctx.solver_state is active_ctx.solver_state else active_ctx
                     settled = continuation.follow_job(active_ctx, run_token, task_path, task_ticket, job_id,
-                                                      prior_worker=prior_worker)
+                                                      prior_worker=prior_worker, solve_ctx=solve_ctx)
                     # A quick solve settles within the grace and the plan goes
                     # on in this turn; a long one releases the turn.
                     deadline = time.monotonic() + continuation.GRACE_SECONDS

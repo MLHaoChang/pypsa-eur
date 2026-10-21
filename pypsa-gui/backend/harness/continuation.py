@@ -42,14 +42,16 @@ MAX_FOLLOW_SECONDS = 24 * 3600
 _WAKE = threading.Event()  # never set in production; a poll interval, not a signal
 
 
-def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None) -> threading.Event:
+def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None, solve_ctx=None) -> threading.Event:
     """Follow a plan's job to its end on its own thread (not the session's
     progress monitor, which stops when the chat closes), then settle the
     waiting step from that job's own record. Returns an event set once the
     step is settled. Takes no network lock.
 
     `prior_worker` is the solver worker before the run call: a job bound to
-    it (or to none) has no solve of its own, so its outcome is unknown."""
+    it (or to none) has no solve of its own, so its outcome is unknown.
+    `ctx` is the context the job is bound to (its identity); `solve_ctx` the
+    one whose network the solve ran on, when the two differ."""
     settled = threading.Event()
     binding = job_adapters._ACTIVITY_BINDINGS.get(job_id)
     # A foreground solve is bound to its worker thread (or, without one, its start time).
@@ -64,7 +66,7 @@ def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None) 
                 if status != "running":
                     break
                 _WAKE.wait(POLL_SECONDS)
-            settle_from_record(ctx, run_token, task_path, ticket, job_id, status)
+            settle_from_record(ctx, run_token, task_path, ticket, job_id, status, solve_ctx=solve_ctx)
         except Exception:  # noqa: BLE001 — a lost settlement leaves the step waiting, never re-runs
             logger.exception("plan job %s could not be settled", job_id)
         finally:
@@ -74,17 +76,20 @@ def follow_job(ctx, run_token, task_path, ticket, job_id, *, prior_worker=None) 
     return settled
 
 
-def settle_from_record(ctx, run_token, task_path, ticket, job_id, status):
+def settle_from_record(ctx, run_token, task_path, ticket, job_id, status, *, solve_ctx=None):
     """Settle from the job's own terminal record, never from live state.
 
     `completed` needs the job's identity-bound native status before AND after
     its run manifest is published, and the manifest's own objective and input
-    fingerprint; anything less settles `uncertain`. Failed, aborted and
+    fingerprint, that fingerprint being the one the solve recorded under its
+    lock with no edit landing before the publish; anything less settles
+    `uncertain`. Failed, aborted and
     unknown settle `failed`."""
     from services import run_evidence
 
+    solve_ctx = solve_ctx or ctx
     if status in ("completed", "failed", "aborted") and run_token is not None:
-        run_evidence.publish_foreground_run(run_token, ctx)
+        run_evidence.publish_foreground_run(run_token, solve_ctx)
         if job_adapters._snapshot_bound_job(job_id, ctx).get("status") != status:
             # A later solve took the slot while publishing: the record may not be this job's.
             if status == "completed":
@@ -97,8 +102,11 @@ def settle_from_record(ctx, run_token, task_path, ticket, job_id, status):
               if run_token is not None else None)
     objective = ((record or {}).get("metrics") or {}).get("objective", {}).get("value")
     fingerprint = (record or {}).get("fingerprint")
+    # The step's fingerprint must be the solve's own, recorded under its lock.
+    solved = (getattr(solve_ctx.network, "meta", None) or {}).get("assistant_solve_input_fingerprint")
     if not record or record.get("status") != "completed" or record.get("job_id") != job_id \
-            or objective is None or not fingerprint:
+            or objective is None or not fingerprint or fingerprint != solved \
+            or "inputs_changed_before_publish" in (record.get("warnings") or []):
         return assistant_tasks.settle_job(task_path, ticket, job_id, "completed", "uncertain")
     return assistant_tasks.settle_job(task_path, ticket, job_id, "completed", "completed",
                                       {"run_id": run_token["run_id"], "objective": objective,
