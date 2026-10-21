@@ -259,11 +259,12 @@ class LimitBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     value: float | None = None
-    source: str
+    #: Optional here so a missing source is the service's 422 with its error_kind.
+    source: str | None = None
     note: str = ""
 
 
-def _limit_error(exc) -> HTTPException:
+def _limit_error(exc: Exception) -> HTTPException:
     return HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": exc.message})
 
 
@@ -286,7 +287,7 @@ def put_grid_readiness_limit(
                                      value=body.value, source=body.source, note=body.note,
                                      set_by=getattr(user, "email", None))
     except grid_limits.LimitError as exc:
-        raise _limit_error(exc)
+        raise _limit_error(exc) from exc
 
 
 @router.delete("/{name}/grid-readiness/limits/{item}")
@@ -304,7 +305,7 @@ def delete_grid_readiness_limit(
     try:
         cleared = grid_limits.clear_limit(project_registry.project_dir(_row(proj, db)), item)
     except grid_limits.LimitError as exc:
-        raise _limit_error(exc)
+        raise _limit_error(exc) from exc
     return {"item": item, "cleared": cleared}
 
 

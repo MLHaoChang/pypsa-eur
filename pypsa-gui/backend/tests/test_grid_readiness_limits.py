@@ -11,10 +11,8 @@ flow's to-check item for a limit clears once its source is not ``assumed``.
 from __future__ import annotations
 
 import json
-import sys
 import uuid as _uuid
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -23,10 +21,6 @@ import main
 from services.adequacy import grid_limits as L
 from services.adequacy import grid_readiness as G
 from tests.conftest import attach_session
-
-BACKEND = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(BACKEND / "project_templates"))
-import eh_templates as T  # noqa: E402
 
 BASE = "/api/campus-electrical"
 
@@ -67,6 +61,19 @@ def test_a_set_limit_survives_a_snapshot_round_trip(client, hub):
     assert row["source"].startswith("Your value (datasheet)")
 
 
+def test_a_snapshot_taken_before_any_limit_restores_the_templates_limit(client, hub):
+    name, d = hub
+    template_limit = _row(client, name, "ramp_rate")["limit"]
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "before"})
+    assert r.status_code in (200, 201), r.text
+    snap_id = r.json()["id"]
+    assert _put(client, name, "connection_ramp", {"value": 7.5, "source": "code"}).status_code == 200
+    r = client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore")
+    assert r.status_code == 200, r.text
+    assert not (d / L.SIDECAR_NAME).exists()
+    assert _row(client, name, "ramp_rate")["limit"] == template_limit
+
+
 def test_the_template_file_stays_byte_identical_through_a_set_and_a_clear(client, hub):
     name, d = hub
     before = (d / "eh_template.json").read_bytes()
@@ -96,6 +103,7 @@ def test_the_scorecard_shows_the_users_limit_live_and_says_whose_it_is(client, h
     row = _row(client, name, "ramp_rate")
     assert row["limit"] == 12.0 and row["source"] == "Your value (code): Grid code §4"
     assert row["setting"]["user"]["value"] == 12.0
+    assert "set_by" not in row["setting"]["user"]
     assert row["setting"]["default"] == default
 
     # A value the user still only assumes stays to check.
@@ -124,6 +132,19 @@ def _flow_items(client, name) -> dict:
     return {i["code"]: i for s in r.json()["sections"] for i in s["items"]}
 
 
+def test_an_assumed_value_over_a_code_row_stays_to_check(client, hub):
+    name, d = hub
+    meta = json.loads((d / "eh_template.json").read_text())
+    for row in meta["ledger"]:
+        if row["item"] == "oscillation":
+            row["source"] = "code"
+    (d / "eh_template.json").write_text(json.dumps(meta))
+    assert "assumed_oscillation" not in _flow_items(client, name)
+    _put(client, name, "oscillation", {"value": 3.0, "source": "assumed"})
+    assert "assumed_oscillation" in _flow_items(client, name)
+    assert _row(client, name, "oscillation")["source"] == "Your assumption"
+
+
 def test_a_confirmed_limit_clears_its_to_check_item_in_the_flow(client, hub):
     name, _d = hub
     items = _flow_items(client, name)
@@ -140,6 +161,7 @@ def test_a_confirmed_limit_clears_its_to_check_item_in_the_flow(client, hub):
     ("connection_ramp", {"value": 0.0, "source": "code"}, "invalid_limit_value"),
     ("connection_ramp", {"value": -1.0, "source": "code"}, "invalid_limit_value"),
     ("connection_ramp", {"source": "code"}, "invalid_limit_value"),
+    ("connection_ramp", {"value": 1.0}, "invalid_limit_source"),
     ("oscillation", {"value": 100.5, "source": "code"}, "invalid_limit_value"),
     ("oscillation", {"value": 1.0, "source": "guess"}, "invalid_limit_source"),
     ("oscillation", {"value": 1.0, "source": "code", "note": "x" * 501}, "note_too_long"),

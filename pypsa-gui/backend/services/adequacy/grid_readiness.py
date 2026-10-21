@@ -362,12 +362,18 @@ def _setting(inp: _Inputs, item: str, generic: float | None) -> dict:
     else:
         default = {"value": generic, "source": "assumed", "origin": "placeholder"}
     user = inp.user_limits.get(item)
-    return {"item": item, "user": dict(user) if user is not None else None, "default": default}
+    # Who set it stays in the sidecar: the scorecard also reaches the copilot.
+    shown = {k: v for k, v in user.items() if k != "set_by"} if user is not None else None
+    return {"item": item, "user": shown, "default": default}
+
+
+def _generic_ramp(inp: _Inputs) -> float | None:
+    """The placeholder ramp limit: a share of the connection per minute."""
+    return GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw if inp.connection_mw else None
 
 
 def _ramp_row(inp: _Inputs) -> dict:
-    generic = (GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw
-               if inp.connection_mw else None)
+    generic = _generic_ramp(inp)
     limit, source, assumed = _limit_from(
         inp, "connection_ramp", generic,
         f"{GENERIC_RAMP_SHARE_PER_MIN:.0%} of the connection capacity per minute")
@@ -801,8 +807,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
             _rvc_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
             _lole_row(inp)]
     _after_battery(inp, rows)
-    generic_ramp = GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw if inp.connection_mw else None
-    settings = {"ramp_rate": ("connection_ramp", generic_ramp),
+    settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
                 "scr": ("fault_level", None)}
     for r in rows:

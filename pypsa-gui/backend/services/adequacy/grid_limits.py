@@ -59,15 +59,19 @@ def _lock(project_dir: pathlib.Path) -> threading.Lock:
 def _valid_entry(item, entry) -> bool:
     if item not in ITEMS or not isinstance(entry, dict) or entry.get("source") not in SOURCES:
         return False
-    if item in SOURCE_ONLY:
-        return True
-    v = entry.get("value")
-    return (isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
-            and _in_range(item, float(v)))
+    return item in SOURCE_ONLY or _valid_value(item, entry.get("value"))
 
 
-def _in_range(item: str, v: float) -> bool:
+def _valid_value(item: str, v) -> bool:
+    """A finite number above 0; the oscillation limit at most 100 %."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return False
     return v > 0 and (item != "oscillation" or v <= 100.0)
+
+
+def _known(item: str) -> None:
+    if item not in ITEMS:
+        raise LimitError("unknown_limit_item", f"unknown limit {item!r}; known {list(ITEMS)}")
 
 
 def load_limits(project_dir) -> dict:
@@ -93,8 +97,7 @@ def sidecar_hash(project_dir) -> str:
 
 def validate(item: str, value, source, note) -> tuple[float | None, str, str]:
     """``(value, source, note)`` as stored, or a ``LimitError``."""
-    if item not in ITEMS:
-        raise LimitError("unknown_limit_item", f"unknown limit {item!r}; known {list(ITEMS)}")
+    _known(item)
     if source not in SOURCES:
         raise LimitError("invalid_limit_source", f"source must be one of {list(SOURCES)}")
     note = "" if note is None else str(note)
@@ -106,8 +109,7 @@ def validate(item: str, value, source, note) -> tuple[float | None, str, str]:
                              "the fault level is set on the point-of-connection bus; "
                              "here only its source and note")
         return None, source, note
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
-            or not _in_range(item, float(value)):
+    if not _valid_value(item, value):
         rng = "in (0, 100] %" if item == "oscillation" else "a finite number above 0 MW/min"
         raise LimitError("invalid_limit_value", f"the {item.replace('_', ' ')} limit must be {rng}")
     return float(value), source, note
@@ -133,7 +135,8 @@ def _write(project_dir: pathlib.Path, state: dict) -> None:
         path.unlink(missing_ok=True)
 
 
-def set_limit(project_dir, item: str, *, value=None, source, note="", set_by: str | None = None) -> dict:
+def set_limit(project_dir, item: str, *, value=None, source=None, note="",
+              set_by: str | None = None) -> dict:
     """Validate, then set ``item``; returns the stored entry."""
     project_dir = pathlib.Path(project_dir)
     value, source, note = validate(item, value, source, note)
@@ -149,8 +152,7 @@ def set_limit(project_dir, item: str, *, value=None, source, note="", set_by: st
 
 def clear_limit(project_dir, item: str) -> bool:
     """Reset ``item`` to the template's value or the placeholder; whether one was set."""
-    if item not in ITEMS:
-        raise LimitError("unknown_limit_item", f"unknown limit {item!r}; known {list(ITEMS)}")
+    _known(item)
     project_dir = pathlib.Path(project_dir)
     with _lock(project_dir):
         state = load_limits(project_dir)
