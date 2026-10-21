@@ -1,5 +1,26 @@
 import type { AnswerReceipt } from '../utils/answerAssurance'
-import { readableProfile } from '../utils/readableTime'
+import { readableProfile, readableWindow } from '../utils/readableTime'
+import type { NavigationEntry } from '../utils/answerAssurance'
+
+// What the Load flow tab shows instead of the checked solve and window (S3b).
+const VIEW_REASON: Record<NonNullable<NavigationEntry['reason']>, string> = {
+  window_differs: 'a different time window',
+  source_not_lopf: "results other than the optimisation's",
+  inputs_changed: 'inputs changed since the checked run',
+  fingerprint_basis_unknown: 'a solve that cannot be matched to the checked one',
+  project_differs: 'another project',
+}
+
+/** The Load flow line: "showing" only with a confirmed, matching display. */
+export function loadflowLine(entry: NavigationEntry): string | null {
+  if (entry.shows === 'checked_evidence' && entry.window) {
+    return `Load flow is showing the solve and window that were checked (${readableWindow(entry.window.start, entry.window.end)}).`
+  }
+  if (entry.shows === 'different_view' && entry.reason) {
+    return `Load flow opened. It shows ${VIEW_REASON[entry.reason]}, so the numbers there are not the checked ones.`
+  }
+  return entry.shows === 'not_confirmed' ? 'Load flow opened.' : null
+}
 
 export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answerId: string; receipt: AnswerReceipt; sourceLabel?: string }) {
   const scope = receipt.request_scope
@@ -8,7 +29,9 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
     <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
       {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {readableProfile(scope.profile)}</p>}
-      {scope?.start && <p>{scope.start} to {scope.end}</p>}
+      {scope?.start && <p>{readableWindow(scope.start, scope.end)}</p>}
+      {receipt.navigation?.map(n => loadflowLine(n)).filter(Boolean).map((line, i) =>
+        <p key={i} data-testid="checked-loadflow-view">{line}</p>)}
       {scope?.cost_basis && <p>Cost basis: {scope.cost_basis.currency}, price year {scope.cost_basis.price_year};
         {' '}annual fixed cost fraction {scope.cost_basis.annual_fixed_cost_fraction}</p>}
       {receipt.result_slots && <ul>{receipt.result_slots.map(s => <li key={s.metric}>
