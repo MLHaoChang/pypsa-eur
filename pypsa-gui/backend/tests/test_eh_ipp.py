@@ -563,3 +563,27 @@ def test_operating_pin_ipp(solved):
     n, cfg, _da = solved
     case, _res = _case(n, cfg)
     check("ipp", case)
+
+
+@pytest.mark.live_solve
+def test_revenue_by_stream_on_the_base_case(solved):
+    """Ticket 05 (G6): the PPAs show as PPA sales and market sales, nothing lands in Other,
+    and every year the rows sum to the operating cash; the report's project payload has them."""
+    from services.finance.report import assemble_finance_sections
+    from services.finance.revenue_streams import revenue_by_stream
+
+    n, cfg, _da = solved
+    case, res = _case(n, cfg)
+    out = revenue_by_stream(res.op)
+    assert out["other_keys"] == []
+    rows = {r["id"]: np.array(r["values"], dtype=float) for r in out["rows"]}
+    np.testing.assert_allclose(sum(rows.values()), res.op.revenue - res.op.costs,
+                               rtol=1e-9, atol=1e-6)
+    on = res.op.tl.operating_mask()
+    tenor = np.flatnonzero(on)[:M.PPA_TENOR]                  # the PPAs end after their tenor
+    assert (rows["ppa"][tenor] > 0).all() and not rows["ppa"][np.flatnonzero(on)[M.PPA_TENOR:]].any()
+    assert (rows["merchant"][on] > 0).all()
+    assert not rows["cfd"].any() and not rows["other"].any()
+    assert (rows["om"][on] < 0).all()
+    payload = assemble_finance_sections(res, case).sections["project"].payload
+    assert payload["revenue_streams"]["rows"][0]["id"] == "ppa"

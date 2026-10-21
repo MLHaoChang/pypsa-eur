@@ -503,3 +503,16 @@ def test_operating_pin_ammonia():
 
     _n, case = _case("base", site_today=False)
     check("ammonia", case)
+
+
+@pytest.mark.live_solve
+def test_revenue_by_stream_names_what_it_cannot_place():
+    """IPP ticket 05 (GK): on this template, the keys in Other are listed by name. The one
+    there is the grey-ammonia buy-in, a product purchase (not O&M of an asset), so Other."""
+    from services.finance.cashflow import build_operating
+    from services.finance.revenue_streams import revenue_by_stream
+    from services.finance.timeline import build_timeline
+
+    _n, case = _case("base", site_today=False)
+    out = revenue_by_stream(build_operating(case, build_timeline(case)))
+    assert out["other_keys"] == ["asset:opex:Generator:__buy_nh3"]
