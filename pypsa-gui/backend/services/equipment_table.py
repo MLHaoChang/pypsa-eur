@@ -14,13 +14,18 @@ Rules (server verdicts; the model proposes a mapping, never a value):
   `MAX_CELL_CHARS` characters per cell; more refuses (`table_too_large`) instead of
   truncating. Formulas are never evaluated: an XLSX formula cell is read from the value
   the workbook cached, flagged `formula`, and one with no cached value is left out
-  (`formula_without_value`). Macros, links and other sheets are not read.
+  (`formula_without_value`). Macros, links and other sheets are not read. Before openpyxl
+  opens an XLSX, its zip is refused (`table_unsafe`) when it would inflate past
+  `MAX_XLSX_INFLATED` or by more than `MAX_XLSX_RATIO`, or when an XML part declares a
+  DOCTYPE or entity (defusedxml is not installed, so openpyxl's parser is not hardened).
 - **Exact lineage.** Every cell names the upload id, the full sha256 of the bytes read,
   the sheet, the sheet row and column and its A1 reference, with the raw value and unit.
 - **Exact entities.** A row's name matches one asset of the class exactly, or the row is
   left out (`component_not_found`, `duplicate_entity`).
 - **Native fields.** Unknown, derived, read-only and non-numeric fields are left out with
-  the field schema's own reason; values go through the edit card's value checks.
+  the field schema's own reason; values go through the edit card's value checks. A
+  time-series field, or a static-or-series field the asset holds as a series, is left out
+  (`time_series_not_supported_here`); a static-or-series field is written as static.
 - **Units from the schema only.** A column's unit is the field's stored unit, or its display
   unit converted by the schema's `display_scale`. Any other unit, or none, leaves the
   column out (`unit_mismatch`, `unit_missing`): nothing is assumed.
@@ -35,6 +40,7 @@ import csv
 import hashlib
 import io
 import re
+import zipfile
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
@@ -46,10 +52,25 @@ MAX_CELL_CHARS = 200
 # Cells one card shows; a larger mapping is split by the user (rows or columns).
 MAX_CARD_CELLS = 200
 
+MAX_XLSX_INFLATED = 100 * 1024 * 1024
+MAX_XLSX_RATIO = 100
+
 CSV_SHEET = "(csv)"
 CONFIRMATIONS = ("money_year",)
 
 _NUMBER = re.compile(r"^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$")
+
+
+# Every refusal kind below, written as literals so `tests/test_tool_error_kind_manifest.py`
+# derives them (`_refuse` takes its kind as a variable).
+_ERROR_KINDS = (
+    {"error_kind": "table_too_large"}, {"error_kind": "table_unsafe"}, {"error_kind": "unreadable_table"},
+    {"error_kind": "sheet_not_found"}, {"error_kind": "source_changed"},
+    {"error_kind": "unsupported_table_format"}, {"error_kind": "duplicate_header"},
+    {"error_kind": "column_not_found"}, {"error_kind": "empty_mapping"}, {"error_kind": "mapping_too_large"},
+    {"error_kind": "table_confirmation_needed"}, {"error_kind": "nothing_to_change"},
+    {"error_kind": "edit_preview_stale"},
+)
 
 
 def _refuse(kind: str, message: str, status: int = 422, **extra):
@@ -101,9 +122,37 @@ def _read_csv(blob: bytes) -> tuple[list[str], list[list[dict]]]:
     return [c["raw"] for c in cells[0]], cells[1:]
 
 
+_DTD = re.compile(rb"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
+def _check_xlsx(blob: bytes) -> None:
+    """Refuse a zip bomb or an XML DOCTYPE/entity before openpyxl parses anything."""
+    try:
+        members = zipfile.ZipFile(io.BytesIO(blob)).infolist()
+    except (zipfile.BadZipFile, ValueError):
+        _refuse("unreadable_table", "The workbook could not be read as XLSX: not a zip archive.")
+    inflated = sum(m.file_size for m in members)
+    packed = sum(m.compress_size for m in members)
+    if inflated > MAX_XLSX_INFLATED or inflated > MAX_XLSX_RATIO * max(packed, 1):
+        _refuse("table_unsafe", f"The workbook inflates to {inflated} bytes from {packed}; a table is read up to "
+                f"{MAX_XLSX_INFLATED} bytes and {MAX_XLSX_RATIO}x compression.",
+                limits={"inflated_bytes": MAX_XLSX_INFLATED, "ratio": MAX_XLSX_RATIO})
+    archive = zipfile.ZipFile(io.BytesIO(blob))
+    for m in members:
+        if not m.filename.lower().endswith((".xml", ".rels", ".vml")):
+            continue
+        tail = b""
+        with archive.open(m) as part:
+            while chunk := part.read(1 << 16):
+                if _DTD.search(tail + chunk):
+                    _refuse("table_unsafe", f"{m.filename} declares a DOCTYPE or entity; the workbook is not read.")
+                tail = chunk[-16:]
+
+
 def _read_xlsx(blob: bytes, sheet: str | None) -> tuple[str, list[str], list[str], list[list[dict]]]:
     import openpyxl
 
+    _check_xlsx(blob)
     try:
         # Two inert reads of the same bytes: cached values, and which cells hold a formula.
         values = openpyxl.load_workbook(io.BytesIO(blob), read_only=True, data_only=True, keep_links=False)
@@ -212,6 +261,9 @@ def _column_verdict(field_name: str, field: dict | None, unit: str | None, money
     """`(plan, None)` for a mappable column, else `(None, reason)`."""
     if field is None:
         return None, {"kind": "unknown_field", "message": f"No field {field_name!r}. Read get_component_schema."}
+    if str(field.get("native_type") or "") == "series":
+        return None, {"kind": "time_series_not_supported_here", "message": f"{field_name} is a time series; a "
+                      "table maps one static value per asset."}
     if field.get("derived"):
         return None, {"kind": "derived_field", "message": f"{field_name} is derived from other fields."}
     if not field.get("editable"):
@@ -263,6 +315,7 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
         _refuse("empty_mapping", "Map at least one column onto a field.")
     attr = edit_card._component_attr(component_class)
     frame = getattr(n, attr)
+    series = getattr(n, f"{attr}_t", {})
     unmapped: list[dict] = []
     plans: dict[str, dict] = {}
     for header, spec in columns.items():
@@ -317,6 +370,12 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
             if cell["raw"] in (None, ""):
                 unmapped.append({"name": nm, "field": p["field"], "kind": "empty_cell", "source": lineage,
                                  "message": f"{cell['cell']} is empty; {nm}.{p['field']} keeps its value."})
+                continue
+            held = series.get(p["field"]) if hasattr(series, "get") else None
+            if held is not None and nm in getattr(held, "columns", ()):
+                unmapped.append({"name": nm, "field": p["field"], "kind": "time_series_not_supported_here",
+                                 "source": lineage, "message": f"{nm}.{p['field']} is held as a time series; "
+                                 "a static value from the table would not apply. It is left as it is."})
                 continue
             d = _number(cell["raw"])
             if d is None:
@@ -400,9 +459,9 @@ def changes(n, p: dict) -> dict[str, dict]:
     return out
 
 
-def source_id(lineage: dict, filename: str) -> str:
-    """A written field's provenance source: `upload:<sha16>/<file>#<sheet>!<cell>`."""
-    return f"upload:{lineage['sha256'][:16]}/{filename}#{lineage['sheet']}!{lineage['cell']}"
+def source_id(lineage: dict) -> str:
+    """A written field's provenance source: `upload:<id>#<sha16> <sheet>!<cell>`."""
+    return f"upload:{lineage['upload_id']}#{lineage['sha256'][:16]} {lineage['sheet']}!{lineage['cell']}"
 
 
 def stamp(n, p: dict, written: dict[str, dict], *, approved_by: str | None) -> None:
@@ -414,33 +473,52 @@ def stamp(n, p: dict, written: dict[str, dict], *, approved_by: str | None) -> N
         if cell["field"] not in written.get(cell["name"], {}):
             continue
         provenance.record(n, p["component_class"], cell["name"], cell["field"], status="customised",
-                          source=source_id(cell["source"], p["source"]["filename"]),
+                          source=source_id(cell["source"]),
                           currency=cell["currency"], currency_year=cell["money_year"],
                           approved_by=approved_by, approved_at=when)
 
 
-def apply(p: dict, *, approved_by: str | None) -> dict:
-    """Write each changed asset through the native component update, in table order, and
-    stamp it. Not one transaction: a refusal part-way stops, and the result names what was
-    written and what was not (the turn's undo snapshot reverts the written part)."""
+def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
+    """Write exactly the cells the card's copy preview accepted, each asset through the
+    native component update, in table order, and stamp them.
+
+    Under the network's mutation lock for the whole loop (`update_component` re-enters
+    it per asset), so no other write lands between assets. Before the first write the
+    live network must still hold every typed row's `old` and the plan must change
+    exactly the card's typed cells, else `edit_preview_stale` and nothing is written.
+    Not one transaction: a native refusal part-way stops, and the result names what was
+    written and what was not (one undo reverts the written part)."""
+    from harness import edit_card
     from services import chat_tools
     from services.pypsa_service import PyPSAService
 
-    todo = changes(PyPSAService.get_network(), p)
-    if not todo:
-        _refuse("nothing_to_change", "Every mapped value already equals the network's; nothing to apply.")
-    written: dict[str, dict] = {}
-    failed = None
-    for name, attrs in todo.items():
-        try:
-            chat_tools.update_component(p["component_class"], name, attrs)
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
-            failed = {"name": name, "error_kind": detail.get("error_kind", "edit_refused"),
-                      "message": detail.get("message", "")}
-            break
-        written[name] = attrs
-    stamp(PyPSAService.get_network(), p, written, approved_by=approved_by)
+    shown = {(r["name"], r["field"]): r for r in card["rows"] if r["role"] == "typed"}
+    with PyPSAService.get_lock():
+        n = PyPSAService.get_network()
+        todo = changes(n, p)
+        if not todo:
+            _refuse("nothing_to_change", "Every mapped value already equals the network's; nothing to apply.")
+        frame = getattr(n, edit_card._component_attr(p["component_class"]))
+        cells = {(name, field) for name, attrs in todo.items() for field in attrs}
+
+        def now(name, field):
+            return edit_card._scalar(frame.at[name, field]) if field in frame.columns else None
+
+        if cells != set(shown) or any(not edit_card._same(now(*k), shown[k]["old"]) for k in cells):
+            _refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
+                    "Propose the edit again.", 409)
+        written: dict[str, dict] = {}
+        failed = None
+        for name, attrs in todo.items():
+            try:
+                chat_tools.update_component(p["component_class"], name, dict(attrs))
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                failed = {"name": name, "error_kind": detail.get("error_kind", "edit_refused"),
+                          "message": detail.get("message", "")}
+                break
+            written[name] = attrs
+        stamp(PyPSAService.get_network(), p, written, approved_by=approved_by)
     out = {"component_class": p["component_class"], "source": p["source"], "written": written,
            "unmapped": p["unmapped"], "notes": p["notes"]}
     if failed:

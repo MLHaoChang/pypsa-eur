@@ -3633,14 +3633,17 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "preview_equipment_mapping",
         "Map an uploaded CSV/XLSX equipment table (one row per asset) onto assets "
-        "of ONE class: `name_column` holds each asset's exact name, `columns` maps "
+        "of ONE class: `name_column` holds each asset's name, matched exactly and "
+        "case-sensitively after trimming spaces, `columns` maps "
         "a header to {field, unit} (fields from get_component_schema; the unit is "
         "the field's stored or display unit, nothing else is converted). Cost "
         "fields need `currency` and `money_year`. The server reads the file "
         "(at most 500 rows, 40 columns; formulas are never evaluated), checks "
         "every cell and returns {source (upload_id, sha256, sheet), cells (asset, "
         "field, value, unit, source cell), changed_cells, unmapped (each with its "
-        "kind and reason), needs, missing}. Writes nothing. Show the user the "
+        "kind and reason), needs, missing}. Time-series fields are left out "
+        "(time_series_not_supported_here); static-or-series fields are written as "
+        "static. Writes nothing. Show the user the "
         "unmapped cells; never guess a field, unit or asset for them. Safety: read.",
         {
             "upload_id": {"type": "string"},

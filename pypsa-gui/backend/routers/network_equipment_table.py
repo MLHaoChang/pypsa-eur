@@ -1,13 +1,17 @@
 """
 Apply a mapped equipment table (CSV/XLSX upload) to several assets of one class.
 
-Under `/api/network`, so the write takes the undo snapshot and invalidates results
-like every other network edit. It goes through the edit card (`harness/edit_card.py`,
-tool `apply_equipment_mapping`): the card shows every changed cell old → new with its
-source cell; `apply` re-previews, refuses a card whose digest moved
-(`edit_preview_stale`) or whose table bytes changed (`source_changed`), writes, and
-returns the card's receipt. The assistant's `apply_equipment_mapping` runs the same
-handler after its own confirmation. See `services/equipment_table.py`.
+Under `/api/network`, so the middleware takes ONE undo snapshot before the handler (the
+loop below calls the native update in-process, never through HTTP, so it adds none),
+the foreign-lock gate applies, and results are invalidated like every other network
+edit. It goes through the edit card (`harness/edit_card.py`, tool
+`apply_equipment_mapping`): the card shows every changed cell old → new with its source
+cell. The handler builds the card on a copy (any refused cell refuses the card), refuses
+a digest other than the one the user approved (`edit_preview_stale`) or changed table
+bytes (`source_changed`), then `equipment_table.apply` writes exactly the card's cells
+under the mutation lock and the receipt reads them back. The assistant's
+`apply_equipment_mapping` runs the same handler after its own confirmation. See
+`services/equipment_table.py`.
 """
 from __future__ import annotations
 
@@ -69,9 +73,10 @@ def apply_equipment_mapping(body: EquipmentMappingRun, user: User = Depends(requ
 
     args = args_of(body)
     card = edit_card.preview(TOOL, args, with_state=False)
-    if body.digest is not None:
-        edit_card.require_current(TOOL, args, {"digest": body.digest})
+    if body.digest is not None and body.digest != card["digest"]:
+        T._refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
+                  "Propose the edit again.", 409)
     p = T.plan_active(args)
     T.require_confirmed(p)
-    out = T.apply(p, approved_by=getattr(user, "email", None))
+    out = T.apply(p, card, approved_by=getattr(user, "email", None))
     return {**out, "receipt": edit_card.receipt(card, args)}

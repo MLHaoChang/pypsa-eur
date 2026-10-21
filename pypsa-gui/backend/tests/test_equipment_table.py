@@ -17,6 +17,17 @@ own numbering of the #567 study's I-series (research only):
 - ET-10 money: a cost column needs currency and money year, a different base
   year needs the user's confirmation;
 - ET-11 (I07) the HTTP apply refuses a card that is not current.
+
+Gatekeeper review (GO WITH CHANGES), each with its case:
+
+- ET-12 the live loop writes only the cells the card's copy preview accepted, and
+  refuses before the first write when the network moved since the card;
+- ET-13 one undo through the HTTP route reverts the whole batch;
+- ET-14 a zip bomb or a DOCTYPE/entity refuses before openpyxl opens the workbook;
+- ET-15 time-series fields stay out; static-or-series fields are written as static;
+- ET-16 the card's digest binds the source cell, not the raw text in it;
+- ET-17 the route sits behind the foreign-lock gate and the undo middleware, both
+  tools are lock-gated, the apply is undo-captured, and an anonymous apply is refused.
 """
 from __future__ import annotations
 
@@ -117,7 +128,7 @@ def test_et01_two_lines_one_card_with_cell_lineage_and_verified_readback(grid):
     assert result["written"] == {"L1": {"s_nom": 500, "x": 10.5}, "L2": {"s_nom": 450, "x": 7.25}}
     stamp = provenance.get(n, "Line", "L2")["x"]
     assert stamp["status"] == "customised"
-    assert stamp["source"] == f"upload:{preview['source']['sha256'][:16]}/lines.csv#(csv)!C3"
+    assert stamp["source"] == f"upload:{uid}#{preview['source']['sha256'][:16]} (csv)!C3"
 
 
 def test_et02_display_unit_converts_by_the_schema_scale_and_other_units_stay_out(grid):
@@ -198,9 +209,15 @@ def test_et07_a_repeat_apply_changes_nothing(grid):
     assert "nothing_to_change" in json.dumps(collector[-1]["content"])
 
 
+def _card(args):
+    from harness import edit_card
+
+    return edit_card.preview("apply_equipment_mapping", args, with_state=False)
+
+
 def test_et08_a_refusal_part_way_is_reported_as_partial(grid, monkeypatch):
-    p = T.plan_active({"upload_id": _csv(LINES), "component_class": "Line", "name_column": "name",
-                       "columns": LINE_COLUMNS})
+    args = {"upload_id": _csv(LINES), "component_class": "Line", "name_column": "name", "columns": LINE_COLUMNS}
+    p, card = T.plan_active(args), _card(args)
     real = chat_tools.update_component
 
     def update(klass, name, attrs, *a, **k):
@@ -209,7 +226,7 @@ def test_et08_a_refusal_part_way_is_reported_as_partial(grid, monkeypatch):
         return real(klass, name, attrs, *a, **k)
 
     monkeypatch.setattr(chat_tools, "update_component", update)
-    out = T.apply(p, approved_by=None)
+    out = T.apply(p, card, approved_by=None)
     assert out["partial"] is True
     assert out["written"] == {"L1": {"s_nom": 500, "x": 10.5}}
     assert out["failed"]["name"] == "L2" and out["failed"]["error_kind"] == "study_in_flight"
@@ -266,3 +283,131 @@ def test_et11_the_http_apply_refuses_a_card_that_is_not_current(client, grid):
     r = client.post("/api/network/equipment_table/apply", json={**args, "digest": "f" * 64})
     assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "edit_preview_stale", r.text
     assert n.lines.at["L1", "s_nom"] == 300 and n.lines.at["L2", "x"] == 8.0
+
+
+def test_et12_the_live_loop_writes_only_what_the_copy_accepted_and_refuses_a_moved_network(grid):
+    args = {"upload_id": _csv(LINES), "component_class": "Line", "name_column": "name", "columns": LINE_COLUMNS}
+    p, card = T.plan_active(args), _card(args)
+    n = PyPSAService.get_network()
+    n.lines.loc["L2", "x"] = 9.0  # another write after the card was shown
+    with pytest.raises(HTTPException) as exc:
+        T.apply(p, card, approved_by=None)
+    assert exc.value.status_code == 409 and exc.value.detail["error_kind"] == "edit_preview_stale"
+    assert n.lines.at["L1", "s_nom"] == 300  # nothing written, not even the unmoved asset
+
+    n.lines.loc["L2", "x"] = 8.0
+    fewer = {**card, "rows": [r for r in card["rows"] if (r["name"], r.get("field")) != ("L2", "x")]}
+    with pytest.raises(HTTPException) as exc:
+        T.apply(p, fewer, approved_by=None)
+    assert exc.value.detail["error_kind"] == "edit_preview_stale"
+    assert n.lines.at["L1", "s_nom"] == 300
+
+
+def test_et13_one_undo_through_the_http_route_reverts_the_whole_batch(client, grid, session_ctx):
+    from tests.test_chat_tools_dispatch import _bound_to
+
+    def lines():
+        rows = {ln["name"]: ln for ln in client.get("/api/network/lines").json()}
+        return rows["L1"]["s_nom"], rows["L1"]["x"], rows["L2"]["s_nom"], rows["L2"]["x"]
+
+    # A saved project the client's session owns, as a real user's apply runs on.
+    assert client.post("/api/projects/P", params={"force": True, "rebind": True}).status_code == 200
+    with _bound_to(session_ctx(client)):
+        _, args = _args(_csv(LINES))
+        digest = _card(args)["digest"]
+    r = client.post("/api/network/equipment_table/apply", json={**args, "digest": digest})
+    assert r.status_code == 200, r.text
+    assert r.json()["written"] == {"L1": {"s_nom": 500, "x": 10.5}, "L2": {"s_nom": 450, "x": 7.25}}
+    assert r.json()["receipt"]["outcome"] == "verified"
+    assert lines() == (500, 10.5, 450, 7.25)
+    assert client.get("/api/network/undo/info").json()["depth"] == 1  # one snapshot for the batch
+
+    assert client.post("/api/network/undo").status_code == 200
+    assert lines() == (300, 12.1, 200, 8.0)
+
+
+def _xlsx_bytes(parts: dict[str, bytes], method=None) -> bytes:
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", method or zipfile.ZIP_DEFLATED) as z:
+        for name, data in parts.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+def test_et14_a_zip_bomb_or_a_doctype_refuses_before_openpyxl_opens_it(grid, monkeypatch):
+    import openpyxl
+
+    opened = []
+    monkeypatch.setattr(openpyxl, "load_workbook", lambda *a, **k: opened.append(1) or (_ for _ in ()).throw(
+        AssertionError("openpyxl opened an unsafe workbook")))
+    mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    columns = {"rating": {"field": "s_nom", "unit": "MVA"}}
+
+    bomb = upload_service.add_upload("P", _xlsx_bytes({"xl/worksheets/sheet1.xml": b"\0" * (8 * 1024 * 1024)}),
+                                     "bomb.xlsx", mime).file_id
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.preview_equipment_mapping(bomb, "Line", "name", columns)
+    assert exc.value.detail["error_kind"] == "table_unsafe"
+
+    xxe = b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><worksheet>&e;</worksheet>'
+    dtd = upload_service.add_upload("P", _xlsx_bytes({"xl/worksheets/sheet1.xml": xxe}), "xxe.xlsx", mime).file_id
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.preview_equipment_mapping(dtd, "Line", "name", columns)
+    assert exc.value.detail["error_kind"] == "table_unsafe" and "DOCTYPE" in exc.value.detail["message"]
+    assert opened == []
+
+
+def test_et15_time_series_fields_stay_out_and_static_or_series_fields_are_static(grid):
+    import pandas as pd
+
+    out = chat_tools.preview_equipment_mapping(_csv("name,flow\nL1,5\n"), "Line", "name",
+                                               {"flow": {"field": "p0", "unit": "MW"}})
+    assert out["cells"] == [] and out["unmapped"][0]["kind"] == "time_series_not_supported_here"
+
+    n = PyPSAService.get_network()
+    n.lines_t.s_max_pu = pd.DataFrame({"L2": [0.5, 0.6]}, index=n.snapshots)
+    out = chat_tools.preview_equipment_mapping(_csv("name,smax\nL1,0.9\nL2,0.9\n"), "Line", "name",
+                                               {"smax": {"field": "s_max_pu", "unit": "per unit"}})
+    assert [(c["name"], c["value"]) for c in out["cells"]] == [("L1", 0.9)]
+    assert [(u["name"], u["kind"]) for u in out["unmapped"]] == [("L2", "time_series_not_supported_here")]
+
+    eff = chat_tools.preview_equipment_mapping(_csv("name,eff\nBattery,90\n", "b.csv"), "StorageUnit", "name",
+                                               {"eff": {"field": "efficiency_store", "unit": "%"}})
+    assert [(c["field"], c["value"]) for c in eff["cells"]] == [("efficiency_store", 0.9)]
+
+
+def test_et16_the_digest_binds_the_source_cell_not_its_raw_text(grid):
+    plain = _csv("name,rating\nL1,500\n")
+    padded = _csv("name,rating\nL1,500.0\n")
+    args = {"component_class": "Line", "name_column": "name", "columns": {"rating": {"field": "s_nom", "unit": "MVA"}}}
+    a, b = _card({**args, "upload_id": plain}), _card({**args, "upload_id": padded})
+    typed = [r for r in a["rows"] if r["role"] == "typed"]
+    assert typed[0]["source"]["raw"] == "500"  # the card still shows it
+    # Different bytes and upload: the cell's lineage differs, so the digest does.
+    assert a["digest"] != b["digest"]
+    from harness import edit_card
+
+    same_cell = {**a, "rows": [{**r, "source": {**r["source"], "raw": "500.000"}} if r.get("source") else r
+                               for r in a["rows"]]}
+    assert edit_card._digest(same_cell) == a["digest"]
+    moved = {**a, "rows": [{**r, "source": {**r["source"], "cell": "B9"}} if r.get("source") else r
+                           for r in a["rows"]]}
+    assert edit_card._digest(moved) != a["digest"]
+
+
+def test_et17_the_route_is_gated_undo_captured_and_refuses_anonymous_callers(anon_client, grid):
+    import main
+
+    path = "/api/network/equipment_table/apply"
+    assert any(path.startswith(p) for p in main._FOREIGN_LOCK_GATE_PREFIXES)
+    assert any(path.startswith(p) for p in main._UNDO_PREFIXES) and path not in main._UNDO_EXCLUDE
+    gated = chat_tools._lock_gated_tool_names()
+    assert "apply_equipment_mapping" in gated and "apply_equipment_mapping" in chat_tools.UNDO_CAPTURED_TOOLS
+    assert "preview_equipment_mapping" not in chat_tools.UNDO_CAPTURED_TOOLS
+
+    _, args = _args(_csv(LINES))
+    r = anon_client.post(path, json={**args, "digest": "f" * 64})
+    assert r.status_code == 401
+    assert PyPSAService.get_network().lines.at["L1", "s_nom"] == 300

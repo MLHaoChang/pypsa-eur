@@ -142,8 +142,11 @@ _UNBOUND = frozenset({"digest", "section_state"})
 
 def _digest(card: dict) -> str:
     """Binds what the card SHOWS: a different old, new or derived value is a
-    different card. Edits elsewhere in the project leave it valid."""
+    different card. Edits elsewhere in the project leave it valid. A row's source
+    cell is bound by its upload, sha256 and cell, never by the raw text it holds."""
     body = {k: v for k, v in card.items() if k not in _UNBOUND}
+    body["rows"] = [{**row, "source": {k: v for k, v in row["source"].items() if k != "raw"}}
+                    if isinstance(row.get("source"), dict) else row for row in body.get("rows", [])]
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str, allow_nan=False).encode()).hexdigest()
 
 

@@ -148,8 +148,9 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                     </button>
                   )}
                   {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source">
-                    From {r.source.filename ? `${r.source.filename} · ` : ''}{r.source.sheet} · cell {r.source.cell}:{' '}
-                    {show(r.source.raw)} {r.source.raw_unit}{r.source.formula ? ' (saved formula value)' : ''}
+                    {[r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell]
+                      .filter(Boolean).join(' \u203a ')}{' '}
+                    ({show(r.source.raw)} {r.source.raw_unit}{r.source.formula ? ', saved formula value' : ''})
                   </span>}
                   {r.money && <span className="block text-[10px] text-muted" data-testid="chat-edit-money">
                     {r.money.currency}, {r.money.money_year} money, not adjusted
