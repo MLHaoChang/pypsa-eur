@@ -19,6 +19,7 @@ from fastapi import HTTPException
 
 from services import chat_tools
 from services.chat_tools_schema import safety_tier_for
+from services.library import common
 
 ORACLES = Path(__file__).parent / "fixtures" / "investment_case" / "oracles"
 TARIFF = {"id": "nl-tou", "name": "NL TOU", "jurisdiction": "NL", "valid_from": "2030-01-01",
@@ -44,7 +45,10 @@ def test_the_tools_are_registered_with_their_safety_tiers():
 def test_list_and_get_read_the_callers_org_library(client):
     ref = _put(client)
     page = chat_tools.DISPATCHERS["list_library_items"](kind="tariff")
-    assert page["items"] == [ref] and page["total_count"] == 1 and not page["has_more"]
+    shipped = [common.ref("tariff", n).model_dump(mode="json") for n in common.names("tariff")]
+    # The org's own tariff and the shipped common ones (the same in every org), by id.
+    assert page["items"] == sorted([ref, *shipped], key=lambda r: r["id"])
+    assert page["total_count"] == 1 + len(shipped) and not page["has_more"]
     got = chat_tools.DISPATCHERS["get_library_item"](kind="tariff", name="nl")
     assert got["ref"] == ref and got["summary"]["id"] == "nl-tou"
     assert got["summary"]["items"][0]["windows"] == ["day", "night"]
@@ -243,7 +247,8 @@ def test_refusals_reach_the_model_capped_and_as_identifiers(client, install_netw
 def test_another_orgs_library_is_invisible_to_the_tools(client, other_org_client):
     """Cross-org (M5): the acting user's org decides, as over HTTP."""
     _put(other_org_client, name="theirs")
-    assert chat_tools.DISPATCHERS["list_library_items"](kind="tariff")["items"] == []
+    listed = [r["id"] for r in chat_tools.DISPATCHERS["list_library_items"](kind="tariff")["items"]]
+    assert "theirs" not in listed and listed == common.names("tariff")
     with pytest.raises(HTTPException) as exc:
         chat_tools.DISPATCHERS["get_library_item"](kind="tariff", name="theirs")
     assert exc.value.status_code == 404

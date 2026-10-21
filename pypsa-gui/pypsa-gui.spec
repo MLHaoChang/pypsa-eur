@@ -106,6 +106,10 @@ datas = [
     # module (collected by import), its data files are not.
     (str(BACKEND / "services" / "library" / "defaults_pack" / "versions"),
      "services/library/defaults_pack/versions"),
+    # The shipped (common) Library items (GS-EU P2d): `services/library/common.py`
+    # reads `Path(__file__).with_name("common_items")`, a data folder beside the module.
+    (str(BACKEND / "services" / "library" / "common_items"),
+     "services/library/common_items"),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
