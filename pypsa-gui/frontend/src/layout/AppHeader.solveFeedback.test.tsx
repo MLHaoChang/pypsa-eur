@@ -66,14 +66,14 @@ describe('after a successful solve', () => {
     expect(screen.getByText('Optimal')).toBeTruthy()
   })
 
-  it('toasts the objective and opens Results on Economics when nothing else is open', async () => {
+  it('toasts the objective and opens Results on its Summary when nothing else is open', async () => {
     const success = vi.spyOn(toast, 'success')
     renderHeader()
     await screen.findByText('Abort')
     act(() => doneCallback()({ status: 'completed', objective: 1_234_567 }))
     expect(success).toHaveBeenCalled()
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
-    expect(useUIStore.getState().resultsTabRequest).toBe('economics')
+    expect(useUIStore.getState().resultsTabRequest).toBeNull()
   })
 
   it('leaves a panel the user opened during the solve where it is', async () => {

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify one component's optimised capacity and its change (with a note when it was built to its bound), and a StorageUnit's or Store's equivalent cycles over a window (`capacity/1`, `storage-cycles/1`, opt-in).

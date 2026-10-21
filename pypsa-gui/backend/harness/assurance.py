@@ -245,12 +245,14 @@ class Turn:
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
                 from harness import (
                     branch_calculations, carrier_calculations, curtailment_calculations,
-                    emissions_calculations, lost_load_calculations, price_calculations,
+                    capacity_calculations, emissions_calculations, lost_load_calculations,
+                    price_calculations, storage_cycles_calculations,
                 )
 
                 refusals = (carrier_calculations.REFUSALS | branch_calculations.REFUSALS
                             | lost_load_calculations.REFUSALS | price_calculations.REFUSALS
-                            | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS)
+                            | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS
+                            | capacity_calculations.REFUSALS | storage_cycles_calculations.REFUSALS)
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
@@ -432,6 +434,8 @@ class Turn:
             assurance_metrics.curtailment.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Generator",
         }.get(profile)
+        if profile in (assurance_metrics.capacity.PROFILE, assurance_metrics.cycles.PROFILE):
+            result_kind = self.request_scope["component_class"]
         entity_kind = (
             result_kind if result_kind
             else "Carrier" if carrier
@@ -456,6 +460,10 @@ class Turn:
             lines.extend(assurance_metrics.emissions.notes(record["raw"], _label))
         if profile == assurance_metrics.curtailment.PROFILE:
             lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
+        if profile == assurance_metrics.capacity.PROFILE:
+            lines.extend(assurance_metrics.capacity.notes(record["raw"]))
+        if profile == assurance_metrics.cycles.PROFILE:
+            lines.extend(assurance_metrics.cycles.notes(record["raw"]))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(

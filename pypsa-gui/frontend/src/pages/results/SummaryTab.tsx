@@ -90,6 +90,8 @@ function Absent({ children }: { children: ReactNode }) {
 
 export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) => void }) {
   const project = useUIStore(s => s.currentProject)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const requestIoModal = useUIStore(s => s.requestIoModal)
   const { selectedPeriod } = useResultsFilter()
   const { data: status } = useQuery({ queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus })
   const { data: cost } = useQuery({ queryKey: nk(project, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
@@ -212,6 +214,18 @@ export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) 
             <p className="text-[10px] text-muted">and {caps.length - MAX_CAPACITY_ROWS} more</p>
           )}
         </Card>
+      </div>
+      {/* The visible next step (UX-flow rule 3): what follows the answer. */}
+      <div data-testid="summary-handoff" className="flex flex-wrap items-center gap-3 text-[11px]">
+        <span className="text-muted">Next: hand off</span>
+        <button type="button" data-testid="summary-open-reports" onClick={() => setSlidePanel('reports')}
+          className="inline-flex items-center gap-1 text-accent hover:underline">
+          Reports <ArrowRight size={11} />
+        </button>
+        <button type="button" data-testid="summary-open-export" onClick={() => requestIoModal('export')}
+          className="inline-flex items-center gap-1 text-accent hover:underline">
+          Export <ArrowRight size={11} />
+        </button>
       </div>
     </div>
   )
