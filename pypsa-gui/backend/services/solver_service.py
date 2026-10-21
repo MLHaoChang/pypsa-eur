@@ -377,7 +377,7 @@ class SolverConfig:
     process_uc: Literal["auto", "linearised", "binary"] = "auto"
     # Capacity › sizing off (F1, `services/solver/fixed_sizes.py`): "off" sizes
     # as usual; "capacity_run" / "nameplate" dispatch on that source's sizes.
-    fixed_sizes: str = "off"
+    fixed_sizes: Literal["off", "capacity_run", "nameplate"] = "off"
     # ── Solve strategy ──────────────────────────────────────────────────────
     # Three modes:
     #
@@ -834,11 +834,19 @@ def run_simulation(
                 if _fixed != "off":
                     from services.adequacy.sweep import freeze_capacities
 
-                    _rec = network.meta.get(_fixed_sizes.META_RECORD) or {}
-                    _unfreeze = freeze_capacities(
-                        network, source="opt" if _fixed == "capacity_run" else "nom",
-                        sizes=_rec.get("sizes") if _fixed == "capacity_run" else None,
-                        transient=False)
+                    _undo_freeze = freeze_capacities(
+                        network, transient=False, **_fixed_sizes.freeze_kwargs(network, _fixed))
+                    _frozen = {"v": True}
+
+                    def _unfreeze() -> None:
+                        # Once: every exit path below calls it, and so do the
+                        # outer handlers (through `restore_modelling`) for a
+                        # raise before the guarded restore is set.
+                        if _frozen["v"]:
+                            _frozen["v"] = False
+                            _undo_freeze()
+
+                    restore_modelling = _unfreeze
                     phase(f"Sizing off: dispatching on fixed sizes from "
                           f"{'the capacity run' if _fixed == 'capacity_run' else 'the nameplate'}.")
                 _emit_state(sizing=_fixed_sizes.run_label(network, config))

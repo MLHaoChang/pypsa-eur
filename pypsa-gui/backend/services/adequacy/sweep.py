@@ -202,48 +202,54 @@ def freeze_capacities(n, lock=None, *, source: str = "opt", sizes: dict | None =
     failed solve keeps the previous sizes."""
     undo_ops: list[Callable[[], None]] = []
     pinned: dict[str, float] = {}
-    for attr, nom in _CAPACITY_ATTRS:
-        df = getattr(n, attr, None)
-        ext_col = f"{nom}_extendable"
-        min_col, max_col = f"{nom}_min", f"{nom}_max"
-        if df is None or df.empty or ext_col not in df.columns:
-            continue
-        if min_col not in df.columns or max_col not in df.columns:
-            continue
-        mask = df[ext_col].astype(bool)
-        if not mask.any():
-            continue
-        idx = df.index[mask]
-        orig_min = df.loc[idx, min_col].copy()
-        orig_max = df.loc[idx, max_col].copy()
+    try:
+        for attr, nom in _CAPACITY_ATTRS:
+            df = getattr(n, attr, None)
+            ext_col = f"{nom}_extendable"
+            min_col, max_col = f"{nom}_min", f"{nom}_max"
+            if df is None or df.empty or ext_col not in df.columns:
+                continue
+            if min_col not in df.columns or max_col not in df.columns:
+                continue
+            mask = df[ext_col].astype(bool)
+            if not mask.any():
+                continue
+            idx = df.index[mask]
+            orig_min = df.loc[idx, min_col].copy()
+            orig_max = df.loc[idx, max_col].copy()
 
-        # Re-fetch the frame at undo time: run_simulation's transient
-        # add/remove (VOLL slacks, vintages) can REPLACE the component
-        # DataFrame, so a captured reference goes stale and the restore
-        # would write into a dead object.
-        def _undo(n=n, attr=attr, min_col=min_col, max_col=max_col,
-                  orig_min=orig_min, orig_max=orig_max):
-            live = getattr(n, attr)
-            keep = [i for i in orig_min.index if i in live.index]
-            live.loc[keep, min_col] = orig_min.loc[keep]
-            live.loc[keep, max_col] = orig_max.loc[keep]
+            # Re-fetch the frame at undo time: run_simulation's transient
+            # add/remove (VOLL slacks, vintages) can REPLACE the component
+            # DataFrame, so a captured reference goes stale and the restore
+            # would write into a dead object.
+            def _undo(n=n, attr=attr, min_col=min_col, max_col=max_col,
+                      orig_min=orig_min, orig_max=orig_max):
+                live = getattr(n, attr)
+                keep = [i for i in orig_min.index if i in live.index]
+                live.loc[keep, min_col] = orig_min.loc[keep]
+                live.loc[keep, max_col] = orig_max.loc[keep]
 
-        undo_ops.append(_undo)
-        size = df.loc[idx, nom].astype(float)
-        opt_col = f"{nom}_opt"
-        if source == "opt" and opt_col in df.columns:
-            opt = df.loc[idx, opt_col].astype(float)
-            good = opt.notna() & opt.map(math.isfinite)
-            size[good] = opt[good]
-        if sizes is not None:
-            for name in idx:
-                key = f"{attr}/{name}"
-                if key in sizes:
-                    size[name] = float(sizes[key])
-        size = size.fillna(0.0).clip(lower=0.0)
-        pinned.update({f"{attr}/{name}": float(v) for name, v in size.items()})
-        df.loc[idx, min_col] = size
-        df.loc[idx, max_col] = size + 1e-6
+            undo_ops.append(_undo)
+            size = df.loc[idx, nom].astype(float)
+            opt_col = f"{nom}_opt"
+            if source == "opt" and opt_col in df.columns:
+                opt = df.loc[idx, opt_col].astype(float)
+                good = opt.notna() & opt.map(math.isfinite)
+                size[good] = opt[good]
+            if sizes is not None:
+                for name in idx:
+                    key = f"{attr}/{name}"
+                    if sizes.get(key) is not None:
+                        size[name] = float(sizes[key])
+            size = size.fillna(0.0).clip(lower=0.0)
+            pinned.update({f"{attr}/{name}": float(v) for name, v in size.items()})
+            df.loc[idx, min_col] = size
+            df.loc[idx, max_col] = size + 1e-6
+    except BaseException:
+        # A raise part-way leaves no clamp behind on the (possibly live) network.
+        for op in reversed(undo_ops):
+            op()
+        raise
 
     # Edge Investment Case: tell the commercial layer this is an OPERATIONAL
     # solve, so a connection agreement pins the designed connection instead of

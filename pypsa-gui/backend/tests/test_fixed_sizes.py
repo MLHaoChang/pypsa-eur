@@ -206,7 +206,27 @@ def test_a_failed_fixed_run_keeps_the_previous_sizes_and_bounds(reset_backend, m
     assert status == ("aborted" if how == "abort" else "error")
     assert _opt(n) == pytest.approx(plan, abs=1e-9)
     _same_bounds(before, _bounds(n))
-    assert not getattr(n, "_ic_operational", False)
+    assert not hasattr(n, "_fixed_design") and not hasattr(n, "_ic_operational")
+
+
+@pytest.mark.parametrize("exc", ["binding", "other"])
+def test_a_raise_at_the_commercial_binding_leaves_no_freeze_behind(reset_backend, monkeypatch,
+                                                                   exc):
+    """Every exit between the freeze and the guarded restore undoes it."""
+    import services.solver_service as SS
+    from services.commercial.connection import CommercialBindingError
+
+    n = _install(_plan_net())
+    before = _bounds(n)
+
+    def boom(*_a, **_k):
+        raise (CommercialBindingError("refused") if exc == "binding" else RuntimeError("boom"))
+
+    monkeypatch.setattr(SS, "apply_commercial_for_solve", boom)
+    status, cond, _, _ = _solve(fixed_sizes="nameplate")
+    assert status == "error"
+    _same_bounds(before, _bounds(n))
+    assert not hasattr(n, "_fixed_design")
 
 
 # ── refusals ────────────────────────────────────────────────────────────────
@@ -241,12 +261,34 @@ def test_an_empty_nameplate_is_refused_and_a_zero_candidate_is_named(reset_backe
 
 @pytest.mark.live_solve
 def test_a_topology_edit_drops_the_source(reset_backend):
+    """Any component added or removed (extendable or not) since the sizing run."""
+    from services.solver.fixed_sizes import source_problem
+
     n = _install(_plan_net())
     _solve()
     with PyPSAService.get_lock():
+        n.add("Bus", "spare", carrier="AC")              # no dispatch column, not extendable
+    assert source_problem(n)[0] == "fixed_sizes_no_capacity_run"
+    with PyPSAService.get_lock():
+        n.remove("Bus", "spare")
+    assert source_problem(n) is None                     # the same network again
+    with PyPSAService.get_lock():
         n.add("Generator", "wind", bus="site", carrier="solar", p_nom_extendable=True,
-              capital_cost=50.0)
+              capital_cost=50.0, p_nom_max=10.0)
     assert "fixed_sizes_no_capacity_run" in _errors(fixed_sizes="capacity_run")
+
+
+@pytest.mark.live_solve
+def test_the_record_round_trips_through_netcdf(reset_backend, tmp_path):
+    import json
+
+    n = _install(_plan_net())
+    _solve()
+    json.dumps(n.meta["sizing_record"], allow_nan=False)        # strict JSON
+    path = str(tmp_path / "n.nc")
+    n.export_to_netcdf(path)
+    m = pypsa.Network(path)
+    assert m.meta["sizing_record"] == n.meta["sizing_record"]
 
 
 def test_the_new_codes_file_to_scenarios():
@@ -426,6 +468,32 @@ def test_an_f1_run_at_another_connection_size_does_not_state_the_fee(reset_backe
     terms = commercial_cost_terms(n, com)
     assert "network_capacity_not_established" in terms["flags"]
     assert not any(label == "network_capacity" for label, *_ in terms["items"])
+
+
+@pytest.mark.live_solve
+def test_an_f1_run_under_a_changed_agreement_does_not_carry_the_old_fee(reset_backend):
+    from services.commercial import connection as C
+    from tests.test_connection_agreement import _agreement, _conn, _fee
+
+    n = _edge()
+    _solve(commercial=_fee_commercial())
+    assert _solve(commercial=_conn(_agreement(fee=_fee(900.0))),
+                  fixed_sizes="capacity_run")[0] in ("ok", "optimal")
+    assert n.meta[C.META_FEE]["not_established"]
+
+
+@pytest.mark.live_solve
+def test_the_sweeps_freeze_still_skips_the_process_check(reset_backend):
+    from services.adequacy.sweep import freeze_capacities
+    from tests.test_process_uc_solve_path import _process_net
+
+    n = _install(_process_net(load=1.0, store=False))
+    undo = freeze_capacities(n)
+    try:
+        status, _, state, _ = _solve()
+    finally:
+        undo()
+    assert status in ("ok", "optimal") and state.get("last_process_uc_check") is None
 
 
 @pytest.mark.live_solve

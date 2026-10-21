@@ -11,11 +11,14 @@ The size comes from one of two sources:
 
 * ``"capacity_run"``: the last sizing run's ``*_nom_opt``. Every successful
   sizing solve (``fixed_sizes == "off"``, not an operational sweep solve)
-  writes ``n.meta["sizing_record"]``: ``{revision, solved_at, sha256, sizes}``.
+  writes ``n.meta["sizing_record"]``: ``{revision, solved_at, sha256, sizes,
+  topology}`` (``revision`` and ``sha256`` are provenance; the check reads the
+  vector and the topology hash).
   ``n.meta`` travels with the network through netCDF and copies. The record
   is replaced only by the next sizing solve. "capacity_run" is refused
   without a record (``fixed_sizes_no_capacity_run``), after a topology edit
-  (the record's component set or ``dispatch_status`` no longer match), and
+  (the record's topology hash, its component set or ``dispatch_status`` no
+  longer match: the record no longer counts), and
   when the network's sizes differ from it (``fixed_sizes_source_changed``):
   a nameplate run, a results load or a hand edit may have overwritten
   ``*_nom_opt``. The comparison has a 1e-4 MW tolerance, because a
@@ -37,20 +40,18 @@ from datetime import UTC, datetime
 
 MODES = ("off", "capacity_run", "nameplate")
 META_RECORD = "sizing_record"
+# The size tolerance of the source check, and of the connection fee carrying
+# over (`commercial.connection`): far above the freeze's +1e-6 MW headroom.
 TOLERANCE_MW = 1e-4
-
-# (component table, nominal column), the set `sweep.freeze_capacities` pins.
-_CAPACITY_ATTRS = (
-    ("generators", "p_nom"),
-    ("storage_units", "p_nom"),
-    ("stores", "e_nom"),
-    ("links", "p_nom"),
-    ("lines", "s_nom"),
-    ("transformers", "s_nom"),
-)
+# Every component table whose rows make the topology the record was solved on.
+_TOPOLOGY_TABLES = ("buses", "generators", "loads", "storage_units", "stores", "links",
+                    "lines", "transformers")
 
 
 def _extendable(n):
+    # The set `sweep.freeze_capacities` pins (imported here: sweep pulls in the solver).
+    from services.adequacy.sweep import _CAPACITY_ATTRS
+
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
         ext = f"{nom}_extendable"
@@ -60,20 +61,29 @@ def _extendable(n):
             yield attr, nom, str(name)
 
 
-def sizes(n, column: str = "opt") -> dict[str, float]:
+def sizes(n, column: str = "opt") -> dict[str, float | None]:
     """``{"<table>/<name>": MW}`` of every extendable asset: its ``*_nom_opt``
-    (``column="opt"``) or its ``*_nom`` (``"nom"``)."""
-    out = {}
+    (``column="opt"``) or its ``*_nom`` (``"nom"``). A missing or non-finite
+    size is None (strict JSON in ``n.meta``)."""
+    out: dict[str, float | None] = {}
     for attr, nom, name in _extendable(n):
         df = getattr(n, attr)
         col = f"{nom}_opt" if column == "opt" else nom
         v = float(df.at[name, col]) if col in df.columns else float("nan")
-        out[f"{attr}/{name}"] = v if math.isfinite(v) else float("nan")
+        out[f"{attr}/{name}"] = v if math.isfinite(v) else None
     return out
 
 
-def _sha(vector: dict[str, float]) -> str:
-    raw = json.dumps({k: round(v, 6) for k, v in sorted(vector.items())}, sort_keys=True)
+def _topology(n) -> str:
+    """A hash of every component's name: any row added or removed changes it."""
+    names = sorted(f"{t}/{i}" for t in _TOPOLOGY_TABLES
+                   for i in getattr(getattr(n, t, None), "index", ()))
+    return hashlib.sha256("|".join(names).encode()).hexdigest()
+
+
+def _sha(vector: dict[str, float | None]) -> str:
+    raw = json.dumps({k: None if v is None else round(v, 6) for k, v in vector.items()},
+                     sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()
 
 
@@ -81,7 +91,7 @@ def record_sizing(n, revision: int | None) -> dict:
     """Write the record of a successful sizing solve into ``n.meta``."""
     vector = sizes(n, "opt")
     rec = {"revision": revision, "solved_at": datetime.now(UTC).isoformat(timespec="seconds"),
-           "sha256": _sha(vector), "sizes": vector}
+           "sha256": _sha(vector), "sizes": vector, "topology": _topology(n)}
     n.meta[META_RECORD] = rec
     return rec
 
@@ -92,13 +102,21 @@ def source_problem(n) -> tuple[str, str] | None:
 
     rec = n.meta.get(META_RECORD)
     current = sizes(n, "opt")
+    # A topology edit drops the source: a record from another component set
+    # (or one older than the topology hash) is not this network's plan.
     if (not isinstance(rec, dict) or not isinstance(rec.get("sizes"), dict)
-            or set(rec["sizes"]) != set(current) or dispatch_status(n) != "fresh"):
+            or rec.get("topology") != _topology(n) or set(rec["sizes"]) != set(current)
+            or dispatch_status(n) != "fresh"):
         return ("fixed_sizes_no_capacity_run",
                 "Sizing off on \"the capacity run\" needs a capacity run of this network: "
-                "run with sizing on first (none recorded, or the assets changed since).")
-    moved = [k for k, v in current.items()
-             if not (math.isfinite(v) and abs(v - float(rec["sizes"][k])) <= TOLERANCE_MW)]
+                "run with sizing on first (none recorded, or components were added or "
+                "removed since).")
+
+    def same(now, then) -> bool:
+        return (now is not None and then is not None
+                and abs(float(now) - float(then)) <= TOLERANCE_MW)
+
+    moved = [k for k, v in current.items() if not same(v, rec["sizes"][k])]
     if moved:
         return ("fixed_sizes_source_changed",
                 f"The sizes on the network are no longer the capacity run's of "
@@ -135,16 +153,25 @@ def issues(n, cfg) -> list[tuple[str, str, str, str]]:
             out.append(("error", problem[0], "", problem[1]))
     else:
         plate = sizes(n, "nom")
-        if plate and not any(math.isfinite(v) and v > 0 for v in plate.values()):
+        if plate and not any(v is not None and v > 0 for v in plate.values()):
             out.append(("error", "fixed_sizes_nameplate_empty", "",
                         "Sizing off on the nameplate, but every extendable asset has a "
                         "nameplate of 0: there is nothing to dispatch."))
         for key, v in plate.items():
-            if not (math.isfinite(v) and v > 0):
+            if not (v is not None and v > 0):
                 out.append(("warning", "fixed_sizes_zero_nameplate", key.split("/", 1)[1],
                             f"{key.split('/', 1)[1]} has a nameplate of 0: with sizing off "
                             "it is not built in this run."))
     return out
+
+
+def freeze_kwargs(n, mode: str) -> dict:
+    """``sweep.freeze_capacities`` keywords for a fixed-size run: the recorded
+    vector for "capacity_run" (so repeated runs never drift by the freeze's
+    +1e-6), the configured ``*_nom`` for "nameplate"."""
+    if mode == "capacity_run":
+        return {"source": "opt", "sizes": (n.meta.get(META_RECORD) or {}).get("sizes")}
+    return {"source": "nom", "sizes": None}
 
 
 def run_label(n, cfg) -> dict:
