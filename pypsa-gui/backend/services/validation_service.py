@@ -391,8 +391,11 @@ def _check_extendable_bounds(
     df: pd.DataFrame, comp: str, prefix: str, capital_cost_required: bool,
 ) -> list[Issue]:
     """
-    *_extendable assets need finite *_nom_min / *_nom_max with min < max,
-    and a positive capital_cost (otherwise the solver picks max_nom for free).
+    *_extendable assets need finite *_nom_min / *_nom_max with min < max, or
+    min == max > 0: an explicit forced size (built exactly at p_nom_min =
+    p_nom_max; it still carries capex, which the investment case counts — IPP
+    ticket 03), and a positive capital_cost (otherwise the solver picks max_nom
+    for free). Equal bounds of 0 can never build and are refused.
     `prefix` is 'p_nom' / 's_nom' / 'e_nom'.
     """
     out: list[Issue] = []
@@ -410,9 +413,12 @@ def _check_extendable_bounds(
         # Extendable: bounds must be finite and ordered
         lo = df.at[name, min_col] if min_col in df.columns else 0
         hi = df.at[name, max_col] if max_col in df.columns else float("inf")
-        if not (_is_finite_nonneg(lo) and _is_finite(hi) and float(hi) > float(lo)):
+        if not (_is_finite_nonneg(lo) and _is_finite(hi) and float(hi) > 0
+                and float(hi) >= float(lo)):
             out.append(_err(f"{comp.lower()}_{prefix}_bounds", comp, str(name),
-                f"extendable: need finite {min_col} < {max_col} (got {_pretty(lo)} / {_pretty(hi)})."))
+                f"extendable: need finite {min_col} < {max_col}, or {min_col} = {max_col} > 0 "
+                f"(an explicit forced size, built exactly at that size) "
+                f"(got {_pretty(lo)} / {_pretty(hi)})."))
         if capital_cost_required and "capital_cost" in df.columns:
             cc = df.at[name, "capital_cost"]
             # Accept overnight_cost > 0 as a substitute: solver_service's

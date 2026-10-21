@@ -182,16 +182,54 @@ def test_a_share_series_carries_unit_share_and_no_money_notes(tmp_path):
                        {"da.csv": _da() / 100.0}))
 
 
-def test_a_series_basis_that_differs_from_the_finance_basis_is_named(tmp_path):
-    series = TS.read(_write(tmp_path, [ENTRY], {"da.csv": _da()}))      # real, 2030
-    assert TS.basis_conflicts(series, {"price_basis": "real", "currency_year": 2030}) == []
-    assert TS.basis_conflicts(series, {"price_basis": "nominal", "currency_year": 2030}) == \
-        ["tpl_da: price_basis real vs finance nominal"]
+def _basis(tmp_path, notes, n=48, start="2030-01-01"):
+    idx = pd.date_range(start, periods=n, freq="h")
+    s = pd.Series(np.linspace(10, 50, n), index=idx)
+    return TS.read(_write(tmp_path, [{**ENTRY, "notes": notes}], {"da.csv": s}))
+
+
+NOM_2030 = {"price_basis": "nominal", "currency_year": 2030, "currency": "EUR"}
+REAL_2030 = {"price_basis": "real", "currency_year": 2030, "currency": "EUR"}
+
+
+def test_rule_real_series_on_a_nominal_case_needs_the_same_year(tmp_path):
+    ok = _basis(tmp_path / "a", ["price_basis:real", "currency_year:2030", "currency:EUR"])
+    assert TS.basis_conflicts(ok, NOM_2030) == []
+    bad = _basis(tmp_path / "b", ["price_basis:real", "currency_year:2024", "currency:EUR"])
+    assert TS.basis_conflicts(bad, NOM_2030) == ["tpl_da: real in 2024 money vs finance "
+                                                 "currency_year 2030"]
+
+
+def test_rule_nominal_series_on_a_nominal_case_only_as_the_single_base_year(tmp_path):
+    one = _basis(tmp_path / "a", ["price_basis:nominal", "currency_year:2030"])
+    assert TS.basis_conflicts(one, NOM_2030) == []
+    multi = _basis(tmp_path / "b", ["price_basis:nominal", "currency_year:2030"],
+                   n=24 * 400, start="2030-01-01")
+    (reason,) = TS.basis_conflicts(multi, NOM_2030)
+    assert "escalated twice" in reason
+
+
+def test_rule_nominal_series_on_a_real_case_is_refused(tmp_path):
+    s = _basis(tmp_path, ["price_basis:nominal", "currency_year:2030"])
+    assert TS.basis_conflicts(s, REAL_2030) == ["tpl_da: a nominal series in a real case would "
+                                                "need deflating"]
+
+
+def test_rule_real_series_on_a_real_case_needs_the_same_year(tmp_path):
+    assert TS.basis_conflicts(_basis(tmp_path / "a", ["price_basis:real", "currency_year:2030"]),
+                              REAL_2030) == []
+    assert TS.basis_conflicts(_basis(tmp_path / "b", ["price_basis:real", "currency_year:2020"]),
+                              REAL_2030) != []
+
+
+def test_rule_the_currency_must_be_the_cases(tmp_path):
+    s = _basis(tmp_path, ["price_basis:real", "currency_year:2030", "currency:USD"])
+    assert TS.basis_conflicts(s, NOM_2030) == ["tpl_da: currency USD vs finance EUR"]
 
 
 def test_a_template_whose_series_and_finance_disagree_is_refused_before_the_project(
         client, tmp_path, monkeypatch, tmp_projects_dir):
-    """The data-centre sidecar's finance is nominal, 2020; a `price_basis:real` series refuses."""
+    """The data-centre sidecar's finance is nominal, 2020; a series in 2030 money refuses."""
     from routers import projects as projects_router
 
     _template(tmp_path, [{**ENTRY, "file": "cfe.csv", "targets": ["commercial.export_price_ref"]}])

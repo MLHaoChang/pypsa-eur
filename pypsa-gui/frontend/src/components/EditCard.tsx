@@ -4,7 +4,7 @@
  * contract is `harness/edit_card.py`; any edit kind that registers an adapter
  * there arrives in this one shape, so this component is the only renderer.
  */
-import type { FlowTarget } from '../api/flow'
+import { FLOW_STATE_WORDS, type FlowSectionState, type FlowTarget } from '../api/flow'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
 
 type Scalar = string | number | boolean | null
@@ -179,7 +179,7 @@ export function EditReceiptLine({ receipt, disabled, onRequest }: {
           : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
       {receipt.section?.changed && <div data-testid="chat-edit-section">
-        {receipt.section.label}: {receipt.section.state}.
+        {receipt.section.label}: {FLOW_STATE_WORDS[receipt.section.state as FlowSectionState] ?? receipt.section.state}.
       </div>}
       {receipt.results_stale && <div className="text-muted" data-testid="chat-edit-stale">
         Results are now stale: they were computed before this change.
