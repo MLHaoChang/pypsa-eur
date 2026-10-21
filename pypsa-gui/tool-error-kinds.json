@@ -835,6 +835,38 @@
       "surface": "inline",
       "why": "A profile apply's unit does not fit its target (a price not in currency/MWh, a per-unit shape whose peak or mean is not 1, a missing scale or price basis). The detail says which; the assistant fixes the parameters and retries, per call."
     },
+    "dc_load_owned": {
+      "surface": "inline",
+      "why": "A profile apply would overwrite the data-centre load a project's dc_load spec owns (a data-centre archetype, or a profile on the template's it_load/cooling split). The detail says to change the dc_load spec instead; the assistant points there, per call."
+    },
+    "unknown_load": {
+      "surface": "inline",
+      "why": "Load-profile generation named a load that is not on the open network, or a measured load upload has no column naming one. The detail lists the loads; the assistant asks which one, per call."
+    },
+    "project_not_open": {
+      "surface": "inline",
+      "why": "A profile was generated or uploaded for a project that is not the open one (the foreground holds another). The detail names both; the assistant opens the project first or asks, per call."
+    },
+    "unknown_archetype": {
+      "surface": "inline",
+      "why": "Load-profile generation named an archetype or preset that does not exist. The detail lists the available ones; the assistant picks one, per call."
+    },
+    "invalid_archetype_params": {
+      "surface": "inline",
+      "why": "A load archetype's parameters are missing, unknown or out of range (no peak_mw or annual_mwh, a misspelt key, a bad timezone or holiday). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
+    "load_upload_format": {
+      "surface": "inline",
+      "why": "A measured load upload is not a readable timestamp + numeric load table (unreadable timestamps, a non-number, a negative reading, repeated wall-clock hours, a step coarser than an hour). The detail names the column or row; the user fixes the file, per call."
+    },
+    "load_upload_unit": {
+      "surface": "inline",
+      "why": "A measured load upload names no unit, an unknown one, or a header unit that disagrees with the stated one. The detail names the column; the assistant asks for the unit, per call."
+    },
+    "load_upload_coverage": {
+      "surface": "inline",
+      "why": "A measured load upload does not cover one full calendar year, covers several without one named, or holds a gap longer than a week. The detail says which; the assistant asks for the year or a complete file, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
@@ -858,6 +890,10 @@
     "malformed_job_id": {
       "surface": "inline",
       "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
+    },
+    "unknown_grid_code_profile": {
+      "surface": "inline",
+      "why": "campus_grid_readiness was asked for a grid-code profile that is neither shipped nor published in the project. The detail lists the known ones; the assistant picks one of them or asks the user. There is no conversation-wide recovery action."
     }
   }
 }

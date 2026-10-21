@@ -237,6 +237,7 @@ DELETE  /api/network/vintage_bounds/{component_class}/{name}                    
 PUT     /api/network/vintage_bounds/{component_class}/{name}                       -> update_vintage_bounds_api_network_vintage_bounds__component_class___name__put
 GET     /api/network/vintage_results                                               -> list_vintage_results_api_network_vintage_results_get
 POST    /api/profiles/estimate                                                     -> estimate_profile_api_profiles_estimate_post
+GET     /api/profiles/load-archetypes                                              -> list_load_archetypes_api_profiles_load_archetypes_get
 GET     /api/profiles/presets                                                      -> list_profile_presets_api_profiles_presets_get
 GET     /api/projects/                                                             -> list_projects_api_projects__get
 GET     /api/projects/from_template/eh_site/form                                   -> get_site_template_form_api_projects_from_template_eh_site_form_get
@@ -266,6 +267,8 @@ GET     /api/projects/{name}/members                                            
 PUT     /api/projects/{name}/members                                               -> put_project_members_api_projects__name__members_put
 POST    /api/projects/{name}/profiles/apply                                        -> apply_profile_api_projects__name__profiles_apply_post
 POST    /api/projects/{name}/profiles/generate                                     -> generate_profiles_api_projects__name__profiles_generate_post
+POST    /api/projects/{name}/profiles/loads/generate                               -> generate_load_profiles_api_projects__name__profiles_loads_generate_post
+POST    /api/projects/{name}/profiles/loads/upload                                 -> upload_load_profiles_api_projects__name__profiles_loads_upload_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get

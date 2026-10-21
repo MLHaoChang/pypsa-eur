@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's change card now names the project-flow section a change lands in (for example "Connection & grid > L2"), offers "Show in Properties" to open the field in place without leaving the chat, and its receipt says when the change moved that section's state. An opened answer card on a full-screen page is capped in height.

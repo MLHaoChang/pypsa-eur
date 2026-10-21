@@ -1500,12 +1500,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "apply_generated_profile",
-        "Write one PENDING generated profile onto a generator's p_max_pu "
-        "(undoable; the confirmation card authorises the write). The point "
-        "feeding the component defaults to the component's own name. Refuses "
-        "(422) when the component is gone, its carrier is not wind/solar, or "
-        "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "Write one PENDING generated profile onto its target (undoable; the "
+        "confirmation card authorises the write): a renewable profile onto a "
+        "generator's p_max_pu, a load profile (generate_load_profile) onto a "
+        "load's p_set; `component_type`/`attribute` name another target "
+        "only when the user asks. The point feeding the component defaults "
+        "to the component's own name. Refuses (422) when the component is "
+        "gone, a renewable profile meets a non-wind/solar carrier, the "
+        "profile's family may not write that target, or the artifact holds "
+        "no column for it; warns when the bus moved since generation. A load "
+        "answer carries profile_annual_mwh and modelled_mwh; relay an "
+        "energy_mismatch warning. `time_basis` says what the snapshots mean: \"UTC\" "
         "or the IANA zone whose wall clock they are (e.g. "
         "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
         "Leave it unset unless the user said; then the answer's `warnings` "
@@ -1517,8 +1522,45 @@ TOOLS: list[dict[str, Any]] = [
          "job_id": {"type": "string"},
          "component": {"type": "string"},
          "point_id": {"type": "string"},
-         "time_basis": {"type": "string"}},
+         "time_basis": {"type": "string"},
+         "component_type": {"type": "string"},
+         "attribute": {"type": "string"}},
         ["project_id", "job_id", "component"],
+    ),
+    _t(
+        "list_load_profile_archetypes",
+        "List the load-profile archetypes (industrial, commercial, "
+        "residential, ev_charging, heat, data_centre, library) with every "
+        "parameter and its default, and the named presets (e.g. "
+        "commercial_office, industrial_three_shift). Every archetype is a "
+        "stated, assumed shape, never a measurement. Safety: read.",
+        {},
+    ),
+    _t(
+        "generate_load_profile",
+        "Generate a load archetype for named loads of the open project into "
+        "the pending store (one column per load; nothing on the network "
+        "changes until apply_generated_profile). `params` must state exactly "
+        "one of peak_mw or annual_mwh; other keys are the archetype's (see "
+        "list_load_profile_archetypes) and a misspelt one is refused. Shapes "
+        "are hourly; working hours follow the project's commercial timezone "
+        "unless params.timezone says otherwise. The answer gives each load's "
+        "peak MW, its source-year annual MWh, the MWh this model's snapshots "
+        "will see (modelled_mwh: a sampled template sees less), any "
+        "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
+        "job_id to apply. On a project made "
+        "with a data-centre dc_load spec, that spec owns the DC load: apply "
+        "refuses a data_centre profile there. `project_id` is the project "
+        "NAME and must be the open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "archetype": {"type": "string",
+                       "enum": ["industrial", "commercial", "residential",
+                                "ev_charging", "heat", "data_centre",
+                                "library"]},
+         "loads": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "archetype", "loads"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -1730,7 +1772,9 @@ TOOLS: list[dict[str, Any]] = [
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
         "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
-        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_site (a generic site that is not a data "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_ipp_hybrid "
+        "(a wind and PV IPP with a battery candidate behind a 70 MW export limit; one hourly 2030 year, "
+        "illustrative day-ahead prices, financial PPAs), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
         "hospital | campus | other fills every value from a preset; override "
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
@@ -1747,7 +1791,7 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
                                      "eh_h2_hub_staged", "eh_microgrid_staged",
-                                     "eh_ammonia_staged"]},
+                                     "eh_ammonia_staged", "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site only: the site's parameters "
@@ -3076,6 +3120,27 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "campus_grid_readiness",
+        "The grid-readiness scorecard of a project (DC grid readiness 02): an "
+        "advisory red-flag screening against its connection limits and a "
+        "grid-code profile (default the campus study's last profile, else "
+        "eu_rfg_dcc_ce; generic_assumed or a published project profile also). "
+        "Returns {profile, rows, summary}: each row {id, requirement, limit, "
+        "unit, source, project_value, verdict pass|warn|fail|unknown, assumed, "
+        "note, section, target}. Rows: SCR, peak against the energized import "
+        "after losses plus firm gensets per period, ramp rate, oscillation and "
+        "rapid voltage change from the AI-training envelope (before UPS/BESS "
+        "smoothing), reactive range, frequency support and the profile's "
+        "dynamic requirements (always unknown: an EMT study is needed), grid "
+        "former, island ride-through per scenario, LOLE against the goal. "
+        "unknown means an input is missing, never a pass; say which. Say which "
+        "limits are assumed. It never blocks a run. 422 for an unknown "
+        "profile. Safety: read.",
+        {"project_id": {"type": "string"},
+         "profile": {"type": "string", "description": "a grid-code profile id"}},
+        ["project_id"],
+    ),
+    _t(
         "campus_set_island_config",
         "Save a hub project's island requirements: the whole island_config.json "
         "sidecar as a JSON object, which replaces the project's copy. It is "
@@ -3955,13 +4020,15 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (6)
+    # profile generator (8)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
+    "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
+    "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
@@ -4129,6 +4196,8 @@ TOOL_ROUTES: dict[str, list] = {
     "campus_island_gfm_settings": _SERVICE_CALL,
     "campus_recommend_gfm_settings": _SERVICE_CALL,
     "campus_apply_gfm_settings": _SERVICE_CALL,
+    # the grid-readiness scorecard (DC grid readiness 02) — a read service call
+    "campus_grid_readiness": _SERVICE_CALL,
     # campus grid codes (2) — service calls; no publish tool (plan C10)
     "campus_list_grid_codes": _SERVICE_CALL,
     "campus_extract_grid_code": _SERVICE_CALL,

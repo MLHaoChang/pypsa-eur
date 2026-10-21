@@ -822,6 +822,7 @@ def test_every_new_apply_refusal_maps_to_its_literal_error_kind():
         apply.InvalidSeriesUnitError: "invalid_series_unit",
         apply.ProfileBoundConflictError: "profile_bound_conflict",
         apply.ComponentNotFoundError: "component_not_found",
+        apply.DcLoadOwnedError: "dc_load_owned",
         # Not in the table: the class-name fallback, as before.
         apply.CarrierMismatchError: "carrier_mismatch",
     }

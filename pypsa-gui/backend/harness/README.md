@@ -263,6 +263,13 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Flow section (PR-2).** Each component row carries a FlowTarget
+  `{section, panel, component, entity, field}` from
+  `flow_service.section_for_component` (the flow's own class rule), and the
+  card names its `section`. The section's flow state before the write rides
+  the card outside the digest (`section_state`); the receipt adds `section`
+  with the state after the write and whether it `changed`. The browser's
+  "Show in Properties" selects the component in place; the chat stays open.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -322,7 +329,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 174 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -335,7 +342,19 @@ external verification. See the [calibration and review guide](../../../.scratch/
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch
-and declared-basis direct StorageUnit costs.
+and declared-basis direct StorageUnit costs. A sixth, `carrier-energy/1`
+(`carrier_calculations.py`), sums one exact carrier's generator energy, combined
+peak and StorageUnit charge/discharge; it is opt-in (`calculations.OPT_IN_PROFILES`
+run only when listed in `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`), excludes Links and
+Stores and always discloses how many it excluded. `branch-loading/1` and
+`network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
+Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
+P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
+refuse whenever AC power-flow results exist. `lost-load/1` (`lost_load_calculations.py`,
+opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted shed
+hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
+claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
+the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

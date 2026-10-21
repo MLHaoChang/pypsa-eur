@@ -14,7 +14,7 @@ describe('flow client', () => {
   it('reads the flow of the named project', async () => {
     get.mockResolvedValue({ data: { sections: [], run_ready: true, run_blocker: null, notes: [], deferred: false, deferred_reason: null } })
     const body = await getProjectFlow('my site')
-    expect(get).toHaveBeenCalledWith('/projects/my%20site/flow')
+    expect(get).toHaveBeenCalledWith('/projects/my%20site/flow', { skipErrorToast: true })
     expect(body.run_ready).toBe(true)
   })
 

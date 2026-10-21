@@ -17,6 +17,15 @@ export type FlowSectionId = (typeof FLOW_SECTIONS)[number]
 /** Sections 1–8. `unknown` only while the preflight is deferred; never `complete`. */
 export type FlowSectionState = 'complete' | 'warning' | 'incomplete' | 'not_needed' | 'unknown'
 
+/** A section state in the user's words (project-workflow design §3.2, the rail). */
+export const FLOW_STATE_WORDS: Record<FlowSectionState, string> = {
+  complete: 'complete',
+  warning: 'to check',
+  incomplete: 'to do',
+  not_needed: 'not needed',
+  unknown: 'not known yet',
+}
+
 /** Section 10's own vocabulary (`results.freshness`). */
 export type FlowFreshness = 'not_run' | 'running' | 'fresh' | 'stale'
 
@@ -103,7 +112,9 @@ export interface FlowAck {
 const flowPath = (project: string) => `/projects/${encodeURIComponent(project)}/flow`
 
 export function getProjectFlow(project: string): Promise<ProjectFlow> {
-  return client.get<ProjectFlow>(flowPath(project)).then(r => r.data)
+  // Read ambiently by the rail, the sidebar and the Run: a failure shows as
+  // "not known yet" on the state dots, never as a toast on every poll.
+  return client.get<ProjectFlow>(flowPath(project), { skipErrorToast: true }).then(r => r.data)
 }
 
 /** Acknowledge a standing warning. 404: no such item; 422: an error. */
