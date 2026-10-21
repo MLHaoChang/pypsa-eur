@@ -5,10 +5,11 @@
 // step: it moves to a card in the footer, with its actions behind a menu.
 // Guided keeps its own sidebar (spec §3.5), pinned by Sidebar.uiMode.test.tsx.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
+import { useDecisionStore } from '../pages/decision/decisionStore'
 import Sidebar from './Sidebar'
 
 vi.mock('../api/network', () => ({
@@ -112,6 +113,19 @@ describe('M2 — Expert sidebar, expanded', () => {
   it.each(ORDER)('%s holds its rows, in order', async (id) => {
     await renderSidebar()
     expect(rowLabels(screen.getByTestId(`sidebar-group-${id}`))).toEqual(ROWS[id])
+  })
+
+  // UX-flow #21: the Decision study row shows only in a study's own project.
+  it('shows the Decision study row only in the project of the open decision study', async () => {
+    useDecisionStore.setState({ active: { project: 'Demo', studyId: 's1' } })
+    await renderSidebar()
+    expect(rowLabels(screen.getByTestId('sidebar-group-results')))
+      .toEqual(['Results', 'Decision study', 'Planning → dynamics', 'Reports'])
+    cleanup()
+    useDecisionStore.setState({ active: { project: 'Elsewhere', studyId: 's1' } })
+    await renderSidebar()
+    expect(rowLabels(screen.getByTestId('sidebar-group-results'))).not.toContain('Decision study')
+    useDecisionStore.setState({ active: null })
   })
 
   it('drops the old kind-based headers', async () => {
