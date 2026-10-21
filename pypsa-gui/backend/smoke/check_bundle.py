@@ -202,6 +202,10 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-07/manifest.json",
     "services/library/defaults_pack/versions/2026-10-13/manifest.json",
     "services/library/defaults_pack/versions/2026-10-20/manifest.json",
+    # GS-2 regional cost packs (`<date>+<region>`), one manifest per region.
+    "services/library/defaults_pack/versions/2026-10-21+ca_federal/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-21+uk/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-21+us_federal/manifest.json",
     # The EU cost references (GS-EU): `europe_reference._DATA_FILE` = the module's
     # sibling `reference_data/`; the reader refuses to run without its pinned bytes.
     "services/library/reference_data/eu-dea-2026-08.json",
