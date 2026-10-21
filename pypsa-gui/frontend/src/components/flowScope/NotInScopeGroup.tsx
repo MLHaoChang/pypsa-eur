@@ -59,13 +59,18 @@ export function SectionNotInScope({ section }: { section: FlowSectionId }) {
   })
   const names = addable.map(c => registry.cards.find(d => d.id === c)?.label ?? c)
   const n = items.length
+  const are = `${n} item${n === 1 ? ' is' : 's are'}`
+  // None of the cards can be added here: say why, promise nothing, no button.
+  const why = cards.map(c => registry.cards.find(d => d.id === c))
+    .map(d => (d ? cardNotOffered(d) : null)).find(r => r) ?? ''
   return (
     <div data-testid="section-not-in-scope" className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
       <span>
-        {n} item{n === 1 ? ' is' : 's are'} not in scope
-        {names.length > 0 ? `: ${n === 1 ? 'it comes' : 'they come'} back if you add ${names.join(' or ')}.` : '.'}
+        {names.length > 0
+          ? `${are} not in scope: ${n === 1 ? 'it comes' : 'they come'} back if you add ${names.join(' or ')}.`
+          : `${are} not in scope here${why ? `: ${why}` : '.'}`}
       </span>
-      {cards.map(c => <AddCardToScope key={c} card={c} testId={`section-not-in-scope-add-${c}`} />)}
+      {addable.map(c => <AddCardToScope key={c} card={c} testId={`section-not-in-scope-add-${c}`} />)}
     </div>
   )
 }

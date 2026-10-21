@@ -317,9 +317,8 @@ describe('NotInScopeGroup', () => {
     getFlowScope.mockResolvedValue(reg)
     mount(<SectionNotInScope section="scenarios" />)
     const line = await screen.findByTestId('section-not-in-scope')
-    expect(line.textContent).toContain('1 item is not in scope.')
-    expect(line.textContent).not.toContain('come back')
-    expect(line.textContent).toContain(`Not offered for this site: ${nothing}`)
+    expect(line.textContent).toBe(`1 item is not in scope here: ${nothing}`)
+    expect(screen.queryByTestId('section-not-in-scope-add-reliability')).toBeNull()
   })
 })
 

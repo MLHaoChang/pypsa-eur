@@ -92,12 +92,13 @@ export function AddToScope({ card, option, testId }: {
 
 /** `collapsed`: Guided's density (a Guided card holds ≤ 3 decisions): one
  *  summary line, and "Change" opens the cards in place. Expert shows them. */
-/** Why a card cannot be added on this site, or null when it can: its lock,
- *  or the reason its sub-options are not available (the registry's words). */
+/** Why a card cannot be added on this site, or null when it can: the reason
+ *  its sub-options are not available (the registry's words), or '' for a
+ *  locked card (always on, so its items are never out of scope; no promise). */
 export function cardNotOffered(def: ScopeCardDef): string | null {
-  if (def.locked_reason) return def.locked_reason
+  if (def.locked_reason) return ''
   if (def.options.some(o => o.status === 'available' || o.status === 'required')) return null
-  return def.options.find(o => o.reason)?.reason ?? 'It is not available here.'
+  return def.options.find(o => o.reason)?.reason ?? ''
 }
 
 /** "Add <card>": switches a card on in place, restoring its kept sub-options
@@ -108,10 +109,10 @@ export function AddCardToScope({ card, testId }: { card: ScopeCardId; testId: st
   const def = registry?.cards.find(c => c.id === card)
   if (!scope || !def) return null
   const why = cardNotOffered(def)
-  if (why) {
+  if (why !== null) {
     return (
       <span data-testid={`${testId}-why`} className="text-[11px] text-muted">
-        Not offered for this site: {why}
+        {why ? `Not offered for this site: ${why}` : 'Not offered for this site.'}
       </span>
     )
   }
