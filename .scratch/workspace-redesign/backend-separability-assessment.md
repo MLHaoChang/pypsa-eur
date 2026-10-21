@@ -1,8 +1,28 @@
 # Required gate: backend separability and workflow dependencies
 
-Status: ready-for-agent — source reconnaissance started; runtime assessment not completed
+Status: W0 matrix proven (2026-10-21) — see "The matrix (W0)" below; the code copy is `pypsa-gui/backend/services/run_separability.py` (`MATRIX`), proven by `tests/test_run_separability.py`
 
 Owner request, 2026-10-20: assess whether the individual activities inside the three UI groups can actually be run separately. UI grouping, a preset or Select all is not proof of backend independence.
+
+## The matrix (W0)
+
+Proven against master d327f645 by `pypsa-gui/backend/tests/test_run_separability.py`; each row also names its tests in `MATRIX[kind].evidence`, and a test checks that every named test exists. **Runnable** = supported, or bundled with its bundle in the same Run. Unknown and unsupported never run.
+
+| Kind / study | Class | Runnable in the one Run | Entry point | Locks and shared state | Implicit sub-steps | Freshness | Verdict (never waits on the lock) |
+|---|---|---|---|---|---|---|---|
+| `optimisation` | supported | yes | `POST /simulation/run` → `run_simulation` | network lock for validate + solve; `_state` claim; study mesh | `process_uc.binary_check` on a copy (never changes the plan; skipped when `_ic_operational`); AC-PF Stage 2 when `run_ac_pf_after_lopf` | `dispatch_status`; network revision | `preflight_validate` → `validate_for_run` (the check `/run` repeats) |
+| `study` (EH reliability) | supported | yes | `POST /results/eh_study` → `start_eh_study` | `check_eh_study_start` takes the lock briefly; worker solves a copy; sibling stores cleared | `apply_pack`, `ens_solve` mandatory; `ens_solve` = full `run_simulation` on the copy | `edited_since` | preflight gates + `check_eh_study_start(lock_blocking=False)` |
+| `loadflow` | bundled (needs a dispatch) | with `optimisation` | `POST /simulation/run_ac_pf`; Stage 2 of `/run` | network lock for the whole PF; overwrites `lines_t.p0/q0`, `buses_t.v_*`; not abortable | none | `dispatch_status == fresh` | with the optimisation: its verdict; alone: `ac_pf_refusal` (the route's own 400) in the preflight's lock span |
+| N-1 SCLOPF | supported (an option) | yes | `SolverConfig.sclopf` | as optimisation | none | as optimisation | the optimisation's; refused with losses, rolling, no branches |
+| grid-readiness scorecard | not a run kind | — | advisory read | read-only | — | live | — |
+| campus electrical | bundled | **no** | `/campus-electrical/{name}/run`, `/milp` (queue job) | the **saved** `network.nc`; NetCDF lock and run-dir lock; never the network lock | island checks, cuts, sizing, purchase in one job | `_stale` (nc sha, campus file, library) | — (needs a save step first) |
+| `control_checks` (island study) | bundled | **no** | `/campus-electrical/{name}/island/study` | inline in the request; saved `network.nc`; no lock, no mesh | its own HiGHS LOPF **re-sizes** extendables, ignoring solver_config | sidecar change | — (until #448 §3.1's fixed-size island mode) |
+| contingencies beyond N-1, connection capacity | unsupported here | no | `routers/gridspine.py` | files only | AC LF + N-1 per bisection step | the screened run | — (a `planning_dynamics` project) |
+| frequency & time domain | unsupported in-app | no | hand-off bundles; PowerFactory read-back | files only | — | read-back | — |
+| detailed process (beyond UC) | unsupported | no | none | — | — | — | — (after GTP) |
+| fixed sizes (sizing off) | unsupported | no | none yet | — | — | — | — (slice F1) |
+
+Tests named `*_current_behaviour` record the campus and island gaps as they stand; the fix PRs flip them.
 
 ## Initial source evidence
 
