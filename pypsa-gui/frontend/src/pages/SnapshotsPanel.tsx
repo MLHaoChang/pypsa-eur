@@ -455,6 +455,14 @@ function RestoreConfirmModal({
         </div>
       )}
 
+      {snapshot.has_capture_manifest === false && (
+        <div className="bg-bg/60 border border-border rounded p-3 mb-3 text-xs text-muted">
+          <div className="font-medium text-text mb-1">Older snapshot</div>
+          This snapshot does not record which files existed when it was taken, so
+          settings, uploads and reports added since then stay as they are.
+        </div>
+      )}
+
       <div className="bg-bg/60 border border-border rounded p-3 mb-4 text-xs text-muted">
         <div className="font-medium text-text mb-1">Safety net</div>
         The current state will be auto-saved as a snapshot labelled
