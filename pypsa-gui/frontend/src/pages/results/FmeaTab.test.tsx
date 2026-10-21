@@ -308,13 +308,14 @@ it('warns, with the solver\'s word, when the plan was not put back', async () =>
   }
 })
 
-it('hosts the class-C stress-scenario editor (P15)', async () => {
+it('lists the stress scenarios read-only and links to Solver settings, where they are edited', async () => {
   vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
   renderTab()
-  const editor = await screen.findByTestId('stress-editor')
-  await waitFor(() => expect(editor.textContent).toMatch(/cold_snap/))
+  const list = await screen.findByTestId('stress-pointer-list')
+  await waitFor(() => expect(list.textContent).toMatch(/cold_snap/))
+  expect(screen.queryByTestId('stress-editor')).toBeNull()
+  expect(screen.queryByTestId('stress-add')).toBeNull()
 })
-
 
 it('refuses to sweep without a readable stress registry (E2E review m4)', async () => {
   const toast = (await import('react-hot-toast')).default
