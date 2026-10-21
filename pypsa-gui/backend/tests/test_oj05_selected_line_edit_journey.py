@@ -81,8 +81,11 @@ def test_selected_line_edit_shows_the_card_then_reads_back(oj_grid, kind, model,
     assert cards[0]['s_nom'] == 300.0
     assert card['version'] == 1 and card['kind'] == 'parameter_edit'
     typed = [row for row in card['rows'] if row['role'] == 'typed']
+    # The flow target (PR-2): the section by the flow's own class rule, Properties in place.
+    target = {'section': 'connection', 'panel': None, 'component': 'Line', 'entity': 'L2', 'field': 's_nom'}
     assert typed == [{'component_class': 'Line', 'name': 'L2', 'field': 's_nom', 'label': typed[0]['label'],
-                      'old': 300.0, 'new': 400.0, 'unit': 'MVA', 'role': 'typed'}]
+                      'old': 300.0, 'new': 400.0, 'unit': 'MVA', 'role': 'typed', 'target': target}]
+    assert card['section'] == {'id': 'connection', 'label': 'Connection & grid'}
     assert card['says'] == 'L2 s_nom 300 → 400 MVA'
 
     # Native read-back equals 400; the receipt says so, offers undo and calls results stale.
@@ -92,6 +95,10 @@ def test_selected_line_edit_shows_the_card_then_reads_back(oj_grid, kind, model,
     assert receipt['rows'][0]['readback'] == 400.0
     assert receipt['undo'] == {'tool': 'undo_last', 'available': True}
     assert receipt['results_stale'] is True
+    # The section's flow state after the write (flow_service.project_flow); oj-grid
+    # has no grid connection, so Connection & grid stays incomplete: unchanged.
+    assert receipt['section'] == {'id': 'connection', 'label': 'Connection & grid', 'state': 'incomplete',
+                                  'changed': False}
     assert not [d for e, d in frames if e in {'error', 'tool_error'}]
 
 

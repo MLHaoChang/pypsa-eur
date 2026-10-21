@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/3"
+SUITE_VERSION = "checked-pilot-evaluation/4"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -57,6 +57,13 @@ BRANCH = {
     "peak_branch_flow": (8, "MW"), "branch_rating": (8, "MVA"),
 }
 NETWORK_LOADING = {"max_branch_utilisation": (100, "%"), "branches_above_rating": (0, "branches")}
+# Load L1 sheds 0 then 5 MW (the solve's VoLL capture). Generator weights 2, 3:
+# 3*5 = 15 MWh and 3 weighted hours; objective weights 1, 2 at VoLL 1000:
+# 2*5*1000 = 10000 EUR; peak 5 MW.
+LOST_LOAD = {
+    "lost_load_energy": (15, "MWh"), "peak_shed": (5, "MW"),
+    "shed_hours": (3, "h"), "lost_load_cost": (10000, "EUR"),
+}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -74,7 +81,8 @@ BATTERY_CARRIER = {
 }
 # Opt-in profiles join the pilot suite only; the stress catalogue keeps the first five.
 EVALUATION_PROFILE_METRICS = {**PROFILE_METRICS, "carrier-energy/1": tuple(CARRIER),
-                              "branch-loading/1": tuple(BRANCH), "network-loading/1": tuple(NETWORK_LOADING)}
+                              "branch-loading/1": tuple(BRANCH), "network-loading/1": tuple(NETWORK_LOADING),
+                              "lost-load/1": tuple(LOST_LOAD)}
 # These are public contract labels, not calculated values from the runtime.
 LABELS = {
     "dispatch_energy": "Generator energy", "marginal_expenditure": "Marginal dispatch expenditure",
@@ -96,6 +104,10 @@ LABELS = {
     "branch_rating": "Rating (s_nom_opt if extendable, else s_nom)",
     "max_branch_utilisation": "Highest branch loading against its rating",
     "branches_above_rating": "Branches above their rating at any snapshot",
+    "lost_load_energy": "Unserved energy",
+    "peak_shed": "Peak shed power",
+    "shed_hours": "Weighted hours with shed above 1e-3 MW",
+    "lost_load_cost": "Unserved energy at the solve's VoLL",
 }
 
 
@@ -126,7 +138,8 @@ class Case:
             return self.entity_id
         return ("Battery" if self.profile.startswith("storage-") else "network" if self.profile.startswith("network-")
                 else "wind" if self.profile.startswith("carrier-")
-                else "L12" if self.profile.startswith("branch-") else "G1")
+                else "L12" if self.profile.startswith("branch-")
+                else "L1" if self.profile.startswith("lost-") else "G1")
 
 
 def catalogue():
@@ -136,12 +149,16 @@ def catalogue():
         carrier = profile.startswith("carrier-")
         cost = "cost" in profile
         loading = profile.endswith("-loading/1")
+        shed = profile.startswith("lost-")
         entity = ("storage unit Battery" if storage else "network" if profile.startswith("network-")
-                  else "carrier wind" if carrier else "line L12" if loading else "generator G1")
-        question = f"Show the loading for {entity}" if loading else f"Give me the key results for {entity}"
+                  else "carrier wind" if carrier else "line L12" if loading else "load L1" if shed
+                  else "generator G1")
+        question = (f"Show the loading for {entity}" if loading else f"Show the lost load for {entity}" if shed
+                    else f"Give me the key results for {entity}")
         if cost:
             question += "; price year 2026; annual fixed cost fraction " + ("0.5" if storage else "1")
         values = (STORAGE if storage else NETWORK_LOADING if profile == "network-loading/1" else BRANCH if loading
+                  else LOST_LOAD if shed
                   else NETWORK if profile.startswith("network-") else CARRIER if carrier else GENERATOR)
         expected = {metric: values[metric] for metric in metrics}
         cases.append(Case(profile + ":golden", profile, "golden", question, expected))
@@ -150,6 +167,7 @@ def catalogue():
         target = ("total_cost" if cost else "discharged_energy" if storage
                   else "carrier_generator_energy" if carrier else "max_branch_utilisation"
                   if profile == "network-loading/1" else "peak_branch_utilisation" if loading
+                  else "lost_load_energy" if shed
                   else "dispatch_energy")
         for fault in ("missing", "stale"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, (target,)))
