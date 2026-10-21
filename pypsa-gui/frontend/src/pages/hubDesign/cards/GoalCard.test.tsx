@@ -191,6 +191,13 @@ describe('GoalCard run', () => {
     expect(await screen.findByTestId('stress-editor')).toBeTruthy()
   })
 
+  it('opens More settings with the stress editor when a link asks for it, once', async () => {
+    useHubDesignStore.setState({ goalAdvancedRequested: true })
+    mount()
+    expect(await screen.findByTestId('stress-editor')).toBeTruthy()
+    expect(useHubDesignStore.getState().goalAdvancedRequested).toBe(false)
+  })
+
   it('shows VOLL read-only when it is set', async () => {
     mount()
     await userEvent.click(await screen.findByTestId('hub-goal-advanced'))

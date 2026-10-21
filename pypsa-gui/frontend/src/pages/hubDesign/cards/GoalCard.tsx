@@ -40,6 +40,13 @@ export function GoalCard() {
   const setLoleTarget = useHubDesignStore(s => s.setLoleTarget)
   const setEnsCap = useHubDesignStore(s => s.setEnsCap)
   const [advanced, setAdvanced] = useState(false)
+  // A link to the stress editor opens "More settings" once.
+  const advancedRequested = useHubDesignStore(s => s.goalAdvancedRequested)
+  useEffect(() => {
+    if (!advancedRequested) return
+    setAdvanced(true)
+    useHubDesignStore.getState().setGoalAdvancedRequested(false)
+  }, [advancedRequested])
   const [blocked, setBlocked] = useState<string | null>(null)
 
   // Default goal: the template's own override (set on reset), else the pack

@@ -4,13 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import { resultsApi, type StressScenario } from '../../api/simulation'
 import { nk } from '../../utils/queryKeys'
 import { useUIStore } from '../../store/uiStore'
-import { openSectionInExpert } from '../../layout/flowNavigation'
+import { useHubDesignStore } from '../hubDesign/hubDesignStore'
+import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 
 export default function StressScenariosPointer({ project }: { project: string | null }) {
   const expert = useUIStore(s => s.uiMode === 'expert')
   const editHere = () => {
     if (expert) openSectionInExpert('scenarios')
-    else { const ui = useUIStore.getState(); ui.setActiveSection('scenarios'); ui.setSlidePanel(null) }
+    else {
+      useHubDesignStore.getState().setGoalAdvancedRequested(true)
+      openSectionInGuided('scenarios')
+    }
   }
   const { data: reg } = useQuery({
     queryKey: nk(project, 'adequacy', 'stress_scenarios'),
