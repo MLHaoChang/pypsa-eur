@@ -39,7 +39,7 @@ def test_written_inventory_is_complete_and_explicit_about_unverified_behavior(tm
     assert {t['id'] for t in data['result_tabs']} >= {'summary', 'adequacy', 'fmea', 'loadflow', 'investment'}
     # 19 panels: Economics in Expert added 'economics' (plan 2026-10-14-economics-in-expert.md).
     # 17 result tabs: M3 added 'summary'; site commercial UX added 'flows' and 'loadshape'.
-    assert len(data['result_tabs']) == 17 and len(data['slide_panels']) == 20
+    assert len(data['result_tabs']) == 17 and len(data['slide_panels']) == 22
     assert 'pending' in data['status']
 
 
