@@ -87,6 +87,10 @@ class UnknownFamilyError(ProfileApplyError):
     """The meta names a profile family nobody registered."""
 
 
+class DcLoadOwnedError(ProfileApplyError):
+    """The project's `dc_load` spec owns the data-centre load (#421)."""
+
+
 class UnsupportedTargetError(ProfileApplyError):
     """The (component_type, attribute) pair is not in `TARGETS`."""
 
@@ -701,6 +705,53 @@ def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
     return {"total": float(energy.sum())}
 
 
+def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
+                   target: TargetSpec, src_year: int) -> tuple[dict, list[str]]:
+    """``profile_annual_mwh`` (the source year's energy: its mean power over
+    its hours — the plain sum for an hourly series, while a daily or weekly
+    one is a mean per step whose edge weeks straddle the year),
+    ``modelled_mwh`` per period, and the energy_mismatch warning."""
+    year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
+    profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
+    modelled = _modelled_mwh(n, aligned, target.weighting)
+    warnings: list[str] = []
+    if profile_mwh > 0:
+        off = {k: v for k, v in modelled.items()
+               if abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
+        if off:
+            parts = ", ".join(f"{k}: {v:,.0f} MWh" for k, v in off.items())
+            warnings.append(
+                f"{ENERGY_MISMATCH_WARNING}: the profile's source year "
+                f"holds {profile_mwh:,.0f} MWh but the model sees "
+                f"{parts} (snapshot weightings), more than "
+                f"{ENERGY_TOLERANCE:.0%} apart"
+            )
+    return {"profile_annual_mwh": profile_mwh, "modelled_mwh": modelled}, warnings
+
+
+def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
+                   component_type: str, attribute: str,
+                   time_basis: str | None = None) -> dict:
+    """What `assign_profile` would record for a power series' energy —
+    ``profile_annual_mwh``, ``modelled_mwh`` and its warnings, the time-basis
+    one included — aligned exactly as apply aligns, written nowhere. Lets a
+    caller show the gap on a sampled model (a one-week template) before the
+    user applies."""
+    target = _target(component_type, attribute)
+    if target.kind != "power":
+        raise UnsupportedTargetError(
+            f"{component_type}/{attribute} is not a power target; it has no energy")
+    scale, _ = _scale_power(series, meta)
+    basis, _recorded, warnings = resolve_time_basis(time_basis, _commercial_timezone(ctx))
+    resolution = str(meta.get("resolution") or "hourly").strip().lower()
+    aligned, align_meta = _align_to_snapshots(
+        series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
+    aligned = aligned * scale
+    energy, energy_warnings = _energy_record(
+        ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]))
+    return {**energy, "warnings": [*warnings, *energy_warnings]}
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -759,7 +810,7 @@ def assign_profile(
             f"{target.noun} {component!r} not found on the network"
         )
     if family.guard is not None:
-        family.guard(n, component_type, component, meta)
+        family.guard(ctx, component_type, component, meta)
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     unit_meta: dict[str, Any] = {}
@@ -809,26 +860,10 @@ def assign_profile(
     aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
 
     if target.kind == "power":
-        # The source year's energy: its mean power over its hours. For an
-        # hourly series this is the plain sum; a daily or weekly series is a
-        # mean per step, and a weekly one's edge weeks straddle the year.
-        src_year = int(align_meta["weather_year"])
-        year_hours = 24 * (366 if pd.Timestamp(year=src_year, month=1, day=1).is_leap_year else 365)
-        profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
-        modelled = _modelled_mwh(n, aligned, target.weighting)
-        unit_meta["profile_annual_mwh"] = profile_mwh
-        unit_meta["modelled_mwh"] = modelled
-        if profile_mwh > 0:
-            off = {k: v for k, v in modelled.items()
-                   if abs(v - profile_mwh) / profile_mwh > ENERGY_TOLERANCE}
-            if off:
-                parts = ", ".join(f"{k}: {v:,.0f} MWh" for k, v in off.items())
-                warnings = [*warnings, (
-                    f"{ENERGY_MISMATCH_WARNING}: the profile's source year "
-                    f"holds {profile_mwh:,.0f} MWh but the model sees "
-                    f"{parts} (snapshot weightings), more than "
-                    f"{ENERGY_TOLERANCE:.0%} apart"
-                )]
+        energy, energy_warnings = _energy_record(
+            n, series, aligned, scale, target, int(align_meta["weather_year"]))
+        unit_meta.update(energy)
+        warnings = [*warnings, *energy_warnings]
 
     if now is None:
         applied_at = _dt.datetime.now(_dt.timezone.utc)

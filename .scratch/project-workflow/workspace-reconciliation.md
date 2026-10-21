@@ -793,6 +793,8 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 | **W3c Guided cards at depth** | §4: each card's decisions, Required inputs (same editors) and Advanced; VOLL editable (J1) | B2 (Guided part) | UX | W3a, W4a; per-section, can split |
 | **W4a Scope (data)** | `flow_scope.json` (bundled); the section-8 scope component (mounted by the Builder); show/hide of group blocks, `not_needed`, and `in_scope: false` items (§5.2). No new run kind, so no separability proof | new | gatekeeper told (flow service); UX | B1 |
 | **W4b Run kinds** | each new `run_request` kind with its lock-free verdict and `source` (§5.2), one kind per PR | new | gatekeeper; UX | W0's row for that kind; W4a |
+| **F1 Fixed-size run (sizing off)** | modular-cards §4: a solver-config run option that dispatches on fixed sizes through `adequacy.sweep.freeze_capacities` (extendable stays on, each size clamped). The size source is the last capacity run (`*_nom_opt`) or the configured nameplate; the run records which, and is refused when the source has no sizes. Incompatible with myopic and rolling. Covers load-flow and grid-compliance-only studies on existing assets and the commercial-only study. Built with #448 §3.1's fixed-size island mode; not myopic/rolling planning. Owner: "required, not prioritised" | new (owner Q18 = A) | **gatekeeper** (engine semantics, run verdict) | W0 (its verdict joins the `optimisation` row) |
+| **GS-X0 Optional-worker path** | modular-cards §7.3: isolated, pinned environment per external engine, run as a native job; then GS-B1 BLAST-Lite first, then H2Integrate, OpenDSM, TESPy, python-control, one gated slice each. An ordered follow-up, not built yet | research GS-F2/F3 (#491) | **gatekeeper**; security review | W0, W4a, W3a |
 | **W5 Asset form, picker and converters** | B3 as designed (General → Sizing incl. Capacity Bounds → Controls → Reliability → Commercial → Availability), tiered picker; §10's Controls block wired to the preset route and the GFM settings | B3 | UX; gatekeeper on the preset write path | W3a |
 | **P0 Electrical data plan** | gatekeeper plan for 10a.3: the electrical sidecar keyed by component with its per-field owner table and no-shadow test, in `_BUNDLE_FILES`, renamed and dropped with its component; the campus draft reading it; one params → engine conversion with round-trip tests; PyPSA standard types folded in; the library schema (10a.4) and folding `campus_assets.yaml`, the voltage-step presets and the defaults pack into it | new | **gatekeeper** (engine semantics, write paths) | W0 |
 | **P1 AC-PF palette and forms (PyPSA-native)** | bus, line/cable with library types, 2-winding transformer (tap ratio, phase shift; library types), shunt capacitor/reactor in the palette, load power factor, generator control in the create form; each placeable from every canvas and opening the W5 form; Guided key parameters and Expert reset | new (owner 18:05) | UX; gatekeeper on units and typed lines | W5, P0 (library) |
@@ -804,7 +806,7 @@ B1 (#434) stays as is. The queued B2–B6 are re-cut as **W-slices**; the old ti
 | **W9 Companion** | #437's modes on top of #441; "Help with this section"; transient-card rule (§9, with LC-04) | new | UX | #441, #437 |
 | **W10 Results by group** | §6.3 tabs; Hand-off tab (reports, exports, the specialist packet) | new | UX | W3a, W4a |
 
-Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; P0 → P1 → P2, P3 per engine plan; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
+Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) → W4b per kind as W0 classifies it → W7 → W10; F1 after W0; GS-X0 after W0, W4a and W3a, then GS-B1 first; P0 → P1 → P2, P3 per engine plan; W8 after GTP-02; W9 once #441 and #437 land. B2's existing condition stands: shell work waits until LC-04 leaves the shell/dock area. Sonnet sessions for the UI slices; Opus for W0 and W4 (contracts others read).
 
 ### 13.1 In-flight PRs and how they fold in
 
@@ -817,6 +819,7 @@ Order: W0 ∥ E1 ∥ W1 ∥ W4a ∥ W3a → (W2 ∥ W3b ∥ W3c ∥ W5 ∥ W6) �
 | #435 / #442 DC-02 scorecard | inputs stay in 3; verdicts become 9's Grid view; #442's Expert Issues placement folds into 9, and its Guided Site-card rows into the section-3 card in W3a |
 | #418 ammonia | the Home card becomes creatable when it merges; its pre-fill is design §2.3's ammonia column |
 | #436 | this branch carries its files; this document supersedes its spec where §11 says so. Its HANDOFF slice list is replaced by §13 |
+| #491 GridSpine research (draft) | mapped onto the six cards in [modular-cards.md](modular-cards.md) §7 with `GS-` ids (owner, 2026-10-21: keep six cards); its five-card registry is W4a's, its availability register is W0's |
 
 ## 14. Pointers
 

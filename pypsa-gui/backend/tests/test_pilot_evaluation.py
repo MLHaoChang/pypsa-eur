@@ -18,7 +18,11 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile.endswith("-loading/1"):
+    if case.profile.startswith("lost-"):
+        n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 3]
+        n.snapshot_weightings.loc[:, "objective"] = [1, 2]
+    elif case.profile.endswith("-loading/1"):
         n.set_snapshots(pd.date_range("2026-01-01", periods=3, freq="h"))
         n.loads_t.p_set = pd.DataFrame({"L1": [0, 0, 0]}, index=n.snapshots)
         n.add("Bus", "B2", v_nom=110)
@@ -56,6 +60,12 @@ def evaluation_project(baseline, request):
     assert n.optimize(solver_name="highs", include_objective_constant=False) == ("ok", "optimal")
     ctx.solver_state.update(status="completed", condition="optimal")
     workflow_tools._record_solve_inputs(n, ctx.solver_state["solver_config"])
+    if case.profile.startswith("lost-"):
+        # The VoLL capture a solve with slacks writes; hand-set, as n.optimize adds none.
+        ctx.solver_state["last_lost_load"] = {
+            "lost_load_t": pd.DataFrame({"L1": [0.0, 5.0]}, index=n.snapshots),
+            "voll_eur_per_mwh": 1000.0,
+        }
     return ctx
 
 
@@ -108,6 +118,8 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
     if case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile.startswith("lost-"):
+        evaluation_project.solver_state["last_lost_load"]["lost_load_t"].iloc[1, 0] = float("nan")
     elif case.fault == "missing" and case.profile.endswith("-loading/1"):
         n.lines_t.p0.loc[:, "L12"] = float("nan")
     elif case.fault == "missing":

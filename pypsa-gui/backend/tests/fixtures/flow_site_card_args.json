@@ -72,6 +72,18 @@
   }
  },
  {
+  "id": "eh_ipp_hybrid",
+  "meta": {
+   "dtc_attribution": null,
+   "pack_overrides": {},
+   "recommended_archetype": "strong_grid",
+   "stages": null
+  },
+  "study_body": {
+   "archetype": "strong_grid"
+  }
+ },
+ {
   "id": "eh_microgrid",
   "meta": {
    "dtc_attribution": null,

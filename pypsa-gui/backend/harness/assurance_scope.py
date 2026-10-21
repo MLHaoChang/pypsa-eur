@@ -21,7 +21,7 @@ class RequestScope(BaseModel):
     profile: Literal[
         "generator-dispatch/1", "generator-cost/1", "network-linear-cost/1",
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
-        "branch-loading/1", "network-loading/1",
+        "branch-loading/1", "network-loading/1", "lost-load/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -62,6 +62,10 @@ def validate(value):
         scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("unsupported_loading_cost_scope")
+    if scope["profile"] == "lost-load/1" and (
+        scope.get("cost_basis") or scope.get("comparison_evidence_id")
+    ):
+        raise ValueError("unsupported_lost_load_cost_scope")
     if scope.get("component_class") and scope["profile"] != "branch-loading/1":
         raise ValueError("component_class_requires_branch_scope")
     if (scope["profile"] == "network-loading/1") != (scope["entity_id"] == "network") and (
@@ -130,6 +134,20 @@ def from_message(message, project_id, ui_context):
             value["component_class"] = loading[2].capitalize()
         if loading[4]:
             value.update(start=loading[4], end=loading[5])
+        return validate(value)
+    lost = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?lost load\s+for\s+"
+        r"(network|load\s+([^;]{1,128}?))"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    if lost:
+        value = {
+            "version": 1, "profile": "lost-load/1", "project_id": project_id,
+            "entity_id": "network" if lost[2] is None else lost[2], "retain": False,
+        }
+        if lost[3]:
+            value.update(start=lost[3], end=lost[4])
         return validate(value)
     storage_cost = re.fullmatch(
         r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?"
