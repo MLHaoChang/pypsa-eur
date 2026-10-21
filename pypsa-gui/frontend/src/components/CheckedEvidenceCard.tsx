@@ -17,9 +17,11 @@ export function loadflowLine(entry: NavigationEntry): string | null {
     return `Load flow is showing the solve and window that were checked (${readableWindow(entry.window.start, entry.window.end)}).`
   }
   if (entry.shows === 'different_view' && entry.reason) {
-    // Unknown basis: the mismatch itself is not known, so "may not be".
-    const verb = entry.reason === 'fingerprint_basis_unknown' ? 'may not be' : 'are not'
-    return `Load flow was opened on a different window or solve than the one checked. It shows ${VIEW_REASON[entry.reason]}, so the numbers there ${verb} the checked ones.`
+    // Unknown basis: a mismatch is not known, so no "different" claim and "may not be".
+    if (entry.reason === 'fingerprint_basis_unknown') {
+      return `Load flow opened. It shows ${VIEW_REASON[entry.reason]}, so the numbers there may not be the checked ones.`
+    }
+    return `Load flow was opened on a different window or solve than the one checked. It shows ${VIEW_REASON[entry.reason]}, so the numbers there are not the checked ones.`
   }
   return entry.shows === 'not_confirmed' ? 'Load flow opened.' : null
 }

@@ -84,7 +84,7 @@ describe('the Load flow line (S3b)', () => {
       .toBe('Load flow was opened on a different window or solve than the one checked. It shows a different time '
         + 'window, so the numbers there are not the checked ones.')
     expect(loadflowLine({ ...base, shows: 'different_view', reason: 'fingerprint_basis_unknown' }))
-      .toContain("It shows a solve that can't be matched to the checked one, so the numbers there may not be the checked ones.")
+      .toBe("Load flow opened. It shows a solve that can't be matched to the checked one, so the numbers there may not be the checked ones.")
     expect(loadflowLine({ ...base, outcome: 'submitted', shows: 'not_confirmed' })).toBe('Load flow opened.')
     expect(loadflowLine(base)).toBeNull()
   })
