@@ -2,6 +2,7 @@ import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
+import { readActiveSection, writeActiveSection } from './activeSection'
 import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
@@ -703,7 +704,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   fieldDrawer: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
-  activeSection: null,
+  activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockPinned: storedAssistantDockPinned(),
@@ -1012,7 +1013,8 @@ export const useUIStore = create<UIStore>((set) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
-        activeSection: null,
+        // The section this project was left in (design §7), else none.
+        activeSection: readActiveSection(name),
         fieldDrawer: null,
         selectedComponent: null,
         highlightedComponent: null,
@@ -1182,3 +1184,11 @@ if (typeof window !== 'undefined') {
   w.__uiModeStorageListener = onUiModeStorage
   window.addEventListener('storage', onUiModeStorage)
 }
+
+// Remember the section per project (design §7). A project switch restores the
+// new project's own section in the same update, so this writes it back
+// unchanged; a rename carries the section to the new name.
+useUIStore.subscribe((s, prev) => {
+  if (s.activeSection === prev.activeSection && s.currentProject === prev.currentProject) return
+  writeActiveSection(s.currentProject, s.activeSection)
+})
