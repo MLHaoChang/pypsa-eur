@@ -373,6 +373,89 @@ def _ledger() -> list[dict]:
     ]
 
 
+# ── Pre-built cases (spec §7; ticket 04): data only until the sensitivities slice (S5) ─
+#
+# Each case is the minimum set of declared changes that must move together (gatekeeper), in
+# the experiment contract's path and value rules (`services.experiments._validate_change`):
+# a network input `<Component>.<name>.<attribute>`, a commercial one
+# `commercial.contracts.<contract id>.<field>` or `commercial.<field>…`, a finance one
+# `finance.<field>.<key>`. A price-series change names the series id
+# (`commercial.<ref>.id`): S5 resolves it in the org Library to its one entry (minted at
+# create) and writes the whole reference, never the id alone.
+
+CASES_VERSION = 1
+CHEAP_BATTERY_FACTOR = 0.7
+LONGER_PPA_TENOR = 15
+
+
+def _change(path: str, old, new) -> dict:
+    return {"path": path, "value_type": "string" if isinstance(new, str) else "number",
+            "old": old, "new": new}
+
+
+def _price_refs(new: str) -> list[dict]:
+    paths = ["commercial.export_price_ref.id", "commercial.import_price_ref.id",
+             *(f"commercial.contracts.{cid}.reference_price.id" for cid, _p in PPA.values())]
+    return [_change(p, SERIES["base"], new) for p in paths]
+
+
+def _per_ppa(field: str, value) -> list[dict]:
+    return [_change(f"commercial.contracts.{cid}.{field}", old, value(old))
+            for cid, old in ((c, {"price": p, "share": PPA_SHARE, "tenor_years": PPA_TENOR}[field])
+                             for c, p in PPA.values())]
+
+
+def cases() -> dict:
+    """The base and 8 cases of spec §7 as declared changes (`cases.json`)."""
+    n = build_eh_ipp_hybrid()
+    parts = {f: float(n.storage_units.at["bess", f])
+             for f in ("inv_power_overnight", "inv_energy_overnight")}
+    same_series = ("the export, the import (G7) and both PPA references follow one price "
+                   "series, so they move together")
+    both_ppas = "the same term on both PPAs (wind and PV), as one negotiation"
+    return {
+        "version": CASES_VERSION, "template": TID,
+        "note": "Declared changes, data only: nothing lists or applies them until the "
+                "sensitivities slice (S5) turns them into ordinary, editable cases.",
+        "base": "pay-as-produced PPAs at 70 %, da_base, a 70 MW export limit, the pack's "
+                "battery cost",
+        "cases": [
+            {"id": "low_price", "label": "Low price level", "answers": "merchant risk",
+             "reason": same_series, "changes": _price_refs(SERIES["low"])},
+            {"id": "cannibalised", "label": "Cannibalised shape",
+             "answers": "shape risk, battery value", "reason": same_series,
+             "changes": _price_refs(SERIES["cannibalised"])},
+            {"id": "ppa_price_minus_10", "label": "PPA price −10 %",
+             "answers": "PPA negotiation", "reason": both_ppas,
+             "changes": _per_ppa("price", lambda p: round(p * 0.9, 6))},
+            {"id": "merchant_heavy", "label": "Merchant-heavy", "answers": "PPA share vs merchant",
+             "reason": both_ppas, "changes": _per_ppa("share", lambda _s: 0.3)},
+            {"id": "longer_ppa", "label": "Longer PPA", "answers": "PPA tenor",
+             "reason": both_ppas + ". It replaces spec §7's baseload case: a baseload form "
+                       "has no financial settlement (owner Q-IPP6 = A)",
+             "changes": _per_ppa("tenor_years", lambda _t: LONGER_PPA_TENOR)},
+            {"id": "cheap_battery", "label": "Cheap battery", "answers": "battery size",
+             "reason": "both upfront parts × 0.7, so the power/energy split is kept; the fixed "
+                       "O&M is a share of the power part and moves with it. Applied through the "
+                       "asset form, which re-derives capital_cost from the parts",
+             "changes": [_change(f"StorageUnit.bess.{f}", v,
+                                 round(v * CHEAP_BATTERY_FACTOR, 6))
+                         for f, v in parts.items()]},
+            {"id": "tight_connection", "label": "Tight connection",
+             "answers": "connection limit, battery size",
+             "reason": "the export Link's size is the binding limit (no connection agreement "
+                       "is set)",
+             "changes": [_change("Link.grid_export.p_nom", EXPORT_MW, 55.0)]},
+            {"id": "faster_degradation", "label": "Faster degradation",
+             "answers": "lifetime revenue", "reason": "both plants age faster together",
+             "changes": [_change("finance.degradation_by_asset.pv_plant",
+                                 DEGRADATION["pv_plant"], 0.01),
+                         _change("finance.degradation_by_asset.wind_farm",
+                                 DEGRADATION["wind_farm"], 0.008)]},
+        ],
+    }
+
+
 def register(T) -> None:
     """Add the IPP template to ``eh_templates``' registries."""
     T.BUILDERS[TID] = build_eh_ipp_hybrid
@@ -382,6 +465,7 @@ def register(T) -> None:
     T.SOLVER_CONFIG_EXTRA[TID] = {"discount_rate": FINANCE["wacc_nominal"], "voll": 0.0}
     T._SOLVER_CONFIG_BUILT[TID] = commercial_and_finance
     T.PRICE_SERIES[TID] = write_price_series
+    T.CASES[TID] = cases
     T.TEMPLATE_META[TID] = {
         "id": TID,
         "name": "Renewables IPP with battery",
