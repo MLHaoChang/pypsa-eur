@@ -3219,6 +3219,11 @@ TOOLS: list[dict[str, Any]] = [
         "smoothing), reactive range, frequency support and the profile's "
         "dynamic requirements (always unknown: an EMT study is needed), grid "
         "former, island ride-through per scenario, LOLE against the goal. "
+        "With an AI-training load and a committed battery/UPS, the ramp, "
+        "oscillation and voltage-change rows also carry after_battery {value, "
+        "verdict, units, note}: the value after the battery/UPS smooths, judged "
+        "by the same limit; the row's own verdict stays before mitigation, so "
+        "give both. "
         "unknown means an input is missing, never a pass; say which. Say which "
         "limits are assumed. It never blocks a run. 422 for an unknown "
         "profile. Safety: read.",
@@ -3617,6 +3622,71 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── Library references (3) — the shipped common cost references ───────
+    _t(
+        "list_library_references",
+        "List the shipped (common) technology cost references: published "
+        "benchmarks such as the Danish Energy Agency's August 2026 catalogue "
+        "for onshore wind, utility and commercial rooftop PV and 100 MW AEC/PEM "
+        "electrolysers, one row per technology and projection year. Each row "
+        "has its money year (currency_year), capacity_basis_code "
+        "(output_electric, output_electric_ac, input_electric), "
+        "includes_grid_connection (true, false or 'unknown'), licence and "
+        "attribution. They are opt-in references, never the project's "
+        "defaults. Paged: {items, total_count, offset, returned, has_more}. "
+        "Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "get_library_reference",
+        "Read one shipped cost reference (technology and projection_year from "
+        "list_library_references) with its source cells, and a comparison: "
+        "each parameter beside the defaults-pack value it would otherwise be, "
+        "both with their own source and money year, and differs=true where "
+        "value, unit, currency, money year or projection year differ. Nothing "
+        "is converted or written. With component and asset, the pack is the "
+        "one that asset's overnight cost was priced from; otherwise the "
+        "latest generic pack. `pack` names which. Report both values with "
+        "their money years; never present the reference as the default. "
+        "Safety: read.",
+        {
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "component": {"type": "string"},
+            "asset": {"type": "string"},
+        },
+        ["technology", "projection_year"],
+    ),
+    _t(
+        "apply_library_reference",
+        "Apply one shipped cost reference (list_library_references) to ONE asset: "
+        "a Generator for wind/PV (output-priced), a Link for an electrolyser "
+        "(priced per MW of electrical INPUT, never scaled by efficiency). Writes "
+        "overnight_cost, lifetime, fom_cost (overnight x the reference's FOM "
+        "share) and, on a Link, efficiency; capital_cost and discount_rate stay. "
+        "The user sees an old→new card with the reference and the default it "
+        "replaces, each with its source and money year. Nothing is converted. "
+        "Refusals: reference_target_unsupported (wrong class or a StorageUnit), "
+        "currency_mismatch (the asset's pack is not EUR), and "
+        "reference_confirmation_needed with `missing`: ask the user about each "
+        "item's text, then call again with confirm=[...] naming only what they "
+        "confirmed (dc_ac: AC-priced PV on a generator whose capacity basis is "
+        "not declared; grid_connection: the reference includes grid connection "
+        "and the project already prices its connection; money_year: the value "
+        "is copied in its own money year, not adjusted). Never confirm on the "
+        "user's behalf. Returns {written, source, currency_year, licence, "
+        "attribution, notes, receipt}. Safety: write.",
+        {
+            "component_class": {"type": "string", "enum": ["Generator", "Link"]},
+            "name": {"type": "string"},
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string",
+                        "enum": ["dc_ac", "grid_connection", "money_year"]}},
+        },
+        ["component_class", "name", "technology", "projection_year"],
+    ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
         "set_site_connection",
@@ -3866,7 +3936,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4299,6 +4369,11 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    # Library references (3): two reads (the asset's pack from its provenance) and the apply.
+    "list_library_references": [("GET", "/api/library/references")],
+    "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
+                              ("GET", "/api/library/references/{technology}/{year}")],
+    "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),

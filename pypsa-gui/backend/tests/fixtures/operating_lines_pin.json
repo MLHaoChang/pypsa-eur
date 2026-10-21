@@ -1,0 +1,37 @@
+{
+ "cfd": {
+  "case_hash": "ca89d5f8501a8893",
+  "lines": {
+   "contract:c:cfd_difference": "abb3a2b8dc6ea2c4804f5a9a517ab2b56f76cc3658cfd682ed9c8cfdde0743da",
+   "export_price:export_price": "028d2637291e5dabe099cc00b621bb76c001f7a20b712cc544e4c3a05dcb1597"
+  }
+ },
+ "cfd_escalating": {
+  "case_hash": "ea7852ffd0d31b99",
+  "lines": {
+   "contract:c:cfd_difference": "6ad88fe62c32eb3d6d762c9ce604500db80da545e329f570ae704610b3fb6834",
+   "export_price:export_price": "210c3346ac5f3914b92fe8436802d7ba76d8ef1f0edd71c6094e10122d051f5c"
+  }
+ },
+ "financial_ppa": {
+  "case_hash": "b042515d8bbe59b4",
+  "lines": {
+   "contract:c1:ppa_energy": "b4eabbc24c4598f9258fab4efed529203e40d3019f62447c6af2f41a6276da94",
+   "export_price:export_price": "028d2637291e5dabe099cc00b621bb76c001f7a20b712cc544e4c3a05dcb1597"
+  }
+ },
+ "financial_ppa_escalating": {
+  "case_hash": "2dfe26872d32b0fb",
+  "lines": {
+   "contract:c1:ppa_energy": "faab7496e2ba5b2ada6e06b2c1096077662df89897506f74b6f037edffe60019",
+   "export_price:export_price": "210c3346ac5f3914b92fe8436802d7ba76d8ef1f0edd71c6094e10122d051f5c"
+  }
+ },
+ "physical_ppa": {
+  "case_hash": "3665f7c73a965e25",
+  "lines": {
+   "contract:c1:ppa_energy": "1a3ab1f190e3f43e5561c90a56212564191de23fa8021b5f659b6eae327369d7",
+   "export_price:export_price": "81b45610b9bea2db849b0873c51a51c54150dfc0437522551504c6283ec409f7"
+  }
+ }
+}

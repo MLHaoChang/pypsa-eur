@@ -45,6 +45,7 @@ interface HubDesignState {
   loleSource: LoleSource
   /** Energy strictness (ENS cap); '' = the pack's own value. */
   ensCap: string
+  goalAdvancedRequested: boolean
   /** A manual rail click suppresses the next auto-advance (§5.6). */
   userMovedRail: boolean
   /** A generic site's values to start a NEW project from (the Site card's
@@ -64,6 +65,8 @@ interface HubDesignState {
   setLoleTarget: (v: string) => void
   seedLoleFromPack: (v: string) => void
   setEnsCap: (v: string) => void
+  /** One-shot: the Goal card opens its "More settings" (a link to the stress editor). */
+  setGoalAdvancedRequested: (v: boolean) => void
   setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
   setSiteFormRequested: (v: boolean) => void
   dismissSetupCard: () => void
@@ -77,6 +80,7 @@ export const HUB_DESIGN_INITIAL = {
   loleTarget: '',
   loleSource: null as LoleSource,
   ensCap: '',
+  goalAdvancedRequested: false,
   userMovedRail: false,
   siteSeed: null as { params: SiteParams; entered: string[] } | null,
   siteFormRequested: false,
@@ -101,6 +105,7 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
   setLoleTarget: (loleTarget) => set({ loleTarget, loleSource: 'user' }),
   seedLoleFromPack: (loleTarget) => set({ loleTarget, loleSource: 'pack' }),
   setEnsCap: (ensCap) => set({ ensCap }),
+  setGoalAdvancedRequested: (goalAdvancedRequested) => set({ goalAdvancedRequested }),
   setSiteSeed: (siteSeed) => set({ siteSeed }),
   setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),
   dismissSetupCard: () => set({ setupCardDismissed: true }),

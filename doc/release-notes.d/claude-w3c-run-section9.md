@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Section 9 (Readiness → run) now has a Run. In Expert the Issues panel offers the header's gated Run when the checks pass; in Guided the reliability study's Run moved from the Goal card to the Readiness → run card, and the Goal card now only sets the goal.

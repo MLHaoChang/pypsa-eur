@@ -46,6 +46,7 @@ function carrierZeroCo2Result(message: string): PreflightResult {
       component_class: 'Carrier',
       name: 'gas',
       message,
+      title: 'Fossil carrier has zero CO₂ emissions',
     }],
   }
 }
@@ -145,7 +146,7 @@ describe('IssuesPanel — carrier_zero_co2 fix button', () => {
       ok: false, errors: 0, warnings: 1,
       issues: [{
         severity: 'warning', code: 'carrier_zero_co2', component_class: 'Carrier',
-        name: 'coal', message: noHintMessage,
+        name: 'coal', message: noHintMessage, title: 'Fossil carrier has zero CO₂ emissions',
       }],
     })
     vi.mocked(networkApi.getCarriers).mockResolvedValue([
@@ -202,6 +203,7 @@ describe('IssuesPanel — preflight fetch failure vs. a genuine clean result (AD
       issues: [{
         severity: 'error', code: 'bus_ref_unknown', component_class: 'Load',
         name: 'Load 1', message: "bus='Bus 5' does not match any bus",
+        title: 'Connected bus does not exist',
       }],
     })
     vi.mocked(networkApi.getCarriers).mockResolvedValue([])
@@ -210,7 +212,7 @@ describe('IssuesPanel — preflight fetch failure vs. a genuine clean result (AD
 
     await screen.findByText('bus_ref_unknown')
     expect(screen.getByText(/does not match any bus/)).toBeTruthy()
-    // Q8: the finding leads with a plain title; the code stays beside it.
+    // Q8: the finding leads with the server's plain title; the code stays beside it.
     expect(screen.getByTestId('issue-title').textContent).toBe('Connected bus does not exist')
     expect(screen.queryByText('Could not run the validation check')).toBeNull()
     expect(screen.queryByText('All checks passed')).toBeNull()
