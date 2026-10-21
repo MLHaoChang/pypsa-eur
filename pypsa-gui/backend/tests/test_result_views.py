@@ -6,10 +6,13 @@ the catalogue without an entry fails here, as does an entry whose read is
 not a real read-tier tool.
 """
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 
 from harness.catalogue import RESULTS_TAB_ENUM, TOOLS, safety_tier_for
+from services import chat_service, chat_tools
 from services import result_views as rv
 
 _TOOLS = {t['name']: t for t in TOOLS}
@@ -129,7 +132,7 @@ def test_every_results_view_names_its_card_option_and_tab():
     assert got == BY_CARD
 
 
-def test_card_fields_use_flow_scope_ids():
+def test_card_fields_use_the_card_ids():
     assert rv.CARDS == CARD_IDS
     for v in rv.RESULT_VIEWS:
         if v.card is None:
@@ -151,11 +154,6 @@ def test_card_fields_are_frozen():
 def test_list_result_views_payload_is_unchanged(monkeypatch):
     """R0 adds data only: the listing the model sees is byte-identical to the
     one before the card fields (no new ids, labels or keys)."""
-    import json
-    from pathlib import Path
-
-    from services import chat_service, chat_tools
-
     golden = json.loads((Path(__file__).parent / 'golden' / 'result_views_listing.json').read_text())
     monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
     monkeypatch.setattr(rv, 'shown_key', lambda: 'golden')
