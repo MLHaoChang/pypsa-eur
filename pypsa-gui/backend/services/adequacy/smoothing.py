@@ -246,9 +246,9 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
     row.update(cover)
     short = [w for w, ok in (("MW", reserve["mw"] >= need_mw - 1e-9),
                              ("MWh", reserve["mwh"] >= need_mwh - 1e-9),
-                             ("UPS walk-in", cover["ups_ramp_mw_per_min"] <= ramp + 1e-9),
-                             ("UPS walk-in not known", not (reserve["ups"]["mw"] > 0
-                                                            and reserve["ups"]["walk_in_s"] is None))) if not ok]
+                             ("UPS walk-in", cover["ups_ramp_mw_per_min"] <= ramp + 1e-9)) if not ok]
+    # A missing input is unknown, never short; a measured shortfall still wins.
+    missing = ["UPS walk-in not known"] if reserve["ups"]["mw"] > 0 and reserve["ups"]["walk_in_s"] is None else []
     words = [f"a {s:.3g} MW step through the {ramp:g} MW/min limit takes {s / ramp:.3g} min and "
              f"{e_step:.3g} MWh each way",
              (f"oscillation {a_x:.3g} MW above the limit, {e_osc:.2g} MWh of swing" if a_x > 0
@@ -262,7 +262,10 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
                         else f", above the {ramp:g} MW/min limit"))
     if reserve["unsized"]:
         words.append(f"{', '.join(reserve['unsized'])} sized by the run, not counted")
-    return {**row, "verdict": "short" if short else "covered", "short": short, "note": "; ".join(words)}
+    if missing:
+        words.insert(0, f"{', '.join(missing)}: the UPS's share of the step is not counted")
+    verdict = "short" if short else "unknown" if missing else "covered"
+    return {**row, "verdict": verdict, "short": short, "missing": missing, "note": "; ".join(words)}
 
 
 def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limit_mw_per_min: float | None,
