@@ -18,9 +18,10 @@ from harness import profile_common as common
 PROFILE = "energy-balance/1"
 BUS_TOL_MW = 1e-5
 SERVED_TOL = 1e-6
+SOC_TOL = 1e-6
 REFUSALS = frozenset({
     "network_scope_required", "non_energy_bus", "legacy_lost_load_capture", "unsupported_snapshot_scope",
-    "misaligned_source", "shortfall_without_load",
+    "misaligned_source", "shortfall_without_load", "unsupported_storage_inflow",
 })
 METRICS = {
     "generation_energy": {
@@ -85,6 +86,7 @@ def source(ctx, entity):
     """Called under the network lock: raw arrays only; arithmetic in calculate."""
     from models.process_unit import product_role_generators
     from services.adequacy.slack import slack_generator_mask
+    from harness.calculations import _series
     from services.results.energy_flows import _is_energy_unit
 
     n = ctx.network
@@ -123,7 +125,8 @@ def source(ctx, entity):
         for bus, attr in ports:
             values = _frame(getattr(getattr(n, accessor), attr, None), [name], index)
             flows.append((bus, None if values is None else values[:, 0]))
-    storage = []
+    storage, dynamics = [], []
+    units = n.components["StorageUnit"]
     for name in n.storage_units.index:
         row = n.storage_units.loc[name]
         p = _frame(n.storage_units_t.p, [name], index)
@@ -131,12 +134,33 @@ def source(ctx, entity):
         start = (None if soc is None else soc[-1, 0]) if bool(row["cyclic_state_of_charge"]) else max(
             float(row["state_of_charge_initial"]), 0.0)
         storage.append((str(row["bus"]), None if p is None else p[:, 0], None if soc is None else soc[:, 0], start))
+        # Inflow and spill change the state without touching a bus: the tab
+        # refuses them through its closure, which the derived remainder lacks.
+        spill = _frame(n.storage_units_t.get("spill"), [name], index) if name in n.storage_units_t.get(
+            "spill", {}) else np.zeros((len(index), 1))
+        if any(v != 0 for v in _series(units, "inflow", name, index)) or spill is None or (spill != 0).any():
+            raise ValueError("unsupported_storage_inflow")
+        d, x = (_frame(n.storage_units_t.get(k), [name], index) for k in ("p_dispatch", "p_store"))
+        if d is None or x is None:
+            d, x = (None, None) if p is None else (np.maximum(p, 0.0), np.maximum(-p, 0.0))
+        dynamics.append({
+            "charge": None if x is None else x[:, 0], "discharge": None if d is None else d[:, 0],
+            "eta_store": float(row["efficiency_store"]), "eta_dispatch": float(row["efficiency_dispatch"]),
+            "standing_loss": _series(units, "standing_loss", name, index),
+        })
+    stores = n.components["Store"]
     for name in n.stores.index:
         row = n.stores.loc[name]
         p = _frame(n.stores_t.p, [name], index)
         e = _frame(n.stores_t.e, [name], index)
         start = (None if e is None else e[-1, 0]) if bool(row["e_cyclic"]) else max(float(row["e_initial"]), 0.0)
         storage.append((str(row["bus"]), None if p is None else p[:, 0], None if e is None else e[:, 0], start))
+        dynamics.append({
+            "charge": None if p is None else np.maximum(-p[:, 0], 0.0),
+            "discharge": None if p is None else np.maximum(p[:, 0], 0.0),
+            "eta_store": 1.0, "eta_dispatch": 1.0,
+            "standing_loss": _series(stores, "standing_loss", name, index),
+        })
     weights = n.snapshot_weightings
     return _plain({
         "version": 1,
@@ -159,6 +183,7 @@ def source(ctx, entity):
         "shed": shed,
         "flows": flows,
         "storage": storage,
+        "storage_dynamics": dynamics,
         "valid_solve": common.lp_outputs_live(ctx),
     })
 
@@ -190,15 +215,55 @@ def _bus_balance_closes(raw):
     return all((np.abs(net[b]) <= BUS_TOL_MW * np.maximum(1.0, scale[b])).all() for b in net)
 
 
+def _storage_reproduced(raw):
+    """Each state follows from its own charge, discharge, efficiencies and standing
+    loss, as the tab's state-of-charge check requires (relative 1e-6)."""
+    dt = np.array(raw["w_store"], dtype=float)
+    for (_bus, _p, state, start), dyn in zip(raw["storage"], raw["storage_dynamics"], strict=True):
+        if state is None or start is None or dyn["charge"] is None or dyn["discharge"] is None:
+            return False
+        soc, x, d = _array(state), _array(dyn["charge"]), _array(dyn["discharge"])
+        loss, eta_s, eta_d = _array(dyn["standing_loss"]), dyn["eta_store"], dyn["eta_dispatch"]
+        if not (np.isfinite(loss).all() and math.isfinite(eta_s) and math.isfinite(eta_d)) or eta_d <= 0:
+            return False
+        previous = np.concatenate(([start], soc[:-1]))
+        expected = (1 - loss) ** dt * previous + dt * (eta_s * x - d / eta_d)
+        if (np.abs(expected - soc) > SOC_TOL * (1 + np.abs(soc).max(initial=0.0))).any():
+            return False
+    return True
+
+
+def _gate(raw):
+    """The per-snapshot conditions every figure (and the carrier split) needs."""
+    if not raw["valid_solve"] or not _bus_balance_closes(raw) or not _storage_reproduced(raw):
+        return False
+    w, dt = np.array(raw["w_gen"]), np.array(raw["w_store"])
+    T = len(w)
+    gp, lp = _array(raw["gen_p"]).reshape(T, -1), _array(raw["load_p"]).reshape(T, -1)
+    if not (dt > 0).all() or (lp < -SERVED_TOL).any():
+        return False
+    # Per load, as the tab: shed may not exceed the load's own demand.
+    for load, values in (raw.get("shed_by_load") or {}).items():
+        j = raw["load_names"].index(load)
+        if (lp[:, j] - _array(values) < -SERVED_TOL * (1 + lp[:, j].max(initial=0.0))).any():
+            return False
+    # A shortfall may run only where its bus has demand to leave unserved.
+    for j in raw["shortfall"]:
+        bus = raw["gen_bus"][j]
+        demand = sum((lp[:, k] for k, b in enumerate(raw["load_bus"]) if b == bus), np.zeros(T))
+        amount = np.maximum(gp[:, j], 0.0)
+        if ((amount > SERVED_TOL) & (demand <= SERVED_TOL)).any():
+            return False
+    return True
+
+
 def calculate(raw, scope):
     if raw.get("version") != 1 or raw.get("profile") != PROFILE or raw["entity_id"] != scope["entity_id"]:
         raise ValueError("energy_balance_source_identity")
     a, b = common.window(raw["index"], scope)
     base = "unverified_solve" if not raw["valid_solve"] else "balance_not_established"
     available = {}
-    if raw["valid_solve"] and _bus_balance_closes(raw) and all(
-        s is not None and start is not None for _bus, _p, s, start in raw["storage"]
-    ):
+    if _gate(raw):
         w = np.array(raw["w_gen"])
         dt = np.array(raw["w_store"])
         T = len(w)
@@ -210,7 +275,7 @@ def calculate(raw, scope):
         delta = np.zeros(len(w))
         for _bus, _p, state, start in raw["storage"]:
             delta += np.diff(np.concatenate(([start], _array(state))))
-        if (dt > 0).all() and (served_t >= -SERVED_TOL * (1 + lp.sum(axis=1).max(initial=0.0))).all():
+        if (served_t >= -SERVED_TOL * (1 + lp.sum(axis=1).max(initial=0.0))).all():
             rows = slice(a, b + 1)
             generation = math.fsum((np.maximum(kept, 0.0).sum(axis=1) * w)[rows])
             served = math.fsum((np.maximum(served_t, 0.0) * w)[rows])
@@ -266,7 +331,8 @@ def notes(raw, scope, label):
         "Export, losses and conversion is derived (generation minus served minus storage change), "
         "not separately measured.",
     ]
-    if not raw["valid_solve"] or not _bus_balance_closes(raw):
+    facts, _ = calculate(raw, {k: v for k, v in scope.items() if k != "metrics"})
+    if len(facts) != len(METRICS):  # the split only beside a full, checked set of totals
         return lines
     split = _by_carrier(raw, scope)
     if len(split) > 1:

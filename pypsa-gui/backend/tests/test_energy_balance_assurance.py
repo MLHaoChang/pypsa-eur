@@ -174,3 +174,35 @@ def test_a_commodity_bus_is_refused_as_the_tab_refuses_it(shortfall, checked):
     ctx = solve(shortfall)
     frames = ask(checked, ctx, {})
     assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"non_energy_bus"}
+
+
+def test_storage_inflow_is_refused_as_the_tab_refuses_it(baseline, checked):
+    # Inflow fills the state without touching a bus: a derived remainder would read -8 MWh.
+    ctx = baseline[0]
+    ctx.network.add("StorageUnit", "Hydro", bus="B1", p_nom=10, max_hours=4, inflow=4,
+                    state_of_charge_initial=0, cyclic_state_of_charge=False)
+    ctx = solve(ctx)
+    assert energy_flows(ctx.network)["status"] != "ok"
+    frames = ask(checked, ctx, {})
+    assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"unsupported_storage_inflow"}
+
+
+def test_a_state_off_its_own_dispatch_gives_no_figure(battery, checked):
+    ctx = solve(battery)
+    soc = ctx.network.storage_units_t.state_of_charge
+    soc.iloc[:, 0] += 1  # each state 1 MWh above what its dispatch makes
+    frames = ask(checked, ctx, {})
+    assert {s["reason"] for s in approval(frames)["receipt"]["result_slots"]} == {"balance_not_established"}
+
+
+def test_no_carrier_split_beside_withheld_totals(shortfall):
+    from harness import calculations, energy_balance_calculations as balance
+
+    shortfall.network.buses.at["prod", "carrier"] = "NH3"
+    ctx = solve(shortfall)
+    scope = {"version": 1, "profile": PROFILE, "entity_id": "network"}
+    raw = calculations.scoped_source(ctx, scope)
+    assert any("different carriers" in line for line in balance.notes(raw, scope, str))
+    raw["w_store"] = [0.0] * len(raw["w_store"])  # a gate calculate applies, past the bus balance
+    assert balance.calculate(raw, scope)[0] == []
+    assert not any("different carriers" in line for line in balance.notes(raw, scope, str))
