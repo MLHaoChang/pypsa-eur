@@ -227,7 +227,7 @@ function SnapshotRow({
           <span className="text-[13px] font-semibold text-text truncate">
             {snap.label || <span className="text-muted italic font-normal">unlabeled</span>}
           </span>
-          {isNewest ? <Tag tone="accent">current</Tag>
+          {isNewest ? <Tag tone="accent">Latest saved</Tag>
             : type ? <Tag tone={SNAP_TYPE_TONE[type]}>{type}</Tag>
             : null}
           {snap.dispatch_status === 'stale' ? (

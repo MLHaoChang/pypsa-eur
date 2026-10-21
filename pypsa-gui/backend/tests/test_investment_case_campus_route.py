@@ -114,7 +114,7 @@ def _capture_factory(monkeypatch):
 
     seen: list = []
 
-    def factory(n, cfg, *, owner, lost_load, campus=None):
+    def factory(n, cfg, *, owner, lost_load, campus=None, growth_flags=()):
         seen.append(campus)
         return lambda: S.to_finance_case("s2")
 
@@ -627,7 +627,7 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
     seen: list = []
     real_factory = R._ic_build_case
 
-    def factory(n, cfg, *, owner, lost_load, campus=None):
+    def factory(n, cfg, *, owner, lost_load, campus=None, growth_flags=()):
         seen.append(campus)
         return real_factory(n, cfg, owner=owner, lost_load=lost_load, campus=campus)
     monkeypatch.setattr(R, "_ic_build_case", factory)

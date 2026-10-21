@@ -2461,7 +2461,8 @@ def solve_ppa_price(target_irr: float, target_year: int,
 
     from models.finance import SolvePpa
     from routers.results import (
-        _dispatch_ready, _ic_build_case, _ic_read_campus, _study_mesh_blocker,
+        _dispatch_ready, _ic_build_case, _ic_growth_flags, _ic_read_campus,
+        _study_mesh_blocker,
     )
     from routers.simulation import _state as sim_state
     from services.finance.case import FinanceRefused
@@ -2495,7 +2496,7 @@ def solve_ppa_price(target_irr: float, target_year: int,
     # IC G3 R-2: the campus study read the way the route reads it, so the solved
     # price and the report value the same case.
     build = _ic_build_case(n, cfg, owner=owner, lost_load=sim_state.get("last_lost_load"),
-                           campus=_ic_read_campus(raw))
+                           campus=_ic_read_campus(raw), growth_flags=_ic_growth_flags())
     try:
         case = build()
     except FinanceRefused as exc:
@@ -2539,9 +2540,11 @@ def solve_ppa_price(target_irr: float, target_year: int,
         "equity_post_tax_irr_at_target_year": _ne(out.get("solved_equity_irr_at_target_year"), 6),
         "owner": _cut(case.owner),
         # IC G3 gate C1: the case's campus flags too, so a price solved without the
-        # campus extras (a stale study, no engine, an unsaved network) says so.
+        # campus extras (a stale study, no engine, an unsaved network) says so; and
+        # E1's growth placeholders, so a price solved on them says so.
         "flags": [_cut(f, 160) for f in [*(out.get("solve_ppa_flags") or []),
-                                         *(f for f in case.flags if f.startswith("campus_study_"))]],
+                                         *(f for f in case.flags if f.startswith(
+                                             ("campus_study_", "growth_placeholder:")))]],
         "basis": ("post-tax equity IRR on the incremental cash against the counterfactual "
                   "supply cost, over operating years 1..target_year (SAM ppa_soln_mode=0)"),
         "stored_inputs_changed": False,
@@ -3585,13 +3588,24 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
 
 def generate_availability_profile(project_id: str, kind: str, generators: list,
                                   params: dict | None = None,
-                                  year: int | None = None) -> dict:
+                                  year: int | None = None,
+                                  component_type: str = "generators") -> dict:
     from routers.profiles import (
         AvailabilityGenerateRequest,
         generate_availability_profiles as _h,
     )
-    body = AvailabilityGenerateRequest(kind=kind, generators=generators,
+    body = AvailabilityGenerateRequest(kind=kind, components=generators,
+                                       component_type=component_type,
                                        params=params, year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def generate_series_profile(project_id: str, kind: str, components: list,
+                            params: dict | None = None,
+                            year: int | None = None) -> dict:
+    from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
+    body = SeriesGenerateRequest(kind=kind, components=components, params=params,
+                                 year=year)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7684,6 +7698,7 @@ DISPATCHERS: dict[str, Any] = {
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,
+    "generate_series_profile": generate_series_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,

@@ -738,6 +738,12 @@ def restore_snapshot(
                 # keeps the removed file.
                 if fname == "results_state.pkl":
                     (project_dir / fname).unlink(missing_ok=True)
+                # DC 03 slice 6: the user's grid-readiness limits are absent
+                # exactly when none was set (clearing the last one deletes the
+                # file), so a snapshot without them restores the template's
+                # limits; a later limit must not survive the restore.
+                if fname == "grid_readiness_limits.json":
+                    (project_dir / fname).unlink(missing_ok=True)
                 continue
             _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
 
