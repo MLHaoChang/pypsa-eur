@@ -2,8 +2,8 @@ import type { FlowTarget, FlowSectionId } from '../api/flow'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
 import { SECTION_OPEN } from './flowSections'
 
-// Showing a section or one flow item's field in Expert: the Guided cards'
-// "Edit in Expert", the Run's reason, and Issues all go through here.
+// Showing a section or one flow item's field: the Guided cards, the Run's
+// reason, and Issues all go through here.
 
 /** Show a section in Expert: set it active, switch the mode, open its first
  *  panel. The switch keeps the section (workspace-reconciliation §7). */
@@ -35,5 +35,21 @@ export function openFlowTarget(target: FlowTarget): void {
     ui.setActiveSection(target.section)
     return
   }
+  openSectionInExpert(target.section)
+}
+
+/** Open one flow item's field in place, in Guided: a drawer over the card with
+ *  the component's own editor, or the panel it points at. An item with no known
+ *  field opens its section in Expert instead (the one way to reach it). */
+export function openFlowTargetInPlace(target: FlowTarget): void {
+  const ui = useUIStore.getState()
+  if (target.component && target.entity) {
+    ui.setSelectedComponent({ type: target.component, name: target.entity })
+    ui.setHighlightedComponent({ type: target.component, name: target.entity })
+    ui.openRightPanel()
+    ui.setFieldDrawer(target)
+    return
+  }
+  if (target.panel) { ui.setFieldDrawer(target); return }
   openSectionInExpert(target.section)
 }

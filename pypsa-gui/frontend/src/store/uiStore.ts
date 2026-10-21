@@ -7,7 +7,7 @@ import type { SizingMode } from '../site3d/sizing'
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
-import type { FlowSectionId } from '../api/flow'
+import type { FlowSectionId, FlowTarget } from '../api/flow'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -450,6 +450,10 @@ interface UIStore {
   // (workspace-reconciliation §7). Moved by opening a section's panel, by
   // selecting a component, or by picking a section on the Guided rail; the
   // mode switch keeps it. Null until one is chosen.
+  // Guided: the field a section item opened in place, in a drawer over the
+  // card, so the user finishes it without leaving Guided (design §3.5).
+  fieldDrawer: FlowTarget | null
+  setFieldDrawer: (t: FlowTarget | null) => void
   activeSection: FlowSectionId | null
   setActiveSection: (s: FlowSectionId | null) => void
   // The assistant is NOT a SlidePanel. It has its own open/closed state so it
@@ -697,6 +701,8 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSiteId: readActiveSite(storedCurrentProject()),
   siteSizing: 'installed',
   activeSlidePanel: null,
+  fieldDrawer: null,
+  setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
   activeSection: null,
   setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
@@ -757,7 +763,7 @@ export const useUIStore = create<UIStore>((set) => ({
       if (explicit) localStorage.setItem(UI_MODE_EXPLICIT_KEY, '1')
     } catch { /* noop */ }
     set(s => {
-      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit }
+      const patch: Partial<UIStore> = { uiMode: mode, uiModeExplicit: s.uiModeExplicit || explicit, fieldDrawer: null }
       // UX review W5: switching mode keeps the autosave state, so the footer
       // reads the same for one project in Guided and in Expert. The mode only
       // seeds the default at load (storedAutosave).
@@ -1007,6 +1013,7 @@ export const useUIStore = create<UIStore>((set) => ({
       const patch: Partial<UIStore> = {
         currentProject: name,
         activeSection: null,
+        fieldDrawer: null,
         selectedComponent: null,
         highlightedComponent: null,
         assetDetailRequest: null,

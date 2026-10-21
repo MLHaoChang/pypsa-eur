@@ -38,6 +38,7 @@ import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
+import { FieldDrawer } from './components/FieldDrawer'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -778,6 +779,13 @@ export default function App() {
               dock and collapsed companion use this body as their positioned
               container while the chat stays mounted. */}
           <AssistantDock />
+          {uiMode === 'guided' && (
+            <FieldDrawer>
+              {t => t.component && t.entity
+                ? <PropertiesPanel />
+                : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
+            </FieldDrawer>
+          )}
         </div>
 
         <StatusBar />

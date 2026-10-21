@@ -5,18 +5,18 @@ import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/f
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
-import { openFlowTarget, openSectionInExpert } from '../../layout/flowNavigation'
 import { sectionMeta } from '../../layout/flowSections'
+import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
 
 // One flow section in Guided: its name and state, the items that are still to
 // do or to check (a Guided user never has a blocker hidden: the field is named
 // and one button shows it in Expert, design §3.5), then the section's card.
 
-/** The field an item points at, in words ("Link grid_import · p_nom"). */
+/** The field an item points at, in words ("Connection & grid > Link grid_import"). */
 export function fieldWords(item: FlowItem): string | null {
-  const { component, entity, field } = item.target
+  const { component, entity } = item.target
   const thing = [component, entity].filter(Boolean).join(' ')
-  return [thing, field].filter(Boolean).join(' · ') || null
+  return thing ? `${sectionMeta(item.target.section).label} > ${thing}` : null
 }
 
 function ItemRow({ item }: { item: FlowItem }) {
@@ -32,10 +32,16 @@ function ItemRow({ item }: { item: FlowItem }) {
         {field && <span className="text-muted"> ({field})</span>}
       </span>
       <button type="button" data-testid="section-item-open"
-        onClick={() => openFlowTarget(item.target)}
-        title={`Edit ${field ?? 'this'} in Expert; switching back returns you here`}
+        onClick={() => openFlowTargetInPlace(item.target)}
+        title={`Open ${field ?? 'this field'} here`}
         className="shrink-0 inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
-        Edit in Expert <ArrowRight size={11} />
+        Open here <ArrowRight size={11} />
+      </button>
+      <button type="button" data-testid="section-item-expert"
+        onClick={() => openFlowTarget(item.target)}
+        title="Open it in Expert; switching back returns you to this section"
+        className="shrink-0 text-[11px] text-muted hover:text-accent hover:underline">
+        Open in Expert
       </button>
     </li>
   )
@@ -124,13 +130,13 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <p className="text-[12px] text-muted">
-        {s?.summary ? `${s.summary}. ` : ''}{meta.label} is set in Expert for now. Everything it needs
-        is listed above when something is missing; you can also ask the assistant.
+        {s?.summary ? `${s.summary}. ` : ''}What this section needs is listed above when something is missing, and each item opens here.
+        The full {meta.label.toLowerCase()} editor is in Expert, or you can ask the assistant.
       </p>
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
-          Edit {meta.label.toLowerCase()} in Expert <ArrowRight size={11} />
+          Open {meta.label.toLowerCase()} in Expert <ArrowRight size={11} />
         </button>
       </div>
     </div>

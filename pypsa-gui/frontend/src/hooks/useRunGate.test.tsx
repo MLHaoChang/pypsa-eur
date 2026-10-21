@@ -69,3 +69,15 @@ describe('useRunGate', () => {
     expect(result.current.blocked).toBe(false)
   })
 })
+
+describe('useRunGate — deferred', () => {
+  it('says it is checking while a solve holds the network, and does not block', async () => {
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({
+      ...base, run_ready: false, run_blocker: null, deferred: true, deferred_reason: 'solving',
+      verdicts: { optimisation: { ready: false, blocker: null }, study: null },
+    } as never)
+    const { result } = renderHook(() => useRunGate(), { wrapper })
+    await waitFor(() => expect(result.current.checking).toBe(true))
+    expect(result.current.blocked).toBe(false)
+  })
+})

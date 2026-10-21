@@ -1076,6 +1076,11 @@ export default function AppHeader() {
               {runGate.reason}
             </button>
           )}
+          {runGate.checking && !amber && (
+            <span data-testid="run-checking" className="text-[11px] text-muted">
+              Checking whether the project is ready…
+            </span>
+          )}
           {!gated && !amber && runGate.notes.length > 0 && (
             <button type="button" data-testid="run-notes"
               onClick={() => openFlowTarget(runGate.notes[0].target)}

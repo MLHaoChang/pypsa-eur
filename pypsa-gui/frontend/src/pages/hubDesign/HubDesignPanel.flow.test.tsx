@@ -58,7 +58,7 @@ const RUNNING = { status: 'running', archetype: 'weak_flexible' as const }
 const DONE = { status: 'done', archetype: 'weak_flexible' as const, report: REPORT }
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo', activeSection: null })
+  useUIStore.setState({ currentProject: 'Demo', activeSection: null, fieldDrawer: null, uiMode: 'guided' })
   vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flowPayload())
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL })
   vi.spyOn(guidesApi, 'getGuide').mockRejectedValue(new Error('offline'))
@@ -439,10 +439,17 @@ describe('the rail is the ten flow sections', () => {
     expect(useUIStore.getState().activeSection).toBe('loads')
     const item = await screen.findByTestId('section-item')
     expect(item.textContent).toContain('Add a demand')
-    expect(item.textContent).toContain('Load dc_it · p_set')
+    expect(item.textContent).toContain('Loads & demand > Load dc_it')
+    expect(item.textContent).not.toContain('p_set')
+    // The primary action opens the field here, in Guided (design §3.5).
     await user.click(screen.getByTestId('section-item-open'))
-    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.entity).toBe('dc_it')
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Load', name: 'dc_it' })
+    // The secondary link takes the section to Expert and closes the drawer.
+    await user.click(screen.getByTestId('section-item-expert'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().fieldDrawer).toBeNull()
     expect(useUIStore.getState().activeSection).toBe('loads')
   })
 

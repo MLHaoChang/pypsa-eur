@@ -76,3 +76,15 @@ describe('the Guided ↔ Expert switch keeps the section (§7)', () => {
     expect(useUIStore.getState().activeSection).toBe('scenarios')
   })
 })
+
+describe('the panel → section map covers every sidebar panel', () => {
+  // The panels the Expert sidebar rows open. Snapshots belongs to no section
+  // (a project utility); every other row must map, or the section would not
+  // follow the panel (activeSection keeps the last one for an unmapped panel).
+  const SIDEBAR_PANELS = ['horizon', 'campusElectrical', 'capacityBounds', 'timeseries', 'profiles', 'economics',
+    'simparams', 'scenarios', 'issues', 'solveQueue', 'results', 'decision', 'gridspine', 'reports'] as const
+
+  it.each(SIDEBAR_PANELS)('%s maps to a section', (panel) => {
+    expect(PANEL_SECTION[panel]).toBeTruthy()
+  })
+})
