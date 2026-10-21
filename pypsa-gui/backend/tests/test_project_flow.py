@@ -1,0 +1,659 @@
+"""The project flow endpoint (project-workflow B1, design §3).
+
+`GET /api/projects/{name}/flow` files the existing checks into the ten flow
+sections; `POST …/flow/ack` acknowledges a warning. Covered here:
+
+  * per section: empty → incomplete, filled → complete, broken (an error item)
+    → incomplete, a warning → warning, acknowledged → complete, and re-raised
+    once the value changes;
+  * a deferred preflight → every input section `unknown`, `run_ready` false;
+  * the templates at create, against the instantiation table (design §2.3);
+  * an islanded microgrid → connection `not_needed`;
+  * `run_ready` agrees with `/simulation/preflight`'s `ok` when no presence
+    rule fails.
+"""
+from __future__ import annotations
+
+import contextlib
+import json
+import time
+from dataclasses import replace
+
+import pandas as pd
+import pypsa
+import pytest
+
+from routers import simulation as sim_router  # noqa: F401 — monkeypatched
+from services.pypsa_service import PyPSAService
+
+INPUTS = ("project", "carriers", "connection", "loads", "assets", "profiles",
+          "commercial", "scenarios")
+
+
+# ── helpers ─────────────────────────────────────────────────────────────────
+
+def _site_network() -> pypsa.Network:
+    """A small placed site behind a tagged grid connection: every presence rule
+    holds and the validator finds nothing."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=24, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 8760 / 24         # one modelled year
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas", co2_emissions=0.2)
+    n.add("Carrier", "grid")
+    n.add("Bus", "grid", x=5.0, y=52.0, carrier="AC")
+    n.add("Bus", "site", x=5.01, y=52.01, carrier="AC")
+    n.add("Generator", "market", bus="grid", carrier="grid", p_nom=100.0, marginal_cost=60.0)
+    n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=50.0, carrier="grid")
+    n.links.loc["grid_import", "eh_role"] = "grid_import"
+    n.add("Load", "it", bus="site", p_set=20.0)
+    n.add("Generator", "gas", bus="site", carrier="gas", p_nom=30.0, marginal_cost=80.0)
+    return n
+
+
+@pytest.fixture
+def site(client, install_network, tmp_projects_dir):
+    """Factory: install a network as a saved, open project; returns its name."""
+    def _make(n: pypsa.Network | None = None, name: str = "site") -> str:
+        install_network(n if n is not None else _site_network(), name=name)
+        r = client.post(f"/api/projects/{name}", params={"force": True, "rebind": True})
+        assert r.status_code == 200, r.text
+        return name
+    return _make
+
+
+def _flow(client, name) -> dict:
+    r = client.get(f"/api/projects/{name}/flow")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _states(body) -> dict[str, str | None]:
+    return {s["section"]: s["state"] for s in body["sections"]}
+
+
+def _codes(body, section) -> list[str]:
+    row = next(s for s in body["sections"] if s["section"] == section)
+    return [i["code"] for i in row["items"]]
+
+
+@pytest.fixture
+def edit(client, bound_ctx):
+    """Yield the session's own network under its lock, as a context manager."""
+    @contextlib.contextmanager
+    def _edit():
+        with bound_ctx(client), PyPSAService.get_lock():
+            yield PyPSAService.get_network()
+    return _edit
+
+
+@pytest.fixture
+def set_cfg(client, bound_ctx):
+    """Replace fields of the session's solver config."""
+    def _set(**kw):
+        with bound_ctx(client):
+            state = PyPSAService.get_solver_state()
+            state["solver_config"] = replace(state["solver_config"], **kw)
+    return _set
+
+
+def _create(client, tid, name, **kw) -> str:
+    r = client.post(f"/api/projects/from_template/{tid}", params={"name": name}, **kw)
+    assert r.status_code == 200, r.text
+    return r.json().get("name", name)
+
+
+# ── the payload ─────────────────────────────────────────────────────────────
+
+def test_a_filled_site_is_complete_and_ready(client, site):
+    body = _flow(client, site())
+    assert [s["section"] for s in body["sections"]] == [*INPUTS, "readiness", "results"]
+    assert {s: _states(body)[s] for s in INPUTS} == {s: "complete" for s in INPUTS}
+    assert body["run_ready"] is True and body["run_blocker"] is None
+    assert body["notes"] == [] and body["deferred"] is False
+    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["verdicts"] == {"optimisation": {"ready": True, "blocker": None},
+                                "study": None}
+    rows = {s["section"]: s for s in body["sections"]}
+    assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
+    assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
+    assert rows["connection"]["summary"] == "grid_import, 50 MW"
+    assert rows["project"]["required"] and not rows["commercial"]["required"]
+
+
+def test_an_item_carries_its_target(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.loads.loc["it", "p_set"] = float("nan")
+    body = _flow(client, name)
+    row = next(s for s in body["sections"] if s["section"] == "loads")
+    item = next(i for i in row["items"] if i["severity"] == "error")
+    assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
+                         "acknowledged"}
+    assert item["source"] == "validation" and item["blocking"] is True
+    assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
+                              "entity": "it", "field": None}
+    assert body["run_blocker"]["section"] == "loads"
+    assert body["run_blocker"]["message"].startswith("Loads & demand: ")
+    assert body["run_blocker"]["target"] == item["target"]
+
+
+def test_a_project_that_is_not_open_answers_409(client, site):
+    first = site(name="first")
+    site(name="second")
+    r = client.get(f"/api/projects/{first}/flow")
+    assert r.status_code == 409
+    assert r.json()["detail"]["error_kind"] == "flow_project_not_open"
+
+
+# ── per section: empty, filled (above), broken, warning ─────────────────────
+
+def test_project_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.snapshot_weightings.loc[:, "objective"] = float("nan")
+    body = _flow(client, name)
+    assert _states(body)["project"] == "incomplete"            # broken
+    assert "snapshot_weighting_nan" in _codes(body, "project")
+    with edit() as n:
+        n.snapshot_weightings.loc[:, "objective"] = 8760 / 24
+        n.buses[["x", "y"]] = 0.0
+    body = _flow(client, name)
+    assert _states(body)["project"] == "warning"               # no site location
+    assert _codes(body, "project") == ["site_location_missing"]
+    assert body["run_ready"] is True                           # W3: warnings never block
+
+
+def test_carriers_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.carriers.loc["gas", "co2_emissions"] = 0.0
+    body = _flow(client, name)
+    assert _states(body)["carriers"] == "warning"
+    assert "carrier_zero_co2" in _codes(body, "carriers")
+
+
+def test_connection_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.links.loc["grid_import", "p_nom_extendable"] = True
+        n.links.loc["grid_import", "p_nom_min"] = 80.0
+        n.links.loc["grid_import", "p_nom_max"] = 10.0
+    body = _flow(client, name)
+    assert _states(body)["connection"] == "incomplete"         # broken, on the import Link
+    assert "link_p_nom_bounds" in _codes(body, "connection")
+    assert "link_p_nom_bounds" not in _codes(body, "assets")
+    with edit() as n:
+        n.remove("Link", "grid_import")
+    body = _flow(client, name)
+    assert _states(body)["connection"] == "incomplete"         # empty
+    assert "presence_connection" in _codes(body, "connection")
+    assert body["run_ready"] is True                           # display only (R2 kind c)
+    assert body["notes"][0]["section"] == "connection"
+
+
+def test_loads_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.loads.loc["it", "p_set"] = float("nan")
+    assert _states(_flow(client, name))["loads"] == "incomplete"   # broken
+    with edit() as n:
+        n.remove("Load", "it")
+    body = _flow(client, name)
+    assert _states(body)["loads"] == "incomplete"              # empty
+    assert "presence_loads" in _codes(body, "loads")
+
+
+def test_assets_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.generators.loc["gas", "p_nom_extendable"] = True
+        n.generators.loc["gas", "p_nom_min"] = 50.0
+        n.generators.loc["gas", "p_nom_max"] = 5.0
+    body = _flow(client, name)
+    assert _states(body)["assets"] == "incomplete"             # broken
+    assert "generator_p_nom_bounds" in _codes(body, "assets")
+    with edit() as n:
+        n.remove("Generator", "gas")
+    body = _flow(client, name)
+    assert _states(body)["assets"] == "incomplete"             # empty: the import is not an asset
+    assert "presence_assets" in _codes(body, "assets")
+
+
+def test_profiles_section(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.add("Generator", "pv", bus="site", carrier="gas", p_nom=5.0,
+              p_max_pu=pd.Series(0.0, index=n.snapshots))
+    body = _flow(client, name)
+    assert _states(body)["profiles"] == "warning"
+    assert "timeseries_all_zero" in _codes(body, "profiles")
+
+
+def test_commercial_section(client, site, set_cfg):
+    name = site()
+    set_cfg(finance={"discount_rate": "not a number"})
+    body = _flow(client, name)
+    rows = {s["section"]: s for s in body["sections"]}
+    assert rows["commercial"]["state"] == "incomplete"
+    assert rows["commercial"]["required"] is True
+    assert "finance_inputs_invalid" in _codes(body, "commercial")
+    # A bind issue is display-only (R1): /run's preflight does not refuse it.
+    assert body["run_ready"] is True and body["run_blocker"] is None
+    assert [n["section"] for n in body["notes"]] == ["commercial"]
+
+
+def test_scenarios_section(client, site, set_cfg):
+    name = site()
+    set_cfg(solve_strategy="rolling", rolling_horizon=0)
+    body = _flow(client, name)
+    assert _states(body)["scenarios"] == "incomplete"          # broken
+    assert "rolling_horizon_invalid" in _codes(body, "scenarios")
+    # A reliability goal without VOLL: the validator's own check, filed here.
+    set_cfg(solve_strategy="full", ens_cap_permyriad=1.0, voll=0.0)
+    assert "ens_cap_without_voll" in _codes(_flow(client, name), "scenarios")
+    set_cfg(voll=5000.0)
+    body = _flow(client, name)
+    assert "ens_cap_without_voll" not in _codes(body, "scenarios")    # filled
+    assert "presence_voll" not in _codes(body, "scenarios")     # no study: not asked
+
+
+# ── acknowledgements ────────────────────────────────────────────────────────
+
+def test_a_warning_acknowledged_is_complete_until_its_value_changes(
+        client, site, project_storage_dir, edit):
+    name = site()
+    with edit() as n:
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 3.0
+    body = _flow(client, name)
+    assert _states(body)["project"] == "warning"
+    assert "snapshot_weights_nyears_off" in _codes(body, "project")
+
+    r = client.post(f"/api/projects/{name}/flow/ack",
+                    json={"code": "snapshot_weights_nyears_off", "entity": None})
+    assert r.status_code == 200, r.text
+    ack = r.json()["ack"]
+    assert set(ack) == {"section", "code", "entity", "value_hash", "at"}
+    assert ack["section"] == "project"
+    stored = json.loads((project_storage_dir(name) / "flow_acks.json").read_text())
+    assert stored["acks"] == [ack]
+    body = _flow(client, name)
+    assert _states(body)["project"] == "complete"
+    row = next(s for s in body["sections"] if s["section"] == "project")
+    assert row["items"][0]["acknowledged"] is True               # still listed, as checked
+
+    with edit() as n:
+        n.snapshot_weightings.loc[:, ["objective", "generators", "stores"]] = 5.0
+    assert _states(_flow(client, name))["project"] == "warning"  # re-raised
+
+
+def test_an_error_cannot_be_acknowledged(client, site, edit):
+    name = site()
+    with edit() as n:
+        n.loads.loc["it", "p_set"] = float("nan")
+    r = client.post(f"/api/projects/{name}/flow/ack",
+                    json={"code": "load_p_set_invalid", "entity": "it"})
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "flow_ack_not_warning"
+    r = client.post(f"/api/projects/{name}/flow/ack", json={"code": "no_such_code"})
+    assert r.status_code == 404
+    assert r.json()["detail"]["error_kind"] == "flow_item_unknown"
+
+
+# ── deferred ────────────────────────────────────────────────────────────────
+
+def test_a_deferred_preflight_is_unknown_everywhere(client, site, monkeypatch):
+    name = site()
+    monkeypatch.setattr(sim_router, "_solver_in_flight", lambda: True)
+    body = _flow(client, name)
+    assert body["deferred"] is True and body["run_ready"] is False
+    assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
+    assert body["run_blocker"]["section"] == "readiness"
+    assert body["deferred_reason"]
+    rows = {s["section"]: s for s in body["sections"]}
+    assert rows["results"]["freshness"] == "running"
+    r = client.post(f"/api/projects/{name}/flow/ack", json={"code": "x"})
+    assert r.status_code == 409
+
+
+# ── R4: run_ready is exactly the server's verdict ───────────────────────────
+#
+# The verdict is asked of the server itself, after the flow is read: the
+# preflight (what /run validates with), and, for a project whose Run includes
+# the reliability study, `POST /results/eh_study` with the Goal card's body (the
+# study's worker is faked, so an accepted start returns at once).
+
+def _server_verdict(client, monkeypatch, name) -> bool:
+    import time
+
+    from services import flow_service as S
+
+    pre = client.post("/api/simulation/preflight").json()
+    if pre.get("deferred"):
+        return False
+    ok = bool(pre["ok"])
+    meta = client.get(f"/api/projects/{name}/eh_template")
+    if meta.status_code == 200:
+        monkeypatch.setattr("services.adequacy.eh_study.run_eh_study",
+                            lambda *a, **k: {})
+        r = client.post("/api/results/eh_study", json=S._request_for(meta.json()))
+        assert r.status_code in (200, 202, 422), r.text
+        ok = ok and r.status_code != 422
+        for _ in range(100):                     # let the fake worker finish
+            rec = client.get("/api/results/eh_study")
+            if rec.status_code != 200 or rec.json().get("status") != "running":
+                break
+            time.sleep(0.05)
+    return ok
+
+
+def _assert_equivalent(client, monkeypatch, name) -> dict:
+    body = _flow(client, name)
+    assert body["run_ready"] == _server_verdict(client, monkeypatch, name), body["run_blocker"]
+    assert (body["run_blocker"] is None) == body["run_ready"]
+    return body
+
+
+R4_TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
+                "eh_microgrid", "eh_microgrid_staged", "eh_site", "eh_ammonia_staged"]
+
+
+@pytest.mark.parametrize("tid", R4_TEMPLATES)
+def test_r4_templates(client, tmp_projects_dir, monkeypatch, tid):
+    kw = {"json": {"site_type": "industrial"}} if tid == "eh_site" else {}
+    body = _assert_equivalent(client, monkeypatch, _create(client, tid, "r4", **kw))
+    assert body["run_ready"] is True
+
+
+def test_r4_ieee14(client, site, monkeypatch):
+    import project_templates._build as classic
+
+    body = _assert_equivalent(client, monkeypatch, site(classic.build_ieee14(), name="ieee14"))
+    assert body["run_ready"] is True
+
+
+@pytest.mark.parametrize("breakage", [
+    lambda n: n.loads.loc.__setitem__(("it", "p_set"), float("nan")),
+    lambda n: n.carriers.loc.__setitem__(("gas", "co2_emissions"), 0.0),
+    lambda n: n.generators.loc.__setitem__(("gas", "efficiency"), -1.0),
+    lambda n: n.remove("Load", "it"),
+])
+def test_r4_broken_sites(client, site, edit, monkeypatch, breakage):
+    name = site()
+    with edit() as n:
+        breakage(n)
+    _assert_equivalent(client, monkeypatch, name)
+
+
+def test_r4_no_import_link_undeclared(client, site, edit, monkeypatch):
+    """No import Link, not declared islanded: the server accepts the run, so
+    Run is ready; connection reads incomplete, display only."""
+    name = site()
+    with edit() as n:
+        n.remove("Link", "grid_import")
+        n.remove("Generator", "market")
+        n.remove("Bus", "grid")
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_ready"] is True
+    assert _states(body)["connection"] == "incomplete"
+    assert [x["section"] for x in body["notes"]] == ["connection"]
+
+
+def test_r4_off_grid_template_without_import_link(client, tmp_projects_dir, monkeypatch):
+    """Declared islanded (the microgrid's off_grid archetype) and its tie
+    removed: connection `not_needed`, Run as the server says."""
+    name = _create(client, "eh_microgrid", "island_cut")
+    r = client.delete("/api/network/links/subsea_tie")
+    assert r.status_code in (200, 204), r.text
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert _states(body)["connection"] == "not_needed"
+    assert body["run_ready"] is False                   # the commercial config still names the tie
+    assert body["run_blocker"]["section"] == "commercial", body["run_blocker"]
+
+
+def test_r4_snapshots_empty(client, site, monkeypatch):
+    """PyPSA refuses an empty snapshot index on a live network, so the
+    validator's own `snapshots_empty` is injected where both /preflight and the
+    flow read it (`routers.simulation.validate_for_run`)."""
+    from services.validation_service import Issue
+
+    name = site()
+    monkeypatch.setattr(sim_router, "validate_for_run", lambda n, cfg: [
+        Issue("error", "snapshots_empty", "", "", "Network has no snapshots.")])
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_ready"] is False
+    assert body["run_blocker"]["section"] == "project"
+    assert _codes(body, "project") == ["snapshots_empty"]
+
+
+def test_r4_study_with_voll_zero(client, tmp_projects_dir, monkeypatch):
+    """The study starts with VOLL 0 (only its frontier and stress stages need
+    it), so Run is ready and the gap is a scenarios note."""
+    name = _create(client, "eh_h2_hub", "voll0")
+    cfg = client.get("/api/simulation/solver_config").json()
+    assert client.put("/api/simulation/solver_config", json={**cfg, "voll": 0.0}).status_code == 200
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_ready"] is True
+    assert body["verdicts"]["optimisation"]["ready"] is True
+    assert body["verdicts"]["study"]["ready"] is True       # the study starts without VOLL
+    assert "presence_voll" in _codes(body, "scenarios")
+    # The template's buses are unplaced: the location is a note too.
+    assert {x["section"] for x in body["notes"]} == {"project", "scenarios"}
+
+
+def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypatch,
+                                             project_storage_dir):
+    """The study's own refusal (here: an energy-import cap on a two-way import
+    Link, `check_eh_study_start`) blocks Run in section 8."""
+    name = _create(client, "eh_datacenter", "refused")
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    meta["pack_overrides"] = {**meta["pack_overrides"], "import_energy_mwh_per_year": 1000.0}
+    path.write_text(json.dumps(meta))
+    link = client.get("/api/network/links").json()
+    grid = next(r for r in link if r["name"] == "grid_import")
+    assert client.put("/api/network/links/grid_import",
+                      json={**grid, "p_min_pu": -1.0}).status_code == 200
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_ready"] is False
+    assert body["run_blocker"]["section"] == "scenarios"
+    assert "eh_study_refused" in _codes(body, "scenarios")
+    # Per run kind: the optimisation is the preflight's verdict alone, so a
+    # client driving Run LOPF is not blocked by the study's refusal.
+    pre = client.post("/api/simulation/preflight").json()
+    assert body["run_request"] == {"optimisation": True, "study": True}
+    assert body["verdicts"]["optimisation"]["ready"] is pre["ok"] is True
+    assert body["verdicts"]["study"]["ready"] is False
+    assert body["verdicts"]["study"]["blocker"] == body["run_blocker"]
+
+
+def test_r4_in_flight(client, site, monkeypatch):
+    name = site()
+    monkeypatch.setattr(sim_router, "_solver_in_flight", lambda: True)
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_ready"] is False
+    assert body["verdicts"]["optimisation"]["ready"] is False
+    assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
+
+
+# ── the templates at create (design §2.3) ───────────────────────────────────
+#
+# The state of each section right after create. Where it differs from the
+# instantiation table, the comment says how (recorded in the PR, not papered
+# over): the table's **R** inputs (location, the data centre's limits, ramp
+# and LOLE goal) have no source that says "not yet confirmed" except the
+# template's `assumed` ledger rows, and the site location is a warning by the
+# brief's rule (the validator does not require it).
+TEMPLATE_STATES = {
+    # R location → warning (site_location_missing). R connection limits and
+    # ramp, R LOLE goal: no `assumed` row names them → complete.
+    "eh_datacenter": {"project": "warning", "carriers": "complete",
+                      "connection": "complete", "loads": "complete",
+                      "assets": "complete", "profiles": "complete",
+                      "commercial": "complete", "scenarios": "complete"},
+    # Islanded: connection `not_needed`. Assumed island data → assets warning.
+    "eh_microgrid": {"project": "warning", "carriers": "complete",
+                     "connection": "not_needed", "loads": "complete",
+                     "assets": "warning", "profiles": "complete",
+                     "commercial": "warning", "scenarios": "complete"},
+    # Ammonia (#418): electricity, H2 and NH3 pre-filled. Its assumed rows
+    # (energization; tanks, electrolyser, UC; finance and the NH3 value) read warning.
+    "eh_ammonia_staged": {"project": "warning", "carriers": "complete",
+                          "connection": "warning", "loads": "complete",
+                          "assets": "warning", "profiles": "complete",
+                          "commercial": "warning", "scenarios": "complete"},
+    "eh_h2_hub": {"project": "warning", "carriers": "complete",
+                  "connection": "complete", "loads": "complete",
+                  "assets": "warning", "profiles": "complete",
+                  "commercial": "complete", "scenarios": "complete"},
+}
+
+
+@pytest.mark.parametrize("tid", sorted(TEMPLATE_STATES))
+def test_template_states_at_create(client, tmp_projects_dir, tid):
+    name = _create(client, tid, "tpl")
+    body = _flow(client, name)
+    assert {s: _states(body)[s] for s in INPUTS} == TEMPLATE_STATES[tid], json.dumps(
+        {s["section"]: [i["code"] for i in s["items"]] for s in body["sections"]}, indent=1)
+    assert body["run_ready"] is True
+    assert body["run_ready"] == client.post("/api/simulation/preflight").json()["ok"]
+
+
+def test_generic_site_states_at_create(client, tmp_projects_dir):
+    name = _create(client, "eh_site", "plant", json={"site_type": "industrial"})
+    body = _flow(client, name)
+    states = _states(body)
+    # Assumed: discount rate and finance (commercial), PoC losses, fault level
+    # and the energization schedule (connection), the critical share (loads),
+    # the existing site (assets), the money year (commercial).
+    assert {s: states[s] for s in INPUTS} == {
+        "project": "warning", "carriers": "complete", "connection": "warning",
+        "loads": "warning", "assets": "warning", "profiles": "complete",
+        "commercial": "warning", "scenarios": "complete"}
+    assert "assumed_default" in _codes(body, "connection")
+    assert body["run_ready"] is True
+
+
+def test_an_assumed_default_acknowledged_is_re_raised_when_the_template_value_changes(
+        client, tmp_projects_dir, project_storage_dir):
+    name = _create(client, "eh_site", "plant2", json={"site_type": "industrial"})
+    body = _flow(client, name)
+    item = next(i for s in body["sections"] for i in s["items"]
+                if i["code"] == "assumed_default" and i["target"]["entity"] == "fault level at the PoC")
+    r = client.post(f"/api/projects/{name}/flow/ack",
+                    json={"code": "assumed_default", "entity": item["target"]["entity"]})
+    assert r.status_code == 200, r.text
+    body = _flow(client, name)
+    acked = next(i for s in body["sections"] for i in s["items"]
+                 if i["target"]["entity"] == "fault level at the PoC")
+    assert acked["acknowledged"] is True
+    path = project_storage_dir(name) / "eh_template.json"
+    meta = json.loads(path.read_text())
+    for row in meta["ledger"]:
+        if row["item"] == "fault level at the PoC":
+            row["value"] = "999 MVA"
+    path.write_text(json.dumps(meta))
+    again = next(i for s in _flow(client, name)["sections"] for i in s["items"]
+                 if i["target"]["entity"] == "fault level at the PoC")
+    assert again["acknowledged"] is False
+
+
+def test_an_islanded_microgrid_needs_no_connection(client, tmp_projects_dir):
+    name = _create(client, "eh_microgrid", "island")
+    rows = {s["section"]: s for s in _flow(client, name)["sections"]}
+    assert rows["connection"]["state"] == "not_needed"
+    assert rows["connection"]["required"] is False
+    assert rows["connection"]["summary"] == "Off-grid: no grid connection needed"
+
+
+@pytest.mark.parametrize("tid", R4_TEMPLATES)
+def test_flow_answers_within_the_preflights_time(client, tmp_projects_dir, tid, capsys):
+    """Done-when: GET /flow answers in about the preflight's time (measured, and
+    printed for the PR). The cold call runs eh_readiness on a copy; the next
+    one reads its cache (per network revision)."""
+    kw = {"json": {"site_type": "industrial"}} if tid == "eh_site" else {}
+    name = _create(client, tid, f"t_{tid}", **kw)
+    t0 = time.perf_counter()
+    client.post("/api/simulation/preflight")
+    pre = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    _flow(client, name)
+    cold = time.perf_counter() - t0
+    t0 = time.perf_counter()
+    _flow(client, name)
+    warm = time.perf_counter() - t0
+    with capsys.disabled():
+        print(f"\n[flow timing] {tid}: preflight {pre * 1000:.0f} ms, flow cold "
+              f"{cold * 1000:.0f} ms, warm {warm * 1000:.0f} ms")
+    # The budget: generous absolute bounds, so a slow CI runner does not flake.
+    # Measured locally: preflight 45-120 ms, cold 100-570 ms, warm 50-100 ms.
+    assert cold < 10.0 and warm < 3.0
+
+
+def test_the_acks_sidecar_travels_with_the_project():
+    from routers.projects import _BUNDLE_FILES
+    from services.flow_service import ACKS_FILE
+
+    assert ACKS_FILE in _BUNDLE_FILES
+
+
+def test_the_assistant_tool_returns_the_endpoints_payload(client, site, bound_ctx):
+    from services import chat_tools
+    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+
+    name = site()
+    assert TOOL_ROUTES["get_project_flow"] == [("GET", "/api/projects/{name}/flow")]
+    assert safety_tier_for("get_project_flow") == "read"
+    with bound_ctx(client):
+        out = chat_tools.DISPATCHERS["get_project_flow"](name=name)
+    assert out == _flow(client, name)
+
+
+def test_a_missing_location_is_a_note_beside_an_enabled_run(client, site, edit):
+    """Design §3.3: "Run is enabled with a note when only display-only gaps
+    remain ('Project & site: no location')"."""
+    name = site()
+    with edit() as n:
+        n.buses[["x", "y"]] = 0.0
+    body = _flow(client, name)
+    assert body["run_ready"] is True
+    assert [x["section"] for x in body["notes"]] == ["project"]
+    assert body["notes"][0]["message"].startswith("Project & site: ")
+
+
+def test_a_held_network_lock_defers_the_flow_instead_of_waiting(client, tmp_projects_dir,
+                                                                monkeypatch):
+    """Gatekeeper: GET /flow is polled, so it never blocks on the lock. The
+    study check runs after the preflight's span; a lock taken in between makes
+    the answer `deferred`, within the budget, with run_ready false."""
+    import threading
+
+    from services.adequacy import eh_study_runner as R
+
+    name = _create(client, "eh_h2_hub", "busy")
+    real = R.check_eh_study_start
+    held, release = threading.Event(), threading.Event()
+
+    def holder(lock):
+        with lock:
+            held.set()
+            release.wait(10)
+
+    def check(*a, **k):
+        # The request's own lock is taken just after the preflight released it.
+        t = threading.Thread(target=holder, args=(PyPSAService.get_lock(),), daemon=True)
+        t.start()
+        held.wait(5)
+        assert k.get("lock_blocking") is False
+        return real(*a, **k)
+
+    monkeypatch.setattr(R, "check_eh_study_start", check)
+    t0 = time.perf_counter()
+    try:
+        body = _flow(client, name)
+    finally:
+        release.set()
+    assert time.perf_counter() - t0 < 3.0
+    assert body["deferred"] is True and body["run_ready"] is False
+    assert {s: _states(body)[s] for s in INPUTS} == {s: "unknown" for s in INPUTS}
+    assert body["verdicts"]["study"]["ready"] is False

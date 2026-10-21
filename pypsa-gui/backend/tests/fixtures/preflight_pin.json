@@ -1,0 +1,94 @@
+{
+ "broken": {
+  "codes": [
+   "rolling_horizon_invalid"
+  ],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 1,
+  "ok": false,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_datacenter": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_datacenter_staged": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_h2_hub": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_h2_hub_staged": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_microgrid": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_microgrid_staged": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "eh_site": {
+  "codes": [],
+  "deferred": null,
+  "deferred_reason": null,
+  "deferred_stuck": null,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ },
+ "in_flight": {
+  "codes": [],
+  "deferred": true,
+  "deferred_reason": "Solver worker still active \u2014 validation deferred until the LP transforms (vintage rows, slack generators, dispatch fix) are reverted. Click Revalidate once the lock is released.",
+  "deferred_stuck": false,
+  "errors": 0,
+  "ok": true,
+  "status": 200,
+  "warnings": 0
+ }
+}
