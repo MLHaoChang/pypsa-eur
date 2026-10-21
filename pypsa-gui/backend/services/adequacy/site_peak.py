@@ -98,7 +98,7 @@ def _energized(n, link: str) -> np.ndarray:
 
 
 #: The growth inputs the check rests on (``eh_template.json`` ``growth_inputs`` kinds).
-PEAK_INPUTS = ("it_mw", "energized_mw", "load_mw")
+PEAK_INPUTS = ("it_mw", "energized_mw")
 
 
 def unset_periods(meta: dict | None) -> dict[str, list[str]]:

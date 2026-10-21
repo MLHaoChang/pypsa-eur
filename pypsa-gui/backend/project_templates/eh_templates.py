@@ -373,9 +373,10 @@ def _dc_plan(planning: Planning | None = None) -> _DcPlan:
     it = _by_stage(p, native, {y: v for y, v, _pue in DC_PHASES})
     pue = _by_stage(p, native, {y: v for y, _it, v in DC_PHASES})
     en = _by_stage(p, native, DC_ENERGIZATION_MW)
-    return _DcPlan(p, tuple((y, v, pu) for (y, v, _s), (_y, pu, _s2) in zip(it, pue)),
-                   {y: v for y, v, _s in en}, {y: s for y, _v, s in it},
-                   {y: s for y, _v, s in en})
+    return _DcPlan(p, tuple((y, it_mw, pue_y)
+                            for (y, it_mw, _set), (_year, pue_y, _pue_set) in zip(it, pue)),
+                   {y: mw for y, mw, _set in en}, {y: is_set for y, _mw, is_set in it},
+                   {y: is_set for y, _mw, is_set in en})
 
 # ── The staged campus's commercial and finance inputs (slice D4) ────────────
 # Inline only (no Library refs a fresh project would not have), so the
@@ -878,9 +879,9 @@ _GROWTH_KINDS = {
 
 
 def _growth_rows(kind: str, staged, *, source_set: str = "example", overrides=None):
-    """``growth_inputs`` rows for one kind: ``staged`` is ``_by_stage``'s
-    ``[(year, value, set)]``; ``overrides`` ({year: value}) are entered values
-    (set, ``source_set``)."""
+    """``growth_inputs`` rows for one kind: ``staged`` is ``[(year, the
+    example's same-stage value, set)]``; ``overrides`` ({year: value}) are
+    entered values (set, ``source_set``)."""
     rows = []
     for y, v, is_set in staged:
         if overrides is not None and y in overrides:
@@ -929,14 +930,18 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
                if load_spec is not None else None)
     shown_it = spec_it if spec_it is not None else it_mw
     until = f"{e0:g} MW until {years[1]}" if len(years) > 1 else f"{e0:g} MW"
-    inverters = [(y, y + 10) for y in years if y + 10 < end]
-    inverter_note = (" and ".join(f"bess_new_{y}'s in {e}" if i else f"bess_new_{y}'s inverter "
-                                  f"ends in {e}" for i, (y, e) in enumerate(inverters))
-                     + f", inside the {end} horizon; the template's finance inputs re-buy it at "
-                     "the end of its lifetime (replacement_rule part_lifetimes)"
-                     if inverters else
-                     f"no candidate battery's inverter ends inside the {end} horizon "
-                     "(replacement_rule part_lifetimes re-buys one that does)")
+    # Each candidate battery's inverter lives 10 years; list those that end
+    # inside the horizon.
+    ends = [f"bess_new_{y}'s in {y + 10}" for y in years if y + 10 < end]
+    if ends:
+        ends[0] = ends[0].replace("'s in", "'s inverter ends in", 1)
+        inverter_note = (f"{' and '.join(ends)}, inside the {end} horizon; the template's finance "
+                         "inputs re-buy it at the end of its lifetime (replacement_rule "
+                         "part_lifetimes)")
+    else:
+        inverter_note = (f"no candidate battery's inverter ends inside the {end} horizon "
+                         "(replacement_rule part_lifetimes re-buys one that does)")
+
     def _projected_note(y):
         if spec_it is not None:
             return "the dc_load phase entered at create"
@@ -1053,9 +1058,10 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
     }
     if is_native:
         return meta
-    growth = [*_growth_rows("it_mw", _by_stage(p, native, {y: v for y, v, _pue in DC_PHASES}),
+    growth = [*_growth_rows("it_mw", [(y, it_mw[y], plan.it_set[y]) for y in years],
                             source_set="dc_load", overrides=spec_it),
-              *_growth_rows("energized_mw", _by_stage(p, native, DC_ENERGIZATION_MW))]
+              *_growth_rows("energized_mw",
+                            [(y, plan.energization[y], plan.energized_set[y]) for y in years])]
     meta["growth_inputs"] = growth
     meta["planning"] = {"start_year": y0, "end_year": end, "periods": years,
                         "native_periods": list(native.years), "native_end_year": native.end_year}
@@ -1325,7 +1331,8 @@ def _microgrid_commercial_and_finance() -> dict:
 #: Template blocks that need the backend's models (built on first use).
 _SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance,
                         "eh_microgrid": _microgrid_commercial_and_finance}
-_BUILT_CACHE: dict = {}
+#: Built blocks by template id, or by (id, Planning) for entered years.
+_BUILT_CACHE: dict[str | tuple, dict] = {}
 
 
 def solver_config(template_id: str, planning: Planning | None = None) -> dict:

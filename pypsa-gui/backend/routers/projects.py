@@ -1510,7 +1510,8 @@ def _planned_network(mod, template_key: str, planning, load_spec):
     except ValueError as exc:
         refused = [str(exc)]
     if refused:
-        raise HTTPException(422, {"code": "planning_invalid", "field": "planning",
+        raise HTTPException(422, {"error_kind": "planning_invalid",
+                                  "code": "planning_invalid", "field": "planning",
                                   "message": "planning: the example does not build for "
                                              f"{list(planning.years)} → {planning.end_year}: "
                                              + "; ".join(refused)})
@@ -1659,7 +1660,8 @@ def create_from_template(
         allowed = _template_params(template_key)
         extra = sorted(set(params) - allowed)
         if extra:
-            raise HTTPException(422, {"code": "template_params_invalid", "field": extra[0],
+            raise HTTPException(422, {"error_kind": "template_params_invalid",
+                                      "code": "template_params_invalid", "field": extra[0],
                                       "message": f"{extra[0]}: unknown parameter (this template "
                                                  f"takes only {', '.join(sorted(allowed))})"})
         tpl_mod = _eh_templates_module()
@@ -1668,16 +1670,18 @@ def create_from_template(
             try:
                 planning = tpl_mod.planning_spec(template_key, params["planning"])
             except tpl_mod.PlanningError as exc:
-                raise HTTPException(422, {"code": "planning_invalid", "field": exc.field,
-                                          "message": str(exc)})
+                raise HTTPException(422, {"error_kind": "planning_invalid",
+                                          "code": "planning_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
         dc_spec = None
         if "dc_load" in params:
             try:
                 dc_spec = tpl_mod.dc_load_spec(template_key, params.get("dc_load"),
                                                planning=planning)
             except DcLoadError as exc:
-                raise HTTPException(422, {"code": "dc_load_invalid", "field": exc.field,
-                                          "message": str(exc)})
+                raise HTTPException(422, {"error_kind": "dc_load_invalid",
+                                          "code": "dc_load_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
         if planning is None:
             built_net = tpl_mod.BUILDERS[template_key](load_spec=dc_spec)
         else:

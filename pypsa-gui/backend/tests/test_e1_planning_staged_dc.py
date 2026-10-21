@@ -210,6 +210,32 @@ def test_a_shifted_year_is_a_placeholder_with_the_examples_value_by_stage():
     assert energ[2038]["source"] == "assumed" and "placeholder" in energ[2038]["note"]
 
 
+def test_an_example_year_keeps_its_value_set_when_only_the_horizon_moves():
+    """2027 / 2030 → 2033: both years are the example's, so their IT and
+    energization values are its own (set), though 2030 now stands for 3 years."""
+    meta = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2033}))
+    assert all(g["set"] for g in meta["growth_inputs"])
+    assert [g["year"] for g in meta["growth_inputs"]] == [2027, 2030, 2027, 2030]
+    assert meta["period_years"] == {"2027": 3, "2030": 3}
+
+
+def test_a_dc_load_above_a_placeholder_cap_is_unknown_not_refused():
+    """Only a set energization can refuse a dc_load peak (DC-01); against a
+    placeholder the period is unknown and the create goes ahead."""
+    from services.adequacy import site_peak as SP
+
+    p = _plan({"start_year": 2028, "end_year": 2040})
+    phases = [{"cod": f"{y}-01-01", "it_mw": 60.0} for y in p.years]
+    spec = T.dc_load_spec(TID, {"phases": phases}, planning=p)        # not refused
+    n = T.BUILDERS[TID](load_spec=spec, planning=p)
+    rows = SP.peak_check(n, T.island_config(TID, p),
+                         unset=SP.unset_periods(T.template_meta(TID, p, load_spec=spec)))
+    assert all(r["headroom_mw"] is None and r["unset"] == ["energized_mw"] for r in rows)
+    with pytest.raises(Exception, match="dc_load.phases"):          # the same load, native years
+        T.dc_load_spec(TID, {"phases": [{"cod": f"{y}-01-01", "it_mw": 60.0}
+                                        for y in (2027, 2030, 2035)]})
+
+
 def test_the_peak_check_reads_unknown_for_a_placeholder_period():
     from services.adequacy import site_peak as SP
 
@@ -329,6 +355,8 @@ def test_the_flow_warns_on_each_placeholder_and_the_scorecard_reads_unknown(
     assert rows["energization_peak:2038"]["verdict"] == "unknown"
     assert "not set" in rows["energization_peak:2038"]["note"]
     assert rows["energization_peak:2030"]["verdict"] != "unknown"
+    # The ramp row is one row for the site (not per period) and reads the
+    # AI-training envelope, which a create without dc_load does not have.
     assert rows["ramp_rate"]["verdict"] == "unknown"
     # The run is allowed: the placeholder network solves.
     _solve(n, T.solver_config(TID, _plan(SHIFTED)))
@@ -342,7 +370,8 @@ def test_the_investment_case_lists_each_placeholder(client, tmp_projects_dir, bo
     with bound_ctx(client):
         flags = R._ic_growth_flags()
     assert flags == ("growth_placeholder:it_mw_2038", "growth_placeholder:energized_mw_2038")
-    assert flag_text(flags[0]).startswith("it_mw_2038 is a placeholder")
+    assert flag_text(flags[0]).startswith("The IT load in 2038 is a placeholder")
+    assert flag_text(flags[1]).startswith("The energized import in 2038 is a placeholder")
 
 
 def test_the_default_create_has_no_placeholder_flag(client, tmp_projects_dir, bound_ctx):
