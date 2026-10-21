@@ -21,7 +21,7 @@ describe('CheckedChart', () => {
     render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
     expect(screen.getByTestId('checked-chart-download').getAttribute('href')).toBe(DRAWN.download_url)
     expect(screen.getByTestId('checked-chart-footer').textContent).toBe(
-      'Chart drawn from checked evidence · 1 series · 2026-01-01T00:00:00 to 2026-01-01T01:00:00')
+      'Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00')
     expect(screen.getByText("Not drawn: marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
   })
 

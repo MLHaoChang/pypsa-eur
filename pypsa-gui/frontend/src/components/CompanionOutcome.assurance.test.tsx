@@ -57,7 +57,7 @@ describe('closed companion publication', () => {
     expect(screen.getAllByText('Requested results checked').length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: 'View answer record' }).getAttribute('href')).toBe('/api/chat/answers/answer-1')
     expect(screen.getByText(/project-1/)).toBeTruthy()
-    expect(screen.getByText(/generator-cost\/1/)).toBeTruthy()
+    expect(screen.getByText(/generator cost/)).toBeTruthy()
     expect(screen.getByTestId('companion-outcome').getAttribute('data-answer-id')).toBe('answer-1')
   })
 

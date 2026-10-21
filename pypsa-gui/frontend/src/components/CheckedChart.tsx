@@ -1,5 +1,6 @@
 import type { CheckedChart as Chart } from '../utils/answerAssurance'
 import { useUIStore } from '../store/uiStore'
+import { readableWindow } from '../utils/readableTime'
 
 // The Results tab that draws the same data natively, per checked profile.
 const NATIVE: Record<string, { tab: string; label: string }> = {
@@ -18,7 +19,7 @@ export function CheckedChart({ chart, profile, compact = false }: { chart: Chart
   if (compact) {
     return chart.status === 'drawn' && chart.download_url
       ? <a data-testid="checked-chart-download" className="underline" href={chart.download_url}
-        download={chart.filename ?? undefined}>Download</a>
+        download={chart.filename ?? undefined}>Download chart</a>
       : null
   }
   return <div className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-chart">
@@ -27,7 +28,7 @@ export function CheckedChart({ chart, profile, compact = false }: { chart: Chart
         download={chart.filename ?? undefined}>Download chart{chart.filename ? ` (${chart.filename})` : ''}</a>
       : <p className="font-medium">Chart not drawn{chart.title ? ` — ${chart.title}` : ''}</p>}
     {chart.status === 'drawn' && chart.window && <p className="mt-1" data-testid="checked-chart-footer">
-      Chart drawn from checked evidence · {drawn.length} series · {chart.window.start} to {chart.window.end}
+      Chart drawn from checked evidence · {drawn.length} series · {readableWindow(chart.window.start, chart.window.end)}
     </p>}
     {notDrawn.length > 0 && <ul className="mt-1" aria-label="Not drawn">{notDrawn.map(s =>
       <li key={s.series}>Not drawn: {s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
