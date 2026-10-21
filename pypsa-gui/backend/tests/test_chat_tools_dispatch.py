@@ -543,7 +543,9 @@ def test_dispatch_status_calls_service_function_directly(install_network, monkey
 
     result = chat_tools.dispatch_status()
     assert call_count["n"] == 1
-    assert result is sentinel
+    # LC-12: the service's shape plus the solve-fingerprint comparison (None:
+    # this network was never solved, so no claim either way).
+    assert result == {**sentinel, "inputs_changed_since_solve": None, "results_current": False}
 
 
 # ─────────────────────────────────────────────────────────────────────────────

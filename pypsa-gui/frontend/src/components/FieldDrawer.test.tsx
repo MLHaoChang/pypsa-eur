@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import { useUIStore } from '../store/uiStore'
 import { FieldDrawer } from './FieldDrawer'
 import { openFlowTargetInPlace } from '../layout/flowNavigation'
+
+const render = (ui: ReactElement) => rtlRender(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 const target = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: 'p_nom' } as const
 
@@ -17,7 +22,7 @@ describe('FieldDrawer', () => {
   it('opens a component target in place, names it in words, and closes', () => {
     render(<FieldDrawer>{t => <p>editor for {t.entity}</p>}</FieldDrawer>)
     act(() => openFlowTargetInPlace(target))
-    expect(screen.getByTestId('field-drawer').textContent).toContain("Connection & grid > Link 'grid_import'")
+    expect(screen.getByTestId('field-drawer').textContent).toContain("Connection & grid › Link 'grid_import' › Capacity")
     expect(screen.getByText('editor for grid_import')).toBeTruthy()
     expect(useUIStore.getState().uiMode).toBe('guided')
     // The item's section stays active, not the Link class's own (Assets).

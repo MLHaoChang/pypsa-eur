@@ -2374,6 +2374,33 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "generate_availability_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/availability/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "generators",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "generators"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "f41a3cdcbb9086b9c62ce9d9d12a3804f4abaef4fb91c44d690776d2dde0d146",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "list_projects",
       "toolsets": [
         "project",

@@ -13,7 +13,9 @@
 # test or catalogue inventory check on the trial merge, or any check run on the
 # head that is not success or skipped (or that it could not read), or a live
 # coordination-file change with no matching template change. Docs-only
-# overlap and files identical on both sides are reported, not fatal.
+# overlap and files identical on both sides are reported, not fatal. A code
+# overlap is waived when the trial merge is clean, the semantic tests pass and
+# the tests that exercise each overlapping file pass (see "code overlap tests").
 #
 # Environment:
 #   PREMERGE_REMOTE  remote to fetch from (default: origin)
@@ -22,6 +24,8 @@
 #                    (default: MLHaoChang/pypsa-eur)
 #   PREMERGE_TEMPLATE_SYNC  "skip" to pass a live coordination-file change
 #                    that is project-specific and needs no template change
+#   PREMERGE_VITEST  command that runs frontend tests, given test files
+#                    (default: npx vitest run)
 #   PREMERGE_PYTHON  Python that runs the semantic tests (default: the repo's
 #                    pixi `test` env, then `default`, then ~/.venv-pypsa-gui
 #                    from .claude/hooks/session-start.sh, then python3)
@@ -35,6 +39,7 @@ remote=${PREMERGE_REMOTE:-origin}
 base_branch=${PREMERGE_BASE:-master}
 gh_repo=${PREMERGE_REPO:-MLHaoChang/pypsa-eur}
 
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 
@@ -103,6 +108,7 @@ fi
 
 echo
 echo "== files changed on both sides since merge-base"
+code_files=()  # code overlap, waived if its tests pass on the trial merge (below)
 inv_overlap=()  # overlap files that pass if the trial merge, tests and inventory do
 kinds_overlap=()  # tool-error-kinds.json overlap, waived if append-only (below)
 overlap=$(comm -12 \
@@ -111,7 +117,6 @@ overlap=$(comm -12 \
 if [[ -z $overlap ]]; then
   echo "none"
 else
-  code_overlap=0
   while IFS= read -r f; do
     # Same blob on both sides (e.g. a cherry-pick master already has), or
     # deleted on both: nothing to reconcile.
@@ -128,13 +133,9 @@ else
       kinds_overlap+=("$f")
     else
       echo "  code       $f"
-      fail=1
-      code_overlap=$((code_overlap + 1))
+      code_files+=("$f")
     fi
   done <<<"$overlap"
-  if ((code_overlap)); then
-    reasons+=("overlap: $code_overlap code file$([[ $code_overlap -eq 1 ]] || echo s)")
-  fi
 fi
 
 echo
@@ -143,8 +144,10 @@ changed=$(git diff --name-only "$mbase" "$head")
 sem_ok=0 inv_ok=0
 tests_to_run=("${semantic_tests[@]}")
 ((${#kinds_overlap[@]})) && tests_to_run+=("$kinds_test")
-if ! grep -Eq "$semantic_re" <<<"$changed" && ((${#inv_overlap[@]} == 0)) \
-  && ((${#kinds_overlap[@]} == 0)); then
+need_sem=0
+{ grep -Eq "$semantic_re" <<<"$changed" || ((${#inv_overlap[@]} || ${#kinds_overlap[@]})); } && need_sem=1
+unmapped=() pytest_files=() vitest_files=() tested=()
+if ((!need_sem && ${#code_files[@]} == 0)); then
   echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
 elif ((conflict)); then
   echo "skipped: no trial merge while the PR conflicts"
@@ -169,7 +172,22 @@ else
   # so every import resolves inside the trial merge.
   export PYTHONPATH="$wt/pypsa-gui/backend:$wt"
   echo "trial merge $trial, python $py"
-  if (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${tests_to_run[@]}"); then
+
+  # The tests that exercise each code-overlap file; a file with none still blocks.
+  if ((${#code_files[@]})); then
+    while IFS=$'\t' read -r runner f t; do
+      case $runner in
+        none) unmapped+=("$f") ;;
+        pytest) pytest_files+=("$t"); tested+=("$t") ;;
+        vitest) vitest_files+=("$t"); tested+=("$t") ;;
+      esac
+    done < <(python3 "$script_dir/overlap_tests.py" "$wt" "${code_files[@]}")
+  fi
+  ((${#code_files[@]} && ${#unmapped[@]} == 0)) && need_sem=1
+
+  if ((!need_sem)); then
+    echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
+  elif (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${tests_to_run[@]}"); then
     echo "semantic tests: pass"
     sem_ok=1
   else
@@ -189,6 +207,42 @@ else
       fail=1
       reasons+=("inventory check failed")
     fi
+  fi
+fi
+
+if ((${#code_files[@]})); then
+  echo
+  echo "== code overlap tests"
+  ok=0
+  if ((conflict)); then
+    echo "  no trial merge while the PR conflicts"
+  elif ((${#unmapped[@]})); then
+    printf '  no test     %s\n' "${unmapped[@]}"
+    echo "  these files have no test file (backend: tests/test_<mod>*.py; frontend: <Name>*.test.*), so the overlap blocks"
+  elif ((!sem_ok)); then
+    echo "  the semantic tests did not pass on the trial merge, so the overlap blocks"
+  else
+    ok=1
+    unique_py=$(printf '%s\n' "${pytest_files[@]}" | sort -u)
+    unique_vt=$(printf '%s\n' "${vitest_files[@]}" | sort -u)
+    if [[ -n $unique_py ]]; then
+      mapfile -t pyfiles <<<"$unique_py"
+      (cd "$wt/pypsa-gui/backend" && "$py" -m pytest -q -p no:cacheprovider --disable-warnings "${pyfiles[@]}") || ok=0
+    fi
+    if [[ -n $unique_vt ]]; then
+      mapfile -t vtfiles <<<"$unique_vt"
+      [[ -e $wt/pypsa-gui/frontend/node_modules ]] \
+        || ln -s "$root/pypsa-gui/frontend/node_modules" "$wt/pypsa-gui/frontend/node_modules" 2>/dev/null || true
+      read -r -a vt_cmd <<<"${PREMERGE_VITEST:-npx vitest run}"
+      (cd "$wt/pypsa-gui/frontend" && "${vt_cmd[@]}" "${vtfiles[@]}") || ok=0
+    fi
+  fi
+  if ((ok)); then
+    echo "  waived      code overlap (${#code_files[@]} file(s)): clean trial merge, semantic tests pass, ran: $(printf '%s\n' "${tested[@]}" | sort -u | paste -sd' ')"
+  else
+    ((conflict || ${#unmapped[@]} || !sem_ok)) || echo "  the overlap tests failed on the trial merge, so the overlap blocks"
+    fail=1
+    reasons+=("overlap: ${#code_files[@]} code file$([[ ${#code_files[@]} -eq 1 ]] || echo s)")
   fi
 fi
 
@@ -267,6 +321,9 @@ if runs=$(command -v gh >/dev/null &&
   [[ -n $waived ]] && printf '%s' "$waived"
   if ((total == 0)); then
     echo "  none yet"
+    if (($(date +%s) - $(git log -1 --format=%ct "$head") > 600)); then
+      echo "  no CI ran on this head (e.g. base retargeted after the push): merge $base_branch in, as a real merge commit, to trigger it"
+    fi
     fail=1
     reasons+=("checks: none yet")
   elif [[ -n $bad ]]; then

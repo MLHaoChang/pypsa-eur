@@ -1,6 +1,7 @@
 import type { FlowItem } from '../api/flow'
 import { componentLabel } from './componentLabels'
 import { sectionMeta } from '../layout/flowSections'
+import { FIELD_LABELS } from './fieldLabels'
 
 /** An item that counts: not acknowledged, in scope, and a to-do or to-check
  *  (not an info line). The one filter for the rail, the sidebar badge, the
@@ -22,10 +23,24 @@ export function countWords({ todo, check }: { todo: number; check: number }): st
   return [todo > 0 && `${todo} to do`, check > 0 && `${check} to check`].filter(Boolean).join(' · ')
 }
 
-/** The field an item points at, in words: "Connection & grid > Link 'grid_import'". */
-export function fieldWords(t: Pick<FlowItem['target'], 'section' | 'component' | 'entity'>): string | null {
-  if (!t.component && !t.entity) return null
+const plain = (x: string) => x.trim().replace(/:\s*$/, '').toLowerCase()
+const startsWithLabel = (message: string, label: string) => plain(message).startsWith(plain(label))
+
+/** The field an item points at, in words: "Connection & grid › Link 'grid_import' › Efficiency".
+ *  The field's own label is added only when `labels` has one: an unlabelled
+ *  field shows the entity alone rather than a made-up name. With `message`,
+ *  a label the message already opens with is left out. */
+export function fieldWords(
+  t: Pick<FlowItem['target'], 'section' | 'component' | 'entity'> & { field?: string | null },
+  labels: Record<string, string> = FIELD_LABELS,
+  message?: string,
+): string | null {
+  const label = t.field ? labels[t.field] : null
+  // A message that already opens with the label ("Connection ramp limit: 4 …")
+  // does not need it said again.
+  const field = label && message && startsWithLabel(message, label) ? null : label
+  if (!t.component && !t.entity && !field) return null
   const thing = [t.component ? componentLabel(t.component) : null, t.entity ? `'${t.entity}'` : null]
     .filter(Boolean).join(' ')
-  return `${sectionMeta(t.section).label} > ${thing}`
+  return [sectionMeta(t.section).label, thing || null, field].filter(Boolean).join(' › ')
 }

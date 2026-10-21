@@ -1,0 +1,1 @@
+* Chore(coord): Rotate long work sessions past 300k context (`sessions.py` flags them), add `docs/agents/owner-decisions.md`, write owner questions into reply text too, widen premerge's overlap waiver to files whose tests pass on a clean trial merge, and add a zero-check hint and coordinator tool hints.

@@ -695,10 +695,27 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
         result = handler()
     result = _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
     if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
-        if detail == "lines":
-            return _value_flow_lines_page(result, offset, limit)
-        return _value_flows_summary(result)
-    return result
+        result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
+                  else _value_flows_summary(result))
+    return _with_freshness(result)
+
+
+def _with_freshness(result: Any) -> Any:
+    """LC-12: a result read says whether the inputs changed since the solve."""
+    if not isinstance(result, dict):
+        return result
+    from services.workflow_tools import solve_freshness
+    freshness = solve_freshness()
+    out = {**result, **freshness}
+    if freshness["inputs_changed_since_solve"]:
+        out["freshness_note"] = ("stale: the inputs changed after this solve, so these results "
+                                 "describe the earlier inputs; re-run before relying on them.")
+    elif freshness["inputs_changed_since_solve"] is False and not freshness["results_current"]:
+        out["freshness_note"] = ("not current: these are not verified as this session's optimal LP "
+                                 "solve of the current inputs (an AC power flow replaced them, the "
+                                 "solve did not finish optimal, or it was loaded rather than solved "
+                                 "here); re-run before relying on them.")
+    return out
 
 
 # ── value flows for the model (IC P3 WP3.4) ────────────────────────────────
@@ -2902,8 +2919,10 @@ def dispatch_status() -> dict:
     string).
     """
     from services.dispatch_status import dispatch_status_detail as _ds
+    from services.workflow_tools import solve_freshness
     n = PyPSAService.get_network()
-    return _ds(n)
+    # LC-12: the axis check misses a parameter-only edit; the fingerprint does not.
+    return {**_ds(n), **solve_freshness()}
 
 
 # ── Simulation execution (4) ────────────────────────────────────────────────
@@ -3561,6 +3580,18 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
                                year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def generate_availability_profile(project_id: str, kind: str, generators: list,
+                                  params: dict | None = None,
+                                  year: int | None = None) -> dict:
+    from routers.profiles import (
+        AvailabilityGenerateRequest,
+        generate_availability_profiles as _h,
+    )
+    body = AvailabilityGenerateRequest(kind=kind, generators=generators,
+                                       params=params, year=year)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7652,6 +7683,7 @@ DISPATCHERS: dict[str, Any] = {
     "apply_generated_profile": apply_generated_profile,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
+    "generate_availability_profile": generate_availability_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
