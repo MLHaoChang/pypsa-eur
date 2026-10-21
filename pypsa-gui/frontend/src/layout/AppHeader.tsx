@@ -11,6 +11,8 @@ import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
+import { formatApiDetail } from '../api/client'
+import { mismatchSentence } from '../utils/projectMismatch'
 import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
@@ -44,12 +46,10 @@ export function formatObjective(v: number | null | undefined): string | null {
   return `€${v.toFixed(0)}`
 }
 
-/** Open Results after a solve: on Economics in Expert (Guided has no
- *  Economics tab and keeps its own default). */
+/** Open Results after a solve, on its Summary (the answer first; the Summary
+ *  hands on to Reports and Export). */
 function openResultsAfterSolve() {
-  const ui = useUIStore.getState()
-  if (ui.uiMode !== 'guided') ui.requestResultsTab('economics')
-  ui.setSlidePanel('results')
+  useUIStore.getState().setSlidePanel('results')
 }
 
 // ── Search types ───────────────────────────────────────────────────────────────
@@ -501,7 +501,22 @@ export default function AppHeader() {
     onError: (e: unknown) => {
       const status = (e as { response?: { status?: number } })?.response?.status
       if (status === 409) {
-        toast.error('Cannot save: network is empty. Load the project first.')
+        // The backend's own sentence where it gave one (a study in flight, or
+        // the network bound to another project); only a bare 409 means empty.
+        const raw = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+        const structured = typeof raw === 'object' && raw !== null && !Array.isArray(raw)
+        const detail = structured ? formatApiDetail(raw) : String(raw ?? '')
+        if (/bound to project/i.test(detail)) {
+          const bound = /bound to project '([^']+)', not '([^']+)'/i.exec(detail)
+          if (bound && bound[2] === useUIStore.getState().currentProject) {
+            useUIStore.getState().setProjectMismatch({ tab: bound[2], backend: bound[1] })
+          }
+          toast.error(`Can't save '${bound?.[2] ?? 'the project'}': the backend is on a different project. Reload it to resync.`)
+        } else if (structured) {
+          toast.error(detail)
+        } else {
+          toast.error('Cannot save: network is empty. Load the project first.')
+        }
         return
       }
       toast.error('Save failed')
@@ -510,6 +525,13 @@ export default function AppHeader() {
   })
 
   const handleQuickSave = useCallback(() => {
+    // A2: while this tab and the backend disagree about the open project, a
+    // save would write the backend's network under this tab's name.
+    const mismatch = useUIStore.getState().projectMismatch
+    if (mismatch) {
+      toast.error(mismatchSentence(mismatch))
+      return
+    }
     // Read-only guard — the keyboard shortcut (Ctrl+S) bypasses the disabled
     // button, so block here too while another user holds the edit lock, or a
     // queue job is solving this project. Routed through evaluateMutation (not

@@ -28,6 +28,7 @@
  *     `verdicts.optimisation` (else `run_ready`) is false, naming the blocker;
  *     Guided shows the same verdict on the Readiness card.
  *  5. Switch back to Guided: the section is unchanged.
+ *  6. Resume: a reload (in either mode) reopens the section it was left in.
  *
  * Screenshots: <shots>/<template>-<step>.jpg (default: none; pass --shots to
  * write them, e.g. docs/superpowers/plans/2026-10-21-flow-shell/shots).
@@ -106,7 +107,12 @@ async function walk(browser, template, args) {
       return failures
     }
     assert.equal(created.status(), 200, `create ${template}: ${body.slice(0, 200)}`)
-    await page.addInitScript(() => localStorage.setItem('network-diagram:ui-mode', 'guided'))
+    // Start in Guided once; a reload must keep the mode the journey chose.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('flow-shell-journey')) return
+      sessionStorage.setItem('flow-shell-journey', '1')
+      localStorage.setItem('network-diagram:ui-mode', 'guided')
+    })
     await page.goto(`${WEB}/projects`)
     await page.locator('a[href^="/app?project="]').first().click()
     await byId('hub-rail').waitFor({ timeout: 30_000 })
@@ -261,6 +267,21 @@ async function walk(browser, template, args) {
     const target = broken.blocker.section
     check((await railState(target)) === 'current', `broken: the blocker opened its section, ${target}`)
     await shot('7-broken-blocker-section')
+
+    // 5. Resume (design §7): a reload returns to the section the project was left in.
+    await byId(RAIL_ID.commercial).click()
+    await page.locator('[data-testid="section-view-commercial"], [data-testid="hub-card-commercial"]').first()
+      .waitFor({ timeout: 10_000 })
+    await page.reload()
+    await byId('hub-rail').waitFor({ timeout: 30_000 })
+    await page.waitForTimeout(1500)
+    check((await railState('commercial')) === 'current', 'resume: a reload reopens the section it was left in')
+    await open('expert')
+    await page.reload()
+    await byId('flow-section-connection').waitFor({ timeout: 30_000 })
+    await open('guided')
+    check((await railState('commercial')) === 'current', 'resume: Expert → reload → Guided still lands on that section')
+    await shot('8-resume')
 
     check(errors.length === 0, `no page errors${errors.length ? `: ${errors[0]}` : ''}`)
   } catch (e) {

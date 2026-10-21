@@ -1,0 +1,1 @@
+* Doc(pypsa-gui): An audit of Expert and Guided mode against the owner's UX-flow rules (one entry point per feature, features under their owning section, a visible next step) lists 26 findings with fixes and owning packages (`.scratch/project-workflow/issues/UX-flow-expert-audit.md`).

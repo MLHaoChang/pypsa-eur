@@ -2,6 +2,7 @@ import { navigationChanged } from '../utils/navigationEpoch'
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
+import { readActiveSection, writeActiveSection } from './activeSection'
 import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
@@ -492,6 +493,12 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  /** A section within the requested Results tab (the Investment tab's
+   *  `SECTIONS` ids, e.g. 'case'); consumed and cleared by that tab. */
+  resultsSectionRequest: string | null
+  /** One-shot: Time Series opens on this component's tab with it selected
+   *  ("give it a time series", UX-flow #24). */
+  timeSeriesFocus: { type: string; name: string } | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -632,8 +639,11 @@ interface UIStore {
   setCompareRailWidth: (px: number) => void
   requestBottomTab: (tab: string) => void
   clearBottomTabRequest: () => void
-  requestResultsTab: (tab: string) => void
+  requestResultsTab: (tab: string, section?: string) => void
   clearResultsTabRequest: () => void
+  clearResultsSectionRequest: () => void
+  focusTimeSeries: (type: string, name: string) => void
+  clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -703,7 +713,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeSlidePanel: null,
   fieldDrawer: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
-  activeSection: null,
+  activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockPinned: storedAssistantDockPinned(),
@@ -717,6 +727,8 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  resultsSectionRequest: null,
+  timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
@@ -951,8 +963,17 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   requestBottomTab: (tab) => set({ bottomTabRequest: tab }),
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
-  requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
+  // A request without a section drops any section still pending, so an
+  // older section never applies to a later tab.
+  requestResultsTab: (tab, section) => {
+    navigationChanged(); set({ resultsTabRequest: tab, resultsSectionRequest: section ?? null })
+  },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
+  focusTimeSeries: (type, name) => set({
+    timeSeriesFocus: { type, name }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
+  }),
+  clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
@@ -1019,7 +1040,8 @@ export const useUIStore = create<UIStore>((set) => ({
       // same-named asset in project B.
       const patch: Partial<UIStore> = {
         currentProject: name,
-        activeSection: null,
+        // The section this project was left in (design §7), else none.
+        activeSection: readActiveSection(name),
         fieldDrawer: null,
         selectedComponent: null,
         highlightedComponent: null,
@@ -1189,3 +1211,11 @@ if (typeof window !== 'undefined') {
   w.__uiModeStorageListener = onUiModeStorage
   window.addEventListener('storage', onUiModeStorage)
 }
+
+// Remember the section per project (design §7). A project switch restores the
+// new project's own section in the same update, so this writes it back
+// unchanged; a rename carries the section to the new name.
+useUIStore.subscribe((s, prev) => {
+  if (s.activeSection === prev.activeSection && s.currentProject === prev.currentProject) return
+  writeActiveSection(s.currentProject, s.activeSection)
+})

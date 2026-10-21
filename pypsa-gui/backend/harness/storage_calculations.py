@@ -51,7 +51,7 @@ DISCLOSURE = (
 )
 
 
-def source(ctx, entity):
+def source(ctx, entity, allow_cyclic=False):
     """Capture complete raw trajectory under the harness network lock."""
     from harness.calculations import MAX_SNAPSHOTS, _number, _series, solve_matches_inputs
 
@@ -68,7 +68,8 @@ def source(ctx, entity):
     if entity not in component.static.index or not component.static.index.is_unique:
         raise ValueError("unknown_storage_unit")
     row = component.static.loc[entity]
-    if _number(row["sign"]) != 1 or bool(row["cyclic_state_of_charge"]):
+    cyclic = bool(row["cyclic_state_of_charge"])
+    if _number(row["sign"]) != 1 or (cyclic and not allow_cyclic):
         raise ValueError("unsupported_storage_boundary")
     weights = n.snapshot_weightings
     if not weights.index.equals(index) or not weights.index.is_unique:
@@ -116,6 +117,7 @@ def source(ctx, entity):
             row["p_nom_opt"] if row["p_nom_extendable"] else row["p_nom"]
         ),
         "max_hours": _number(row["max_hours"]),
+        "cyclic": cyclic,
         "initial_state": _number(row["state_of_charge_initial"]),
         "input_fingerprint": fingerprint,
         "solved_fingerprint": n.meta.get("assistant_solve_input_fingerprint"),
@@ -123,6 +125,33 @@ def source(ctx, entity):
         "condition": state.get("condition"),
         "valid_solve": solve_matches_inputs(ctx),
     }
+
+
+SNAPSHOT_KEYS = (
+    "duration", "p_store", "p_dispatch", "p", "state_of_charge", "p_min_pu", "p_max_pu",
+    "efficiency_store", "efficiency_dispatch", "standing_loss", "inflow",
+)
+
+
+def snapshot_within_bounds(values, capacity, hours):
+    """One snapshot's own limits, without the predecessor chain. Shared by this
+    profile and storage-cycles/1 so both judge a snapshot the same way."""
+    if any(v is None for v in values):
+        return False
+    dt, charge, discharge, _net, state, lo, hi, eta_in, eta_out, loss, inflow = values
+    return (
+        dt > 0
+        and charge >= 0
+        and discharge >= 0
+        and lo <= 0 <= hi
+        and 0 < eta_in <= 1
+        and 0 < eta_out <= 1
+        and 0 <= loss <= 1
+        and inflow == 0
+        and charge <= -lo * capacity + ABS_TOLERANCE
+        and discharge <= hi * capacity + ABS_TOLERANCE
+        and -ABS_TOLERANCE <= state <= capacity * hours + ABS_TOLERANCE
+    )
 
 
 def calculate(raw, scope):
@@ -144,19 +173,7 @@ def calculate(raw, scope):
     ):
         raise ValueError("invalid_storage_index")
     count, inputs = len(index), raw["inputs"]
-    keys = (
-        "duration",
-        "p_store",
-        "p_dispatch",
-        "p",
-        "state_of_charge",
-        "p_min_pu",
-        "p_max_pu",
-        "efficiency_store",
-        "efficiency_dispatch",
-        "standing_loss",
-        "inflow",
-    )
+    keys = SNAPSHOT_KEYS
     if any(len(inputs[k]) != count for k in keys):
         raise ValueError("invalid_storage_population")
     a, b = 0, count - 1
@@ -185,36 +202,9 @@ def calculate(raw, scope):
         dt, charge, discharge, net, state, lo, hi, eta_in, eta_out, loss, inflow = (
             _number(inputs[k][i]) for k in keys
         )
-        ok = prefix_valid and all(
-            v is not None
-            for v in (
-                dt,
-                charge,
-                discharge,
-                net,
-                state,
-                lo,
-                hi,
-                eta_in,
-                eta_out,
-                loss,
-                inflow,
-            )
+        ok = prefix_valid and snapshot_within_bounds(
+            (dt, charge, discharge, net, state, lo, hi, eta_in, eta_out, loss, inflow), capacity, hours
         )
-        if ok:
-            ok = (
-                dt > 0
-                and charge >= 0
-                and discharge >= 0
-                and lo <= 0 <= hi
-                and 0 < eta_in <= 1
-                and 0 < eta_out <= 1
-                and 0 <= loss <= 1
-                and inflow == 0
-                and charge <= -lo * capacity + ABS_TOLERANCE
-                and discharge <= hi * capacity + ABS_TOLERANCE
-                and -ABS_TOLERANCE <= state <= capacity * hours + ABS_TOLERANCE
-            )
         if ok:
             try:
                 expected = (1 - loss) ** dt * previous + dt * (

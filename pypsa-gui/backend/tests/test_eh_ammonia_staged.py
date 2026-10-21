@@ -494,3 +494,38 @@ def test_a_shortfall_is_lost_production_at_its_value_never_o_and_m_or_a_purchase
         assert not [ln for c in case.counterfactual for ln in c.lines if "__lost_nh3" in ln.key]
         assert _line(case, BUY, y) == pytest.approx(-_cost_per_year(n, "__buy_nh3", y), rel=1e-9)
         assert not [ln for ln in t.lines if "__lost_nh3" in ln.key and ln.stream in ("vom", "fuel", "capex")]
+
+
+@pytest.mark.live_solve
+def test_the_two_leg_helper_leaves_the_ammonia_cash_alone():
+    """IPP ticket 05: no ammonia line is a difference line, so none takes the two-leg path,
+    and the revenue rows still sum to the operating cash. Not a byte pin of the lines: the
+    twin solar plants (one bus, one profile, no marginal cost) split their curtailment
+    arbitrarily and the plan is a MIP solved to a gap, so the per-plant lines differ by
+    machine. The helper's arithmetic is pinned on fixed cases in test_operating_pin.py."""
+    from services.finance.cashflow import build_operating
+    from services.finance.revenue_streams import revenue_by_stream
+    from services.finance.timeline import build_timeline
+
+    _n, case = _case("base", site_today=False)
+    op = build_operating(case, build_timeline(case))
+    assert op.legs == {}
+    rows = revenue_by_stream(op)["rows"]
+    np.testing.assert_allclose(sum(np.array(r["values"], dtype=float) for r in rows),
+                               op.revenue - op.costs, rtol=1e-12, atol=1e-6)
+
+
+@pytest.mark.live_solve
+def test_revenue_by_stream_names_what_it_cannot_place():
+    """IPP ticket 05 (GK): on this template, the keys in Other are listed by name. The one
+    there is the grey-ammonia buy-in, a product purchase (not O&M of an asset), so Other."""
+    from services.finance.cashflow import build_operating
+    from services.finance.revenue_streams import revenue_by_stream
+    from services.finance.timeline import build_timeline
+
+    _n, case = _case("base", site_today=False)
+    op = build_operating(case, build_timeline(case))
+    out = revenue_by_stream(op)
+    assert out["other_keys"] == ["asset:opex:Generator:__buy_nh3"]
+    rows = sum(np.array(r["values"], dtype=float) for r in out["rows"])
+    np.testing.assert_allclose(rows, op.revenue - op.costs, rtol=1e-9, atol=1e-6)

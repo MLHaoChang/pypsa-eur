@@ -7,6 +7,7 @@ import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
+import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
 import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
 
@@ -43,7 +44,12 @@ function ItemRow({ item }: { item: FlowItem }) {
   )
 }
 
-export function SectionView({ id, children }: { id: FlowSectionId; children?: ReactNode }) {
+export function SectionView({ id, onNext, children }: {
+  id: FlowSectionId
+  /** Moves the rail to another section: the "Next" step under the card. */
+  onNext?: (to: FlowSectionId) => void
+  children?: ReactNode
+}) {
   const meta = sectionMeta(id)
   const { section, isError } = useProjectFlow()
   const s = section(id)
@@ -74,6 +80,12 @@ export function SectionView({ id, children }: { id: FlowSectionId; children?: Re
         </ul>
       )}
       {children}
+      {onNext && (
+        <div>
+          <NextSectionButton from={id} onNext={onNext} testId={`section-next-${id}`}
+            label={items.length > 0 ? 'Continue anyway' : 'Next'} />
+        </div>
+      )}
     </div>
   )
 }

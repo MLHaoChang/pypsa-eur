@@ -21,6 +21,7 @@ before families existed is a wind/solar capacity factor.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -82,6 +83,19 @@ def default_target(meta: Mapping[str, Any], component_type: str | None,
     """The (component_type, attribute) an apply writes: the caller's, or the
     family's default. Raises the apply path's UnsupportedTargetError when
     neither names one."""
+    stated = meta.get("target")
+    if isinstance(stated, (list, tuple)) and len(stated) == 2:
+        # A family with several targets (availability, series) says which
+        # one this artifact is for; a caller may move it to another component
+        # type with the same attribute (a price onto a link), never to
+        # another attribute (a floor written as a cap).
+        if attribute and attribute != stated[1]:
+            from services.profile_gen.apply import UnsupportedTargetError
+
+            raise UnsupportedTargetError(
+                f"this {meta.get('kind', 'profile')} artifact is for "
+                f"{stated[0]}/{stated[1]}, not {component_type or stated[0]}/{attribute}")
+        return str(component_type or stated[0]), str(stated[1])
     if component_type and attribute:
         return component_type, attribute
     family = get_family(family_of(meta))
@@ -170,9 +184,41 @@ def _load_generate(ids, archetype, params, year):
 register_family(Family("load", frozenset({("loads", "p_set")}),
                        guard=_load_guard, generate=_load_generate,
                        default_target=("loads", "p_set")))
+_WEATHER = re.compile(r"wind|solar|(?<![a-z])pv(?![a-z])")
+
+
+def is_weather_carrier(carrier: Any) -> bool:
+    """A carrier whose generators carry a weather capacity-factor profile."""
+    return bool(_WEATHER.search(str(carrier or "").lower()))
+
+
+def _availability_guard(ctx, component_type: str, component: str,
+                        meta: Mapping[str, Any]) -> None:
+    """Wind and solar keep their weather profile (composing an availability
+    series with it is its own future plan); a dated maintenance window
+    applies only on a single-period network of its year."""
+    from services.profile_gen.apply import CarrierMismatchError
+    from services.profile_gen.availability import check_dated_windows
+
+    carrier = str(ctx.network.generators.at[component, "carrier"] or "").lower()
+    if is_weather_carrier(carrier):
+        raise CarrierMismatchError(
+            f"generator {component!r} ({carrier}) carries a weather profile; an "
+            "availability series would overwrite it")
+    check_dated_windows(ctx, meta)
+
+
+def _availability_generate(ids, kind, params, year):
+    # Imported on first use, as `_load_generate` is.
+    from services.profile_gen.availability import generate_frame
+
+    return generate_frame(ids, kind, params, year)
+
+
 register_family(Family(
     "availability",
     frozenset({("generators", "p_max_pu"), ("generators", "p_min_pu")}),
+    guard=_availability_guard, generate=_availability_generate,
 ))
 register_family(Family(
     "series",
