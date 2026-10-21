@@ -210,6 +210,24 @@ def test_the_plants_curtail_at_the_limit_and_at_negative_prices(solved):
 
 
 @pytest.mark.live_solve
+def test_curtailment_splits_by_cause_on_the_base_case(solved):
+    """Ticket 05 (G6): both causes occur on the base case, and the split sums to the total."""
+    from services.results.curtailment import compute_curtailment, curtailment_by_cause
+
+    n, cfg, _da = solved
+    out = curtailment_by_cause(n, cfg.commercial)
+    assert out["status"] == "ok" and out["export_limit_mw"] == pytest.approx(70.0)
+    hourly = compute_curtailment(n, None, None)
+    w = n.snapshot_weightings.generators.to_numpy()
+    for i, plant in enumerate(hourly["columns"]):
+        total = float(sum(row[i] * w[k] for k, row in enumerate(hourly["data"])))
+        assert sum(out["plants"][plant]["by_cause_mwh"].values()) == pytest.approx(total)
+    causes = {c: sum(p["by_cause_mwh"][c] for p in out["plants"].values())
+              for c in ("export_limit", "negative_price")}
+    assert causes["export_limit"] > 0 and causes["negative_price"] > 0, causes
+
+
+@pytest.mark.live_solve
 def test_the_pv_capture_rate_is_below_one(solved):
     n, _cfg, da = solved
     pv = n.generators_t.p["pv_plant"]
