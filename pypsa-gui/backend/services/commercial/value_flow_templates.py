@@ -41,8 +41,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from models.commercial import CommercialConfig, ValueFlowConfig
-from models.process_unit import product_roles
-from services.process_products import bus_values
+from models.process_unit import bus_values, product_roles
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 

@@ -44,3 +44,15 @@ def product_roles(n) -> dict[str, str]:
     """{Generator: role} of every Generator with a `process_role`, from `product_role_generators` (column only).
     A product slack is an LP term, not an asset: the value flows never make it ownable (ticket 06)."""
     return {str(g): role for role in PROCESS_GENERATOR_ROLES for g in product_role_generators(n, role)}
+
+
+def bus_values(n) -> dict[str, float]:
+    """{bus: lost_production_value} for every bus with a finite value above 0 (ticket 08): the column alone."""
+    import math
+
+    import pandas as pd
+
+    if "lost_production_value" not in n.buses.columns:
+        return {}
+    v = pd.to_numeric(n.buses["lost_production_value"], errors="coerce")
+    return {str(b): float(x) for b, x in v.items() if math.isfinite(x) and x > 0}

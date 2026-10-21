@@ -23,9 +23,9 @@ from __future__ import annotations
 
 import pandas as pd
 
-from models.process_unit import product_role_generators
+from models.process_unit import bus_values, product_role_generators
 from services.adequacy.slack import lost_slack_name
-from services.process_products import bus_values, capture_key
+from services.process_products import capture_key
 from services.pypsa_service import PyPSAService
 
 #: The carrier of the solve-time slack (added for the solve when the network has none).

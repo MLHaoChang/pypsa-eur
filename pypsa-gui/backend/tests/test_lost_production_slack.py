@@ -281,13 +281,12 @@ def test_energy_flows_close_with_the_captured_shortfall_as_unserved_product(rese
 
 @pytest.mark.live_solve
 def test_the_capture_survives_a_real_project_save_and_load_and_reads_stale_after_an_edit(
-        client, install_network, api_project):
+        client, install_network, api_project, session_ctx):
     """Solve through the app, save the project, load another one and this one back: the restored record gives the
     same lost tonnes, EUR and IC line, keyed current; an edit after that reads it stale."""
     import time
 
     import routers.simulation as sim_router
-    from services.pypsa_service import PyPSAService
     from services.solver_service import SolverConfig
     from tests.test_eh_ammonia_staged import _ic_config
 
@@ -313,8 +312,8 @@ def test_the_capture_survives_a_real_project_save_and_load_and_reads_stale_after
         return next(p for p in body["products"] if p["bus"] == "nh3")["lost"]
 
     def ic():
-        return _case_lines(PyPSAService.get_network(), sim_router._state, sim_router._state["solver_config"],
-                           "__lost_nh3")
+        ctx = session_ctx(client)               # the client's own context: the one the app solved and reloaded
+        return _case_lines(ctx.network, ctx.solver_state, cfg, "__lost_nh3")
 
     before_lost, before_ic = lost(), ic()
     assert before_lost["t"] > 0 and before_lost["eur_flag"] is None and before_ic
@@ -327,5 +326,5 @@ def test_the_capture_survives_a_real_project_save_and_load_and_reads_stale_after
     assert after_lost["eur"] == pytest.approx(before_lost["eur"], rel=1e-12)
     assert after_ic.keys() == before_ic.keys()
     assert all(after_ic[k][0] == pytest.approx(before_ic[k][0], rel=1e-12) for k in before_ic)
-    PyPSAService.get_network().loads_t.p_set.iloc[0, 0] += 1.0          # an edit: never current
+    session_ctx(client).network.loads_t.p_set.iloc[0, 0] += 1.0        # an edit: never current
     assert lost()["eur_flag"] == "lost_production_capture_stale"

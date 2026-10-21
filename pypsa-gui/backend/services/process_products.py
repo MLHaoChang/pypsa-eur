@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from models.process_unit import PROCESS_GENERATOR_ROLES, product_role_generators
+from models.process_unit import PROCESS_GENERATOR_ROLES, bus_values, product_role_generators
 from services.adequacy.slack import LOST_SLACK_PREFIX, lost_slack_name
 from services.carrier_catalog import CARRIER_CATALOG
 
@@ -97,14 +97,6 @@ def t_per_unit(n, bus: str) -> float | None:
         return 1.0
     f = _positive(_cell(n.buses, bus, "mwh_per_t"))
     return None if f is None else 1.0 / f
-
-
-def bus_values(n) -> dict[str, float]:
-    """{bus: lost_production_value} for every bus with a finite value above 0 (ticket 08)."""
-    if "lost_production_value" not in n.buses.columns:
-        return {}
-    v = pd.to_numeric(n.buses["lost_production_value"], errors="coerce")
-    return {str(b): float(x) for b, x in v.items() if math.isfinite(x) and x > 0}
 
 
 _KEYED = ("Bus", "Carrier", "Generator", "Load", "Link", "Store", "StorageUnit", "Line", "Transformer",
