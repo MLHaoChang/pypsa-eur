@@ -1,0 +1,1 @@
+* Docs(gridspine): Add one-page terms summaries and a terms index for the prioritized library sources (EU tariffs, DEA catalogues, ATB, PNNL, SMARD, Energinet, EIA-861, OEB, Enedis) for the owner's clearance before common-library use.
