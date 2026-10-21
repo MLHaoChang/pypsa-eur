@@ -45,3 +45,12 @@ The tools exist; no layer owns the conversation:
 
 OJ-27 and OJ-28 pass in Tier A, including one failed case among three; no
 second solve on restart; LC-D19's creation cases pass.
+
+## Rules folded in from #558 ROI-C (owner decision AI-558, 2026-10-21)
+
+Source: `.scratch/project-management-redesign/06-AI-PRIORITIES-AND-COST-SPEC.md` (#558 commit a0831729), research only.
+- Suggest 2–3 sensitivity cases (hard cap 4), at most 2 declared changes per case, ranges sourced or chosen by the user (no invented ±20%).
+- Editing a suggested case never needs a new model call.
+- Build on `start_experiment` / `prepare_experiment` or the edit-card preview; do not add a `sensitivity_preview.py` (no third path).
+- Execution only through the existing approvals; no model maths.
+- Test cases to adopt from #558: RI13, RI15–RI18.
