@@ -656,6 +656,8 @@ _WRITE_ARGS = {
     "reconstruct_network_from_image": lambda n: (("no-such-file",), {}),
     "import_uploaded_network": lambda n: (("no-such-file", "netcdf"), {}),
     "apply_project_changes": lambda n: (("00000000-0000-0000-0000-000000000000",), {}),
+    # A shipped cost reference on one asset (GS-EU P2b); needs no confirmation on G1.
+    "apply_library_reference": lambda n: (("Generator", "G1", "onwind", 2030), {}),
 }
 
 # Tools whose effect needs something to act on first (outside the sweep).
