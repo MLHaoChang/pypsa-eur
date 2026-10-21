@@ -255,10 +255,11 @@ def _pack_for(body: dict):
 
 # ── Facts under the lock ────────────────────────────────────────────────────
 
-def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
-    from services import dirty_state
+def _connection(n, config, template: dict | None) -> tuple[list[str], set[str]]:
+    """``(import Links, connection Links)``: the Links the archetype selector
+    picks as imports (with the template's pack, as the Site card's readiness
+    does), plus the commercial config's PoC and export Links."""
     from services.adequacy import archetypes as arch
-    from services.network_geometry import _bus_coord
 
     body = _request_for(template) if template is not None else {"archetype": "strong_grid"}
     try:
@@ -273,6 +274,26 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         for key in ("poc_link", "export_link"):
             if commercial.get(key) and str(commercial[key]) in set(map(str, n.links.index)):
                 connection.add(str(commercial[key]))
+    return list(imports), connection
+
+
+def section_for_component(n, config, project_dir: pathlib.Path | None,
+                          component_class: str, entity: str) -> dict:
+    """``{id, label, panel}``: the flow section a component belongs to, by the
+    flow's own rule (`flow_sections.section_for`, with this project's
+    connection Links). For a caller outside the flow (the chat edit card) that
+    names the section an edit lands in. Read under the caller's lock."""
+    template = read_template(project_dir) if project_dir is not None else None
+    _imports, connection = _connection(n, config, template)
+    return F.section_for(component_class, entity, frozenset(connection))
+
+
+def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
+    from services import dirty_state
+    from services.network_geometry import _bus_coord
+
+    imports, connection = _connection(n, config, template)
+    commercial = getattr(config, "commercial", None)
     links = [str(i) for i in n.links.index]
     # The supply behind the fence (a market Generator on an import Link's grid
     # side) is the connection's, not an asset of the site.
@@ -520,29 +541,60 @@ def ledger_section(item: str) -> str | None:
     return next((s for words, s in _LEDGER_SECTIONS if any(w in low for w in words)), None)
 
 
+def _humanise(item: str) -> str:
+    """``fault_level`` → ``Fault level``; ``discount rate`` → ``Discount rate``."""
+    text = item.replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def _shown(value) -> str:
+    """A ledger value as the message shows it: a number at full precision and
+    never in exponent form for an integral MW figure (``1500000``, ``0.85``)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value if value is not None else "")
+    return str(int(value)) if float(value).is_integer() else repr(float(value))
+
+
 def _assumed_items(template: dict) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
-    has not confirmed is a warning (design §3.2)."""
+    has not confirmed is a warning (design §3.2). A row may name its own
+    ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
+    that does not is filed by ``ledger_section(item)``."""
     out: list[dict] = []
     for row in template.get("ledger") or []:
         if not isinstance(row, dict) or row.get("source") != "assumed":
             continue
         item = str(row.get("item") or "")
-        value = str(row.get("value") or "")
-        out.append(_item("assumed_default", "warning",
-                         f"{item}: {value} is a template assumption; confirm it or set "
-                         "your own.", "template", ledger_section(item) or "project",
-                         entity=item, value=value))
+        value = row.get("value")
+        unit = row.get("unit")
+        shown = f"{_shown(value)} {unit}" if unit else _shown(value)
+        # "<label>: <value> <unit> (assumed) — <hint>"; without a label the
+        # item, humanised (checklist §6.9: no raw ids in the UI).
+        label = str(row.get("label") or _humanise(item))
+        message = f"{label}: {shown} (assumed) — confirm it or set your own."
+        section = row.get("section")
+        if section in F.INPUT_SECTIONS:
+            # A row that names its own target (DC-02's rows): filed there, and
+            # coded per item so two rows on one entity keep separate acks.
+            out.append(_item(f"assumed_{item}", "warning", message, "template", section,
+                             component=str(row.get("component") or ""),
+                             entity=str(row.get("entity") or ""),
+                             fld=str(row.get("field") or ""),
+                             panel=row.get("panel"), value=str(value or "")))
+            continue
+        out.append(_item("assumed_default", "warning", message, "template",
+                         ledger_section(item) or "project", entity=item,
+                         value=str(value or "")))
     energ = [e for e in template.get("energization") or []
              if isinstance(e, dict) and e.get("source") == "assumed"]
     if energ:
         value = json.dumps([[e.get("year"), e.get("available_import_mw")] for e in energ])
-        steps = ", ".join(f"{e.get('year')}: {e.get('available_import_mw'):g} MW"
+        steps = ", ".join(f"{e.get('year')}: {_shown(e.get('available_import_mw'))} MW"
                           if isinstance(e.get("available_import_mw"), (int, float))
                           else str(e.get("year")) for e in energ)
         out.append(_item("assumed_default", "warning",
-                         f"energization schedule ({steps}) is a template assumption; "
-                         "confirm it with the network operator's offer.", "template",
+                         f"Energization schedule: {steps} (assumed) — confirm it with the "
+                         "network operator's offer.", "template",
                          "connection", entity="energization schedule", value=value))
     return out
 
