@@ -46,6 +46,7 @@ class Gate:
         self.open = threading.Event()
         self.hold_seconds = None
         self.starts = []
+        self.after_solve = None  # runs as the solve releases the network lock
 
     def wrap(self, real):
         def run_simulation(config, n, lock, stop_event, log_queue, **kwargs):
@@ -58,7 +59,10 @@ class Gate:
                 stop_event.wait(0.05)
             if stop_event.is_set():
                 return 'aborted', 'aborted'
-            return real(config, n, lock, stop_event, log_queue, **kwargs)
+            out = real(config, n, lock, stop_event, log_queue, **kwargs)
+            if self.after_solve is not None:
+                self.after_solve(n, lock)
+            return out
         return run_simulation
 
 
@@ -527,3 +531,27 @@ def test_stop_waiting_withdraws_the_continuation_and_the_job_runs_on(oj_grid, cl
     chat_tools.set_chat_session(session)
     assert chat_tools.get_task(task_id)['next_step']['id'] == 'walk'  # the plan still settled
     assert client.post(f'/api/chat/{session.session_id}/continuations/{job}/dismiss').json() == {'ok': False}
+
+def test_an_edit_landing_as_the_solve_ends_never_completes_the_step(oj_grid):
+    """An edit queued on the network lock applies the moment the solve releases
+    it, before the run is published. The step must not take the edited inputs'
+    fingerprint as the solve's own: it settles uncertain, and there is one run."""
+    from services import assistant_tasks
+
+    def edit(n, lock):
+        with lock:
+            n.lines.at['L1', 's_nom'] = 700.0
+    oj_grid.after_solve = edit
+    calls, results, frames, session, cards, runs_before = _start(PROVIDERS[1], oj_grid)
+    job, task_id = results[3]['job_id'], results[0]['task_id']
+    oj_grid.open.set()
+    due = _await_due(session)
+    assert [(d['job_id'], d['status']) for d in due] == [(job, 'completed')]
+    _, raw = assistant_tasks._read(task_id)
+    run = next(s for s in raw['steps'] if s['id'] == 'run')
+    assert run['status'] == 'uncertain' and 'result' not in run
+    record = _manifest(f"fg-{job[3:]}")
+    assert record['fingerprint'] == PyPSAService.get_network().meta['assistant_solve_input_fingerprint']
+    assert 'inputs_changed_before_publish' in record['warnings']
+    assert 'loadflow' not in (record.get('sections') or {})
+    assert len(oj_grid.starts) == 1
