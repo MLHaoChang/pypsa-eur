@@ -935,6 +935,10 @@
       "surface": "inline",
       "why": "LC-12: a continuation turn named a job with no continuation due to this session (none finished, already continued, the plan was cancelled, the job was aborted, or another session or project). The turn does not start and nothing runs; the panel simply stops offering it."
     },
+    "plan_continue_unavailable": {
+      "surface": "inline",
+      "why": "LC-23 COP-1: the user's Continue on the plan card named a plan that is not paused at a card (already continued, cancelled, or another project), or the request also carried a message. The turn does not start and nothing runs; the plan card stops offering Continue."
+    },
     "invalid_continuation": {
       "surface": "inline",
       "why": "LC-12: /stream carried continuation_job_id together with typed words, attachments, a script or checked fields. A continuation is written by the harness, never by the user; the request is refused before any turn."

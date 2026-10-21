@@ -276,6 +276,22 @@ def receipt(card: dict, args: dict) -> dict:
     return out
 
 
+def reread(tool_name: str, args: dict, earlier: dict) -> dict | None:
+    """A fresh native read-back of an earlier receipt's rows (LC-23 SC-12):
+    the receipt, now verified, when every stored row reads back as its new
+    value; None when a row differs or the tool has no native adapter."""
+    adapter = ADAPTERS.get(tool_name)
+    rows = [{k: v for k, v in row.items() if k != "readback"} for row in earlier.get("rows") or []]
+    if adapter is None or not rows:
+        return None
+    values = adapter.readback(args or {}, rows)
+    rows = [{**row, "readback": _scalar(value)} for row, value in zip(rows, values)]
+    if len(rows) != len(earlier["rows"]) or not all(
+            _same(row["readback"], row["new"]) for row in rows if row["role"] not in ("at_solve", "note")):
+        return None
+    return {**earlier, "outcome": "verified", "rows": rows}
+
+
 # ── Components: update_component / bulk_update_components ──────────────────
 
 
