@@ -4,6 +4,8 @@ import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { useFieldLabels } from '../../hooks/useFieldLabels'
+import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
 import { sectionMeta } from '../../layout/flowSections'
 import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
@@ -15,7 +17,8 @@ import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../.
 function ItemRow({ item }: { item: FlowItem }) {
   const Icon = item.severity === 'error' ? XCircle : item.severity === 'warning' ? AlertTriangle : Info
   const tone = item.severity === 'error' ? 'text-danger' : item.severity === 'warning' ? 'text-warn' : 'text-muted'
-  const field = fieldWords(item.target)
+  const labels = useFieldLabels()
+  const field = fieldWords(item.target, labels, item.message)
   return (
     <li data-testid="section-item" data-severity={item.severity}
       className="flex items-start gap-2 text-[12px] text-text">
@@ -81,9 +84,39 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
   const meta = sectionMeta(id)
   const { flow, section } = useProjectFlow()
   const setActiveSection = useUIStore(s => s.setActiveSection)
+  const gate = useRunGate('all')
   if (id === 'readiness') {
     return (
       <div data-testid="hub-card-readiness" className="flex flex-col gap-2 rounded border border-border bg-panel p-4">
+        {/* The same verdict the Run button uses: blocked only when the server
+            would refuse, with the reason by section; gaps that do not block
+            show as notes. */}
+        {gate.checking ? (
+          <p data-testid="readiness-checking" className="text-[12px] text-muted">
+            Checking whether the project is ready…
+          </p>
+        ) : gate.blocked ? (
+          <p data-testid="readiness-blocked" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
+            Not ready to run: {gate.reason}
+            {gate.blocker && (<>
+              <button type="button" data-testid="readiness-open"
+                onClick={() => openFlowTargetInPlace(gate.blocker!.target)}
+                className="inline-flex items-center gap-1 text-accent hover:underline">
+                Open here <ArrowRight size={11} />
+              </button>
+              <button type="button" data-testid="readiness-open-expert"
+                onClick={() => openFlowTarget(gate.blocker!.target)}
+                className="text-muted hover:text-accent hover:underline">
+                Open in Expert
+              </button>
+            </>)}
+          </p>
+        ) : (
+          <p data-testid="readiness-ready" className="text-[12px] text-text">
+            {flow ? 'Ready to run.' : 'Not known yet: the readiness could not be read.'}
+            {gate.notes.length > 0 && ` ${gate.notes.length} note${gate.notes.length === 1 ? '' : 's'}: ${gate.notes.map(n => n.message).join('; ')}`}
+          </p>
+        )}
         <p className="text-[12px] text-muted">
           Each section's state, in flow order. Open one to see what is left in it.
         </p>

@@ -333,7 +333,11 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
                  and agreement.capacity_fee is not None)
     if fee:
         link = fee.get("link")
-        if link in n.links.index and "p_nom_opt" in n.links.columns:
+        if fee.get("not_established"):
+            # A fixed-size run at another connection size (F1): no fee is stated.
+            block["network_capacity"] = None
+            flags.append("network_capacity_not_established")
+        elif link in n.links.index and "p_nom_opt" in n.links.columns:
             p_nom_opt = float(n.links.at[link, "p_nom_opt"])
             total = 0.0
             for key, eur_per_mw in fee.get("eur_per_mw_by_period", {}).items():

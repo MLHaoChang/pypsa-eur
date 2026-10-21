@@ -1,0 +1,83 @@
+{
+  "date": "2026-10-21",
+  "branch": "claude/eu-library-depth",
+  "baseline": "d327f645a92b8ddc50ba1988b3e15105b91468e2",
+  "reviewed_actual_master": "791c9b9e68be0b515e6054320a870e34fe4e8443",
+  "library_code_changes_since_baseline_on_reviewed_master": [],
+  "prior_research_pr": 491,
+  "prior_research_head": "c35bfd0b7a218a343c9b5febc8f1b69aa26f0836",
+  "counts": {
+    "parameter_groups": 44,
+    "source_assessments": 36,
+    "technology_year_references": 24,
+    "source_workbooks_integrated": 2
+  },
+  "local_checks": [
+    {
+      "command": "pytest tests/test_library_europe_reference.py tests/test_library_defaults_pack.py tests/test_library_defaults_pack_s3.py tests/test_library_defaults_pack_ammonia.py -q -p no:warnings --override-ini addopts=",
+      "result": "82 passed in 8.23s"
+    },
+    {
+      "command": "pytest tests/test_library_items.py tests/test_library_bundle_pins.py tests/test_library_defaults_pack_campus.py tests/test_library_defaults_pack_pricing.py tests/test_library_europe_reference.py -q -p no:warnings --override-ini addopts= -o faulthandler_timeout=30",
+      "result": "106 passed in 20.30s",
+      "environment": "Network-enabled execution required for local TestClient/async networking; writable XDG_CACHE_HOME/MPLCONFIGDIR; OMP/OPENBLAS threads=1"
+    },
+    {
+      "command": "ruff check new reader, tests and extraction helper",
+      "result": "passed"
+    },
+    {
+      "command": "re-extract pinned primary workbook cells and byte-compare to committed subset",
+      "result": "passed; deterministic identical bytes"
+    },
+    {
+      "command": "parameter/source/family IDs, flags and primary hash/status evidence plus relative links",
+      "result": "passed: 44 joins, 36 unique source IDs, all production-import flags false"
+    }
+  ],
+  "counts_overlap": "The 82-test and 106-test selections overlap; never sum these counts.",
+  "environment_diagnosis": "Initial broad HTTP test selections stalled under restricted networking and were interrupted. A minimal FastAPI TestClient reproducer timed out there and passed with network access enabled. The same broad selection then passed 106 tests; no test weakening or app code fix.",
+  "parallel_work_inspected": [
+    {
+      "pr": 499,
+      "head": "ba0daf20b433a3d9ef38a17cf3178e67d51cce31",
+      "scope": "CA/UK/US regional overlays; shared loader/pricing untouched here"
+    },
+    {
+      "pr": 498,
+      "head": "1b91acaf0d9f7145fba2acde5a88d8973e8cb90b",
+      "scope": "source clearances proposal, automatic imports remain false"
+    }
+  ],
+  "not_claimed": [
+    "UI/chat selection or approved apply integration",
+    "all-EU operational tariff coverage",
+    "new tariff/PPA/forward-curve importer",
+    "complete O&M/degradation model",
+    "paid model/media execution",
+    "production deployment",
+    "independent human/domain approval",
+    "remote CI success"
+  ],
+  "artifacts": {
+    ".scratch/gridspine-library-eu/04-COMMERCIAL.md": "bbafa8fb73906007ff9423be07d25b1f1032832923319f0748c7913a900cc2ca",
+    ".scratch/gridspine-library-eu/parameter-map.json": "687c592e1ad64a03cd1c0540a6e0322ffe129e038e04acb9c47bc91d72487a57",
+    ".scratch/gridspine-library-eu/build_dea_reference.py": "8b97ae519f01f8c802bd940206abc6e45eec2104cdad8013b837c683d36fc8ce",
+    ".scratch/gridspine-library-eu/01-PARAMETERS.md": "9ef02e501906c734bd799eabf99fd6471359c1efd4d2d116f3989a4ca4c695a0",
+    ".scratch/gridspine-library-eu/03-TARIFFS.md": "a5a7708644fbddd1703eea2f176551dc7e75e4966ed1bcbdb8e117b974cd8add",
+    ".scratch/gridspine-library-eu/05-TECHNOLOGY-OM.md": "63cbda5c3469ff332d4339b969c7155d733f23e5a47326bdd395e34b769744c6",
+    ".scratch/gridspine-library-eu/README.md": "4b2b7f300dc6b27f3bcd9fa12c6b0f018d350114a8b026029c419859a91407e1",
+    ".scratch/gridspine-library-eu/HANDOFF.md": "bfe0a9a724a06aed7e6cb3c1c7861a3fbb299922ce9bd5c46ed8748d96e71f7c",
+    ".scratch/gridspine-library-eu/06-INTEGRATION-TESTS.md": "b60d186d549cfa5b33787e41472ff2923945b19b2493bfe1c9f8c4caa3816532",
+    ".scratch/gridspine-library-eu/IMPLEMENTATION.md": "8f6782af763c6db0baf32e40df9ad9d45e1b838ff6d6030835396076ee7319f1",
+    ".scratch/gridspine-library-eu/fetch-observations.json": "ae5e05f09045f72ddd6306017b290076316ae6bc787214351ee0b9e2e931bf64",
+    ".scratch/gridspine-library-eu/02-SOURCES.md": "7ba413624ea2d15c1ce07c6785d934ffc62eb66149e4bf0da3fe725b11da6902",
+    ".scratch/gridspine-library-eu/source-register.json": "5c877ee4011e69946c620ae66f04d96579ab357cf57dc5fe373d88299bdd1605",
+    "pypsa-gui/backend/services/library/europe_reference.py": "72089f409c7d220b18f1e8f445877ae4e4b6b573aa8d5e8c2aca858ccbdf6ad6",
+    "pypsa-gui/backend/services/library/reference_data/eu-dea-2026-08.json": "e034aad727495a36fde12cb9035502b34fafc23e49dc7d04c1858fe32db70b57",
+    "pypsa-gui/backend/services/library/reference_data/eu-dea-2026-08.json.license": "0df44e80b57b65cd4cbe66ae1c98608b549c60e8c758a219fe16a767915ee6ed",
+    "pypsa-gui/backend/services/library/reference_data/README.md": "b03b94804282d4a1075f418bb3b6370f26220068ed4ac35df024f795c2423272",
+    "pypsa-gui/backend/tests/test_library_europe_reference.py": "8de615b22a16aec8f553b1b7e502d9a2ecf537fddc4ec4ecb16a7148cfe91def",
+    "docs/research/gridspine-eu-library-overview.md": "2b6103f6587c190c87e0141b427612d6443a5e505bbb86e67b480a97b253dc0a"
+  }
+}

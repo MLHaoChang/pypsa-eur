@@ -186,21 +186,21 @@ Compare (S6) shows these for base + 8 with deltas. Until S6, the existing A/B Co
 
 ## 7. Pre-built sensitivities: base + 8 cases
 
-Each case is a **declared change** in the S5 / experiment shape (dotted path, typed value, old → new), with at most 2 changes per case.
+Each case is a **declared change** in the S5 / experiment shape (dotted path, typed value, old → new): the minimum set of changes that must move together, within the experiment contract's limit, each case's reason naming why they move together (gatekeeper at ticket 04).
 
 | # | Case | Changes | Answers |
 |---|---|---|---|
 | base | pay-as-produced PPA, 70 % share, `da_base`, 70 MW export, pack battery cost | — | — |
-| 1 | Low price level | `export_price_ref` and the PPA reference → `da_low` | merchant risk |
+| 1 | Low price level | the export and import (G7) price refs and both PPA references → `da_low` | merchant risk |
 | 2 | Cannibalised shape | the same two refs → `da_cannibalised` | shape risk, battery value |
-| 3 | PPA price −10 % | the PPA `price` | PPA negotiation |
-| 4 | Merchant-heavy | the PPA `share` 0.7 → 0.3 | PPA share vs merchant |
-| 5 | Baseload PPA | the PPA form: pay-as-produced → baseload at the same expected MWh | PPA form |
-| 6 | Cheap battery | the battery's overnight cost −30 % | battery size |
+| 3 | PPA price −10 % | both PPAs' `price` | PPA negotiation |
+| 4 | Merchant-heavy | both PPAs' `share` 0.7 → 0.3 | PPA share vs merchant |
+| 5 | Longer PPA | both PPAs' tenor 10 → 15 years (replaces the baseload form: a baseload PPA has no financial settlement; owner Q-IPP6 = A) | PPA tenor |
+| 6 | Cheap battery | the battery's two upfront parts (power, energy) × 0.7, through the asset form, which re-derives capital_cost | battery size |
 | 7 | Tight connection | `grid_export.p_nom` 70 → 55 MW | connection limit, battery size |
 | 8 | Faster degradation | `degradation_by_asset` PV 0.5 → 1.0 %/yr, wind 0.3 → 0.8 %/yr | lifetime revenue |
 
-Cases 1 and 2 change two paths that must move together, the export price and the PPA reference. Each case's declared changes list both.
+Cases 1 and 2 change four refs that follow one price series: export, import and both PPA references. A ref change is declared by the series id; S5 resolves it to its one Library entry and writes the whole reference (id, version, hash), never the id alone (gatekeeper).
 
 **Delivery** (Q-IPP5 = A, reconciled with the both-modes rule): the template ships `cases.json` as data only, validated against the experiment contract's path and value rules.
 - **Nothing in the UI shows it as a list until S5.** A read-only list would be a lock that the engine doesn't require (UX reviewer).

@@ -229,7 +229,7 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds, selectedComponent,
   } = useUIStore()
   // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
   useSitesLifecycle(currentProject)
@@ -761,7 +761,15 @@ export default function App() {
 
           {/* Zone 3 — Right properties panel. Only renders alongside the
               Topology Canvas — hidden while a tab panel occupies the right half. */}
+          {/* Beside the Issues list too (J9): an item opens its field here and
+              Issues stays, so the user fixes it and sees it clear without
+              going back. */}
           {!activeSlidePanel && <PropertiesPanel />}
+          {activeSlidePanel === 'issues' && selectedComponent && (
+            <div data-no-panel-close className="flex min-h-0 shrink-0">
+              <PropertiesPanel />
+            </div>
+          )}
 
           {/* Zone 5 — The assistant. Outside the panel container on purpose:
               it must stay on screen while a full-screen tab owns the main
