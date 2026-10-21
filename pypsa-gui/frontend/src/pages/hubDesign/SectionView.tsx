@@ -89,15 +89,25 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
         {/* The same verdict the Run button uses: blocked only when the server
             would refuse, with the reason by section; gaps that do not block
             show as notes. */}
-        {gate.blocked ? (
+        {gate.checking ? (
+          <p data-testid="readiness-checking" className="text-[12px] text-muted">
+            Checking whether the project is ready…
+          </p>
+        ) : gate.blocked ? (
           <p data-testid="readiness-blocked" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
             Not ready to run: {gate.reason}
-            {gate.blocker && (
-              <button type="button" onClick={() => openFlowTarget(gate.blocker!.target)}
+            {gate.blocker && (<>
+              <button type="button" data-testid="readiness-open"
+                onClick={() => openFlowTargetInPlace(gate.blocker!.target)}
                 className="inline-flex items-center gap-1 text-accent hover:underline">
-                Edit in Expert <ArrowRight size={11} />
+                Open here <ArrowRight size={11} />
               </button>
-            )}
+              <button type="button" data-testid="readiness-open-expert"
+                onClick={() => openFlowTarget(gate.blocker!.target)}
+                className="text-muted hover:text-accent hover:underline">
+                Open in Expert
+              </button>
+            </>)}
           </p>
         ) : (
           <p data-testid="readiness-ready" className="text-[12px] text-text">

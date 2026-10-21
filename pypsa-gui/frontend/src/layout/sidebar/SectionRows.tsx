@@ -12,7 +12,7 @@ import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useSolveQueue } from '../../hooks/useSolveQueue'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { isOpenItem } from '../../utils/flowItems'
+import { countOpen } from '../../utils/flowItems'
 import AssetPaletteInline from './AssetPaletteInline'
 import { SItem, usePanelToggle } from './SidebarRows'
 
@@ -122,11 +122,10 @@ function ReadinessRows({ onCloseModal }: Props) {
   // to-check items (sections 1–8, acknowledged ones left out), falling back to
   // the preflight count only while the flow is unavailable.
   const { flow } = useProjectFlow()
-  const flowItems = flow
-    ? flow.sections.filter(s => s.state !== null).flatMap(s => s.items).filter(i => !i.acknowledged && i.severity !== 'info')
-    : null
-  const errorCount = flowItems ? flowItems.filter(i => i.severity === 'error').length : (preflight?.errors ?? 0)
-  const warningCount = flowItems ? flowItems.filter(i => i.severity === 'warning').length : (preflight?.warnings ?? 0)
+  const flowItems = flow ? flow.sections.filter(s => s.state !== null).flatMap(s => s.items) : null
+  const open = flowItems ? countOpen(flowItems) : null
+  const errorCount = open ? open.todo : (preflight?.errors ?? 0)
+  const warningCount = open ? open.check : (preflight?.warnings ?? 0)
   // ADR-0001: a failed preflight fetch must never render as "no issues".
   const issueCount = errorCount + warningCount
   const hasErrors = errorCount > 0
