@@ -34,6 +34,7 @@ harness/
   job_adapters.py foreground (fg:…) and later domain job handles for wait_for_job without holding the turn
   activity_history.py bounded owned job-origin/status observations across worker loss; no execution, numerical or approval authority
   completion_observer.py bounded weak native-worker status observation while Activity is closed; no advancement or retry
+  continuation.py  LC-12: a plan's finished job continues its conversation once; no approval authority
   experiment_execution.py ordinary network-case admission and permanent no-replay receipts
   experiment_two_case.py sequential two-case admission with shared caps and failure policy
   experiment_reconciliation.py explicitly confirmed fenced native submission read-back; no execution or retry
@@ -329,7 +330,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 174 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 214 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -355,6 +356,12 @@ opt-in) rebuilds one Load's or the network's unserved energy, peak, weighted she
 hours and VoLL cost from the solve's own VoLL-slack capture, which every solve
 claim wipes and rewrites beside the input fingerprints. Monte Carlo LOLE (and
 the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
+`bus-price/1`, `generator-emissions/1`, `network-emissions/1` and `curtailment/1`
+(opt-in, `price_calculations.py`, `emissions_calculations.py`,
+`curtailment_calculations.py`, sharing `profile_common.py`) check one bus's
+time-weighted price, generator CO2 over the time-varying efficiency with the cap's
+dual as −mu, and curtailment of generators with a time-varying availability. Every
+profile refuses once an AC power flow has overwritten the LP outputs.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -726,11 +733,57 @@ so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
 still receives only its catalogue arguments; chat renders the preview table.
 
-Sequential durable tasks wait for a terminal solver outcome before advancing
-chart/export steps, bounded by the per-tool deadline and cancellation. Ordinary
-foreground solver calls retain the detached start receipt. A start or
-contradictory still-running receipt cannot complete a task; fully asynchronous
-durable-task step resumption remains outside the checked-scope recovery tranche.
+### Plan jobs and continuation (LC-05, LC-12)
+
+A plan runs in order. Before any card, `assistant_tasks.admit` refuses a call
+that matches a later pending step (`task_step_out_of_order`) or the step
+waiting on its job (`task_step_waiting`); other calls pass. An edit step
+completes only when its `_edit_receipt` is `verified`, otherwise it is
+`uncertain`. An edit card refuses a negative rating (`s_nom`, `p_nom`,
+`e_nom` and their `_min`/`_max`) as `invalid_edit_value`.
+
+A `run_simulation`/`run_ac_pf_stage` step is `waiting` on its `fg:` job, the
+plan `waiting_job`, durably in the task file. Its own thread
+(`continuation.follow_job`, not the session's progress monitor, which stops
+when the chat closes) follows the job and settles the step from that job's own
+record, never from live state, and without the network lock: `completed` only
+when the job's identity-bound native status is `completed` before and after its
+run manifest is published and the manifest carries its objective and input
+fingerprint, and that fingerprint is the one the solve recorded under its lock
+(the step keeps `run_id`, `objective` and `fingerprint`, so a later step can
+reference `$run.run_id`); `publish_foreground_run` records the solve's own
+fingerprint, and when an edit queued on the lock already landed it warns
+`inputs_changed_before_publish` and captures no load-flow section; `failed` for failed, aborted or unknown
+(including a job bound to no new worker); `uncertain` when it completed but its
+record cannot be verified, or this process never registered it (a restart). The
+turn waits up to `continuation.GRACE_SECONDS` (10 s): a quick solve settles and
+the plan goes on in the same turn, with no separate continuation; a longer one
+releases the turn like an ordinary foreground solve. Nothing re-runs by itself;
+`resolve_task_step` stays the only reconciliation. A start or contradictory
+still-running receipt without a job still cannot complete a step.
+
+When the job ends, one continuation is due to the session that started it
+(`continuation.py`). `GET /api/chat/{session_id}/continuations` lists them;
+`/stream` with `continuation_job_id` (no message, attachments, script or
+checked fields) claims one, at most once per job, and runs an ordinary turn
+whose user message the harness writes: `job <id> finished: <status> (plan:
+<title>)`. None is due after `cancel_task` or a user abort, and none for
+another session or project. The continuation approves nothing: every card in
+that turn still needs its click. `get_task` names the plan's verified edits in
+`changes`, and the OpenAI tool selection favours every tool the plan still
+has to run.
+
+### Stale result reads (LC-12)
+
+A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
+`state` can still say `fresh`. `dispatch_status` and every dict answer of
+`get_results` therefore also carry `workflow_tools.solve_freshness()`:
+`inputs_changed_since_solve` compares both recorded solve fingerprints with
+the current inputs (`null` when no solve recorded them), and `results_current`
+is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
+never disagree with it, also after an AC power flow. `get_results` adds a
+`freshness_note`: stale when the inputs changed, not current when the guard
+fails for another reason.
 
 ## Recorded runs, load flow, and experiment plans
 

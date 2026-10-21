@@ -1,4 +1,4 @@
-import type { FlowSectionId } from '../api/flow'
+import type { FlowSectionId, FlowTarget } from '../api/flow'
 import type { SlidePanel } from '../store/uiStore'
 
 // The ten flow sections as the shell shows them (workspace-reconciliation §6.1,
@@ -68,3 +68,19 @@ const CLASS_SECTION: Record<string, FlowSectionId> = {
 }
 export const sectionForComponent = (type: string | null | undefined): FlowSectionId | null =>
   (type && CLASS_SECTION[type]) || null
+
+/** The panel a section's "Edit in Expert" opens first: where its inputs live
+ *  today (navigation only; the value moves are W3b). A null panel with a table
+ *  opens that bottom table; sections 1, 9 and 10 open their one panel. */
+export const SECTION_OPEN: Record<FlowSectionId, { panel?: SlidePanel; table?: string }> = {
+  project: { panel: 'horizon' },
+  carriers: { table: 'Carriers' },
+  connection: { panel: 'campusElectrical' },
+  loads: { table: 'Loads' },
+  assets: { panel: 'capacityBounds' },
+  profiles: { panel: 'timeseries' },
+  commercial: { panel: 'economics' },
+  scenarios: { panel: 'simparams' },
+  readiness: { panel: 'issues' },
+  results: { panel: 'results' },
+}

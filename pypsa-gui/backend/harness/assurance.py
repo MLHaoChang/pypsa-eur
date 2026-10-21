@@ -243,10 +243,14 @@ class Turn:
                     self.owner, self.request_scope
                 )
             except (ValueError, KeyError, TypeError, HTTPException) as exc:
-                from harness import branch_calculations, carrier_calculations, lost_load_calculations
+                from harness import (
+                    branch_calculations, carrier_calculations, curtailment_calculations,
+                    emissions_calculations, lost_load_calculations, price_calculations,
+                )
 
                 refusals = (carrier_calculations.REFUSALS | branch_calculations.REFUSALS
-                            | lost_load_calculations.REFUSALS)
+                            | lost_load_calculations.REFUSALS | price_calculations.REFUSALS
+                            | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS)
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
@@ -420,8 +424,17 @@ class Turn:
         carrier = self.request_scope["profile"] == assurance_metrics.carrier.PROFILE
         loading = self.request_scope["profile"] in assurance_metrics.branch.PROFILES
         shed = self.request_scope["profile"] == assurance_metrics.lost_load.PROFILE
+        profile = self.request_scope["profile"]
+        result_kind = {
+            assurance_metrics.price.PROFILE: "Bus",
+            assurance_metrics.emissions.GENERATOR_PROFILE: "Generator",
+            assurance_metrics.emissions.NETWORK_PROFILE: "Network",
+            assurance_metrics.curtailment.PROFILE:
+                "Network" if self.request_scope["entity_id"] == "network" else "Generator",
+        }.get(profile)
         entity_kind = (
-            "Carrier" if carrier
+            result_kind if result_kind
+            else "Carrier" if carrier
             else ("Network" if self.request_scope["entity_id"] == "network" else "Load") if shed
             else "Network" if self.request_scope["profile"] == assurance_metrics.branch.NETWORK_PROFILE
             else "Branch" if loading
@@ -439,6 +452,10 @@ class Turn:
             lines.extend(assurance_metrics.branch.notes(record["raw"]))
         if shed:
             lines.extend(assurance_metrics.lost_load.notes(record["raw"], self.request_scope, _label))
+        if profile in assurance_metrics.emissions.PROFILES:
+            lines.extend(assurance_metrics.emissions.notes(record["raw"], _label))
+        if profile == assurance_metrics.curtailment.PROFILE:
+            lines.extend(assurance_metrics.curtailment.notes(record["raw"], self.request_scope, _label))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
             fact = next(

@@ -101,6 +101,9 @@ class StreamRequest(BaseModel):
     # LC-03: this client ACKs source-bound navigation in ordinary turns too.
     # It only lets the server wait briefly for that ACK; it grants nothing.
     ui_ack: StrictBool = False
+    # LC-12: continue this conversation after a plan's job ended (one listed by
+    # GET /{session_id}/continuations). The server writes the message; once per job.
+    continuation_job_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class ConfirmRequest(BaseModel):
@@ -1519,6 +1522,11 @@ async def chat_stream(
                 or body.generation is not None or body.input_mode not in (None, 'text')
                 or body.message != FOLLOWUP_MESSAGE):
             raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'})
+    if body.continuation_job_id is not None and (
+            body.message or body.attachment_file_ids or body.script or body.source_gap_ref is not None
+            or body.checked_scope is not None or body.checked_operation is not None
+            or body.utterance_id is not None or body.generation is not None):
+        raise HTTPException(422, {"error_kind": "invalid_continuation"})
     if body.checked_scope is not None:
         from harness.assurance_scope import validate
         try:
@@ -1781,6 +1789,7 @@ async def chat_stream(
                     source_gap_ref=body.source_gap_ref,
                     binding_generation=body.binding_generation,
                     ui_ack=body.ui_ack,
+                    continuation_job_id=body.continuation_job_id,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
@@ -1967,6 +1976,34 @@ def chat_abort(session_id: str,
         return {"ok": False, "reason": "unknown_session"}
     session.abort_event.set()
     return {"ok": True}
+
+
+@router.get("/{session_id}/continuations")
+def chat_continuations(session_id: str, actor: User = Depends(require_user)) -> dict[str, Any]:
+    """
+    LC-12: the plan jobs of this conversation that ended and have not
+    continued yet. The panel sends one `/stream` with `continuation_job_id`
+    for each, when its progress stream closes and on reopen. Listing claims
+    nothing and approves nothing. A foreign session lists nothing, like an
+    unknown one.
+    """
+    from harness import continuation
+    try:
+        session = _resolve_owned_session(session_id, actor)
+    except HTTPException as exc:
+        if exc.status_code == 409:
+            return {"items": []}
+        raise
+    if session is None:
+        return {"items": []}
+    from services import chat_tools
+    chat_tools.set_acting_user(actor.id)
+    try:
+        return {"items": continuation.due(session)}
+    except HTTPException as exc:
+        if exc.status_code in (404, 409):
+            return {"items": []}  # no project, or a plan this project cannot read
+        raise
 
 
 @router.get("/{session_id}/progress")

@@ -1,0 +1,781 @@
+{
+  "baseline": "d327f645a92b8ddc50ba1988b3e15105b91468e2",
+  "prior_research_head": "c35bfd0b7a218a343c9b5febc8f1b69aa26f0836",
+  "parameters": [
+    {
+      "parameter_id": "T01",
+      "title": "DSO volumetric transport rates and time bands",
+      "existing_family_ids": [
+        "C02"
+      ],
+      "native_binding_or_gap": "TariffItem energy, TariffPeriod; integer-hour windows only",
+      "source_ids": [
+        "DE-DSO",
+        "NL-DSO",
+        "FR-DSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "DK-TARIFF",
+        "AT-NETWORK",
+        "PT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T02",
+      "title": "TSO volumetric transport/system charges",
+      "existing_family_ids": [
+        "C05"
+      ],
+      "native_binding_or_gap": "Separate tariff item/payee; must identify upstream charges already included in DSO rates",
+      "source_ids": [
+        "DE-TSO",
+        "NL-TSO",
+        "FR-TSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "DK-TARIFF",
+        "AT-NETWORK",
+        "PT-NETWORK",
+        "FI-LEAD"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T03",
+      "title": "Contracted capacity charge",
+      "existing_family_ids": [
+        "C03"
+      ],
+      "native_binding_or_gap": "capacity/per_kw_year or per_kw_month; distinguish contracted from measured peak",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "NL-TSO",
+        "FR-DSO",
+        "FR-TSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "AT-NETWORK",
+        "PT-NETWORK",
+        "FI-LEAD"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T04",
+      "title": "Measured demand charge and interval",
+      "existing_family_ids": [
+        "C03"
+      ],
+      "native_binding_or_gap": "demand/peak_import and settlement; 15/30/60-minute support requires matching input resolution",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "NL-TSO",
+        "FR-DSO",
+        "FR-TSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "PT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T05",
+      "title": "Fixed customer, metering and subscription fees",
+      "existing_family_ids": [
+        "C04"
+      ],
+      "native_binding_or_gap": "fixed/per_month or per_day; complete bill requires each applicable component",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "FR-DSO",
+        "IT-TARIFFS",
+        "DK-TARIFF",
+        "AT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T06",
+      "title": "Reactive energy, power factor and excess capacity penalties",
+      "existing_family_ids": [
+        "C03"
+      ],
+      "native_binding_or_gap": "Not generically represented; retain unsupported_fields, never silently omit",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "FR-DSO",
+        "FR-TSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "AT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T07",
+      "title": "Injection/export tariffs and producer access",
+      "existing_family_ids": [
+        "C06"
+      ],
+      "native_binding_or_gap": "export-side supported items; charging direction and consumer/producer eligibility explicit",
+      "source_ids": [
+        "DK-TARIFF"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T08",
+      "title": "One-off grid connection and reinforcement costs",
+      "existing_family_ids": [
+        "C07"
+      ],
+      "native_binding_or_gap": "ConnectionAgreement subset plus finance CapEx; avoid treating one-off connection cost as recurring tariff",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "NL-TSO",
+        "FR-TSO"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T09",
+      "title": "Non-firm access and dynamic capacity products",
+      "existing_family_ids": [
+        "C07"
+      ],
+      "native_binding_or_gap": "Native connection kinds and envelope; actual contract-specific availability/curtailment rules required",
+      "source_ids": [
+        "NL-DSO",
+        "NL-TSO"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T10",
+      "title": "Taxes, levies, exemptions, VAT and inclusive/exclusive scope",
+      "existing_family_ids": [
+        "C05"
+      ],
+      "native_binding_or_gap": "tax_levy and supported finance subset; eligibility is not inferred",
+      "source_ids": [
+        "DE-TSO",
+        "NL-DSO",
+        "FR-DSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "DK-TARIFF",
+        "AT-NETWORK",
+        "PT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T11",
+      "title": "Effective dates, operator, voltage and customer class",
+      "existing_family_ids": [
+        "C02",
+        "C03"
+      ],
+      "native_binding_or_gap": "Tariff jurisdiction, dso_or_retailer, valid dates; richer applicability needs admission",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-DSO",
+        "NL-TSO",
+        "FR-DSO",
+        "FR-TSO",
+        "ES-TOLLS",
+        "IT-TARIFFS",
+        "DK-TARIFF",
+        "AT-NETWORK",
+        "PT-NETWORK",
+        "FI-LEAD"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "T12",
+      "title": "Annual tariff projections and provisional schedules",
+      "existing_family_ids": [
+        "C14"
+      ],
+      "native_binding_or_gap": "Dated scenario/reference, distinct from final payable schedule",
+      "source_ids": [
+        "DE-TSO",
+        "DE-DSO",
+        "NL-TSO",
+        "DK-TARIFF",
+        "AT-NETWORK",
+        "PT-NETWORK"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M01",
+      "title": "Historical day-ahead/imbalance prices",
+      "existing_family_ids": [
+        "C01"
+      ],
+      "native_binding_or_gap": "PriceSeriesRef/series store; market regime, bidding zone, currency, UTC/local and interval retained",
+      "source_ids": [
+        "DK-MARKET"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M02",
+      "title": "PPA fixed price, tenor and delivery profile",
+      "existing_family_ids": [
+        "C08"
+      ],
+      "native_binding_or_gap": "PpaContract price/kind/tenor_years/asset_ids; actual quotes usually private",
+      "source_ids": [
+        "PPA-FILES",
+        "ACER-PPA",
+        "EU-MARKET-RULES",
+        "DE-AUCTION"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M03",
+      "title": "Financial PPA and fixed-for-floating power swaps",
+      "existing_family_ids": [
+        "C08"
+      ],
+      "native_binding_or_gap": "Financial PPA subset only; arbitrary swap products are not a native general derivatives engine",
+      "source_ids": [
+        "PPA-FILES",
+        "EU-MARKET-RULES",
+        "ORE-QUANTLIB"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M04",
+      "title": "PPA share, volume, shaping and sleeving fees",
+      "existing_family_ids": [
+        "C08"
+      ],
+      "native_binding_or_gap": "Native share, baseload_mw, caps and sleeving fields; balancing/shape risk not automatically priced",
+      "source_ids": [
+        "PPA-FILES",
+        "ACER-PPA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M05",
+      "title": "Indexation, reference year and negative-price clauses",
+      "existing_family_ids": [
+        "C08",
+        "C14"
+      ],
+      "native_binding_or_gap": "Native indexation/base_year/suspension subset; clause-level equivalence required",
+      "source_ids": [
+        "PPA-FILES"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M06",
+      "title": "CfD strike, reference calculation and settlement",
+      "existing_family_ids": [
+        "C09"
+      ],
+      "native_binding_or_gap": "CfdContract subset; awards are benchmarks and support scheme clauses may exceed it",
+      "source_ids": [
+        "EU-MARKET-RULES",
+        "DE-AUCTION",
+        "IE-RESS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M07",
+      "title": "PPA/CfD standard agreement files and legal clauses",
+      "existing_family_ids": [
+        "C08",
+        "C09"
+      ],
+      "native_binding_or_gap": "Linked document references and structured archetypes; public download does not grant template redistribution",
+      "source_ids": [
+        "PPA-FILES",
+        "ACER-PPA",
+        "EU-MARKET-RULES",
+        "IE-RESS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M08",
+      "title": "Forward curves, futures and swap quotations",
+      "existing_family_ids": [
+        "C01",
+        "C08"
+      ],
+      "native_binding_or_gap": "Licensed scenario/series if permitted; no open live forward feed assumed",
+      "source_ids": [
+        "EEX-MARKET",
+        "ORE-QUANTLIB"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M09",
+      "title": "Guarantees of Origin, balancing and ancillary revenues",
+      "existing_family_ids": [
+        "C10",
+        "C18"
+      ],
+      "native_binding_or_gap": "Certificates/DR/market subset; attributes, fees and market access separate",
+      "source_ids": [
+        "EEX-MARKET",
+        "AIB-CERTIFICATES"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "M10",
+      "title": "Hydrogen support premium vs hydrogen offtake price",
+      "existing_family_ids": [
+        "C17",
+        "C19"
+      ],
+      "native_binding_or_gap": "EUR/kg support is not an electricity CfD strike or a delivered H2 quote",
+      "source_ids": [
+        "EU-H2-SUPPORT",
+        "H2-OBS-DATA",
+        "H2-OBS-CALC"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K01",
+      "title": "Onshore wind investment and cost projections",
+      "existing_family_ids": [
+        "E01"
+      ],
+      "native_binding_or_gap": "Existing onwind investment pack; original money year distinct from projection year",
+      "source_ids": [
+        "DEA-POWER",
+        "TECHNOLOGY-DATA",
+        "JRC-CETO",
+        "FRAUNHOFER-LCOE"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K02",
+      "title": "Utility PV investment and cost projections",
+      "existing_family_ids": [
+        "E01"
+      ],
+      "native_binding_or_gap": "PackValue overnight/per_MW; DC/AC capacity boundary must be explicit",
+      "source_ids": [
+        "DEA-POWER",
+        "TECHNOLOGY-DATA",
+        "JRC-CETO",
+        "FRAUNHOFER-LCOE",
+        "PVGIS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K03",
+      "title": "Commercial rooftop PV investment and cost projections",
+      "existing_family_ids": [
+        "E01"
+      ],
+      "native_binding_or_gap": "Separate commercial archetype; not a 50/50 household/commercial blend",
+      "source_ids": [
+        "DEA-POWER",
+        "TECHNOLOGY-DATA",
+        "FRAUNHOFER-LCOE",
+        "PVGIS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K04",
+      "title": "Fixed O&M and its projection by technology",
+      "existing_family_ids": [
+        "E02"
+      ],
+      "native_binding_or_gap": "PackValue fom_share; percentage of contemporary overnight cost, not absolute currency O&M",
+      "source_ids": [
+        "DEA-POWER",
+        "DEA-FUELS",
+        "DEA-STORAGE",
+        "TECHNOLOGY-DATA",
+        "H2-OBS-DATA",
+        "H2-OBS-CALC",
+        "JRC-CETO",
+        "FRAUNHOFER-LCOE",
+        "PVPS-OM",
+        "WOMBAT"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K05",
+      "title": "Variable O&M and consumables",
+      "existing_family_ids": [
+        "E03"
+      ],
+      "native_binding_or_gap": "Native marginal_cost/finance costs; pack unit registry may not support source VOM units",
+      "source_ids": [
+        "DEA-POWER",
+        "TECHNOLOGY-DATA",
+        "FRAUNHOFER-LCOE"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K06",
+      "title": "Technical lifetime vs economic horizon",
+      "existing_family_ids": [
+        "E04"
+      ],
+      "native_binding_or_gap": "PackValue lifetime and independent finance horizon",
+      "source_ids": [
+        "DEA-POWER",
+        "DEA-FUELS",
+        "TECHNOLOGY-DATA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K07",
+      "title": "Replacement, refurbishment and decommissioning",
+      "existing_family_ids": [
+        "E06"
+      ],
+      "native_binding_or_gap": "Existing replacement subset; lifetime is not an OEM maintenance schedule",
+      "source_ids": [
+        "DEA-POWER",
+        "DEA-STORAGE",
+        "PVPS-OM",
+        "WOMBAT"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K08",
+      "title": "Inflation, FX and regional cost adjustment",
+      "existing_family_ids": [
+        "C13",
+        "C14"
+      ],
+      "native_binding_or_gap": "Explicit source-basis transformations; no automatic localisation by exchange rate",
+      "source_ids": [
+        "FRAUNHOFER-LCOE"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "K09",
+      "title": "Construction period and commissioning lead time",
+      "existing_family_ids": [
+        "E05"
+      ],
+      "native_binding_or_gap": "Finance subset; no inference from annual CapEx trajectory",
+      "source_ids": [
+        "DEA-POWER",
+        "DEA-FUELS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H01",
+      "title": "AEC, PEM and SOEC CapEx/FOM/lifetime projections",
+      "existing_family_ids": [
+        "E01",
+        "E02",
+        "E04",
+        "E18"
+      ],
+      "native_binding_or_gap": "Existing generic electrolysis primarily AEC; subtype and power basis needed",
+      "source_ids": [
+        "DEA-FUELS",
+        "TECHNOLOGY-DATA",
+        "H2-OBS-DATA",
+        "H2-OBS-CALC",
+        "JRC-CETO"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H02",
+      "title": "Electrolyser efficiency and electricity consumption",
+      "existing_family_ids": [
+        "E18"
+      ],
+      "native_binding_or_gap": "Link efficiency on stated LHV/HHV/input-output basis",
+      "source_ids": [
+        "DEA-FUELS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "optional_native_reference_subset_added",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H03",
+      "title": "Stack replacement and efficiency degradation",
+      "existing_family_ids": [
+        "E06",
+        "E18"
+      ],
+      "native_binding_or_gap": "Scenario/model extension; calendar vs operating-hour ageing distinguished",
+      "source_ids": [
+        "DEA-FUELS",
+        "H2-OBS-DATA",
+        "H2-OBS-CALC"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H04",
+      "title": "Minimum load, ramps and startup requirements",
+      "existing_family_ids": [
+        "E11",
+        "E18"
+      ],
+      "native_binding_or_gap": "Native commitment subset; annual average efficiency is not a part-load map",
+      "source_ids": [
+        "DEA-FUELS"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H05",
+      "title": "Water, treatment, compression and auxiliary loads",
+      "existing_family_ids": [
+        "E24"
+      ],
+      "native_binding_or_gap": "Explicit conversion/auxiliary ports; scope must prevent double counting",
+      "source_ids": [
+        "DEA-FUELS",
+        "H2-OBS-DATA",
+        "H2-OBS-CALC"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H06",
+      "title": "Compressed H2 tanks, caverns and compressors",
+      "existing_family_ids": [
+        "E23"
+      ],
+      "native_binding_or_gap": "Native Store/Link plus per-energy or per-power cost parts; site geology/safety separate",
+      "source_ids": [
+        "DEA-STORAGE",
+        "TECHNOLOGY-DATA",
+        "OREDA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H07",
+      "title": "Fuel cell performance and replacement",
+      "existing_family_ids": [
+        "E10",
+        "E18"
+      ],
+      "native_binding_or_gap": "Existing generic fuel-cell pack; named technology and heat-recovery boundary",
+      "source_ids": [
+        "TECHNOLOGY-DATA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "H08",
+      "title": "H2 and NH3 product properties and process costs",
+      "existing_family_ids": [
+        "E19",
+        "E20",
+        "C19"
+      ],
+      "native_binding_or_gap": "Existing ammonia tracer/product factors; LHV, tonnes and delivered cost boundaries",
+      "source_ids": [
+        "DEA-FUELS",
+        "TECHNOLOGY-DATA",
+        "H2-OBS-DATA",
+        "JRC-CETO"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "D01",
+      "title": "PV annual performance degradation",
+      "existing_family_ids": [
+        "E07"
+      ],
+      "native_binding_or_gap": "Finance degradation supported; physical profile feedback separately validated",
+      "source_ids": [
+        "DEA-POWER",
+        "PVGIS",
+        "PVPS-DEGRADATION"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "D02",
+      "title": "Wind age-related performance and availability",
+      "existing_family_ids": [
+        "E07",
+        "R02"
+      ],
+      "native_binding_or_gap": "Cohort benchmark vs site-specific performance; maintenance/curtailment confounding",
+      "source_ids": [
+        "DEA-POWER",
+        "PVPS-DEGRADATION",
+        "ENGIE-SCADA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "D03",
+      "title": "Failure events, MTTR, exposure and censoring",
+      "existing_family_ids": [
+        "R01",
+        "R03"
+      ],
+      "native_binding_or_gap": "Native occurrence subset; SCADA anomalies alone are not calibrated failure rates",
+      "source_ids": [
+        "DEA-POWER",
+        "PVPS-DEGRADATION",
+        "OREDA",
+        "ENGIE-SCADA"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "D04",
+      "title": "Preventive maintenance intervals and costs",
+      "existing_family_ids": [
+        "R04",
+        "E02"
+      ],
+      "native_binding_or_gap": "CMMS/vendor evidence; FOM is not a maintenance calendar",
+      "source_ids": [
+        "DEA-POWER",
+        "PVPS-OM",
+        "OREDA",
+        "WOMBAT"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    },
+    {
+      "parameter_id": "D05",
+      "title": "Battery ageing and replacement sensitivity",
+      "existing_family_ids": [
+        "E08",
+        "E09",
+        "E06"
+      ],
+      "native_binding_or_gap": "Existing placeholders/finance subset; new physical ageing law requires own validation",
+      "source_ids": [
+        "DEA-STORAGE"
+      ],
+      "existing_support": "Native subset exists; exact source applicability and unsupported terms remain explicit",
+      "integration_status": "research_mapping_only_no_new_runtime_support",
+      "remaining_gate": "Per-source rights, exact field/bill/model validation and approved use; unsupported terms cannot be dropped"
+    }
+  ]
+}

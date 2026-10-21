@@ -521,3 +521,10 @@ def test_a_nameplate_run_does_not_touch_the_sizing_record(reset_backend):
     rec = n.meta["sizing_record"]
     _solve(fixed_sizes="nameplate")
     assert n.meta["sizing_record"] == rec
+
+
+def test_the_fee_tolerance_is_the_source_checks():
+    from services.commercial.connection import FEE_SIZE_TOLERANCE_MW
+    from services.solver.fixed_sizes import TOLERANCE_MW
+
+    assert FEE_SIZE_TOLERANCE_MW == TOLERANCE_MW

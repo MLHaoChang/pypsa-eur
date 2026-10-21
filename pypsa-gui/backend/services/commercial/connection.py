@@ -91,6 +91,9 @@ OPERATIONAL_ATTR = "_ic_operational"
 # commit. The design run's fee carries over only while the pinned size is the
 # one it was committed with (``size_mw``); otherwise it is not established.
 FIXED_DESIGN_ATTR = "_fixed_design"
+# = services.solver.fixed_sizes.TOLERANCE_MW; not imported: the commercial
+# package never imports the solver (test_investment_case_tripwires).
+FEE_SIZE_TOLERANCE_MW = 1e-4
 # Set by a study that imposes a planning limit on a Link ({link: MW}), e.g. the
 # lever study's `import_cap`: the agreement never lifts it (round 3 #3).
 LINK_LIMITS_ATTR = "_ic_link_limits"
@@ -394,14 +397,12 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
             # A fixed-size run: the design's fee stands only for this
             # agreement at its own size. A record without `size_mw` (written
             # before F1) cannot show that, so it reads not established too.
-            from services.solver.fixed_sizes import TOLERANCE_MW
-
             prior = n.meta.get(META_FEE) or {}
             committed = prior.get("size_mw")
             if not (prior.get("link") == poc_link and "not_established" not in prior
                     and prior.get("agreement_hash") == agreement_hash(agreement)
                     and committed is not None
-                    and abs(float(committed) - pinned_size) <= TOLERANCE_MW):
+                    and abs(float(committed) - pinned_size) <= FEE_SIZE_TOLERANCE_MW):
                 n.meta[META_FEE] = {
                     "link": poc_link,
                     "not_established": "connection size changed since the design run",
