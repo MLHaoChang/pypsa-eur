@@ -7,7 +7,7 @@ You are a session for {{REPO}}, commissioned by the owner through the coordinato
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
-**Owner's decisions.** <Each decision in the owner's own words, with the option they picked.>
+**Owner decisions.** <rows of docs/agents/owner-decisions.md this task rests on; a decision not yet logged, in the owner's own words with the option they picked>
 
 **Starts from.** `{{BASE_BRANCH}}` at <full SHA>.
 

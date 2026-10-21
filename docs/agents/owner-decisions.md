@@ -1,0 +1,27 @@
+# Owner decisions
+
+Every decision the owner (haochang.1029@gmail.com) has made that sessions act on. The coordinator appends new ones as they're made. Briefs cite a line here, so a session can check the decision on master instead of trusting a relayed message. Times are CEST.
+
+| Date | Id | Question | Decision | Relayed by |
+|---|---|---|---|---|
+| 2026-10-20 | Q1–Q7 | Workspace reconciliation choices | See `.scratch/project-workflow/workspace-reconciliation.md` §12 | coordinator |
+| 2026-10-20 | Q17 | Reliability as a card | Reliability is its own card | coordinator |
+| 2026-10-20 | Q18 | Capacity card | Capacity can be deselected where the engine runs | coordinator |
+| 2026-10-20 | F1 | freeze_capacities | Required, not prioritised: the gated run option behind "sizing off" (load-flow / grid-compliance-only studies on existing assets); opens with or after W0 | coordinator |
+| 2026-10-21 | macOS | Runner-less macOS job | Integration (macos) queued > 30 min with no runner and every other check green: cancel the run and merge under premerge's waiver | coordinator |
+| 2026-10-21 06:5x | CQ-466 | CodeQL alerts 505/506 on #466 | Dismiss as false positives and merge; a router-wide sanitiser PR follows. The owner dismissed them in the UI. | coordinator |
+| 2026-10-21 06:5x | W-kinds | Append-only `tool-error-kinds.json` overlap | Waived on a clean trial merge (#490) | coordinator |
+| 2026-10-21 06:5x | W-readme | `harness/README.md` overlap | Counts as docs (#490) | coordinator |
+| 2026-10-21 07:39 | G1 | Card model for the #491 research | Keep the six cards (`modular-cards.md`) and map the research onto them (#494) | coordinator |
+| 2026-10-21 07:39 | G2 | Researched costs | CER EF2026, UK DESNZ 2025 and EIA reference plants as region-tagged in-tree defaults-pack versions; a sanctioned exception to IC decision 20; also their terms clearance | coordinator |
+| 2026-10-21 07:39 | G3 | External engines (BLAST-Lite, H2Integrate, OpenDSM, TESPy, python-control) | Optional-worker path only after W0/W4a/W3a; BLAST-Lite first | coordinator |
+| 2026-10-21 07:39 | G4 | Source terms | The owner clears each `public_terms_review` source from an agent's one-page summary; URDB and ENTSO-E are user-scoped imports only, never shipped | coordinator |
+| 2026-10-21 07:45 | CER | CER default region | Ontario, CM scenario, 2030 as the `ca_federal` default (coordinator call, owner may override) | coordinator |
+| 2026-10-21 08:05 | T1 | Terms for `common` | Cleared: DEA generation, storage, renewable fuels, energy transport, industrial heat; NREL ATB 2025; SMARD; Energinet; EIA-861; EU-C09 ACM TenneT; OEB scorecard. The DEA in-file CC BY 4.0 governs over the ens.dk disclaimer. User-scoped only: EU-C06/07/08/10/11/12, PNNL, Enedis. Recorded in `.scratch/gridspine-library-research/terms/clearances.json` | coordinator |
+| 2026-10-21 08:24 | EU | #501 | Integrate #501's EU research and references into the common Library for Europe | owner, in chat |
+| 2026-10-21 09:05 | Q-IPP6 | IPP case 5 | Replace "Baseload PPA" with "Longer PPA" (tenor 10 → 15 y on both PPAs); 8 cases; a financial baseload PPA is a gated engine follow-up | coordinator |
+| 2026-10-21 | R-1021 | Retro | Land all eight: typed cost units; UI copy guard test; server-verdict UI rule; wider overlap waiver; rotate work sessions past 300k context; this log; owner questions also as reply text; premerge zero-check hint and coordinator tool hints | coordinator |
+| 2026-10-21 09:40 | E1-stages | Staged example periods when only start/end years are entered | Keep the example's spacing shifted to the start year; drop stages at or after the end year; the Builder shows the periods before Create | coordinator |
+| 2026-10-21 10:00 | R-relay | Who brings the owner updates and questions | "I think it is the purpose of the master coordination to either confirm or forward me the updates / questions so that I don't go every where." The coordinator is the owner's channel; sessions send owner questions to it, never to their own window | coordinator |
+| 2026-10-21 11:05 | Q-GS4 | SMARD/Energinet price pilot | An attributed historical seed with the IPP example (DE-LU 2024 from SMARD, DK1 2024 from Energinet), fetched once with a pinned hash, no runtime fetch; supersedes IPP Q8 for these two sources | coordinator |
+| 2026-10-21 11:20 | PACE | Usage at the 7-day warning | Finish in-flight PRs; open no new packages or slices until the Mon 26 Oct 18:00 CEST reset | coordinator |

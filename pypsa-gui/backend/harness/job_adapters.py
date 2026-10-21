@@ -241,6 +241,12 @@ def _refuse(kind: str, message: str, status: int = 404, **extra) -> None:
     raise HTTPException(status, detail)
 
 
+def is_registered(job_id: str) -> bool:
+    """Whether this process minted the handle; a restart forgets every one."""
+    with _LOCK:
+        return job_id in _FOREGROUND or job_id in _STUDIES or job_id in _REPORTS
+
+
 def is_foreground_job_id(job_id: str) -> bool:
     return isinstance(job_id, str) and job_id.startswith(FOREGROUND_PREFIX)
 
