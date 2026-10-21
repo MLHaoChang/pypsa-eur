@@ -110,8 +110,10 @@ def _walk_in_s(block: dict) -> float | None:
 
 def response_latency(name: str, block: dict) -> dict:
     """``{unit, kind, latency_s, walk_in_s, basis}``: a converter battery's
-    assumed response latency from its effective control (``latency_s`` None
-    when the control is not known); a UPS's walk-in instead."""
+    assumed response latency from its effective control; a control not known
+    is taken as the slowest assumed (grid following, 0.2 s) and says so,
+    since a missing input must not read as an instant answer. A UPS gets its
+    walk-in instead (``latency_s`` None)."""
     kind = block.get("kind")
     if kind == "ups":
         w = _walk_in_s(block)
@@ -122,8 +124,10 @@ def response_latency(name: str, block: dict) -> dict:
         latency = _value((block.get("values") or {}).get("fw_delay_s", block.get("fw_delay_s")))
     else:
         latency = LATENCY_S.get(control)
-    return {"unit": name, "kind": kind, "latency_s": None if latency is None else float(latency),
-            "walk_in_s": None, "basis": CONTROL_WORDS.get(control, "control not known")}
+    basis = CONTROL_WORDS.get(control, "control not known")
+    if latency is None:
+        latency, basis = max(LATENCY_S.values()), basis + ", taken as grid following"
+    return {"unit": name, "kind": kind, "latency_s": float(latency), "walk_in_s": None, "basis": basis}
 
 
 def latency_words(latency: list[dict]) -> str:
@@ -275,7 +279,9 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
     # The slowest converter battery's latency lets the step through at the
     # envelope's rate until it answers: ℓ = min(S, dP/dt × L). For a true step
     # (dP/dt → ∞) ℓ is the whole step for any L > 0, which is what a rapid
-    # voltage change sees in those first L seconds.
+    # voltage change sees in those first L seconds. The slowest battery sets
+    # it even when the batteries carry none of the step (all on the UPS):
+    # conservative.
     known = [x["latency_s"] for x in reserve.get("latency", [])
              if x["kind"] != "ups" and x["latency_s"] is not None and x["unit"] in reserve["units"]]
     slope = float(ck.get("dp_dt_mw_per_s") or ph.get("max_dp_dt_mw_per_s") or 0.0)

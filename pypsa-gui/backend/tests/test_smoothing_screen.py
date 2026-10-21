@@ -220,7 +220,7 @@ def test_a_ride_through_shortfall_does_not_eat_the_ups_energy():
     ({"kind": "bess", "control": "gfl_fw", "fw_delay_s": {"value": 0.35, "source": "assumed"}}, 0.35,
      "fast frequency response"),
     ({"kind": "bess", "control": "gfl_fw", "values": {"fw_delay_s": 0.1}}, 0.1, "fast frequency response"),
-    ({"kind": "bess"}, None, "control not known"),
+    ({"kind": "bess"}, 0.2, "control not known, taken as grid following"),
 ])
 def test_each_control_has_its_assumed_latency(block, latency, basis):
     out = S.response_latency("u", block)
@@ -364,3 +364,18 @@ def test_a_ups_without_a_walk_in_is_not_counted_as_shaping():
     # A measured shortfall still wins over the missing input.
     (ph,) = _screen(_site([("ups", 1.0, 0.01, 1.0, False)], {"it": 0.1}), island, [_phase(5.0)])["phases"]
     assert ph["verdict"] == "short" and ph["missing"] == ["UPS walk-in not known"]
+
+
+def test_an_unknown_control_battery_leaks_like_a_grid_following_one():
+    ph = _phase(100.0)
+    ph["checkpoint"]["dp_dt_mw_per_s"] = 100.0
+    n = _site([("rt", 500.0, 1.0, 1.0, False)])
+    leaks = []
+    for block in ({"kind": "bess"}, {"kind": "bess", "control": "gfl_pq"}):
+        island = {"units": {"rt": block}, "requirements": {"sustained_h": {"value": 1.0}}}
+        (out,) = _screen(n, island, [ph])["phases"]
+        leaks.append(out["leak_mw"])
+    assert leaks == [pytest.approx(20.0), pytest.approx(20.0)]
+    island = {"units": {"rt": {"kind": "bess"}}, "requirements": {"sustained_h": {"value": 1.0}}}
+    (out,) = _screen(n, island, [ph])["phases"]
+    assert "'rt' responds in 0.2 s (control not known, taken as grid following, assumed)" in out["note"]
