@@ -59,8 +59,8 @@ from services.adequacy.site_peak import (_periods, _value, committed_storage, de
 
 NO_BATTERY = "unknown, no battery/UPS"
 #: The screen's own limits, on every result.
-CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; deliverable MWh, "
-           "the charging side's 1/η_store not added")
+CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; energies as "
+           "delivered, charging losses not added")
 
 
 def step_mwh(step_mw: float, ramp_mw_per_min: float) -> float:
@@ -233,6 +233,7 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
         "step_mwh": e_step, "checkpoint_mwh": e_ck,
         "checkpoints_per_day": 86400.0 / interval if interval > 0 and e_ck > 0 else 0.0,
         "oscillation_excess_mw": a_x, "oscillation_mwh": e_osc, "oscillation_in_band": in_band,
+        "amplitude_mw": amp, "period_s": period,
         "need_mw": need_mw, "need_mwh": need_mwh,
         "reserve_mw": reserve["mw"], "reserve_mwh": reserve["mwh"],
         "backup_mwh": reserve["backup_mwh"],
@@ -284,3 +285,28 @@ def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limi
     order = {"short": 0, "unknown": 1, "covered": 2}
     worst = min(phases, key=lambda p: order[p["verdict"]])
     return {"verdict": worst["verdict"], "note": worst["note"], "phases": phases, "caveats": CAVEATS}
+
+
+def after_mitigation(ph: dict) -> dict | None:
+    """What the point of connection sees once the battery/UPS has smoothed,
+    from one screened phase (``_phase``, its ``coverage``): ``{step_mw,
+    covered_battery_mw, covered_ups_mw, ups_ramp_mw_per_min, covered_step_mw,
+    residual_step_mw, amplitude_mw, residual_amplitude_mw, period_s}``, or None
+    when the phase was not screened (no battery/UPS, no ramp limit). The
+    batteries' share reaches the grid at the ramp limit, the UPSs' at their
+    walk-in rate, the rest unshaped. The oscillation is covered up to its
+    whole amplitude A, not only its excess over the oscillation limit: the
+    ramp row's value carries the oscillation's slope 2π·A/T, so leaving A_lim
+    uncovered would keep the ramp failing with power and energy to spare;
+    the oscillation row is still judged against its own limit."""
+    if ph.get("verdict") not in ("covered", "short"):
+        return None
+    s = ph["step_mw"]
+    covered = min(s, ph["covered_battery_mw"] + ph["covered_ups_mw"])
+    amp = ph.get("amplitude_mw", 0.0)
+    return {"step_mw": s, "covered_battery_mw": ph["covered_battery_mw"],
+            "covered_ups_mw": ph["covered_ups_mw"], "ups_ramp_mw_per_min": ph["ups_ramp_mw_per_min"],
+            "ups_walk_in_s": ph["ups_walk_in_s"], "covered_step_mw": covered,
+            "residual_step_mw": max(0.0, s - covered), "amplitude_mw": amp,
+            "residual_amplitude_mw": max(0.0, amp - ph["oscillation_covered_mw"]),
+            "period_s": ph.get("period_s", 0.0)}

@@ -3161,6 +3161,11 @@ TOOLS: list[dict[str, Any]] = [
         "smoothing), reactive range, frequency support and the profile's "
         "dynamic requirements (always unknown: an EMT study is needed), grid "
         "former, island ride-through per scenario, LOLE against the goal. "
+        "With an AI-training load and a committed battery/UPS, the ramp, "
+        "oscillation and voltage-change rows also carry after_battery {value, "
+        "verdict, units, note}: the value after the battery/UPS smooths, judged "
+        "by the same limit; the row's own verdict stays before mitigation, so "
+        "give both. "
         "unknown means an input is missing, never a pass; say which. Say which "
         "limits are assumed. It never blocks a run. 422 for an unknown "
         "profile. Safety: read.",

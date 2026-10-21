@@ -716,7 +716,98 @@ def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
     for r in G.grid_readiness(d, n, PROFILE)["rows"]:
         text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
                         if r[k] is not None)
+        text += " " + str((r.get("after_battery") or {}).get("note", ""))     # DC 03
         for word in RAW_IDS:
             assert word not in text, (r["id"], word, text)
         if r["verdict"] == "unknown":
             assert r["note"][0].isupper(), (r["id"], r["note"])
+
+
+# ── after mitigation (DC 03) ────────────────────────────────────────────────
+
+
+def _envelope_rows(tmp_path, tid="eh_datacenter", dc_load=None, edit=None):
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    if edit:
+        edit(n)
+    out = G.grid_readiness(d, n, PROFILE)
+    return out, {k: v for k, v in _rows(out).items() if k in G._AFTER_IDS}
+
+
+def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
+    """The 40 MW / 10 MWh UPS keeps 34.5 MW × 600 s = 5.75 MWh for its bridge
+    and carries the whole 23.4 MW step, but its rectifier walks it onto the
+    grid over 15 s: 23.4·60/15 = 93.6 MW/min, above the 4 MW/min limit. The
+    voltage change and the oscillation pass after it. The rows' own
+    verdicts stay before mitigation."""
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    assert {k: r["verdict"] for k, r in rows.items()} == {
+        "ramp_rate": "fail", "oscillation": "fail", "rapid_voltage_change": "warn"}
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(93.6) and ramp["verdict"] == "fail"
+    assert "walks 23.4 MW in over 15 s" in ramp["note"]
+    assert rows["oscillation"]["after_battery"]["value"] == 0.0
+    assert rows["rapid_voltage_change"]["after_battery"]["value"] == 0.0
+    assert rows["oscillation"]["after_battery"]["verdict"] == "pass"
+    assert rows["rapid_voltage_change"]["after_battery"]["verdict"] == "pass"
+    assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
+    assert "before mitigation" in rows["ramp_rate"]["note"]
+    assert out["summary"]["pass_after_mitigation"] == 2
+    assert out["summary"]["red_flags"] == 3                         # the summary stays before mitigation
+
+
+def test_a_small_ups_covers_part_of_the_step(tmp_path):
+    """A 10 MW UPS walks 10 of the 23.4 MW in over 15 s (40 MW/min); the
+    other 13.4 MW reach the grid at the envelope's rate, so the ramp fails and
+    the voltage change warns after it."""
+    def shrink(n):
+        n.storage_units.at["ups_battery", "p_nom"] = 10.0
+        n.storage_units.at["ups_battery", "max_hours"] = 2.0
+    _, rows = _envelope_rows(tmp_path, dc_load={}, edit=shrink)
+    rvc = rows["rapid_voltage_change"]["after_battery"]
+    assert rvc["value"] == pytest.approx(round(13.4 / 250.0 * 100.0, 4))
+    assert rvc["verdict"] == "warn"                                  # 5.36 % above the 3 % limit
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(40.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
+    assert ramp["verdict"] == "fail"
+
+
+def test_without_a_battery_or_ups_there_is_no_after_value(tmp_path):
+    def drop(n):
+        n.remove("StorageUnit", "ups_battery")
+    out, rows = _envelope_rows(tmp_path, dc_load={}, edit=drop)
+    assert not any("after_battery" in r for r in rows.values())
+    assert out["summary"]["pass_after_mitigation"] == 0
+
+
+@pytest.mark.parametrize("tid", TIDS)
+def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
+    _, rows = _envelope_rows(tmp_path, tid)
+    assert not any("after_battery" in r for r in rows.values())
+
+
+def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):
+    out, _ = _envelope_rows(tmp_path, dc_load={})
+    counts = {v: sum(r["verdict"] == v for r in out["rows"]) for v in G.VERDICTS}
+    assert {v: out["summary"][v] for v in G.VERDICTS} == counts
+    assert out["summary"]["red_flags"] == counts["fail"] + counts["warn"]
+
+
+def test_the_after_value_survives_every_consumer(tmp_path, monkeypatch):
+    """The key round-trips through JSON (the route and the assistant tool
+    return the dict as is), the assistant tool's dispatcher and the report
+    chapter, which reads the rows it lists and ignores the rest."""
+    from services import chat_tools
+    from services.reports import chapters as C
+
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    back = json.loads(json.dumps(out))
+    assert back["rows"] == out["rows"] and "after_battery" in _rows(back)["ramp_rate"]
+    monkeypatch.setattr(G, "grid_readiness_for", lambda p, prof: out)
+    monkeypatch.setattr(chat_tools, "_acting", lambda: __import__("contextlib").nullcontext((None, None)))
+    monkeypatch.setattr(chat_tools, "_gridspine_project", lambda db, user, pid: pid)
+    assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="p") is out
+    payload = C.grid_readiness_payload(out)
+    assert [r["verdict"] for r in payload["rows"]] == [r["verdict"] for r in out["rows"]]
+    C.grid_readiness_table(payload, "/sections/grid_readiness/payload")
+    C.grid_readiness_disclosures(payload)

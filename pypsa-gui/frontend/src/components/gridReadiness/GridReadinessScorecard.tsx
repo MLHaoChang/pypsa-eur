@@ -90,12 +90,43 @@ export function VerdictChip({ verdict }: { verdict: GridReadinessVerdict }) {
   )
 }
 
-/** The summary line: "red flags" in Expert and the report, plain words in Guided. */
+/** The summary line: "red flags" in Expert and the report, plain words in Guided.
+ *  It counts the before-mitigation verdicts; rows that pass only after the
+ *  battery/UPS are added at the end (DC 03, UX review). */
 export function summaryText(s: GridReadiness['summary'], mode: ScorecardMode): string {
+  const after = s.pass_after_mitigation ? ` · ${s.pass_after_mitigation} pass after battery/UPS` : ''
   if (mode === 'guided') {
-    return `${s.red_flags} ${s.red_flags === 1 ? 'thing' : 'things'} to look at, ${s.unknown} not yet known`
+    return `${s.red_flags} ${s.red_flags === 1 ? 'thing' : 'things'} to look at, ${s.unknown} not yet known${after}`
   }
-  return `${s.red_flags} red ${s.red_flags === 1 ? 'flag' : 'flags'} · ${s.unknown} unknown · ${s.assumed} assumed`
+  return `${s.red_flags} red ${s.red_flags === 1 ? 'flag' : 'flags'} · ${s.unknown} unknown · ${s.assumed} assumed${after}`
+}
+
+/** "After battery 'ups_battery'" for one unit, "After batteries/UPS" for several. */
+export function afterLabel(after: NonNullable<GridReadinessRow['after_battery']>): string {
+  return after.units.length === 1 ? `After battery '${after.units[0]}'` : 'After batteries/UPS'
+}
+
+function AfterLine({ row }: { row: GridReadinessRow }) {
+  const after = row.after_battery
+  if (!after) return null
+  if (after.value == null) {
+    return (
+      <div data-testid={`gr-after-${row.id}`} className="text-muted">
+        After battery/UPS: not known yet (run the study)
+      </div>
+    )
+  }
+  const { word, Icon, cls } = VERDICT[after.verdict]
+  return (
+    <div data-testid={`gr-after-${row.id}`} className="flex flex-wrap items-center gap-1 text-muted">
+      {afterLabel(after)}: <span className="text-text">{fmt(after.value, row.unit)}</span>
+      <span>·</span>
+      <span data-testid="gr-after-verdict" data-verdict={after.verdict}
+        className={`inline-flex items-center gap-1 rounded-md border px-1 py-0 text-[10px] font-medium ${cls}`}>
+        <Icon size={10} aria-hidden /> {word}
+      </span>
+    </div>
+  )
 }
 
 function editableIn(row: GridReadinessRow, labels: Record<string, string>): string | null {
@@ -132,6 +163,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             <span className="mx-1.5">·</span>
             Project: <span className="text-text">{fmt(row.project_value, row.unit)}</span>
           </div>
+          <AfterLine row={row} />
         </div>
         {mode === 'expert' && t.component && t.entity && (
           <button type="button" data-testid={`gr-jump-${row.id}`} onClick={() => onJump(t.component!, t.entity!)}
@@ -146,6 +178,11 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
             onClick={() => ask(`On the grid-readiness scorecard, explain "${row.requirement}": `
               + `why it reads ${VERDICT[row.verdict].word.toLowerCase()}, what the limit and its source are, `
               + 'and what I could change.'
+              // DC 03: the after-mitigation value too, so both numbers are explained (UX review).
+              + (row.after_battery?.value != null
+                ? ` ${afterLabel(row.after_battery)} it reads ${fmt(row.after_battery.value, row.unit)} `
+                  + `(${VERDICT[row.after_battery.verdict].word.toLowerCase()}): explain that number too.`
+                : '')
               // An unknown row's next step is its missing input (a study to run, a value
               // to enter): the Ask carries it, since Guided has no jump (UX review).
               + (row.verdict === 'unknown' ? ` It is not known yet (${row.note ?? 'an input is missing'}): `
@@ -167,6 +204,11 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
         <div id={`gr-detail-${mode}-${row.id}`} data-testid={`gr-detail-${row.id}`} className="ml-[4.5rem] flex flex-col gap-0.5 text-[11px] text-muted">
           <div><span className="text-text">Source:</span> {row.source}</div>
           {row.note && !missing && <div>{row.note}</div>}
+          {row.after_battery && (
+            <div data-testid={`gr-after-note-${row.id}`}>
+              <span className="text-text">{afterLabel(row.after_battery)}:</span> {row.after_battery.note}
+            </div>
+          )}
           {mode === 'guided' && where && (
             <div data-testid={`gr-editable-${row.id}`}>Editable in Expert: {where}</div>
           )}

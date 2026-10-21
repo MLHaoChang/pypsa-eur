@@ -148,4 +148,48 @@ describe('GridReadinessScorecard', () => {
     expect(summaryText(DATA.summary, 'expert')).toBe('2 red flags · 2 unknown · 3 assumed')
     expect(summaryText(DATA.summary, 'guided')).toBe('2 things to look at, 2 not yet known')
   })
+
+  // DC 03: the value after the battery/UPS sits beside the before-mitigation verdict.
+  const AFTER: GridReadiness = {
+    ...DATA,
+    summary: { ...DATA.summary, pass_after_mitigation: 1 },
+    rows: DATA.rows.map(r => r.id === 'ramp_rate'
+      ? { ...r, after_battery: { value: 4, verdict: 'pass' as const, rule: {}, units: ['ups_battery'],
+          note: 'the UPS covers the 23.4 MW step' } }
+      : r),
+  }
+
+  it('shows the after-battery value under the row, the row verdict unchanged', async () => {
+    const user = userEvent.setup()
+    render(<GridReadinessScorecard data={AFTER} mode="expert" />)
+    const line = screen.getByTestId('gr-after-ramp_rate')
+    expect(line.textContent).toContain("After battery 'ups_battery': 4 MW/min")
+    expect(line.querySelector('[data-testid="gr-after-verdict"]')?.getAttribute('data-verdict')).toBe('pass')
+    expect(line.textContent).toContain('Pass')
+    expect(screen.getByTestId('gr-row-ramp_rate').querySelector('[data-testid="gr-verdict"]')
+      ?.getAttribute('data-verdict')).toBe('fail')
+    expect(screen.queryByTestId('gr-after-scr')).toBeNull()
+    await user.click(screen.getByTestId('gr-more-ramp_rate'))
+    expect(screen.getByTestId('gr-after-note-ramp_rate').textContent).toContain('covers the 23.4 MW step')
+  })
+
+  it('names several units together, and an unknown after-value is never a pass', () => {
+    const data: GridReadiness = { ...AFTER, rows: AFTER.rows.map(r => r.id === 'ramp_rate'
+      ? { ...r, after_battery: { ...r.after_battery!, value: null, verdict: 'unknown' as const,
+          units: ['a', 'b'] } } : r) }
+    render(<GridReadinessScorecard data={data} mode="expert" />)
+    expect(screen.getByTestId('gr-after-ramp_rate').textContent)
+      .toBe('After battery/UPS: not known yet (run the study)')
+  })
+
+  it('Guided: the Ask carries the after value, and the summary counts it', async () => {
+    const user = userEvent.setup()
+    render(<GridReadinessScorecard data={AFTER} mode="guided" />)
+    await user.click(screen.getByTestId('gr-ask-ramp_rate'))
+    expect(useChatStore.getState().composerSeed)
+      .toContain("After battery 'ups_battery' it reads 4 MW/min (pass): explain that number too.")
+    expect(summaryText(AFTER.summary, 'expert')).toBe('2 red flags · 2 unknown · 3 assumed · 1 pass after battery/UPS')
+    expect(summaryText(AFTER.summary, 'guided'))
+      .toBe('2 things to look at, 2 not yet known · 1 pass after battery/UPS')
+  })
 })
