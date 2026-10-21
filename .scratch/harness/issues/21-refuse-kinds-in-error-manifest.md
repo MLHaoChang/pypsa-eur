@@ -24,6 +24,8 @@ Missing today from `assistant_tasks.py` alone: `invalid_task`,
 `invalid_brief`, `brief_inputs_unreadable`, `task_pause_needs_user`,
 `task_paused_at_card`, `task_not_paused`, `task_brief_stale`,
 `task_resolution_unverifiable`, `task_reference_too_large`, and others.
+Study copilot slice 2 adds `brief_cases_not_runnable` and
+`task_step_needs_retry` (both `assistant_tasks.py`).
 
 ## Scope
 

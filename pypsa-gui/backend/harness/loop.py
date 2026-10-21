@@ -2998,6 +2998,24 @@ def _dispatch_real_tool_call(
                 tool_name, _redact_for_log(exc),
             )
 
+    # Study copilot slice 2: a plan's queued run step (sweep, enqueue) waits on
+    # its solve-queue jobs. The turn is released at once (a queued job is never
+    # a same-turn result); one follower settles the step from native records
+    # and arms one continuation. A partial or cancelled sweep does not wait:
+    # its receipt settles uncertain in finish_step.
+    if (task_ticket is not None and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
+            and isinstance(result, dict) and result.get("status") not in ("partial", "cancelled")):
+        try:
+            from harness import continuation
+            jobs = continuation.queue_jobs(result)
+            task_path = assistant_tasks.await_job(task_ticket, jobs, session.session_id) if jobs else None
+            if task_path:
+                continuation.follow_queue_job(task_path, task_ticket)
+                result = {**result, "waiting": True, "job_id": jobs[0]["job_id"],
+                          "note": "The plan waits on these queued jobs; the conversation continues when they end."}
+        except Exception as exc:  # noqa: BLE001 — the step then stays a start receipt: uncertain
+            logger.exception("chat: plan step could not wait on queued jobs: %s", _redact_for_log(exc))
+
     # Issue 11 — adequacy/study mesh handoff. Starters already return
     # {"status": "running"} after publish_study; mint an ad:… handle so
     # wait_for_job can observe without model-polling get_adequacy_results.

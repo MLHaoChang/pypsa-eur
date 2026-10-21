@@ -24,6 +24,9 @@ _LIMITS = {False: (12, 16000), True: (24, 32000)}  # (steps, step chars) without
 ARGS_CHARS = 1800
 RESULT_CHARS = 4000  # the model-facing result cap, harness.results._RESULT_CONTENT_CAP
 _WAIT_TOOLS = frozenset({"run_simulation", "run_ac_pf_stage"})
+# Queued runs wait on their solve-queue job(s) (`harness/continuation.py`).
+QUEUE_WAIT_TOOLS = frozenset({"run_sensitivity_sweep", "solve_queue_enqueue"})
+_QUEUE_FOLLOWERS = set()  # (task_id, step_id, attempt_id) of steps this process follows
 
 
 def _refuse(kind, message, status=409):
@@ -131,9 +134,23 @@ def _check_brief(brief, ids):
             "phases": [{"card": p["card"], "steps": list(p["steps"])} for p in phases]}
 
 
+def _check_runnable(brief, steps):
+    """A brief runs only what execution admits (issue 23, SC-10): its run
+    steps wait by themselves, and its cases fit one 1–2 network-case
+    experiment (`experiment_execution.runnable`, the advance rule)."""
+    from harness.experiment_execution import RUNNABLE_RULE, runnable
+    if any(step["tool"] == "wait_for_job" for step in steps):
+        _refuse("invalid_task_tool", "Under a brief a run step waits by itself; drop the wait_for_job step.", 422)
+    asked = [(step["args"].get("domain", "network"), len(step["args"].get("cases") or []))
+             for step in steps if step["tool"] == "start_experiment"]
+    if (brief["cases"] and not runnable("network", len(brief["cases"]))) or any(not runnable(*a) for a in asked):
+        _refuse("brief_cases_not_runnable", RUNNABLE_RULE + " Propose the first two network cases as this brief "
+                "and the rest as a follow-up brief.", 422)
+
+
 def _limit(tool):
     """Each step's packet limit, from the server, never from the model."""
-    return {"args_chars": ARGS_CHARS, "result_chars": RESULT_CHARS, "wait": "job" if tool in _WAIT_TOOLS else None}
+    return {"args_chars": ARGS_CHARS, "result_chars": RESULT_CHARS, "wait": "job" if tool in _WAIT_TOOLS | QUEUE_WAIT_TOOLS else None}
 
 
 def _fingerprint():
@@ -170,6 +187,21 @@ def _pause_at_boundary(task, step):
 def _effectful(tool):
     from harness.catalogue import safety_tier_for
     return safety_tier_for(tool) != "read"
+
+
+# LC-19 triage reads a failed run step's fix is drafted from. They are offered,
+# never run: the fix is an ordinary edit card and the plan goes on only
+# through resolve_task_step(retry) with its confirmation.
+_TRIAGE = ("get_simulation_log_history", "diagnose_network", "validate_network")
+
+
+def _correction(step):
+    """`next_step.correction` under a brief: proposes, runs nothing."""
+    if step.get("job") or step["tool"] in _WAIT_TOOLS | QUEUE_WAIT_TOOLS:
+        return {"triage": list(_TRIAGE), "then": "resolve_task_step(retry) after the user approves the fix"}
+    if step.get("receipt"):
+        return {"reread": step["tool"], "then": "resolve_task_step(completed) re-reads it; else retry"}
+    return {"then": "inspect, then resolve_task_step(retry) or cancel_task"}
 
 
 def _view(task, fresh=False, current=None):
@@ -211,6 +243,8 @@ def _view(task, fresh=False, current=None):
                 out["next_step"]["blocked"] = exc.detail
         if step.get("error"):
             out["next_step"]["error"] = step["error"]
+        if brief and step["status"] in ("failed", "uncertain"):
+            out["next_step"]["correction"] = _correction(step)
     changes = [s["result"]["_edit_receipt"]["says"] for s in task["steps"] if s["status"] == "completed"
                and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
                and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
@@ -270,6 +304,7 @@ def start_task(title: str, steps: list[dict], request_id: str, brief: dict | Non
         ids.add(name)
     if brief is not None:
         brief = _check_brief(brief, [s["id"] for s in steps])
+        _check_runnable(brief, steps)
     root, project, owner = _authority()
     # Deterministic owner-scoped ID makes a repeated start request idempotent.
     task_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{project}:{owner}:{request_id}"))
@@ -405,6 +440,11 @@ def _native_evidence(path, task, step):
     """(found, result) for a failed or uncertain step, from native records only."""
     if "late_receipt" in step:
         return True, step["late_receipt"]["result"]
+    if (step.get("job") or {}).get("kind") == "queue":
+        from harness import continuation
+        status, _, result = continuation.queue_outcome(step["job"]["jobs"])
+        return (True, {"job_id": step["job"]["job_id"], "final_status": "completed", **result}) \
+            if status == "completed" else (False, None)
     if step.get("job"):
         from services import run_evidence
         job_id = step["job"]["job_id"]
@@ -470,6 +510,9 @@ def _gate_brief(task, step):
     if task["status"] == "paused_at_card":
         _refuse("task_paused_at_card", f"The plan is paused before the {task['pause']['card']} card; "
                 "the user continues from the plan card.")
+    if task.get("brief") and step["status"] == "failed" and _effectful(step["tool"]):
+        _refuse("task_step_needs_retry", "This step failed; draft the fix from next_step.correction, "
+                "then resolve_task_step(retry) reopens it.")
     if _effectful(step["tool"]) and _stale(task):
         _refuse("task_brief_stale", "The inputs changed outside this plan, or could not be read; "
                 "draft a new brief for the user to review.")
@@ -479,16 +522,21 @@ def await_job(ticket, job_id, session_id):
     """A run step whose solve is still running waits on its job, durably.
 
     The turn is released; `settle_job` records the outcome when the job ends,
-    and the conversation continues once (`claim_continuation`)."""
-    if ticket is None:
+    and the conversation continues once (`claim_continuation`). A queued step
+    passes its jobs as a list (`continuation.queue_jobs`); the first one keys
+    its continuation."""
+    if ticket is None or job_id == []:
         return None
+    jobs = job_id if isinstance(job_id, list) else None
     with _LOCK:
         path, task = _read(ticket[0])
         step = next(s for s in task["steps"] if s["id"] == ticket[1])
         if step.get("attempt_id") != ticket[2] or step["status"] != "running":
             return None
         step["status"] = "waiting"
-        step["job"] = {"job_id": job_id, "session_id": session_id, "continuation": "armed"}
+        step["job"] = {"job_id": jobs[0]["job_id"] if jobs else job_id, "session_id": session_id, "continuation": "armed"}
+        if jobs:
+            step["job"].update(kind="queue", jobs=[dict(j) for j in jobs])
         if task["status"] != "cancelled":
             task["status"] = "waiting_job"
         _save(path, task)
@@ -561,7 +609,14 @@ def _reconcile_lost(path, task):
     from harness import job_adapters
     changed = False
     for step in task["steps"]:
-        if step["status"] == "waiting" and not job_adapters.is_registered(step["job"]["job_id"]):
+        if step["status"] != "waiting":
+            continue
+        if step["job"].get("kind") == "queue":
+            # Followed by a thread of this process, or lost with a restart (SC-09).
+            lost = (task["task_id"], step["id"], step.get("attempt_id")) not in _QUEUE_FOLLOWERS
+        else:
+            lost = not job_adapters.is_registered(step["job"]["job_id"])
+        if lost:
             _settle(task, step, "unknown", "uncertain", None)  # lost with the process
             changed = True
     if changed:
@@ -665,6 +720,11 @@ def _outcome(tool, result, error):
     receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
     if error:
         return ("failed" if _retryable_read(tool) else "uncertain"), str(error)[:300]
+    if tool == "refresh_experiment" and isinstance(result, dict) and result.get("status") != "completed":
+        # Only a completed case with intact evidence completes the step (issue 23).
+        if result.get("status") in ("ready", "submitted", "running"):
+            return "failed", "Case not finished; retry after it completes."
+        return "failed", f"Case result unavailable: {str(result.get('last_error') or result.get('status'))[:120]}."
     if isinstance(result, dict) and (result.get("final_status") in ("failed", "aborted", "idle")
             or result.get("status") in ("failed", "error", "aborted", "partial")
             or result.get("success") is False or result.get("ok") is False
@@ -677,6 +737,11 @@ def _outcome(tool, result, error):
         or result.get("status") == "started" and result.get("final_status") != "completed"
     ):
         return "uncertain", "Solver start is not completion; inspect its outcome before advancing or retrying."
+    if tool in QUEUE_WAIT_TOOLS and isinstance(result, dict) and (
+        result.get("status") in ("queued", "running", "submitted")
+        or any(isinstance(c, dict) and c.get("status") != "completed" for c in result.get("cases") or [])
+    ):
+        return "uncertain", "A queued job is not completion; inspect its outcome before advancing or retrying."
     if receipt is not None and (not isinstance(receipt, dict) or receipt.get("outcome") != "verified"):
         # An edit counts only when its native read-back equals the card.
         return "uncertain", "The edit's read-back did not match its card; inspect it before going on."
