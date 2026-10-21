@@ -81,6 +81,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The grid study's settings (section 8) and results (section 10).
+    "CampusStudy", "campusStudy", "CampusResults", "campusResults",
     # The guided investment study panel (frontend normalises both to 'decision').
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
@@ -1994,7 +1996,7 @@ TOOLS: list[dict[str, Any]] = [
         "scenario picks. Use project_picker when the user wants to browse "
         "saved projects without naming one. hubDesign opens the step-by-step "
         "Energy Hub design panel (Guided mode's main view). workspace, settings, "
-        "gridspine, reports and campusElectrical open their application panels; economics opens the rates, "
+        "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
         "price basis and every asset's investment costs; "
         "adequacy and fmea select their Results tabs. Safety: read.",
         {
