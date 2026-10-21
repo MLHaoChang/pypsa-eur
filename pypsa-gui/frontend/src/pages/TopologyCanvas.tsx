@@ -3139,7 +3139,7 @@ export default function TopologyCanvas() {
                 </button>
                 <button aria-label="Connect buses — route a line between two buses"
                   onClick={() => setCanvasMode(canvasMode === 'connect' ? 'select' : 'connect')}
-                  title="Connect buses — route a line between two buses"
+                  title="Connect buses (C) — route a line between two buses; V or Esc returns to Select"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
                     ${canvasMode === 'connect'
                       ? 'bg-accent-50 text-accent'
