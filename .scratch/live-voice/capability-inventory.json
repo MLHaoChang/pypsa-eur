@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-20",
+  "generated_at": "2026-10-21",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 266,
+  "tool_count": 271,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2316,7 +2316,9 @@
         "job_id",
         "component",
         "point_id",
-        "time_basis"
+        "time_basis",
+        "component_type",
+        "attribute"
       ],
       "required": [
         "project_id",
@@ -2324,7 +2326,51 @@
         "component"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2d1ca8a47aa130e9388f8cff4a688ee54fa1a64322fb2100afabfaac8dec1354",
+      "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_load_profile_archetypes",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/profiles/load-archetypes"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_load_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/loads/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "archetype",
+        "loads",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "archetype",
+        "loads"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "7e4c6f8350d345f5d6c9908cc9f9944961f4b7ea0c7e540c60046c3b9ce33e97",
       "behavioral_fixture": "pending"
     },
     {
@@ -2784,7 +2830,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
+      "schema_sha256": "e0a09e1749bbfc1dcba31d51fd1a0fe017b77abc2d81db5b7217a058fb0363a5",
       "behavioral_fixture": "pending"
     },
     {
@@ -3178,7 +3224,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "efbad4ff4dfcfd3ca17c5b3fd5934cd268856615dc4371ba98a4fa6440e111eb",
+      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -4621,6 +4667,25 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "campus_grid_readiness",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "profile"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b638f21159458f54ae0ee6a3d6916a963a83d51be4d58eb13da126e2f7368d09",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "campus_set_island_config",
       "toolsets": [
         "gridspine"
@@ -5592,7 +5657,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "3fee3fd1579f25938f311af69c6da1ad4df6771e28290a3ca4fbaa9e0e32ce72",
+      "schema_sha256": "b46446d653180d98e76cef8cbdb028da3cdc19b7ef9a6d79c89c8d4c4805242a",
       "behavioral_fixture": "pending"
     },
     {
@@ -5724,6 +5789,25 @@
       "required": [],
       "safety_tier": "read",
       "schema_sha256": "3914ac2afc6ecf565a667beb948839ec1af36bf8a8752d2c19760faf0d59226b",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_load_shape",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "view",
+        "period",
+        "window_from",
+        "window_to",
+        "week",
+        "series"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "87dab0f09008944469043e7b7737f1d5ee9e05f228dc8d9af2bf2591b4fc8602",
       "behavioral_fixture": "pending"
     },
     {
@@ -6062,6 +6146,27 @@
       "safety_tier": "write",
       "schema_sha256": "03068bc75969f2330c68781e3c718de251ca87e12e5a76ea329ad3f6d3849f1d",
       "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_flow",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
     }
   ],
   "result_tabs": [
@@ -6088,6 +6193,10 @@
     {
       "id": "flows",
       "label": "Energy flow"
+    },
+    {
+      "id": "loadshape",
+      "label": "Load shape"
     },
     {
       "id": "prices",
@@ -6146,7 +6255,8 @@
     "investment",
     "adequacy",
     "fmea",
-    "flows"
+    "flows",
+    "loadshape"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [
