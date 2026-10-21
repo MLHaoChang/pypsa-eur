@@ -9,7 +9,9 @@ through what it writes into the project, its ledger rows (``eh_template.json``
 ``ledger``, items ``connection_ramp``, ``oscillation``, ``import_efficiency``,
 ``fault_level``, ``lole_goal``), its island sidecar and the opt-in AI-training
 envelope (DC 01, ``dc_load_profile.read_envelope``). A project with no ledger
-row for a limit gets the generic placeholder below, marked assumed.
+row for a limit gets the generic placeholder below, marked assumed. The user's
+own limit (``grid_limits``, the bundled ``grid_readiness_limits.json``) comes
+before either, and the row's source says whose value it is.
 
 **Advisory.** It reads files and a network copy, solves nothing, and feeds
 neither ``validate_for_run`` nor the flow's ``run_ready`` (project workflow
@@ -18,7 +20,10 @@ refusal.
 
 Each row: ``{id, requirement, limit, unit, source, project_value, verdict,
 assumed, note, section, target}``, ``verdict`` one of pass|warn|fail|unknown
-and ``target`` the flow's ``{section, panel, component, entity, field}``.
+and ``target`` the flow's ``{section, panel, component, entity, field}``. The
+ramp, oscillation and SCR rows also carry ``setting`` ``{item, user, default}``:
+the user's own limit (``grid_limits``) or None, and the value a reset returns
+to (the template's ledger row, else the placeholder).
 
 Rules (gatekeeper review of 02):
 
@@ -26,7 +31,8 @@ Rules (gatekeeper review of 02):
 * a requirement only a dynamic study can show (the profile's
   ``dynamic_requirements``) is always ``unknown``, "dynamic (EMT) study needed";
 * ``assumed`` is true unless the limit's own tag is ``code`` (an extracted,
-  unconfirmed limit counts as assumed), or an input it rests on is assumed
+  unconfirmed limit counts as assumed) or the user set it with a source other
+  than ``assumed``, or an input it rests on is assumed
   (an assumed fault level makes the SCR and voltage-change rows assumed);
 * the envelope is IT-side at the PoC before any UPS/BESS smoothing, so the
   ramp, oscillation and voltage-change verdicts read "before mitigation".
@@ -146,6 +152,8 @@ class _Inputs:
         self.meta = meta if isinstance(meta, dict) else {}
         self.ledger = {r["item"]: r for r in self.meta.get("ledger") or []
                        if isinstance(r, dict) and isinstance(r.get("item"), str)}
+        from services.adequacy.grid_limits import load_limits
+        self.user_limits = load_limits(self.dir)
         dc = self.meta.get("dc_load") if isinstance(self.meta.get("dc_load"), dict) else {}
         self.envelope = dc.get("envelope") if isinstance(dc.get("envelope"), dict) else None
         self.dc_spec = dc.get("spec") if isinstance(dc.get("spec"), dict) else None
@@ -167,6 +175,22 @@ class _Inputs:
                               if self.links else None)
 
     def marking(self, item):
+        """The limit's row: the user's own (``origin: user``) first, then the
+        template's ledger row, else None (the caller's placeholder). The
+        fault level's value lives on the bus, so the user's row for it keeps
+        the ledger's value and entity and takes only the source and note."""
+        row = self.template_marking(item)
+        user = self.user_limits.get(item)
+        if user is None:
+            return row
+        out = {**(self.ledger.get(item) or {}), "item": item, "source": user["source"],
+               "note": user.get("note") or "", "origin": "user"}
+        if user.get("value") is not None:
+            out["value"] = user["value"]
+        return out
+
+    def template_marking(self, item):
+        """The template's ledger row for ``item`` when it carries a value, else None."""
         row = self.ledger.get(item)
         return row if row is not None and _num(row.get("value")) is not None else None
 
@@ -181,8 +205,13 @@ def _profile_title(inp: "_Inputs") -> str:
 
 
 def _marking_assumed(row: dict | None) -> bool:
-    """A marking is assumed unless it is there and tagged ``code``."""
-    return row is None or str(row.get("source")) != "code"
+    """A marking is assumed unless it is there and tagged ``code``, or the
+    user set it from a source other than ``assumed``."""
+    if row is None:
+        return True
+    if row.get("origin") == "user":
+        return str(row.get("source")) == "assumed"
+    return str(row.get("source")) != "code"
 
 
 def _envelope_assumed(inp: _Inputs) -> bool:
@@ -194,8 +223,11 @@ def _marking_source(row: dict) -> tuple[str, bool]:
     note = row.get("note") or ""
     if note.lower().startswith("assumed: "):
         note = note[len("assumed: "):]
-    lead = "Template assumption" if src == "assumed" else f"Template value ({src})"
-    return (f"{lead}: {note}" if note else lead, src != "code")
+    if row.get("origin") == "user":
+        lead = "Your assumption" if src == "assumed" else f"Your value ({src})"
+    else:
+        lead = "Template assumption" if src == "assumed" else f"Template value ({src})"
+    return (f"{lead}: {note}" if note else lead, _marking_assumed(row))
 
 
 # ── rows ───────────────────────────────────────────────────────────────────
@@ -308,7 +340,8 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
 
 
 def _limit_from(inp: _Inputs, item: str, generic: float | None, generic_note: str):
-    """(value, source text, assumed) from the ledger row, else the generic placeholder."""
+    """(value, source text, assumed) from the user's limit, else the ledger
+    row, else the generic placeholder."""
     row = inp.marking(item)
     if row is not None:
         src, assumed = _marking_source(row)
@@ -316,6 +349,20 @@ def _limit_from(inp: _Inputs, item: str, generic: float | None, generic_note: st
     if generic is None:
         return None, generic_note, True
     return generic, f"assumed (generic placeholder): {generic_note}", True
+
+
+def _setting(inp: _Inputs, item: str, generic: float | None) -> dict:
+    """What the panel's inline field edits (DC 03 slice 6): the user's own
+    limit (or None) and the value a reset returns to, the template's ledger
+    row or the generic placeholder."""
+    row = inp.template_marking(item)
+    if row is not None:
+        default = {"value": float(row["value"]), "source": str(row.get("source") or "assumed"),
+                   "origin": "template"}
+    else:
+        default = {"value": generic, "source": "assumed", "origin": "placeholder"}
+    user = inp.user_limits.get(item)
+    return {"item": item, "user": dict(user) if user is not None else None, "default": default}
 
 
 def _ramp_row(inp: _Inputs) -> dict:
@@ -754,6 +801,13 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
             _rvc_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
             _lole_row(inp)]
     _after_battery(inp, rows)
+    generic_ramp = GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw if inp.connection_mw else None
+    settings = {"ramp_rate": ("connection_ramp", generic_ramp),
+                "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
+                "scr": ("fault_level", None)}
+    for r in rows:
+        if r["id"] in settings:
+            r["setting"] = _setting(inp, *settings[r["id"]])
     counts = {v: sum(r["verdict"] == v for r in rows) for v in VERDICTS}
     after = sum(r["verdict"] in ("fail", "warn") and (r.get("after_battery") or {}).get("verdict") == "pass"
                 for r in rows)
