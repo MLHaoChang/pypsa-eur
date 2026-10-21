@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FolderOpen, Pencil, Check, X } from 'lucide-react'
+import { FolderOpen } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -23,7 +23,6 @@ export default function OverviewPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const lastSavedByProject = useUIStore(s => s.lastSavedByProject)
   const autosaveEnabled = useUIStore(s => s.autosaveEnabled)
-  const renameProjectInStore = useUIStore(s => s.renameProject)
 
   // Network-level data. All cached by other consumers, so this page rarely
   // triggers fresh requests.
@@ -123,12 +122,8 @@ export default function OverviewPanel() {
     <div className="flex flex-col h-full">
       <PageHeader
         eyebrow="PROJECT · OVERVIEW"
-        title={
-          <ProjectNameEditor
-            currentProject={currentProject}
-            onRenamed={(oldName, newName) => renameProjectInStore(oldName, newName)}
-          />
-        }
+        // Plain text: the project is renamed in the header field only (UX-flow #11).
+        title={<span className="truncate" title={currentProject}>{currentProject}</span>}
         subtitle="Snapshot of the current network configuration, capacity mix, and recent activity."
       />
       <PageBody>
@@ -271,152 +266,6 @@ function ProjectSettingsSection({ currentProject }: { currentProject: string }) 
         }
       />
     </PageSection>
-  )
-}
-
-// ── Project-name inline editor ──────────────────────────────────────────────
-// Click the title → it swaps to an input. Enter / Check icon commits the
-// rename through `POST /api/projects/{name}/rename` (atomic dir move +
-// metadata refresh + child-scenario reparent). Esc / X icon cancels.
-//
-// On success: updates currentProject + openTabs + recents + lastSavedByProject
-// atomically via the `renameProject` store action, then invalidates every
-// React-Query cache keyed by the old name so the rest of the UI re-fetches
-// against the new path.
-//
-// Charset rule mirrors the backend's `_PROJECT_NAME_RE`: letters, digits,
-// underscore, hyphen, dot, space. We validate client-side before firing the
-// mutation so the user gets instant feedback (rather than waiting for the
-// 400 round-trip on every keystroke).
-
-const PROJECT_NAME_VALID = /^[A-Za-z0-9_.\- ]{1,64}$/
-
-function ProjectNameEditor({
-  currentProject, onRenamed,
-}: {
-  currentProject: string
-  onRenamed: (oldName: string, newName: string) => void
-}) {
-  const qc = useQueryClient()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(currentProject)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  // Reset the draft when the active project changes externally (e.g. user
-  // switched projects via the sidebar while this panel was open) — without
-  // this, opening the editor would show the previous project's name.
-  useEffect(() => {
-    if (!editing) setDraft(currentProject)
-  }, [currentProject, editing])
-
-  // Focus + select-all on transition into edit mode. Selecting makes Type-
-  // over-to-replace work as expected.
-  useEffect(() => {
-    if (editing) {
-      inputRef.current?.focus()
-      inputRef.current?.select()
-    }
-  }, [editing])
-
-  const rename = useMutation({
-    mutationFn: (newName: string) => projectsApi.rename(currentProject, newName),
-    onSuccess: (_info, newName) => {
-      const oldName = currentProject
-      onRenamed(oldName, newName)
-      // Invalidate every cache keyed by the old name. ['projects'] is the
-      // project-list that the sidebar / scenario picker reads from.
-      qc.invalidateQueries({ queryKey: ['projects'] })
-      qc.invalidateQueries({ queryKey: ['compare-state', oldName] })
-      qc.invalidateQueries({ queryKey: ['results-summary', oldName] })
-      qc.invalidateQueries({ queryKey: nk(oldName, 'meta') })
-      qc.invalidateQueries({ queryKey: ['changelog'] })
-      toast.success(`Renamed to '${newName}'`)
-      setEditing(false)
-    },
-    onError: (e: { response?: { data?: { detail?: unknown } }; message?: string }) => {
-      const detail = e.response?.data?.detail
-      toast.error(typeof detail === 'string' ? detail : (e.message || 'Rename failed'))
-    },
-  })
-
-  const trimmed = draft.trim()
-  const valid =
-    trimmed.length >= 1 &&
-    trimmed.length <= 64 &&
-    PROJECT_NAME_VALID.test(trimmed) &&
-    trimmed !== currentProject
-
-  const commit = () => {
-    if (!valid) {
-      // Bail out quietly — the disabled state on the commit button is the
-      // primary affordance; toast would be noisy on every Esc-tab away.
-      setEditing(false)
-      setDraft(currentProject)
-      return
-    }
-    rename.mutate(trimmed)
-  }
-
-  const cancel = () => {
-    setEditing(false)
-    setDraft(currentProject)
-  }
-
-  if (!editing) {
-    return (
-      <button
-        onClick={() => setEditing(true)}
-        title="Click to rename project"
-        // The PageHeader title slot is sized for an <h1>; we mimic that to keep
-        // the visual rhythm consistent. Pencil icon appears on hover only so
-        // the static state stays clean.
-        className="group inline-flex items-center gap-2 text-[22px] font-semibold text-text tracking-[-0.02em] leading-tight hover:text-accent transition-colors max-w-full"
-      >
-        <span className="truncate">{currentProject}</span>
-        <Pencil size={14} className="opacity-0 group-hover:opacity-60 transition-opacity shrink-0" />
-      </button>
-    )
-  }
-
-  return (
-    <div className="flex items-center gap-2 max-w-full">
-      <input
-        ref={inputRef}
-        type="text"
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); commit() }
-          else if (e.key === 'Escape') { e.preventDefault(); cancel() }
-        }}
-        maxLength={64}
-        disabled={rename.isPending}
-        // Inherit the title typography so the input doesn't visually jump
-        // when toggling between view and edit modes.
-        className="bg-bg border border-accent rounded px-2 py-1 text-[22px] font-semibold text-text tracking-[-0.02em] leading-tight focus:outline-none min-w-[200px] max-w-[440px] disabled:opacity-60"
-      />
-      <button
-        onClick={commit}
-        disabled={!valid || rename.isPending}
-        title="Confirm rename (Enter)"
-        className="flex items-center justify-center w-7 h-7 rounded bg-success text-white hover:bg-success/85 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        <Check size={14} />
-      </button>
-      <button
-        onClick={cancel}
-        disabled={rename.isPending}
-        title="Cancel (Esc)"
-        className="flex items-center justify-center w-7 h-7 rounded bg-bg border border-border text-muted hover:text-text hover:bg-border/30 transition-colors disabled:opacity-30"
-      >
-        <X size={14} />
-      </button>
-      {!valid && trimmed && trimmed !== currentProject && (
-        <span className="text-[10px] text-danger">
-          Allowed: letters, digits, _ . - and space (max 64)
-        </span>
-      )}
-    </div>
   )
 }
 
