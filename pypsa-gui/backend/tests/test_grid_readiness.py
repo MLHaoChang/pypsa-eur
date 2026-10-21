@@ -426,6 +426,20 @@ def test_a_product_offtake_is_not_electric_peak_load(tid, product):
         assert row["peak_mw"] == pytest.approx(float(n.loads_t.p_set["process_load"][mask].max()))
 
 
+def test_a_load_on_an_unknown_electric_carrier_counts_and_an_offtake_does_not():
+    """A Load on a "low voltage" bus is electric (an unknown carrier counts);
+    one on an H2 bus is an offtake, left out and named in the row."""
+    n = _one_period(load=np.full(48, 10.0))
+    n.add("Bus", "lv", carrier="low voltage")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "homes", bus="lv", p_set=5.0)
+    n.add("Load", "h2_offtake", bus="h2", p_set=25.0)
+    assert SP.electric_loads(n) == ["demand", "homes"]
+    (row,) = SP.peak_check(n, None)
+    assert row["peak_mw"] == pytest.approx(15.0)
+    assert row["not_electric"] == ["h2_offtake on h2 (H2)"]
+
+
 def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
     """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
     its critical process load, with no genset, needs its peak for the 1 h

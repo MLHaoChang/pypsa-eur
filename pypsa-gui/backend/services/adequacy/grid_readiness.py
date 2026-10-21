@@ -291,6 +291,8 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                  "energization schedule" if r["scheduled"] else "no energization schedule: the connection's capacity",
                  f"import efficiency from {loss_src}",
                  "fixed loads only (a flexible conversion unit is a decision, not counted)"]
+        if r.get("not_electric"):
+            notes.append("not electric load: " + ", ".join(r["not_electric"]))
         if uplift is not None:
             notes.append(f"the in-hour AI-training step is about {uplift:.3g} MW above the hourly "
                          "mean, so headroom below that is a warning")
