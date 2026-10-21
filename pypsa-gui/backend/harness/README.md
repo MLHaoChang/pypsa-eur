@@ -773,6 +773,18 @@ that turn still needs its click. `get_task` names the plan's verified edits in
 `changes`, and the OpenAI tool selection favours every tool the plan still
 has to run.
 
+### Stale result reads (LC-12)
+
+A parameter-only edit keeps the dispatch axes aligned, so `dispatch_status`'s
+`state` can still say `fresh`. `dispatch_status` and every dict answer of
+`get_results` therefore also carry `workflow_tools.solve_freshness()`:
+`inputs_changed_since_solve` compares both recorded solve fingerprints with
+the current inputs (`null` when no solve recorded them), and `results_current`
+is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
+never disagree with it, also after an AC power flow. `get_results` adds a
+`freshness_note`: stale when the inputs changed, not current when the guard
+fails for another reason.
+
 ## Recorded runs, load flow, and experiment plans
 
 These tools live in `services/run_evidence.py`, `services/loadflow_summary.py`,
