@@ -182,7 +182,9 @@ def _valid_month(path: Path) -> bool:
     try:
         import xarray as xr
 
-        with xr.open_dataset(path) as ds:
+        from services.profile_gen.job import pending_io_lock
+
+        with pending_io_lock(), xr.open_dataset(path) as ds:
             return ds.sizes.get("time", 0) > 0
     except Exception:
         return False
@@ -227,19 +229,24 @@ def _merge_months(parts: list[Path], final: Path) -> None:
     """
     import xarray as xr
 
+    from services.profile_gen.job import pending_io_lock
+
     tmp = Path(str(final) + ".part")
     opened = []
-    try:
-        for p in parts:
-            ds = xr.open_dataset(str(p))
-            ds.load()
-            opened.append(ds)
-        xr.concat(opened, dim="time").to_netcdf(tmp)
-        os.replace(tmp, final)
-    finally:
-        for ds in opened:
-            ds.close()
-        tmp.unlink(missing_ok=True)
+    # The process netCDF lock (HDF5 is not thread-safe): a merge on a queue
+    # worker must not run beside a project save/load or a pending write.
+    with pending_io_lock():
+        try:
+            for p in parts:
+                ds = xr.open_dataset(str(p))
+                ds.load()
+                opened.append(ds)
+            xr.concat(opened, dim="time").to_netcdf(tmp)
+            os.replace(tmp, final)
+        finally:
+            for ds in opened:
+                ds.close()
+            tmp.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +305,11 @@ def ensure_cutout(
                 written.append(mpath)  # resume: keep the valid month
             else:
                 mpath.unlink(missing_ok=True)  # corrupt partial: never resume
+                # Not under the netCDF lock: a month can take minutes, and the
+                # lock would stall every project save. atlite's prepare() reads
+                # and writes the month through xarray/netCDF4 IN this process,
+                # so HDF5 is still shared; the fix is a subprocess fetch
+                # (.scratch/renewable-profiles/issues/13-cutout-fetch-subprocess.md).
                 _call_with_timeout(
                     lambda m=month, p=mpath: dl(padded, int(year), m, p, stop_event),
                     timeout_s,
