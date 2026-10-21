@@ -4,8 +4,11 @@ reader needs each difference line's price and reference legs per year, so the tw
 became a helper the cash calls too. That refactor must change no cash: every line array of
 these cases, and the case hash, equals the digest recorded from master before it.
 
+Only fixed cases are pinned: a case from a solve differs in its last bits by machine (and a
+degenerate plan by more), so the solved IPP and ammonia cases check their legs instead.
+
 Regenerate (only after an intended cash change, with the gatekeeper):
-`OPERATING_PIN_WRITE=1 pytest tests/test_operating_pin.py tests/test_eh_ipp.py -k pin`.
+`OPERATING_PIN_WRITE=1 pytest tests/test_operating_pin.py`.
 """
 from __future__ import annotations
 

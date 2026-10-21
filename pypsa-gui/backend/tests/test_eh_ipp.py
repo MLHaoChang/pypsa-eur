@@ -556,13 +556,22 @@ def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_projec
 
 
 @pytest.mark.live_solve
-def test_operating_pin_ipp(solved):
-    """The IPP case's operating cash is unchanged by the two-leg helper (ticket 05, GK)."""
-    from tests.test_operating_pin import check
+def test_each_ppa_line_is_its_two_legs(solved):
+    """Ticket 05 (GK): each financial PPA's difference line is its price leg plus its
+    reference leg, every year. Not a byte pin of the lines: they come from a solve, which
+    differs in the last bits by machine. The helper's arithmetic is pinned on fixed cases
+    in test_operating_pin.py."""
+    from services.finance.cashflow import build_operating
+    from services.finance.timeline import build_timeline
 
     n, cfg, _da = solved
     case, _res = _case(n, cfg)
-    check("ipp", case)
+    op = build_operating(case, build_timeline(case))
+    assert sorted(op.legs) == sorted(f"contract:{cid}:ppa_energy" for cid, _p in M.PPA.values())
+    for key, (price_leg, reference_leg) in op.legs.items():
+        np.testing.assert_allclose(price_leg + reference_leg, op.lines[key], rtol=1e-12,
+                                   atol=1e-9)
+        assert (price_leg[op.tl.operating_mask()] > 0).any()
 
 
 @pytest.mark.live_solve
