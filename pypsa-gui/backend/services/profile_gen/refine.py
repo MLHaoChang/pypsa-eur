@@ -13,9 +13,11 @@ Ops (``{"op": name, **params}``), applied in order:
 - ``scale_peak_to``: proportional scale so the peak the MODEL will see (the
   series aligned to the snapshots as apply aligns it) hits the target —
   ``{"mw": x}`` (power), ``{"value": v}`` (any other target), or
-  ``{"fraction": f, "of": "current_peak" | "connection"}``. ``connection``
-  is resolved here, server-side, from the point-of-connection link's
-  ``p_nom``; the MW, its source and a hash of the connection are recorded.
+  ``{"fraction": f, "of": "current_peak" | "connection"}`` (``of`` is
+  required: "75 %" alone does not say of what). ``connection`` is resolved
+  here, server-side, from the point-of-connection link's ``p_nom``; the MW,
+  its source and a hash of the connection are recorded, and a caller that
+  sends them itself is refused.
 - ``scale_window``: ``{"hours": [start, end), "weekdays"?, "months"?,
   "factor"}`` multiplies the matching hours on the SITE's clock: the
   project's commercial timezone, else the profile's own ``params.timezone``,
@@ -36,7 +38,8 @@ warned ``earlier_target_broken``, naming both ops and the final value: run
 the window first.
 
 `replay` re-runs a recorded op list (on regeneration): a scale to a
-connection keeps its recorded MW and warns if the connection changed; any
+connection keeps its recorded MW and warns if the connection changed or its
+link is gone; any
 op that no longer fits, or a target that changed, is refused naming the op
 and its index.
 """
@@ -64,6 +67,8 @@ EARLIER_TARGET_WARNING = "earlier_target_broken"
 CONNECTION_CHANGED_WARNING = "connection_changed_since_refinement"
 OPS = ("scale_peak_to", "scale_window", "set_floor", "set_cap", "shift", "smooth",
        "rescale_energy")
+# What the server records on an op; only a replay may carry them in.
+_RESOLVED = ("connection", "resolved_mw")
 
 
 class RefineError(ProfileApplyError):
@@ -210,7 +215,7 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
             target = _num(op, "value")
         elif "fraction" in op:
             frac = _num(op, "fraction")
-            of = op.get("of", "current_peak")
+            of = op.get("of")
             if of == "current_peak":
                 target = frac * current
             elif of == "connection":
@@ -224,10 +229,10 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
                 raise InvalidRefineOpError(f"op {i}: of must be current_peak or connection")
         else:
             raise InvalidRefineOpError(f"op {i}: scale_peak_to takes mw, value or fraction")
+        if "resolved_mw" in op:  # a replay keeps the recorded MW
+            target = _num(op, "resolved_mw")
         if target <= 0:
             raise InvalidRefineOpError(f"op {i}: the peak target must be positive")
-        if "resolved_mw" in op:  # a replay keeps the recorded MW
-            target = float(op["resolved_mw"])
         v = v * (target / current)
         extra["target_peak"] = target
     elif name == "scale_window":
@@ -300,6 +305,11 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
     for i, op in enumerate(ops):
         if not isinstance(op, Mapping):
             raise InvalidRefineOpError(f"op {i} must be an object")
+        smuggled = [k for k in _RESOLVED if k in op]
+        if smuggled and not replaying:
+            raise InvalidRefineOpError(
+                f"op {i} ({op.get('op')}): {', '.join(smuggled)} is recorded by the "
+                "server; send the fraction and of only")
         record = {k: v for k, v in op.items()}
         record["target"] = t.key
         if replaying:
@@ -308,14 +318,19 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                 raise RefineReplayError(
                     f"op {i} ({op.get('op')}) was recorded for {stated[0]}/{stated[1]}, "
                     f"not {t.key[0]}/{t.key[1]}")
-            if op.get("connection"):
-                now = _connection(ctx) if op.get("of") == "connection" else None
-                if now and now["hash"] != op["connection"].get("hash"):
-                    warnings.append(
-                        f"{CONNECTION_CHANGED_WARNING}: op {i} kept its recorded "
-                        f"{op.get('resolved_mw'):g} MW; the connection is now "
-                        f"{now['value']:g} MW ({now['source']})")
             try:
+                if op.get("connection") and op.get("of") == "connection":
+                    try:
+                        now = _connection(ctx)
+                    except InvalidRefineOpError:
+                        now = None
+                    if now is None or now["hash"] != op["connection"].get("hash"):
+                        where = (f"the connection is now {now['value']:g} MW "
+                                 f"({now['source']})" if now else
+                                 "the point-of-connection link is gone")
+                        warnings.append(
+                            f"{CONNECTION_CHANGED_WARNING}: op {i} kept its recorded "
+                            f"{_num(op, 'resolved_mw'):g} MW; {where}")
                 s, st = _apply_op(t, s, op, i, record)
             except RefineError as exc:
                 if isinstance(exc, RefineReplayError):
