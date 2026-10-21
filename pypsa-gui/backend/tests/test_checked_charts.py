@@ -139,3 +139,25 @@ def test_loading_needs_only_the_windows_snapshots(grid, checked):
                    "branch_rating": 8}, ["loading"], component_class="Line", start=first, end=second)
     assert receipt["chart"]["status"] == "drawn"
     assert sidecar(receipt["chart"])["dataset"]["values"] == [[50, 100]]
+
+
+def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, checked):
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    chart = receipt["chart"]
+    drawn_at = sidecar(chart)["drawn_at"]
+    assert chart["caption"][-1].startswith(f"Checked against the solve of {drawn_at} · evidence ")
+    fresh = checked.client.get(chart["download_url"])
+    assert fresh.headers["X-Checked-Chart"] == "evidence re-verified now"
+    path = assurance_records._path(assurance_records.actor_id(), receipt["evidence_ids"][0])
+    envelope = json.loads(path.read_text())
+    envelope["record"]["expires_at"] = 0
+    envelope["sha256"] = assurance_records.digest(envelope["record"])
+    path.write_text(json.dumps(envelope))
+    old = checked.client.get(chart["download_url"])
+    assert old.status_code == 200
+    assert old.headers["X-Checked-Chart"] == (
+        f"checked against the solve of {drawn_at}; evidence expired, not re-verified now")
+    # A checked turn never re-presents it: a new request draws a fresh chart from new evidence.
+    again = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    assert again["chart"]["evidence_id"] != chart["evidence_id"]
+    assert checked.client.get(again["chart"]["download_url"]).headers["X-Checked-Chart"] == "evidence re-verified now"
