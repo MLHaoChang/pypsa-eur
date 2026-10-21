@@ -192,4 +192,36 @@ describe('GridReadinessScorecard', () => {
     expect(summaryText(AFTER.summary, 'guided'))
       .toBe('2 things to look at, 2 not yet known · 1 pass after battery/UPS')
   })
+
+  // DC 03 slice 5: each unit's assumed latency, its name a link to the asset.
+  const UPS_UNIT = { unit: 'ups_battery', kind: 'ups', latency_s: null, walk_in_s: 15,
+    basis: 'UPS, walks in over 15 s',
+    target: target('assets', 'StorageUnit', 'ups_battery', null) }
+  const LAT: GridReadiness = { ...AFTER, rows: AFTER.rows.map(r => r.id === 'ramp_rate'
+    ? { ...r, after_battery: { ...r.after_battery!, unit_detail: [UPS_UNIT] } } : r) }
+
+  it('names a single UPS as a UPS and links it from its latency line', async () => {
+    const user = userEvent.setup()
+    const onJump = vi.fn()
+    render(<GridReadinessScorecard data={LAT} mode="expert" onJump={onJump} />)
+    expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain("After UPS 'ups_battery': 4 MW/min")
+    await user.click(screen.getByTestId('gr-more-ramp_rate'))
+    expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
+      .toBe("'ups_battery' walks in over 15 s (UPS, assumed)")
+    await user.click(screen.getByTestId('gr-latency-unit-ups_battery'))
+    expect(onJump).toHaveBeenCalledWith('StorageUnit', 'ups_battery')
+  })
+
+  it('lists several units in one line', async () => {
+    const user = userEvent.setup()
+    const data: GridReadiness = { ...LAT, rows: LAT.rows.map(r => r.id === 'ramp_rate'
+      ? { ...r, after_battery: { ...r.after_battery!, units: ['bess_1', 'ups_battery'], unit_detail: [
+        { unit: 'bess_1', kind: 'bess', latency_s: 0.02, basis: 'grid forming',
+          target: target('assets', 'StorageUnit', 'bess_1', null) }, UPS_UNIT] } } : r) }
+    render(<GridReadinessScorecard data={data} mode="expert" />)
+    expect(screen.getByTestId('gr-after-ramp_rate').textContent).toContain('After batteries/UPS')
+    await user.click(screen.getByTestId('gr-more-ramp_rate'))
+    expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
+      .toBe("'bess_1' 0.02 s (grid forming), 'ups_battery' walks in over 15 s (UPS); all assumed")
+  })
 })

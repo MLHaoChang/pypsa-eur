@@ -15,8 +15,10 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
   MessageCircleQuestion } from 'lucide-react'
 import { create } from 'zustand'
-import { campusApi, type GridReadiness, type GridReadinessRow, type GridReadinessVerdict }
-  from '../../api/campusElectrical'
+import { campusApi, type GridReadiness, type GridReadinessAfterUnit, type GridReadinessRow,
+  type GridReadinessVerdict } from '../../api/campusElectrical'
+import type { FlowTarget } from '../../api/flow'
+import { openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { useChatReadiness } from '../../hooks/useChatProfiles'
 import { ask, ASK_TITLE } from '../../pages/hubDesign/delegate'
@@ -101,9 +103,43 @@ export function summaryText(s: GridReadiness['summary'], mode: ScorecardMode): s
   return `${s.red_flags} red ${s.red_flags === 1 ? 'flag' : 'flags'} · ${s.unknown} unknown · ${s.assumed} assumed${after}`
 }
 
-/** "After battery 'ups_battery'" for one unit, "After batteries/UPS" for several. */
+/** "After battery 'b'" or "After UPS 'u'" for one unit, "After batteries/UPS" for several. */
 export function afterLabel(after: NonNullable<GridReadinessRow['after_battery']>): string {
-  return after.units.length === 1 ? `After battery '${after.units[0]}'` : 'After batteries/UPS'
+  if (after.units.length !== 1) return 'After batteries/UPS'
+  const kind = after.unit_detail?.find(u => u.unit === after.units[0])?.kind
+  return `After ${kind === 'ups' ? 'UPS' : 'battery'} '${after.units[0]}'`
+}
+
+/** Each unit's assumed response latency, its name a link to the asset (DC 03,
+ *  UX review): "'u' responds in 0 s (UPS, assumed)", or several in one line. */
+function LatencyLine({ row, mode, onJump }: {
+  row: GridReadinessRow; mode: ScorecardMode; onJump: (type: string, name: string) => void
+}) {
+  const units = row.after_battery?.unit_detail ?? []
+  if (!units.length) return null
+  const open = (u: GridReadinessAfterUnit) => mode === 'expert'
+    ? onJump(u.target.component ?? 'StorageUnit', u.unit)
+    : openFlowTargetInPlace(u.target as FlowTarget)
+  const secs = (u: GridReadinessAfterUnit) => (u.latency_s == null ? 'not known' : `${u.latency_s} s`)
+  // A UPS answers through its rectifier's walk-in, not a latency (GK review).
+  const walk = (u: GridReadinessAfterUnit) => `walks in over ${u.walk_in_s == null ? 'an unknown time' : `${u.walk_in_s} s`}`
+  const what = (u: GridReadinessAfterUnit, lead: boolean) => (u.kind === 'ups'
+    ? walk(u) : `${lead ? 'responds in ' : ''}${secs(u)}`)
+  const basis = (u: GridReadinessAfterUnit) => (u.kind === 'ups' ? 'UPS' : u.basis)
+  const name = (u: GridReadinessAfterUnit) => (
+    <button type="button" data-testid={`gr-latency-unit-${u.unit}`} onClick={() => open(u)}
+      title={`Open ${u.unit}, where its control is set`}
+      className="text-accent hover:underline">'{u.unit}'</button>
+  )
+  return (
+    <div data-testid={`gr-latency-${row.id}`}>
+      {units.length === 1
+        ? <>{name(units[0])} {what(units[0], true)} ({basis(units[0])}, assumed)</>
+        : <>{units.map((u, i) => (
+          <span key={u.unit}>{i > 0 && ', '}{name(u)} {what(u, false)} ({basis(u)})</span>
+        ))}; all assumed</>}
+    </div>
+  )
 }
 
 function AfterLine({ row }: { row: GridReadinessRow }) {
@@ -209,6 +245,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
               <span className="text-text">{afterLabel(row.after_battery)}:</span> {row.after_battery.note}
             </div>
           )}
+          <LatencyLine row={row} mode={mode} onJump={onJump} />
           {mode === 'guided' && where && (
             <div data-testid={`gr-editable-${row.id}`}>Editable in Expert: {where}</div>
           )}

@@ -786,6 +786,16 @@ def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
     assert not any("after_battery" in r for r in rows.values())
 
 
+def test_the_after_value_names_each_unit_its_kind_latency_and_asset(tmp_path):
+    _, rows = _envelope_rows(tmp_path, dc_load={})
+    (u,) = rows["ramp_rate"]["after_battery"]["unit_detail"]
+    assert u == {"unit": "ups_battery", "kind": "ups", "latency_s": None, "walk_in_s": 15.0,
+                 "basis": "UPS, walks in over 15 s",
+                 "target": {"section": "assets", "panel": None, "component": "StorageUnit",
+                            "entity": "ups_battery", "field": None}}
+    assert "'ups_battery' walks in over 15 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]
+
+
 def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):
     out, _ = _envelope_rows(tmp_path, dc_load={})
     counts = {v: sum(r["verdict"] == v for r in out["rows"]) for v in G.VERDICTS}

@@ -58,6 +58,16 @@ from services.adequacy.site_peak import (_periods, _value, committed_storage, de
                                          ride_through_batteries)
 
 NO_BATTERY = "unknown, no battery/UPS"
+#: A converter battery's response latency by its effective control, after
+#: its control preset (DC 04) is expanded: how long before it answers a load
+#: step. All assumed: a grid-forming converter is a voltage source and answers
+#: within a cycle; a grid-following one runs a measured power loop; an FFR
+#: unit waits its own ``fw_delay_s``. A UPS has no latency here: its share
+#: reaches the grid over its rectifier's walk-in (``coverage``).
+LATENCY_S = {"gfm_droop": 0.02, "gfm_vsm": 0.02, "gfl_pq": 0.2, "gfl_qu": 0.2, "gfl_pf": 0.2}
+CONTROL_WORDS = {"gfm_droop": "grid forming", "gfm_vsm": "grid forming", "gfl_pq": "grid following",
+                 "gfl_qu": "grid following", "gfl_pf": "grid following", "gfl_fw": "fast frequency response"}
+
 #: The screen's own limits, on every result.
 CAVEATS = ("closed form on the envelope's phases, blind to in-hour ramps beyond them; energies as "
            "delivered, charging losses not added")
@@ -96,6 +106,43 @@ def _walk_in_s(block: dict) -> float | None:
     raw = (block.get("values") or {}).get("walk_in_s", block.get("walk_in_s"))
     v = _value(raw)
     return None if v is None else float(v)
+
+
+def response_latency(name: str, block: dict) -> dict:
+    """``{unit, kind, latency_s, walk_in_s, basis}``: a converter battery's
+    assumed response latency from its effective control; a control not known
+    is taken as the slowest assumed (grid following, 0.2 s) and says so,
+    since a missing input must not read as an instant answer. A UPS gets its
+    walk-in instead (``latency_s`` None)."""
+    kind = block.get("kind")
+    if kind == "ups":
+        w = _walk_in_s(block)
+        return {"unit": name, "kind": kind, "latency_s": None, "walk_in_s": w,
+                "basis": "UPS, walks in over " + ("an unknown time" if w is None else f"{w:g} s")}
+    control = _value(block.get("control"))
+    if control == "gfl_fw":
+        latency = _value((block.get("values") or {}).get("fw_delay_s", block.get("fw_delay_s")))
+    else:
+        latency = LATENCY_S.get(control)
+    basis = CONTROL_WORDS.get(control, "control not known")
+    if latency is None:
+        latency, basis = max(LATENCY_S.values()), basis + ", taken as grid following"
+    return {"unit": name, "kind": kind, "latency_s": float(latency), "walk_in_s": None, "basis": basis}
+
+
+def latency_words(latency: list[dict]) -> str:
+    """"'u' responds in 0.02 s (grid forming, assumed)", "'u' walks in over
+    15 s (UPS, assumed)", or several in one line."""
+    def one(x, lead):
+        if x["kind"] == "ups":
+            return (f"walks in over {x['walk_in_s']:g} s" if x["walk_in_s"] is not None
+                    else "walks in over an unknown time"), "UPS"
+        t = "not known" if x["latency_s"] is None else f"{x['latency_s']:g} s"
+        return (f"responds in {t}" if lead else t), x["basis"]
+    if len(latency) == 1:
+        t, b = one(latency[0], True)
+        return f"'{latency[0]['unit']}' {t} ({b}, assumed)"
+    return ", ".join(f"'{x['unit']}' {one(x, False)[0]} ({one(x, False)[1]})" for x in latency) + "; all assumed"
 
 
 def _year(cod: str) -> int | None:
@@ -179,6 +226,7 @@ def _reserve(n, island: dict, year: int | None) -> dict:
         out["backup_mwh"] += keep
         out["units"].append(u)
         out["notes"].append(bridge_note(u))
+    out["latency"] = [response_latency(u, effective.get(u) or units.get(u) or {}) for u in out["units"]]
     return out
 
 
@@ -228,6 +276,16 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
     # The band holds the larger of the step and the checkpoint dip (the dip is
     # inside it when its depth is at most the swing, as the envelope makes it).
     need_mw, need_mwh = s + a_x, 2.0 * max(e_step, e_ck) + e_osc
+    # The slowest converter battery's latency lets the step through at the
+    # envelope's rate until it answers: ℓ = min(S, dP/dt × L). For a true step
+    # (dP/dt → ∞) ℓ is the whole step for any L > 0, which is what a rapid
+    # voltage change sees in those first L seconds. The slowest battery sets
+    # it even when the batteries carry none of the step (all on the UPS):
+    # conservative.
+    known = [x["latency_s"] for x in reserve.get("latency", [])
+             if x["kind"] != "ups" and x["latency_s"] is not None and x["unit"] in reserve["units"]]
+    slope = float(ck.get("dp_dt_mw_per_s") or ph.get("max_dp_dt_mw_per_s") or 0.0)
+    leak = min(s, slope * max(known)) if known else 0.0
     row.update({
         "ramp_limit_mw_per_min": ramp, "ramp_minutes": s / ramp,
         "step_mwh": e_step, "checkpoint_mwh": e_ck,
@@ -237,7 +295,7 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
         "need_mw": need_mw, "need_mwh": need_mwh,
         "reserve_mw": reserve["mw"], "reserve_mwh": reserve["mwh"],
         "backup_mwh": reserve["backup_mwh"],
-        "units": list(reserve["units"]),
+        "units": list(reserve["units"]), "latency": list(reserve.get("latency", [])), "leak_mw": leak,
     })
     if not reserve["units"]:
         why = (f"; {', '.join(reserve['unsized'])} sized by the run, not counted" if reserve["unsized"] else "")
@@ -254,7 +312,9 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
              (f"oscillation {a_x:.3g} MW above the limit, {e_osc:.2g} MWh of swing" if a_x > 0
               else "the oscillation needs no smoothing" + ("" if in_band else " (outside the band of concern)")),
              f"need {need_mw:.3g} MW / {need_mwh:.3g} MWh against {reserve['mw']:.3g} MW / "
-             f"{reserve['mwh']:.3g} MWh left after backup", *reserve["notes"], CAVEATS]
+             f"{reserve['mwh']:.3g} MWh left after backup", *reserve["notes"],
+             latency_words(reserve["latency"]) + (f", so {leak:.3g} MW reach the grid before it answers"
+                                                   if leak > 0 else ""), CAVEATS]
     if cover["covered_ups_mw"] > 0:
         words.append(f"the UPS carries {cover['covered_ups_mw']:.3g} MW of the step and walks it onto the "
                      f"grid over {cover['ups_walk_in_s']:g} s, {cover['ups_ramp_mw_per_min']:.3g} MW/min"
@@ -302,9 +362,12 @@ def after_mitigation(ph: dict) -> dict | None:
     if ph.get("verdict") not in ("covered", "short"):
         return None
     s = ph["step_mw"]
-    covered = min(s, ph["covered_battery_mw"] + ph["covered_ups_mw"])
+    # The latency's leak ℓ reaches the grid however large the reserve: the
+    # residual step is max(S − covered, ℓ), taken from the batteries' share.
+    leak = ph.get("leak_mw", 0.0)
+    covered = min(s, ph["covered_battery_mw"] + ph["covered_ups_mw"], s - leak)
     amp = ph.get("amplitude_mw", 0.0)
-    return {"step_mw": s, "covered_battery_mw": ph["covered_battery_mw"],
+    return {"step_mw": s, "covered_battery_mw": max(0.0, covered - ph["covered_ups_mw"]),
             "covered_ups_mw": ph["covered_ups_mw"], "ups_ramp_mw_per_min": ph["ups_ramp_mw_per_min"],
             "ups_walk_in_s": ph["ups_walk_in_s"], "covered_step_mw": covered,
             "residual_step_mw": max(0.0, s - covered), "amplitude_mw": amp,

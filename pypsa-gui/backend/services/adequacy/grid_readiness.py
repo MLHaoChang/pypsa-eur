@@ -668,6 +668,9 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
     if not screened:
         return
     units = sorted({u for ph, _ in screened for u in ph["units"]})
+    # Each unit with its kind, assumed latency or walk-in, and where it is (DC 03).
+    detail = list({x["unit"]: {**x, "target": _target("assets", "StorageUnit", x["unit"])}
+                   for ph, _ in screened for x in ph.get("latency", [])}.values())
     before = ramp["project_value"]
     limit = ramp["limit"]
 
@@ -712,11 +715,11 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
             if row is osc and value is None and row["project_value"] is not None:
                 return                     # outside the band of concern: nothing to smooth
             row["after_battery"] = {"value": None, "verdict": "unknown", "rule": dict(rule), "units": units,
-                                    "note": "not known yet: the row itself has no value"}
+                                    "unit_detail": detail, "note": "not known yet: the row itself has no value"}
             return
         v = round(value, 4)
         row["after_battery"] = {"value": v, "verdict": _judge(v, row["limit"], rule), "rule": dict(rule),
-                                "units": units, "note": how}
+                                "units": units, "unit_detail": detail, "note": how}
 
     attach(ramp, 0, RULE_RAMP)
     attach(osc, 1, RULE_OSC)
