@@ -197,7 +197,7 @@ def _in_hour_uplift_mw(inp: _Inputs, period: str) -> float | None:
 
 
 def _peak_rows(inp: _Inputs) -> list[dict]:
-    from services.adequacy.site_peak import describe, peak_check
+    from services.adequacy.site_peak import describe, peak_check, unset_periods
 
     loss = inp.marking("import_efficiency")
     target = _target("connection", "Link", inp.link, "eh_energization_mw")
@@ -208,7 +208,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                      note="no import connection (no Link tagged eh_role grid_import or at an eh_poc bus)"
                      if inp.n is not None else "the project has no saved network",
                      section="connection", target=target)]
-    checked = peak_check(inp.n, inp.island_raw)
+    checked = peak_check(inp.n, inp.island_raw, unset=unset_periods(inp.meta))
     if all(r["energized_max_mw"] <= 0 for r in checked):
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
@@ -217,6 +217,17 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                      section="connection", target=target)]
     rows = []
     for r in checked:
+        if r["unset"]:
+            # A placeholder growth value (E1): the example's figure for another
+            # year, so the period's verdict is not established.
+            rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
+                             limit=None, unit="MW", source="the template's growth inputs",
+                             project_value=None, verdict="unknown", assumed=True,
+                             note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the example "
+                                   "has no figure for this year and its placeholder is not a "
+                                   "value to check against; set it in the flow"),
+                             section="connection", target=target))
+            continue
         uplift = _in_hour_uplift_mw(inp, r["period"])
         if r["headroom_mw"] < -1e-9:
             verdict = "fail"

@@ -20,6 +20,10 @@ _PLAIN = {
                                             "comparison is not established.",
     "co2_price_not_applied": "The CO2 price cannot be applied to this comparison, so the "
                              "avoided CO2 cost is not established.",
+    # Not a baseline flag: a growth value of an example built for entered
+    # planning years that is the example's same-stage placeholder (E1).
+    "growth_placeholder": "{a} is a placeholder (the example's value for the same stage, not "
+                          "set for this year): the plan and this case rest on it until it is set.",
 }
 
 
