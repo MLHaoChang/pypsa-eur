@@ -3094,6 +3094,14 @@ def get_eh_template(name: str) -> dict:
     return out
 
 
+def get_project_flow(name: str) -> dict:
+    """The project flow (B1): the section states, run_ready, run_blocker and
+    notes, through the same handler as ``GET /api/projects/{name}/flow``."""
+    from routers.flow import get_project_flow as _h
+
+    return _route(_h, project=_authorized_project(name))
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -7368,6 +7376,7 @@ from services.run_evidence import list_project_runs, get_run_evidence, compare_p
 # discuss_project_run is defined above with the UI-control tools.
 from services.loadflow_summary import get_loadflow_summary
 from services.energy_flows_read import get_energy_flows
+from services.load_shape_read import get_load_shape
 from services.experiments import start_experiment, prepare_experiment, list_experiments, get_experiment
 from harness.experiment_execution import advance_experiment, refresh_experiment, cancel_experiment
 from harness.experiment_reconciliation import reconcile_experiment
@@ -7391,6 +7400,7 @@ DISPATCHERS: dict[str, Any] = {
     "export_run_evidence": export_run_evidence,
     "get_loadflow_summary": get_loadflow_summary,
     "get_energy_flows": get_energy_flows,
+    "get_load_shape": get_load_shape,
     "start_experiment": start_experiment,
     "prepare_experiment": prepare_experiment,
     "advance_experiment": advance_experiment,
@@ -7530,6 +7540,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_stress_scenarios": get_stress_scenarios,
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
+    "get_project_flow": get_project_flow,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,

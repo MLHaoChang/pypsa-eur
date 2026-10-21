@@ -380,7 +380,11 @@ shared harness. No new stream vocabulary or provider-specific guard path is used
 The actor-owned record store uses bounded cross-process transactions, but the live
 project runtime still supports one application worker. These checks do not certify
 all engineering domains, arbitrary request completeness or independent expert
-approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+approval. Unmapped strict tools fail closed: a checked turn runs only
+`assurance.CHECKED_TOOLS`, and `tests/test_checked_results_dispositions.py` proves
+every other catalogue tool is refused before its handler runs. Each result view
+declares `checked_profiles` and a `checked_gap` (`services/result_views.py`; plan in
+`.scratch/checked-results/audit.md`). Deployment remains opt-in. Read the
 [implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
 and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
@@ -863,6 +867,20 @@ solve it is `unavailable_kind=not_solved`; an attribution the module cannot
 prove to conserve energy is `not_established`, with no rows. Current results
 only; `inputs_changed_since_solve` says when the inputs moved after the solve.
 The `flows` result view (`services/result_views.py`) goes live with this tool.
+
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
 
 ### Experiment plans
 
