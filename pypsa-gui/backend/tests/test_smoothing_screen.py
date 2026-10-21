@@ -49,7 +49,8 @@ def _screen(n, island, phases, ramp=20.0, osc=1.0, conn=200.0):
                               oscillation_limit_pct=osc, connection_mw=conn)
 
 
-UPS = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}},
+#: A slow walk-in (600 s), so the UPS shapes these tests' steps to the limit.
+UPS = {"units": {"ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": 600.0}},
        "requirements": {"bridge_s": {"value": 600.0}}}
 
 
@@ -188,7 +189,10 @@ def test_the_data_centre_campus_end_to_end():
     assert ph["units"] == ["ups_battery"]
     assert ph["reserve_mw"] == pytest.approx(40.0)
     assert 0 < ph["reserve_mwh"] < 10.0 * 0.95
-    assert out["verdict"] == "covered"
+    # Its UPS walks the 23.4 MW onto the grid over 15 s: 93.6 MW/min, not 4.
+    assert ph["covered_ups_mw"] == pytest.approx(23.4)
+    assert ph["ups_ramp_mw_per_min"] == pytest.approx(23.4 * 60.0 / 15.0)
+    assert out["verdict"] == "short" and ph["short"] == ["UPS walk-in"]
     assert np.isfinite(ph["need_mwh"])
 
 
@@ -233,3 +237,35 @@ def test_a_dip_deeper_than_the_swing_sets_the_band():
     (ph,) = _screen(n, UPS, [_phase(10.0, depth=100.0, duration=600.0)])["phases"]
     assert ph["checkpoint_mwh"] > ph["step_mwh"]
     assert ph["need_mwh"] == pytest.approx(2.0 * ph["checkpoint_mwh"])
+
+
+def test_a_ups_shapes_the_step_only_at_its_walk_in_rate():
+    """23.4 MW on a 40 MW UPS that walks in over 10 s: the grid sees
+    23.4/10·60 = 140 MW/min, above a 4 MW/min limit; only a walk-in of
+    60·23.4/4 = 351 s holds it to the limit."""
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    for walk_in, verdict in ((10.0, "short"), (351.0, "covered")):
+        island = {"units": {"ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": walk_in}},
+                  "requirements": {"bridge_s": {"value": 600.0}}}
+        (ph,) = _screen(n, island, [_phase(23.4)], ramp=4.0, conn=40.0)["phases"]
+        assert ph["ups_ramp_mw_per_min"] == pytest.approx(23.4 * 60.0 / walk_in)
+        assert ph["verdict"] == verdict
+
+
+def test_a_converter_battery_shapes_to_the_limit_and_the_ups_takes_the_rest():
+    """A 10 MW ride-through battery with energy to spare takes 10 of a
+    23.4 MW step to the limit; the UPS carries 13.4 MW at its walk-in."""
+    n = _site([("rt", 10.0, 4.0, 1.0, False), ("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    island = {"units": {"rt": {"kind": "bess"}, "ups": {"kind": "ups", "it_load": ["it"], "walk_in_s": 15.0}},
+              "requirements": {"bridge_s": {"value": 600.0}, "sustained_h": {"value": 1.0}}}
+    (ph,) = _screen(n, island, [_phase(23.4)], ramp=4.0, conn=40.0)["phases"]
+    assert ph["covered_battery_mw"] == pytest.approx(10.0)
+    assert ph["covered_ups_mw"] == pytest.approx(13.4)
+    assert ph["ups_ramp_mw_per_min"] == pytest.approx(13.4 * 4.0)
+
+
+def test_a_ups_without_a_walk_in_is_not_counted_as_shaping():
+    n = _site([("ups", 40.0, 0.25, 1.0, False)], {"it": 10.0})
+    island = {"units": {"ups": {"kind": "ups", "it_load": ["it"]}}, "requirements": {}}
+    (ph,) = _screen(n, island, [_phase(5.0)])["phases"]
+    assert ph["covered_ups_mw"] == 0.0 and "UPS walk-in not known" in ph["short"]

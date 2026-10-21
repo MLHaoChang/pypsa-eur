@@ -29,6 +29,12 @@ first and smoothing gets what is left.
   state-of-charge band above the backup floor: the battery sits where it can
   both give E_up and take E_down, so E_up + E_down ≤ e − R (UPS: e − bridge).
 
+Who shapes the step (``coverage``): a converter battery under plant control
+holds it to the ramp limit; a UPS's rectifier walks its share onto the grid
+over its own ``walk_in_s`` (gridspine's UPS block, 10-15 s in the presets),
+so the grid sees 60·S_u/walk_in_s MW/min, within the limit only when the
+walk-in is at least 60·S_u/R. Batteries take the step first, UPSs the rest.
+
 A unit counts in a phase when it is in service at the phase's COD year (the
 asset must exist when that load does); the reserve R reads the hours of the
 investment period the phase falls in, as the peak check does. Each
@@ -74,6 +80,24 @@ def oscillation_mwh(amplitude_mw: float, period_s: float) -> float:
     return amplitude_mw * period_s / (math.pi * 3600.0)
 
 
+def _effective_units(island: dict) -> dict:
+    """The sidecar's units with their control presets expanded (gridspine's
+    validation), or the raw units when it cannot validate them."""
+    from services.adequacy.island_config import ContractError, validate
+
+    try:
+        return validate(island)["units"]
+    except (ContractError, KeyError, TypeError, ValueError):
+        return island.get("units") or {}
+
+
+def _walk_in_s(block: dict) -> float | None:
+    """A UPS's walk-in time from its (effective or raw) island block."""
+    raw = (block.get("values") or {}).get("walk_in_s", block.get("walk_in_s"))
+    v = _value(raw)
+    return None if v is None else float(v)
+
+
 def _year(cod: str) -> int | None:
     try:
         return int(str(cod)[:4])
@@ -98,12 +122,17 @@ def _reserve(n, island: dict, year: int | None) -> dict:
     """What the committed ride-through batteries and UPSs in service in
     ``year`` (the phase's) hold for smoothing after their backup duty, read
     over the hours of the period the phase falls in (energy only, each group
-    clamped at 0 on its own): ``{mw, mwh, backup_mwh, units, unsized, notes}``."""
+    clamped at 0 on its own): ``{mw, mwh, backup_mwh, units, unsized, notes,
+    battery: {mw, mwh}, ups: {mw, mwh, walk_in_s}}``. Batteries shape a step
+    to the ramp limit under plant control; a UPS's rectifier walks its load
+    onto the grid over its own ``walk_in_s`` (the fastest of them is kept)."""
     su = n.storage_units
     units = island.get("units") or {}
     req = island.get("requirements") or {}
     _, mask = _period(n, year)
-    out = {"mw": 0.0, "mwh": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [], "notes": []}
+    out = {"mw": 0.0, "mwh": 0.0, "backup_mwh": 0.0, "units": [], "unsized": [], "notes": [],
+           "battery": {"mw": 0.0, "mwh": 0.0}, "ups": {"mw": 0.0, "mwh": 0.0, "walk_in_s": None}}
+    effective = _effective_units(island)
     rt = ride_through_batteries(n, island, year)
     out["unsized"] += rt["unsized"]
     upss, unsized = committed_storage(n, [u for u, d in units.items() if d.get("kind") == "ups"], year)
@@ -130,6 +159,7 @@ def _reserve(n, island: dict, year: int | None) -> dict:
         keep += sum(bridge[u][0] for u in shared)
         out["mw"] += rt["p_mw"]
         out["mwh"] += max(0.0, rt["e_mwh"] - keep)
+        out["battery"] = {"mw": rt["p_mw"], "mwh": max(0.0, rt["e_mwh"] - keep)}
         out["backup_mwh"] += keep
         out["units"] += rt["names"]
         out["notes"] += [f"ride-through {', '.join(rt['names'])} keeps the {words}",
@@ -140,10 +170,42 @@ def _reserve(n, island: dict, year: int | None) -> dict:
         keep = bridge[u][0]
         out["mw"] += float(su.at[u, "p_nom"])
         out["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
+        out["ups"]["mw"] += float(su.at[u, "p_nom"])
+        out["ups"]["mwh"] += max(0.0, deliverable_mwh(su, u) - keep)
+        w = _walk_in_s(effective.get(u) or units.get(u) or {})
+        if w is not None:
+            prev = out["ups"]["walk_in_s"]
+            out["ups"]["walk_in_s"] = w if prev is None else min(prev, w)
         out["backup_mwh"] += keep
         out["units"].append(u)
         out["notes"].append(bridge_note(u))
     return out
+
+
+def coverage(s: float, e_one: float, amp: float, period: float, ramp: float, reserve: dict) -> dict:
+    """How much of a step S and an oscillation (A, T) the reserve holds, by
+    who holds it. The batteries take the step first and shape it to the ramp
+    limit: their band 2·e_one scales with S², so they cover
+    S_b = min(P_b, S·√min(1, E_b/band)). A UPS takes what is left, up to its
+    MW and the energy of its walk-in triangle up and down (S_u·w/3600 MWh),
+    and the grid sees its share at 60·S_u/w MW/min. What power and energy
+    are left go to the oscillation, up to its whole amplitude:
+    A_c = min(A, P_left, E_left·π·3600/T)."""
+    bat, ups = reserve.get("battery") or {}, reserve.get("ups") or {}
+    p_b, e_b = float(bat.get("mw", 0.0)), float(bat.get("mwh", 0.0))
+    p_u, e_u, w = float(ups.get("mw", 0.0)), float(ups.get("mwh", 0.0)), ups.get("walk_in_s")
+    band = 2.0 * e_one
+    s_b = min(p_b, s * math.sqrt(min(1.0, e_b / band)) if band > 0 else s, s)
+    used_b = band * (s_b / s) ** 2 if s > 0 else 0.0
+    s_u = 0.0
+    if w and w > 0 and p_u > 0:
+        s_u = max(0.0, min(p_u, s - s_b, e_u * 3600.0 / w))
+    used_u = s_u * w / 3600.0 if s_u > 0 else 0.0
+    left_p = max(0.0, p_b - s_b) + max(0.0, p_u - s_u)
+    left_e = max(0.0, e_b - used_b) + max(0.0, e_u - used_u)
+    a_c = min(amp, left_p, left_e * math.pi * 3600.0 / period if period > 0 else 0.0)
+    return {"covered_battery_mw": s_b, "covered_ups_mw": s_u, "ups_walk_in_s": w,
+            "ups_ramp_mw_per_min": 60.0 * s_u / w if s_u > 0 else 0.0, "oscillation_covered_mw": a_c}
 
 
 def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | None,
@@ -179,14 +241,24 @@ def _phase(ph: dict, reserve: dict, ramp: float | None, osc_limit_pct: float | N
     if not reserve["units"]:
         why = (f"; {', '.join(reserve['unsized'])} sized by the run, not counted" if reserve["unsized"] else "")
         return {**row, "verdict": "unknown", "note": NO_BATTERY + why}
+    cover = coverage(s, max(e_step, e_ck), amp, period, ramp, reserve)
+    row.update(cover)
     short = [w for w, ok in (("MW", reserve["mw"] >= need_mw - 1e-9),
-                             ("MWh", reserve["mwh"] >= need_mwh - 1e-9)) if not ok]
+                             ("MWh", reserve["mwh"] >= need_mwh - 1e-9),
+                             ("UPS walk-in", cover["ups_ramp_mw_per_min"] <= ramp + 1e-9),
+                             ("UPS walk-in not known", not (reserve["ups"]["mw"] > 0
+                                                            and reserve["ups"]["walk_in_s"] is None))) if not ok]
     words = [f"a {s:.3g} MW step through the {ramp:g} MW/min limit takes {s / ramp:.3g} min and "
              f"{e_step:.3g} MWh each way",
              (f"oscillation {a_x:.3g} MW above the limit, {e_osc:.2g} MWh of swing" if a_x > 0
               else "the oscillation needs no smoothing" + ("" if in_band else " (outside the band of concern)")),
              f"need {need_mw:.3g} MW / {need_mwh:.3g} MWh against {reserve['mw']:.3g} MW / "
              f"{reserve['mwh']:.3g} MWh left after backup", *reserve["notes"], CAVEATS]
+    if cover["covered_ups_mw"] > 0:
+        words.append(f"the UPS carries {cover['covered_ups_mw']:.3g} MW of the step and walks it onto the "
+                     f"grid over {cover['ups_walk_in_s']:g} s, {cover['ups_ramp_mw_per_min']:.3g} MW/min"
+                     + ("" if cover["ups_ramp_mw_per_min"] <= ramp + 1e-9
+                        else f", above the {ramp:g} MW/min limit"))
     if reserve["unsized"]:
         words.append(f"{', '.join(reserve['unsized'])} sized by the run, not counted")
     return {**row, "verdict": "short" if short else "covered", "short": short, "note": "; ".join(words)}
