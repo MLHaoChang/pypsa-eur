@@ -111,6 +111,16 @@ beforeEach(() => {
   enqueueMock.mockReset().mockResolvedValue({})
 })
 
+// PM-558: no "Best objective" across unrelated scenarios (their objectives are not comparable).
+describe('the summary tiles', () => {
+  it('count scenarios and solved ones, and rank none of them', async () => {
+    renderPanel()
+    await rowFor('base')
+    expect(screen.getByText('Solved')).toBeTruthy()
+    expect(screen.queryByText('Best objective')).toBeNull()
+  })
+})
+
 describe('branching from a row that is not the active project', () => {
   it('offers the branch action on every row, not only the active one', async () => {
     // The regression. The button was disabled everywhere except the active
