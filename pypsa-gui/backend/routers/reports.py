@@ -338,7 +338,10 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     case report and its staleness when one is stored; the campus island
     report and the GFM settings when the project has island data on disk (an
     island sidecar or a campus frequency check). Neither → no chapter, so the
-    report of any other project keeps its evidence.
+    report of any other project keeps its evidence. A hub project (one with
+    the template's ``eh_template.json`` beside a saved network) also gets the
+    grid-readiness scorecard (DC grid readiness 02); a scorecard that cannot
+    be read is a chapter stated not established.
     """
     from types import SimpleNamespace
 
@@ -375,6 +378,16 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
             except Exception as exc:                        # noqa: BLE001 - stated as not established
                 logger.info("reports: island %s not read: %s", key, exc)
         out["island"] = island
+    if (d / "eh_template.json").is_file() and (d / "network.nc").is_file():
+        from services.adequacy.grid_readiness import grid_readiness_for
+
+        row = SimpleNamespace(name=project.name, storage_path=str(d), project_kind=None,
+                              org_id=project.org_id, id=project.uuid)
+        try:
+            out["grid_readiness"] = grid_readiness_for(row)
+        except Exception as exc:                            # noqa: BLE001 - stated as not established
+            logger.info("reports: grid readiness not read: %s", exc)
+            out["grid_readiness"] = {}
     return out
 
 

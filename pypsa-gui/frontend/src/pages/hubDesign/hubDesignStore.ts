@@ -4,10 +4,23 @@
 // `step` (P25).
 import { create } from 'zustand'
 import type { EhArchetype } from '../../api/simulation'
+import type { FlowSectionId } from '../../api/flow'
+import { useUIStore } from '../../store/uiStore'
 import type { SiteParams } from './genericSite'
 
 export type HubStep = 'start' | 'site' | 'goal' | 'results' | 'improve'
 export const HUB_STEPS: readonly HubStep[] = ['start', 'site', 'goal', 'results', 'improve']
+
+/** The flow section each card belongs to (workspace-reconciliation §4): the
+ *  Start card is section 1, Site is the connection, Goal is the question asked
+ *  of the model, Results and Improve are section 10. Sections not listed here
+ *  have no bespoke card: the generic section card shows them. */
+export const STEP_SECTION: Record<HubStep, FlowSectionId> = {
+  start: 'project', site: 'connection', goal: 'scenarios', results: 'results', improve: 'results',
+}
+export const SECTION_STEP: Partial<Record<FlowSectionId, HubStep>> = {
+  project: 'start', connection: 'site', scenarios: 'goal', results: 'results',
+}
 
 /** Where the Goal card's shortfall target came from: the template's own
  *  override, the pack default readiness reports, or the user's typing. Only
@@ -77,7 +90,12 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
     loleTarget: d.loleTarget, loleSource: d.loleTarget !== '' ? 'template' : null,
     ensCap: d.ensCap, userMovedRail: false, siteSeed: null,
   }),
-  setStep: (step, opts) => set(opts?.user ? { step, userMovedRail: true } : { step }),
+  // The card and the section are one position: moving the step moves the
+  // section both modes share (`activeSection`, §7).
+  setStep: (step, opts) => {
+    useUIStore.getState().setActiveSection(STEP_SECTION[step])
+    set(opts?.user ? { step, userMovedRail: true } : { step })
+  },
   clearUserMoved: () => set({ userMovedRail: false }),
   setArchetype: (archetype) => set({ archetype }),
   setLoleTarget: (loleTarget) => set({ loleTarget, loleSource: 'user' }),
