@@ -1,0 +1,34 @@
+{
+ "pack_id": "generic_defaults",
+ "version": "2026-10-21",
+ "region": "uk",
+ "currency": "GBP",
+ "base_version": "2026-10-20",
+ "base_hash": "1266cc82fb8826c33281317f8916a7bf10f95c1bf72437e3ba0f77bd993ab231",
+ "title": "Generic defaults pack, regional technology costs: United Kingdom (DESNZ Electricity Generation Costs 2025, 2030 commissioning)",
+ "sources": [
+  {
+   "source_id": "cost_uk_desnz_2025",
+   "title": "UK Electricity Generation Costs 2025, Annex A: additional estimates and key assumptions",
+   "publisher": "UK Department for Energy Security and Net Zero",
+   "url": "https://www.gov.uk/government/publications/electricity-generation-costs-2025",
+   "file": "annex-a-additional-estimates-and-key-assumptions-2025.xlsx",
+   "sha256": "a6233e478d7d1b1c6471781a397e8ba2d3bed511e2eccfb597edb2011ecf20ea",
+   "size_bytes": 1807935,
+   "licence": "Open Government Licence v3.0 (GOV.UK content, except as otherwise stated)",
+   "terms_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+   "attribution": "Contains public sector information licensed under the Open Government Licence v3.0.",
+   "redistribution_status": "open_verified",
+   "owner_clearance": "2026-10-21, coordinator-relayed (decision G2)",
+   "selection": "Technical and Cost Assumptions sheet, commissioning year 2030, Medium cost cases; real 2024 GBP",
+   "file_url": "https://assets.publishing.service.gov.uk/media/69d8efec96c86b7513170229/annex-a-additional-estimates-and-key-assumptions-2025.xlsx"
+  }
+ ],
+ "source_cells": {
+  "file": "source_cells.csv",
+  "sha256": "49ba684630b6ff61f176e1e62e4f1a690f70e7ea2263595508815a1c72797d6c"
+ },
+ "files": {
+  "values": "values.csv"
+ }
+}

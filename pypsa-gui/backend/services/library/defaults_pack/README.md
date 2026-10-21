@@ -26,6 +26,16 @@ IC spec decision 20 says "no external data curated in-tree". **This pack amends 
 for itself only** (owner decision, 2026-10-05). Every other tariff, price series or market data
 set still arrives through the import schemas (spec §11.4) and lives in the org Library.
 
+**Sanctioned exception (owner decision G2, 2026-10-21; GS-2).** Three researched `open_verified`
+cost sources may also be transcribed in-tree, as region-tagged versions of this pack (see
+[Regional versions](#regional-versions)): Canada Energy Regulator Energy Future 2026
+(`cost_canada_cer_ef2026`, Open Government Licence - Canada), UK DESNZ Electricity Generation
+Costs 2025 (`cost_uk_desnz_2025`, Open Government Licence v3.0) and the EIA capital-cost reference
+plants (`cost_eia_reference_plants`, EIA reuse policy: use with acknowledgment). The exception names
+these three sources only. Every other source needs its own terms review and an explicit owner
+clearance first. Each regional manifest records the clearance as `owner_clearance: 2026-10-21,
+coordinator-relayed (decision G2)`, the licence, its terms URL, the source file and its sha256.
+
 ## Versions
 
 One version is one directory, `versions/<YYYY-MM-DD>/`:
@@ -58,6 +68,52 @@ No model's dump enters the hash, so a model change (for example a new default fi
 location does not enter the hash.
 
 `load_defaults_pack()` with no argument loads the latest version.
+
+## Regional versions
+
+A regional version is a directory `versions/<YYYY-MM-DD>+<region>/` (today `2026-10-21+ca_federal`,
+`+uk`, `+us_federal`). It is an **overlay** on one EU version, not a full pack:
+
+| File | What it holds |
+|---|---|
+| `manifest.json` | `region`, `currency`, `base_version` and `base_hash` (the EU version it falls back to and that version's hash; a mismatch is refused), each source (id, publisher, URL, file, sha256, licence, terms URL, `owner_clearance`) and the sha256 of `source_cells.csv`. |
+| `values.csv` | Only the rows the source supports, with the EU row's key, technology, part, basis and parameter, in the region's own currency (`CAD/MW`, `GBP/MW`, `USD/MW`). Each row's `source` is `<source_id>: <table or cell>`. |
+| `source_cells.csv` | The source figures behind each row, with their location in the file. |
+
+Rules:
+
+- **Explicit selection.** `load_defaults_pack(region="ca_federal")` and
+  `price_from_pack(..., version="2026-10-21", region="ca_federal")` take the region as an argument;
+  nothing infers it from a project. `available_versions()` never lists a regional directory, so
+  `load_defaults_pack()` stays the latest EU version and EU projects and pins are unchanged. How a
+  project picks its region is a later wiring decision.
+- **No fallback across currencies.** A regional row is read as the case's real money, so an EU row in
+  2020 EUR would be taken for CAD. A money row the region does not carry is not substituted:
+  `pack.value(key)` and `price_from_pack` raise `MissingRegionalRow(key, region, currency)`.
+- **Currency-less rows may fall back.** A share, lifetime or efficiency the source does not state
+  (the EIA study has no lifetimes; DESNZ and CER state no usable OCGT efficiency basis) comes from
+  the EU row, for a part the region prices, and `pack.region_info.row_source[key]` is `eu_fallback`
+  (`regional` otherwise).
+- **Units.** Conversions stay in the closed `UNIT_CONVERSIONS` table, per currency; none changes
+  currency. Mixed money years within one currency stay allowed.
+- **Hash.** The regional hash covers the overlay manifest, `values.csv` and the base version's
+  hash. It is pinned under `generic_defaults_regional` in `tests/fixtures/defaults_pack/pack_hashes.json`.
+- **A new version, never an edit**, as for the EU versions.
+
+What each region carries (technologies: `solar-utility`, `onwind`, `gas-genset`; each with overnight,
+`fom_share` and, where the source states one, lifetime):
+
+| Region | Source and cell | Money |
+|---|---|---|
+| `ca_federal` | CER EF2026 cost data electricity CSV: Province/Territory ON, Scenario CM, Year 2030 | CAD, Dollar Year 2025. Overnight excludes the separate Connection Costs field; FOM includes property and municipal tax, insurance and land. |
+| `uk` | DESNZ Annex A, sheet "Technical and Cost Assumptions", 2030 commissioning, Medium. Overnight is pre-development + construction + infrastructure / reference plant size; `fom_share` is (fixed O&M + insurance) / overnight | GBP, real 2024. Infrastructure includes connection costs; connection and use of system charges are left out of `fom_share`. |
+| `us_federal` | EIA AEO2025 capital cost study (SL-018001 Rev A), Table 1-2 cases 16 (PV, 150 MWac), 13 (onshore wind, 200 MW) and 4 (H-class simple cycle, 419 MW) | USD, 2023 price levels, EPC boundary, no financing cost. |
+
+Not mapped (no clear key): battery power and energy parts (the sources price a whole battery system
+per kW, not the inverter and the storage block), the diesel genset (a diesel engine farm; CER and
+DESNZ give turbines or gas engines), electrolysis, fuel cell, ammonia and tanks, rooftop PV, the campus
+electrical equipment, and the efficiencies (heat rates are higher-heating-value or unstated). Asking a
+regional pack for any of them raises `MissingRegionalRow`.
 
 ## Units
 

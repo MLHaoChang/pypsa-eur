@@ -33,6 +33,7 @@ def _row(pack, key: str):
     for row in pack.cost_values:
         if row.key == key:
             return row
+    pack.value(key)               # a regional pack's missing money row: MissingRegionalRow
     raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
 
 
@@ -66,15 +67,19 @@ def _value(pack, key: str) -> float:
     for row in pack.cost_values:
         if row.key == key:
             return float("nan") if row.value is None else float(row.value)
+    pack.value(key)               # a regional pack's missing money row: MissingRegionalRow
     raise KeyError(f"defaults pack {pack.version} has no row {key!r}")
 
 
 def price_from_pack(n, component: str, name: str, technology: str, *,
-                    version: str) -> dict[str, Any]:
+                    version: str, region: str | None = None) -> dict[str, Any]:
     """Write `technology`'s pack costs onto `n.<component>.loc[name]`; return what was written with
     the pack's id, version and hash, and the annual charge: `capital_cost` (the annuity alone),
-    `fom_cost` and `annualised_cost_eur_per_mw_yr` (their sum, what the LP charges per MW-year). Raises `KeyError` for a technology the pack does not price."""
-    pack = load_defaults_pack(version)
+    `fom_cost` and `annualised_cost_eur_per_mw_yr` (their sum, what the LP charges per MW-year). Raises `KeyError` for a technology the pack does not price.
+    `region` (explicit; None is the EU pack) prices from that region's pack, `version` being its
+    date; a money row the region lacks raises `MissingRegionalRow` before anything is written, the
+    EU row is never substituted."""
+    pack = load_defaults_pack(version, region=region)
     rate = float(pack.finance.discount_rate.value)
     df = getattr(n, component)
     stamp = {"technology": technology, "pack_id": pack.pack_id, "pack_version": pack.version,
