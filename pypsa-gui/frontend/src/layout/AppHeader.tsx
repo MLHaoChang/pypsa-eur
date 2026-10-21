@@ -44,12 +44,10 @@ export function formatObjective(v: number | null | undefined): string | null {
   return `€${v.toFixed(0)}`
 }
 
-/** Open Results after a solve: on Economics in Expert (Guided has no
- *  Economics tab and keeps its own default). */
+/** Open Results after a solve, on its Summary (the answer first; the Summary
+ *  hands on to Reports and Export). */
 function openResultsAfterSolve() {
-  const ui = useUIStore.getState()
-  if (ui.uiMode !== 'guided') ui.requestResultsTab('economics')
-  ui.setSlidePanel('results')
+  useUIStore.getState().setSlidePanel('results')
 }
 
 // ── Search types ───────────────────────────────────────────────────────────────
