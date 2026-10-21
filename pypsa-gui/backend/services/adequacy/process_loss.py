@@ -50,6 +50,7 @@ import numpy as np
 import pandas as pd
 
 from models.process_unit import CRITICALITY_TIERS
+from services.adequacy.metrics import HOURS_PER_YEAR
 from services import process_products as PP
 from services.solver.process_uc import process_mask
 
@@ -185,11 +186,11 @@ def outage_loss(n, period, start: int, hours: float, units=None, lost_load=None)
 
 
 def _year_hours(period) -> float:
-    """The period year's hours (24 × 365 or 366), never a literal 8760; 8760 on a single-period network."""
+    """The period year's hours (24 × 365 or 366); `metrics.HOURS_PER_YEAR` on a single-period network."""
     try:
         return 24.0 * (366 if pd.Timestamp(year=int(period), month=1, day=1).is_leap_year else 365)
     except (TypeError, ValueError):
-        return 8760.0
+        return HOURS_PER_YEAR
 
 
 def _active(n, comp: str, period) -> pd.Series:
