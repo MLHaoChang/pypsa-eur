@@ -4,7 +4,8 @@ and what a Generator on a product bus stands for.
 
 A Generator's role comes from its `process_role` column (`models/process_unit.py`). The `__buy_<p>` / `__lost_<p>`
 names of the design (§2.1) are only a fallback, and a role read from a name carries the flag `role_from_name`, so
-a hidden naming convention never decides a booking silently (gatekeeper, 2026-10-19).
+a hidden naming convention never decides a booking silently (gatekeeper, 2026-10-19). Ownership never reads the
+fallback: the value flows and the investment case take a role from the column alone (`process_unit.product_roles`).
 """
 from __future__ import annotations
 

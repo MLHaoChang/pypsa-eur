@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): checked answers refuse once an AC power flow has run over the solve, since the live generator, storage and price outputs are then power-flow values rather than the LP solve the answer would certify.

@@ -234,23 +234,21 @@ def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     return dtc
 
 
-def start_eh_study(
-    body: EhStudyRequest | None,
-    *,
-    solver_state: dict,
-    state_update,
-    publish_study,
-):
-    """
-    Start the Energy Hub reference-design study in a worker thread.
+class EhStudyLockBusy(Exception):
+    """`check_eh_study_start(lock_blocking=False)` found the network lock held
+    (a solve or an edit has it): the verdict is deferred, not a refusal."""
 
-    ASYNCHRONOUS BY CONSTRUCTION: pack apply + ENS solve (+ optional
-    redundancy / levers / DtC stages) must never block a request. 409 while
-    another study or a foreground solve is running (mesh refuse is the
-    caller's job; this publishes under the claim).
-    """
-    from services.adequacy.eh_study import run_eh_study
 
+def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
+                         lock_blocking: bool = True) -> dict:
+    """Every refusal `POST /results/eh_study` makes before its worker exists
+    (P13), as one function: an `HTTPException(422)` names the refusal, and a
+    pass returns what the worker needs. `start_eh_study` calls it first; the
+    project flow (`services/flow_service.py`) calls it to state the same verdict
+    without starting anything. Takes the network lock briefly (component names
+    and the energy-cap orientation are read from the live network); with
+    ``lock_blocking=False`` (the polled flow) a held lock raises
+    `EhStudyLockBusy` instead of waiting."""
     body = body or EhStudyRequest()
     archetype = getattr(body, "archetype", None)
     if archetype is None:
@@ -300,7 +298,10 @@ def start_eh_study(
         _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
     raw_dtc, dtc_attribution = resolve_dtc_attribution(
         body.dtc_config, body.dtc_attribution)
-    with lock:  # component names read from the live network
+    # Component names are read from the live network.
+    if not lock.acquire(blocking=lock_blocking):
+        raise EhStudyLockBusy()
+    try:
         dtc_config = (_validate_dtc_config(raw_dtc, n)
                       if raw_dtc is not None else None)
         bus_names = set(map(str, n.buses.index))
@@ -311,6 +312,8 @@ def start_eh_study(
             _arch.import_energy_patch(n, pack)
         except _arch.ArchetypePackError as exc:
             raise HTTPException(422, str(exc)) from exc
+    finally:
+        lock.release()
     dsr_buses = None
     if body.dsr_buses is not None:
         dsr_buses = list(dict.fromkeys(str(b) for b in body.dsr_buses))
@@ -334,6 +337,37 @@ def start_eh_study(
                                    ("mc_seed", mc_opts.seed),
                                    ("mc_cov_target", mc_opts.cov_target))
                  if v is not None}
+    return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
+            "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,
+            "dtc_attribution": dtc_attribution, "dtc_config": dtc_config,
+            "dsr_buses": dsr_buses, "mc_kwargs": mc_kwargs}
+
+
+def start_eh_study(
+    body: EhStudyRequest | None,
+    *,
+    solver_state: dict,
+    state_update,
+    publish_study,
+):
+    """
+    Start the Energy Hub reference-design study in a worker thread.
+
+    ASYNCHRONOUS BY CONSTRUCTION: pack apply + ENS solve (+ optional
+    redundancy / levers / DtC stages) must never block a request. 409 while
+    another study or a foreground solve is running (mesh refuse is the
+    caller's job; this publishes under the claim).
+    """
+    from services.adequacy.eh_study import run_eh_study
+
+    # P13: every refusal happens here, before the worker exists.
+    plan = check_eh_study_start(body, solver_state=solver_state)
+    body, archetype, budget, stages = (plan["body"], plan["archetype"],
+                                       plan["budget"], plan["stages"])
+    cfg, n, lock, pack = plan["cfg"], plan["n"], plan["lock"], plan["pack"]
+    raw_dtc, dtc_attribution = plan["raw_dtc"], plan["dtc_attribution"]
+    dtc_config, dsr_buses = plan["dtc_config"], plan["dsr_buses"]
+    mc_kwargs = plan["mc_kwargs"]
 
     stop_event = _threading.Event()
     log_queue: _queue.SimpleQueue = _queue.SimpleQueue()

@@ -19,6 +19,8 @@ from pathlib import Path
 
 import yaml
 
+from services.flow_sections import SECTION_IDS
+
 _DIR = Path(__file__).resolve().parent
 _FRONT_MATTER = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.S)
 _STEP_HEADING = re.compile(r"^## Step: ([a-z0-9-]+)\s*$", re.M)
@@ -43,6 +45,10 @@ class Step:
     title: str
     done_when: str
     body: str
+    # The project-flow section this step completes (design §3.6): "done" is
+    # that section's state, not the model's reading of the transcript. One of
+    # `services.flow_sections.SECTION_IDS`; None for a workflow outside the flow.
+    flow_section: str | None = None
 
 
 @dataclass(frozen=True)
@@ -120,7 +126,12 @@ def _parse(path: Path) -> Workflow:
                 raise WorkflowError(f"{path.name}: step {s!r} missing {k!r}")
         if s["id"] not in sections:
             raise WorkflowError(f"{path.name}: step {s['id']!r} has no '## Step: {s['id']}' section")
-        steps.append(Step(id=s["id"], title=s["title"], done_when=s["done_when"], body=sections[s["id"]]))
+        flow_section = s.get("flow_section")
+        if flow_section is not None and flow_section not in SECTION_IDS:
+            raise WorkflowError(f"{path.name}: step {s['id']!r} names unknown flow_section "
+                                f"{flow_section!r} (one of {', '.join(SECTION_IDS)})")
+        steps.append(Step(id=s["id"], title=s["title"], done_when=s["done_when"],
+                          body=sections[s["id"]], flow_section=flow_section))
     stray = set(sections) - {s.id for s in steps}
     if stray:
         raise WorkflowError(f"{path.name}: body sections not in front matter: {sorted(stray)}")

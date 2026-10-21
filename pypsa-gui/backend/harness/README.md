@@ -322,7 +322,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 133 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 164 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -335,7 +335,15 @@ external verification. See the [calibration and review guide](../../../.scratch/
 Shared scope and calculation modules own project/entity/window/metric constraints, required-slot dispositions, units,
 formulas and coverage. Five bounded profiles support generator dispatch,
 declared-basis generator costs, a linear network subset, StorageUnit dispatch
-and declared-basis direct StorageUnit costs.
+and declared-basis direct StorageUnit costs. A sixth, `carrier-energy/1`
+(`carrier_calculations.py`), sums one exact carrier's generator energy, combined
+peak and StorageUnit charge/discharge; it is opt-in (`calculations.OPT_IN_PROFILES`
+run only when listed in `PYPSA_GUI_ANSWER_ASSURANCE_PROFILES`), excludes Links and
+Stores and always discloses how many it excluded. `branch-loading/1` and
+`network-loading/1` (`branch_calculations.py`, also opt-in) check one Line or
+Transformer, or the whole network, against `loadflow_summary`'s LOPF definition:
+P-only flow max(|p0|, |p1|) over rating·s_max_pu(t), overload above 1 + 1e-6. They
+refuse whenever AC power-flow results exist.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -380,7 +388,11 @@ shared harness. No new stream vocabulary or provider-specific guard path is used
 The actor-owned record store uses bounded cross-process transactions, but the live
 project runtime still supports one application worker. These checks do not certify
 all engineering domains, arbitrary request completeness or independent expert
-approval. Unmapped strict tools fail closed; deployment remains opt-in. Read the
+approval. Unmapped strict tools fail closed: a checked turn runs only
+`assurance.CHECKED_TOOLS`, and `tests/test_checked_results_dispositions.py` proves
+every other catalogue tool is refused before its handler runs. Each result view
+declares `checked_profiles` and a `checked_gap` (`services/result_views.py`; plan in
+`.scratch/checked-results/audit.md`). Deployment remains opt-in. Read the
 [implemented API and settings](../../../.scratch/assistant-assurance/harness-contracts.md),
 [implementation boundary](../../../.scratch/assistant-assurance/implementation-status.md)
 and [reliability design](../../../.scratch/assistant-assurance/reliability-contract.md)
@@ -863,6 +875,20 @@ solve it is `unavailable_kind=not_solved`; an attribution the module cannot
 prove to conserve energy is `not_established`, with no rows. Current results
 only; `inputs_changed_since_solve` says when the inputs moved after the solve.
 The `flows` result view (`services/result_views.py`) goes live with this tool.
+
+### Current load shape
+
+`get_load_shape` (`services/load_shape_read.py`) reads the current solve's Load
+shape tab through the same `services/results/load_shape.py` payload the tab
+draws, one view per call (`summary`, `heatmap`, `week`, `monthly`, `annual`),
+trimmed under 3800 characters; `period`, `window_from` / `window_to` (the
+heatmaps), `week` and `series` pick what is returned. It computes nothing of
+its own. A group the network does not model, or the run cannot establish,
+keeps its `not_modelled` / `unavailable` state and reason, never a missing key
+that reads as zero. Before a solve it is `unavailable_kind=not_solved`; a run
+whose dispatch cannot be read as energy is `not_established`. Current results
+only. The `loadshape` result view (`services/result_views.py`) goes live with
+this tool.
 
 ### Experiment plans
 

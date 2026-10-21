@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-20",
+  "generated_at": "2026-10-21",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 268,
+  "tool_count": 270,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5773,6 +5773,25 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "get_load_shape",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "view",
+        "period",
+        "window_from",
+        "window_to",
+        "week",
+        "series"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "87dab0f09008944469043e7b7737f1d5ee9e05f228dc8d9af2bf2591b4fc8602",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "get_loadflow_summary",
       "toolsets": [
         "results"
@@ -6107,6 +6126,27 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "03068bc75969f2330c68781e3c718de251ca87e12e5a76ea329ad3f6d3849f1d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_flow",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
       "behavioral_fixture": "pending"
     }
   ],

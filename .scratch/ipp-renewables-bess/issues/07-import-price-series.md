@@ -26,8 +26,14 @@ The mirror of `export_price_ref`:
    the site party, booked once beside the tariff's own items. Its stream and escalation class are
    the gatekeeper's call (proposed: the market-price class, as the export).
 5. **Preflight.** Coverage, and the existing arbitrage-loop warning with the series in.
-6. **Editor.** A 7a "import price" Library series picker beside the export price (today's
-   Economics › Tariffs editor until K1).
+6. **Editor** (UX reviewer, 2026-10-20). Today no editor sets the export price either, so a
+   "Prices the optimisation uses" block holds both Library series pickers: export (shown with an
+   export Link) and import. Each shows its provenance (id, version, `illustrative`). The block
+   sits in today's tariff editor (`TariffSection`, the 7a host K1 moves), above the import
+   tariff, so both of its mounts (Economics › Tariffs & contracts, Results › Investment case ›
+   Tariff) show one editor. Both are **`lp_input`** (#447 §2.0): shown with the Commercial group
+   off. Guided reaches them with W3c's 7a card; until then the assistant sets either series
+   through the LC-04 edit card.
 
 ## Acceptance
 

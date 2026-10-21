@@ -249,8 +249,9 @@ def test_the_economics_still_sum_to_the_objective_with_the_shortfall_moved_out_o
 
 
 def test_the_investment_case_reads_none_of_the_figures_this_ticket_changes():
-    """Ticket 04 must not change what the investment case books; treating lost tonnes as lost revenue there is
-    ticket 06/11's. The staged-template NPV pins cannot catch it (no shortfall generator), so pin the boundary."""
+    """Ticket 04 must not change what the investment case books. Ticket 06 books the shortfall there, from the
+    ledger alone (its own `lost_production` stream, `participants`); the case still reads none of the Compare or
+    process-view figures, so pin that boundary."""
     import pathlib
     import re
     root = pathlib.Path(__file__).resolve().parents[1]
@@ -258,7 +259,7 @@ def test_the_investment_case_reads_none_of_the_figures_this_ticket_changes():
                *(root / "services" / "study").rglob("*.py"), root / "services" / "results" / "finance_case.py",
                root / "models" / "commercial.py"]
     forbidden = re.compile(r"compare\.economics|economics_by_carrier|CarrierEconomics|AssetLCOHEntry|per_asset_lcoh"
-                           r"|_compute_economics_summary|process_view|process_products|lost_production")
+                           r"|_compute_economics_summary|process_view|process_products")
     hits = [str(p.relative_to(root)) for p in sources if p.exists() and forbidden.search(p.read_text())]
     assert len(sources) > 3 and hits == []
 
