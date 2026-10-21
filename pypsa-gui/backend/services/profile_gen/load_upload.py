@@ -149,8 +149,8 @@ def _utc_index(raw: pd.Index, timezone: str | None, default_timezone: str | None
         # ambiguous readings and let the gap fill cover those two hours.
         try:
             local = idx.tz_localize(zone, ambiguous="NaT", nonexistent="NaT")
-        except Exception as exc:  # noqa: BLE001
-            raise UploadFormatError(f"timezone {zone!r}: {exc}") from None
+        except Exception:  # noqa: BLE001 — zoneinfo's text can carry the tzdata path
+            raise UploadFormatError(f"timezone {zone!r} is not an IANA zone") from None
         notes = ["dst_ambiguous_hours_dropped"]
     return (local.tz_convert("UTC").tz_localize(None),
             f"UTC (read from {zone} wall clock)", notes, zone)
