@@ -1125,3 +1125,49 @@ def test_an_event_the_site_cannot_hold_is_infeasible_and_the_diagnosis_names_the
     _diagnose_infeasibility(n, None, log)
     text = " ".join(log.get() for _ in range(log.qsize()))
     assert "island rows are on" in text and "Island-n1-down-b2" in text and "Island-e2-up" in text
+
+
+# ── E2 and the pickup order by criticality tier (grid-to-process ticket 08) ──
+
+
+def _process_hub():
+    """The hub with two process units on site (and one fed straight from the grid, outside the island)."""
+    n = _hub(load=2.0, hours=4)
+    n.add("Bus", "prod")
+    n.add("Load", "prod_load", bus="prod", p_set=6.0)
+    n.add("Link", "unit", bus0="site", bus1="prod", p_nom=20.0, efficiency=0.5)
+    n.add("Link", "flex", bus0="site", bus1="prod", p_nom=20.0, efficiency=0.5)
+    n.add("Link", "outside", bus0="grid", bus1="prod", p_nom=1.0, efficiency=0.5)
+    n.links["eh_process"] = n.links.index.isin(["unit", "flex", "outside"])
+    n.links["criticality_tier"] = ""
+    n.links.loc[["unit", "flex"], "criticality_tier"] = ["process_critical", "process_flexible"]
+    return n
+
+
+def test_without_pickup_blocks_each_island_process_unit_is_a_load_step():
+    """E2's largest load step counts a process unit's draw (its p0, a decision here: a row each), as a charging
+    battery's; a unit fed from the grid side is not picked up by the island, and explicit blocks replace them."""
+    n = _solve(_process_hub(), _seamless(_units()))
+    rows = set(n._island_facts["instant"]["rows"])
+    assert {"Island-e2-up-unit", "Island-e2-up-flex"} <= rows and "Island-e2-up-outside" not in rows
+    n = _solve(_process_hub(), _seamless(_units(), blocks=[0.1]))
+    assert not {r for r in n._island_facts["instant"]["rows"] if r.startswith("Island-e2-up-unit")}
+
+
+def test_the_pickup_sequence_runs_by_tier_then_size_then_name_from_the_solved_draw():
+    from services.solver.island import pickup_sequence
+
+    n = _process_hub()
+    before = pickup_sequence(n)
+    assert [b["name"] for b in before][:3] == ["unit", "flex", "prod_load"]    # tiers, then Loads by size
+    assert [b["kind"] for b in before[2:]] == ["load"] * (len(before) - 2)
+    assert {b["basis"] for b in before if b["kind"] == "process_unit"} == {"not_solved"}
+    assert all(b["block_mw"] is None for b in before if b["kind"] == "process_unit")
+    n.links_t.p0 = pd.DataFrame({"unit": [3.0, 5.0, 1.0, 0.0], "flex": [12.0, 0.0, 0.0, 0.0]},
+                                index=n.snapshots)
+    seq = pickup_sequence(n)
+    assert [(b["name"], b["block_mw"], b["basis"]) for b in seq[:2]] == [
+        ("unit", 5.0, "solved_p0_max"), ("flex", 12.0, "solved_p0_max")]     # a tier outranks a size
+    assert "outside" not in {b["name"] for b in seq}
+    n.links.loc["flex", "criticality_tier"] = "process_critical"
+    assert [b["name"] for b in pickup_sequence(n)[:2]] == ["flex", "unit"]        # same tier: largest first
