@@ -103,7 +103,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_results", result_kind="cost_breakdown"),
                 _r("get_results", result_kind="economics_by_carrier")),
                units="MW, MWh, EUR/a",
-               checked_profiles=("generator-cost/1", "storage-unit-cost/1")),
+               checked_profiles=("generator-cost/1", "storage-unit-cost/1", "capacity/1")),
     ResultView("dispatch", _RESULTS, "dispatch", "Dispatch",
                "hourly generation and storage operation", "results",
                (_r("get_results", result_kind="generators"),
@@ -120,6 +120,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                requires_tools=("get_energy_flows",),
                claim_limits="Energy carriers only; a flow the server cannot prove to conserve "
                             "energy is unavailable, not zero.",
+               checked_profiles=("energy-balance/1",),
                units="MWh"),
     # Gated like flows: the copilot read lands with the catalogue work.
     ResultView("loadshape", _RESULTS, "loadshape", "Load shape",
@@ -168,7 +169,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "storage cycles and state of charge", "results",
                (_r("get_results", result_kind="storage"),),
                units="cycles, MWh",
-               checked_profiles=("storage-unit-dispatch/1",)),
+               checked_profiles=("storage-unit-dispatch/1", "storage-cycles/1")),
     ResultView("fmea", _RESULTS, "fmea", "FMEA",
                "failure modes ranked by their effect on supply", "adequacy",
                (_r("get_adequacy_results", kind="fmea_modes"),),

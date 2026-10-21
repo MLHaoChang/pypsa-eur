@@ -324,6 +324,141 @@ def test_the_peak_cap_takes_the_poc_links_losses():
     assert row["cap_mw"] == pytest.approx(40.0 * 0.995 + 30.0)       # 4 × 10 MW gensets, N+1
 
 
+# ── ride-through batteries in the peak check (DC 03) ────────────────────────
+
+
+def _rt_site(load, import_mw=40.0, p_nom=20.0, max_hours=1.0, extendable=False, sustained_h=1.0,
+             rts=("rt",), critical=None, eta=1.0):
+    """A bare site with one ride-through battery; ``critical`` is the critical
+    load's MW (a second Load), absent by default."""
+    n = _one_period(import_mw=import_mw, load=np.asarray(load, dtype=float))
+    n.add("StorageUnit", "rt", bus="site", p_nom=p_nom, max_hours=max_hours,
+          efficiency_dispatch=eta, efficiency_store=eta, p_nom_extendable=extendable)
+    units = {"rt": {"kind": "bess"}}
+    if critical is not None:
+        n.add("Load", "critical", bus="site", p_set=critical)
+        units["critical"] = {"kind": "load", "critical": True}
+    island = {"units": units,
+              "requirements": {"sustained_h": {"value": sustained_h, "source": "assumed"}}}
+    if rts is not None:
+        island["requirements"]["ride_through_storage"] = list(rts)
+    return n, island
+
+
+def test_a_battery_does_not_cover_a_deficit_longer_than_its_energy():
+    """20 MW / 20 MWh against a 15 MW shortfall for 3 h: it runs out after
+    1.33 h, so the third hour falls short by the full 15 MW."""
+    load = np.full(48, 30.0)
+    load[10:13] = 55.0
+    n, island = _rt_site(load)
+    (row,) = SP.peak_check(n, island)
+    assert row["headroom_mw"] == pytest.approx(-15.0)                # 15 + 5 MWh, then empty
+    assert row["binding_snapshot"].startswith("2030-01-01 12:00")
+    assert row["firm"][1]["mw"] == 0.0
+    assert "20 MWh above the" in row["firm"][1]["rule"]
+
+
+def test_the_outage_reserve_is_not_spent_on_the_peak():
+    """A 20 MW critical load, no gensets, 1 h ride-through: R = 20 MWh = E,
+    so nothing is free and the 15 MW shortfall stands."""
+    load = np.full(48, 30.0)
+    load[10] = 55.0
+    n, island = _rt_site(load - 20.0, critical=20.0)
+    (row,) = SP.peak_check(n, island)
+    assert row["firm"][1]["mw"] == 0.0
+    assert row["headroom_mw"] == pytest.approx(-15.0)
+    assert "0 MWh above the 20 MWh outage reserve" in row["firm"][1]["rule"]
+
+
+def test_the_battery_recharges_between_runs():
+    """Two 1 h, 15 MW shortfalls a day apart, 20 MWh: the headroom between
+    refills it (η = 0.9 both ways), so both are covered."""
+    load = np.full(48, 30.0)
+    load[[5, 29]] = 55.0
+    n, island = _rt_site(load, eta=0.9)
+    (row,) = SP.peak_check(n, island)
+    assert row["headroom_mw"] == pytest.approx(0.0, abs=1e-9)
+    assert row["firm"][1]["mw"] == pytest.approx(15.0)
+
+
+def test_without_ride_through_storage_named_every_bess_is_ride_through():
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load, rts=None)
+    assert SP.peak_check(n, island)[0]["headroom_mw"] == pytest.approx(0.0, abs=1e-9)
+
+
+@pytest.mark.parametrize("change, why", [
+    ({"extendable": True}, "no committed ride-through battery"),
+    ({"rts": ()}, "no committed ride-through battery"),
+    ({"sustained_h": 0}, "no sustained ride-through time"),
+])
+def test_no_battery_shaves_without_a_committed_unit_or_a_ride_through_time(change, why):
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load, **change)
+    (row,) = SP.peak_check(n, island)
+    assert row["firm"][1]["mw"] == 0.0 and why in row["firm"][1]["rule"]
+    assert row["headroom_mw"] == pytest.approx(-10.0)
+    assert "batteries" not in SP.describe(row)
+    (row,) = SP.peak_check(n, None)
+    assert row["firm"][1]["rule"] == "no island sidecar: no battery is counted as firm"
+
+
+def test_a_battery_built_after_the_period_shaves_nothing_in_it():
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load)
+    n.storage_units.at["rt", "build_year"] = 2035
+    (row,) = SP.peak_check(n, island)                               # the 2030 period
+    assert row["firm"][1]["mw"] == 0.0 and row["headroom_mw"] == pytest.approx(-10.0)
+
+
+@pytest.mark.parametrize("tid, product", [("eh_h2_hub", "h2_offtake"), ("eh_h2_hub_staged", "h2_offtake"),
+                                          ("eh_ammonia_staged", "nh3_delivery")])
+def test_a_product_offtake_is_not_electric_peak_load(tid, product):
+    """The H2 and NH3 offtakes sit on product buses: the electric peak check
+    counts the AC process load only."""
+    n = T.BUILDERS[tid]()
+    assert product in n.loads.index and SP.electric_loads(n) == ["process_load"]
+    for row in SP.peak_check(n, T.ISLAND_CONFIG.get(tid)):
+        mask = [str(s).startswith(row["period"]) or row["period"] in str(s) for s in n.snapshots]
+        assert row["peak_mw"] == pytest.approx(float(n.loads_t.p_set["process_load"][mask].max()))
+
+
+def test_a_load_on_an_unknown_electric_carrier_counts_and_an_offtake_does_not():
+    """A Load on a "low voltage" bus is electric (an unknown carrier counts);
+    one on an H2 bus is an offtake, left out and named in the row."""
+    n = _one_period(load=np.full(48, 10.0))
+    n.add("Bus", "lv", carrier="low voltage")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Load", "homes", bus="lv", p_set=5.0)
+    n.add("Load", "h2_offtake", bus="h2", p_set=25.0)
+    assert SP.electric_loads(n) == ["demand", "homes"]
+    (row,) = SP.peak_check(n, None)
+    assert row["peak_mw"] == pytest.approx(15.0)
+    assert row["not_electric"] == ["h2_offtake on h2 (H2)"]
+
+
+def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
+    """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
+    its critical process load, with no genset, needs its peak for the 1 h
+    ride-through (43.65 MWh), so nothing is free and the cap is the import.
+    The data-centre campus names only its extendable bess_new, so its cap
+    stays the import plus the gensets."""
+    n = T.BUILDERS["eh_h2_hub"]()
+    (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_h2_hub"])
+    reserve = float(n.loads_t.p_set["process_load"].max()) * 1.0
+    assert reserve > 38.0
+    assert row["firm"][1]["mw"] == 0.0
+    assert row["cap_mw"] == pytest.approx(row["delivered_mw"])
+    assert f"20 MW / 38 MWh, 0 MWh above the {reserve:.4g} MWh outage reserve" in row["firm"][1]["rule"]
+    n = T.BUILDERS["eh_datacenter"]()
+    (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_datacenter"])
+    assert row["firm"][1]["mw"] == 0.0
+    assert row["cap_mw"] == pytest.approx(40.0 * 0.995 + 30.0)
+
+
 def _at_cap_spec(tid, it_mw):
     return {"phases": [{"cod": "2030-01-01", "it_mw": it_mw}]}
 
@@ -581,7 +716,108 @@ def test_the_panel_text_is_in_plain_words(tmp_path, tid, dc_load):
     for r in G.grid_readiness(d, n, PROFILE)["rows"]:
         text = " ".join(str(r[k]) for k in ("requirement", "limit", "project_value", "source", "note")
                         if r[k] is not None)
+        text += " " + str((r.get("after_battery") or {}).get("note", ""))     # DC 03
         for word in RAW_IDS:
             assert word not in text, (r["id"], word, text)
         if r["verdict"] == "unknown":
             assert r["note"][0].isupper(), (r["id"], r["note"])
+
+
+# ── after mitigation (DC 03) ────────────────────────────────────────────────
+
+
+def _envelope_rows(tmp_path, tid="eh_datacenter", dc_load=None, edit=None):
+    d, n = _project(tmp_path, tid, dc_load=dc_load)
+    if edit:
+        edit(n)
+    out = G.grid_readiness(d, n, PROFILE)
+    return out, {k: v for k, v in _rows(out).items() if k in G._AFTER_IDS}
+
+
+def test_the_campus_ups_walks_the_step_in_too_fast_for_the_ramp_limit(tmp_path):
+    """The 40 MW / 10 MWh UPS keeps 34.5 MW × 600 s = 5.75 MWh for its bridge
+    and carries the whole 23.4 MW step, but its rectifier walks it onto the
+    grid over 15 s: 23.4·60/15 = 93.6 MW/min, above the 4 MW/min limit. The
+    voltage change and the oscillation pass after it. The rows' own
+    verdicts stay before mitigation."""
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    assert {k: r["verdict"] for k, r in rows.items()} == {
+        "ramp_rate": "fail", "oscillation": "fail", "rapid_voltage_change": "warn"}
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(93.6) and ramp["verdict"] == "fail"
+    assert "walks 23.4 MW in over 15 s" in ramp["note"]
+    assert rows["oscillation"]["after_battery"]["value"] == 0.0
+    assert rows["rapid_voltage_change"]["after_battery"]["value"] == 0.0
+    assert rows["oscillation"]["after_battery"]["verdict"] == "pass"
+    assert rows["rapid_voltage_change"]["after_battery"]["verdict"] == "pass"
+    assert rows["ramp_rate"]["after_battery"]["units"] == ["ups_battery"]
+    assert "before mitigation" in rows["ramp_rate"]["note"]
+    assert out["summary"]["pass_after_mitigation"] == 2
+    assert out["summary"]["red_flags"] == 3                         # the summary stays before mitigation
+
+
+def test_a_small_ups_covers_part_of_the_step(tmp_path):
+    """A 10 MW UPS walks 10 of the 23.4 MW in over 15 s (40 MW/min); the
+    other 13.4 MW reach the grid at the envelope's rate, so the ramp fails and
+    the voltage change warns after it."""
+    def shrink(n):
+        n.storage_units.at["ups_battery", "p_nom"] = 10.0
+        n.storage_units.at["ups_battery", "max_hours"] = 2.0
+    _, rows = _envelope_rows(tmp_path, dc_load={}, edit=shrink)
+    rvc = rows["rapid_voltage_change"]["after_battery"]
+    assert rvc["value"] == pytest.approx(round(13.4 / 250.0 * 100.0, 4))
+    assert rvc["verdict"] == "warn"                                  # 5.36 % above the 3 % limit
+    ramp = rows["ramp_rate"]["after_battery"]
+    assert ramp["value"] == pytest.approx(40.0 + 13.4 / 23.4 * 1404.0, rel=1e-6)
+    assert ramp["verdict"] == "fail"
+
+
+def test_without_a_battery_or_ups_there_is_no_after_value(tmp_path):
+    def drop(n):
+        n.remove("StorageUnit", "ups_battery")
+    out, rows = _envelope_rows(tmp_path, dc_load={}, edit=drop)
+    assert not any("after_battery" in r for r in rows.values())
+    assert out["summary"]["pass_after_mitigation"] == 0
+
+
+@pytest.mark.parametrize("tid", TIDS)
+def test_without_the_ai_profile_there_is_no_after_value(tmp_path, tid):
+    _, rows = _envelope_rows(tmp_path, tid)
+    assert not any("after_battery" in r for r in rows.values())
+
+
+def test_the_after_value_names_each_unit_its_kind_latency_and_asset(tmp_path):
+    _, rows = _envelope_rows(tmp_path, dc_load={})
+    (u,) = rows["ramp_rate"]["after_battery"]["unit_detail"]
+    assert u == {"unit": "ups_battery", "kind": "ups", "latency_s": None, "walk_in_s": 15.0,
+                 "basis": "UPS, walks in over 15 s",
+                 "target": {"section": "assets", "panel": None, "component": "StorageUnit",
+                            "entity": "ups_battery", "field": None}}
+    assert "'ups_battery' walks in over 15 s (UPS, assumed)" in rows["ramp_rate"]["after_battery"]["note"]
+
+
+def test_the_counts_read_the_row_verdict_never_the_after_value(tmp_path):
+    out, _ = _envelope_rows(tmp_path, dc_load={})
+    counts = {v: sum(r["verdict"] == v for r in out["rows"]) for v in G.VERDICTS}
+    assert {v: out["summary"][v] for v in G.VERDICTS} == counts
+    assert out["summary"]["red_flags"] == counts["fail"] + counts["warn"]
+
+
+def test_the_after_value_survives_every_consumer(tmp_path, monkeypatch):
+    """The key round-trips through JSON (the route and the assistant tool
+    return the dict as is), the assistant tool's dispatcher and the report
+    chapter, which reads the rows it lists and ignores the rest."""
+    from services import chat_tools
+    from services.reports import chapters as C
+
+    out, rows = _envelope_rows(tmp_path, dc_load={})
+    back = json.loads(json.dumps(out))
+    assert back["rows"] == out["rows"] and "after_battery" in _rows(back)["ramp_rate"]
+    monkeypatch.setattr(G, "grid_readiness_for", lambda p, prof: out)
+    monkeypatch.setattr(chat_tools, "_acting", lambda: __import__("contextlib").nullcontext((None, None)))
+    monkeypatch.setattr(chat_tools, "_gridspine_project", lambda db, user, pid: pid)
+    assert chat_tools.DISPATCHERS["campus_grid_readiness"](project_id="p") is out
+    payload = C.grid_readiness_payload(out)
+    assert [r["verdict"] for r in payload["rows"]] == [r["verdict"] for r in out["rows"]]
+    C.grid_readiness_table(payload, "/sections/grid_readiness/payload")
+    C.grid_readiness_disclosures(payload)

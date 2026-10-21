@@ -662,6 +662,31 @@ export interface GridReadinessRow {
   note: string | null
   section: string
   target: GridReadinessTarget
+  /** DC 03: the value at the PoC once the battery/UPS has smoothed, judged by
+   *  the row's own limit; present only with an AI-training load and a
+   *  committed battery/UPS. The row's `verdict` stays before mitigation. */
+  after_battery?: GridReadinessAfter
+}
+
+export interface GridReadinessAfter {
+  value: number | null
+  verdict: GridReadinessVerdict
+  rule: Record<string, unknown>
+  units: string[]
+  /** Each unit's kind and assumed response latency from its control preset,
+   *  and where the unit is (DC 03 slice 5). */
+  unit_detail?: GridReadinessAfterUnit[]
+  note: string
+}
+
+export interface GridReadinessAfterUnit {
+  unit: string
+  kind: string | null
+  latency_s: number | null
+  /** A UPS's walk-in (its share reaches the grid over it); null for a battery. */
+  walk_in_s?: number | null
+  basis: string
+  target: GridReadinessTarget
 }
 
 export interface GridReadiness {
@@ -670,7 +695,9 @@ export interface GridReadiness {
   template_id: string | null
   envelope: boolean
   rows: GridReadinessRow[]
-  summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number }
+  summary: Record<GridReadinessVerdict, number> & { assumed: number; red_flags: number
+    /** Rows that fail or warn before mitigation and pass after the battery/UPS (DC 03). */
+    pass_after_mitigation?: number }
   basis: string
 }
 

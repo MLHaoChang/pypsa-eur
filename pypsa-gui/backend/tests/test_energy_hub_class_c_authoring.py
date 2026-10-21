@@ -198,6 +198,10 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")
+    # The EU cost references (GS-EU) are read `__file__`-relative beside their module.
+    refs = root / "services" / "library" / "reference_data"
+    refs.mkdir(parents=True)
+    (refs / "eu-dea-2026-08.json").write_text("{}")
     # The chat harness's Markdown (prompts, workflows, skills) is read
     # `__file__`-relative from the package too (chat harness issue 10).
     assert any("harness/prompts/base_identity.md" in m

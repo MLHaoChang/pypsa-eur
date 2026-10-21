@@ -210,6 +210,39 @@ def test_the_plants_curtail_at_the_limit_and_at_negative_prices(solved):
 
 
 @pytest.mark.live_solve
+def test_curtailment_splits_by_cause_on_the_base_case(solved):
+    """Ticket 05 (G6): both causes occur on the base case, and the split sums to the total."""
+    from services.results.curtailment import compute_curtailment, curtailment_by_cause
+
+    n, cfg, _da = solved
+    out = curtailment_by_cause(n, cfg.commercial)
+    assert out["status"] == "ok" and out["export_capacity_mw"] == pytest.approx(70.0)
+    hourly = compute_curtailment(n, None, None)
+    w = n.snapshot_weightings.generators.to_numpy()
+    for i, plant in enumerate(hourly["columns"]):
+        total = float(sum(row[i] * w[k] for k, row in enumerate(hourly["data"])))
+        assert sum(out["plants"][plant]["by_cause_mwh"].values()) == pytest.approx(total)
+    causes = {c: sum(p["by_cause_mwh"][c] for p in out["plants"].values())
+              for c in ("export_limit", "negative_price")}
+    assert causes["export_limit"] > 0 and causes["negative_price"] > 0, causes
+
+
+@pytest.mark.live_solve
+def test_curtailment_by_cause_survives_a_reload(solved, tmp_path):
+    """The split reads the price the dispatch was solved with; the solve's record and the
+    price frame travel in network.nc, so a saved and reopened project splits the same."""
+    import pypsa
+
+    from services.results.curtailment import curtailment_by_cause
+
+    n, cfg, _da = solved
+    n.export_to_netcdf(str(tmp_path / "n.nc"))
+    reopened = pypsa.Network(str(tmp_path / "n.nc"))
+    assert curtailment_by_cause(reopened, cfg.commercial) == curtailment_by_cause(
+        n, cfg.commercial)
+
+
+@pytest.mark.live_solve
 def test_the_pv_capture_rate_is_below_one(solved):
     n, _cfg, da = solved
     pv = n.generators_t.p["pv_plant"]
@@ -324,6 +357,16 @@ def test_from_template_mints_the_series_and_binds_every_block(client, tmp_projec
     assert issues == [] and pins == bundle_pins.collect_pins(cfg) and pins
     flow = client.get("/api/projects/ipp/flow").json()
     assert "library_ref_stale" not in {i["code"] for s in flow["sections"] for i in s["items"]}
+
+
+def test_a_project_reopened_before_its_first_save_binds_its_prices(client, tmp_projects_dir):
+    """The minted series' prices travel in the created project's network.nc: reopened from
+    disk before any save (a restart, another tab), it still prices its export (ticket 02)."""
+    _create(client)
+    assert client.post("/api/simulation/preflight").json()["ok"] is True
+    assert client.get("/api/projects/ipp").status_code == 200           # reload from disk
+    pre = client.post("/api/simulation/preflight").json()
+    assert pre["ok"] is True, pre["issues"]
 
 
 def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_projects_dir):
@@ -520,3 +563,46 @@ def test_every_prefilled_value_is_editable(label, edit, want, client, tmp_projec
     _create(client)
     got = edit(client)
     assert got == pytest.approx(want) if isinstance(want, float) else got == want, label
+
+
+@pytest.mark.live_solve
+def test_each_ppa_line_is_its_two_legs(solved):
+    """Ticket 05 (GK): each financial PPA's difference line is its price leg plus its
+    reference leg, every year. Not a byte pin of the lines: they come from a solve, which
+    differs in the last bits by machine. The helper's arithmetic is pinned on fixed cases
+    in test_operating_pin.py."""
+    from services.finance.cashflow import build_operating
+    from services.finance.timeline import build_timeline
+
+    n, cfg, _da = solved
+    case, _res = _case(n, cfg)
+    op = build_operating(case, build_timeline(case))
+    assert sorted(op.legs) == sorted(f"contract:{cid}:ppa_energy" for cid, _p in M.PPA.values())
+    for key, (price_leg, reference_leg) in op.legs.items():
+        np.testing.assert_allclose(price_leg + reference_leg, op.lines[key], rtol=1e-12,
+                                   atol=1e-9)
+        assert (price_leg[op.tl.operating_mask()] > 0).any()
+
+
+@pytest.mark.live_solve
+def test_revenue_by_stream_on_the_base_case(solved):
+    """Ticket 05 (G6): the PPAs show as PPA sales and market sales, nothing lands in Other,
+    and every year the rows sum to the operating cash; the report's project payload has them."""
+    from services.finance.report import assemble_finance_sections
+    from services.finance.revenue_streams import revenue_by_stream
+
+    n, cfg, _da = solved
+    case, res = _case(n, cfg)
+    out = revenue_by_stream(res.op)
+    assert out["other_keys"] == []
+    rows = {r["id"]: np.array(r["values"], dtype=float) for r in out["rows"]}
+    np.testing.assert_allclose(sum(rows.values()), res.op.revenue - res.op.costs,
+                               rtol=1e-9, atol=1e-6)
+    on = res.op.tl.operating_mask()
+    tenor = np.flatnonzero(on)[:M.PPA_TENOR]                  # the PPAs end after their tenor
+    assert (rows["ppa"][tenor] > 0).all() and not rows["ppa"][np.flatnonzero(on)[M.PPA_TENOR:]].any()
+    assert (rows["merchant"][on] > 0).all()
+    assert not rows["cfd"].any() and not rows["other"].any()
+    assert (rows["om"][on] < 0).all()
+    payload = assemble_finance_sections(res, case).sections["project"].payload
+    assert payload["revenue_streams"]["rows"][0]["id"] == "ppa"

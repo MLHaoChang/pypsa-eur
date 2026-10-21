@@ -1546,6 +1546,9 @@ _LIBRARY_ERROR_KINDS = (
     {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
     {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
     {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+    {"error_kind": "library_reference_unknown"},
+    {"error_kind": "reference_target_unsupported"}, {"error_kind": "currency_mismatch"},
+    {"error_kind": "reference_confirmation_needed"},
 )
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
@@ -1652,6 +1655,43 @@ def get_library_item(kind: str, name: str, version: int | None = None,
     if kind == "tariff" and detail != "full":
         return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
     return out
+
+
+def list_library_references(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library_references import list_references as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_reference(technology: str, projection_year: int, component: str | None = None,
+                          asset: str | None = None) -> dict:
+    """One shipped reference beside the pack value it would otherwise be. With an asset,
+    the pack is the one that asset's overnight cost was priced from (its provenance)."""
+    from routers.library_references import get_reference as _h
+
+    pack_source = None
+    if (component is None) != (asset is None):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "library_reference_unknown",
+            "message": "pass component and asset together, or neither"})
+    if asset is not None:
+        from routers.network import get_asset_provenance as _p
+        fields = _route(_p, component, asset)["fields"]
+        pack_source = (fields.get("overnight_cost") or {}).get("source")
+    return _library_call(_h, technology, projection_year,
+                         pack_source=pack_source).model_dump(mode="json")
+
+
+def apply_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                            confirm: list[str] | None = None) -> dict:
+    """Write one shipped reference onto one asset through the network route (the
+    edit card is shown and confirmed before this runs)."""
+    from routers.network_library_reference import ReferenceApplyRun
+    from routers.network_library_reference import apply_library_reference as _h
+
+    body = ReferenceApplyRun(component_class=component_class, name=name, technology=technology,
+                             projection_year=projection_year, confirm=list(confirm or []))
+    return _route(_h, body)
 
 
 def _urdb_rate(data, item_index: int | None = None):
@@ -3540,6 +3580,18 @@ def generate_load_profile(project_id: str, archetype: str, loads: list,
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
                                year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def generate_availability_profile(project_id: str, kind: str, generators: list,
+                                  params: dict | None = None,
+                                  year: int | None = None) -> dict:
+    from routers.profiles import (
+        AvailabilityGenerateRequest,
+        generate_availability_profiles as _h,
+    )
+    body = AvailabilityGenerateRequest(kind=kind, generators=generators,
+                                       params=params, year=year)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7631,6 +7683,7 @@ DISPATCHERS: dict[str, Any] = {
     "apply_generated_profile": apply_generated_profile,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
+    "generate_availability_profile": generate_availability_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
@@ -7675,6 +7728,9 @@ DISPATCHERS: dict[str, Any] = {
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "list_library_references": list_library_references,
+    "get_library_reference": get_library_reference,
+    "apply_library_reference": apply_library_reference,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
