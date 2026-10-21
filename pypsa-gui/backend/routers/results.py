@@ -1772,7 +1772,6 @@ def _ic_growth_flags() -> tuple[str, ...]:
     from db import session as _db
     from db.models import Project
     from services import project_registry
-    from services.adequacy.site_peak import unset_periods
 
     pid = getattr(PyPSAService.get_active_context(), "project_uuid", None)
     if not pid:
@@ -1784,10 +1783,15 @@ def _ic_growth_flags() -> tuple[str, ...]:
         meta = json.loads(path.read_text()) if path is not None and path.is_file() else None
     except (OSError, ValueError):
         return ()
+    return _growth_flags_of(meta if isinstance(meta, dict) else None)
+
+
+def _growth_flags_of(meta: dict | None) -> tuple[str, ...]:
+    """The ``growth_placeholder`` flags of one template metadata dict."""
+    from services.adequacy.site_peak import unset_periods
+
     return tuple(f"growth_placeholder:{kind}_{year}"
-                 for year, kinds in sorted(unset_periods(meta if isinstance(meta, dict)
-                                                         else None).items())
-                 for kind in kinds)
+                 for year, kinds in sorted(unset_periods(meta).items()) for kind in kinds)
 
 
 def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource | None = None,

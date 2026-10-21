@@ -410,3 +410,57 @@ def test_planning_is_not_a_parameter_of_a_template_without_native_years(client, 
     assert r.status_code == 422
     detail = r.json()["detail"]
     assert detail["code"] == "template_params_invalid" and detail["field"] == "planning"
+
+
+@pytest.mark.live_solve
+def test_the_ic_report_has_one_sentence_per_placeholder(reset_backend, monkeypatch, tmp_path):
+    """Entered years, no dc_load: solved as run_simulation solves it, the
+    case carries ``_ic_growth_flags``' flags (as ``_ic_build_case`` adds
+    them), and the IC report lists each flag and one sentence for it."""
+    import dataclasses
+    import queue
+    import threading
+
+    import routers.results as R
+    import routers.simulation as sim_router
+    from models.finance import FinanceInputs
+    from routers.projects import _solver_config_from_dict
+    from services.finance.baseline_text import flag_text
+    from services.finance.engine import run_case
+    from services.finance.report import _project_payload
+    from services.pypsa_service import PyPSAService
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+    from services.solver import island as I
+    from services.solver_service import run_simulation
+    from tests.conftest import install_network_into_backend
+
+    from services.adequacy.island_config import SIDECAR_NAME, load_island_config
+
+    p = _plan(SHIFTED)
+    T.write_sidecars(tmp_path, TID, p)
+    isl = load_island_config(tmp_path / SIDECAR_NAME)
+    isl["cuts"] = []
+    monkeypatch.setattr(I, "load_project_island", lambda: isl)
+    install_network_into_backend(T.BUILDERS[TID](planning=p))
+    cfg = _solver_config_from_dict(T.solver_config(TID, p))
+    sim_router._state["solver_config"] = cfg
+    n = PyPSAService.get_network()
+    state: dict = {}
+    status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                  queue.SimpleQueue(), state_update=lambda **k: state.update(k))
+    assert status in ("ok", "optimal"), (status, cond)
+    Bl.clear_cache()
+    plan = baseline_plan(n, cfg)
+    base = Bl.solve_baseline(n, cfg, plan) if plan is not None and plan.needed else None
+    case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance),
+                              result_df=R._result_df, lost_load=state.get("last_lost_load"),
+                              baseline=base)
+    growth = R._growth_flags_of(T.template_meta(TID, p))
+    assert growth == ("growth_placeholder:it_mw_2038", "growth_placeholder:energized_mw_2038")
+    case = dataclasses.replace(case, flags=case.flags + growth)
+    payload = _project_payload(run_case(case), case)
+    assert set(growth) <= set(payload["flags"])
+    notes = payload["counterfactual"]["notes"]
+    for f in growth:
+        assert notes.count(flag_text(f)) == 1, notes
