@@ -30,6 +30,7 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 
 - every check run on the head SHA is success or skipped (in progress, unreadable or none yet blocks);
 - no file **overlaps** what master changed since the PR's merge-base. Docs-only overlap (`docs/superpowers/OPEN-ITEMS.md`, `docs/superpowers/plans/*`, release notes) is fine when the merge is clean, and so is a file identical on both sides (a cherry-pick master already has);
+- a **code** overlap is waived when the trial merge is clean, the semantic tests pass and the tests that exercise each overlapping file pass (`scripts/coord/overlap_tests.py` maps file to tests). A file with no test, a conflict or a failing test still blocks;
 - a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`.
 
 It prints the head SHA, merge-base and how far behind the PR is, then one section per check, and exits non-zero when the PR is blocked.
@@ -74,6 +75,15 @@ Before you build UI, tell the reviewer in a few lines where the change sits in t
 ## Helper agents
 
 Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) with `model: haiku`. Give each one the exact question and the answer shape you expect back.
+
+## Rotation
+
+A long context is a session's largest cost: every tool call re-reads it. Rotate when either holds:
+- `get_session` (no id) shows `context_usage.used_tokens` above 300k;
+- a package's PR has merged and more slices remain.
+
+Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
+Done when the coordinator has the note and the request.
 
 ## Finishing a package
 
