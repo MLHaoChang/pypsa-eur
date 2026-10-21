@@ -322,7 +322,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 254 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 264 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -365,7 +365,12 @@ gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its 
 attribution and stay withheld. `site-import/1` (opt-in) gives the Load shape tab's
 grid import, peak import and export as that tab measures them, and the weighted hours at
 the grid_import Link's p_nom_opt x p_max_pu; the tab's heatmap, week and monthly views stay
-unchecked.
+unchecked. `investment-case/1` (opt-in) rebuilds the post-tax equity and project NPV and IRR
+from the stored report's cash rows at the rates it records, with the engine's timing; an IRR
+only for one sign change, and every figure must match the report's headline. The report's own
+staleness key is read outside the network lock before and after the read. The LCOE (its
+energy and value series are not retained), payback, cover ratios and the solved PPA stay
+withheld.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

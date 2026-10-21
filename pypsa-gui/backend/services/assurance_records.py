@@ -259,8 +259,7 @@ def evidence(owner, evidence_id):
             if ctx.project_uuid != record["project_id"]:
                 unavailable("evidence_unavailable")
             try:
-                with network_guard():
-                    raw = calculations.scoped_source(ctx, scope, owner)
+                raw = _scoped_read(ctx, scope, owner)
             except (ValueError, KeyError, TypeError):
                 unavailable("evidence_unavailable")
         try:
@@ -363,8 +362,8 @@ def capture_scoped(owner, scope):
         if expected != record["request_scope"]:
             raise ValueError("historical_scope_mismatch")
         return record
+    raw = _scoped_read(ctx, scope, owner)
     with network_guard():
-        raw = calculations.scoped_source(ctx, scope, owner)
         facts, slots = calculations.scoped_calculate(raw, scope)
         first = (raw["storage_unit"] if scope["profile"] in calculations.STORAGE_PROFILES
                  else raw if scope["profile"] in (calculations.carrier.PROFILE, *calculations.branch.PROFILES,
@@ -372,7 +371,8 @@ def capture_scoped(owner, scope):
                                                   *calculations.emissions.PROFILES,
                                                   calculations.curtailment.PROFILE,
                                                   calculations.capacity.PROFILE, calculations.cycles.PROFILE,
-                                                  calculations.balance.PROFILE, calculations.site_import.PROFILE)
+                                                  calculations.balance.PROFILE, calculations.site_import.PROFILE,
+                                                  calculations.investment.PROFILE)
                  else next(iter(raw["generators"].values())))
         record = {
             "version": 1,
@@ -403,6 +403,23 @@ def capture_scoped(owner, scope):
         }
         save(record, record["evidence_id"])
         return record
+
+
+def _scoped_read(ctx, scope, owner):
+    """The profile's raw source under the network lock. The investment case's own
+    staleness is read outside the lock, as its route reads it, before and after
+    the locked read: both must be current and name the same report."""
+    from harness import calculations
+
+    invested = scope["profile"] == calculations.investment.PROFILE
+    before = calculations.investment.current(ctx) if invested else None
+    with network_guard():
+        raw = calculations.scoped_source(ctx, scope, owner, investment_state=before)
+    if invested:
+        after = calculations.investment.current(ctx)
+        if not calculations.investment.is_current(after) or after["assumptions_hash"] != raw["assumptions_hash"]:
+            raise ValueError("investment_case_not_current")
+    return raw
 
 
 def public(record):
