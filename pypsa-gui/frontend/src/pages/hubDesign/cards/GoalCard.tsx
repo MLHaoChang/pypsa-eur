@@ -2,7 +2,8 @@
 // acceptable, how strict to be on energy (advanced), the price of undelivered
 // energy (read-only, with an assistant fix). The Run is in section 9,
 // Readiness → run (`shared/GoalStudyRun.tsx`): this card sets the goal.
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
@@ -11,13 +12,20 @@ import { Term } from '../shared/Term'
 import { useGoalStudy } from '../useGoalStudy'
 
 export function GoalCard() {
-  const { running, readiness, voll, vollMissing } = useGoalStudy()
+  const { project, running, readiness, voll, vollMissing } = useGoalStudy()
   const liveStudy = useLiveStudyRunning()
   const loleTarget = useHubDesignStore(s => s.loleTarget)
   const ensCap = useHubDesignStore(s => s.ensCap)
   const setLoleTarget = useHubDesignStore(s => s.setLoleTarget)
   const setEnsCap = useHubDesignStore(s => s.setEnsCap)
   const [advanced, setAdvanced] = useState(false)
+  // A link to the stress editor opens "More settings" once.
+  const advancedRequested = useHubDesignStore(s => s.goalAdvancedRequested)
+  useEffect(() => {
+    if (!advancedRequested) return
+    setAdvanced(true)
+    useHubDesignStore.getState().setGoalAdvancedRequested(false)
+  }, [advancedRequested])
   const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
 
   return (
@@ -58,6 +66,14 @@ export function GoalCard() {
           </label>
         )}
       </div>
+
+      {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
+      {advanced && (
+        <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
+          <span className="text-[12px] font-semibold text-text">Stress conditions</span>
+          <StressScenarioEditor project={project} />
+        </div>
+      )}
 
       {/* A set price is a "More settings" item; one that is missing blocks the run, so it stays in view
           (UX review L3). */}

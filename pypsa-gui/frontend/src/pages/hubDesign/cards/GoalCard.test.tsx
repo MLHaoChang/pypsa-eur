@@ -138,6 +138,21 @@ describe('GoalCard voll line', () => {
     expect(screen.getByTestId('hub-goal-voll')).toBeTruthy()
   })
 
+  it('mounts the stress-conditions editor under More settings (one editor, same as Solver settings)', async () => {
+    mount()
+    expect(screen.queryByTestId('hub-goal-stress')).toBeNull()
+    await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
+    expect(screen.getByTestId('hub-goal-stress').textContent).toContain('Stress conditions')
+    expect(await screen.findByTestId('stress-editor')).toBeTruthy()
+  })
+
+  it('opens More settings with the stress editor when a link asks for it, once', async () => {
+    useHubDesignStore.setState({ goalAdvancedRequested: true })
+    mount()
+    expect(await screen.findByTestId('stress-editor')).toBeTruthy()
+    expect(useHubDesignStore.getState().goalAdvancedRequested).toBe(false)
+  })
+
   it('shows VOLL read-only when it is set', async () => {
     mount()
     await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
