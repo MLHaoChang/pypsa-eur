@@ -118,7 +118,10 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # Edge Investment Case WP1.1c: the (id, version, hash) of every
                  # Library series the project references, re-checked on open.
                  # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
-                 "library_refs.json")
+                 "library_refs.json",
+                 # The project flow's acknowledged warnings (B1).
+                 # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
+                 "flow_acks.json")
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the
