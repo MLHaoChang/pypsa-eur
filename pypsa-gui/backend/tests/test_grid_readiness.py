@@ -324,40 +324,68 @@ def test_the_peak_cap_takes_the_poc_links_losses():
     assert row["cap_mw"] == pytest.approx(40.0 * 0.995 + 30.0)       # 4 × 10 MW gensets, N+1
 
 
-# ── firm ride-through batteries (DC 03) ─────────────────────────────────────
+# ── ride-through batteries in the peak check (DC 03) ────────────────────────
 
 
-def _rt_site(p_nom=10.0, max_hours=2.0, eff=0.9, extendable=False, sustained_h=4.0, rts=("rt",)):
-    """A flat 50 MW site on a 40 MW connection with one ride-through battery."""
-    n = _one_period(load=np.full(48, 50.0))
+def _rt_site(load, import_mw=40.0, p_nom=20.0, max_hours=1.0, extendable=False, sustained_h=1.0,
+             rts=("rt",), critical=None, eta=1.0):
+    """A bare site with one ride-through battery; ``critical`` is the critical
+    load's MW (a second Load), absent by default."""
+    n = _one_period(import_mw=import_mw, load=np.asarray(load, dtype=float))
     n.add("StorageUnit", "rt", bus="site", p_nom=p_nom, max_hours=max_hours,
-          efficiency_dispatch=eff, p_nom_extendable=extendable)
-    island = {"units": {"rt": {"kind": "bess"}},
+          efficiency_dispatch=eta, efficiency_store=eta, p_nom_extendable=extendable)
+    units = {"rt": {"kind": "bess"}}
+    if critical is not None:
+        n.add("Load", "critical", bus="site", p_set=critical)
+        units["critical"] = {"kind": "load", "critical": True}
+    island = {"units": units,
               "requirements": {"sustained_h": {"value": sustained_h, "source": "assumed"}}}
     if rts is not None:
         island["requirements"]["ride_through_storage"] = list(rts)
     return n, island
 
 
-@pytest.mark.parametrize("p_nom, max_hours, sustained_h, firm", [
-    (10.0, 2.0, 4.0, 10.0 * 2.0 * 0.9 / 4.0),     # energy-bound: 18 MWh over 4 h = 4.5 MW
-    (10.0, 8.0, 4.0, 10.0),                        # power-bound: 72 MWh over 4 h > 10 MW
-])
-def test_a_ride_through_battery_is_firm_for_what_it_holds_through_the_ride_through(
-        p_nom, max_hours, sustained_h, firm):
-    n, island = _rt_site(p_nom=p_nom, max_hours=max_hours, sustained_h=sustained_h)
-    mw, rule = SP.firm_battery_mw(n, island)
-    assert mw == pytest.approx(firm)
-    assert f"{sustained_h:g} h ride-through" in rule
+def test_a_battery_does_not_cover_a_deficit_longer_than_its_energy():
+    """20 MW / 20 MWh against a 15 MW shortfall for 3 h: it runs out after
+    1.33 h, so the third hour falls short by the full 15 MW."""
+    load = np.full(48, 30.0)
+    load[10:13] = 55.0
+    n, island = _rt_site(load)
     (row,) = SP.peak_check(n, island)
-    assert row["cap_mw"] == pytest.approx(40.0 + firm)
-    assert row["firm"][1] == {"source": "ride-through batteries", "mw": mw, "rule": rule}
-    assert "of firm ride-through batteries" in SP.describe(row)
+    assert row["headroom_mw"] == pytest.approx(-15.0)                # 15 + 5 MWh, then empty
+    assert row["binding_snapshot"].startswith("2030-01-01 12:00")
+    assert row["firm"][1]["mw"] == 0.0
+    assert "20 MWh above the" in row["firm"][1]["rule"]
+
+
+def test_the_outage_reserve_is_not_spent_on_the_peak():
+    """A 20 MW critical load, no gensets, 1 h ride-through: R = 20 MWh = E,
+    so nothing is free and the 15 MW shortfall stands."""
+    load = np.full(48, 30.0)
+    load[10] = 55.0
+    n, island = _rt_site(load - 20.0, critical=20.0)
+    (row,) = SP.peak_check(n, island)
+    assert row["firm"][1]["mw"] == 0.0
+    assert row["headroom_mw"] == pytest.approx(-15.0)
+    assert "0 MWh above the 20 MWh outage reserve" in row["firm"][1]["rule"]
+
+
+def test_the_battery_recharges_between_runs():
+    """Two 1 h, 15 MW shortfalls a day apart, 20 MWh: the headroom between
+    refills it (η = 0.9 both ways), so both are covered."""
+    load = np.full(48, 30.0)
+    load[[5, 29]] = 55.0
+    n, island = _rt_site(load, eta=0.9)
+    (row,) = SP.peak_check(n, island)
+    assert row["headroom_mw"] == pytest.approx(0.0, abs=1e-9)
+    assert row["firm"][1]["mw"] == pytest.approx(15.0)
 
 
 def test_without_ride_through_storage_named_every_bess_is_ride_through():
-    n, island = _rt_site(rts=None)
-    assert SP.firm_battery_mw(n, island)[0] == pytest.approx(4.5)
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load, rts=None)
+    assert SP.peak_check(n, island)[0]["headroom_mw"] == pytest.approx(0.0, abs=1e-9)
 
 
 @pytest.mark.parametrize("change, why", [
@@ -365,25 +393,35 @@ def test_without_ride_through_storage_named_every_bess_is_ride_through():
     ({"rts": ()}, "no committed ride-through battery"),
     ({"sustained_h": 0}, "no sustained ride-through time"),
 ])
-def test_no_battery_is_firm_without_a_committed_unit_or_a_ride_through_time(change, why):
-    n, island = _rt_site(**change)
-    mw, rule = SP.firm_battery_mw(n, island)
-    assert mw == 0.0 and why in rule
-    assert "batteries" not in SP.describe(SP.peak_check(n, island)[0])
-    assert SP.firm_battery_mw(n, None) == (0.0, "no island sidecar: no battery is counted as firm")
+def test_no_battery_shaves_without_a_committed_unit_or_a_ride_through_time(change, why):
+    load = np.full(48, 30.0)
+    load[10] = 50.0
+    n, island = _rt_site(load, **change)
+    (row,) = SP.peak_check(n, island)
+    assert row["firm"][1]["mw"] == 0.0 and why in row["firm"][1]["rule"]
+    assert row["headroom_mw"] == pytest.approx(-10.0)
+    assert "batteries" not in SP.describe(row)
+    (row,) = SP.peak_check(n, None)
+    assert row["firm"][1]["rule"] == "no island sidecar: no battery is counted as firm"
 
 
-def test_the_h2_hubs_site_battery_is_firm_and_the_data_centres_cap_is_unchanged():
-    """The H2 hub's 20 MW / 40 MWh site battery holds 20 MW through its 1 h
-    ride-through; the data-centre campus names only its extendable bess_new,
-    so its cap stays the import plus the gensets."""
+def test_the_h2_hubs_site_battery_and_the_data_centres_cap():
+    """The H2 hub's 20 MW / 40 MWh site battery delivers 0.95 × 40 = 38 MWh;
+    its critical process load, with no genset, needs its peak for the 1 h
+    ride-through (43.65 MWh), so nothing is free and the cap is the import.
+    The data-centre campus names only its extendable bess_new, so its cap
+    stays the import plus the gensets."""
     n = T.BUILDERS["eh_h2_hub"]()
     (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_h2_hub"])
-    assert row["firm"][1]["mw"] == pytest.approx(20.0)
-    assert row["cap_mw"] == pytest.approx(row["delivered_mw"] + 20.0)
+    reserve = float(n.loads_t.p_set["process_load"].max()) * 1.0
+    assert reserve > 38.0
+    assert row["firm"][1]["mw"] == 0.0
+    assert row["cap_mw"] == pytest.approx(row["delivered_mw"])
+    assert f"20 MW / 38 MWh, 0 MWh above the {reserve:.4g} MWh outage reserve" in row["firm"][1]["rule"]
     n = T.BUILDERS["eh_datacenter"]()
     (row,) = SP.peak_check(n, T.ISLAND_CONFIG["eh_datacenter"])
     assert row["firm"][1]["mw"] == 0.0
+    assert row["cap_mw"] == pytest.approx(40.0 * 0.995 + 30.0)
 
 
 def _at_cap_spec(tid, it_mw):
