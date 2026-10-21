@@ -62,3 +62,80 @@ def test_restore_still_brings_back_the_snapshot_state(client, api_project):
 
     live = {b["name"]: b["x"] for b in client.get("/api/network/buses").json()}
     assert live[bus] == original[bus]
+
+
+def _project_bytes(d):
+    return {p.relative_to(d): p.read_bytes() for p in sorted(d.rglob("*"))
+            if p.is_file() and "snapshots" not in p.relative_to(d).parts}
+
+
+def _labels(client, name):
+    return [s["label"] for s in client.get(f"/api/projects/{name}/snapshots").json()]
+
+
+def test_a_refused_save_refuses_the_restore_and_changes_nothing(
+        client, api_project, project_storage_dir, monkeypatch):
+    """A save refusal (solver in flight, study running, identity) must refuse
+    the restore before any file moves or any safety snapshot is taken."""
+    from fastapi import HTTPException
+    from routers import projects
+
+    name = api_project("restore-save-refused")
+    sid = _snapshot(client, name)
+    bus, changed_x = _edit_first_bus_x(client)
+    d = project_storage_dir(name)
+    before = _project_bytes(d)
+
+    def _refuse(*_a, **_k):
+        raise HTTPException(409, detail={"error_kind": "solver_in_flight", "message": "busy"})
+    monkeypatch.setattr(projects, "_save_context", _refuse)
+
+    r = client.post(f"/api/projects/{name}/snapshots/{sid}/restore")
+    assert r.status_code == 409, r.text
+    assert _project_bytes(d) == before
+    assert "before-restore" not in _labels(client, name)
+    live = client.get("/api/network/buses").json()
+    assert next(b for b in live if b["name"] == bus)["x"] == changed_x
+
+
+def test_an_edit_during_the_restore_refuses_it(
+        client, api_project, project_storage_dir, monkeypatch):
+    """An edit landing after the save but before the restore's lock is in
+    neither the safety snapshot nor the restored state: refuse instead."""
+    from routers import snapshots
+    from services import dirty_state
+
+    name = api_project("restore-edit-during")
+    sid = _snapshot(client, name)
+    bus, changed_x = _edit_first_bus_x(client)
+    original_create = snapshots._create_snapshot_internal
+
+    def _create_then_edit(*a, **k):
+        info = original_create(*a, **k)
+        dirty_state.bump_revision()
+        return info
+    monkeypatch.setattr(snapshots, "_create_snapshot_internal", _create_then_edit)
+
+    r = client.post(f"/api/projects/{name}/snapshots/{sid}/restore")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "changed_during_restore"
+    live = client.get("/api/network/buses").json()
+    assert next(b for b in live if b["name"] == bus)["x"] == changed_x
+
+
+def test_restoring_a_project_that_is_not_open_saves_nothing(
+        client, api_project, project_storage_dir):
+    """Only the project being restored is saved: another open project's
+    unsaved edits are not written to its disk."""
+    other = api_project("restore-other")
+    target = api_project("restore-target")
+    sid = _snapshot(client, target)
+    r = client.get(f"/api/projects/{other}")
+    assert r.status_code == 200, r.text
+    _edit_first_bus_x(client)
+    other_dir = project_storage_dir(other)
+    before = _project_bytes(other_dir)
+
+    _restore(client, target, sid)
+
+    assert _project_bytes(other_dir) == before

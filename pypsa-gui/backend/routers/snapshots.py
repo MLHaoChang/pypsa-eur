@@ -560,7 +560,7 @@ def list_snapshots(
     return [_to_info(d) for d in _list_snapshot_dirs(project_dir)]
 
 
-def _save_unsaved_live_state(project: AuthorizedProject, db, user) -> None:
+def _save_unsaved_live_state(project: AuthorizedProject, db, user) -> int | None:
     """Save the project's unsaved in-memory edits before a restore (SR-1, F01).
 
     The before-restore safety snapshot copies files on disk, and the restore
@@ -572,22 +572,58 @@ def _save_unsaved_live_state(project: AuthorizedProject, db, user) -> None:
     restore before anything has changed.
 
     Only when the ACTIVE context is this project: another project's edits are
-    not what this restore replaces.
+    not what this restore replaces. Returns that context's edit revision once
+    memory and disk agree, for `_refuse_if_changed_since` to compare; ``None``
+    when the active context is another project.
+
+    Calls `_save_context`, which takes `PyPSAService.get_lock()` itself: call
+    this BEFORE the restore's own `with get_lock()` block, never inside it (the
+    lock is not re-entrant).
     """
     from services import dirty_state, undo_service
     from routers.projects import _save_context
 
+    ctx = _bound_active_context(project)
+    if ctx is None:
+        return None
+    if dirty_state.is_dirty(ctx) or undo_service.depth() > 0:
+        _save_context(
+            ctx, project.name, expect=project.name,
+            storage_dir=project.directory, db=db, user=user,
+        )
+        dirty_state.clear(ctx)  # memory and disk now agree
+    return dirty_state.revision(ctx)
+
+
+def _bound_active_context(project: AuthorizedProject):
+    """The active context when it is bound to `project`, else ``None``."""
     ctx = PyPSAService.get_active_context()
     if ctx.loaded_project != project.name:
-        return
+        return None
     if ctx.project_uuid is not None and str(ctx.project_uuid) != str(project.uuid):
+        return None
+    return ctx
+
+
+def _refuse_if_changed_since(project: AuthorizedProject, saved_revision: int | None) -> None:
+    """Refuse when the project was edited after `_save_unsaved_live_state`.
+
+    An autosave tick or a chat edit landing between that save and the restore's
+    lock would be in neither the safety snapshot nor the restored state. Call
+    with `get_lock()` held, before the first file is overwritten.
+    """
+    from services import dirty_state
+
+    if saved_revision is None:
         return
-    if not (dirty_state.is_dirty(ctx) or undo_service.depth() > 0):
+    ctx = _bound_active_context(project)
+    if ctx is None:
         return
-    _save_context(
-        ctx, project.name, expect=project.name,
-        storage_dir=project.directory, db=db, user=user,
-    )
+    if dirty_state.is_dirty(ctx) or dirty_state.revision(ctx) != saved_revision:
+        raise HTTPException(409, detail={
+            "error_kind": "changed_during_restore",
+            "message": "Edits arrived while restoring; nothing was restored. Try again.",
+        })
 
 
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
@@ -638,7 +674,8 @@ def restore_snapshot(
 
     _enforce_project_lock(db, _lock_target(project), user)
 
-    _save_unsaved_live_state(project, db, user)
+    # Outside the `get_lock()` block below: the save takes that lock itself.
+    saved_revision = _save_unsaved_live_state(project, db, user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
@@ -679,6 +716,7 @@ def restore_snapshot(
     # the lock.
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
+        _refuse_if_changed_since(project, saved_revision)
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
         # snapshot file in place — never a half-written one.
