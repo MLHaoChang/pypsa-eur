@@ -142,3 +142,13 @@ def test_a_stale_solve_gives_no_figure(importing, checked):
     ctx = solve(importing)
     ctx.network.loads_t.p_set.iloc[0, 0] = 1
     assert set(reasons(ask(checked, ctx, {})).values()) == {"unverified_solve"}
+
+
+def test_an_unreadable_or_zero_connection_withholds_only_the_limit(importing, checked):
+    ctx = solve(importing)
+    values = {"grid_import_energy": 15, "peak_grid_import": 6, "export_energy": 0}
+    for capacity in (float("nan"), 0.0):
+        ctx.network.links.at["meter", "p_nom_opt"] = capacity
+        frames = ask(checked, ctx, values)
+        assert reasons(frames) == {"hours_at_import_limit": "no_import_connection"}
+        assert answered(checked, frames) == pytest.approx(values)

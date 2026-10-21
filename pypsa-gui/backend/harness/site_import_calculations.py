@@ -57,7 +57,7 @@ def _column(table, name, index):
 
 def source(ctx, entity):
     """Called under the network lock: raw arrays only; arithmetic in calculate."""
-    from harness.calculations import _series
+    from harness.calculations import _number, _series
     from services.results.energy_flows import period_mask, read_dispatch
 
     n = ctx.network
@@ -98,14 +98,14 @@ def source(ctx, entity):
     if "eh_role" in links.columns:
         component = n.components["Link"]
         for name in links.index[links["eh_role"].astype(str) == "grid_import"]:
-            connection.append({"p_nom_opt": float(links.at[name, "p_nom_opt"]),
+            connection.append({"p_nom_opt": _number(links.at[name, "p_nom_opt"]),
                                "p_max_pu": _series(component, "p_max_pu", name, index)})
     return {
         "version": 1,
         "profile": PROFILE,
         "entity_id": entity,
         "index": [v.isoformat() for v in index],
-        "w_gen": n.snapshot_weightings["generators"].to_numpy(dtype=float).tolist(),
+        "w_gen": [_number(v) for v in n.snapshot_weightings["generators"]],
         "generators": generators,
         "external": external,
         "ports": ports,
@@ -122,9 +122,9 @@ def calculate(raw, scope):
     reasons = {m: base for m in METRICS}
     available = {}
     gens, ports = raw["generators"], raw["ports"]
-    w = np.array(raw["w_gen"], dtype=float)
     readable = (all(g["p"] is not None for g in gens) and all(p is not None for _bus, p in ports)
-                and np.isfinite(w).all() and (w >= 0).all())
+                and all(v is not None and v >= 0 for v in raw["w_gen"]))
+    w = np.array([v if v is not None else math.nan for v in raw["w_gen"]], dtype=float)
     if raw["valid_solve"] and readable:
         rows = slice(a, b + 1)
         T = len(w)
@@ -159,16 +159,17 @@ def calculate(raw, scope):
 
 
 def _limit(connection, T):
-    """MW per snapshot of the grid_import Links, or None without one (or unreadable)."""
+    """MW per snapshot of the grid_import Links, or None without one, unreadable, or
+    never above zero (the tab's `_import_capacity` shows no connection then)."""
     if not connection:
         return None
     total = np.zeros(T)
     for link in connection:
         cap, pu = link["p_nom_opt"], np.asarray(link["p_max_pu"], dtype=float)
-        if not math.isfinite(cap) or cap < 0 or len(pu) != T or not np.isfinite(pu).all():
+        if cap is None or cap < 0 or len(pu) != T or not np.isfinite(pu).all():
             return None
         total += cap * pu
-    return total
+    return total if (total > 0).any() else None
 
 
 def notes(raw):
