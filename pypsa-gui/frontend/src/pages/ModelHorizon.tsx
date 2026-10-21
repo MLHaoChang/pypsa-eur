@@ -13,6 +13,8 @@ import {
   resolutionLabel, horizonRangeLabel,
   visibleSteps, isHorizonUnset, stepSummary,
   type WeightingRow, type HorizonStepId, type HorizonSummaryContext, stepHoursForFreq} from './modelHorizonModel'
+import { NextSectionButton } from '../components/NextSectionButton'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
 import { HorizonSummary } from './modelHorizon/HorizonSummary'
 import { StepMode } from './modelHorizon/StepMode'
@@ -820,6 +822,7 @@ export default function ModelHorizon() {
             title={steps.includes(view) ? `Step ${steps.indexOf(view) + 1} of ${steps.length} — ${STEP_LABELS[view]}` : ''}
             advanced={advancedContent}
             unmountAdvancedWhenCollapsed={unmountAdvancedWhenCollapsed}
+            stepNav={{ finish: <NextSectionButton from="project" onNext={openSectionInExpert} testId="horizon-next-section" /> }}
           >
 
       {/* ── Mode toggle (the single decision point) ───────────── */}

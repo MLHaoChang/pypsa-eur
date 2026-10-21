@@ -22,7 +22,7 @@ Proven against master d327f645 by `pypsa-gui/backend/tests/test_run_separability
 | contingencies beyond N-1, connection capacity | unsupported here | no | `routers/gridspine.py` | files only | AC LF + N-1 per bisection step | the screened run | — (a `planning_dynamics` project) |
 | frequency & time domain | unsupported in-app | no | hand-off bundles; PowerFactory read-back | files only | — | read-back | — |
 | detailed process (beyond UC) | unsupported | no | none | — | — | — | — (after GTP) |
-| fixed sizes (sizing off) | unsupported | no | none yet | — | — | — | — (slice F1) |
+| fixed sizes (sizing off) | supported (an option, F1) | yes | `SolverConfig.fixed_sizes` = `capacity_run` \| `nameplate` (`services/solver/fixed_sizes.py`) | as optimisation; the freeze is undone on every exit; `_fixed_design` | as optimisation; the connection pinned at the fixed size | the sizing record (sizes and topology) | the validator with `fixed_sizes` set to the chosen source (the flow's own once it is set) |
 
 Tests named `*_current_behaviour` record the campus and island gaps as they stand; the fix PRs flip them (island: #448 §3.1's fixed-size island mode; campus: a save step before the study). A loadflow item `source` in the flow (§5.2) is W4b's, when `loadflow` enters `run_request`.
 

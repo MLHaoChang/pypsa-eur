@@ -9,11 +9,13 @@ import pandas as pd
 
 from services import workflow_tools
 from harness import branch_calculations as branch
+from harness import capacity_calculations as capacity
 from harness import carrier_calculations as carrier
 from harness import curtailment_calculations as curtailment
 from harness import emissions_calculations as emissions
 from harness import lost_load_calculations as lost_load
 from harness import price_calculations as price
+from harness import storage_cycles_calculations as cycles
 from harness import storage_calculations as storage
 from harness import storage_costs
 
@@ -76,7 +78,8 @@ COMPARISON_METRICS = {
 DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRICS, **storage_costs.METRICS,
                **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS,
                **lost_load.METRICS, **price.METRICS, **emissions.GENERATOR_METRICS,
-               **emissions.NETWORK_METRICS, **curtailment.METRICS}
+               **emissions.NETWORK_METRICS, **curtailment.METRICS, **capacity.METRICS,
+               **cycles.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -93,11 +96,14 @@ PROFILES = {
     emissions.GENERATOR_PROFILE: tuple(emissions.GENERATOR_METRICS),
     emissions.NETWORK_PROFILE: tuple(emissions.NETWORK_METRICS),
     curtailment.PROFILE: tuple(curtailment.METRICS),
+    capacity.PROFILE: tuple(capacity.METRICS),
+    cycles.PROFILE: tuple(cycles.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
 OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE, price.PROFILE,
-                             *emissions.PROFILES, curtailment.PROFILE})
+                             *emissions.PROFILES, curtailment.PROFILE, capacity.PROFILE,
+                             cycles.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -328,6 +334,10 @@ def scoped_source(ctx, scope, owner=None):
         return emissions.source(ctx, scope["entity_id"], scope["profile"] == emissions.NETWORK_PROFILE)
     if scope["profile"] == curtailment.PROFILE:
         return curtailment.source(ctx, scope["entity_id"])
+    if scope["profile"] == capacity.PROFILE:
+        return capacity.source(ctx, scope["entity_id"], scope.get("component_class"))
+    if scope["profile"] == cycles.PROFILE:
+        return cycles.source(ctx, scope["entity_id"], scope.get("component_class"))
     if scope["profile"] in branch.PROFILES:
         return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
                              scope.get("component_class"))
@@ -514,6 +524,10 @@ def scoped_calculate(raw, scope):
         return emissions.calculate(raw, scope)
     if scope["profile"] == curtailment.PROFILE:
         return curtailment.calculate(raw, scope)
+    if scope["profile"] == capacity.PROFILE:
+        return capacity.calculate(raw, scope)
+    if scope["profile"] == cycles.PROFILE:
+        return cycles.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -674,6 +688,10 @@ def disclosure(scope):
         return emissions.DISCLOSURE
     if scope["profile"] == curtailment.PROFILE:
         return curtailment.DISCLOSURE
+    if scope["profile"] == capacity.PROFILE:
+        return capacity.DISCLOSURE
+    if scope["profile"] == cycles.PROFILE:
+        return cycles.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:
