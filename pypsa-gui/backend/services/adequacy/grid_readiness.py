@@ -663,49 +663,66 @@ def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
                               ramp_limit_mw_per_min=ramp["limit"],
                               oscillation_limit_pct=(osc or {}).get("limit"),
                               connection_mw=inp.connection_mw, band_hz=OSCILLATION_BAND_HZ)
-    screened = [ph for ph in (screen or {}).get("phases", []) if after_mitigation(ph) is not None]
+    screened = [(ph, after_mitigation(ph)) for ph in (screen or {}).get("phases", [])]
+    screened = [(ph, after) for ph, after in screened if after is not None]
     if not screened:
         return
-    ph = max(screened, key=lambda q: q["step_mw"])
-    after = after_mitigation(ph)
-    units = ph["units"]
-    words = f"{ph['verdict']} by the smoothing screen: {ph['note']}"
-    hz = 1.0 / after["period_s"] if after["period_s"] > 0 else math.inf
-    in_band = OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1]
+    units = sorted({u for ph, _ in screened for u in ph["units"]})
+    before = ramp["project_value"]
+    limit = ramp["limit"]
 
-    def attach(row, value, rule, how):
+    def values(ph, after):
+        """(ramp after, oscillation after, voltage change after, words) of one phase."""
+        s = after["step_mw"]
+        frac = after["residual_step_mw"] / s if s > 0 else 0.0
+        a_res, period = after["residual_amplitude_mw"], after["period_s"]
+        osc_slope = mw_per_s_to_mw_per_min(2.0 * math.pi * a_res / period) if period > 0 else 0.0
+        # The batteries' share at the limit, the UPSs' at their walk-in rate,
+        # the uncovered part at the envelope's rate (conservative); the residual
+        # oscillation's slope 2π·A/T stands on its own.
+        shaped = ((min(limit, before) if after["covered_battery_mw"] > 0 else 0.0)
+                  + after["ups_ramp_mw_per_min"] + frac * before) if before is not None else None
+        r = None if before is None else min(before, max(shaped, osc_slope))
+        hz = 1.0 / period if period > 0 else math.inf
+        o = (2.0 * a_res / inp.connection_mw * 100.0
+             if inp.connection_mw and OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1] else None)
+        v = after["residual_step_mw"] / sk * 100.0 if sk else None
+        parts = [f"{ph['cod'][:4] if ph.get('cod') else 'the phase'}: of the {s:.3g} MW step, batteries "
+                 f"hold {after['covered_battery_mw']:.3g} MW to the {limit:g} MW/min limit"]
+        if after["covered_ups_mw"] > 0:
+            parts.append(f"the UPS walks {after['covered_ups_mw']:.3g} MW in over {after['ups_walk_in_s']:g} s "
+                         f"({after['ups_ramp_mw_per_min']:.3g} MW/min)")
+        parts.append(f"the uncovered part ({after['residual_step_mw']:.3g} MW) is counted at the envelope's "
+                     f"rate, conservatively, and a {a_res:.3g} MW oscillation remains")
+        return r, o, v, "; ".join(parts) + f"; {ph['verdict']} by the smoothing screen: {ph['note']}"
+
+    sk = _poc_sk_mva(inp.n)
+    per_phase = [values(ph, after) for ph, after in screened]
+
+    def worst(i):
+        """The worst after value over the screened phases for result ``i``, and its words."""
+        got = [(x[i], x[3]) for x in per_phase if x[i] is not None]
+        return max(got, key=lambda t: t[0]) if got else (None, None)
+
+    def attach(row, i, rule):
         if row is None:
             return
+        value, how = worst(i)
         if row["project_value"] is None or row["limit"] is None or value is None:
+            if row is osc and value is None and row["project_value"] is not None:
+                return                     # outside the band of concern: nothing to smooth
             row["after_battery"] = {"value": None, "verdict": "unknown", "rule": dict(rule), "units": units,
                                     "note": "not known yet: the row itself has no value"}
             return
-        row["after_battery"] = {"value": round(value, 4), "verdict": _judge(round(value, 4), row["limit"], rule),
-                                "rule": dict(rule), "units": units, "note": f"{how}; {words}"}
+        v = round(value, 4)
+        row["after_battery"] = {"value": v, "verdict": _judge(v, row["limit"], rule), "rule": dict(rule),
+                                "units": units, "note": how}
 
-    # The covered part arrives at the limit; the rest, conservatively, at the
-    # row's own steepest rate; the residual oscillation's slope 2π·A/T stands.
-    s_frac = after["residual_step_mw"] / after["step_mw"] if after["step_mw"] > 0 else 0.0
-    w = ph["step_mw"]
-    a_res = after["residual_amplitude_mw"]
-    osc_per_min = (mw_per_s_to_mw_per_min(2.0 * math.pi * a_res / after["period_s"])
-                   if after["period_s"] > 0 else 0.0)
-    before = ramp["project_value"]
-    ramp_after = None if before is None else min(
-        before, max(min(ramp["limit"], before) + s_frac * before, osc_per_min))
-    attach(ramp, ramp_after, RULE_RAMP,
-           f"the battery/UPS covers {after['covered_step_mw']:.3g} of the {w:.3g} MW step at the "
-           f"{ramp['limit']:g} MW/min limit; the uncovered part ({after['residual_step_mw']:.3g} MW) is "
-           f"counted at the envelope's rate, conservatively, and a {a_res:.3g} MW oscillation remains")
-    if osc is not None and in_band and inp.connection_mw:
-        attach(osc, 2.0 * a_res / inp.connection_mw * 100.0, RULE_OSC,
-               f"{after['amplitude_mw'] - a_res:.3g} of the {after['amplitude_mw']:.3g} MW amplitude held by "
-               "the battery/UPS")
+    attach(ramp, 0, RULE_RAMP)
+    attach(osc, 1, RULE_OSC)
     rvc = by_id.get("rapid_voltage_change")
-    sk = _poc_sk_mva(inp.n)
     if rvc is not None and rvc.get("rule") and sk:
-        attach(rvc, after["residual_step_mw"] / sk * 100.0, RULE_RVC,
-               f"the {after['residual_step_mw']:.3g} MW the battery/UPS does not cover, over {sk:g} MVA")
+        attach(rvc, 2, RULE_RVC)
 
 
 # ── the scorecard ──────────────────────────────────────────────────────────

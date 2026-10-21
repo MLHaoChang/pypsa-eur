@@ -286,21 +286,20 @@ def smoothing_screen(n, island: dict | None, envelope: dict | None, *, ramp_limi
 
 def after_mitigation(ph: dict) -> dict | None:
     """What the point of connection sees once the battery/UPS has smoothed,
-    from one screened phase (``_phase``): ``{step_mw, covered_step_mw,
-    residual_step_mw, amplitude_mw, residual_amplitude_mw, period_s}``, or
-    None when the phase was not screened (no battery/UPS, no ramp limit).
-
-    The band a covered step S_c takes scales with S_c², so the reserve's
-    energy covers S_c = S·√min(1, E_r/band) and its power S_c ≤ P_r. What is
-    left after the band and the step's MW goes to the oscillation, up to its
-    whole amplitude: A_c = min(A, P_r − S_c, (E_r − band(S_c))·π/T)."""
+    from one screened phase (``_phase``, its ``coverage``): ``{step_mw,
+    covered_battery_mw, covered_ups_mw, ups_ramp_mw_per_min, covered_step_mw,
+    residual_step_mw, amplitude_mw, residual_amplitude_mw, period_s}``, or None
+    when the phase was not screened (no battery/UPS, no ramp limit). The
+    batteries' share reaches the grid at the ramp limit, the UPSs' at their
+    walk-in rate, the rest unshaped."""
     if ph.get("verdict") not in ("covered", "short"):
         return None
-    s, p, e = ph["step_mw"], ph["reserve_mw"], ph["reserve_mwh"]
-    band = 2.0 * ph["step_mwh"]
-    s_c = min(p, s * math.sqrt(min(1.0, e / band)) if band > 0 else s)
-    left = max(0.0, e - band * (s_c / s) ** 2) if s > 0 else e
-    amp, period = ph.get("amplitude_mw", 0.0), ph.get("period_s", 0.0)
-    a_c = min(amp, max(0.0, p - s_c), left * math.pi * 3600.0 / period if period > 0 else 0.0)
-    return {"step_mw": s, "covered_step_mw": s_c, "residual_step_mw": max(0.0, s - s_c),
-            "amplitude_mw": amp, "residual_amplitude_mw": max(0.0, amp - a_c), "period_s": period}
+    s = ph["step_mw"]
+    covered = min(s, ph["covered_battery_mw"] + ph["covered_ups_mw"])
+    amp = ph.get("amplitude_mw", 0.0)
+    return {"step_mw": s, "covered_battery_mw": ph["covered_battery_mw"],
+            "covered_ups_mw": ph["covered_ups_mw"], "ups_ramp_mw_per_min": ph["ups_ramp_mw_per_min"],
+            "ups_walk_in_s": ph["ups_walk_in_s"], "covered_step_mw": covered,
+            "residual_step_mw": max(0.0, s - covered), "amplitude_mw": amp,
+            "residual_amplitude_mw": max(0.0, amp - ph["oscillation_covered_mw"]),
+            "period_s": ph.get("period_s", 0.0)}
