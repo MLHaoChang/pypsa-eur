@@ -97,7 +97,7 @@ def _tag_columns(n) -> None:
 # Owner 2026-10-13: every candidate is priced from the pack through the asset
 # schema (overnight parts; PyPSA or `derive.apply_parts` annuitises them at
 # the pack's discount rate), never from an annualised literal.
-TEMPLATE_PACK_VERSION = "2026-10-13"
+TEMPLATE_PACK_VERSION = "2026-10-22"
 
 
 def _price(n, component: str, name: str, technology: str) -> None:

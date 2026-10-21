@@ -29,7 +29,7 @@ HORIZON_END = 2045
 DISCOUNT_RATE = 0.07
 
 #: The defaults-pack version that carries the ammonia rows (``haber-bosch``, ``nh3-tank``, ``h2-tank``).
-AMMONIA_PACK_VERSION = "2026-10-20"
+AMMONIA_PACK_VERSION = "2026-10-22"
 
 # ── The numbers, each with its ledger row below ────────────────────────────
 #: NH3 energy content (MWh LHV per t): config.default.yaml:1015 (``MWh_NH3_per_tNH3``).

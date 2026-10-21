@@ -34,6 +34,9 @@ stated before any solver time is spent.
     per MWh; the solve pays both (the tariff is added to the Link's cost),
     and the message names the Link's price, the tariff's and their sum. The
     numbers are not changed (owner decision 2026-10-13).
+  * `commercial.grid_connection_double_count` (warning, GS-2b): an asset priced from a pack row
+    that includes the grid connection, on a project whose connection agreement charges a capacity
+    fee;
   * `commercial.group_fee_bypass` (warning): a capacity fee on `poc_link`
     while another group member is extendable (it takes capacity fee-free).
   * `commercial.meter_bypass` (warning, P2 WP2.2c round 2): a grid-side bus
@@ -154,6 +157,30 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
                  f"{exc}); the solve applies its own checks.")]
 
 
+def _connection_double_count(n, fee) -> list[tuple[str, str, str, str, str]]:
+    """`commercial.grid_connection_double_count` (warning, GS-2b): an asset priced from a defaults-pack
+    row whose overnight cost already includes the grid connection
+    (`includes_grid_connection` true, recorded in its provenance) sits on a project that also
+    charges a connection capacity fee. Warns, never raises: the row may include only a share."""
+    if fee is None:
+        return []
+    from services.asset_schema import provenance
+
+    out = []
+    for comp, cls in (("generators", "Generator"), ("storage_units", "StorageUnit"),
+                      ("links", "Link"), ("stores", "Store")):
+        for name in getattr(n, comp).index:
+            rec = provenance.get(n, cls, str(name)).get("overnight_cost") or {}
+            if rec.get("includes_grid_connection") is True:
+                out.append(("warning", "commercial.grid_connection_double_count", cls, str(name),
+                            f"{name!r} is priced from a defaults-pack row whose overnight cost "
+                            "already includes the grid connection, and the connection agreement "
+                            "also charges a capacity fee: the connection may be paid twice. "
+                            "Drop the fee, or price the asset from a row that leaves the "
+                            "connection out."))
+    return out
+
+
 def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, str]]:
     out: list[tuple[str, str, str, str, str]] = []
     # Netted of η_import, never gated on the efficiency-blind count: with an
@@ -183,6 +210,8 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
                         f"The connection capacity fee is charged on {cfg.poc_link!r} only; "
                         f"extendable group member(s) {free} can take capacity without it. "
                         "Fix their capacity or model their fee on the Link's capital_cost."))
+
+    out += _connection_double_count(n, fee)
 
     for item_id, msg in demand_resolution_warnings(n, cfg):
         out.append(("warning", "commercial.demand_resolution", "", item_id, msg))

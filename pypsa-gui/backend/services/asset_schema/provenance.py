@@ -63,6 +63,15 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
     }
 
 
+def annotate(n, component_class: str, name: str, field: str, **extra: Any) -> None:
+    """Add keys to a field's recorded entry (the typed cost units of a pack row: `capacity_basis`,
+    `includes_grid_connection`, `connection_fee_review`). Nothing is recorded for a field that
+    `record` has not written; `record` itself replaces the entry, extras included."""
+    entry = _root(n).get(component_class, {}).get(name, {}).get(field)
+    if entry is not None:
+        entry.update(extra)
+
+
 def mark_customised(n, component_class: str, name: str, fields: Iterable[str]) -> None:
     """A person changed these fields. The source they overrode stays, so the card can say what it replaced."""
     asset = _root(n).setdefault(component_class, {}).setdefault(name, {})

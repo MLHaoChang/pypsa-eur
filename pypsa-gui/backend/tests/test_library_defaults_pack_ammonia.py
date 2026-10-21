@@ -70,8 +70,8 @@ def test_the_new_version_is_the_latest_and_pinned(new, prev):
     from services.library.defaults_pack import loader
 
     pins = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
-    assert loader.available_versions()[-2:] == (PREV, NEW)
-    assert loader.load_defaults_pack().version == NEW
+    versions = loader.available_versions()
+    assert versions[versions.index(PREV) + 1] == NEW      # later versions may follow (typed units)
     assert new.hash == pins[NEW] != prev.hash == pins[PREV]
 
 
