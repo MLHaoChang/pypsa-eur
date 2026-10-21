@@ -493,6 +493,9 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  /** One-shot: Time Series opens on this component's tab with it selected
+   *  ("give it a time series", UX-flow #24). */
+  timeSeriesFocus: { type: string; name: string } | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -635,6 +638,8 @@ interface UIStore {
   clearBottomTabRequest: () => void
   requestResultsTab: (tab: string) => void
   clearResultsTabRequest: () => void
+  focusTimeSeries: (type: string, name: string) => void
+  clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -718,6 +723,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
@@ -954,6 +960,10 @@ export const useUIStore = create<UIStore>((set) => ({
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   requestResultsTab: (tab) => { navigationChanged(); set({ resultsTabRequest: tab }) },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  focusTimeSeries: (type, name) => set({
+    timeSeriesFocus: { type, name }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
+  }),
+  clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),

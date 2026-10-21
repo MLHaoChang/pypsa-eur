@@ -10,6 +10,7 @@ import { simulationApi } from '../../api/simulation'
 import { isActive } from '../../api/solveQueue'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useSolveQueue } from '../../hooks/useSolveQueue'
+import { storedStudyRef, useDecisionStore } from '../../pages/decision/decisionStore'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { countOpen } from '../../utils/flowItems'
@@ -169,6 +170,12 @@ function ResultRows({ onCloseModal }: Props) {
   const { data: projects } = useQuery({ queryKey: ['projects'], queryFn: projectsApi.list, staleTime: 10_000 })
   const openProject = projects?.find(p => p.id === currentProject || p.name === currentProject)
   const knownNotAStudy = !!openProject && openProject.project_kind !== 'planning_dynamics'
+  // A decision study is its own project kind, started and reopened from the
+  // projects home (workspace-reconciliation §6.2): the row shows only in the
+  // study's own project, or while its panel is open (UX-flow #21).
+  const studyRef = useDecisionStore(s => s.active) ?? storedStudyRef()
+  const showDecision = activeSlidePanel === 'decision'
+    || (!!studyRef && !!currentProject && studyRef.project === currentProject)
   return (
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"
@@ -176,9 +183,11 @@ function ResultRows({ onCloseModal }: Props) {
       <SItem icon={<Cable size={15} />} label="Grid study results"
         title="What the electrical design study found: transformers, reactive compensation, short circuit and PCC compliance at the critical hours."
         active={activeSlidePanel === 'campusResults'} onClick={() => toggle('campusResults')} />
-      <SItem icon={<Scale size={15} />} label="Decision study"
-        title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
-        active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />
+      {showDecision && (
+        <SItem icon={<Scale size={15} />} label="Decision study"
+          title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
+          active={activeSlidePanel === 'decision'} onClick={() => toggle('decision')} />
+      )}
       {!knownNotAStudy && (
         <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
           title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."

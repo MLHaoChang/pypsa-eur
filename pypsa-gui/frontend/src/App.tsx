@@ -60,6 +60,9 @@ import { acquireProjectLock, invalidateNetworkQueries, stopLockHeartbeat, switch
 import { nk } from './utils/queryKeys'
 import { appLog, useSimulationStore } from './store/simulationStore'
 import { PanelChromeContext, type PanelChrome } from './components/PageKit'
+import { NextSectionButton } from './components/NextSectionButton'
+import { PANEL_SECTION } from './layout/flowSections'
+import { openSectionInExpert } from './layout/flowNavigation'
 import BackToHubResults from './components/BackToHubResults'
 
 // Top-level boundary so any render error in the header/tabs/sidebar/etc. shows
@@ -193,9 +196,17 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
   // ref so the context value (and the PageHeader's claim effect) stays stable.
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
+  // The panel's section says what comes next in Expert; Guided has its own
+  // footer under each section.
+  const section = uiMode === 'expert' ? PANEL_SECTION[panel] : undefined
+  const next = section
+    ? <NextSectionButton from={section} onNext={openSectionInExpert} testId="panel-next-section" />
+    : null
   const chrome = useMemo<PanelChrome>(
-    () => ({ eyebrow: meta.eyebrow, onClose: () => onCloseRef.current(), claimHeader: setHeaderClaimed }),
-    [meta.eyebrow],
+    () => ({ eyebrow: meta.eyebrow, onClose: () => onCloseRef.current(), claimHeader: setHeaderClaimed, next }),
+    // `next` is rebuilt per render; the section is what changes it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [meta.eyebrow, section],
   )
   return (
     <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-bg">
@@ -208,6 +219,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
         <span className="text-[12px] font-semibold text-text tracking-[-0.005em]">{meta.title}</span>
         <span className="flex-1" />
         {fromHub && <BackToHubResults />}
+        {next}
         <button
           onClick={onClose}
           title="Close (Esc)"

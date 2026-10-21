@@ -330,7 +330,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 214 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 234 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -362,6 +362,11 @@ the EH study's per-year LOLE) stays withheld: no per-sample series is retained.
 time-weighted price, generator CO2 over the time-varying efficiency with the cap's
 dual as −mu, and curtailment of generators with a time-varying availability. Every
 profile refuses once an AC power flow has overwritten the LP outputs.
+`capacity/1` (opt-in) reports one named-class component's `*_nom_opt` and its
+change, and says when it was built to its bound; `storage-cycles/1` divides window
+discharge (store weights) by energy capacity, sharing the StorageUnit profile's
+per-snapshot bounds helper; cyclic units are checked against their bounds only.
+`tests/test_profile_registry.py` keeps every metric name to one module.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
