@@ -1,1 +1,1 @@
-* Fix(pypsa-gui): The post-LOPF AC power flow now runs every Link (including energy-hub PoC/import Links) at its LP flow instead of at an unset `p_set`, so the slack no longer carries the import and AC-PF loadings and voltages on that path match the dispatch.
+* Fix(pypsa-gui): The load flow after the optimisation now carries Link flows (grid import) instead of leaving the import to the slack; results read after a load flow no longer lose Link flows.
