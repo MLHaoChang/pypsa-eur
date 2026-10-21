@@ -39,6 +39,7 @@ import { useUIStore } from '../store/uiStore'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
@@ -213,6 +214,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
       {part === 'inputs' && (<>
         <CampusFileSection name={name} state={state.data} onChange={refresh} />
         <GridConnectionSection name={name} state={state.data} />
+        <ConnectionLimits />
         <CampusGridCodeSection
           name={name}
           onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
