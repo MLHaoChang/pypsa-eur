@@ -85,6 +85,12 @@ FEE_BUILT_ATTR = "_ic_fee_built"        # transient: set by the LP wrapper, read
 # is fixed). The agreement then pins the connection at its designed size and
 # adds no fee term, and nothing is committed (WP1.4 review round 2 #1).
 OPERATIONAL_ATTR = "_ic_operational"
+# Set by a fixed-size run (F1, = adequacy.sweep.FIXED_DESIGN_ATTR; not imported):
+# ``{"source", "sizes"}``. The design is fixed, so the connection is pinned at
+# the run's size with no fee term, but the run is a real one: its records
+# commit. The design run's fee carries over only while the pinned size is the
+# one it was committed with (``size_mw``); otherwise it is not established.
+FIXED_DESIGN_ATTR = "_fixed_design"
 # Set by a study that imposes a planning limit on a Link ({link: MW}), e.g. the
 # lever study's `import_cap`: the agreement never lifts it (round 3 #3).
 LINK_LIMITS_ATTR = "_ic_link_limits"
@@ -292,8 +298,10 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
     limit = (getattr(n, LINK_LIMITS_ATTR, None) or {}).get(poc_link)
     if limit is not None:
         cap = min(cap, float(limit))  # a study's planning limit is never lifted
-    operational = bool(getattr(n, OPERATIONAL_ATTR, False))
+    fixed_design = getattr(n, FIXED_DESIGN_ATTR, None)
+    operational = bool(getattr(n, OPERATIONAL_ATTR, False)) or bool(fixed_design)
     design_mismatch = False
+    pinned_size: float | None = None
     fixed_fee_by_period: dict | None = None
     closed, first_open = _available_mask(n, agreement, timezone)
     try:
@@ -302,11 +310,20 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
             # solve chose (freeze_capacities' min = size, max = size + ε).
             size = float(n.links.at[poc_link, "p_nom_opt"]) \
                 if "p_nom_opt" in n.links.columns else float("nan")
+            if fixed_design:
+                # The fixed-size run's own size for the Link: what it froze,
+                # else (a Link extendable only under the agreement) its source.
+                frozen = (fixed_design.get("sizes") or {}).get(f"links/{poc_link}")
+                if frozen is not None:
+                    size = float(frozen)
+                elif fixed_design.get("source") == "nom":
+                    size = float(n.links.at[poc_link, "p_nom"])
             if not np.isfinite(size):
                 size = float(n.links.at[poc_link, "p_nom"])
             built = n.meta.get(META_FEE) or {}
             design_mismatch = built.get("link") != poc_link or size > cap + 1e-9
             size = min(max(size, 0.0), cap)  # never above the contract
+            pinned_size = size
             _set_static(n, applied, poc_link, "p_nom_extendable", True)
             _set_static(n, applied, poc_link, "p_nom_min", size)
             _set_static(n, applied, poc_link, "p_nom_max", size + 1e-6)
@@ -368,8 +385,28 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
                                   "hash_version": _HASH_VERSION}
         built = getattr(n, FEE_BUILT_ATTR, None)
         if built is not None:
-            n.meta[META_FEE] = {**built, "agreement_hash": agreement_hash(agreement),
+            size_mw = (float(n.links.at[poc_link, "p_nom_opt"])
+                       if "p_nom_opt" in n.links.columns else None)
+            n.meta[META_FEE] = {**built, "size_mw": size_mw,
+                                "agreement_hash": agreement_hash(agreement),
                                 "hash_version": _HASH_VERSION}
+        elif fixed_design and pinned_size is not None:
+            # A fixed-size run: the design's fee stands only for this
+            # agreement at its own size. A record without `size_mw` (written
+            # before F1) cannot show that, so it reads not established too.
+            from services.solver.fixed_sizes import TOLERANCE_MW
+
+            prior = n.meta.get(META_FEE) or {}
+            committed = prior.get("size_mw")
+            if not (prior.get("link") == poc_link and "not_established" not in prior
+                    and prior.get("agreement_hash") == agreement_hash(agreement)
+                    and committed is not None
+                    and abs(float(committed) - pinned_size) <= TOLERANCE_MW):
+                n.meta[META_FEE] = {
+                    "link": poc_link,
+                    "not_established": "connection size changed since the design run",
+                    "agreement_hash": agreement_hash(agreement),
+                    "hash_version": _HASH_VERSION}
         else:
             n.meta.pop(META_FEE, None)
         if fixed_fee_by_period is not None:
