@@ -7,6 +7,7 @@ import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
+import { CommercialCard } from './cards/CommercialCard'
 import { sectionMeta } from '../../layout/flowSections'
 import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../../layout/flowNavigation'
 
@@ -138,6 +139,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
     )
   }
   const s = section(id)
+  if (id === 'commercial') return <CommercialCard />
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <p className="text-[12px] text-muted">

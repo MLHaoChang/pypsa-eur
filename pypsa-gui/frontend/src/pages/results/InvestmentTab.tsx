@@ -11,6 +11,7 @@ import {
   type ValueFlowsPayload,
 } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
+import { openSectionInExpert } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
@@ -116,7 +117,10 @@ export default function InvestmentTab() {
   const island = poc.data?.open === true
   const [section, setSection] = useState<SectionId>('participants')
   const expert = useUIStore(s => s.uiMode === 'expert')
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const openCommercial = () => {
+    if (expert) openSectionInExpert('commercial')
+    else { const ui = useUIStore.getState(); ui.setActiveSection('commercial'); ui.setSlidePanel(null) }
+  }
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -183,14 +187,12 @@ export default function InvestmentTab() {
                 {participantsText}
               </p>
             )}
-            {expert && (
-              <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
-                The tariff, contracts, finance inputs, library and participants are set under
-                Expert → Economics.{' '}
-                <button type="button" className="underline"
-                        onClick={() => setSlidePanel('economics')}>Open Economics</button>
-              </p>
-            )}
+            <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
+              The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
+              <button type="button" className="underline" onClick={openCommercial}>
+                Open Commercial &amp; parties
+              </button>
+            </p>
           </div>
         )}
         {section === 'case' && <InvestmentCaseView />}

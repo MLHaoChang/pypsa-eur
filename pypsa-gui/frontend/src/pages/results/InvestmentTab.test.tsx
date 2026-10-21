@@ -251,23 +251,26 @@ describe('InvestmentTab → Economics', () => {
   })
   afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
 
-  it('holds no input editors: the sections are results, with one link to Economics', async () => {
+  it('holds no input editors: the sections are results, with one link to Commercial & parties', async () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
     renderTab()
     const names = screen.getAllByRole('tab').map(t => t.textContent)
     expect(names).toEqual(['Participants', 'Bill', 'Investment case'])
     expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
-      .toMatch(/Economics/)
+      .toMatch(/set in Commercial & parties/)
     expect(screen.queryByRole('button', { name: /Define participants/ })).toBeNull()
-    fireEvent.click(screen.getByRole('button', { name: 'Open Economics' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open Commercial & parties' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
   })
 
-  it('Guided never shows the link', async () => {
-    useUIStore.setState({ uiMode: 'guided' })
+  it('Guided: the link goes to the Guided section-7 card, not to Expert', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
     renderTab()
-    await screen.findByTestId('ic-participants-state')
-    expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Commercial & parties' }))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 
   it('shows an island with an open PoC: no connection, tariff or export to set (H4)', async () => {

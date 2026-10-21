@@ -7,6 +7,7 @@ import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
@@ -1255,15 +1256,14 @@ function FuelLimitsPerPeriod({ existingRows }: { existingRows: GlobalConstraint[
 // before n.optimize() and reverts after — the network on disk stays unchanged.
 /** A rate set under Economics (section 7): shown here, edited there. */
 function ReadOnlyRate({ label, value }: { label: string; value: number | null | undefined }) {
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   return (
     <div className="flex flex-col gap-1" data-testid={`solver-rate-${label.split(' ')[0].toLowerCase()}`}>
       <span className="text-[10px] text-muted">{label} (%)</span>
       <span className="text-xs font-mono text-text py-0.5">
         {value == null || Number.isNaN(value) ? 'not set' : Number((value * 100).toFixed(4))}
       </span>
-      <button type="button" className="text-[10px] underline text-left" onClick={() => setSlidePanel('economics')}>
-        Edit in Economics
+      <button type="button" className="text-[10px] underline text-left" onClick={() => openSectionInExpert('commercial')}>
+        Edit in Commercial &amp; parties
       </button>
     </div>
   )

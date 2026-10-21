@@ -23,10 +23,11 @@ describe('Solver settings: rates', () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
-  it('links home: Edit in Economics opens the Economics panel', () => {
+  it('links home: Edit in Commercial & parties opens Commercial & parties in Expert', () => {
     wrap(<EconomicAssumptions draft={DRAFT} patch={vi.fn()} />)
-    fireEvent.click(screen.getAllByRole('button', { name: 'Edit in Economics' })[0])
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit in Commercial & parties' })[0])
     expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
   })
 
   it('a missing rate reads "not set", never 0', () => {
