@@ -174,6 +174,7 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                       "would be counted twice. Unconfirmed, nothing is applied."})
     pack_year = pack_overnight.currency_year if pack_overnight is not None else None
     read_as = base_year if base_year is not None else pack_year
+    no_money_year = read_as is None
     if read_as is not None and read_as != ref.currency_year:
         against = (f"the investment case's base year ({read_as})" if base_year is not None
                    else f"the default it replaces ({read_as} {pack_currency or ref.currency})")
@@ -187,6 +188,9 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     notes = []
     if period is not None and period != ref.projection_year:
         notes.append(f"The reference is the {ref.projection_year} projection; this asset's period is {period}.")
+    if no_money_year:
+        notes.append(f"No investment case or default value to compare money years with: the value is "
+                     f"{ref.currency_year} {ref.currency} price data, as the source states.")
 
     fields = {"overnight_cost": "overnight", "lifetime": "lifetime", "fom_cost": "fom_share",
               "efficiency": "efficiency"}
@@ -208,6 +212,10 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
             "projection_year": projection_year, "attrs": attrs, "rows": rows, "base_year": base_year,
             "needs": needs, "missing": [x["confirmation"] for x in needs if x["confirmation"] not in confirm],
             "notes": notes, "pack": detail.pack.model_dump(), "source": source_id(ref),
+            "source_year": part.overnight.source_year,
+            # What a re-apply compares against: the pack source this asset had before any reference.
+            "replaces": (stamps.get("overnight_cost") or {}).get("replaces")
+            or (stamps.get("overnight_cost") or {}).get("source"),
             "currency": ref.currency, "currency_year": ref.currency_year,
             "licence": ref.licence, "attribution": ref.attribution}
 
@@ -243,7 +251,7 @@ def stamp(n, p: dict, *, approved_by: str | None, approved_at: str | None = None
     when = approved_at or datetime.now(UTC).isoformat(timespec="seconds")
     for field in p["attrs"]:
         provenance.record(n, p["component_class"], p["name"], field, status="customised",
-                          source=p["source"], source_year=2026,
+                          source=p["source"], source_year=p["source_year"], replaces=p["replaces"],
                           currency_year=p["currency_year"] if field in ("overnight_cost", "fom_cost") else None,
                           currency=p["currency"] if field in ("overnight_cost", "fom_cost") else None,
                           approved_by=approved_by, approved_at=when)

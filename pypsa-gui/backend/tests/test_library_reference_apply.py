@@ -240,7 +240,7 @@ def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client,
     # AC basis undeclared, and 2025 EUR beside the generic pack's 2020 EUR
     assert body["card"] is None and body["missing"] == ["dc_ac", "money_year"]
     assert "AC output" in body["needs"][0]["text"] and "not adjusted" in body["needs"][1]["text"]
-    r = client.post(f"{ROUTE}/apply", json=pv)
+    r = client.post(f"{ROUTE}/apply", json={**pv, "digest": "never-shown"})
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
     card = client.post(f"{ROUTE}/preview", json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
     assert any(row["field"] == "dc_ac" and row.get("confirmed") for row in card["rows"])
@@ -306,3 +306,31 @@ def test_money_years_in_use_lists_each_recorded_cost_year():
     assert sorted(years) == [2020, 2025]
     assert ("Generator", "pv", "overnight_cost") in years[2025]
     assert ("Generator", "wind", "overnight_cost") in years[2020]
+
+
+def test_the_http_apply_needs_the_digest_of_a_card_the_user_saw(client, install_network):
+    n = install_network(_net())
+    r = client.post(f"{ROUTE}/apply", json=AEC)
+    assert r.status_code == 422
+    ref = R.load_europe_technology_reference("electrolysis-aec-100mw", 2030)
+    assert n.links.at["electrolyser", "overnight_cost"] != ref.cost_part.overnight.value
+    assert P.get(n, "Link", "electrolyser") == {}
+
+
+def test_re_applying_compares_with_the_pack_the_asset_had_before_and_is_idempotent():
+    n = _net()
+    version = load_defaults_pack().version
+    price_from_pack(n, "generators", "wind", "onwind", version=version)
+    first = A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    _apply(n, first)
+    again = A.plan(n, {}, "Generator", "wind", "onwind", 2030)
+    assert again["pack"]["chosen_by"] == "asset_provenance" and again["pack"]["version"] == version
+    assert again["attrs"] == first["attrs"] and again["missing"] == first["missing"]
+    _apply(n, again)
+    assert P.get(n, "Generator", "wind")["overnight_cost"]["replaces"].startswith(f"generic_defaults@{version}")
+
+
+def test_no_default_and_no_case_is_a_note_not_a_silent_skip():
+    p = A.plan(_net(), {}, "Link", "electrolyser", "electrolysis-pem-100mw", 2030)
+    assert "money_year" not in p["missing"]
+    assert any("No investment case or default value" in note for note in p["notes"])

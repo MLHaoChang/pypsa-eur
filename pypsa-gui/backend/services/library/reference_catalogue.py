@@ -88,7 +88,10 @@ def pack_for_asset(provenance: dict[str, dict] | None) -> tuple[DefaultsPack, Pa
     """The pack an asset would be priced from: the one its `overnight_cost` provenance
     names, else the latest generic version. A named pack this build cannot load falls
     back to the latest generic, and the note says so."""
-    source = ((provenance or {}).get("overnight_cost") or {}).get("source") or ""
+    # After a reference was applied, the pack it replaced is what the asset "would
+    # otherwise get" (`replaces`), not the reference itself.
+    entry = (provenance or {}).get("overnight_cost") or {}
+    source = entry.get("replaces") or entry.get("source") or ""
     m = _PACK_SOURCE_RE.fullmatch(source)
     if m is not None:
         try:

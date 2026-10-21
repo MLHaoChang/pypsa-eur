@@ -32,8 +32,14 @@ class ReferenceApplyIn(BaseModel):
 
 
 class ReferenceApplyRun(ReferenceApplyIn):
-    # The card the user approved; a moved digest refuses (edit_preview_stale).
+    # The card the user approved; a moved digest refuses (edit_preview_stale). The
+    # HTTP apply always needs it; the assistant's tool passes None because its turn
+    # loop has already checked the card it showed (`edit_card.require_current`).
     digest: str | None = None
+
+
+class ReferenceApplyHttp(ReferenceApplyIn):
+    digest: str = Field(min_length=1)
 
 
 def _args(body: ReferenceApplyIn) -> dict:
@@ -69,6 +75,11 @@ def apply_reference(args: dict, approved_by: str | None) -> dict:
 
 
 @router.post("/library_reference/apply")
+def apply_library_reference_http(body: ReferenceApplyHttp, user: User = Depends(require_user)) -> dict:
+    """The UI's apply: the card the user saw must still be current."""
+    return apply_library_reference(ReferenceApplyRun(**body.model_dump()), user)
+
+
 def apply_library_reference(body: ReferenceApplyRun, user: User = Depends(require_user)) -> dict:
     from harness import edit_card
 

@@ -46,9 +46,10 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
            source_year: int | None = None, currency_year: int | None = None,
            range: tuple[float, float] | None = None, illustrative: bool = False,
            currency: str | None = None, approved_by: str | None = None,
-           approved_at: str | None = None) -> None:
-    """Write one field's provenance, replacing what was there. `currency`, `approved_by` and
-    `approved_at` (a value the user applied from a Library reference) are kept only when given."""
+           approved_at: str | None = None, replaces: str | None = None) -> None:
+    """Write one field's provenance, replacing what was there. `currency`, `approved_by`,
+    `approved_at` and `replaces` (a value the user applied from a Library reference, and the
+    source it replaced) are kept only when given."""
     if status not in STATUSES:
         raise ValueError(f"status must be one of {STATUSES}, got {status!r}")
     entry = {
@@ -59,7 +60,8 @@ def record(n, component_class: str, name: str, field: str, *, status: str, sourc
         "range": None if range is None else [float(range[0]), float(range[1])],
         "illustrative": bool(illustrative),
     }
-    for key, value in (("currency", currency), ("approved_by", approved_by), ("approved_at", approved_at)):
+    for key, value in (("currency", currency), ("approved_by", approved_by), ("approved_at", approved_at),
+                       ("replaces", replaces)):
         if value is not None:
             entry[key] = value
     _root(n).setdefault(component_class, {}).setdefault(name, {})[field] = entry
