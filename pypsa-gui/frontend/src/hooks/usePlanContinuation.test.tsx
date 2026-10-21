@@ -68,7 +68,7 @@ it('reads the server message back as plain words, never the job id', () => {
   const match = CONTINUATION_MESSAGE.exec(item.message)
   expect(match?.[2]).toBe('completed')
   expect(continuationMarker('completed')).toBe('The solve finished · continuing')
-  expect(continuationMarker('failed')).toBe('The solve stopped: it failed · continuing')
+  expect(continuationMarker('failed')).toBe("The solve didn't finish · continuing")
   for (const status of ['completed', 'failed', 'aborted', 'unknown']) {
     expect(continuationMarker(status)).not.toMatch(/fg:|\b(completed|aborted|unknown)\b/)
   }

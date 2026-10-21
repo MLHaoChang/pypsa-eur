@@ -19,7 +19,8 @@ export const CONTINUATION_MESSAGE = /^job (fg:[0-9a-f]+) finished: (completed|fa
 export function continuationMarker(status: string): string {
   if (status === 'completed') return 'The solve finished · continuing'
   if (status === 'aborted') return 'The solve was cancelled'
-  if (status === 'failed') return 'The solve stopped: it failed · continuing'
+  // Until the listing carries the solver's reason: "The solve didn't finish: <plain reason> · continuing".
+  if (status === 'failed') return "The solve didn't finish · continuing"
   return 'The solve ended without a known outcome · continuing'
 }
 
