@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Guided section items and the field drawer name the field as well as the entity ("Connection & grid › Link 'grid_import' › Efficiency"), using the existing labels (the shell's four and the template ledger's). A field with no label shows the entity alone.
