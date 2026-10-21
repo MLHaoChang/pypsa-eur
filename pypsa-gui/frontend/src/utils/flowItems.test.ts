@@ -21,6 +21,18 @@ describe('fieldWords', () => {
       .toBe("Connection & grid › Link 'grid_import' › Connection ramp limit")
     expect(labels.efficiency).toBe('Efficiency')
   })
+  it('leaves the label out when the message already opens with it', () => {
+    const labels = { connection_ramp: 'Connection ramp limit', target_lole_h: 'Reliability goal (LOLE):' }
+    expect(fieldWords({ ...link, field: 'connection_ramp' }, labels, 'Connection ramp limit: 4 MW/min (assumed)'))
+      .toBe("Connection & grid › Link 'grid_import'")
+    expect(fieldWords({ ...link, field: 'connection_ramp' }, labels, 'connection ramp LIMIT is not set'))
+      .toBe("Connection & grid › Link 'grid_import'")
+    expect(fieldWords({ ...link, field: 'connection_ramp' }, labels, 'Ramp is 4 MW/min'))
+      .toBe("Connection & grid › Link 'grid_import' › Connection ramp limit")
+    // Nothing to add when the label was all there was.
+    expect(fieldWords({ section: 'scenarios', component: null, entity: null, field: 'target_lole_h' }, labels,
+      'Reliability goal (LOLE): 3 h/yr')).toBeNull()
+  })
   it('names a labelled field that has no entity, and nothing otherwise', () => {
     expect(fieldWords({ section: 'scenarios', component: null, entity: null, field: 'target_lole_h' }))
       .toBe('Scenarios & optimisation › LOLE target')
