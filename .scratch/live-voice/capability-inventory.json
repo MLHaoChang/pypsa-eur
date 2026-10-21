@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 270,
+  "tool_count": 271,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -4664,6 +4664,25 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_grid_readiness",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "profile"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b638f21159458f54ae0ee6a3d6916a963a83d51be4d58eb13da126e2f7368d09",
       "behavioral_fixture": "pending"
     },
     {
