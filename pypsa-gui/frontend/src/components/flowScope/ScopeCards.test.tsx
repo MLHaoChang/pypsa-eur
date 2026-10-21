@@ -11,7 +11,7 @@ import type { FlowScopeRegistry, FlowScopeValue } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { AddToScope, ScopeCards, toggleCard, toggleOption } from './ScopeCards'
 import { ScopeChips } from './ScopeChips'
-import { NotInScopeGroup } from './NotInScopeGroup'
+import { NotInScopeGroup, SectionNotInScope } from './NotInScopeGroup'
 import { useInScope } from './useFlowScope'
 
 const getFlowScope = vi.fn()
@@ -251,7 +251,9 @@ describe('AddToScope', () => {
 describe('ScopeChips', () => {
   it('names the cards in scope whose blocks the section holds, from the registry', async () => {
     mount(<><ScopeChips section="assets" /><ScopeChips section="commercial" /><ScopeChips section="loads" /></>)
-    expect((await screen.findByTestId('scope-chips-assets')).textContent).toBe('GridReliability')
+    const assets = await screen.findByTestId('scope-chips-assets')
+    expect(assets.textContent).toBe('GridReliability')
+    expect([...assets.children].map(c => c.getAttribute('title'))).toEqual(['AC power flow & grid', 'Reliability'])
     expect(screen.getByTestId('scope-chips-commercial').textContent).toBe('Commercial')
     expect(screen.queryByTestId('scope-chips-loads')).toBeNull()      // Capacity gets no chip
   })
@@ -262,6 +264,10 @@ describe('ScopeChips', () => {
     expect(screen.queryByTestId('scope-chips-assets')).toBeNull()
   })
 })
+
+const OUT_ITEM = { code: 'eh_study_refused', severity: 'error', message: 'The study would not start',
+  source: 'eh_study', blocking: false, acknowledged: false, card: 'reliability', in_scope: false,
+  target: { section: 'scenarios', panel: null, component: null, entity: null, field: null } }
 
 describe('NotInScopeGroup', () => {
   it('lists the out-of-scope items collapsed, with the card that brings each back', async () => {
@@ -281,8 +287,36 @@ describe('NotInScopeGroup', () => {
     await user.click(toggle)
     const row = screen.getByTestId('issues-not-in-scope-row')
     expect(row.textContent).toContain('The study would not start')
-    expect(row.textContent).toContain('Comes back with Reliability.')
-    expect((await screen.findByTestId('issues-not-in-scope-add-reliability-add')).textContent)
-      .toBe('Add goal_study')
+    const add = await screen.findByTestId('issues-not-in-scope-add-reliability')
+    expect(add.textContent).toBe('Add Reliability')
+    await user.click(add)
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.groups).toContain('reliability')
+    expect(sent.options.reliability).toEqual(['goal_study', 'stress'])   // its kept sub-options
+  })
+
+  it('says why where the card cannot be added (no button)', async () => {
+    getProjectFlow.mockResolvedValue({ sections: [{ section: 'scenarios', items: [OUT_ITEM] }] })
+    const reg = registry({ ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability') })
+    const nothing = "Nothing to make adequate: this site only generates and has no load."
+    reg.cards[3].options = reg.cards[3].options.map(o => ({ ...o, status: 'not_yet_available', reason: nothing }))
+    getFlowScope.mockResolvedValue(reg)
+    const user = mount(<NotInScopeGroup />)
+    await user.click(await screen.findByTestId('issues-not-in-scope-toggle'))
+    expect(screen.queryByTestId('issues-not-in-scope-add-reliability')).toBeNull()
+    expect((await screen.findByTestId('issues-not-in-scope-add-reliability-why')).textContent)
+      .toBe(`Comes back with Reliability: ${nothing}`)
+  })
+})
+
+describe('SectionNotInScope (Guided)', () => {
+  it('one muted line, not a count, with the card that brings them back', async () => {
+    getProjectFlow.mockResolvedValue({ sections: [{ section: 'scenarios', items: [OUT_ITEM, OUT_ITEM] }] })
+    getFlowScope.mockResolvedValue(registry({ ...PRESET, groups: PRESET.groups.filter(g => g !== 'reliability') }))
+    mount(<SectionNotInScope section="scenarios" />)
+    const line = await screen.findByTestId('section-not-in-scope')
+    expect(line.textContent).toContain('2 items are not in scope: they come back if you add Reliability.')
+    expect((await screen.findByTestId('section-not-in-scope-add-reliability')).textContent).toBe('Add Reliability')
   })
 })

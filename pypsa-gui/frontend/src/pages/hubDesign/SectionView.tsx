@@ -4,6 +4,7 @@ import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { SectionNotInScope } from '../../components/flowScope/NotInScopeGroup'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
 import { sectionMeta } from '../../layout/flowSections'
@@ -66,6 +67,7 @@ export function SectionView({ id, children }: { id: FlowSectionId; children?: Re
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
+      {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">
           {infos.map((it, i) => <li key={`${it.code}-${i}`}>{it.message}</li>)}

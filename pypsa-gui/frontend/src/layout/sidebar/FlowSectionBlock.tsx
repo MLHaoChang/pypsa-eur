@@ -24,9 +24,10 @@ export function FlowSectionBlock({ id, children }: { id: FlowSectionId; children
         <span className="flex-1 min-w-0 truncate text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-600">
           {meta.label}
         </span>
-        {!stateless && <ScopeChips section={id} />}
         {!stateless && <FlowStateDot state={state} testId={`flow-dot-${id}`} />}
       </div>
+      {/* The cards in scope it holds, under the label so it is never squeezed. */}
+      {!stateless && <ScopeChips section={id} className="flex flex-wrap gap-0.5 pl-9 pr-3 pb-0.5" />}
       {children}
     </div>
   )

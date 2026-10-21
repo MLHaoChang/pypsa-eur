@@ -92,6 +92,31 @@ export function AddToScope({ card, option, testId }: {
 
 /** `collapsed`: Guided's density (a Guided card holds ≤ 3 decisions): one
  *  summary line, and "Change" opens the cards in place. Expert shows them. */
+/** "Add <card>": switches a card on in place, restoring its kept sub-options
+ *  (else the example's). Where the card cannot be added (locked, or nothing
+ *  available) it says why instead. For an item that names only its card. */
+export function AddCardToScope({ card, testId }: { card: ScopeCardId; testId: string }) {
+  const { registry, scope, save } = useFlowScope()
+  const def = registry?.cards.find(c => c.id === card)
+  if (!scope || !def) return null
+  const pickable = def.options.some(o => o.status === 'available' || o.status === 'required')
+  if (def.locked_reason || !pickable) {
+    const why = def.locked_reason ?? def.options.find(o => o.reason)?.reason ?? null
+    return (
+      <span data-testid={`${testId}-why`} className="text-[11px] text-muted">
+        Comes back with {def.label}{why ? `: ${why}` : '.'}
+      </span>
+    )
+  }
+  return (
+    <button type="button" data-testid={testId} disabled={save.isPending}
+      onClick={() => save.mutate(toggleCard(scope, def, true))}
+      className="rounded border border-accent/60 px-2 py-0.5 text-[11px] text-accent hover:bg-accent/10 disabled:opacity-50">
+      Add {def.label}
+    </button>
+  )
+}
+
 export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
   testId?: string
   collapsed?: boolean

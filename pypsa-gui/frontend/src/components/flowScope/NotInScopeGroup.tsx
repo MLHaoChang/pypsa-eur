@@ -1,28 +1,22 @@
-// Expert Issues' "Not in scope (n)" (workspace-reconciliation §5.2, W4a): the
-// flow items the scope leaves out (`in_scope: false`). Collapsed, at the bottom,
-// and in no count or badge: an out-of-scope item never counts, is never to
-// check and never blocks. Each row says which card brings it back, and adds it
-// in place where that is possible.
+// The flow items the scope leaves out (`in_scope: false`, workspace-
+// reconciliation §5.2, W4a). They count nowhere: never to do, to check or a
+// blocker. Expert Issues lists them collapsed at the bottom ("Not in scope
+// (n)"); a Guided section says in one muted line that some exist. Each names
+// the card that brings it back and adds it in place.
 import { useState } from 'react'
 import { ChevronDown } from 'lucide-react'
-import type { FlowItem, ScopeCardDef } from '../../api/flow'
+import type { FlowItem, FlowSectionId, ScopeCardId } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
-import { AddToScope } from './ScopeCards'
+import { AddCardToScope } from './ScopeCards'
 import { useFlowScope } from './useFlowScope'
 
-/** The sub-option that brings a card back: the example's first available
- *  one, else the card's first available one. */
-function bringBack(card: ScopeCardDef | undefined): string | null {
-  if (!card) return null
-  const available = card.options.filter(o => o.status === 'available').map(o => o.id)
-  return available.find(o => card.intended.includes(o)) ?? available[0] ?? null
-}
+const outOfScope = (items: FlowItem[]) => items.filter(i => i.in_scope === false && !i.acknowledged)
 
 export function NotInScopeGroup() {
   const { flow } = useProjectFlow()
   const { registry } = useFlowScope()
   const [open, setOpen] = useState(false)
-  const items: FlowItem[] = (flow?.sections ?? []).flatMap(s => s.items).filter(i => i.in_scope === false)
+  const items = outOfScope((flow?.sections ?? []).flatMap(s => s.items))
   if (items.length === 0) return null
   return (
     <section data-testid="issues-not-in-scope" className="border-t border-border/60">
@@ -36,21 +30,37 @@ export function NotInScopeGroup() {
         <ul className="flex flex-col">
           {items.map((it, i) => {
             const card = registry?.cards.find(c => c.id === it.card)
-            const option = bringBack(card)
             return (
               <li key={`${it.code}-${it.target.entity ?? ''}-${i}`} data-testid="issues-not-in-scope-row"
-                className="flex flex-col gap-1 px-4 py-2 text-[11.5px] text-muted">
+                className="flex flex-col items-start gap-1 px-4 py-2 text-[11.5px] text-muted">
                 <span>{it.message}</span>
-                {card && <span className="text-[10.5px]">Comes back with {card.label}.</span>}
-                {card && option && (
-                  <AddToScope card={card.id} option={option}
-                    testId={`issues-not-in-scope-add-${card.id}`} />
-                )}
+                {card && <AddCardToScope card={card.id} testId={`issues-not-in-scope-add-${card.id}`} />}
               </li>
             )
           })}
         </ul>
       )}
     </section>
+  )
+}
+
+/** Guided: one muted line under a section's items when the scope leaves some
+ *  out. Not a count of work: they come back with their card. */
+export function SectionNotInScope({ section }: { section: FlowSectionId }) {
+  const { section: flowSection } = useProjectFlow()
+  const { registry } = useFlowScope()
+  const items = outOfScope(flowSection(section)?.items ?? [])
+  if (items.length === 0 || !registry) return null
+  const cards = [...new Set(items.map(i => i.card).filter((c): c is ScopeCardId => !!c))]
+  const names = cards.map(c => registry.cards.find(d => d.id === c)?.label ?? c)
+  const n = items.length
+  return (
+    <div data-testid="section-not-in-scope" className="flex flex-wrap items-center gap-2 text-[11.5px] text-muted">
+      <span>
+        {n} item{n === 1 ? ' is' : 's are'} not in scope
+        {names.length > 0 ? `: ${n === 1 ? 'it comes' : 'they come'} back if you add ${names.join(' or ')}.` : '.'}
+      </span>
+      {cards.map(c => <AddCardToScope key={c} card={c} testId={`section-not-in-scope-add-${c}`} />)}
+    </div>
   )
 }
