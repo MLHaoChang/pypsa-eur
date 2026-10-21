@@ -200,6 +200,24 @@ describe('GoalCard run', () => {
     expect(await screen.findByTestId('stress-editor')).toBeTruthy()
   })
 
+  it('out of Reliability › Stress, the stress editor gives way to adding it in place (W4a)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'reliability', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study', 'stress'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null },
+          { id: 'stress', label: 'Stress conditions & FMEA', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    mount()
+    await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
+    expect((await screen.findByTestId('hub-goal-stress-scope-add')).textContent).toBe('Add Stress conditions & FMEA')
+    expect(screen.queryByTestId('stress-editor')).toBeNull()
+  })
+
   it('opens More settings with the stress editor when a link asks for it, once', async () => {
     useHubDesignStore.setState({ goalAdvancedRequested: true })
     mount()

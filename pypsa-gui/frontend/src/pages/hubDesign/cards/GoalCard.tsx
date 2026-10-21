@@ -26,6 +26,7 @@ import {
 } from '../useHubData'
 import { AddToScope, ScopeCards } from '../../../components/flowScope/ScopeCards'
 import { useInScope } from '../../../components/flowScope/useFlowScope'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 export const RELIABILITY_OUT_OF_SCOPE =
   'Outside scope: add Reliability to set a goal and run the study.'
@@ -153,7 +154,10 @@ export function GoalCard() {
       {advanced && (
         <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
           <span className="text-[12px] font-semibold text-text">Stress conditions</span>
-          <StressScenarioEditor project={project} />
+          {/* Reliability › Stress conditions & FMEA owns the editor (W4a). */}
+          <ScopeGate card="reliability" option="stress" testId="hub-goal-stress-scope">
+            <StressScenarioEditor project={project} />
+          </ScopeGate>
         </div>
       )}
 

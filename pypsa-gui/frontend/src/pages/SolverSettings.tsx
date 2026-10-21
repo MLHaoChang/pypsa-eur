@@ -14,6 +14,7 @@ import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
+import { ScopeGate } from '../components/flowScope/ScopeGate'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
 // touch, and an "advanced" key:value table that flows straight into
@@ -118,6 +119,24 @@ function coerceValue(raw: string, kind: ParamSpec['kind']): number | string | bo
   if (raw === 'true') return true
   if (raw === 'false') return false
   return raw
+}
+
+/** The stress conditions (the registry the B/C sweep reads): the same editor
+ *  Guided's Goal card mounts, owned by Reliability › Stress conditions & FMEA
+ *  (W4a), so out of scope it gives way to adding that sub-option. */
+export function StressConditionsSection({ project }: { project: string | null }) {
+  return (
+    <section className="border border-border rounded" data-testid="solver-stress">
+      <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Stress conditions
+      </div>
+      <div className="p-3">
+        <ScopeGate card="reliability" option="stress" testId="solver-stress-scope">
+          <StressScenarioEditor project={project} />
+        </ScopeGate>
+      </div>
+    </section>
+  )
 }
 
 export default function SolverSettings() {
@@ -860,12 +879,7 @@ export default function SolverSettings() {
       <ReliabilityAssumptions draft={draft} patch={patch} />
 
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
-      <section className="border border-border rounded" data-testid="solver-stress">
-        <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
-          Stress conditions
-        </div>
-        <div className="p-3"><StressScenarioEditor project={currentProject} /></div>
-      </section>
+      <StressConditionsSection project={currentProject} />
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
       <SclopfPanel draft={draft} patch={patch} />
