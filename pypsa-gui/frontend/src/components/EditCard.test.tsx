@@ -118,3 +118,12 @@ it('the receipt says the section state only when it changed (PR-2)', () => {
     disabled={false} onRequest={vi.fn()} />)
   expect(screen.queryByTestId('chat-edit-section')).toBeNull()
 })
+
+it.each([['complete', 'complete'], ['warning', 'to check'], ['incomplete', 'to do'], ['not_needed', 'not needed'],
+  ['unknown', 'not known yet']])('the receipt words section state %s as the rail does', (state, words) => {
+  const receipt = { version: 1, digest: card.digest, outcome: 'verified', says: card.says, results_stale: false,
+    rows: [{ ...typed, readback: 400 }], undo: { tool: 'undo_last', available: false },
+    section: { id: 'assets', label: 'Assets & sizing', state, changed: true } }
+  render(<AssistantResultCard result={{ _edit_receipt: receipt }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('chat-edit-section').textContent).toBe(`Assets & sizing: ${words}.`)
+})
