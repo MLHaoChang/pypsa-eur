@@ -15,26 +15,15 @@ import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
-import ParticipantsDesigner from './investment/ParticipantsDesigner'
-import TariffSection from './investment/TariffSection'
-import LibraryBrowser from './investment/LibraryBrowser'
-import ContractsEditor from './investment/ContractsEditor'
-import FinanceInputsEditor from './investment/FinanceInputsEditor'
 import InvestmentCaseView from './investment/InvestmentCaseView'
 import SiteConnectionSection from './investment/SiteConnectionSection'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
   { id: 'bill', label: 'Bill' },
-  { id: 'library', label: 'Library' },
-  { id: 'tariff', label: 'Tariff' },
-  { id: 'contracts', label: 'Contracts' },
-  { id: 'finance', label: 'Finance inputs' },
   { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
-// The sections that edit inputs: Expert → Economics edits the same ones (E3).
-const INPUT_SECTIONS: ReadonlySet<SectionId> = new Set(['tariff', 'library', 'contracts', 'finance'])
 
 export { fmtAmount }
 
@@ -126,7 +115,6 @@ export default function InvestmentTab() {
                          queryFn: () => commercialApi.getPocState() })
   const island = poc.data?.open === true
   const [section, setSection] = useState<SectionId>('participants')
-  const [designing, setDesigning] = useState(false)
   const expert = useUIStore(s => s.uiMode === 'expert')
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
@@ -185,13 +173,6 @@ export default function InvestmentTab() {
       </div>
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
-        {expert && INPUT_SECTIONS.has(section) && (
-          <p className="text-[11px] text-muted pb-2" data-testid="ic-edit-in-economics">
-            These inputs are also under Expert → Economics.{' '}
-            <button type="button" className="underline"
-                    onClick={() => setSlidePanel('economics')}>Open Economics</button>
-          </p>
-        )}
         {section === 'bill' && (
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}
@@ -202,20 +183,16 @@ export default function InvestmentTab() {
                 {participantsText}
               </p>
             )}
-            <button type="button" className="text-[11px] underline" aria-expanded={designing}
-                    onClick={() => setDesigning(d => !d)}>
-              {designing ? 'Close the participants designer' : 'Define participants'}
-            </button>
-            {designing && <ParticipantsDesigner />}
+            {expert && (
+              <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
+                The tariff, contracts, finance inputs, library and participants are set under
+                Expert → Economics.{' '}
+                <button type="button" className="underline"
+                        onClick={() => setSlidePanel('economics')}>Open Economics</button>
+              </p>
+            )}
           </div>
         )}
-        {section === 'tariff' && (island
-          ? <p className="text-[11px] text-muted py-2" data-testid="ic-tariff-island">
-              No tariff: the island buys no grid power.</p>
-          : <TariffSection />)}
-        {section === 'library' && <LibraryBrowser />}
-        {section === 'contracts' && <ContractsEditor />}
-        {section === 'finance' && <FinanceInputsEditor />}
         {section === 'case' && <InvestmentCaseView />}
       </div>
     </div>

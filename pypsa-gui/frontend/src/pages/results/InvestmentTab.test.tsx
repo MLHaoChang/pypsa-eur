@@ -251,32 +251,22 @@ describe('InvestmentTab → Economics', () => {
   })
   afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
 
-  it('an input section links to Economics in Expert, and the link opens it', async () => {
+  it('holds no input editors: the sections are results, with one link to Economics', async () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
     renderTab()
-    for (const name of ['Tariff', 'Finance inputs']) {
-      fireEvent.click(screen.getByRole('tab', { name }))
-      expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
-        .toMatch(/Expert → Economics/)
-    }
+    const names = screen.getAllByRole('tab').map(t => t.textContent)
+    expect(names).toEqual(['Participants', 'Bill', 'Investment case'])
+    expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
+      .toMatch(/Economics/)
+    expect(screen.queryByRole('button', { name: /Define participants/ })).toBeNull()
     fireEvent.click(screen.getByRole('button', { name: 'Open Economics' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('economics')
   })
 
-  it('an output section has no link', async () => {
-    useUIStore.setState({ uiMode: 'expert' })
-    renderTab()
-    for (const name of ['Bill', 'Investment case', 'Participants']) {
-      fireEvent.click(screen.getByRole('tab', { name }))
-      expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
-    }
-  })
-
-  it('Guided, which has no Economics step, never shows it', async () => {
+  it('Guided never shows the link', async () => {
     useUIStore.setState({ uiMode: 'guided' })
     renderTab()
-    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
-    await screen.findByText(/import tariff/)
+    await screen.findByTestId('ic-participants-state')
     expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
   })
 
@@ -288,8 +278,6 @@ describe('InvestmentTab → Economics', () => {
     expect((await screen.findByTestId('ic-island')).textContent).toMatch(
       /^Island: no grid in operation; compared with the island as it stands today\. The tie subsea_tie is open/)
     expect(screen.queryByTestId('ic-site-connection')).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
-    expect(screen.getByTestId('ic-tariff-island').textContent).toMatch(/buys no grid power/)
   })
 
   it('keeps the editors while the PoC state is unknown (a solve holds the network)', async () => {

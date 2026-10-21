@@ -90,7 +90,7 @@ function CommercialRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
     <SItem icon={<Coins size={15} />} label="Economics"
-      title="Discount rate, money year and price basis, and the overnight cost of every asset."
+      title="Discount and inflation rates, finance inputs, tariffs, contracts and participants."
       active={activeSlidePanel === 'economics'} onClick={() => toggle('economics')} />
   )
 }
