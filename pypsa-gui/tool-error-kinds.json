@@ -890,6 +890,10 @@
     "malformed_job_id": {
       "surface": "inline",
       "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
+    },
+    "unknown_grid_code_profile": {
+      "surface": "inline",
+      "why": "campus_grid_readiness was asked for a grid-code profile that is neither shipped nor published in the project. The detail lists the known ones; the assistant picks one of them or asks the user. There is no conversation-wide recovery action."
     }
   }
 }
