@@ -3436,6 +3436,9 @@ def get_profile_parameters(preset: str, technology: str | None = None) -> dict:
     except ProfileGenError as exc:
         raise HTTPException(status_code=422, detail=public_message(
             exc, route="get_profile_parameters")) from exc
+    except Exception as exc:  # noqa: BLE001 — as `_profile_route`: the type, never the text
+        raise HTTPException(status_code=500, detail=public_message(
+            exc, route="get_profile_parameters")) from exc
     return {
         "name": p.name,
         "technology": p.technology,

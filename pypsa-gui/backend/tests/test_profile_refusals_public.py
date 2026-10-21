@@ -121,3 +121,28 @@ def test_the_downloaders_own_text_stays_in_the_log(caplog):
             cutout_cache._call_with_timeout(fail, 5.0, month=4)
     assert str(err.value) == "ERA5 download failed at month 4 (RuntimeError); see the server log"
     assert any(r.exc_info for r in caplog.records)
+
+
+def test_get_profile_parameters_says_only_the_type_of_a_foreign_error(client, monkeypatch):
+    def broken(name, technology=None):
+        raise ValueError(_FOREIGN)
+
+    monkeypatch.setattr(presets, "get_preset", broken)
+    with pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["get_profile_parameters"](preset="x", technology="wind")
+    assert err.value.detail == "unexpected error (ValueError); see the server log"
+    assert _FOREIGN not in str(err.value.detail)
+
+
+def test_an_unknown_zone_is_named_without_the_librarys_text():
+    import pandas as pd
+
+    from services.profile_gen import load_archetypes, load_upload
+
+    idx = pd.date_range("2025-01-01", periods=48, freq="h")
+    with pytest.raises(load_archetypes.InvalidArchetypeParamsError) as err:
+        load_archetypes._Clock(idx, "Europe", [], 2025)
+    assert str(err.value) == "timezone 'Europe' is not an IANA zone"
+    with pytest.raises(load_upload.UploadFormatError) as err:
+        load_upload._utc_index(pd.Index(idx.strftime("%Y-%m-%d %H:%M")), "Europe", None)
+    assert str(err.value) == "timezone 'Europe' is not an IANA zone"
