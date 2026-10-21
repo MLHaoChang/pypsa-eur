@@ -853,15 +853,6 @@ class Turn:
                 ]
             else:
                 receipt["result_slots"] = self.request_evidence["slots"]
-            if self.request_scope.get("chart"):
-                # A checked chart is drawn from this answer's evidence only (S10).
-                from services import checked_charts
-
-                receipt["chart"] = (
-                    checked_charts.refused(self.request_scope["chart"], "draft_not_checked")
-                    if draft_failed or self.request_evidence is None
-                    else checked_charts.safe_render(ctx, self.request_evidence, self.request_scope["chart"])
-                )
             receipt["request_complete"] = all(
                 s["disposition"] == "answered" for s in receipt["result_slots"]
             )
@@ -894,6 +885,13 @@ class Turn:
             records.authorize(self.owner, self.project_id)
             if self.session.abort_event.is_set():
                 raise HTTPException(409, {"error_kind": "assurance_context_changed"})
+            if self.request_scope is not None and self.request_scope.get("chart"):
+                # A checked chart is drawn from this answer's evidence only (S10),
+                # after the last evidence check and just before the durable commit.
+                from services import checked_charts
+
+                receipt["chart"] = checked_charts.for_answer(
+                    ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
         self.approved = record
         return [{"type": "text", "text": text}]

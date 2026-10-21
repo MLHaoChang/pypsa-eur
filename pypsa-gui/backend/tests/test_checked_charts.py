@@ -103,3 +103,39 @@ def test_the_chart_suffix_is_part_of_the_whole_message_grammar():
     scope = assurance_scope.from_message("Show the loading for line L12; chart loading, p0", "p", {})
     assert scope["chart"] == ["loading", "p0"] and scope["profile"] == "branch-loading/1"
     assert assurance_scope.from_message("Show the loading for line L12; chart loading; and more", "p", {}) is None
+
+
+def test_a_plain_download_without_the_chat_user_is_served(solved, checked):
+    from services import chat_tools
+
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    chat_tools.set_acting_user(None)  # the browser's GET carries no chat-tool identity
+    response = checked.client.get(receipt["chart"]["download_url"])
+    assert response.status_code == 200, response.text
+
+
+def test_a_follow_up_that_reuses_the_scope_draws_no_chart(solved, checked):
+    scope = {"version": 1, "profile": "generator-dispatch/1", "project_id": solved.project_uuid,
+             "entity_id": "G1", "retain": False, "chart": ["p"]}
+    first = checked.run(NumericalProvider(GENERATOR), message="Check and chart.", checked_scope=scope,
+                        session_id="assurance-chart-follow-up")
+    assert approval(first)["receipt"]["chart"]["status"] == "drawn"
+    again = checked.run(NumericalProvider(GENERATOR), message="Show the same results again",
+                        session_id="assurance-chart-follow-up")
+    assert "chart" not in approval(again)["receipt"]
+
+
+def test_a_retained_run_draws_no_chart(solved, checked):
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"], **{"retain": True})
+    assert receipt["chart"]["reason"] == "current_run_only"
+
+
+def test_loading_needs_only_the_windows_snapshots(grid, checked):
+    ctx = solve(grid)
+    ctx.network.lines_t.p0.iloc[2, 0] = float("nan")  # outside the requested window
+    first, second = (v.isoformat() for v in ctx.network.snapshots[:2])
+    receipt = ask(checked, ctx, "branch-loading/1", "L12",
+                  {"peak_branch_utilisation": 100, "hours_above_rating": 0, "peak_branch_flow": 8,
+                   "branch_rating": 8}, ["loading"], component_class="Line", start=first, end=second)
+    assert receipt["chart"]["status"] == "drawn"
+    assert sidecar(receipt["chart"])["dataset"]["values"] == [[50, 100]]

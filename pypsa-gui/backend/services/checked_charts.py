@@ -31,6 +31,7 @@ REASONS = {
     "too_many_points": "Too many snapshots to draw every value",
     "draft_not_checked": "The answer could not be checked",
     "render_failed": "The chart could not be saved",
+    "current_run_only": "Charts are drawn from the current run's evidence only",
 }
 
 
@@ -48,9 +49,10 @@ def _branch(raw, entity):
     return matches[0] if len(matches) == 1 else None
 
 
-def series_table(record):
-    """{series: (unit, values over the full index) or None}, and the index, for the
-    evidence's profile. Values are the evidence's own, untouched."""
+def series_table(record, window=None):
+    """{series: (unit, label, values over the full index) or None}, and the index, for
+    the evidence's profile. Values are the evidence's own, untouched; derived
+    loading is computed over the window only (outside it is None)."""
     from harness import branch_calculations
 
     scope, raw = record["request_scope"], record["raw"]
@@ -72,8 +74,10 @@ def series_table(record):
         branch = _branch(raw, entity)
         if branch is None:
             return raw["index"], {}
-        series = branch_calculations.utilisation_series(branch, 0, len(raw["index"]) - 1)
-        loading = None if series is None else [100 * u for u in series[1]]
+        a, b = window if window is not None else (0, len(raw["index"]) - 1)
+        series = branch_calculations.utilisation_series(branch, a, b)
+        loading = None if series is None else [None] * a + [100 * u for u in series[1]] + [None] * (
+            len(raw["index"]) - 1 - b)
         return raw["index"], {
             "p0": ("MW", POWER, branch["p0"]),
             "p1": ("MW", POWER, branch["p1"]),
@@ -84,8 +88,9 @@ def series_table(record):
 
 def dataset(record, requested):
     """The drawn dataset and a slot per requested series."""
-    index, table = series_table(record)
+    index, _ = series_table(record)
     a, b = _window(index, record["request_scope"])
+    _, table = series_table(record, (a, b))
     window = index[a: b + 1]
     drawn, slots = {}, []
     for name in requested:
@@ -143,6 +148,7 @@ def render(ctx, record, requested):
         "evidence_id": record["evidence_id"], "source_sha256": record["source_sha256"],
         "profile": record["request_scope"]["profile"], "entity_id": record["request_scope"]["entity_id"],
         "requested": requested, "window": window, "series": slots, "caption": lines,
+        "owner_id": record["owner_id"],
         "dataset": data, "dataset_sha256": canonical_sha256(data),
         "render_spec": {"kind": "line", "points": "every snapshot as stored", "caption": lines},
         "artifact_sha256": byte_hash,
@@ -151,21 +157,25 @@ def render(ctx, record, requested):
     provenance = {"manifest": manifest}
     assistant_tools.tasks._save(root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
     artifact = chat_tools._save_agent_export(
-        png, f"checked_{record['request_scope']['entity_id']}.png"[:100], "image/png",
+        png, f"checked_{record['request_scope']['entity_id'][:80]}.png", "image/png",
         assurance_sha256=canonical_sha256(provenance))
     return {"status": "drawn", "file_id": artifact["file_id"], "filename": artifact["filename"],
             "download_url": artifact["download_url"], "png_sha256": byte_hash,
             "evidence_id": record["evidence_id"], "window": window, "series": slots, "caption": lines}
 
 
-def safe_render(ctx, record, requested):
-    """`render`, with a failure to save the file reported as not drawn."""
-    from fastapi import HTTPException
-
+def for_answer(ctx, scope, record):
+    """The receipt's chart block for a checked answer: drawn from the current run's
+    evidence, or why not. A failure to draw never fails the answer itself."""
+    requested = list(dict.fromkeys(scope["chart"]))[:MAX_SERIES]
+    if record is None:
+        return refused(requested, "draft_not_checked")
+    if scope.get("retain") or scope.get("evidence_id"):
+        return refused(requested, "current_run_only")
     try:
         return render(ctx, record, requested)
-    except (HTTPException, OSError, ValueError, KeyError):
-        return refused(list(dict.fromkeys(requested))[:MAX_SERIES], "render_failed")
+    except Exception:  # noqa: BLE001 -- the answer stands; the chart says it was not saved
+        return refused(requested, "render_failed")
 
 
 def _draw(record, data, lines):
@@ -197,11 +207,25 @@ def _draw(record, data, lines):
 
 def verify(manifest):
     """True when a checked chart's dataset is still its evidence's: the evidence
-    record's source hash and the series values, re-extracted, must match."""
+    record's source hash and the series values, re-extracted, must match.
+
+    The download route has already checked the reader's access to the project and
+    the file's integrity hashes; the evidence is read by the manifest's owner and
+    project, not the reader's identity (a project member may download). Once the
+    evidence has expired, the chart's integrity hashes alone stand, as recorded
+    when it was drawn from that evidence."""
+    import json
+
     from services import assurance_records
 
-    record = assurance_records.load(assurance_records.actor_id(), manifest["evidence_id"], "evidence")
-    if record["source_sha256"] != manifest["source_sha256"]:
+    path = assurance_records._path(manifest["owner_id"], manifest["evidence_id"])
+    if not path.exists():
+        return True
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    record = envelope["record"]
+    if (assurance_records.digest(record) != envelope["sha256"] or record["record_kind"] != "evidence"
+            or record["project_id"] != manifest["project_id"] or record["owner_id"] != manifest["owner_id"]
+            or record["source_sha256"] != manifest["source_sha256"]):
         return False
     data, slots, window = dataset(record, manifest["requested"])
     return data == manifest["dataset"] and slots == manifest["series"] and window == manifest["window"]
