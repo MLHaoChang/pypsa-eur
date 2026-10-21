@@ -788,6 +788,13 @@ export const useUIStore = create<UIStore>((set) => ({
           && s.activeSlidePanel !== 'decision') {
         patch.activeSlidePanel = s.currentProject ? 'hubDesign' : null
       }
+      // Expert with no panel but a selection from a flow item (the Run's
+      // reason, a field link) lands on that section's card, not the bare
+      // canvas. A plain canvas with nothing selected stays as it is.
+      if (mode === 'guided' && s.activeSlidePanel == null && s.currentProject
+          && s.selectedComponent && s.activeSection) {
+        patch.activeSlidePanel = 'hubDesign'
+      }
       return patch
     })
   },
