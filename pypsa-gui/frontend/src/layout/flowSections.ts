@@ -1,5 +1,5 @@
-import type { FlowSectionId } from '../api/flow'
-import type { SlidePanel } from '../store/uiStore'
+import type { FlowSectionId, FlowTarget } from '../api/flow'
+import { useUIStore, type SlidePanel } from '../store/uiStore'
 
 // The ten flow sections as the shell shows them (workspace-reconciliation §6.1,
 // design §2.1). The server's `label` wins when /flow is read; these are the
@@ -68,3 +68,52 @@ const CLASS_SECTION: Record<string, FlowSectionId> = {
 }
 export const sectionForComponent = (type: string | null | undefined): FlowSectionId | null =>
   (type && CLASS_SECTION[type]) || null
+
+/** The panel a section's "Edit in Expert" opens first: where its inputs live
+ *  today (navigation only; the value moves are W3b). A null panel with a table
+ *  opens that bottom table; sections 1, 9 and 10 open their one panel. */
+const SECTION_OPEN: Record<FlowSectionId, { panel?: SlidePanel; table?: string }> = {
+  project: { panel: 'horizon' },
+  carriers: { table: 'Carriers' },
+  connection: { panel: 'campusElectrical' },
+  loads: { table: 'Loads' },
+  assets: { panel: 'capacityBounds' },
+  profiles: { panel: 'timeseries' },
+  commercial: { panel: 'economics' },
+  scenarios: { panel: 'simparams' },
+  readiness: { panel: 'issues' },
+  results: { panel: 'results' },
+}
+
+/** Show a section in Expert: set it active, switch the mode, open its first
+ *  panel. The switch keeps the section (workspace-reconciliation §7). */
+export function openSectionInExpert(id: FlowSectionId): void {
+  const ui = useUIStore.getState()
+  ui.setActiveSection(id)
+  ui.setUiMode('expert')
+  const open = SECTION_OPEN[id]
+  if (open.panel) ui.setSlidePanel(open.panel)
+  else if (open.table) { ui.setSlidePanel(null); ui.requestBottomTab(open.table) }
+}
+
+/** Show one flow item's field in Expert: its panel, or the component's own
+ *  Properties. An item with no known field opens its section. */
+export function openFlowTarget(target: FlowTarget): void {
+  const ui = useUIStore.getState()
+  if (target.panel) {
+    ui.setActiveSection(target.section)
+    ui.setUiMode('expert')
+    ui.setSlidePanel(target.panel as SlidePanel)
+    return
+  }
+  if (target.component && target.entity) {
+    ui.setUiMode('expert')
+    ui.setSelectedComponent({ type: target.component, name: target.entity })
+    ui.setHighlightedComponent({ type: target.component, name: target.entity })
+    ui.openRightPanel()
+    ui.setSlidePanel(null)
+    ui.setActiveSection(target.section)
+    return
+  }
+  openSectionInExpert(target.section)
+}
