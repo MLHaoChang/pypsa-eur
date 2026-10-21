@@ -465,7 +465,12 @@ def _serialize_user_ts(store: dict | None = None, meta_store: dict | None = None
             None if isinstance(v, float) and not math.isfinite(v) else v
             for v in series.tolist()
         ]
-        result.setdefault(comp, {}).setdefault(attr, {})[col] = {"index": idx, "values": vals}
+        entry = {"index": idx, "values": vals}
+        if not isinstance(series.index, pd.MultiIndex) and isinstance(series.index.name, str):
+            # Round-tripped so a reopened project's inputs fingerprint as the
+            # solved ones did (LC-12); files without it restore unnamed, as before.
+            entry["index_name"] = series.index.name
+        result.setdefault(comp, {}).setdefault(attr, {})[col] = entry
     if meta_items:
         emitted = False
         for (comp, attr, col), meta in meta_items.items():
@@ -512,7 +517,7 @@ def _restore_user_ts(data: dict, store: dict | None = None, meta_store: dict | N
     # Detect format: any top-level key containing "|" → legacy pipe format.
     is_legacy = any("|" in k for k in data.keys())
 
-    def _build_series(raw_idx, values, name: str) -> pd.Series:
+    def _build_series(raw_idx, values, name: str, index_name=None) -> pd.Series:
         """Reconstruct a Series, detecting MultiIndex vs flat by index shape."""
         if raw_idx and isinstance(raw_idx[0], (list, tuple)) and len(raw_idx[0]) == 2:
             periods = [int(p) for p, _ in raw_idx]
@@ -520,6 +525,7 @@ def _restore_user_ts(data: dict, store: dict | None = None, meta_store: dict | N
             mi = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
             return pd.Series(values, index=mi, dtype=float, name=name)
         idx = pd.to_datetime(raw_idx)
+        idx.name = index_name if isinstance(index_name, str) else None
         return pd.Series(values, index=idx, dtype=float, name=name)
 
     if is_legacy:
@@ -546,7 +552,8 @@ def _restore_user_ts(data: dict, store: dict | None = None, meta_store: dict | N
                     if not isinstance(payload, dict):
                         continue
                     try:
-                        series = _build_series(payload["index"], payload["values"], col)
+                        series = _build_series(payload["index"], payload["values"], col,
+                                               payload.get("index_name"))
                         if series.isna().all():
                             continue  # skip corrupt all-NaN series
                         new_store[(comp, attr, col)] = series

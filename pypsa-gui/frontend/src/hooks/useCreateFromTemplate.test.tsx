@@ -123,6 +123,24 @@ describe('useCreateFromTemplate', () => {
     expect(where).toBe('/app')
   })
 
+  // UX-flow #26: Expert starts at the top of the flow; Guided opens its own step.
+  it('in Expert: opens section 1 of the flow', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSection: null, activeSlidePanel: null })
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter'))
+    await waitFor(() => expect(useUIStore.getState().activeSection).toBe('project'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('horizon')
+  })
+
+  it('in Guided: leaves the section to the hub design', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSection: null, activeSlidePanel: null })
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter'))
+    await waitFor(() => expect(calls).toContain(`tab:${NAME}`))
+    expect(useUIStore.getState().activeSection).toBeNull()
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+  })
+
   it('outside a router: creates and adds the tab, nowhere to navigate', async () => {
     const { hook } = render(null)
     act(() => hook.result.current.mutate('eh_datacenter'))

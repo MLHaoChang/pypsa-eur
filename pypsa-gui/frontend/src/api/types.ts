@@ -637,6 +637,8 @@ export interface ValidationIssue {
   component_class: string
   name: string
   message: string
+  /** The server's plain title for `code` (`services/issue_titles.py`). */
+  title: string
 }
 export interface PreflightResult {
   ok: boolean

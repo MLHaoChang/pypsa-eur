@@ -11,6 +11,7 @@ import { projectsApi } from '../api/projects'
 import { resultsApi } from '../api/simulation'
 import type { BundleImportResult } from '../api/types'
 import { getPostLoginPath } from '../auth/resume'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries } from '../utils/projectActions'
@@ -114,6 +115,9 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
+      // Guided opens on its initial step; Expert lands in section 1 so the
+      // new project starts at the top of the flow, not on a bare canvas.
+      if (useUIStore.getState().uiMode === 'expert') openSectionInExpert('project')
       // The template may name the Results tab (and section) its project
       // opens on (IPP ticket 05): asked for once, here; an unreadable meta
       // asks nothing.

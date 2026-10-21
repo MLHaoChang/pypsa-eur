@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Reopening a project returns to the flow section it was left in, with the last Guided/Expert mode. The section is remembered per project in the browser; with storage empty or blocked the app opens as before.

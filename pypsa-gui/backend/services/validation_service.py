@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
+from services.issue_titles import issue_title
 
 # Severity literal kept narrow on purpose — anything beyond error/warning
 # pushes UX complexity onto every callsite for marginal value.
@@ -42,7 +43,9 @@ class Issue:
     message: str            # human-readable, complete sentence
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # The title is server copy (``issue_titles``): the Issues list and the
+        # Run's blocker read the same words.
+        return {**asdict(self), "title": issue_title(self.code)}
 
 
 # ── tiny helpers ─────────────────────────────────────────────────────────────
@@ -2521,6 +2524,13 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_import_energy_cap(n, solver_config)
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
+
+    # Capacity › sizing off (F1): the source and the modes and strategies it
+    # excludes. Any mode, so a power-flow run with the option set is refused.
+    from services.solver import fixed_sizes as _fixed_sizes
+
+    issues += [Issue(severity=sev, code=code, component_class="", name=name, message=msg)
+               for sev, code, name, msg in _fixed_sizes.issues(n, solver_config)]
 
     mode = solver_config.mode
     if mode == "pf":
