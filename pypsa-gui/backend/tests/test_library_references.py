@@ -27,7 +27,17 @@ def _priced(version: str) -> pypsa.Network:
     n = pypsa.Network()
     n.add("Bus", "b")
     n.add("Generator", "wind", bus="b", p_nom=10.0)
-    price_from_pack(n, "generators", "wind", "onwind", version=version)
+    pack = load_defaults_pack(version)
+    if pack.typed:
+        price_from_pack(n, "generators", "wind", "onwind", version=version)
+        return n
+    # A legacy version (before typed cost units) can no longer price: write what a project saved
+    # from it holds, the overnight cost and its provenance stamp.
+    row = next(r for r in pack.cost_values if r.key == "onwind.investment.overnight")
+    n.generators.at["wind", "overnight_cost"] = row.value
+    P.record(n, "Generator", "wind", "overnight_cost", status="default",
+             source=f"{pack.pack_id}@{pack.version}#{pack.hash[:16]}",
+             source_year=row.source_year, currency_year=row.currency_year)
     return n
 
 

@@ -364,11 +364,11 @@ def test_an_asset_priced_from_a_real_regional_pack_is_compared_with_it_and_refus
     if "uk" not in available_regions():
         pytest.skip("no UK regional pack in this build")
     n = _net()
-    price_from_pack(n, "generators", "wind", "onwind", version="2026-10-21", region="uk")
+    price_from_pack(n, "generators", "wind", "onwind", version="2026-10-22", region="uk")
     stamps = P.get(n, "Generator", "wind")
     assert stamps["overnight_cost"]["currency"] == "GBP"
     detail = A.C.reference_detail("onwind", 2030, stamps)
-    assert detail.pack.chosen_by == "asset_provenance" and detail.pack.version == "2026-10-21+uk"
+    assert detail.pack.chosen_by == "asset_provenance" and detail.pack.version == "2026-10-22+uk"
     before = n.generators.copy()
     with pytest.raises(HTTPException) as exc:
         A.plan(n, {}, "Generator", "wind", "onwind", 2030)
