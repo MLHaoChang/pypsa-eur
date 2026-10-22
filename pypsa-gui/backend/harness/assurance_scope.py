@@ -40,6 +40,8 @@ class RequestScope(BaseModel):
     component_class: Literal[
         "Line", "Transformer", "Generator", "Link", "StorageUnit", "Store"
     ] | None = None
+    # A checked chart of these evidence series (S10), drawn from this request's evidence only.
+    chart: list[str] | None = Field(default=None, min_length=1, max_length=8)
 
 
 def validate(value):
@@ -48,6 +50,9 @@ def validate(value):
     scope = RequestScope.model_validate(value).model_dump(exclude_none=True)
     if ("start" in scope) != ("end" in scope):
         raise ValueError("both_window_bounds_required")
+    if "chart" in scope and (len(set(scope["chart"])) != len(scope["chart"])
+                             or any(not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", s) for s in scope["chart"])):
+        raise ValueError("invalid_chart_series")
     if "metrics" in scope:
         if len(set(scope["metrics"])) != len(scope["metrics"]) or any(
             not 1 <= len(m) <= 64 for m in scope["metrics"]
@@ -103,6 +108,18 @@ def validate(value):
 
 
 def from_message(message, project_id, ui_context):
+    """Whole-message profile grammar, with an optional trailing "; chart <series>, ..."
+    (S10) that asks for a checked chart of those evidence series."""
+    match = re.fullmatch(r"(.*?);\s*chart\s+([a-z0-9_]+(?:\s*,\s*[a-z0-9_]+)*)\s*[.!?]?", message.strip(), re.I | re.S)
+    if not match:
+        return _from_message(message, project_id, ui_context)
+    scope = _from_message(match[1], project_id, ui_context)
+    if scope is None:
+        return None
+    return validate({**scope, "chart": [s.strip().lower() for s in match[2].split(",")]})
+
+
+def _from_message(message, project_id, ui_context):
     """Whole-message profile grammar: no extra quantity or instruction is ignored."""
     selected = ui_context.get("selected_component") if isinstance(ui_context, dict) else None
     if (
