@@ -171,3 +171,15 @@ def test_applying_onto_three_hourly_snapshots_writes_the_step_means(client, inst
     stored = session_ctx(client).user_ts[("generators", "p_max_pu", "g_wind")]
     assert len(stored) == 2920
     assert resp.json()["hours"] == 2920
+
+
+def test_a_three_hourly_apply_is_not_reported_stale(client, install_network):
+    project = _project(client, install_network, 2023, steps="3h", periods=2920)
+    rec = _generate(client, project, year=2023)
+    resp = client.post(f"/api/projects/{project}/profiles/apply", json={
+        "job_id": rec["job_id"], "component": "g_wind", "time_basis": "UTC"})
+    assert resp.status_code == 200, resp.text
+    rows = {r["generator"]: r for r in client.get(
+        f"/api/projects/{project}/profiles/readiness").json()["generators"]}
+    assert rows["g_wind"]["profile"] == "generated"
+    assert "stale_reason" not in rows["g_wind"]
