@@ -70,7 +70,7 @@ const ORDER = ['setup', 'model', 'run', 'results', 'reports']
 // mocked project list is empty (unknown is not "not a study").
 const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
-  model: ['Campus electrical', 'Loads', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
+  model: ['Campus electrical', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
   run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
   results: ['Results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots'],
@@ -78,7 +78,7 @@ const ROWS: Record<string, string[]> = {
 
 // The project's actions, now behind the footer card's menu.
 const PROJECT_MENU_ROWS = [
-  'Project info', 'Save', 'Duplicate project', 'Export bundle', 'Other', 'Workspace panel',
+  'Project info', 'Duplicate project', 'Export…', 'Other', 'Workspace panel',
 ]
 
 function rowLabels(group: HTMLElement): string[] {

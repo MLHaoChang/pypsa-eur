@@ -251,33 +251,26 @@ describe('InvestmentTab → Economics', () => {
   })
   afterEach(() => useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null }))
 
-  it('an input section links to Economics in Expert, and the link opens it', async () => {
+  it('holds no input editors: the sections are results, with one link to Commercial & parties', async () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
     renderTab()
-    for (const name of ['Tariff', 'Finance inputs']) {
-      fireEvent.click(screen.getByRole('tab', { name }))
-      expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
-        .toMatch(/Expert → Economics/)
-    }
-    fireEvent.click(screen.getByRole('button', { name: 'Open Economics' }))
+    const names = screen.getAllByRole('tab').map(t => t.textContent)
+    expect(names).toEqual(['Participants', 'Bill', 'Investment case'])
+    expect((await screen.findByTestId('ic-edit-in-economics')).textContent)
+      .toMatch(/set in Commercial & parties/)
+    expect(screen.queryByRole('button', { name: /Define participants/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Open Commercial & parties' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('economics')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
   })
 
-  it('an output section has no link', async () => {
-    useUIStore.setState({ uiMode: 'expert' })
+  it('Guided: the link goes to the Guided section-7 card, not to Expert', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
     renderTab()
-    for (const name of ['Bill', 'Investment case', 'Participants']) {
-      fireEvent.click(screen.getByRole('tab', { name }))
-      expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
-    }
-  })
-
-  it('Guided, which has no Economics step, never shows it', async () => {
-    useUIStore.setState({ uiMode: 'guided' })
-    renderTab()
-    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
-    await screen.findByText(/import tariff/)
-    expect(screen.queryByTestId('ic-edit-in-economics')).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Commercial & parties' }))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSection).toBe('commercial')
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
   it('shows an island with an open PoC: no connection, tariff or export to set (H4)', async () => {
@@ -288,8 +281,6 @@ describe('InvestmentTab → Economics', () => {
     expect((await screen.findByTestId('ic-island')).textContent).toMatch(
       /^Island: no grid in operation; compared with the island as it stands today\. The tie subsea_tie is open/)
     expect(screen.queryByTestId('ic-site-connection')).toBeNull()
-    fireEvent.click(screen.getByRole('tab', { name: 'Tariff' }))
-    expect(screen.getByTestId('ic-tariff-island').textContent).toMatch(/buys no grid power/)
   })
 
   it('keeps the editors while the PoC state is unknown (a solve holds the network)', async () => {
@@ -301,5 +292,38 @@ describe('InvestmentTab → Economics', () => {
     expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
     expect(screen.queryByTestId('ic-island')).toBeNull()
   })
-})
 
+  // IPP ticket 05: `requestResultsTab('investment', 'case')` opens a section.
+  it('opens on a requested section once, and clears the request', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    useUIStore.getState().requestResultsTab('investment', 'case')
+    renderTab()
+    expect(screen.getByRole('tab', { name: 'Investment case' }).getAttribute('aria-selected')).toBe('true')
+    await waitFor(() => expect(useUIStore.getState().resultsSectionRequest).toBeNull())
+    fireEvent.click(screen.getByRole('tab', { name: 'Bill' }))
+    expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
+    useUIStore.getState().clearResultsTabRequest()
+  })
+
+  it('a section requested while mounted switches to it', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    renderTab()
+    useUIStore.getState().requestResultsTab('investment', 'case')
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Investment case' })
+      .getAttribute('aria-selected')).toBe('true'))
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    useUIStore.getState().clearResultsTabRequest()
+  })
+
+  it('no section: opens on Participants as before', () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    useUIStore.getState().requestResultsTab('investment')
+    expect(useUIStore.getState().resultsSectionRequest).toBeNull()
+    renderTab()
+    expect(screen.getByRole('tab', { name: 'Participants' }).getAttribute('aria-selected')).toBe('true')
+    useUIStore.getState().clearResultsTabRequest()
+  })
+})

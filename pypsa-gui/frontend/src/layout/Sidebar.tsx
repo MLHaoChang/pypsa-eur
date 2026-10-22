@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback, useId, useRef } from 'react'
 import {
   ChevronLeft, ChevronRight,
-  FolderOpen, Save, Copy, Upload, FileDown,
-  Download, X, Check, Clock,
-  MousePointer, ZoomIn, ZoomOut,
+  FolderOpen, Copy, Upload, FileDown,
+  Download, X, Clock,
   LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
   Users, Compass, MoreHorizontal,
@@ -443,8 +442,7 @@ function ProjectSectionContent({
   // section, the icon strip's flyout). 'footer': the Expert sidebar's footer
   // card, its actions behind the card's menu (M2, plan 2026-10-05 §11).
   variant?: 'section' | 'footer'
-  // Guided mode (spec §3.5): only the header card, Save, Recent and Projects
-  // home. The hidden rows stay reachable via the palette and the assistant.
+  // Guided mode (spec §3.5): only the header card and Recent. The hidden rows stay reachable via the palette and the assistant.
   guided?: boolean
   projectName: string
   saveStatus: 'idle' | 'saved'
@@ -459,7 +457,6 @@ function ProjectSectionContent({
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
     readOnly, readOnlyReason, projectMismatch,
   } = useUIStore()
-  const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
   // distinct default name and the confirm handler doesn't switch the active
   // project to the copy.
@@ -751,16 +748,6 @@ function ProjectSectionContent({
     return () => clearInterval(id)
   }, [autosaveEnabled, currentProject, networkHasBuses, saveAndExportBundle])
 
-  const handleSave = () => {
-    if (currentProject) saveAndExportBundle(currentProject)
-    else setShowNameModal(true)
-  }
-
-  const handleNameConfirm = (name: string) => {
-    setShowNameModal(false)
-    saveAndExportBundle(name)
-  }
-
   const handleSaveCopy = () => {
     // Always prompt — a "copy" needs a name distinct from the current project.
     // The modal pre-fills "<current>_copy" as a starting point.
@@ -922,13 +909,6 @@ function ProjectSectionContent({
             }}
           />
           )}
-          <SItem
-            icon={saveStatus === 'saved' ? <Check size={15} /> : <Save size={15} />}
-            label={saveStatus === 'saved' ? 'Saved ✓' : 'Save'}
-            hint={dirty ? '●' : undefined}
-            title={projectMismatch ? mismatchSentence(projectMismatch) : undefined}
-            onClick={handleSave}
-          />
           {!guided && (<>
           <SItem
             icon={<Copy size={15} />}
@@ -937,7 +917,8 @@ function ProjectSectionContent({
           />
           <SItem
             icon={<FileDown size={15} />}
-            label="Export bundle"
+            label="Export…"
+            title="Export the project: bundle (.pypsaproj.zip), NetCDF, CSV, Excel or MATPOWER."
             onClick={() => { openIo('export'); onCloseModal?.() }}
           />
           </>)}
@@ -982,13 +963,6 @@ function ProjectSectionContent({
 
   const modals = (
     <>
-      {showNameModal && (
-        <SaveNameModal
-          initial={slugify(currentProject || pn)}
-          onSave={handleNameConfirm}
-          onClose={() => setShowNameModal(false)}
-        />
-      )}
       {showCopyModal && (
         <SaveNameModal
           initial={slugify(`${currentProject || pn}_copy`)}
@@ -1121,99 +1095,7 @@ function HubDesignNavButton({ compact = false, onCloseModal }: {
   )
 }
 
-// ── Mode buttons ───────────────────────────────────────────────────────────────
-function ModeSwitcher({ small = false }: { small?: boolean }) {
-  const { canvasMode, setCanvasMode } = useUIStore()
-  const ConnectIcon = () => (
-    <svg width={small ? 12 : 14} height={small ? 12 : 14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-      <circle cx="3" cy="8" r="2.5" /><circle cx="13" cy="8" r="2.5" />
-      <line x1="5.5" y1="8" x2="10.5" y2="8" />
-    </svg>
-  )
-  if (small) {
-    return (
-      <div className="flex flex-col gap-1 items-center py-2" data-testid="sidebar-mode-switcher">
-        {([
-          { id: 'select', Icon: MousePointer, hint: 'V' },
-          { id: 'connect', Icon: ConnectIcon, hint: 'C' },
-        ] as const).map(({ id, Icon, hint }) => (
-          <button
-            key={id}
-            onClick={() => setCanvasMode(id)}
-            title={id === 'select' ? `Select / Pan  ${hint}` : `Connect Buses  ${hint}`}
-            className="relative flex items-center justify-center rounded transition-colors"
-            style={{
-              width: 32, height: 32,
-              background: canvasMode === id ? 'rgba(var(--color-accent-rgb, 47,129,247),0.2)' : undefined,
-              color: canvasMode === id ? 'var(--color-accent)' : 'var(--color-muted)',
-              border: canvasMode === id ? '1px solid rgba(47,129,247,0.5)' : '1px solid transparent',
-            }}
-          >
-            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-            <Icon size={13} {...({} as any)} />
-          </button>
-        ))}
-        <button aria-label="Zoom in" title="Zoom in"
-          className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
-          onClick={() => (window as unknown as { rfInstance?: { zoomIn: () => void } }).rfInstance?.zoomIn?.()}>
-          <ZoomIn size={12} />
-        </button>
-        <button aria-label="Zoom out" title="Zoom out"
-          className="flex items-center justify-center rounded transition-colors" style={{ width: 32, height: 28, color: 'var(--color-ink-400)', border: '1px solid transparent' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-ink-400)' }}
-          onClick={() => (window as unknown as { rfInstance?: { zoomOut: () => void } }).rfInstance?.zoomOut?.()}>
-          <ZoomOut size={12} />
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="shrink-0 border-t border-border p-2" data-testid="sidebar-mode-switcher">
-      <p className="px-2 pb-1 text-[9px] font-bold uppercase tracking-widest text-ink-400">MODE</p>
-      {([
-        { id: 'select',  label: 'Select / Pan',  Icon: MousePointer, hint: 'V' },
-        { id: 'connect', label: 'Connect Buses', Icon: ConnectIcon,  hint: 'C' },
-      ] as const).map(({ id, label, Icon, hint }) => (
-        <button key={id} onClick={() => setCanvasMode(id)}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded text-[11px] mb-0.5 transition-colors"
-          style={{
-            background: canvasMode === id ? 'rgba(47,129,247,0.15)' : undefined,
-            color: canvasMode === id ? 'var(--color-accent)' : 'var(--color-muted)',
-          }}
-          onMouseEnter={e => { if (canvasMode !== id) (e.currentTarget as HTMLElement).style.background = 'var(--color-border)' }}
-          onMouseLeave={e => { if (canvasMode !== id) (e.currentTarget as HTMLElement).style.background = '' }}
-        >
-          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-          <Icon size={13} {...({} as any)} />
-          <span className="flex-1">{label}</span>
-          <span className="text-[9px] font-mono text-ink-300">{hint}</span>
-        </button>
-      ))}
-      <div className="border-t border-border mt-2 pt-2 flex gap-1">
-        <button className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] rounded transition-colors"
-          style={{ color: 'var(--color-muted)', border: '1px solid var(--color-border)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-muted)' }}
-          onClick={() => (window as unknown as { rfInstance?: { zoomIn: () => void } }).rfInstance?.zoomIn?.()}>
-          <ZoomIn size={11} /> In
-        </button>
-        <button className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] rounded transition-colors"
-          style={{ color: 'var(--color-muted)', border: '1px solid var(--color-border)' }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-text)' }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = 'var(--color-muted)' }}
-          onClick={() => (window as unknown as { rfInstance?: { zoomOut: () => void } }).rfInstance?.zoomOut?.()}>
-          <ZoomOut size={11} /> Out
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// Theme + density toggles. Sits below ModeSwitcher in the sidebar footer.
+// Theme + density toggles. Sits in the sidebar footer.
 // Buttons show the CURRENT state's icon (Sun=light, Moon=dark; Rows2=comfortable,
 // Rows3=compact); click toggles to the other. The same controls are mirrored in
 // the command palette so keyboard users don't need to mouse-over the sidebar.
@@ -1544,7 +1426,6 @@ export default function Sidebar() {
 
           {/* Mode switcher */}
           <div className="shrink-0 border-t border-border w-full">
-            {!guided && <ModeSwitcher small />}
             <PreferencesFooter small />
           </div>
         </aside>
@@ -1637,7 +1518,6 @@ export default function Sidebar() {
             handleNewProject={handleNewProject}
           />
         )}
-        {!guided && <ModeSwitcher />}
         <PreferencesFooter />
       </aside>
 

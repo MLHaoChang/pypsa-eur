@@ -9,8 +9,10 @@ has no demand. One hourly year (2030) is solved against an illustrative day-ahea
 battery is sized, the plants curtail at the export limit and at negative prices, and the PPAs
 settle after the solve (financial, against the same price; ticket 01).
 
-Every price here is illustrative and assumed: three deterministic day-ahead shapes generated
-below and shipped as `price_series/` (ticket 02), never market data. ``register(T)`` adds the
+The default price is illustrative and assumed: three deterministic day-ahead shapes generated
+below and shipped as `price_series/` (ticket 02), never market data. Two observed 2024 years
+(SMARD DE-LU, Energinet DK1; GS-4) ship beside them, attributed and filling nothing until the
+user picks one (`OBSERVED`). ``register(T)`` adds the
 template to ``eh_templates``' registries (``T`` as in ``eh_staged_hubs``); it is called from there.
 """
 from __future__ import annotations
@@ -56,6 +58,20 @@ LOW_LEVEL_FACTOR = 0.8
 PRICE_SEED = 2030
 
 SERIES = {"base": "ipp_da_base", "low": "ipp_da_low", "cannibalised": "ipp_da_cannibalised"}
+
+#: Two observed day-ahead years shipped beside the shapes, filling nothing (owner Q-GS4 = A,
+#: 2026-10-21, superseding Q8 for these two sources): fetched once by
+#: `fetch_ipp_market_series.py` into `eh_ipp_hybrid/sources/` (CC BY 4.0, attributed), re-dated
+#: onto the template's calendar by `observed_series`.
+OBSERVED = {
+    "ipp_da_smard_2024": {"source_file": "smard_de_lu_2024.csv", "file": "smard_2024.csv",
+                          "region": "DE-LU", "provider": "SMARD",
+                          "attribution": "Bundesnetzagentur | SMARD.de"},
+    "ipp_da_dk1_2024": {"source_file": "energinet_dk1_2024.csv", "file": "dk1_2024.csv",
+                        "region": "DK1", "provider": "Energinet",
+                        "attribution": "Source: Energinet (www.energidataservice.dk)"},
+}
+OBSERVED_YEAR = 2024
 
 
 def snapshots() -> pd.DatetimeIndex:
@@ -287,7 +303,51 @@ def series_meta() -> dict:
                                    "Replace it with your own (upload, or ENTSO-E with your token).",
                     "notes": list(SERIES_NOTES),
                     "targets": base_targets if case == "base" else []})
+    for name, spec in OBSERVED.items():
+        out.append({"name": name, "file": spec["file"],
+                    "label": f"Observed {spec['region']} day-ahead price {OBSERVED_YEAR}, "
+                             f"re-dated to {YEAR}",
+                    "source": f"{spec['attribution']} (CC BY 4.0)", "provider": spec["provider"],
+                    "vintage_year": OBSERVED_YEAR,
+                    "description": (
+                        f"Observed {OBSERVED_YEAR} hourly day-ahead prices, {spec['region']} "
+                        f"({spec['attribution']}). The data changed: re-dated to the {YEAR} "
+                        "calendar (hour of year kept, 29 Feb dropped, UTC kept, so weekdays "
+                        f"shift by one day) and taken as {YEAR} real money (assumed). The "
+                        "price–weather correlation not preserved: the prices are "
+                        f"{OBSERVED_YEAR}'s, the template's wind and PV profiles are synthetic. "
+                        "Fetched once by project_templates/fetch_ipp_market_series.py."),
+                    "notes": ["currency:EUR", "price_basis:real", f"currency_year:{YEAR}",
+                              f"region:{spec['region']}"],
+                    "targets": []})
     return {"series": out}
+
+
+def observed_series(name: str) -> pd.Series:
+    """An observed 2024 year on the template's 2030 snapshots: hour of year kept, 29 Feb
+    dropped, UTC kept (so 2030's weekdays fall one day later than 2024's). The values are the
+    source's, unchanged; taking them as 2030 real money is an assumption (the ledger's)."""
+    import pathlib
+
+    src = pathlib.Path(__file__).parent / TID / "sources" / OBSERVED[name]["source_file"]
+    df = pd.read_csv(src)
+    idx = pd.DatetimeIndex(pd.to_datetime(df["timestamp"], utc=True)).tz_convert(None)
+    keep = ~((idx.month == 2) & (idx.day == 29))
+    values = df["value"].to_numpy(dtype=float)[keep]
+    if len(values) != 8760 or (idx[keep].year != OBSERVED_YEAR).any():
+        raise ValueError(f"{src.name}: not one full hourly {OBSERVED_YEAR}")
+    return pd.Series(values, index=snapshots(), name=name)
+
+
+def observed_stats(name: str) -> dict:
+    p = observed_series(name)
+    return {"mean": float(p.mean()), "negative_hours": int((p < 0).sum()),
+            "min": float(p.min()), "max": float(p.max())}
+
+
+def _write_csv(p: pd.Series, path) -> None:
+    pd.DataFrame({"timestamp": p.index.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                  "value": p.to_numpy()}).to_csv(path, index=False)
 
 
 def write_price_series(out_dir) -> None:
@@ -297,9 +357,9 @@ def write_price_series(out_dir) -> None:
     d = pathlib.Path(out_dir) / "price_series"
     d.mkdir(parents=True, exist_ok=True)
     for case in SERIES:
-        p = price_shape(case)
-        pd.DataFrame({"timestamp": p.index.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                      "value": p.to_numpy()}).to_csv(d / f"{case}.csv", index=False)
+        _write_csv(price_shape(case), d / f"{case}.csv")
+    for name, spec in OBSERVED.items():
+        _write_csv(observed_series(name), d / spec["file"])
     (d / "meta.json").write_text(json.dumps(series_meta(), indent=2, sort_keys=True) + "\n")
 
 
@@ -340,6 +400,18 @@ def _ledger() -> list[dict]:
                  "prices in 2024 averaged roughly 80 EUR/MWh with some 450 negative hours "
                  "(SMARD, Bundesnetzagentur; check the current figures). This shape has fewer, "
                  "so the curtailment and battery value are conservative. Bring your own series"},
+        *({"item": f"day-ahead price, observed ({spec['region']} {OBSERVED_YEAR})",
+           "value": f"mean {ob['mean']:.1f} EUR/MWh, {ob['negative_hours']} negative hours, "
+                    f"min {ob['min']:.0f}, max {ob['max']:.0f}",
+           "source": "observed",
+           "note": f"{spec['attribution']}, CC BY 4.0; shipped as {name}, filling nothing: pick "
+                   "it for the export, import or PPA reference price, or in a case"}
+          for name, spec in OBSERVED.items() for ob in (observed_stats(name),)),
+        {"item": f"observed prices re-dated to {YEAR}", "value": "hour of year, 29 Feb dropped",
+         "source": "assumed",
+         "note": f"the {OBSERVED_YEAR} values are taken as {YEAR} real money; UTC hours kept, so "
+                 "weekdays shift by one day; price–weather correlation not preserved: prices are "
+                 f"{OBSERVED_YEAR}, the profiles are synthetic"},
         {"item": "network charges on import",
          "value": f"{NETWORK_CHARGE_EUR_PER_MWH:g} EUR/MWh; injection 0 EUR/MWh",
          "source": "assumed", "note": "the commodity on import is the day-ahead series"},
@@ -483,13 +555,15 @@ def register(T) -> None:
         "groups": {"capacity": True, "commercial": True, "handoff": True,
                    "grid": False, "control": False},
         "not_needed": {"loads": "generation-only: export through the POI in section 3"},
-        "initial_results_tab": "commercial",
+        "initial_results_tab": "investment",            # the Investment case view (ticket 05)
+        "initial_results_section": "case",
         "ledger": _ledger(),
         "study_notes": [
             "One hourly year: the battery is sized against the day-ahead price and the curtailment "
             "it can recover at the export limit.",
             "The PPAs settle after the solve, so they never change the battery the plan picks.",
-            "Every price is illustrative: bring your own series before relying on a result.",
+            "The default price is illustrative; two observed 2024 years ship beside it. Bring "
+            "your own series before relying on a result.",
         ],
         "provenance": "synthetic illustrative data (IPP template); prices are assumed shapes",
     }
