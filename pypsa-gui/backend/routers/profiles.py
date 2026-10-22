@@ -44,7 +44,7 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import solve_queue as sq
-from services.profile_gen import engine, presets, shape
+from services.profile_gen import engine, presets, shape, weather_prefs
 from services.profile_gen.apply import (
     ComponentNotFoundError,
     CurrentChangedError,
@@ -615,8 +615,15 @@ def generate_profiles(
     # The weather year, decided here so the job and the answer agree: an
     # explicit year wins; else the OPEN project's snapshots; a project that is
     # not the open one never has its snapshots read implicitly (RP-03).
+    # The weather bar's saved choice (RP-04b) is the default of a request that
+    # names no source or no year, so the chat and Profile Studio agree with it.
+    saved = weather_prefs.saved_choice(proj.directory)
+    if saved and "source" not in body.model_fields_set:
+        spec["source"] = saved["source"]
     if body.year is not None:
         spec["year_source"] = "explicit"
+    elif saved and saved["year"] is not None:
+        spec["year"], spec["year_source"] = saved["year"], "saved"
     else:
         from services.profile_gen.horizon import default_weather_year
         from services.pypsa_service import PyPSAService
@@ -634,7 +641,7 @@ def generate_profiles(
         engine._normalize_points(spec["points"])
         _validate_technology(body.technology)
         _preset_params(body)
-        if body.source == "atlite":
+        if spec["source"] == "atlite":
             cds_preflight()
     except HTTPException:
         raise
@@ -1427,6 +1434,57 @@ def _moved_bus_warning(ctx, meta: dict, point_id: str, component: str,
                     f"({now[0]:.3f}, {now[1]:.3f})"
                 )
     return warning
+
+
+class WeatherChoice(BaseModel):
+    source: Literal["synthetic", "atlite"]
+    year: int
+
+
+def _weather_answer(proj: AuthorizedProject) -> dict[str, Any]:
+    from services.profile_gen.apply import commercial_timezone, resolve_time_basis
+
+    ctx = _foreground_ctx(proj, "read the weather choice")
+    _mapping, recorded, _warnings = resolve_time_basis(None, commercial_timezone(ctx))
+    return {**weather_prefs.resolved(proj.directory, ctx.network.snapshots),
+            "time_basis": {"value": recorded, "assumed": "assumed" in recorded}}
+
+
+@project_router.get("/{name}/profiles/weather")
+def get_weather_choice(proj: AuthorizedProject = ProjectAccessDep):
+    """The weather bar's source and year: the saved choice, else the snapshots'
+    year (`year_source` says which), with the time basis it is read in
+    (read-only here; the project's site connection holds it)."""
+    return _weather_answer(proj)
+
+
+@project_router.put("/{name}/profiles/weather")
+def put_weather_choice(
+    body: WeatherChoice,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Save the source and year every generate without its own takes."""
+    _check_lock(proj, db, user)
+    try:
+        weather_prefs.save_choice(proj.directory, body.source, body.year)
+    except weather_prefs.WeatherChoiceError as exc:
+        raise HTTPException(status_code=422, detail={"error_kind": "weather_choice",
+                                                     "message": str(exc)}) from exc
+    return _weather_answer(proj)
+
+
+@project_router.delete("/{name}/profiles/weather")
+def clear_weather_choice(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Forget the saved choice: back to the snapshots' year."""
+    _check_lock(proj, db, user)
+    weather_prefs.clear_choice(proj.directory)
+    return _weather_answer(proj)
 
 
 @project_router.get("/{name}/profiles/readiness")

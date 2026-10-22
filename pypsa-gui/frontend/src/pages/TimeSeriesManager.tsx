@@ -27,6 +27,8 @@ import SeriesEditor from '../components/series/SeriesEditor'
 import { fieldLabel, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
+import { WeatherBar } from '../components/series/WeatherBar'
+import { generateAndApply, readyRows } from '../components/series/renewableGeneration'
 import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
 import { profilesApi, type ReadinessRow } from '../api/profiles'
 
@@ -719,11 +721,15 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, readiness, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
+function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
   // The readiness row (RP-02) for a wind/solar generator on the Renewables tab.
   readiness?: ReadinessRow
+  // One-click generate from the weather bar's year and source (RP-04b); set
+  // only on a Renewables row that may be written.
+  onGenerate?: () => void
+  generating?: boolean
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
   // (p_max_pu / p_min_pu / marginal_cost). Drives the row's check icon, the
   // rows-badge, and whether the trash button is shown. Defaults to the
@@ -777,6 +783,14 @@ function GenItem({ gen, meta, readiness, hasActive, activeRows, selected, checke
           </div>
           {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
         </button>
+        {onGenerate && (
+          <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
+            onClick={e => { e.stopPropagation(); onGenerate() }}
+            className="text-[10px] text-accent hover:underline disabled:opacity-50 shrink-0"
+            title="Generate this generator's profile from the weather bar's source and year">
+            {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
+          </button>
+        )}
         <button
           type="button"
           onClick={e => { e.stopPropagation(); onDownload() }}
@@ -1029,6 +1043,25 @@ export default function TimeSeriesManager() {
     enabled: !!currentProject && activeTab === 'renewable',
   })
   const readinessOf = (name: string) => readinessRows.find(r => r.generator === name)
+  // Per-row Generate (RP-04b): generate with the weather bar's choice, wait, apply.
+  const [generating, setGenerating] = useState<ReadonlySet<string>>(new Set())
+  const [genNotice, setGenNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
+  const generateRow = async (name: string) => {
+    const row = readinessOf(name)
+    if (!row || !currentProject) return
+    setGenNotice(null)
+    setGenerating(prev => new Set(prev).add(name))
+    const [outcome] = await generateAndApply(currentProject, [row])
+    setGenerating(prev => { const n = new Set(prev); n.delete(name); return n })
+    setGenNotice(outcome.error
+      ? { tone: 'error', text: `${name}: ${outcome.error}` }
+      : { tone: 'ok', text: `${name}: profile generated and applied. Undo (Ctrl+Z) reverts it.` })
+    void qc.invalidateQueries()
+  }
+  const canGenerateRow = (name: string) => {
+    const row = readinessOf(name)
+    return row ? readyRows([row], true).length > 0 : false
+  }
   const { data: linkProfiles = {} as Record<string, LinkProfileMeta> } = useQuery({
     queryKey: nk(currentProject, 'link_profiles'),
     queryFn: networkApi.getLinkProfiles,
@@ -1828,10 +1861,19 @@ export default function TimeSeriesManager() {
               </>
             ) : (
               <>
+                {activeTab === 'renewable' && currentProject && <WeatherBar project={currentProject} />}
+                {activeTab === 'renewable' && genNotice && (
+                  <p data-testid="generate-notice"
+                    className={`px-3 py-1.5 text-[11px] border-b border-border/40 ${genNotice.tone === 'error' ? 'text-warn' : 'text-success'}`}>
+                    {genNotice.text}
+                  </p>
+                )}
                 {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
+                    onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}
@@ -1854,6 +1896,8 @@ export default function TimeSeriesManager() {
                 {gensWithout.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
                     readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
+                    onGenerate={activeTab === 'renewable' && canGenerateRow(g.name) ? () => { void generateRow(g.name) } : undefined}
+                    generating={generating.has(g.name)}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}

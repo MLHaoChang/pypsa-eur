@@ -8,12 +8,13 @@
 // `profile_gen` job in the ordinary solve queue — one FIFO, so a generation
 // queues behind a running solve; pending artifacts are kept last-10 per
 // project by the backend.
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Play, Wand2 } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
 import { openTimeSeriesFor } from '../layout/flowNavigation'
 import { Btn, PageSection, Seg, Sparkline, Tag } from '../components/PageKit'
+import { weatherKey } from '../components/series/WeatherBar'
 import {
   errorText, profilesApi,
   type GenerateSpec, type PendingProfile, type ProfilePoint,
@@ -130,6 +131,18 @@ export function ProfileStudioView({ name }: { name: string }) {
   const [notice, setNotice] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [estimate, setEstimate] = useState<Record<string, number[]> | null>(null)
+
+  // The weather bar's saved choice is the default here too (RP-04b): one editor
+  // for the year, in Time Series. Read once; the fields below stay editable.
+  const weather = useQuery({ queryKey: weatherKey(name), queryFn: () => profilesApi.weather(name), retry: false })
+  const [seeded, setSeeded] = useState(false)
+  useEffect(() => {
+    if (weather.data && !seeded) {
+      setSource(weather.data.source)
+      setYear(weather.data.year)
+      setSeeded(true)
+    }
+  }, [weather.data, seeded])
 
   const presets = useQuery({
     queryKey: PRESETS_KEY(technology),

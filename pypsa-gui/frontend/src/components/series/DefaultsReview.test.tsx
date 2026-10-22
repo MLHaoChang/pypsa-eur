@@ -9,9 +9,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import DefaultsReview from './DefaultsReview'
 
 const api = vi.hoisted(() => ({ previewDefaults: vi.fn(), applyDefaults: vi.fn() }))
+const prof = vi.hoisted(() => ({
+  readiness: vi.fn(), weather: vi.fn(), generate: vi.fn(), pending: vi.fn(), applyBatch: vi.fn(),
+}))
 vi.mock('../../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../../api/profiles')>('../../api/profiles')
-  return { ...real, seriesApi: api }
+  return { ...real, seriesApi: api, profilesApi: { ...real.profilesApi, ...prof } }
 })
 
 const ROWS = [
@@ -38,6 +41,9 @@ function renderIt() {
 beforeEach(() => {
   vi.clearAllMocks()
   api.previewDefaults.mockResolvedValue({ rows: ROWS })
+  prof.readiness.mockResolvedValue([])
+  prof.weather.mockResolvedValue({ source: 'synthetic', year: 2023, year_source: 'snapshots',
+    time_basis: { value: 'UTC', assumed: false } })
 })
 afterEach(() => cleanup())
 
@@ -96,5 +102,38 @@ describe('DefaultsReview', () => {
     await userEvent.click(screen.getByLabelText('Apply the default for misc'))
     await userEvent.click(screen.getByRole('button', { name: /Apply 1 default$/ }))
     await waitFor(() => expect(api.applyDefaults).toHaveBeenCalledWith('Site A', ['j1']))
+  })
+
+  describe('wind and solar', () => {
+    const gen = (o: object) => ({ generator: 'g_wind', technology: 'wind', bus: 'b', lon: 8, lat: 50,
+      coord_source: 'bus', profile: 'none', ...o })
+
+    it('says in visible text why none is ready', async () => {
+      prof.readiness.mockResolvedValue([gen({ coord_source: 'missing', lon: null, lat: null }),
+        gen({ generator: 'g_up', profile: 'uploaded' })])
+      api.previewDefaults.mockResolvedValue({ rows: [] })
+      renderIt()
+      const reason = await screen.findByTestId('defaults-renewables-reason')
+      expect(reason.textContent).toContain('1 without a location')
+      expect(reason.textContent).toContain('1 with a measured file')
+      expect(screen.getByRole('button', { name: /Apply 0 defaults/ })).toHaveProperty('disabled', true)
+    })
+
+    it('generates the ready generators with the bar\'s year and applies them as one batch', async () => {
+      prof.readiness.mockResolvedValue([gen({}), gen({ generator: 'g_pv', technology: 'solar' }),
+        gen({ generator: 'g_nc', coord_source: 'missing', lon: null, lat: null })])
+      api.previewDefaults.mockResolvedValue({ rows: [] })
+      prof.generate.mockImplementation(async (_p: string, spec: { technology: string }) => ({ id: `job-${spec.technology}` }))
+      prof.pending.mockImplementation(async () => ({
+        pending: [{ job_id: 'job-wind' }, { job_id: 'job-solar' }], jobs: [], keep: 10 }))
+      prof.applyBatch.mockResolvedValue({ applied: [{}], count: 1, skipped: [] })
+      renderIt()
+      expect((await screen.findByTestId('defaults-renewables-weather')).textContent).toContain('2023 (from your snapshots)')
+      await userEvent.click(screen.getByRole('button', { name: /Apply 2 defaults/ }))
+      await waitFor(() => expect(screen.getByTestId('defaults-renewables-result').textContent).toContain('wind: 1 profile applied'))
+      expect(prof.generate).toHaveBeenCalledWith('Site A', { points: [], from_generators: ['g_wind'], technology: 'wind' })
+      expect(prof.generate).toHaveBeenCalledWith('Site A', { points: [], from_generators: ['g_pv'], technology: 'solar' })
+      expect(prof.applyBatch).toHaveBeenCalledWith('Site A', 'job-wind')
+    })
   })
 })
