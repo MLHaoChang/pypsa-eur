@@ -20,6 +20,7 @@ import { H2Icon } from '../../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
+import { openEconomicAssumptions } from '../flowNavigation'
 import { isRenewableCarrier } from '../../utils/carriers'
 import { networkApi } from '../../api/network'
 import { simulationApi } from '../../api/simulation'
@@ -469,15 +470,38 @@ export function BuildYearSelect({ fs, set, tip }: { fs: FS; set: SetFS; tip?: st
   )
 }
 
-// startEdit helper: returns the lifetime string to pre-fill the form with.
-// If the asset's value is null / NaN / inf (PyPSA default) we fall back to
-// the global default_lifetime from solver settings — matches user
-// expectation that "all assets default to the global lifetime". Existing
-// non-default values are preserved.
-export function defaultLifetime(assetLt: number | null | undefined, globalLt: number | undefined): string {
-  if (assetLt != null && Number.isFinite(assetLt) && assetLt > 0) return String(assetLt)
-  if (globalLt != null && Number.isFinite(globalLt) && globalLt > 0) return String(globalLt)
-  return ''
+// startEdit helper: the lifetime string to pre-fill the form with. A blank,
+// infinite or non-positive lifetime stays blank: the asset inherits the project
+// default (Solver Settings › Economic assumptions), and the form says so under
+// the field (`LifetimeInherit`). Nothing writes the default into the asset.
+export function defaultLifetime(assetLt: number | null | undefined): string {
+  return assetLt != null && Number.isFinite(assetLt) && assetLt > 0 ? String(assetLt) : ''
+}
+
+/** Under an asset's lifetime field: where a blank lifetime comes from, or the
+ *  way back to it. The default is edited in Solver Settings, so the link opens
+ *  that block. */
+export function LifetimeInherit({ fs, set }: { fs: FS; set: SetFS }) {
+  const globalLt = useGlobalDefaultLifetime()
+  if (globalLt == null) return null
+  const own = (fs.lifetime ?? '').trim() !== ''
+  return (
+    <div className="col-span-2 -mt-0.5 flex flex-wrap items-center gap-x-2 text-[9px] text-muted" data-testid="asset-lifetime-inherit">
+      {own ? (
+        <button type="button" className="underline" data-testid="asset-lifetime-reset"
+          onClick={() => set(p => ({ ...p, lifetime: '' }))}>
+          Reset to project default ({globalLt} years)
+        </button>
+      ) : (
+        <>
+          <span>{globalLt} years, project default</span>
+          <button type="button" className="underline" data-testid="asset-lifetime-change" onClick={openEconomicAssumptions}>
+            Change in Scenarios &amp; optimisation ›
+          </button>
+        </>
+      )}
+    </div>
+  )
 }
 
 export function DiscountRateInput({ fs, set, tip }: { fs: FS; set: SetFS; tip?: string }) {
