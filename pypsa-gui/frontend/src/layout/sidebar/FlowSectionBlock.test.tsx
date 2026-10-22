@@ -22,7 +22,7 @@ function flowWith(states: Record<string, string | null>): ProjectFlow {
   } as unknown as ProjectFlow
 }
 
-function renderBlock(id: 'connection' | 'readiness') {
+function renderBlock(id: 'connection' | 'readiness' | 'assets') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
@@ -57,5 +57,30 @@ describe('FlowSectionBlock', () => {
     getProjectFlow.mockResolvedValue(flowWith({ readiness: null }))
     renderBlock('readiness')
     expect(screen.queryByTestId('flow-dot-readiness')).toBeNull()
+  })
+
+  describe('Next step for a section worked on the canvas', () => {
+    async function setup(state: string, active: string | null, panel: string | null) {
+      getProjectFlow.mockResolvedValue(flowWith({ assets: state }))
+      useUIStore.setState({ activeSection: active as never, activeSlidePanel: panel as never })
+      renderBlock('assets')
+      await screen.findByTestId('flow-dot-assets')
+    }
+
+    it('shows for a complete, active section with no full-page panel of it open', async () => {
+      await setup('complete', 'assets', null)
+      expect(await screen.findByTestId('sidebar-next-assets')).toBeTruthy()
+    })
+
+    it('hides while a full-page panel of that section is open', async () => {
+      await setup('complete', 'assets', 'capacityBounds')
+      await vi.waitFor(() => expect(screen.getByTestId('flow-dot-assets').getAttribute('data-state')).toBe('complete'))
+      expect(screen.queryByTestId('sidebar-next-assets')).toBeNull()
+    })
+
+    it('hides when the section is not complete or not active', async () => {
+      await setup('incomplete', 'assets', null)
+      expect(screen.queryByTestId('sidebar-next-assets')).toBeNull()
+    })
   })
 })

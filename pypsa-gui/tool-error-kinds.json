@@ -1106,6 +1106,18 @@
     "edit_preview_stale": {
       "surface": "inline",
       "why": "apply_equipment_mapping refused because the network moved between the card the user approved and the live write (another edit, or a different digest on the HTTP apply). Nothing was written; the assistant proposes the edit again, per call."
+    },
+    "pdf_unreadable": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) could not read the PDF: its child-process parse ran past the time budget (`budget_seconds`) or under the memory limit, or pypdf failed on it. Nothing was written; the assistant says the document cannot be read and asks for a re-export or the values typed in, per call."
+    },
+    "pdf_encrypted": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) refused an encrypted PDF without opening it. The assistant asks for an unprotected copy, per call."
+    },
+    "unsupported_document_format": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) was pointed at an upload that is not a PDF. The assistant uses the import that fits the upload (a table goes to preview_equipment_mapping), per call."
     }
   }
 }
