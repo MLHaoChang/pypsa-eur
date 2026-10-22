@@ -509,7 +509,7 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | null
+  solverBlockRequest: 'economic' | 'sclopf' | null
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
   timeSeriesFocus: TimeSeriesFocus | null
@@ -658,7 +658,7 @@ interface UIStore {
   clearResultsSectionRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf') => void
   clearSolverBlockRequest: () => void
   focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
