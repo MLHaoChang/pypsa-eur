@@ -108,7 +108,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
     {answer && <div className="max-h-[25vh] overflow-auto break-words">
       <CheckedEvidenceCard answerId={answer.answer_id} receipt={answer.receipt}
         sourceLabel={answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded evidence'} />
-      {answer.receipt.chart && <CheckedChart chart={answer.receipt.chart} profile={answer.receipt.request_scope?.profile} />}
+      {answer.receipt.chart && <CheckedChart chart={answer.receipt.chart} profile={answer.receipt.request_scope?.profile} entity={answer.receipt.request_scope?.entity_id} />}
     </div>}
     <div className="mt-2 flex flex-wrap gap-3">
       {body && <button type="button" className="underline" aria-expanded={expanded}

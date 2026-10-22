@@ -3544,7 +3544,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'assistant' && m.answer_id && m.receipt && <CheckedEvidenceCard answerId={m.answer_id} receipt={m.receipt} />}
-            {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} />}
+            {m.role === 'assistant' && m.answer_id && m.receipt?.chart && <CheckedChart chart={m.receipt.chart} profile={m.receipt.request_scope?.profile} entity={m.receipt.request_scope?.entity_id} />}
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}

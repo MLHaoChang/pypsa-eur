@@ -50,7 +50,7 @@ def test_a_dispatch_chart_draws_the_evidence_and_names_what_it_did_not_draw(solv
         {"series": "marginal_cost", "disposition": "not_drawn", "reason": "not_in_evidence",
          "title": "Not part of this answer's checked evidence"}]
     assert chart["caption"][0] == "Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00"
-    assert chart["caption"][1] == "Not drawn: marginal cost — Not part of this answer's checked evidence"
+    assert chart["caption"][1] == "Not drawn: G1 marginal cost — Not part of this answer's checked evidence"
     manifest = sidecar(chart)
     record = evidence(receipt)
     # Every value as stored: the drawn dataset is the evidence array, bit for bit.
@@ -164,3 +164,45 @@ def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, 
     again = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
     assert again["chart"]["evidence_id"] != chart["evidence_id"]
     assert checked.client.get(again["chart"]["download_url"]).headers["X-Checked-Chart"] == "evidence re-verified now"
+
+
+def test_a_chart_whose_evidence_file_is_gone_says_it_is_no_longer_stored(solved, checked):
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    chart = receipt["chart"]
+    stamp = checked_charts.readable_stamp(sidecar(chart)["drawn_at"])
+    assurance_records._path(assurance_records.actor_id(), receipt["evidence_ids"][0]).unlink()
+    old = checked.client.get(chart["download_url"])
+    assert old.status_code == 200
+    assert old.headers["X-Checked-Chart"] == (
+        f"drawn {stamp}; its evidence is no longer stored, so it was not re-verified now")
+
+
+def test_a_refused_save_leaves_no_provenance_file(solved, checked, monkeypatch):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.assistant_tools import _project
+
+    def refuse(*args, **kwargs):
+        raise HTTPException(409, "locked")
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", refuse)
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    assert receipt["chart"]["reason"] == "render_failed"
+    _, root, _ = _project()
+    assert not list((root / "assistant_artifacts").glob("*.json"))
+
+
+def test_a_chart_drawn_before_the_caption_named_its_entity_still_verifies(solved, checked):
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p", "marginal_cost"])
+    manifest = sidecar(receipt["chart"])
+    old = {**manifest, "caption": [line.replace("G1 ", "") for line in manifest["caption"]]}
+    assert old["caption"][1].startswith("Not drawn: marginal cost")
+    assert checked_charts.verify(old) == "current"
+
+
+def test_the_caption_names_the_entity_only_when_it_has_one():
+    slots = [{"series": "loading", "disposition": "not_drawn", "reason": "missing_values", "title": "No values"}]
+    window = {"start": "2026-01-01T00:00:00", "end": "2026-01-01T01:00:00"}
+    assert checked_charts.caption(slots, window, "L12")[1] == "Not drawn: L12 loading — No values"
+    assert checked_charts.caption(slots, window)[1] == "Not drawn: loading — No values"

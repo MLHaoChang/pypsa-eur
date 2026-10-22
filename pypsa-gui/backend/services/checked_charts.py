@@ -133,10 +133,12 @@ def readable_stamp(stamp):
     return f"{t.day} {t:%b %Y}, {t:%H:%M} UTC"
 
 
-def caption(slots, window):
+def caption(slots, window, entity=None):
     lines = [f"Chart drawn from checked evidence · {sum(s['disposition'] == 'drawn' for s in slots)} series · "
              f"{readable(window['start'], window['end'])}"]
-    lines += [f"Not drawn: {s['series'].replace('_', ' ')} — {s['title']}" for s in slots if s["disposition"] != "drawn"]
+    # A chart is one entity's: name it, so "loading" is not left to guess.
+    named = lambda s: f"{entity} {s['series'].replace('_', ' ')}" if entity else s["series"].replace("_", " ")  # noqa: E731
+    lines += [f"Not drawn: {named(s)} — {s['title']}" for s in slots if s["disposition"] != "drawn"]
     return lines
 
 
@@ -163,7 +165,7 @@ def render(ctx, record, requested):
 
     drawn_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     # The drawing is as of this solve; an image outlives its evidence and must say when.
-    lines = caption(slots, window) + [f"Drawn {readable_stamp(drawn_at)} from checked evidence · evidence {record['evidence_id']}"]
+    lines = caption(slots, window, record["request_scope"]["entity_id"]) + [f"Drawn {readable_stamp(drawn_at)} from checked evidence · evidence {record['evidence_id']}"]
     png = _draw(record, data, lines)
     project, root, _owner = assistant_tools._project()
     byte_hash = hashlib.sha256(png).hexdigest()
@@ -179,10 +181,15 @@ def render(ctx, record, requested):
     }
     manifest["render_spec_sha256"] = canonical_sha256(manifest["render_spec"])
     provenance = {"manifest": manifest}
-    assistant_tools.tasks._save(root / "assistant_artifacts" / (byte_hash[:16] + ".json"), provenance)
-    artifact = chat_tools._save_agent_export(
-        png, f"checked_{record['request_scope']['entity_id'][:80]}.png", "image/png",
-        assurance_sha256=canonical_sha256(provenance))
+    sidecar = root / "assistant_artifacts" / (byte_hash[:16] + ".json")
+    assistant_tools.tasks._save(sidecar, provenance)
+    try:
+        artifact = chat_tools._save_agent_export(
+            png, f"checked_{record['request_scope']['entity_id'][:80]}.png", "image/png",
+            assurance_sha256=canonical_sha256(provenance))
+    except BaseException:
+        sidecar.unlink(missing_ok=True)  # a refused save leaves no provenance for a file that never existed
+        raise
     return {"status": "drawn", "file_id": artifact["file_id"], "filename": artifact["filename"],
             "download_url": artifact["download_url"], "png_sha256": byte_hash,
             "evidence_id": record["evidence_id"], "window": window, "series": slots, "caption": lines}
@@ -243,11 +250,12 @@ def _draw(record, data, lines):
 
 
 EXPIRED_NOTE = "drawn {drawn_at}; its evidence has expired, so it was not re-verified now"
+MISSING_NOTE = "drawn {drawn_at}; its evidence is no longer stored, so it was not re-verified now"
 
 
 def verify(manifest):
     """"current" when a checked chart's dataset is still its evidence's, "expired"
-    once that evidence has expired (the chart then stands on its integrity hashes
+    once that evidence has expired and "missing" when its file is gone (the chart then stands on its integrity hashes
     and says so), False on any mismatch. Current means: the evidence
     record's source hash and the series values, re-extracted, must match.
 
@@ -264,7 +272,7 @@ def verify(manifest):
 
     path = assurance_records._path(manifest["owner_id"], manifest["evidence_id"])
     if not path.exists():
-        return "expired"
+        return "missing"
     envelope = json.loads(path.read_text(encoding="utf-8"))
     record = envelope["record"]
     if (assurance_records.digest(record) != envelope["sha256"] or record["record_kind"] != "evidence"

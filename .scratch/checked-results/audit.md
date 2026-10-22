@@ -202,10 +202,11 @@ None open.
 ## Follow-ups
 
 Each is outside this package and gets its own issue or PR.
-- **Results-tab window.** A checked answer's link to Results opens the tab without passing the evidence window (UX follow-up c on S3b).
-- **Scorecard rows without a numeric verdict.** The categorical and non-scalar rows (`grid_former`, `lole`, `oscillation`, `energization_peak:*`) each need their own profile; `scorecard-row/1` leaves them unchecked.
-- **Chart evidence messages (#486, GK nits).**
-  - `verify()` says "expired" when the evidence file is missing; it should say "evidence no longer stored".
-  - An orphan provenance JSON is left behind when `_save_agent_export` is refused.
-- **"Not drawn" names (#487, UX nit).** The line has no readable series name, because the receipt carries no entity or carrier. Fixing it changes the receipt contract.
-- **Guided reliability link.** `AvailabilityEditor.openReliability` opens the hub card in Guided mode, not Results (filed separately by the UX reviewer).
+- **Results-tab window.** Done (small-fixes bundle). "Open in Results" on a checked chart carries the chart's window to the Results Horizon filter (a one-shot `resultsWindowRequest`).
+- **Scorecard rows without a numeric verdict.** The categorical and non-scalar rows (`grid_former`, `lole`, `oscillation`, `energization_peak:*`) each need their own profile; `scorecard-row/1` leaves them unchecked. Skipped: a design task.
+- **Chart evidence messages (#486, GK nits).** Done (small-fixes bundle).
+  - `verify()` says "evidence no longer stored" when the evidence file is missing, and "expired" only when it has expired.
+  - A refused `_save_agent_export` removes the provenance JSON it was about to bind.
+- **"Not drawn" names (#487, UX nit).** Done (small-fixes bundle), with no slot change (engine gatekeeper): the PNG caption and the card name the chart's entity (`request_scope.entity_id`) in each not-drawn line. The series slot contract and its validator are unchanged, so charts drawn earlier still verify.
+- **Guided reliability link.** Done (small-fixes bundle). `AvailabilityEditor.openReliability` opens the Results panel in Guided, not the hub card.
+- **Navigation join tests.** Done (small-fixes bundle). `tests/test_navigation_join.py` covers a `network-loading/1` join and the `project_differs` and `fingerprint_basis_unknown` reasons.

@@ -111,6 +111,18 @@ describe('AvailabilityEditor', () => {
       component: 'Generator', entity: 'gt1', field: 'outage_rate_value' })
   })
 
+  it('in Guided, the reliability link opens Results in place with a way back, and stays Guided', async () => {
+    useUIStore.getState().setUiMode('guided')
+    renderEditor('guided')
+    await userEvent.click(screen.getByRole('button', { name: 'Forced outages' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Forced outages are sampled in the reliability study ›' }))
+    const ui = useUIStore.getState()
+    expect(ui.fieldDrawer?.panel).toBe('results')   // in place, over the card
+    expect(ui.resultsTabRequest).toBe('adequacy')
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.flowReturn).not.toBeNull()            // Back returns to the editor
+  })
+
   it('shows forced outages read-only, leading to the asset\'s outage inputs', async () => {
     useUIStore.getState().setUiMode('expert')
     useUIStore.getState().setSlidePanel('timeseries')

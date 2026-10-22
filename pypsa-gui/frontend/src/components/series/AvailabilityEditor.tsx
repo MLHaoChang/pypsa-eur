@@ -12,6 +12,7 @@
 // Guided shows the key parameters (a season and a number of weeks, one
 // share, one floor); dated windows, seasonal shares and the ambient model
 // sit under Advanced, open by default in Expert.
+import { openPanel } from '../../pages/results/openPanel'
 import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
@@ -19,7 +20,7 @@ import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
 import {
-  openFlowTarget, openFlowTargetInPlace, openSectionInExpert, openSectionInGuided,
+  openFlowTarget, openFlowTargetInPlace,
 } from '../../layout/flowNavigation'
 import {
   CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
@@ -103,12 +104,12 @@ export default function AvailabilityEditor({ project, component, componentType, 
   const [perK, setPerK] = useState('')
 
   // The reliability study is the Results section's adequacy tab: opened
-  // through the shared section navigation, in the mode the user is in.
+  // through the shared panel navigation (in place in Guided, never flipping the
+  // mode; Back returns here). The tab is requested first, as that clears a
+  // pending return, which the navigation then sets.
   const openReliability = () => {
-    const ui = useUIStore.getState()
-    if (ui.uiMode === 'guided') openSectionInGuided('results')
-    else openSectionInExpert('results')
-    ui.requestResultsTab('adequacy')
+    useUIStore.getState().requestResultsTab('adequacy')
+    openPanel('results', 'results')
   }
   const editOutageInputs = () =>
     revealOutageInputs(componentType === 'links' ? 'Link' : 'Generator', component)

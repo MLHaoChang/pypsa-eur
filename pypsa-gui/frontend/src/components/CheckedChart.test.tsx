@@ -18,21 +18,22 @@ afterEach(cleanup)
 
 describe('CheckedChart', () => {
   it('shows the bound download, the footer from the series slots and the not-drawn list', () => {
-    render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
+    render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" entity="G1" />)
     expect(screen.getByTestId('checked-chart-download').getAttribute('href')).toBe(DRAWN.download_url)
     expect(screen.getByTestId('checked-chart-footer').textContent).toBe(
       'Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00')
-    expect(screen.getByText("Not drawn: marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
+    expect(screen.getByText("Not drawn: G1 marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
   })
 
   it.each(['guided', 'expert'] as const)('opens Results on the native tab and stays in %s', mode => {
-    useUIStore.setState({ uiMode: mode, activeSection: null, activeSlidePanel: null, resultsTabRequest: null })
+    useUIStore.setState({ uiMode: mode, activeSection: null, activeSlidePanel: null, resultsTabRequest: null, resultsWindowRequest: null })
     render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
     fireEvent.click(screen.getByTestId('checked-chart-native'))
     const ui = useUIStore.getState()
     expect(ui.uiMode).toBe(mode)
     expect(ui.activeSlidePanel).toBe('results')
     expect(ui.resultsTabRequest).toBe('dispatch')
+    expect(ui.resultsWindowRequest).toEqual({ start: '2026-01-01T00:00:00', end: '2026-01-01T01:00:00' })
     expect(screen.getByTestId('checked-chart-native').textContent).toBe('Open in Results › Dispatch')
   })
 
