@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The section 7 commercial edit card and receipt name tariff and PPA values in words with the currency ("Import tariff › Energy, peak period: rate 0.2 → 0.0725 EUR/kWh") instead of raw paths.

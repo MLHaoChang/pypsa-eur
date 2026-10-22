@@ -138,7 +138,8 @@ def _says(rows: list[dict]) -> str:
             return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
         unit = f" {row['unit']}" if row.get("unit") else ""
         old = "?" if row.get("old") is None and row.get("old_known") is False else _number(row.get("old"))
-        return f"{row['name']} {row['field']} {old} → {_number(row['new'])}{unit}"
+        what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
+        return f"{what} {old} → {_number(row['new'])}{unit}"
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
 
 
