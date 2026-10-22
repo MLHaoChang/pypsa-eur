@@ -12,11 +12,13 @@ describe('Profile Studio is Expert only', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('profiles')
   })
 
-  it('lands on Time Series in Guided, in the same section', () => {
-    useUIStore.setState({ uiMode: 'guided' })
+  it("lands on the section's Time Series drawer over the hub design in Guided", () => {
+    useUIStore.setState({ uiMode: 'guided', fieldDrawer: null })
     useUIStore.getState().setSlidePanel('profiles')
-    expect(useUIStore.getState().activeSlidePanel).toBe('timeseries')
-    expect(useUIStore.getState().activeSection).toBe('profiles')
+    const ui = useUIStore.getState()
+    expect(ui.activeSlidePanel).toBe('hubDesign')
+    expect(ui.activeSection).toBe('profiles')
+    expect(ui.fieldDrawer).toEqual({ section: 'profiles', panel: 'timeseries', component: null, entity: null, field: null })
   })
 
   it('leaves every other panel alone in Guided', () => {

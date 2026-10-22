@@ -927,10 +927,15 @@ export const useUIStore = create<UIStore>((set, get) => ({
   setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (requested) => {
     navigationChanged()
-    // Profile Studio is Expert-only (RP-Q4): Guided reaches the same generation
-    // through Time Series' weather bar, "Generate defaults for all" and the
-    // assistant, so any request for the panel lands on Time Series there.
-    const p = requested === 'profiles' && get().uiMode !== 'expert' ? 'timeseries' : requested
+    // Profile Studio is Expert-only (RP-Q4). Guided has no full-screen Time
+    // Series: a request for the panel opens the section's Time Series drawer on
+    // the hub design, the same place `openTimeSeriesFor` opens in Guided.
+    if (requested === 'profiles' && get().uiMode !== 'expert') {
+      set({ activeSlidePanel: 'hubDesign', activeSection: 'profiles',
+        fieldDrawer: { section: 'profiles', panel: 'timeseries', component: null, entity: null, field: null } })
+      return
+    }
+    const p = requested
     const section = p ? PANEL_SECTION[p] : undefined
     set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })
   },

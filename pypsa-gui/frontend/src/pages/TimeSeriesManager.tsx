@@ -1614,7 +1614,7 @@ export default function TimeSeriesManager() {
           <button type="button" data-testid="ts-open-profile-studio"
             onClick={() => useUIStore.getState().setSlidePanel('profiles')}
             className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
-            Generate with Profile Studio →
+            Generate with Profile Studio ›
           </button>
         )}
       </div>
