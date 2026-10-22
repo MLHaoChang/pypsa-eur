@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 281,
+  "tool_count": 283,
   "tools": [
     {
       "name": "resolve_project_target",
