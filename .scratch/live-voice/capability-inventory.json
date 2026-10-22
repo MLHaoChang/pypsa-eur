@@ -6070,7 +6070,8 @@
       "input_keys": [
         "title",
         "request_id",
-        "steps"
+        "steps",
+        "brief"
       ],
       "required": [
         "title",
@@ -6078,7 +6079,7 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
     {
