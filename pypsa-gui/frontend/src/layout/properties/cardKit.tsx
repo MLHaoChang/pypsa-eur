@@ -483,19 +483,20 @@ export function defaultLifetime(assetLt: number | null | undefined): string {
  *  that block. */
 export function LifetimeInherit({ fs, set }: { fs: FS; set: SetFS }) {
   const globalLt = useGlobalDefaultLifetime()
-  if (globalLt == null) return null
   const own = (fs.lifetime ?? '').trim() !== ''
+  const years = globalLt == null ? null : `${globalLt} years`
   return (
     <div className="col-span-2 -mt-0.5 flex flex-wrap items-center gap-x-2 text-[9px] text-muted" data-testid="asset-lifetime-inherit">
       {own ? (
         <button type="button" className="underline" data-testid="asset-lifetime-reset"
           onClick={() => set(p => ({ ...p, lifetime: '' }))}>
-          Reset to project default ({globalLt} years)
+          {years ? `Reset to project default (${years})` : 'Reset to project default'}
         </button>
       ) : (
         <>
-          <span>{globalLt} years, project default</span>
-          <button type="button" className="underline" data-testid="asset-lifetime-change" onClick={openEconomicAssumptions}>
+          <span>{years ? `${years}, project default` : 'Project default'}</span>
+          <button type="button" className="underline" data-testid="asset-lifetime-change" onClick={openEconomicAssumptions}
+            title="Opens Solver Settings in Expert">
             Change in Scenarios &amp; optimisation ›
           </button>
         </>

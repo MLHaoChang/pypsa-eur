@@ -13,7 +13,8 @@ function Line({ label, value, note, testId }: { label: string; value: string; no
       <span className="text-[10px] text-muted">{label}</span>
       <span className="text-xs font-mono text-text">{value}</span>
       {note && <span className="text-[10px] text-muted">{note}</span>}
-      <button type="button" className="text-[10px] underline text-left" onClick={openEconomicAssumptions}>
+      <button type="button" className="text-[10px] underline text-left" onClick={openEconomicAssumptions}
+        title="Opens Solver Settings in Expert">
         Edit in Scenarios &amp; optimisation ›
       </button>
     </div>
