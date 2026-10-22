@@ -145,3 +145,13 @@ path = [
 ]
 SPDX-FileCopyrightText = "Energinet (www.energidataservice.dk)"
 SPDX-License-Identifier = "CC-BY-4.0"
+
+# Vendored third-party skill, see .claude/skills/UI-UX-PRO-MAX-SKILLS.md
+[[annotations]]
+path = [
+    ".claude/skills/ui-ux-pro-max/**",
+    ".claude/skills/UI-UX-PRO-MAX-SKILLS.md",
+    ".claude/skills/UI-UX-PRO-MAX-LICENSE",
+]
+SPDX-FileCopyrightText = "2024 Next Level Builder"
+SPDX-License-Identifier = "MIT"

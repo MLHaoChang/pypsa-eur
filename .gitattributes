@@ -12,3 +12,6 @@ pixi.lock merge=binary linguist-language=YAML linguist-generated=true
 # on 344 tracked files, which broke the multi-line `bash -c` tasks in
 # pixi.toml and made every file show as modified.
 * text=auto eol=lf
+
+# The vendored UI UX Pro Max data is hashed by its catalog summary; keep it LF.
+.claude/skills/ui-ux-pro-max/data/** text eol=lf

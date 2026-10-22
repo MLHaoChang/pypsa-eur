@@ -23,6 +23,8 @@ Opening or driving a PR: read `.claude/skills/steward/SKILL.md` first; it holds 
 
 The skills from mattpocock/skills are vendored in `.claude/skills/` (see `.claude/skills/MATTPOCOCK-SKILLS.md`).
 
+The `ui-ux-pro-max` design skill is vendored too (see `.claude/skills/UI-UX-PRO-MAX-SKILLS.md`). Implementers use it for lookups only: `search.py --domain ux|chart`, `--stack react|html-tailwind`. `pypsa-gui/frontend/src/index.css`, `public/brand.css`, `docs/agents/review-ux.md` and the owner decisions outrank it. Never run `--design-system` or `--persist`, and never generate a palette, font pairing or `design-system/` folder for pypsa-gui. Its mobile and touch-size rules are advisory, since the app is desktop-first. The 9–11px text and Inter are intentional (DENSITY-1).
+
 ### Issue tracker
 
 Issues and specs are local markdown files under `.scratch/<feature>/`. See `docs/agents/issue-tracker.md`.
