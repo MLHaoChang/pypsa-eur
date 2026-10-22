@@ -281,6 +281,16 @@ def test_a_counterfactual_says_the_lcoe_is_on_incremental_value(project, checked
     assert "on the incremental value against the counterfactual" in public_text(frames)
 
 
+def test_a_counterfactual_adds_no_lcoe_note_to_the_returns():
+    from harness import investment_calculations
+
+    raw = {"profile": PROFILE, "has_counterfactual": True, "index": ["2026"], "basis_statement": "nominal basis",
+           "rates": {"cost_of_equity": 0.10, "wacc_nominal": 0.07}}
+    text = " ".join(investment_calculations.notes(raw, str))
+    assert "incremental value" not in text
+    assert "The LCOE is checked separately (investment-lcoe/1)" in text
+
+
 def test_an_unknown_retained_year_is_named_as_such(project, checked):
     def gap(payload):
         lcoe_hand(payload)

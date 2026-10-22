@@ -305,6 +305,6 @@ def notes(raw, label):
         "(financial close) is undiscounted.",
     ] + ([
         "The LCOE is on the incremental value against the counterfactual, as the engine computes it."
-    ] if raw.get("has_counterfactual") else []) + ([] if raw["profile"] == LCOE_PROFILE else [
+    ] if raw["profile"] == LCOE_PROFILE and raw.get("has_counterfactual") else []) + ([] if raw["profile"] == LCOE_PROFILE else [
         "The LCOE is checked separately (investment-lcoe/1), from the series the report retains.",
     ])
