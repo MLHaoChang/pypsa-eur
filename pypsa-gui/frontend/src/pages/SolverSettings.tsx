@@ -15,6 +15,7 @@ import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
+import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
@@ -156,6 +157,11 @@ export default function SolverSettings() {
   // reverting them.
   const baselineRef = useRef<SolverConfig | null>(null)
 
+  // Load flow's on/off is the scope's (W4b), written by the scope cards; the
+  // draft is hydrated once, so the live value comes from the scope.
+  const loadFlowOn = useLoadFlowOn(!!cfg?.run_ac_pf_after_lopf)
+  const n1On = useN1On(!!cfg?.sclopf)
+
   // Hydrate the form from the backend once. We don't useEffect on every cfg
   // refetch because that would clobber the user's in-progress edits if a
   // background poll happens to land mid-typing.
@@ -243,11 +249,24 @@ export default function SolverSettings() {
   const blockRequest = useUIStore(s => s.solverBlockRequest)
   const clearBlockRequest = useUIStore(s => s.clearSolverBlockRequest)
   useEffect(() => {
-    if (blockRequest !== 'economic' || !draft) return
-    if (tab !== 'dispatch') { setTab('dispatch'); return }
-    document.getElementById('solver-economic-assumptions')?.scrollIntoView({ block: 'start' })
+    if (!blockRequest || !draft) return
+    const [want, target] = blockRequest === 'sclopf'
+      ? ['network', 'solver-sclopf-panel'] as const
+      : ['dispatch', 'solver-economic-assumptions'] as const
+    if (tab !== want) { setTab(want); return }
+    document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
   }, [blockRequest, draft, tab, clearBlockRequest])
+  // "Switch it under What the Run computes › N-1 security": the General tab,
+  // scrolled to the scope cards' N-1 row.
+  const [showN1Row, setShowN1Row] = useState(false)
+  useEffect(() => {
+    if (!showN1Row) return
+    if (tab !== 'general') { setTab('general'); return }
+    document.querySelector('[data-testid="expert-scope-cards-row-grid-n1_sclopf"]')
+      ?.scrollIntoView({ block: 'center' })
+    setShowN1Row(false)
+  }, [showN1Row, tab])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -329,7 +348,7 @@ export default function SolverSettings() {
           with `rolling_overlap` snapshots of overlap to carry SoC across.
           Recommended for problems where the full LP is too large for memory
           (typically > ~1000 snapshots × > ~100 buses).
-          Incompatible with SCLOPF and auto-chained AC PF — backend validation
+          Incompatible with SCLOPF and Load flow — backend validation
           rejects those combinations. */}
       <section>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Solve strategy</h3>
@@ -403,13 +422,13 @@ export default function SolverSettings() {
             {/* Surface the SCLOPF / AC PF incompatibility BEFORE the user
                 clicks Run. The backend will also reject these — this is a
                 UX courtesy so they don't have to read the failure log. */}
-            {(draft.sclopf || draft.run_ac_pf_after_lopf) && (
+            {(n1On || loadFlowOn) && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
                 Rolling horizon is not compatible with{' '}
-                {draft.sclopf && <code>SCLOPF</code>}
-                {draft.sclopf && draft.run_ac_pf_after_lopf && ' or '}
-                {draft.run_ac_pf_after_lopf && <code>auto-chained AC PF</code>}
-                . Disable one to run.
+                {n1On && 'N-1 security (What the Run computes › N-1 security)'}
+                {n1On && loadFlowOn && ' or '}
+                {loadFlowOn && 'Load flow (What the Run computes › Load flow)'}
+                . Switch one off to run.
               </p>
             )}
             <p className="text-[10px] text-muted">
@@ -507,15 +526,15 @@ export default function SolverSettings() {
                 </label>
               </div>
             )}
-            {draft.run_ac_pf_after_lopf && (
+            {loadFlowOn && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
-                Myopic foresight is not yet compatible with{' '}
-                <code>auto-chained AC PF</code>. Disable one to run.
+                Myopic foresight is not yet compatible with Load flow
+                (What the Run computes › Load flow). Switch one off to run.
               </p>
             )}
-            {draft.sclopf && (
+            {n1On && (
               <p className="text-[10px] text-muted bg-panel border border-border rounded px-2 py-1">
-                SCLOPF is enabled — contingency constraints are applied per
+                N-1 security is on — contingency constraints are applied per
                 myopic iteration. Choose <code>Contingency scope</code> below
                 (Horizon / Current period).
               </p>
@@ -530,7 +549,7 @@ export default function SolverSettings() {
           LP. Lives next to Solve strategy / Validate so the user configures
           the full solve pipeline in one place. */}
       <div className="border-t border-border pt-4">
-        <Stage2Panel draft={draft} patch={patch} />
+        <Stage2Panel draft={draft} patch={patch} loadFlowOn={loadFlowOn} />
       </div>
 
       {/* ── Pre-run validation CTA ──────────────────────────────
@@ -869,18 +888,18 @@ export default function SolverSettings() {
             optimize_security_constrained doesn't accept the kwarg and the
             LODF formulation assumes a lossless DC network. Grey out so the
             user doesn't expect a no-op to take effect. */}
-        <label className={`flex items-center justify-between p-2 border border-border rounded ${draft.sclopf ? 'opacity-50 cursor-not-allowed' : ''}`}>
+        <label className={`flex items-center justify-between p-2 border border-border rounded ${n1On ? 'opacity-50 cursor-not-allowed' : ''}`}>
           <span className="text-xs">
             Enable transmission losses
             <span className="block text-[11px] text-muted">
-              {draft.sclopf
-                ? 'Disabled — SCLOPF cannot model losses (LODF assumes a lossless DC network).'
-                : 'Iterative LOPF that approximates AC line losses.'}
+              {n1On
+                ? 'Disabled — N-1 security cannot model losses (it assumes a lossless DC network).'
+                : 'Iterative solve that approximates AC line losses.'}
             </span>
           </span>
           <input
-            type="checkbox" checked={draft.transmission_losses && !draft.sclopf}
-            disabled={draft.sclopf}
+            type="checkbox" checked={draft.transmission_losses && !n1On}
+            disabled={n1On}
             onChange={e => patch({ transmission_losses: e.target.checked })}
           />
         </label>
@@ -893,7 +912,7 @@ export default function SolverSettings() {
       <StressConditionsSection project={currentProject} />
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
-      <SclopfPanel draft={draft} patch={patch} />
+      <SclopfPanel draft={draft} patch={patch} n1On={n1On} onShowSwitch={() => setShowN1Row(true)} />
       </>}
 
       {tab === 'constraints' && <>
@@ -1609,11 +1628,14 @@ export function ReliabilityAssumptions({
 //      bus is ≥ threshold is auto-selected
 //   4) two explicit pick lists (extra lines, extra transformers)
 // The four selectors UNION at solve time, so the user can layer them.
-function SclopfPanel({
-  draft, patch,
+export function SclopfPanel({
+  draft, patch, n1On, onShowSwitch,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  n1On: boolean
+  /** Show the scope cards' N-1 security row (the one on/off). */
+  onShowSwitch: () => void
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),        queryFn: networkApi.getLines })
@@ -1682,10 +1704,9 @@ function SclopfPanel({
   }
 
   return (
-    <section className="border-t border-border pt-4">
+    <section id="solver-sclopf-panel" className="border-t border-border pt-4">
       <div className="flex items-center gap-2 mb-1">
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">N-1 Security-Constrained LOPF</h3>
-        <span className="text-[10px] text-muted">(SCLOPF — preventive)</span>
+        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">N-1 security (contingency constraints)</h3>
       </div>
       <p className="text-[11px] text-muted mb-3">
         Adds one constraint per (contingency × monitored branch) so no branch is
@@ -1695,14 +1716,21 @@ function SclopfPanel({
         snapshot — keep the set focused for big networks.
       </p>
 
-      <label className="flex items-center gap-2 cursor-pointer mb-3">
-        <input type="checkbox" checked={draft.sclopf}
-          onChange={e => patch({ sclopf: e.target.checked })}
-          className="accent-accent" />
-        <span className="text-xs font-medium text-text">Enable SCLOPF</span>
-      </label>
+      <p data-testid="sclopf-state" className="text-xs mb-3">
+        <span className="font-semibold">{n1On ? 'On' : 'Off'}:</span>{' '}
+        {n1On ? 'N-1 security is applied in each solve.' : 'N-1 security is not applied in a solve.'}{' '}
+        Switch it under{' '}
+        <button type="button" data-testid="sclopf-show-switch" onClick={onShowSwitch}
+          className="text-accent hover:underline">
+          What the Run computes › N-1 security ›
+        </button>
+        {' '}Choose the branches to check here.
+      </p>
+      <p className="text-[10.5px] text-muted mb-3">
+        Used when N-1 security is on (What the Run computes).
+      </p>
 
-      <div className={`flex flex-col gap-3 ${draft.sclopf ? '' : 'opacity-50 pointer-events-none'}`}>
+      <div className="flex flex-col gap-3">
         {/* ── Coarse selectors ──────────────────────────────────── */}
         <div className="border border-border rounded">
           <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -1739,8 +1767,8 @@ function SclopfPanel({
         {/* ── Resolved-set summary ──────────────────────────────── */}
         <div className="px-3 py-2 bg-panel border border-border rounded text-[11px] text-muted">
           <span className="font-medium text-text">Resolved contingencies: {totalResolved}</span>
-          {totalResolved === 0 && draft.sclopf && (
-            <span className="ml-2 text-danger">— pick at least one source above (otherwise this falls back to plain LOPF).</span>
+          {totalResolved === 0 && n1On && (
+            <span className="ml-2 text-danger">— pick at least one source above (otherwise the solve runs without N-1 security).</span>
           )}
           {totalResolved > 200 && (
             <span className="ml-2 text-warn">— large set, the LP may be slow.</span>
@@ -1758,7 +1786,7 @@ function SclopfPanel({
           </div>
           <div className="p-3 flex flex-col gap-2">
             <label className="text-[11px] text-muted">
-              When myopic foresight is active, choose how SCLOPF constraints
+              When myopic foresight is active, choose how N-1 security constraints
               apply across each iteration's snapshot window:
             </label>
             <select
@@ -1782,10 +1810,10 @@ function SclopfPanel({
               count.
               <br />
               <span className="font-medium text-text">Current period</span>:
-              the SCLOPF LP for each iteration drops future-period snapshots
+              the contingency LP for each iteration drops future-period snapshots
               entirely — only current-period hourly snapshots get N-1
               constraints. Faster, but limited foresight has no effect during
-              SCLOPF iterations.
+              those iterations.
             </p>
             {draft.sclopf_scope === 'current_period' && draft.solve_strategy === 'myopic' && (
               <div className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
@@ -1798,7 +1826,7 @@ function SclopfPanel({
             {draft.solve_strategy !== 'myopic' && (
               <div className="text-[10px] text-muted italic">
                 Applies only when <code>solve_strategy = "myopic"</code> is set
-                above. Ignored on the full-horizon SCLOPF path.
+                above. Ignored on the full-horizon solve.
               </div>
             )}
           </div>
@@ -1869,104 +1897,19 @@ function SclopfPanel({
   )
 }
 
-// Stage 2 — post-solve AC Power Flow panel. Controls the auto-chain toggle,
-// the slack-bus override, the Newton-Raphson tolerance, and the standalone
-// "Run AC Power Flow on current solution" trigger. Mirrors SclopfPanel's
-// layout (single-card section with subdued sub-options when the master
-// toggle is off) so the Solver Settings page reads consistently across
-// tabs.
-//
-// Trigger semantics:
-//   • Auto-chain checkbox flips `run_ac_pf_after_lopf`. On the next "Run
-//     Optimization" the backend chains Stage 2 inside the same worker.
-//   • Standalone button calls POST /api/simulation/run_ac_pf, which is a
-//     separate worker thread. Requires that LOPF has solved and dispatch
-//     is populated. Disabled when no solved network is loaded.
-//   • On successful standalone trigger the resultSource auto-flips to
-//     'ac_pf' (per the design Q: "auto-flip to AC PF view"). The user can
-//     flip back via the LOPF/AC PF toggle in LoadFlow / TopologyCanvas.
-function Stage2Panel({
-  draft, patch,
+// Stage 2 — post-solve AC Power Flow panel: the slack-bus override and the
+// Newton-Raphson tolerance. Whether Stage 2 runs at all is the scope's call
+// (What the Run computes › Load flow, W4b): this panel shows it read-only, and
+// the one Run (the header Run) chains it after the solve.
+export function Stage2Panel({
+  draft, patch, loadFlowOn,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  loadFlowOn: boolean
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
-  const { data: simStatus } = useQuery({
-    // Use the SAME key as every other status consumer (App, AppHeader,
-    // SnapshotPicker, Results, OverviewPanel). The previous 'simulation_status'
-    // was a separate cache entry, so a standalone AC-PF trigger from here
-    // refreshed only this panel and left the picker/overlay status stale.
-    queryKey: nk(currentProject, 'simulationStatus'),
-    queryFn: simulationApi.getStatus,
-    refetchInterval: 2000,
-  })
-  const setResultSource = useUIStore(s => s.setResultSource)
-  const qc = useQueryClient()
-
-  // Treat "completed/optimal" as "has a solved network we can fix dispatch
-  // from". An idle network that was loaded from a project save also counts —
-  // /api/simulation/run_ac_pf will 400 if the network isn't actually solved.
-  const isRunning = simStatus?.running === true
-  const canRunAcPf = !isRunning
-
-  // Refresh result queries when a standalone AC-PF run finishes. The success
-  // handler flips resultSource→'ac_pf' (which refetches the ac_pf-keyed
-  // queries), but the lopf-keyed result queries wouldn't refetch if the user
-  // flips back to 'lopf'. Watch the running→idle edge and invalidate ['results']
-  // (+ status) so every view reflects the post-AC-PF state. prevRunningRef
-  // starts false so a fresh mount with no run in flight never fires.
-  const prevRunningRef = useRef(false)
-  useEffect(() => {
-    if (prevRunningRef.current && !isRunning) {
-      const proj = useUIStore.getState().currentProject
-      qc.invalidateQueries({ queryKey: nk(proj, 'results') })
-      qc.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
-    }
-    prevRunningRef.current = isRunning
-  }, [isRunning, qc])
-
-  const runAcPf = useMutation({
-    mutationFn: () => simulationApi.runAcPf(),
-    onSuccess: () => {
-      toast.success('Stage 2: AC Power Flow started — see the Log tab for progress.')
-      // Auto-flip the result-source toggle to AC PF so the LoadFlow tab and
-      // the canvas overlay show the new view as soon as it finishes.
-      setResultSource('ac_pf')
-      // Invalidate the simulation status query so the polling cycle picks up
-      // the new "running" state immediately rather than waiting 2s.
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'simulationStatus') })
-    },
-    onError: (e: unknown) => {
-      const code = (e as { response?: { status?: number } })?.response?.status
-      if (code === 409) {
-        toast(
-          (t) => (
-            <div className="flex items-center gap-3">
-              <span>Previous simulation still running.</span>
-              <button
-                className="px-2 py-0.5 rounded bg-accent text-white text-xs hover:opacity-90"
-                onClick={async () => {
-                  toast.dismiss(t.id)
-                  try {
-                    await simulationApi.forceReset()
-                    runAcPf.mutate()
-                  } catch { /* ignore */ }
-                }}
-              >
-                Force restart
-              </button>
-            </div>
-          ),
-          { duration: 10000 },
-        )
-        return
-      }
-      const msg = e instanceof Error ? e.message : 'Stage 2 start failed'
-      toast.error(`AC PF: ${msg}`)
-    },
-  })
 
   // Slack-bus options. Empty value ⇒ backend auto-picks (largest gen).
   const busOptions = useMemo(
@@ -1978,27 +1921,20 @@ function Stage2Panel({
     <section>
       <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Stage 2: AC Power Flow</h3>
       <p className="text-xs text-muted mb-3">
-        After the LOPF / SCLOPF solve, fix the optimal dispatch and run a
+        After the solve, fix the optimal dispatch and run a
         non-linear Newton-Raphson AC power flow per snapshot to recover real
         voltages, reactive power, and physical line losses. Each snapshot
         solves independently; non-converged snapshots are flagged in the
         LoadFlow tab and on the canvas.
       </p>
 
-      <label className="flex items-center justify-between mb-3 cursor-pointer">
-        <span className="text-xs">
-          Auto-run AC PF after optimisation
-          <span className="block text-[11px] text-muted">
-            Chains Stage 2 in the same "Run" click. Leave off to trigger
-            Stage 2 manually below.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          checked={!!draft.run_ac_pf_after_lopf}
-          onChange={e => patch({ run_ac_pf_after_lopf: e.target.checked })}
-        />
-      </label>
+      <p data-testid="stage2-state" className="text-xs mb-3">
+        <span className="font-semibold">{loadFlowOn ? 'On' : 'Off'}:</span>{' '}
+        {loadFlowOn
+          ? 'AC power flow runs after each solve.'
+          : 'AC power flow does not run after a solve.'}{' '}
+        Switch it under What the Run computes › Load flow, above.
+      </p>
 
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div className="flex flex-col gap-0.5">
@@ -2037,21 +1973,6 @@ function Stage2Panel({
             Newton-Raphson convergence threshold. Default 1e-6.
           </span>
         </div>
-      </div>
-
-      <div className="border-t border-border pt-3">
-        <button
-          onClick={() => runAcPf.mutate()}
-          disabled={!canRunAcPf || runAcPf.isPending}
-          className="w-full py-2 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {runAcPf.isPending ? 'Starting Stage 2…' : 'Run AC Power Flow on current solution'}
-        </button>
-        <p className="text-[10px] text-muted mt-1.5">
-          Standalone trigger — requires that a LOPF has solved at least once
-          since the network was loaded.
-          {isRunning && ' Disabled while a solve is in progress.'}
-        </p>
       </div>
     </section>
   )

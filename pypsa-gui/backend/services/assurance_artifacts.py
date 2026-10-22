@@ -50,6 +50,20 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
             or manifest["artifact_sha256"] != meta.sha256
         ):
             raise ValueError("manifest mismatch")
+        if manifest.get("source_kind") == "checked_evidence":
+            # A checked chart is still its evidence's: same source hash, same values.
+            from services import checked_charts
+
+            try:
+                status = checked_charts.verify(manifest)
+            except HTTPException:
+                status = False
+            if not status:
+                raise ValueError("checked chart evidence mismatch")
+            manifest = {**manifest, "evidence_status": status}
+            if status == "expired":
+                manifest["evidence_note"] = checked_charts.EXPIRED_NOTE.format(
+                    drawn_at=checked_charts.readable_stamp(manifest["drawn_at"]))
         return record if provenance else manifest
     except (OSError, ValueError, TypeError, KeyError):
         raise HTTPException(

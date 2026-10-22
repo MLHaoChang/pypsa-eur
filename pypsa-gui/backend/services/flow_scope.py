@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import pathlib
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -42,17 +43,6 @@ SCOPE_VERSION: Final = 1
 AVAILABLE: Final = "available"
 REQUIRED: Final = "required"            # always on; it cannot be deselected yet
 NOT_YET: Final = "not_yet_available"
-# Read-only here: the sub-option is on exactly when its solver setting is, so
-# "What the Run computes" never says a load flow runs when it does not (UX gate
-# on W4a). W4b makes these scope-driven run kinds; until then the solver
-# settings are their one editor.
-FROM_SETTINGS: Final = "from_settings"
-
-# (card, option) → the solver-config flag it mirrors.
-SETTING_OPTIONS: Final[dict[tuple[str, str], str]] = {
-    ("grid", "load_flow"): "run_ac_pf_after_lopf",
-    ("grid", "n1_sclopf"): "sclopf",
-}
 
 
 @dataclass(frozen=True)
@@ -74,8 +64,8 @@ class Card:
 # `test_flow_scope` pins that. Sizing off needs the fixed-size run option
 # (modular-cards §4).
 _SIZING_OFF = "Always on for now: running on fixed sizes is still being built."
+_SIZING_FIXED = "Dispatch on fixed sizes from the last capacity run."
 _NOT_HERE = "It can't be run from here yet."
-_SETTINGS = "Set in Solver settings for now."
 
 CARDS: Final[tuple[Card, ...]] = (
     Card("capacity", "Capacity expansion",
@@ -122,9 +112,9 @@ AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
     ("capacity", "sizing"): (REQUIRED, _SIZING_OFF),
     ("capacity", "dispatch"): (REQUIRED, "Always part of the run."),
     ("capacity", "process_detail"): (NOT_YET, _NOT_HERE),
-    ("grid", "load_flow"): (FROM_SETTINGS, _SETTINGS),
+    ("grid", "load_flow"): (NOT_YET, _NOT_HERE),
     ("grid", "grid_code"): (AVAILABLE, None),
-    ("grid", "n1_sclopf"): (FROM_SETTINGS, _SETTINGS),
+    ("grid", "n1_sclopf"): (NOT_YET, _NOT_HERE),
     ("control", "presets"): (AVAILABLE, None),
     ("control", "island_checks"): (NOT_YET, _NOT_HERE),
     ("control", "dynamics"): (NOT_YET, _NOT_HERE),
@@ -147,6 +137,9 @@ MATRIX_KIND: Final[dict[tuple[str, str], str]] = {
     ("control", "island_checks"): "control_checks",
     ("control", "dynamics"): "dynamics",
     ("commercial", "investment_case"): "investment_case",
+    ("capacity", "sizing"): "fixed_sizes",
+    ("grid", "load_flow"): "loadflow",
+    ("grid", "n1_sclopf"): "sclopf",
 }
 
 # Reliability runs the EH study pipeline, which needs the template's pack.
@@ -169,8 +162,8 @@ def option_status(card: str, option: str, *, has_template: bool, no_load: bool =
 # ── Presets (GS-6, modular-cards §3) ────────────────────────────────────────
 #
 # What each example intends, card → sub-options. Load flow and N-1 security
-# follow the solver settings (FROM_SETTINGS), so no preset names them. A not-yet-available
-# sub-option stays here (it lights up when W0 clears it) and is dropped from
+# are the scope's own options mirroring the solver config (``OWNED``), so no
+# preset names them. A not-yet-available sub-option stays here (it lights up when W0 clears it) and is dropped from
 # the effective preset. Proposals for the template authors, aligned with the
 # research mapping (FIVE-CARD-MODULARITY §3); not domain-reviewed defaults.
 
@@ -274,10 +267,11 @@ def effective_preset(preset: Preset, *, has_template: bool, no_load: bool = Fals
 class ScopeError(ValueError):
     """A scope the store refuses: ``error_kind`` is the typed refusal."""
 
-    def __init__(self, error_kind: str, message: str):
+    def __init__(self, error_kind: str, message: str, blocker_code: str | None = None):
         super().__init__(message)
         self.error_kind = error_kind
         self.message = message
+        self.blocker_code = blocker_code      # the validation code behind an option refusal
 
 
 _write_lock = threading.Lock()
@@ -351,19 +345,72 @@ def validate(raw: Any, *, has_template: bool, no_load: bool = False) -> dict:
     return normalise(raw, has_template=has_template, no_load=no_load)
 
 
+def fixed_sizes_transition(sizing: bool, current: str) -> str | None:
+    """The ``fixed_sizes`` value a scope write asks for, or None to leave it:
+    sizing out of scope turns ``off`` into ``capacity_run`` (a source the user
+    chose stays); sizing back in sets ``off``. Applied to the LIVE value under
+    the solver-state lock, never to a snapshot."""
+    if sizing:
+        return "off" if current != "off" else None
+    return "capacity_run" if current == "off" else None
+
+
+def _flag_transition(wanted: bool, current: Any) -> bool | None:
+    return wanted if wanted != bool(current) else None
+
+
+@dataclass(frozen=True)
+class Owned:
+    """A sub-option the scope owns (W4b): it is on exactly when ``field`` of
+    the solver config says so, and a scope write is the one editor of that
+    on/off. ``kind`` is its separability row; the scope owns it only while that
+    row is runnable."""
+
+    card: str
+    option: str
+    field: str
+    kind: str
+    default: Any
+    is_on: Callable[[Any], bool]
+    transition: Callable[[bool, Any], Any]
+
+
+OWNED: Final[tuple[Owned, ...]] = (
+    Owned("capacity", "sizing", "fixed_sizes", "fixed_sizes", "off",
+          lambda v: v == "off", fixed_sizes_transition),
+    Owned("grid", "load_flow", "run_ac_pf_after_lopf", "loadflow", False,
+          bool, _flag_transition),
+    Owned("grid", "n1_sclopf", "sclopf", "sclopf", False, bool, _flag_transition),
+)
+
+
+def owned_active() -> list[Owned]:
+    return [o for o in OWNED if run_separability.runnable(o.kind)]
+
+
+def owned_wanted(scope: dict) -> dict[str, bool]:
+    """``{config field: sub-option wanted}`` for every sub-option the scope owns."""
+    return {o.field: o.card in scope["groups"] and o.option in (scope["options"].get(o.card) or ())
+            for o in owned_active()}
+
+
 def apply_settings(scope: dict, settings: dict | None) -> dict:
-    """The scope with each settings-driven sub-option on exactly when its
-    solver setting is (``SETTING_OPTIONS``). A card holding one that is on is
-    on. ``settings`` None (not read, e.g. a deferred preflight): left off."""
-    options = {k: [o for o in v if (k, o) not in SETTING_OPTIONS]
-               for k, v in scope["options"].items()}
+    """The scope with each sub-option it owns (``OWNED``) on exactly when its
+    config field says so; a card holding one that is on is on. ``settings``
+    None (not read, e.g. a deferred preflight): the stored scope is kept."""
+    options = {k: list(v) for k, v in scope["options"].items()}
     groups = list(scope["groups"])
-    for (card, option), flag in SETTING_OPTIONS.items():
-        if settings and settings.get(flag):
-            options[card] = [o for o, _ in CARD_BY_ID[card].options
-                             if o in options[card] or o == option]
-            if card not in groups:
-                groups.append(card)
+    if settings is not None:
+        for own in owned_active():
+            on = own.is_on(settings.get(own.field, own.default))
+            # A switched-off card keeps its sub-options (modular-cards §2):
+            # only a card that is on shows the option off when the config is.
+            keep = own.card not in groups and not on
+            options[own.card] = [o for o, _ in CARD_BY_ID[own.card].options
+                                 if (o in options[own.card] and (o != own.option or keep))
+                                 or (o == own.option and on)]
+            if on and own.card not in groups:
+                groups.append(own.card)
     order = [c.id for c in CARDS]
     return {**scope, "groups": sorted(groups, key=order.index), "options": options}
 
@@ -386,12 +433,18 @@ def read_scope(project_dir: pathlib.Path, template: dict | None,
 
 
 def write_scope(project_dir: pathlib.Path, raw: Any, template: dict | None,
-                settings: dict | None = None, *, no_load: bool = False) -> dict:
-    """Check and store a scope atomically; returns what ``read_scope`` now reads."""
+                settings: dict | None = None, *, no_load: bool = False,
+                store_owned: Callable[[dict[str, bool]], dict[str, Any]] | None = None) -> dict:
+    """Check and store a scope atomically; returns what ``read_scope`` now reads.
+    ``store_owned({field: wanted})`` applies each owned sub-option's transition
+    (``OWNED``) to the live solver config, through the caller's own writer, and
+    returns the values now in force."""
     from services.atomic_io import atomic_write_text
 
     scope = validate(raw, has_template=template is not None, no_load=no_load)
     with _write_lock:
+        if store_owned is not None and owned_active():
+            settings = {**(settings or {}), **store_owned(owned_wanted(scope))}
         atomic_write_text(project_dir / SCOPE_FILE,
                           json.dumps(scope, indent=2, sort_keys=True) + "\n")
     return read_scope(project_dir, template, settings, no_load=no_load)
@@ -408,9 +461,7 @@ def selected(scope: dict, card: str, option: str | None = None) -> bool:
 def registry(template: dict | None, settings: dict | None = None, *,
              no_load: bool = False) -> dict:
     """The cards as the scope component draws them, with this project's
-    availability, the effective preset and what the preset intends. A card
-    holding a settings-driven sub-option that is on cannot be switched off
-    here."""
+    availability, the effective preset and what the preset intends."""
     has_template = template is not None
     preset_id, preset = preset_for(template)
     cards = []
@@ -420,9 +471,6 @@ def registry(template: dict | None, settings: dict | None = None, *,
             status, reason = option_status(card.id, o, has_template=has_template, no_load=no_load)
             opts.append({"id": o, "label": label, "status": status, "reason": reason})
         locked = card.locked_reason
-        if locked is None and settings and any(
-                settings.get(flag) for (c, _o), flag in SETTING_OPTIONS.items() if c == card.id):
-            locked = "On while Solver settings switch on the load flow or N-1 security."
         cards.append({"id": card.id, "label": card.label, "options": opts,
                       "locked_reason": locked, "sections": list(card.sections),
                       "chip": card.chip,

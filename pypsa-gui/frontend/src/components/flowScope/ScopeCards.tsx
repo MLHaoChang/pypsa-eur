@@ -10,19 +10,18 @@ import { useState } from 'react'
 import { Lock } from 'lucide-react'
 import type { FlowScopeValue, ScopeCardDef, ScopeCardId } from '../../api/flow'
 import { inScope } from '../../api/flow'
+import { openN1BranchSelector } from '../../layout/flowNavigation'
+import { useRunGate } from '../../hooks/useRunGate'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { useFlowScope } from './useFlowScope'
 
 const NOT_YET = 'Not yet available'
 
-/** What the scope stores: without the sub-options its solver settings decide. */
-function stored(scope: FlowScopeValue, cards: ScopeCardDef[]): FlowScopeValue {
-  const settings = new Set(cards.flatMap(c => c.options.filter(o => o.status === 'from_settings')
-    .map(o => `${c.id}.${o.id}`)))
-  const options = Object.fromEntries(Object.entries(scope.options).map(([c, os]) =>
-    [c, os.filter(o => !settings.has(`${c}.${o}`))])) as FlowScopeValue['options']
-  const groups = scope.groups.filter(g => (options[g] ?? []).length > 0)
-  return { ...scope, groups, options }
+/** The validation code behind a refused option switch (``blocker_code``). */
+function refusalCode(err: unknown): string | null {
+  const detail = (err as { response?: { data?: { detail?: { blocker_code?: string } } } })
+    ?.response?.data?.detail
+  return detail?.blocker_code ?? null
 }
 
 function sameScope(a: FlowScopeValue, b: FlowScopeValue): boolean {
@@ -130,6 +129,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
   collapsed?: boolean
 }) {
   const { registry, scope, save, isError, refetch } = useFlowScope()
+  const gate = useRunGate('optimisation')
   const [open, setOpen] = useState(!collapsed)
   if (isError) {
     return (
@@ -141,7 +141,9 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
   }
   if (!registry || !scope) return <p className="text-[12px] text-muted">Loading the scope…</p>
   const write = (next: FlowScopeValue) => save.mutate(next)
-  const atPreset = sameScope(stored(scope, registry.cards), registry.preset)
+  // The empty branch set, refused when switching N-1 security on.
+  const refusedNoBranches = refusalCode(save.error) === 'sclopf_no_branches'
+  const atPreset = sameScope(scope, registry.preset)
   const summary = registry.cards.filter(c => inScope(scope, c.id)).map(c => c.label).join(', ')
 
   if (!open) {
@@ -210,9 +212,12 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                   // A switched-off card keeps its sub-options: shown checked
                   // and dimmed, so the user sees what switching it on restores.
                   const checked = !unavailable && (scope.options[card.id] ?? []).includes(o.id)
+                  // ...or the Run's own refusal once it is on.
+                  const needsBranches = refusedNoBranches
+                    || (checked && gate.blocker?.code === 'sclopf_no_branches')
                   const dim = unavailable || (!on && checked)
                   return (
-                    <li key={o.id}>
+                    <li key={o.id} data-testid={`${testId}-row-${card.id}-${o.id}`}>
                       <label className={`flex flex-wrap items-center gap-1.5 text-[11.5px] ${dim ? 'text-muted/70' : 'text-text'}`}>
                         <input type="checkbox" data-testid={`${testId}-option-${card.id}-${o.id}`}
                           aria-describedby={o.reason ? `${testId}-why-${card.id}-${o.id}` : undefined}
@@ -228,6 +233,42 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                           </span>
                         )}
                       </label>
+                      {card.id === 'capacity' && o.id === 'sizing' && on && !checked && (
+                        <p data-testid={`${testId}-fixed-sizes`}
+                          className="pl-5 text-[10.5px] text-muted">
+                          Dispatch on fixed sizes from the{' '}
+                          {registry.fixed_sizes === 'nameplate' ? 'sizes entered on each asset' : 'last capacity run'}.
+                          {gate.blocked && (
+                            <span data-testid={`${testId}-fixed-sizes-blocked`} role="alert"
+                              className="block text-warn">
+                              The Run can't start yet: {gate.reason}
+                            </span>
+                          )}
+                        </p>
+                      )}
+                      {card.id === 'grid' && o.id === 'load_flow' && on && checked && gate.blocked && (
+                        <p data-testid={`${testId}-option-blocked-${o.id}`} role="alert"
+                          className="pl-5 text-[10.5px] text-warn">
+                          The Run can't start yet: {gate.reason}
+                        </p>
+                      )}
+                      {card.id === 'grid' && o.id === 'n1_sclopf' && on
+                        && (needsBranches || (checked && gate.blocked)) && (
+                        <p data-testid={`${testId}-option-blocked-${o.id}`} role="alert"
+                          className="pl-5 text-[10.5px] text-warn">
+                          {needsBranches
+                            ? 'N-1 security has no branches to check yet.'
+                            : `The Run can't start yet: ${gate.reason}`}
+                          {needsBranches && (
+                            <>
+                              {' '}
+                              <button type="button" data-testid={`${testId}-choose-branches`}
+                                onClick={openN1BranchSelector}
+                                className="text-accent hover:underline">Choose them ›</button>
+                            </>
+                          )}
+                        </p>
+                      )}
                       {o.reason && (
                         <p id={`${testId}-why-${card.id}-${o.id}`}
                           data-testid={`${testId}-why-${card.id}-${o.id}`}
@@ -241,7 +282,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
           )
         })}
       </div>
-      {save.isError && (
+      {save.isError && !refusedNoBranches && (
         <p role="alert" data-testid={`${testId}-save-error`} className="text-[12px] text-danger">
           {blockerMessage(save.error)}
         </p>

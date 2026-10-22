@@ -275,6 +275,7 @@ GET     /api/projects/{name}/map_layout/osm_suggestions                         
 GET     /api/projects/{name}/members                                               -> get_project_members_api_projects__name__members_get
 PUT     /api/projects/{name}/members                                               -> put_project_members_api_projects__name__members_put
 POST    /api/projects/{name}/profiles/apply                                        -> apply_profile_api_projects__name__profiles_apply_post
+POST    /api/projects/{name}/profiles/apply-batch                                  -> apply_profile_batch_api_projects__name__profiles_apply_batch_post
 POST    /api/projects/{name}/profiles/availability/generate                        -> generate_availability_profiles_api_projects__name__profiles_availability_generate_post
 GET     /api/projects/{name}/profiles/current                                      -> get_current_series_api_projects__name__profiles_current_get
 POST    /api/projects/{name}/profiles/defaults/apply                               -> apply_default_series_api_projects__name__profiles_defaults_apply_post
@@ -284,6 +285,7 @@ POST    /api/projects/{name}/profiles/generate                                  
 POST    /api/projects/{name}/profiles/loads/generate                               -> generate_load_profiles_api_projects__name__profiles_loads_generate_post
 POST    /api/projects/{name}/profiles/loads/upload                                 -> upload_load_profiles_api_projects__name__profiles_loads_upload_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
+GET     /api/projects/{name}/profiles/readiness                                    -> profile_readiness_api_projects__name__profiles_readiness_get
 POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
 POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post

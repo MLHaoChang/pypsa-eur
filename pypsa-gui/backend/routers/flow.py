@@ -134,6 +134,117 @@ def _no_load(project: AuthorizedProject, template: dict | None) -> bool:
     return flow_scope.no_load_plant(template, loads)
 
 
+def _refuse_while_running() -> None:
+    """A run option is not edited under a solve, a Stage 2 or a study: the
+    preflight's own gates (a solver worker, a blocking study)."""
+    from routers.simulation import _solver_in_flight
+    from services import flow_scope
+    from services import study_state
+
+    busy = "A calculation is running." if _solver_in_flight() else study_state.blocking_study_detail()
+    if busy:
+        raise flow_scope.ScopeError(
+            "run_in_progress",
+            f"{busy} Change what the Run computes once it has finished.")
+
+
+def _refuse_unavailable_on(project: AuthorizedProject, change: dict, db) -> None:
+    """Switching an option ON is refused with its own verdict's reason when the
+    Run would refuse it (``run_separability``'s option verdict: the validator
+    with the option set). Off is always allowed. A refusal the Run already
+    makes without the option (the optimisation's own first blocker) is not the
+    option's, and a deferred verdict (the network is busy) does not block."""
+    from services import flow_scope, run_separability
+
+    # Each flag's verdict sets only its own flag. One PUT may turn several on
+    # (Load flow and N-1 together); that is sound because no validate_for_run
+    # rule couples ``sclopf`` and ``run_ac_pf_after_lopf`` (each reads one of
+    # them against the strategy, losses or its own inputs), and nothing is
+    # written unless every one passes (test_two_options_on_together_...).
+    for own in flow_scope.owned_active():
+        if change.get(own.field) is not True:                # sizing's values are not flags
+            continue
+        v = run_separability.verdicts(project.directory, ("optimisation", own.kind),
+                                      cache_key=project.registry_key, db=db,
+                                      org_id=_org(project))
+        mine, opt = v[own.kind], v["optimisation"]
+        if mine["ready"] or mine["deferred"]:
+            continue
+        blocker, base = mine.get("blocker") or {}, opt.get("blocker") or {}
+        if opt["ready"] or blocker.get("code") != base.get("code"):
+            label = dict(flow_scope.CARD_BY_ID[own.card].options)[own.option]
+            raise flow_scope.ScopeError(
+                "flow_scope_option_blocked",
+                f"{label} can't be switched on: "
+                f"{blocker.get('message', 'the Run would refuse it')}",
+                blocker.get("code"))
+
+
+def _store_owned(project: AuthorizedProject, wanted: dict[str, bool], db, user) -> dict:
+    """Apply the scope's transitions to the solver-config fields it owns
+    (``flow_scope.OWNED``) and to nothing else, on the LIVE values, and return
+    the values in force. The open project goes through ``update_solver_config``
+    (the one writer) inside the solver-state lock, so a concurrent
+    Solver-settings save is never overwritten; a closed project's saved
+    ``solver_config.json`` is edited the same way."""
+    import json
+    from dataclasses import asdict
+
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import _state, update_solver_config
+    from services import flow_scope, network_lengths
+    from services.atomic_io import atomic_write_text
+    from services.pypsa_service import PyPSAService
+
+    owned = {o.field: o for o in flow_scope.owned_active() if o.field in wanted}
+
+    def decide(current: dict) -> tuple[dict, dict]:
+        """``(values in force, changes to write)`` against ``current``."""
+        now, change = {}, {}
+        for field, own in owned.items():
+            cur = current.get(field, own.default)
+            new = own.transition(wanted[field], cur)
+            now[field] = cur if new is None else new
+            if new is not None:
+                change[field] = new
+        return now, change
+
+    active = network_lengths.active_project_dir()
+    if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
+        # The guards and the verdict run outside the solver-state lock (the
+        # verdict takes the network lock); the write re-decides on the live
+        # value inside it.
+        with PyPSAService.get_solver_state_lock():
+            _now, peek = decide(asdict(_state["solver_config"]))
+        if peek:
+            _refuse_while_running()
+            _refuse_unavailable_on(project, peek, db)
+        with PyPSAService.get_solver_state_lock():
+            now, change = decide(asdict(_state["solver_config"]))
+            if change:
+                _refuse_while_running()                 # a solve claimed in the gap
+                update_solver_config(SolverConfigSchema(**change), db, user)
+            return now
+    path = project.directory / "solver_config.json"
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        raw = None
+    if not isinstance(raw, dict):
+        # No saved config: the defaults are in force. Only a change needs a file.
+        now, change = decide({})
+        if not change:
+            return now
+        raise flow_scope.ScopeError(
+            "solver_config_unavailable",
+            "Open the project first: these run options are stored in its solver "
+            "settings, which are not saved yet.")
+    now, change = decide(raw)
+    if change:
+        atomic_write_text(path, json.dumps({**raw, **change}, indent=2) + "\n")
+    return now
+
+
 @router.get("/{name}/flow/scope")
 def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """``{scope, cards, preset_id, preset}``: the project's scope (stored, or its
@@ -146,6 +257,8 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     no_load = _no_load(project, template)
     return {"scope": flow_scope.read_scope(project.directory, template, settings,
                                            no_load=no_load),
+            # The size source Asset sizing off dispatches on (read-only here).
+            "fixed_sizes": (settings or {}).get("fixed_sizes", "off"),
             **flow_scope.registry(template, settings, no_load=no_load)}
 
 
@@ -172,8 +285,12 @@ def put_flow_scope(body: dict,
     try:
         scope = flow_scope.write_scope(project.directory, body, template,
                                        _solver_settings(project),
-                                       no_load=_no_load(project, template))
+                                       no_load=_no_load(project, template),
+                                       store_owned=lambda w: _store_owned(project, w, db, user))
     except flow_scope.ScopeError as exc:
-        raise HTTPException(422, {"error_kind": exc.error_kind,
-                                  "message": exc.message}) from exc
+        raise HTTPException(409 if exc.error_kind == "run_in_progress" else 422,
+                            {"error_kind": exc.error_kind,
+                                  "message": exc.message,
+                                  **({"blocker_code": exc.blocker_code}
+                                     if exc.blocker_code else {})}) from exc
     return {"scope": scope}

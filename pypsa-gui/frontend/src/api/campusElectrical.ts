@@ -666,6 +666,18 @@ export interface GridReadinessRow {
    *  the row's own limit; present only with an AI-training load and a
    *  committed battery/UPS. The row's `verdict` stays before mitigation. */
   after_battery?: GridReadinessAfter
+  /** The ramp, oscillation and SCR rows only (DC 03 slice 6): the user's own
+   *  limit (null when not set) and what a reset returns to. */
+  setting?: GridLimitSetting
+}
+
+export type GridLimitItem = 'connection_ramp' | 'oscillation' | 'fault_level'
+export type GridLimitSource = 'code' | 'datasheet' | 'measured' | 'assumed'
+
+export interface GridLimitSetting {
+  item: GridLimitItem
+  user: { value: number | null; source: GridLimitSource; note: string; set_at?: string } | null
+  default: { value: number | null; source: string; origin: 'template' | 'placeholder' }
 }
 
 export interface GridReadinessAfter {
@@ -751,6 +763,16 @@ export const campusApi = {
   gridReadiness: (project: string, profile?: string) =>
     client.get<GridReadiness>(`${base(project)}/grid-readiness`,
       { ...quiet, params: profile ? { profile } : undefined }).then(r => r.data),
+
+  /** Set the user's own limit (DC 03 slice 6); a fault level takes no value.
+   *  422 carries `{error_kind, message}`. */
+  setGridLimit: (project: string, item: GridLimitItem,
+                 body: { value?: number | null; source: GridLimitSource; note: string }) =>
+    client.put(`${base(project)}/grid-readiness/limits/${item}`, body, quiet).then(r => r.data),
+
+  /** Reset the limit to the template's value or the generic placeholder. */
+  resetGridLimit: (project: string, item: GridLimitItem) =>
+    client.delete(`${base(project)}/grid-readiness/limits/${item}`, quiet).then(r => r.data),
 
   /** The island sidecar as written and the last island study (null each when absent). */
   island: (project: string) =>

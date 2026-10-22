@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Apply several points of one generated renewable profile job at once (`POST /api/projects/{name}/profiles/apply-batch`, chat tool `apply_generated_profiles`): every member is checked first and nothing is written if one is refused, the write is one undo step, and a failure midway reports what was and was not applied.

@@ -321,10 +321,13 @@ def get_upload_blob(
         data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != meta.sha256:
             raise HTTPException(409, {"error_kind": "artifact_evidence_unavailable"})
-        verify_chart(project.directory, meta, data, project.uuid)
+        checked = verify_chart(project.directory, meta, data, project.uuid)
+        headers = {"Content-Disposition": content_disposition(meta.filename, disposition="inline")}
+        if isinstance(checked, dict) and checked.get("evidence_status"):
+            # A checked chart says whether its evidence was re-verified now (S10).
+            headers["X-Checked-Chart"] = checked.get("evidence_note") or "evidence re-verified now"
         # Send the exact checked bytes, avoiding a second file open after validation.
-        return Response(content=data, media_type=meta.mime,
-                        headers={"Content-Disposition": content_disposition(meta.filename, disposition="inline")})
+        return Response(content=data, media_type=meta.mime, headers=headers)
     return FileResponse(
         path=str(path),
         media_type=meta.mime,

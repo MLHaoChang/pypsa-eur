@@ -109,7 +109,25 @@ export function errorText(e: unknown): string {
   return JSON.stringify(detail)
 }
 
+/** One wind/solar generator's readiness row (RP-02). */
+export interface ReadinessRow {
+  generator: string
+  technology: 'wind' | 'solar'
+  bus: string
+  lon: number | null
+  lat: number | null
+  coord_source: 'bus' | 'missing'
+  profile: 'none' | 'network_native' | 'uploaded' | 'generated'
+  provenance?: { source?: string | null; weather_year?: number | null; provenance?: string | null }
+  stale_reason?: 'horizon_changed' | 'bus_moved'
+}
+
 export const profilesApi = {
+  readiness: (project: string) =>
+    client.get<{ generators: ReadinessRow[] }>(
+      `/projects/${encodeURIComponent(project)}/profiles/readiness`,
+    ).then(r => r.data.generators),
+
   presets: (technology?: ProfileTechnology) =>
     client.get<{ presets: ProfilePreset[] }>('/profiles/presets', {
       params: technology ? { technology } : {},

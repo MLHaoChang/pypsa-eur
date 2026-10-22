@@ -52,6 +52,19 @@ export function openEconomicAssumptions(): void {
   openSectionInExpert('scenarios')
 }
 
+/** Show the N-1 security branch selector (Solver settings › Network): the
+ *  section's panel in Expert, in place in Guided (never flips the mode). */
+export function openN1BranchSelector(): void {
+  const ui = useUIStore.getState()
+  ui.requestSolverBlock('sclopf')
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'scenarios', panel: 'simparams', component: null,
+      entity: null, field: null })
+    return
+  }
+  openSectionInExpert('scenarios')
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {

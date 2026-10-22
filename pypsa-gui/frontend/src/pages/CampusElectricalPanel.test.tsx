@@ -34,6 +34,12 @@ vi.mock('../api/solveQueue', async () => {
   return { ...real, solveQueueApi: { ...real.solveQueueApi, abort: queue.abort } }
 })
 
+const commercial = vi.hoisted(() => ({ getCommercial: vi.fn() }))
+vi.mock('../api/commercial', async () => {
+  const real = await vi.importActual<typeof import('../api/commercial')>('../api/commercial')
+  return { ...real, commercialApi: { ...real.commercialApi, getCommercial: commercial.getCommercial } }
+})
+
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
   return { ...real, campusApi: api }
@@ -90,6 +96,7 @@ beforeEach(() => {
   useCampusRunNotice.setState({ notices: {} })
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
+  commercial.getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
   api.milpStatus.mockResolvedValue(null)
   api.library.mockResolvedValue({ yaml: 'discount_rate: {value: 0.07, source: assumed}\n', is_default: true })
@@ -107,6 +114,27 @@ describe('CampusElectricalPanel', () => {
     api.state.mockRejectedValue({ response: { status: 409, data: { detail: 'is a planning_dynamics project' } } })
     renderPanel(OnePart)
     expect(await screen.findByText(/for capacity-expansion \(hub\) projects/i)).toBeTruthy()
+  })
+
+  // Economics and Investment send the user here to set the site connection (audit #13):
+  // the editor must not depend on the campus read.
+  it('still shows the Site connection editor when the campus read says the project is of another kind', async () => {
+    api.state.mockRejectedValue({ response: { status: 409, data: { detail: 'is a planning_dynamics project' } } })
+    renderPanel(OnePart)
+    expect(await screen.findByText(/for capacity-expansion \(hub\) projects/i)).toBeTruthy()
+    expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
+  })
+
+  it('still shows the Site connection editor while the campus read fails or loads', async () => {
+    api.state.mockRejectedValue(new Error('boom'))
+    renderPanel(OnePart)
+    expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
+  })
+
+  it('does not show the Site connection editor on the study part', async () => {
+    renderPanel(StudyOnly)
+    await screen.findByText(/Grid study|Study settings|Draft the campus file/i)
+    expect(screen.queryByTestId('ic-site-connection')).toBeNull()
   })
 
   it('drafts the campus from the project, and shows a refusal inline', async () => {

@@ -3647,6 +3647,11 @@ def list_pending_profiles(project_id: str) -> dict:
     return _profile_route(_h, proj=_authorized_project(project_id))
 
 
+def get_profile_readiness(project_id: str) -> dict:
+    from routers.profiles import profile_readiness as _h
+    return _profile_route(_h, proj=_authorized_project(project_id))
+
+
 def generate_renewable_profile(project_id: str, points: list | None = None,
                                technology: str = "",
                                preset: str | None = None,
@@ -3676,6 +3681,19 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
                         time_basis=time_basis, component_type=component_type,
                         attribute=attribute)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def apply_generated_profiles(project_id: str, job_id: str,
+                             components: list | None = None,
+                             all_from_job: bool = False,
+                             time_basis: str | None = None) -> dict:
+    from routers.profiles import (
+        BatchApplyRequest, BatchMember, apply_profile_batch as _h,
+    )
+    body = BatchApplyRequest(
+        job_id=job_id, members=[BatchMember(component=str(c)) for c in components or []],
+        all_from_job=bool(all_from_job), time_basis=time_basis)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7828,8 +7846,10 @@ DISPATCHERS: dict[str, Any] = {
     "get_profile_parameters": get_profile_parameters,
     "preview_renewable_profile": preview_renewable_profile,
     "list_pending_profiles": list_pending_profiles,
+    "get_profile_readiness": get_profile_readiness,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
+    "apply_generated_profiles": apply_generated_profiles,
     "preview_default_series": preview_default_series,
     "apply_default_series": apply_default_series,
     "list_load_profile_archetypes": list_load_profile_archetypes,
