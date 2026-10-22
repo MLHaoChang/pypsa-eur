@@ -82,7 +82,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
   useEffect(() => {
     if (!uploadId) { setTable(null); return }
     let cancelled = false
-    setError(null); setPreview(null)
+    setError(null); setPreview(null); setConfirmed(false)
     equipmentTableApi.preview({ upload_id: uploadId, sheet, component_class: componentClass })
       .then(t => {
         if (cancelled) return
@@ -98,15 +98,19 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
   const fields = useMemo(() => new Map((table?.fields ?? []).map(f => [f.field, f])), [table])
   const costPicked = Object.values(columns).some(c => fields.get(c.field)?.currency)
 
-  const request = () => ({
+  // Any change to what the preview was built from drops it and the money-year
+  // confirmation with it: a confirmation covers only the plan it was shown on.
+  const invalidate = () => { setPreview(null); setConfirmed(false) }
+
+  const request = (confirm = confirmed) => ({
     upload_id: uploadId, sheet, component_class: componentClass, name_column: nameColumn, columns,
     currency: costPicked ? currency || null : null,
     money_year: costPicked && moneyYear ? Number(moneyYear) : null,
-    confirm: confirmed ? ['money_year'] : [],
+    confirm: confirm ? ['money_year'] : [],
   })
 
   const setColumn = (header: string, field: string) => {
-    setPreview(null)
+    invalidate()
     setColumns(prev => {
       const next = { ...prev }
       if (!field) delete next[header]
@@ -116,9 +120,9 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
     })
   }
 
-  const runPreview = async () => {
+  const runPreview = async (confirm = confirmed) => {
     setBusy(true); setError(null)
-    try { setPreview(await equipmentTableApi.preview(request())) }
+    try { setPreview(await equipmentTableApi.preview(request(confirm))) }
     catch (e) { setPreview(null); setError(errorText(e, 'The preview failed.')) }
     finally { setBusy(false) }
   }
@@ -236,13 +240,13 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
                           <select aria-label={`Field for ${h}`} className={select} value={pick?.field ?? ''}
                             onChange={e => setColumn(h, e.target.value)}>
                             <option value="">Not imported</option>
-                            {(table.fields ?? []).map(f => <option key={f.field} value={f.field}>{f.label} ({f.field})</option>)}
+                            {(table.fields ?? []).map(f => <option key={f.field} value={f.field}>{f.label === f.field ? f.field : `${f.label} (${f.field})`}</option>)}
                           </select>
                         </td>
                         <td className="py-1">
                           {pick && (
                             <select aria-label={`Unit for ${h}`} className={select} value={pick.unit}
-                              onChange={e => { setPreview(null); setColumns(prev => ({ ...prev, [h]: { ...pick, unit: e.target.value } })) }}>
+                              onChange={e => { invalidate(); setColumns(prev => ({ ...prev, [h]: { ...pick, unit: e.target.value } })) }}>
                               <option value="">Choose…</option>
                               {units.map(u => <option key={u} value={u}>{u}</option>)}
                             </select>
@@ -256,10 +260,10 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
               {costPicked && (
                 <div className="flex flex-wrap items-center gap-2" data-testid="table-import-money">
                   <span className="text-text">Costs in the table are in</span>
-                  <input aria-label="Currency" value={currency} onChange={e => { setPreview(null); setCurrency(e.target.value.toUpperCase()) }}
+                  <input aria-label="Currency" value={currency} onChange={e => { invalidate(); setCurrency(e.target.value.toUpperCase()) }}
                     className={`${select} w-16 font-mono`} maxLength={3} />
                   <input aria-label="Money year" value={moneyYear} inputMode="numeric" placeholder="year"
-                    onChange={e => { setPreview(null); setMoneyYear(e.target.value.replace(/\D/g, '').slice(0, 4)) }}
+                    onChange={e => { invalidate(); setMoneyYear(e.target.value.replace(/\D/g, '').slice(0, 4)) }}
                     className={`${select} w-16 font-mono`} />
                   <span className="text-muted">money. Values are copied as stated, never converted.</span>
                 </div>
@@ -276,7 +280,8 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
               </p>
               {plan.needs.map(n => (
                 <label key={n.confirmation} className="flex items-start gap-2 text-warn" data-testid="table-import-confirm">
-                  <input type="checkbox" checked={confirmed} onChange={e => { setConfirmed(e.target.checked); setPreview(null) }} />
+                  <input type="checkbox" checked={confirmed} disabled={busy}
+                    onChange={e => { setConfirmed(e.target.checked); void runPreview(e.target.checked) }} />
                   <span>{n.text}</span>
                 </label>
               ))}
@@ -316,7 +321,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
           <button type="button" disabled={busy || applyWhy !== null} onClick={() => { void runApply() }}
             data-testid="table-import-apply"
             className="px-3 py-1.5 text-xs rounded bg-accent text-white hover:opacity-90 disabled:opacity-40">
-            Apply {preview?.plan?.changed_cells ?? ''} change{preview?.plan?.changed_cells === 1 ? '' : 's'}
+            {plan ? `Apply ${plan.changed_cells} change${plan.changed_cells === 1 ? '' : 's'}` : 'Apply'}
           </button>
         </>)}
       </div>

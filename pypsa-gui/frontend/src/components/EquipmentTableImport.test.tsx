@@ -2,7 +2,7 @@
 // columns to schema fields, preview the edit card, apply exactly that card,
 // and end on the receipt with "Open <section> ›".
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import EquipmentTableImport from './EquipmentTableImport'
 import { useUIStore } from '../store/uiStore'
@@ -121,5 +121,43 @@ describe('EquipmentTableImport', () => {
     expect(uploadFile).toHaveBeenCalledWith('P', file)
     await waitFor(() => expect((screen.getByTestId('table-import-upload') as HTMLSelectElement).value).toBe('u3'))
     await waitFor(() => expect(preview).toHaveBeenCalledWith({ upload_id: 'u3', sheet: null, component_class: 'Line' }))
+  })
+
+  it('ticking the money-year confirmation previews again in place, and any change asks again', async () => {
+    const need = { confirmation: 'money_year', text: '2020 EUR price data, read as 2025 money: not adjusted for inflation.' }
+    preview.mockImplementation(async (b: { name_column?: string; confirm?: string[] }) => {
+      if (!b.name_column) return { table: TABLE, fields: FIELDS }
+      const confirmed = b.confirm?.includes('money_year')
+      return { table: TABLE, fields: FIELDS, card: confirmed ? CARD : null,
+        plan: { ...PLAN, needs: [need], missing: confirmed ? [] : ['money_year'] } }
+    })
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={() => {}} onApplied={() => {}} />)
+    await userEvent.selectOptions(await screen.findByTestId('table-import-upload'), 'u1')
+    await userEvent.selectOptions(await screen.findByLabelText('Field for rating'), 'capital_cost')
+    await userEvent.selectOptions(screen.getByLabelText('Unit for rating'), 'EUR/MVA')
+    await userEvent.type(screen.getByLabelText('Currency'), 'EUR')
+    await userEvent.type(screen.getByLabelText('Money year'), '2020')
+    await userEvent.click(screen.getByTestId('table-import-preview-btn'))
+    expect((await screen.findByTestId('table-import-why')).textContent).toBe('Confirm the money year above, then preview again.')
+
+    await userEvent.click(within(screen.getByTestId('table-import-confirm')).getByRole('checkbox'))
+    expect(await screen.findByTestId('chat-edit-card')).toBeTruthy()
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ confirm: ['money_year'] }))
+    expect((within(screen.getByTestId('table-import-confirm')).getByRole('checkbox') as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByTestId('table-import-apply')).toHaveProperty('disabled', false)
+
+    // A different year is a different plan: the confirmation is asked for again, unticked.
+    await userEvent.clear(screen.getByLabelText('Money year'))
+    await userEvent.type(screen.getByLabelText('Money year'), '2021')
+    await userEvent.click(screen.getByTestId('table-import-preview-btn'))
+    expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ money_year: 2021, confirm: [] }))
+    const box = within(await screen.findByTestId('table-import-confirm')).getByRole('checkbox') as HTMLInputElement
+    expect(box.checked).toBe(false)
+    expect(screen.queryByTestId('chat-edit-card')).toBeNull()
+  })
+
+  it('Apply reads plainly until a preview gives its count', async () => {
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={() => {}} onApplied={() => {}} />)
+    expect((await screen.findByTestId('table-import-apply')).textContent).toBe('Apply')
   })
 })
