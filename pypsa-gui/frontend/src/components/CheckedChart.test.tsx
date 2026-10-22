@@ -25,11 +25,16 @@ describe('CheckedChart', () => {
     expect(screen.getByText("Not drawn: marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
   })
 
-  it('opens the native Results tab in place', () => {
+  it.each(['guided', 'expert'] as const)('opens Results on the native tab and stays in %s', mode => {
+    useUIStore.setState({ uiMode: mode, activeSection: null, activeSlidePanel: null, resultsTabRequest: null })
     render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
     fireEvent.click(screen.getByTestId('checked-chart-native'))
-    expect(useUIStore.getState().resultsTabRequest).toBe('dispatch')
-    expect(screen.getByTestId('checked-chart-native').textContent).toBe('Open in Results > Dispatch')
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe(mode)
+    expect(ui.activeSection).toBe('results')
+    expect(ui.resultsTabRequest).toBe('dispatch')
+    if (mode === 'guided') expect(ui.activeSlidePanel).toBe('hubDesign')
+    expect(screen.getByTestId('checked-chart-native').textContent).toBe('Open in Results › Dispatch')
   })
 
   it('says why nothing was drawn and offers no download', () => {

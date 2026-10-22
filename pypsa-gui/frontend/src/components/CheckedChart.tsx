@@ -1,5 +1,6 @@
 import type { CheckedChart as Chart } from '../utils/answerAssurance'
 import { useUIStore } from '../store/uiStore'
+import { openSectionInExpert, openSectionInGuided } from '../layout/flowNavigation'
 import { readableWindow } from '../utils/readableTime'
 
 // The Results tab that draws the same data natively, per checked profile.
@@ -8,6 +9,15 @@ const NATIVE: Record<string, { tab: string; label: string }> = {
   'storage-unit-dispatch/1': { tab: 'storage', label: 'Storage cycling' },
   'bus-price/1': { tab: 'prices', label: 'Prices' },
   'branch-loading/1': { tab: 'loadflow', label: 'Load Flow' },
+}
+
+// The Results section on that tab, in the mode the user is in (as the
+// availability editor's reliability link does): Guided stays Guided.
+function openNative(tab: string) {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') openSectionInGuided('results')
+  else openSectionInExpert('results')
+  ui.requestResultsTab(tab)
 }
 
 /** The checked chart's download and its footer (S10). Every line comes from the
@@ -33,7 +43,7 @@ export function CheckedChart({ chart, profile, compact = false }: { chart: Chart
     {notDrawn.length > 0 && <ul className="mt-1" aria-label="Not drawn">{notDrawn.map(s =>
       <li key={s.series}>Not drawn: {s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
     {native && <button type="button" className="mt-1 underline" data-testid="checked-chart-native"
-      onClick={() => useUIStore.getState().requestResultsTab(native.tab)}>
-      Open in Results &gt; {native.label}</button>}
+      onClick={() => openNative(native.tab)}>
+      Open in Results › {native.label}</button>}
   </div>
 }
