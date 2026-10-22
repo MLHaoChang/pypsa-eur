@@ -1,4 +1,3 @@
-import { openTimeSeriesFor } from './flowNavigation'
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
@@ -2109,15 +2108,6 @@ export default function PropertiesPanel() {
           ><ExternalLink size={11} /> View results</button>
         )}
       </div>
-      {(selectedComponent.type === 'Load' || selectedComponent.type === 'Generator' || selectedComponent.type === 'Link') && (
-        <div className="px-3 py-1.5 border-b border-border shrink-0">
-          <button type="button" data-testid="props-next-time-series"
-            onClick={() => openTimeSeriesFor(selectedComponent.type as 'Load' | 'Generator' | 'Link', selectedComponent.name)}
-            className="text-[11px] text-accent hover:underline">
-            Next: give it a time series ›
-          </button>
-        </div>
-      )}
       <div className="flex-1 overflow-y-auto">
         {/* `key={...}` forces a remount when switching between two assets of the
             same type, resetting any in-flight edit/form state to a clean view. */}

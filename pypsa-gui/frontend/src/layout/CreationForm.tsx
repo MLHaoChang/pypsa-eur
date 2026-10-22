@@ -670,7 +670,7 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
           <span className="flex items-center gap-2" data-testid="asset-added-toast">
             <span>{item.label} "{name}" added</span>
             <button type="button" className="underline font-medium" data-testid="asset-give-time-series"
-              onClick={() => { toast.dismiss(t.id); openTimeSeriesFor(cls, name) }}
+              onClick={() => { toast.dismiss(t.id); openTimeSeriesFor(cls, name, { field: cls === 'Generator' ? 'p_max_pu' : 'p_set', openEditor: true }) }}
             >Next: give it a time series ›</button>
           </span>
         ), { duration: 8000 })

@@ -1,1 +1,1 @@
-* Feat(pypsa-gui): After adding a Load, Generator or Link, a "Next: give it a time series ›" step opens Time Series on that component (toast and Properties panel, Guided and Expert).
+* Feat(pypsa-gui): After adding a Load, Generator or Link, the "asset added" toast leads on with "Next: give it a time series ›", opening that field's time-series editor (Guided and Expert).
