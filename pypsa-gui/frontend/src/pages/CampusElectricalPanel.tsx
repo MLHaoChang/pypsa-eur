@@ -36,6 +36,7 @@ import {
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
+import { openFlowTarget } from '../layout/flowNavigation'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
@@ -591,7 +592,14 @@ function StatusTag({ s }: { s: CheckStatus }) {
   return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
 }
 
-function ResultsSection({ state, pending }: { state: CampusState; pending: boolean }) {
+/** `show` picks the part of the results a Results tab mounts: the grid-code compliance
+ *  (Grid code & connection), or the electrical design (investment, transformers,
+ *  compensation, short circuit, critical hours); the Grid study results panel shows both. */
+export type CampusResultsPart = 'all' | 'grid_code' | 'electrical_design'
+
+function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; pending: boolean; show?: CampusResultsPart }) {
+  const grid = show !== 'electrical_design'
+  const design = show !== 'grid_code'
   const r = state.results!
   const req = r.requirement
   // The investment's table re-solves every check with the assets in place; without it
@@ -612,9 +620,9 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
           The campus file or the project has changed since this run. Run the study again before using these numbers.
         </p>
       )}
-      <CampusInvestmentSection state={state} />
+      {design && <CampusInvestmentSection state={state} />}
 
-      <PageSection
+      {grid && <PageSection
         title="PCC compliance"
         hint={invested ? 'as the campus is, and with the purchased assets, re-solved' : 'as the campus is, and with the recommended measures'}
       >
@@ -667,8 +675,9 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
         <p className="text-[11px] text-muted mt-2">
           PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
         </p>
-      </PageSection>
+      </PageSection>}
 
+      {design && <>
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
         <TableScroll>
           <table className="w-full text-[12px]">
@@ -752,6 +761,43 @@ function ResultsSection({ state, pending }: { state: CampusState; pending: boole
           ))}
         </ul>
       </PageSection>
+      </>}
     </>
+  )
+}
+
+/** The campus study's results as a Results tab (W10 R2): the same state the Grid study
+ *  results panel reads, one part of it. A project the campus study is not for, or one
+ *  without a run, says so; it never shows an empty table. */
+export function CampusResultsTab({ name, part }: { name: string; part: Exclude<CampusResultsPart, 'all'> }) {
+  const state = useQuery({
+    queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false,
+    refetchInterval: q => (q.state.data?.run_in_progress || isActiveRun(q.state.data?.run_job)
+      ? CAMPUS_RUN_POLL_MS : false),
+  })
+  if (state.isError) {
+    return <p className="text-[12px] text-muted" data-testid="campus-tab-state">
+      {isOtherKind(state.error)
+        ? 'The campus electrical study is for capacity-expansion (hub) projects.'
+        : errorText(state.error)}
+    </p>
+  }
+  if (!state.data) return <p className="text-[12px] text-muted" data-testid="campus-tab-state">Loading…</p>
+  if (!state.data.results) {
+    return (
+      <div data-testid="campus-tab-state" className="text-[12px] text-muted space-y-2">
+        <p>Not run yet: the grid study has not produced results for this project.</p>
+        <Btn onClick={() => openFlowTarget({ section: 'scenarios', panel: 'campusStudy', component: null, entity: null, field: null })}>
+          Run the grid checks in Grid study ›
+        </Btn>
+      </div>
+    )
+  }
+  const pending = state.data.run_in_progress === true || isActiveRun(state.data.run_job)
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-muted" data-testid="campus-tab-from">From the Grid study (latest run).</p>
+      <ResultsSection state={state.data} pending={pending} show={part} />
+    </div>
   )
 }

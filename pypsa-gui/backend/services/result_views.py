@@ -157,6 +157,27 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                historical_section="loadflow",
                units="%, MW (active-power proxy) or MVA, weighted hours",
                card="grid", sub_option="load_flow", card_tab="load_flow"),
+    # R2 (card-workspaces.md §3.2 C): the grid study's results. Both are mounted-view
+    # only and outside the checked scope; the campus study and the planning->dynamics
+    # study are their own runs, so a view without one says so rather than showing zero.
+    ResultView("grid_code", _RESULTS, "grid_code", "Grid code & connection",
+               "campus PCC compliance against the chosen grid code; connection capacity and "
+               "connection-point assessment of a planning-to-dynamics study", "results",
+               (_r("campus_get_study"), _r("gridspine_get_capacity"),
+                _r("gridspine_get_connection_assessments")),
+               claim_limits="A steady-state screen at the selected hours, not a compliance "
+                            "certificate. Campus rows exist only after a campus study run; the "
+                            "gridspine tables only for a planning-to-dynamics project.",
+               units="MW, MVA, Mvar, kV, %, pu",
+               card="grid", sub_option="grid_code", card_tab="grid_code"),
+    ResultView("electrical_design", _RESULTS, "electrical_design", "Electrical design",
+               "transformer sizing, reactive compensation, short circuit, critical hours and "
+               "the campus investment", "results",
+               (_r("campus_get_study"), _r("campus_get_investment"), _r("campus_get_milp")),
+               claim_limits="Proposals from the campus study at its critical hours; nothing is "
+                            "adopted into the model until the user applies it.",
+               units="MVA, Mvar, kA, EUR",
+               card="grid", sub_option="grid_code", card_tab="electrical_design"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",
                (_r("get_results", result_kind="prices"),

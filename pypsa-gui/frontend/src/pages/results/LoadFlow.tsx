@@ -19,6 +19,8 @@ import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useUIStore } from '../../store/uiStore'
 import ResultState from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
+import { StatePill } from '../../components/ResultState'
+import { openFlowTarget } from '../../layout/flowNavigation'
 
 // Branch loading is the native, source-attested server projection used by
 // get_loadflow_summary. Bus/reactive/voltage/loss diagnostics retain their
@@ -31,6 +33,31 @@ import { nk } from '../../utils/queryKeys'
 // dead code and skip control-flow narrowing, which surfaces dozens of
 // spurious "possibly null" errors on the result variables inside.
 const SHOW_RETIRED_SECTIONS = false as boolean
+
+/** The one Run entry, here: the header's Run through the gate (pre-save, enqueue, log).
+ *  It runs the whole solve again; AC power flow follows only when it is switched on. */
+function RunAgain({ acPfAvailable }: { acPfAvailable: boolean }) {
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
+  return (
+    <div data-testid="loadflow-run-again" className="flex flex-1 flex-wrap items-center gap-2 px-3 text-[11px]">
+      <button type="button" data-testid="loadflow-run-again-btn" onClick={requestRunSolve}
+        title="Runs the whole solve again: the optimisation, then AC power flow when it is switched on"
+        className="rounded-[6px] border border-border-2 bg-bg px-2 py-1 text-[11px] font-semibold text-text hover:border-border-3">
+        Run again
+      </button>
+      {!acPfAvailable && (
+        <>
+          <StatePill state="not_modelled" />
+          <span className="text-muted">AC power flow was not part of this run.</span>
+          <button type="button" data-testid="loadflow-switch-on-acpf" className="text-accent hover:underline"
+            onClick={() => openFlowTarget({ section: 'scenarios', panel: 'simparams', component: null, entity: null, field: null })}>
+            Switch it on in Solver settings ›
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
 
 export default function LoadFlow() {
   // Refs for SVG export — one per chart section.
@@ -401,6 +428,7 @@ export default function LoadFlow() {
       <section>
         <div className="flex items-center justify-between mb-2">
           <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">Network</h3>
+          <RunAgain acPfAvailable={acPfAvailable} />
           {/* Result-source toggle. Hidden when Stage 2 hasn't run yet — the
               backend would just return the same LOPF data either way, so
               giving the user a no-op pill would be misleading. Same store

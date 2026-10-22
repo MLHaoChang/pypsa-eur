@@ -123,6 +123,48 @@
     "verification": "displayed_data"
    },
    {
+    "id": "grid_code",
+    "label": "Grid code & connection",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_capacity",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_connection_assessments",
+      "args": {}
+     }
+    ],
+    "shows": "campus PCC compliance against the chosen grid code; connection capacity and connection-point assessment of a planning-to-dynamics study"
+   },
+   {
+    "id": "electrical_design",
+    "label": "Electrical design",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_investment",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_milp",
+      "args": {}
+     }
+    ],
+    "shows": "transformer sizing, reactive compensation, short circuit, critical hours and the campus investment"
+   },
+   {
     "id": "prices",
     "label": "Prices",
     "data": "available",
@@ -386,6 +428,48 @@
      }
     ],
     "shows": "how import, export and the site's own generation are shaped by weekday, hour, week, month and year"
+   },
+   {
+    "id": "grid_code",
+    "label": "Grid code & connection",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_capacity",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_connection_assessments",
+      "args": {}
+     }
+    ],
+    "shows": "campus PCC compliance against the chosen grid code; connection capacity and connection-point assessment of a planning-to-dynamics study"
+   },
+   {
+    "id": "electrical_design",
+    "label": "Electrical design",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_investment",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_milp",
+      "args": {}
+     }
+    ],
+    "shows": "transformer sizing, reactive compensation, short circuit, critical hours and the campus investment"
    },
    {
     "id": "prices",
@@ -696,6 +780,48 @@
     "verification": "displayed_data"
    },
    {
+    "id": "grid_code",
+    "label": "Grid code & connection (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_capacity",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_connection_assessments",
+      "args": {}
+     }
+    ],
+    "shows": "campus PCC compliance against the chosen grid code; connection capacity and connection-point assessment of a planning-to-dynamics study"
+   },
+   {
+    "id": "electrical_design",
+    "label": "Electrical design (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_investment",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_milp",
+      "args": {}
+     }
+    ],
+    "shows": "transformer sizing, reactive compensation, short circuit, critical hours and the campus investment"
+   },
+   {
     "id": "prices",
     "label": "Prices (advanced)",
     "data": "available",
@@ -959,6 +1085,48 @@
      }
     ],
     "shows": "hourly generation and storage operation"
+   },
+   {
+    "id": "grid_code",
+    "label": "Grid code & connection (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_capacity",
+      "args": {}
+     },
+     {
+      "tool": "gridspine_get_connection_assessments",
+      "args": {}
+     }
+    ],
+    "shows": "campus PCC compliance against the chosen grid code; connection capacity and connection-point assessment of a planning-to-dynamics study"
+   },
+   {
+    "id": "electrical_design",
+    "label": "Electrical design (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "campus_get_study",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_investment",
+      "args": {}
+     },
+     {
+      "tool": "campus_get_milp",
+      "args": {}
+     }
+    ],
+    "shows": "transformer sizing, reactive compensation, short circuit, critical hours and the campus investment"
    },
    {
     "id": "prices",

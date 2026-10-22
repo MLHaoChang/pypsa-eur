@@ -119,6 +119,8 @@ BY_CARD = {
     'prices': ('capacity', 'dispatch', 'costs_prices'),
     'economics': ('capacity', 'dispatch', 'costs_prices'),
     'loadflow': ('grid', 'load_flow', 'load_flow'),
+    'grid_code': ('grid', 'grid_code', 'grid_code'),
+    'electrical_design': ('grid', 'grid_code', 'electrical_design'),
     'adequacy': ('reliability', 'goal_study', 'adequacy'),
     'fmea': ('reliability', 'stress', 'stress_fmea'),
     'investment': ('commercial', 'investment_case', 'investment_case'),
@@ -165,8 +167,9 @@ def test_card_fields_are_frozen():
 
 
 def test_list_result_views_payload_is_unchanged(monkeypatch):
-    """R0 adds data only: the listing the model sees is byte-identical to the
-    one before the card fields (no new ids, labels or keys)."""
+    """The listing the model sees is pinned: card fields added no keys (R0); the
+    golden file changes only when a slice adds a view (R2: grid_code,
+    electrical_design)."""
     golden = json.loads((Path(__file__).parent / 'golden' / 'result_views_listing.json').read_text())
     monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
     monkeypatch.setattr(rv, 'shown_key', lambda: 'golden')

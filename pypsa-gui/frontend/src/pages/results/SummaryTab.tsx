@@ -22,6 +22,7 @@ import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
+import { useGridReadiness } from '../../components/gridReadiness/GridReadinessScorecard'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope, type ScopeCardId } from '../../api/flow'
 import type { SimulationStatus } from '../../api/types'
@@ -113,6 +114,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
   })
   const { data: margin } = useQuery({ queryKey: nk(project, 'results', 'reserve_margin'), queryFn: () => resultsApi.getReserveMargin() })
   const { data: adequacy } = useQuery({ queryKey: nk(project, 'results', 'adequacy'), queryFn: resultsApi.getAdequacy })
+  const { data: readiness } = useGridReadiness()
   const { data: stats } = useQuery({ queryKey: nk(project, 'results_statistics'), queryFn: resultsApi.getStatistics })
 
   const c = costView(cost, selectedPeriod)
@@ -156,7 +158,13 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
           reliability: target
             ? `${fmtEnergy(target.target.system.achieved_ens_mwh)} unserved of ${fmtEnergy(target.target.system.cap_mwh)} allowed`
             : rm ? `Reserve margin ${rm.text}` : null,
+          // The scorecard's own count (its one home is Readiness › Grid readiness).
+          grid: readiness && readiness.rows.length > 0
+            ? `${readiness.summary.pass} of ${readiness.rows.length} grid-readiness checks pass`
+              + (readiness.summary.red_flags > 0 ? ` · ${readiness.summary.red_flags} red ${readiness.summary.red_flags === 1 ? 'flag' : 'flags'}` : '')
+            : null,
         }}
+        openScorecard={() => setSlidePanel('issues')}
         openReports={() => setSlidePanel('reports')}
       />
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
@@ -268,13 +276,14 @@ const ROW_HINT: Partial<Record<CardGroupId, string>> = {
   handoff: 'Reports and exports.',
 }
 
-function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports }: {
+function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports, openScorecard }: {
   status: SimulationStatus | undefined
   onOpenTab: (t: SummaryLink) => void
   onOpenGroup?: (g: CardGroupId) => void
   isIn: (card: ScopeCardId) => boolean
   headline: Partial<Record<CardGroupId, string | null>>
   openReports: () => void
+  openScorecard: () => void
 }) {
   const cards = CARD_GROUPS.filter(g => g.id !== 'summary')
   const inRows = cards.filter(g => isIn(g.id as ScopeCardId))
@@ -291,7 +300,13 @@ function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports 
           return (
             <li key={g.id} data-testid={`summary-row-${g.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
               <span className="w-44 shrink-0 text-[12px] font-semibold text-text">{g.label}</span>
-              <span className="min-w-0 flex-1 text-[11px] text-muted">{headline[g.id] ?? ROW_HINT[g.id] ?? ''}</span>
+              <span className="min-w-0 flex-1 text-[11px] text-muted">
+                {headline[g.id] ?? ROW_HINT[g.id] ?? ''}
+                {g.id === 'grid' && headline.grid && (
+                  <>{' '}<button type="button" data-testid="summary-grid-scorecard" onClick={openScorecard}
+                    className="text-accent hover:underline">Readiness › Grid readiness ›</button></>
+                )}
+              </span>
               {hasResults && fresh !== 'fresh' && <StatePill state={fresh} />}
               <button type="button" onClick={open} data-testid={`summary-row-open-${g.id}`}
                 className="text-[10.5px] text-accent hover:underline inline-flex items-center gap-1">

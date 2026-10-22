@@ -3305,7 +3305,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "93bde255ba875a6460049fb764a44364390030a7e0b8538d53f38ae8025871c4",
+      "schema_sha256": "1e17d8c1f596d8dee3f33d2b367a9532262e93d943d98011aa364430684e166c",
       "behavioral_fixture": "pending"
     },
     {
@@ -5866,7 +5866,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "b46446d653180d98e76cef8cbdb028da3cdc19b7ef9a6d79c89c8d4c4805242a",
+      "schema_sha256": "6ace21a74894e610e1a2a17da053d3a217e0f73e959df6594231203f3f928ea7",
       "behavioral_fixture": "pending"
     },
     {
@@ -6401,6 +6401,14 @@
       "label": "Load Flow"
     },
     {
+      "id": "grid_code",
+      "label": "Grid code & connection"
+    },
+    {
+      "id": "electrical_design",
+      "label": "Electrical design"
+    },
+    {
       "id": "flows",
       "label": "Energy flow"
     },
@@ -6466,7 +6474,9 @@
     "adequacy",
     "fmea",
     "flows",
-    "loadshape"
+    "loadshape",
+    "grid_code",
+    "electrical_design"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [
