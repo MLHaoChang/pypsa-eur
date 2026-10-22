@@ -626,6 +626,27 @@ def class_b_contingencies(n) -> list[dict]:
     return out
 
 
+def _process_loss_rows(network, rows, *, restored) -> None:
+    """Grid-to-process ticket 08b: each solved row's lost production per year (`process_loss.expected_outage_loss`,
+    a feed-forward on the base dispatch: the units the outage cuts off, priced at the lost-production value), only on
+    a network with process units. Without the base dispatch (not restored) it is not established, never 0."""
+    from services.adequacy.process_loss import expected_outage_loss
+    from services.solver.process_uc import process_mask
+
+    links = getattr(network, "links", None)
+    if links is None or links.empty or not process_mask(links).any():
+        return
+    for row in rows:
+        if row["failure_mode"] is None:
+            continue
+        if restored is False:
+            row["process_loss"] = {"status": "not_established", "reason": "base_not_restored"}
+            continue
+        meta = row["meta"]
+        row["process_loss"] = {"status": "ok", **expected_outage_loss(
+            network, meta["name"], meta["mttr_hours"], meta["q"])}
+
+
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                       final_state_update=None,
                       stop_event=None,
@@ -714,6 +735,7 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
             },
             "meta": meta,
         })
+    _process_loss_rows(network, rows, restored=swept.get("base_restored"))
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
     # Phase 12e (shipped-code review, finding 1): the restore's outcome rides
     # OUT of the engine. It was computed and dropped here, so a sweep whose

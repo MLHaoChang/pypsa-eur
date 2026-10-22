@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): `POST /api/projects/{name}/profiles/series/generate` and the `generate_series_profile` assistant tool generate time-of-use prices, hydro inflow and heat-pump COP series; availability generation also targets process links. Market price series are refused until market bundles exist.

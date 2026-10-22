@@ -74,6 +74,24 @@
       "value": "mean 75.8 EUR/MWh, 148 negative hours, PV capture rate 0.56, wind 0.89"
     },
     {
+      "item": "day-ahead price, observed (DE-LU 2024)",
+      "note": "Bundesnetzagentur | SMARD.de, CC BY 4.0; shipped as ipp_da_smard_2024, filling nothing: pick it for the export, import or PPA reference price, or in a case",
+      "source": "observed",
+      "value": "mean 78.6 EUR/MWh, 457 negative hours, min -135, max 936"
+    },
+    {
+      "item": "day-ahead price, observed (DK1 2024)",
+      "note": "Source: Energinet (www.energidataservice.dk), CC BY 4.0; shipped as ipp_da_dk1_2024, filling nothing: pick it for the export, import or PPA reference price, or in a case",
+      "source": "observed",
+      "value": "mean 70.7 EUR/MWh, 375 negative hours, min -60, max 936"
+    },
+    {
+      "item": "observed prices re-dated to 2030",
+      "note": "the 2024 values are taken as 2030 real money; UTC hours kept, so weekdays shift by one day; price\u2013weather correlation not preserved: prices are 2024, the profiles are synthetic",
+      "source": "assumed",
+      "value": "hour of year, 29 Feb dropped"
+    },
+    {
       "item": "network charges on import",
       "note": "the commodity on import is the day-ahead series",
       "source": "assumed",
@@ -121,6 +139,6 @@
   "study_notes": [
     "One hourly year: the battery is sized against the day-ahead price and the curtailment it can recover at the export limit.",
     "The PPAs settle after the solve, so they never change the battery the plan picks.",
-    "Every price is illustrative: bring your own series before relying on a result."
+    "The default price is illustrative; two observed 2024 years ship beside it. Bring your own series before relying on a result."
   ]
 }

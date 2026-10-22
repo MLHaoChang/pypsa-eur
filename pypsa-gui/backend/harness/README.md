@@ -778,7 +778,16 @@ checked fields) claims one, at most once per job, and runs an ordinary turn
 whose user message the harness writes: `job <id> finished: <status> (plan:
 <title>)`. None is due after `cancel_task` or a user abort, and none for
 another session or project. The continuation approves nothing: every card in
-that turn still needs its click. `get_task` names the plan's verified edits in
+that turn still needs its click. `POST /api/chat/{session_id}/continuations/
+{job_id}/dismiss` ("Stop waiting") withdraws it; the job runs on.
+
+The chat panel (`hooks/usePlanContinuation.ts`) checks the listing every 3 s
+while a task card waits on a job, and every 15 s otherwise, so a reopened chat
+still gets it. It sends at most once per job and holds a due continuation while
+a turn streams, the composer has text, or a card or Choice waits for an answer;
+the card then offers "Continue now". The transcript shows a muted marker ("The
+solve finished · continuing"), never a user bubble and never the job id, also
+when the history is replayed. `get_task` names the plan's verified edits in
 `changes`, and the OpenAI tool selection favours every tool the plan still
 has to run.
 

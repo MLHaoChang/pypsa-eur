@@ -169,7 +169,7 @@ ISSUE_TITLES: dict[str, str] = {
     "fixed_sizes_with_rolling": "Sizing off cannot run with the rolling strategy",
     "fixed_sizes_no_capacity_run": "Sizing off needs a capacity run of this network first",
     "fixed_sizes_source_changed": "Network sizes no longer match the capacity run",
-    "fixed_sizes_nameplate_empty": "Sizing off on the nameplate: every nameplate is 0",
+    "fixed_sizes_nameplate_empty": "Sizing off on the nameplate: every extendable asset's nameplate is 0",
     "fixed_sizes_zero_nameplate": "Asset with a nameplate of 0 is not built when sizing is off",
 }
 
