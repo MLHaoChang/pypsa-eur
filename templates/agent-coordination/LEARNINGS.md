@@ -183,3 +183,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **`ciwait.sh` called a running macOS job "runner-less", and the coordinator cancelled it.** The check keyed on `started_at` age, which a running job also has, and a normal macOS run lasts over 30 minutes.
   - Fix: `MACOS` fires only when the job's `runner_id` is 0 (premerge's own test; a queued job has none) and it is over 30 minutes old. The check run's `status` is not used: it can read `queued` while the job is already running.
   - Lives in: `scripts/coord/ciwait.sh`.
+- **2026-10-22: the owner had to approve blocked steps in each session's own window.** Auto mode decides per session, and the coordinator can't answer another session's prompt.
+  - Fix (PERM-1): sessions send `PERMISSION <name>: <command> | why | reach` to the coordinator. The owner approves there, and the coordinator adds the exact pattern to `.claude/settings.json` `permissions.allow`.
+  - Lives in: steward (Blocked steps), coordinator (Deciding or asking).
