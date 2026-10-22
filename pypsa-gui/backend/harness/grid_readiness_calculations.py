@@ -10,6 +10,8 @@ without a value are named, not checked. Only counts are facts; the harness
 writes one line per row.
 """
 
+import hashlib
+
 from harness import profile_common as common
 
 PROFILE = "grid-readiness/1"
@@ -61,6 +63,7 @@ def source(ctx, entity):
 
     from services import campus_electrical_service as ce
     from services import chat_tools, dirty_state, project_registry
+    from services.adequacy import grid_limits
     from services.adequacy.grid_readiness import grid_readiness_for
 
     if entity != "network":
@@ -69,14 +72,19 @@ def source(ctx, entity):
         raise ValueError("no_saved_project")
     with chat_tools._acting() as (db, user):
         project = project_registry.resolve_project(db, user, ctx.project_uuid)
-    if not (project_registry.project_dir(project) / ce.NETWORK_FILE).is_file():
+    root = project_registry.project_dir(project)
+    if not (root / ce.NETWORK_FILE).is_file():
         raise ValueError("no_saved_project")
+    limits = root / grid_limits.SIDECAR_NAME
+    before = _file_sha256(limits)
     try:
         card = grid_readiness_for(project)  # the route's own load path, locks and profile resolution
     except HTTPException as exc:
         if isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "unknown_grid_code_profile":
             raise ValueError("unknown_grid_code_profile") from exc
         raise
+    if _file_sha256(limits) != before:
+        raise ValueError("limits_changed_during_read")
     keep = ("id", "requirement", "limit", "unit", "project_value", "verdict", "assumed", "rule")
     return {
         "version": 1,
@@ -86,7 +94,17 @@ def source(ctx, entity):
         "grid_code": {"id": card["profile"]["id"], "title": card["profile"].get("title")},
         "rows": [{k: r.get(k) for k in keep if k in r} for r in card["rows"]],
         "unsaved_edits": bool(dirty_state.is_dirty(ctx)),
+        # The user's limits sidecar, whole: any edit to it (a note included) makes
+        # earlier evidence stale, even where every row reads the same.
+        "limits_sha256": before,
     }
+
+
+def _file_sha256(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return None
 
 
 def disposition(row, registered=None):

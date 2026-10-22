@@ -141,3 +141,24 @@ def test_no_saved_network_and_an_unknown_grid_code_are_refused(hub, checked):
     (path / ce.NETWORK_FILE).unlink()
     with pytest.raises(ValueError, match="no_saved_project"):
         calculations.scoped_source(ctx, scope)
+
+
+def test_an_edited_limit_makes_the_checked_evidence_stale(hub, checked):
+    from fastapi import HTTPException
+
+    from harness import calculations
+    from services import assurance_records
+    from services.adequacy import grid_limits
+
+    ctx, path = hub
+    scope = {"version": 1, "profile": R.PROFILE, "project_id": ctx.project_uuid, "entity_id": "network",
+             "retain": False}
+    grid_limits.set_limit(path, "fault_level", source="code", note="TSO letter")
+    record = assurance_records.capture_scoped(assurance_records.actor_id(), scope)
+    assert assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+    rows = calculations.scoped_source(ctx, scope)["rows"]
+    # A note-only edit leaves every row as it was; the sidecar's bytes still differ.
+    grid_limits.set_limit(path, "fault_level", source="code", note="TSO letter, revised")
+    assert calculations.scoped_source(ctx, scope)["rows"] == rows
+    with pytest.raises(HTTPException):
+        assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
