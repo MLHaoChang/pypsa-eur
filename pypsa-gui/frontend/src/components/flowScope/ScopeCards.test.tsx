@@ -219,10 +219,10 @@ describe('ScopeCards states', () => {
     const box = await screen.findByTestId('scope-cards-option-grid-n1_sclopf')
     putFlowScope.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
       error_kind: 'flow_scope_option_blocked', blocker_code: 'sclopf_no_branches',
-      message: 'N-1 security can\'t be switched on: N-1 security has no branches to check yet.' } } } })
+      message: 'N-1 security can\'t be switched on: N-1 security needs at least one branch to check.' } } } })
     await user.click(box)
     const why = await screen.findByTestId('scope-cards-option-blocked-n1_sclopf')
-    expect(why.textContent).toMatch(/^N-1 security has no branches to check yet\. Choose them ›$/)
+    expect(why.textContent).toMatch(/^N-1 security needs at least one branch to check\. Choose them ›$/)
     expect(why.textContent).not.toMatch(/LOPF|SCLOPF/)
     expect(screen.queryByTestId('scope-cards-save-error')).toBeNull()
     // Expert: the Network tab's selector is requested, the mode is kept.
