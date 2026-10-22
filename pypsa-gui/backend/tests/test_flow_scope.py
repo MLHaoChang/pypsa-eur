@@ -115,7 +115,6 @@ def test_every_not_yet_row_is_decided_by_the_matrix():
 
 # Why each row the matrix does not decide is not its to decide.
 _NOT_THE_MATRIXS = {
-    ("capacity", "sizing"): "always part of the run (sizing off is W4b's fixed-sizes option)",
     ("capacity", "dispatch"): "always part of the run",
     ("grid", "load_flow"): "the run_ac_pf_after_lopf solver setting decides",
     ("grid", "grid_code"): "an advisory scorecard, not a run kind",
@@ -137,11 +136,57 @@ def test_every_option_is_matrix_decided_or_says_why_not():
     assert set(_NOT_THE_MATRIXS) | set(S.MATRIX_KIND) == set(S.AVAILABILITY)
 
 
-def test_today_the_matrix_clears_none_of_them():
+def test_today_the_matrix_clears_only_sizing_off():
     from services import run_separability as RS
     for (card, option), kind in S.MATRIX_KIND.items():
+        if (card, option) == ("capacity", "sizing"):
+            assert RS.runnable(kind)
+            assert S.option_status(card, option, has_template=True) == (S.AVAILABLE, None)
+            continue
         assert not RS.runnable(kind), kind
         assert S.option_status(card, option, has_template=True)[0] == S.NOT_YET
+
+
+# ── Asset sizing is scope-owned (W4b): sizing in scope ⇔ fixed_sizes == "off" ─
+
+def _cap(options):
+    return {"version": 1, "groups": ["capacity", "handoff"],
+            "options": {"capacity": options, "handoff": ["reports"]}}
+
+
+@pytest.mark.parametrize("fixed, sizing", [("off", True), ("capacity_run", False),
+                                           ("nameplate", False)])
+def test_the_scope_reads_sizing_from_the_fixed_sizes_setting(tmp_path, fixed, sizing):
+    scope = S.read_scope(tmp_path, {"id": "eh_datacenter"}, {"fixed_sizes": fixed})
+    assert ("sizing" in scope["options"]["capacity"]) is sizing
+    assert "dispatch" in scope["options"]["capacity"]
+
+
+def test_a_scope_with_sizing_off_asks_for_capacity_run_only_from_off():
+    off = _cap(["dispatch"])
+    assert S.fixed_sizes_for(off, {"fixed_sizes": "off"}) == "capacity_run"
+    # An explicit source from Solver settings stays.
+    assert S.fixed_sizes_for(off, {"fixed_sizes": "nameplate"}) is None
+    assert S.fixed_sizes_for(off, {"fixed_sizes": "capacity_run"}) is None
+
+
+def test_putting_sizing_back_sets_off():
+    on = _cap(["sizing", "dispatch"])
+    assert S.fixed_sizes_for(on, {"fixed_sizes": "nameplate"}) == "off"
+    assert S.fixed_sizes_for(on, {"fixed_sizes": "off"}) is None
+
+
+def test_write_scope_stores_only_the_fixed_sizes_value(tmp_path):
+    stored = []
+    out = S.write_scope(tmp_path, _cap(["dispatch"]), {"id": "eh_datacenter"},
+                        {"fixed_sizes": "off"}, store_fixed_sizes=stored.append)
+    assert stored == ["capacity_run"]
+    assert "sizing" not in out["options"]["capacity"]
+    stored.clear()
+    out = S.write_scope(tmp_path, _cap(["sizing", "dispatch"]), {"id": "eh_datacenter"},
+                        {"fixed_sizes": "capacity_run"}, store_fixed_sizes=stored.append)
+    assert stored == ["off"]
+    assert "sizing" in out["options"]["capacity"]
 
 
 def test_a_runnable_matrix_row_makes_its_option_available(monkeypatch):
@@ -199,7 +244,8 @@ def test_the_strict_check_refuses_with_a_typed_kind(raw, kind):
 def test_a_stored_scope_is_read_leniently(tmp_path):
     (tmp_path / S.SCOPE_FILE).write_text(json.dumps({
         "version": 1, "groups": ["grid", "nope"],
-        "options": {"grid": ["grid_code", "n1_sclopf", "magic"], "control": ["dynamics"]}}))
+        "options": {"capacity": ["sizing"], "grid": ["grid_code", "n1_sclopf", "magic"],
+                    "control": ["dynamics"]}}))
     scope = S.read_scope(tmp_path, {"id": "eh_datacenter"})
     assert scope["source"] == "project"
     assert scope["groups"] == ["capacity", "grid", "handoff"]
@@ -623,3 +669,31 @@ def test_the_registry_names_each_cards_sections_and_chip():
         "grid": "Grid", "control": "Control", "reliability": "Reliability",
         "commercial": "Commercial"}
     assert by_id["commercial"]["sections"] == ["commercial"]
+
+
+def test_a_scope_put_changes_only_fixed_sizes_and_the_checkbox_mirrors_it(client, tmp_projects_dir):
+    """W4b: sizing out of scope sets fixed_sizes and no other solver_config
+    field; a source named in Solver settings is not clobbered; sizing back in
+    sets it off; the scope reads what the config says."""
+    name = _create(client, "eh_datacenter", "dc_sizing")
+    cfg = lambda: client.get("/api/simulation/solver_config").json()   # noqa: E731
+    before = cfg()
+    assert before["fixed_sizes"] == "off"
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    assert "sizing" in scope["options"]["capacity"]
+    opts = {**scope["options"], "capacity": ["dispatch"]}
+    off = _put(client, name, {**scope, "options": opts})
+    assert "sizing" not in off["options"]["capacity"]
+    after = cfg()
+    assert after["fixed_sizes"] == "capacity_run"
+    assert {k: v for k, v in after.items() if k != "fixed_sizes"} == \
+        {k: v for k, v in before.items() if k != "fixed_sizes"}
+    # A source chosen in Solver settings stays when sizing stays out of scope.
+    assert client.put("/api/simulation/solver_config", json={"fixed_sizes": "nameplate"}).status_code == 200
+    _put(client, name, {**scope, "options": opts})
+    assert cfg()["fixed_sizes"] == "nameplate"
+    assert "sizing" not in client.get(f"/api/projects/{name}/flow/scope").json()["scope"]["options"]["capacity"]
+    # Sizing back in sets off.
+    on = _put(client, name, {**scope, "options": {**opts, "capacity": ["sizing", "dispatch"]}})
+    assert "sizing" in on["options"]["capacity"]
+    assert cfg()["fixed_sizes"] == "off"

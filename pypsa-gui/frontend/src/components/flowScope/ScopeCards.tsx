@@ -228,6 +228,13 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                           </span>
                         )}
                       </label>
+                      {card.id === 'capacity' && o.id === 'sizing' && on && !checked && (
+                        <p data-testid={`${testId}-fixed-sizes`}
+                          className="pl-5 text-[10.5px] text-muted">
+                          Dispatch on fixed sizes, not sized in this run. The source is the last
+                          capacity run unless Solver settings name another.
+                        </p>
+                      )}
                       {o.reason && (
                         <p id={`${testId}-why-${card.id}-${o.id}`}
                           data-testid={`${testId}-why-${card.id}-${o.id}`}

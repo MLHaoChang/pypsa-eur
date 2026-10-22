@@ -11,7 +11,7 @@ import { Loader2, Play, Square } from 'lucide-react'
 import { useRunGate } from '../../../hooks/useRunGate'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
-import { useInScope } from '../../../components/flowScope/useFlowScope'
+import { useFlowScope, useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
 
 export const RELIABILITY_OUT_OF_SCOPE =
@@ -24,6 +24,14 @@ export function GoalStudyRun() {
   } = useGoalStudy()
   // The scope (W4a): with Reliability › goal & study off, the study is not run.
   const reliabilityOn = useInScope('reliability', 'goal_study')
+  // The title follows ScopeGate's branch: "add…" only where the sub-option can
+  // be added; where it isn't offered, the registry's reason.
+  const { registry } = useFlowScope()
+  const goalOpt = registry?.cards.find(c => c.id === 'reliability')
+    ?.options.find(o => o.id === 'goal_study')
+  const outOfScopeTitle = goalOpt && goalOpt.status !== 'available'
+    ? (goalOpt.reason ? `Not offered for this site: ${goalOpt.reason}` : 'Not offered for this site.')
+    : RELIABILITY_OUT_OF_SCOPE
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
   const pipeline = study?.report?.pipeline
@@ -43,7 +51,7 @@ export function GoalStudyRun() {
           disabled={running || run.isPending || built.error !== null || vollMissing || !project
             || templateUnknown || gate.blocked || !reliabilityOn}
           title={templateUnknown ? 'The template could not be read — retry below.'
-            : !reliabilityOn ? RELIABILITY_OUT_OF_SCOPE : undefined}
+            : !reliabilityOn ? outOfScopeTitle : undefined}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {running ? 'Studying…' : again ? 'Run again' : 'Run study'}

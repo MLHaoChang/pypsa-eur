@@ -134,6 +134,35 @@ def _no_load(project: AuthorizedProject, template: dict | None) -> bool:
     return flow_scope.no_load_plant(template, loads)
 
 
+def _store_fixed_sizes(project: AuthorizedProject, value: str) -> None:
+    """Set ``fixed_sizes`` and nothing else in the project's solver config: the
+    live config under the solver-state lock when the project is open (the merge
+    ``PUT /solver_config`` makes), else its saved ``solver_config.json``."""
+    import json
+    from dataclasses import asdict
+
+    from routers.simulation import SolverConfig, _state
+    from services import network_lengths
+    from services.atomic_io import atomic_write_text
+    from services.pypsa_service import PyPSAService
+
+    active = network_lengths.active_project_dir()
+    if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
+        with PyPSAService.get_solver_state_lock():
+            merged = asdict(_state["solver_config"])
+            merged["fixed_sizes"] = value
+            _state["solver_config"] = SolverConfig(**merged)
+        return
+    path = project.directory / "solver_config.json"
+    try:
+        raw = json.loads(path.read_text("utf-8"))
+    except (OSError, ValueError):
+        return                                   # no saved config: the default is "off"
+    if isinstance(raw, dict):
+        raw["fixed_sizes"] = value
+        atomic_write_text(path, json.dumps(raw, indent=2) + "\n")
+
+
 @router.get("/{name}/flow/scope")
 def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """``{scope, cards, preset_id, preset}``: the project's scope (stored, or its
@@ -172,7 +201,8 @@ def put_flow_scope(body: dict,
     try:
         scope = flow_scope.write_scope(project.directory, body, template,
                                        _solver_settings(project),
-                                       no_load=_no_load(project, template))
+                                       no_load=_no_load(project, template),
+                                       store_fixed_sizes=lambda v: _store_fixed_sizes(project, v))
     except flow_scope.ScopeError as exc:
         raise HTTPException(422, {"error_kind": exc.error_kind,
                                   "message": exc.message}) from exc

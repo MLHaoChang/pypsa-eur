@@ -52,7 +52,7 @@ function registry(scope: FlowScopeValue = PRESET): FlowScopeRegistry {
         sections: ['project', 'carriers', 'connection', 'loads', 'assets', 'profiles', 'commercial',
           'scenarios'], chip: null,
         intended: ['sizing', 'dispatch'],
-        options: [opt('sizing', 'required'), opt('dispatch', 'required'),
+        options: [opt('sizing'), opt('dispatch', 'required'),
           opt('process_detail', 'not_yet_available')] },
       { id: 'grid', label: 'AC power flow & grid', locked_reason: null,
         sections: ['connection', 'assets', 'scenarios'], chip: 'Grid',
@@ -120,7 +120,15 @@ describe('ScopeCards', () => {
     expect(screen.getByTestId('scope-cards-why-capacity-dispatch').textContent).toBe('Always part of the run.')
     expect(screen.getByTestId('scope-cards-why-control-dynamics').textContent).toBe("can't be run yet")
     expect((screen.getByTestId('scope-cards-toggle-handoff') as HTMLInputElement).disabled).toBe(true)
-    expect((screen.getByTestId('scope-cards-option-capacity-sizing') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByTestId('scope-cards-option-capacity-sizing') as HTMLInputElement).disabled).toBe(false)
+  })
+
+  it('Asset sizing can be switched off and then says the run is on fixed sizes (W4b)', async () => {
+    const user = mount()
+    await user.click(await screen.findByTestId('scope-cards-option-capacity-sizing'))
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.options.capacity).toEqual(['dispatch'])
   })
 
   it('switching a card off writes the scope without it and keeps its sub-options', async () => {

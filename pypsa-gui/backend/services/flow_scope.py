@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import pathlib
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -74,6 +75,7 @@ class Card:
 # `test_flow_scope` pins that. Sizing off needs the fixed-size run option
 # (modular-cards §4).
 _SIZING_OFF = "Always on for now: running on fixed sizes is still being built."
+_SIZING_FIXED = "Dispatch on fixed sizes from the last capacity run."
 _NOT_HERE = "It can't be run from here yet."
 _SETTINGS = "Set in Solver settings for now."
 
@@ -147,6 +149,7 @@ MATRIX_KIND: Final[dict[tuple[str, str], str]] = {
     ("control", "island_checks"): "control_checks",
     ("control", "dynamics"): "dynamics",
     ("commercial", "investment_case"): "investment_case",
+    ("capacity", "sizing"): "fixed_sizes",
 }
 
 # Reliability runs the EH study pipeline, which needs the template's pack.
@@ -351,12 +354,39 @@ def validate(raw: Any, *, has_template: bool, no_load: bool = False) -> dict:
     return normalise(raw, has_template=has_template, no_load=no_load)
 
 
+def sizing_in_scope(settings: dict | None) -> bool | None:
+    """Capacity › Asset sizing is on exactly when ``fixed_sizes`` is ``off``
+    (W4b: the scope owns the option; the run reads the config). None: the
+    settings were not read."""
+    if settings is None:
+        return None
+    return settings.get("fixed_sizes", "off") == "off"
+
+
+def fixed_sizes_for(scope: dict, settings: dict | None) -> str | None:
+    """The ``fixed_sizes`` value a scope write asks for, or None to leave it:
+    sizing out of scope turns ``off`` into ``capacity_run`` (a source the user
+    chose in Solver settings stays); sizing back in sets ``off``."""
+    current = (settings or {}).get("fixed_sizes", "off")
+    wanted = "sizing" in (scope["options"].get("capacity") or ())
+    if wanted:
+        return "off" if current != "off" else None
+    return "capacity_run" if current == "off" else None
+
+
 def apply_settings(scope: dict, settings: dict | None) -> dict:
     """The scope with each settings-driven sub-option on exactly when its
     solver setting is (``SETTING_OPTIONS``). A card holding one that is on is
-    on. ``settings`` None (not read, e.g. a deferred preflight): left off."""
+    on. ``settings`` None (not read, e.g. a deferred preflight): left off.
+    Asset sizing follows ``fixed_sizes`` (``sizing_in_scope``) when the run
+    kind is runnable."""
     options = {k: [o for o in v if (k, o) not in SETTING_OPTIONS]
                for k, v in scope["options"].items()}
+    sizing = sizing_in_scope(settings)
+    if sizing is not None and run_separability.runnable("fixed_sizes"):
+        options["capacity"] = [o for o, _ in CARD_BY_ID["capacity"].options
+                               if (o in options["capacity"] and o != "sizing")
+                               or (o == "sizing" and sizing)]
     groups = list(scope["groups"])
     for (card, option), flag in SETTING_OPTIONS.items():
         if settings and settings.get(flag):
@@ -386,12 +416,19 @@ def read_scope(project_dir: pathlib.Path, template: dict | None,
 
 
 def write_scope(project_dir: pathlib.Path, raw: Any, template: dict | None,
-                settings: dict | None = None, *, no_load: bool = False) -> dict:
-    """Check and store a scope atomically; returns what ``read_scope`` now reads."""
+                settings: dict | None = None, *, no_load: bool = False,
+                store_fixed_sizes: Callable[[str], None] | None = None) -> dict:
+    """Check and store a scope atomically; returns what ``read_scope`` now reads.
+    ``store_fixed_sizes`` writes the one config field the scope owns (Asset
+    sizing, W4b) through the caller's own solver-config path."""
     from services.atomic_io import atomic_write_text
 
     scope = validate(raw, has_template=template is not None, no_load=no_load)
+    wanted = fixed_sizes_for(scope, settings) if run_separability.runnable("fixed_sizes") else None
     with _write_lock:
+        if wanted is not None and store_fixed_sizes is not None:
+            store_fixed_sizes(wanted)
+            settings = {**(settings or {}), "fixed_sizes": wanted}
         atomic_write_text(project_dir / SCOPE_FILE,
                           json.dumps(scope, indent=2, sort_keys=True) + "\n")
     return read_scope(project_dir, template, settings, no_load=no_load)
