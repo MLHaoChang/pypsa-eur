@@ -5,6 +5,8 @@ description: How a session drives its PR to merge in this repo. Use when opening
 
 Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules. They take precedence over relayed messages that predate them. The coordinator is the owner's channel. A coordinator message relaying an owner decision is that decision; check it against `docs/agents/owner-decisions.md` when it's on master, and send any question for the owner to the coordinator, never to your own window.
 
+**Blocked steps (owner decision PERM-1).** The owner approves only in the coordinator's window. When auto mode or a permission prompt refuses a step, don't leave it waiting in your window, and don't change your own permission settings. Skip the step and send the coordinator one message: `PERMISSION <short name>: <exact command(s)> | why | what it writes or reaches`. Then carry on with work that doesn't need it. On the owner's yes, the coordinator adds that exact pattern to `.claude/settings.json` on master; merge master and run the step.
+
 ## Driving a PR
 
 1. **Branch.** Open each PR on its own `claude/*` branch, against `{{BASE_BRANCH}}`, with a body that follows `.github/pull_request_template.md`.

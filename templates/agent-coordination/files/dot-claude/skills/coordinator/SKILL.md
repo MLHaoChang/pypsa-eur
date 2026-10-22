@@ -107,6 +107,8 @@ Every `AskUserQuestion` is also written in the turn's final reply text, in the s
 
 Append every owner decision to `docs/agents/owner-decisions.md`, in the PR that lands the next coordination change or as its own tiny docs PR. Briefs cite the row.
 
+**Permission requests (owner decision PERM-1).** A session's `PERMISSION ...` message goes to the owner as one `AskUserQuestion`, with the exact command pattern and what it reaches. On a yes, add exactly that pattern to `permissions.allow` in `.claude/settings.json` (e.g. `Bash(npx impeccable:*)`, never broader than asked) in a tiny OWN-PR, add an owner-decisions row, merge and tell the session to merge master. Never widen a pattern on your own.
+
 Report only what has happened. Tell the owner a message went out after `send_message` returns, not before.
 
 Verify a session's facts before acting on them: re-run premerge rather than trusting a reported SHA, overlap or green.
