@@ -762,3 +762,94 @@ def test_the_stores_own_guard_refuses_while_a_calculation_runs(tmp_path, monkeyp
     with pytest.raises(S.ScopeError) as exc:
         flow_router._refuse_while_running()
     assert exc.value.error_kind == "run_in_progress"
+
+
+def _saved_config(client, monkeypatch, name):
+    """The project's solver_config.json as a Solver-settings save leaves it."""
+    import json
+
+    from routers import flow as flow_router
+
+    seen = []
+    real = flow_router._solver_settings
+    monkeypatch.setattr(flow_router, "_solver_settings", lambda project: seen.append(project.directory) or real(project))
+    client.get(f"/api/projects/{name}/flow/scope")                  # a read that names the directory
+    monkeypatch.setattr(flow_router, "_solver_settings", real)
+    path = pathlib.Path(seen[0]) / "solver_config.json"
+    path.write_text(json.dumps(client.get("/api/simulation/solver_config").json(), indent=2) + "\n")
+    return path
+
+
+def _closed_n1_body(client, name):
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    return scope, {"version": 1, "groups": [*scope["groups"], "grid"],
+                   "options": {**scope["options"], "grid": ["n1_sclopf"]}}
+
+
+def test_a_closed_project_refuses_an_option_the_run_would_refuse(client, tmp_projects_dir, monkeypatch):
+    """The closed branch runs the same guards as the open one: switching N-1 on
+    where the Run would refuse it (no branches chosen) is a 422 by name, and the
+    saved solver_config.json is byte-unchanged."""
+    import services.network_lengths as nl
+
+    name = _create(client, "eh_h2_hub", "dc_closed_blocked")
+    path = _saved_config(client, monkeypatch, name)
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    scope, body = _closed_n1_body(client, name)
+    before = path.read_bytes()
+    r = client.put(f"/api/projects/{name}/flow/scope", json=body)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "flow_scope_option_blocked"
+    assert r.json()["detail"]["blocker_code"] == "sclopf_no_branches"
+    assert path.read_bytes() == before
+
+
+def test_a_closed_project_writes_an_option_the_run_accepts(client, tmp_projects_dir, monkeypatch):
+    import json
+
+    import services.network_lengths as nl
+    from services import run_separability as RS
+
+    name = _create(client, "eh_h2_hub", "dc_closed_ready")
+    path = _saved_config(client, monkeypatch, name)
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    scope, body = _closed_n1_body(client, name)
+    ready = {"ready": True, "deferred": False, "blocker": None}
+    monkeypatch.setattr(RS, "verdicts", lambda *a, **k: {"optimisation": ready, "sclopf": ready})
+    assert client.put(f"/api/projects/{name}/flow/scope", json=body).status_code == 200
+    assert json.loads(path.read_text())["sclopf"] is True
+
+
+def test_a_closed_project_switches_off_without_asking_for_a_verdict(client, tmp_projects_dir, monkeypatch):
+    import json
+
+    import services.network_lengths as nl
+    from services import run_separability as RS
+
+    name = _create(client, "eh_h2_hub", "dc_closed_off")
+    path = _saved_config(client, monkeypatch, name)
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    path.write_text(json.dumps({**json.loads(path.read_text()), "sclopf": True}, indent=2) + "\n")
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    calls = []
+    monkeypatch.setattr(RS, "verdicts", lambda *a, **k: calls.append(a) or {})
+    off = {"version": 1, "groups": scope["groups"],
+           "options": {**scope["options"], "grid": [o for o in scope["options"].get("grid", []) if o != "n1_sclopf"]}}
+    assert client.put(f"/api/projects/{name}/flow/scope", json=off).status_code == 200
+    assert json.loads(path.read_text())["sclopf"] is False
+    assert calls == []
+
+
+def test_a_closed_project_refuses_while_a_calculation_runs(client, tmp_projects_dir, monkeypatch):
+    import routers.simulation as sim
+    import services.network_lengths as nl
+
+    name = _create(client, "eh_h2_hub", "dc_closed_busy")
+    path = _saved_config(client, monkeypatch, name)
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    scope, body = _closed_n1_body(client, name)
+    before = path.read_bytes()
+    monkeypatch.setattr(sim, "_solver_in_flight", lambda: True)
+    r = client.put(f"/api/projects/{name}/flow/scope", json=body)
+    assert r.status_code == 409, r.text
+    assert path.read_bytes() == before

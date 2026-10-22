@@ -241,6 +241,11 @@ def _store_owned(project: AuthorizedProject, wanted: dict[str, bool], db, user) 
             "settings, which are not saved yet.")
     now, change = decide(raw)
     if change:
+        # The same guards as the open project's: a solve or study in flight, and
+        # the Run's own verdict on an option being switched on. Nothing is written
+        # on a refusal; switching off is always allowed.
+        _refuse_while_running()
+        _refuse_unavailable_on(project, change, db)
         atomic_write_text(path, json.dumps({**raw, **change}, indent=2) + "\n")
     return now
 
