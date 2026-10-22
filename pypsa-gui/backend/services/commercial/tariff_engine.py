@@ -171,13 +171,20 @@ def _quantity_mw(item: TariffItem, imp: np.ndarray, exp: np.ndarray) -> np.ndarr
 
 
 def _rates(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
+    return period_rates(item.periods, local)
+
+
+def period_rates(periods, local: pd.DatetimeIndex) -> np.ndarray:
+    """The rate of the first `TariffPeriod` matching each instant of the
+    local clock, NaN where none does — the one band model, shared by the
+    tariff engine and the price profiles (`profile_gen/series.py`)."""
     n = len(local)
     rates = np.full(n, np.nan)
     matched = np.zeros(n, dtype=bool)
     month = np.asarray(local.month)
     weekday = np.asarray(local.weekday)
     hour = np.asarray(local.hour + local.minute / 60.0, dtype=float)
-    for p in item.periods:
+    for p in periods:
         mask = ~matched
         if p.months:
             mask &= np.isin(month, p.months)
