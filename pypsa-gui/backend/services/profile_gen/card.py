@@ -38,7 +38,7 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
     import xarray as xr
 
     from services import chat_tools
-    from services.profile_gen.job import _artifact_paths
+    from services.profile_gen.job import _artifact_paths, pending_io_lock
 
     proj = chat_tools._authorized_project(str(args.get("project_id") or ""))
     nc, meta_path = _artifact_paths(proj.directory, str(args.get("job_id") or ""))
@@ -48,7 +48,7 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
         raise HTTPException(404, f"no pending profile for job {args.get('job_id')!r}")
     meta = json.loads(meta_path.read_text())
     point = args.get("point_id") or args.get("component")
-    with xr.open_dataset(nc) as ds:
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
         if point not in ds.data_vars:
             from fastapi import HTTPException
 
@@ -57,6 +57,14 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
         s = ds[point].to_series()
     return pd.Series(s.to_numpy(), index=pd.DatetimeIndex(s.index), name=point,
                      dtype=float), meta
+
+
+# The target field in plain words (the card is user-facing copy).
+_OP = {"scale_peak_to": "peak target", "scale_window": "hour window",
+       "set_floor": "floor", "set_cap": "cap", "shift": "shift", "smooth": "smoothing",
+       "rescale_energy": "energy target"}
+_FIELD = {"p_set": "Load", "p_max_pu": "Availability", "p_min_pu": "Must-run floor",
+          "marginal_cost": "Price", "inflow": "Inflow", "efficiency": "COP"}
 
 
 def _stats(n, values: np.ndarray, power: bool, weighting: str) -> dict[str, float]:
@@ -100,7 +108,8 @@ def preview(args: dict) -> list[dict]:
              "min": unit}
     cls = _CLASS[ct]
     rows = [{"component_class": cls, "name": component, "field": f"{attr}.{k}",
-             "label": f"{attr} {k.replace('_mwh', '').replace('_', ' ')}",
+             "label": ("Load factor (weighted, model snapshots)" if k == "load_factor"
+                       else f"{_FIELD.get(attr, 'Series')} {k.replace('_mwh', '')}"),
              "old": round(old[k], 6), "new": round(new[k], 6), "unit": units[k], "role": "typed"}
             for k in new]
     differ = int((~np.isclose(old_v, new_v)).sum())
@@ -110,7 +119,7 @@ def preview(args: dict) -> list[dict]:
     ops = meta.get("refinements") or []
     if ops:
         rows.append(_note(cls, component, "refinements",
-                          "refined by " + ", ".join(str(o.get("op")) for o in ops)))
+                          "refined by " + ", ".join(_OP.get(str(o.get("op")), "an edit") for o in ops)))
     return rows
 
 
@@ -136,3 +145,59 @@ def readback(args: dict, rows: list[dict]) -> list[Any]:
 def _note(cls: str, name: str, field: str, text: str) -> dict:
     return {"component_class": cls, "name": name, "field": field, "label": field, "old": None,
             "new": None, "unit": "", "role": "note", "note": text}
+
+
+# ── "Generate defaults for all": one card for the batch (plan D) ────────────
+
+
+def _job_meta(project_id: str, job_id: str) -> dict:
+    import json
+
+    from services import chat_tools
+    from services.profile_gen.job import _artifact_paths
+
+    proj = chat_tools._authorized_project(project_id)
+    _nc, meta_path = _artifact_paths(proj.directory, job_id)
+    if not meta_path.exists():
+        from fastapi import HTTPException
+
+        raise HTTPException(404, f"no pending profile for job {job_id!r}")
+    return json.loads(meta_path.read_text())
+
+
+def _batch(args: dict) -> list[tuple[str, dict]]:
+    project = str(args.get("project_id") or "")
+    out = []
+    for job in args.get("job_ids") or []:
+        meta = _job_meta(project, str(job))
+        out.append((str(job), {"project_id": project, "job_id": str(job),
+                               "component": (meta.get("points") or [""])[0], "_meta": meta}))
+    return out
+
+
+def preview_batch(args: dict) -> list[dict]:
+    """Each default's old → new rows, with why it was picked and how sized."""
+    rows: list[dict] = []
+    for _job, one in _batch(args):
+        meta = one.pop("_meta")
+        sub = preview(one)
+        default = meta.get("default") or {}
+        if default:
+            ct = (meta.get("target") or ["loads"])[0]
+            sub.append(_note(_CLASS.get(ct, ""), one["component"], "default",
+                             f"assumed: {default.get('reason')}; sized by its "
+                             f"{default.get('sizing')} (fixed load "
+                             f"{default.get('static_p_set_mw')} MW)"))
+        rows += sub
+    return rows
+
+
+def readback_batch(args: dict, rows: list[dict]) -> list[Any]:
+    """`readback` per default, matched to its rows by component."""
+    out: list[Any] = [None] * len(rows)
+    for _job, one in _batch(args):
+        one.pop("_meta")
+        idx = [i for i, r in enumerate(rows) if r.get("name") == one["component"]]
+        for i, v in zip(idx, readback(one, [rows[i] for i in idx])):
+            out[i] = v
+    return out

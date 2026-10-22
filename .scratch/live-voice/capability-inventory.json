@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 279,
+  "tool_count": 281,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2328,6 +2328,48 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/preview"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "replace_generated",
+        "peak_sized"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "d2bffa1352e1c4f15d71f9e93afa5f173b66aba0eb08e0d07084622bbad1e62a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_ids"
+      ],
+      "required": [
+        "project_id",
+        "job_ids"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "4269f1d7d6b12df848df53620eeb7843392056062a9e9e4cd45573e6572dd0cc",
       "behavioral_fixture": "pending"
     },
     {

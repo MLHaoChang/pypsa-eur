@@ -84,6 +84,24 @@ class LeapYearMismatchError(ProfileApplyError):
     """The target calendar needs a Feb 29 the weather year does not have."""
 
 
+class CurrentSeriesError(ProfileApplyError):
+    """No current series to refine, or one that cannot be a source."""
+
+
+class CurrentChangedError(ProfileApplyError):
+    """The current series an artifact was made from has changed since."""
+
+
+class WindowSourceGapError(ProfileApplyError):
+    """A series made from a window's current series meets hours outside
+    that window."""
+
+
+#: A source year padded with NaN outside the window it was read from
+#: (`current.series_from_current`): its energy is the window's mean annualised.
+WINDOW_MEAN_BASIS = "window_mean"
+
+
 class InvalidTimeBasisError(ProfileApplyError):
     """The declared snapshot time basis is not "UTC" or an IANA zone."""
 
@@ -150,6 +168,31 @@ def commercial_timezone(ctx) -> str | None:
 
 
 _commercial_timezone = commercial_timezone
+
+
+def current_digest(series: pd.Series) -> str:
+    """A fingerprint of a stored series (index and values), so an artifact
+    made from it can tell when it has changed since — an upload carries no
+    ``applied_at``."""
+    import hashlib
+
+    raw = pd.util.hash_pandas_object(series, index=True).to_numpy().tobytes()
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def time_basis_for(ctx, meta: Mapping[str, Any],
+                   stated: str | None) -> tuple[str, str, list[str]]:
+    """`resolve_time_basis` for this artifact. A series made from the
+    current one (``source_clock: snapshot``) is already on the snapshot
+    clock, converted at its first apply: it maps by identity and keeps the
+    basis recorded then, never converted a second time."""
+    if meta.get("source_clock") == "snapshot":
+        if stated not in (None, "UTC"):
+            raise InvalidTimeBasisError(
+                f"this series was made from the current one and is already on "
+                f"the snapshot clock; apply it without a time basis, not {stated!r}")
+        return "UTC", str(meta.get("time_basis") or "the snapshot clock"), []
+    return resolve_time_basis(_profile_zone(ctx, meta, stated), commercial_timezone(ctx))
 
 
 def resolve_time_basis(stated: str | None,
@@ -1033,7 +1076,8 @@ def _window_blocks(window: dict | None, modelled: dict[str, float]) -> dict[str,
 
 def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
                    target: TargetSpec, src_year: int,
-                   window: dict | None = None) -> tuple[dict, list[str]]:
+                   window: dict | None = None,
+                   window_source: bool = False) -> tuple[dict, list[str]]:
     """``profile_annual_mwh`` (the source year's energy: its mean power over
     its hours — the plain sum for an hourly series, while a daily or weekly
     one is a mean per step whose edge weeks straddle the year),
@@ -1049,6 +1093,12 @@ def _energy_record(n, series: pd.Series, aligned: pd.Series, scale: float,
     profile_mwh = float(np.nanmean(series.to_numpy(dtype=float)) * scale * year_hours)
     modelled = _modelled_mwh(n, aligned, target.weighting)
     warnings: list[str] = []
+    if window_source:
+        # The source year IS the window, annualised: held against itself the
+        # check would always pass, so it is not run, and says so.
+        return {"profile_annual_mwh": profile_mwh, "modelled_mwh": modelled,
+                "profile_annual_basis": WINDOW_MEAN_BASIS,
+                "energy_check": "not_applicable (window-derived source)"}, warnings
     sampled = _window_blocks(window, modelled)
     if sampled and profile_mwh > 0:
         w = n.snapshot_weightings[target.weighting].reindex(aligned.index)
@@ -1107,15 +1157,15 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
         raise UnsupportedTargetError(
             f"{component_type}/{attribute} is not a power target; it has no energy")
     scale, _ = _scale_power(series, meta)
-    basis, _recorded, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
+    basis, _recorded, warnings = time_basis_for(ctx, meta, time_basis)
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     aligned, align_meta = _align_to_snapshots(
         series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
     aligned = aligned * scale
     energy, energy_warnings = _energy_record(
         ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]),
-        window=align_meta.get("window"))
+        window=align_meta.get("window"),
+        window_source=meta.get("profile_annual_basis") == WINDOW_MEAN_BASIS)
     return {**energy, "warnings": [*warnings, *energy_warnings]}
 
 
@@ -1183,6 +1233,13 @@ def prepare_profile(
         )
     if family.guard is not None:
         family.guard(ctx, component_type, component, meta)
+    if meta.get("source") == "current":
+        stored = ctx.user_ts.get((component_type, attribute, component))
+        if stored is None or current_digest(stored) != meta.get("based_on_current"):
+            raise CurrentChangedError(
+                f"{component!r}'s {attribute} series changed after this one was "
+                "made from it (another apply, an upload or an undo); refine the "
+                "current series again so nothing written since is lost")
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     unit_meta: dict[str, Any] = {}
@@ -1195,8 +1252,7 @@ def prepare_profile(
         if component_type == "links":
             unit_meta["per"] = "MWh of p0 (bus0 flow)"
 
-    time_basis, recorded_basis, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
+    time_basis, recorded_basis, warnings = time_basis_for(ctx, meta, time_basis)
     warnings = [*warnings, *money_warnings]
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
@@ -1205,6 +1261,12 @@ def prepare_profile(
     # Every written value must be finite at every snapshot — a NaN masks the
     # constraint row out of the LP (the Phase 12f rule).
     vals = aligned.to_numpy(dtype=float) * scale
+    if meta.get("profile_annual_basis") == WINDOW_MEAN_BASIS and np.isnan(vals).any():
+        first = aligned.index[np.isnan(vals)][0]
+        raise WindowSourceGapError(
+            f"{component!r}: this series was made from the current one on a "
+            f"snapshot window and has no value at {first}; the snapshots have "
+            "changed since — refine the current series again")
     if not np.isfinite(vals).all():
         raise ProfileApplyError(
             f"profile for {component!r} has non-finite values after "
@@ -1245,7 +1307,8 @@ def prepare_profile(
     if target.kind == "power":
         energy, energy_warnings = _energy_record(
             n, series, aligned, scale, target, int(align_meta["weather_year"]),
-            window=align_meta.get("window"))
+            window=align_meta.get("window"),
+            window_source=meta.get("profile_annual_basis") == WINDOW_MEAN_BASIS)
         unit_meta.update(energy)
         warnings = [*warnings, *energy_warnings]
 
@@ -1259,6 +1322,10 @@ def prepare_profile(
     key = (component_type, attribute, component)
     replaced, replace_warnings = _replaced_series(ctx, key, family_name,
                                                   _kind_of(meta))
+    if meta.get("source") == "current":
+        # A refinement of the series it replaces (the stale guard above
+        # checked it is still that one): saying so would only be noise.
+        replace_warnings = []
     warnings = [*warnings, *replace_warnings]
     meaning = None
     if attribute == "p_min_pu" and component_type in ("generators", "links") \
@@ -1327,6 +1394,13 @@ def assign_profile(
     warnings, target, family_name = p.warnings, p.target, p.family_name
     align_meta, recorded_basis, unit_meta = p.align_meta, p.recorded_basis, p.unit_meta
     n = ctx.network
+    # What the field held before the write, for the receipt's old → new
+    # (None for a value an imported series left unset).
+    with PyPSAService.get_lock():
+        old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
+    finite = old[np.isfinite(old)]
+    before = ({"peak": float(finite.max()), "mean": float(finite.mean()),
+               "min": float(finite.min())} if len(finite) else None)
 
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).
@@ -1388,6 +1462,7 @@ def assign_profile(
         "mean": float(aligned.mean()),
         "min": float(aligned.min()),
         "peak": float(aligned.max()),
+        "before": before,
         **({"modelled_mwh": unit_meta["modelled_mwh"],
             "profile_annual_mwh": unit_meta["profile_annual_mwh"]}
            if target.kind == "power" else {}),

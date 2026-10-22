@@ -69,6 +69,8 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "profile_gen/availability.py": (1, "an availability bound is drawn on the source year's "
                                        "HOURS like every generated profile; apply aligns it "
                                        "onto the snapshots"),
+    "profile_gen/current.py": (1, "a series read from a snapshot window is padded onto its "
+                                 "source year, the hourly axis every source has (spec §4)"),
     "profile_gen/series.py": (1, "a price/inflow/COP series is drawn on the source "
                                  "year's HOURS like every generated profile; apply aligns "
                                  "it onto the snapshots"),
@@ -145,10 +147,11 @@ def test_the_inventory_is_pinned():
     # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
     # Profile generator: synthetic.py (3), atlite_source.py (1), apply.py (1) added.
     # RP-06: profile_gen/shape.py (2) added.
+    # TS UI: profile_gen/current.py (1) added.
     # TS 03: profile_gen/series.py (1) added.
     # TS 02: profile_gen/availability.py (1) added.
     # TS 01 B3: profile_gen/load_upload.py (1) added.
     # TS 01 B1: profile_gen/load_archetypes.py (1) added.
-    assert sum(c for c, _ in ALLOWED.values()) == 84
-    assert len(ALLOWED) == 43
+    assert sum(c for c, _ in ALLOWED.values()) == 85
+    assert len(ALLOWED) == 44
     assert all(reason for _, reason in ALLOWED.values())

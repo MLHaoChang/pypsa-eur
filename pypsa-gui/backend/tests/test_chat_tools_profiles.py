@@ -38,6 +38,8 @@ PROFILE_TOOLS = (
     "generate_load_profile",
     "generate_availability_profile",
     "generate_series_profile",
+    "preview_default_series",
+    "apply_default_series",
 )
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
@@ -102,6 +104,8 @@ def test_safety_tiers_match_the_declared_markers():
     assert safety_tier_for("generate_load_profile") == "execution"
     assert safety_tier_for("generate_availability_profile") == "execution"
     assert safety_tier_for("generate_series_profile") == "execution"
+    assert safety_tier_for("preview_default_series") == "execution"
+    assert safety_tier_for("apply_default_series") == "write"
 
 
 def test_route_templates_are_in_the_phase0_inventory():
