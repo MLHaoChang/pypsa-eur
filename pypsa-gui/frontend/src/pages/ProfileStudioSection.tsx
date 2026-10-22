@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Play, Wand2 } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
+import { openTimeSeriesFor } from '../layout/flowNavigation'
 import { Btn, PageSection, Seg, Sparkline, Tag } from '../components/PageKit'
 import {
   errorText, profilesApi,
@@ -61,11 +62,13 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
   const [component, setComponent] = useState(record.points[0] ?? '')
   const [message, setMessage] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
+  const [appliedTo, setAppliedTo] = useState<string | null>(null)
 
   const apply = useMutation({
     mutationFn: () => profilesApi.apply(name, record.job_id, component),
     onMutate: () => { setMessage(null); setRefusal(null) },
     onSuccess: (r) => {
+      setAppliedTo(r.component)
       setMessage(
         `applied to ${r.component}: ${r.hours} h, mean ${(r.mean * 100).toFixed(1)}%`
         + (r.tiled ? `, tiled over ${r.periods?.length ?? 0} periods` : '')
@@ -103,6 +106,13 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
         </Btn>
       </div>
       {message && <p className="text-[11px] text-green-600 mt-1.5" data-testid="apply-ok">{message}</p>}
+      {message && appliedTo && (
+        <button type="button" data-testid="apply-view-time-series"
+          onClick={() => openTimeSeriesFor('Generator', appliedTo, { field: 'p_max_pu' })}
+          className="mt-1 text-[11px] text-accent hover:underline">
+          View in Time Series ›
+        </button>
+      )}
       {refusal && <p className="text-[11px] text-red-600 mt-1.5" data-testid="apply-refusal">{refusal}</p>}
     </div>
   )

@@ -259,3 +259,31 @@ def test_a_parts_edit_shows_the_native_clear_of_an_imported_overnight_cost(grid)
     assert rows["overnight_cost"]["role"] == "follows"
     assert result["_edit_receipt"]["outcome"] == "verified"
     assert PyPSAService.get_network().storage_units["overnight_cost"].isna()["Battery"]
+
+
+def test_the_receipt_names_a_section_state_that_changed(grid, monkeypatch):
+    """PR-2: the card names its flow section; the receipt adds the section's
+    state after the write and says when it changed. The section-state read is
+    stubbed here; OJ-05 reads the real flow."""
+    states = iter([{"id": "connection", "label": "Connection & grid", "state": "incomplete"},
+                   {"id": "connection", "label": "Connection & grid", "state": "complete"}])
+    monkeypatch.setattr(edit_card, "_section_state", lambda section_id: next(states))
+    frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                                 "attrs": {"s_nom": 400.0}})
+    card = cards[0]["edit_card"]
+    assert card["section"] == {"id": "connection", "label": "Connection & grid"}
+    assert card["rows"][0]["target"] == {"section": "connection", "panel": None, "component": "Line",
+                                         "entity": "L1", "field": "s_nom"}
+    assert result["_edit_receipt"]["section"] == {"id": "connection", "label": "Connection & grid",
+                                                  "state": "complete", "changed": True}
+
+
+def test_the_section_state_does_not_bind_the_card(grid, monkeypatch):
+    """A section's state moving between card and approval does not make the card stale."""
+    states = iter(["incomplete", "complete"])
+    monkeypatch.setattr(edit_card, "_section_state",
+                        lambda section_id: {"id": section_id, "label": "x", "state": next(states)})
+    first = edit_card.preview("update_component", {"component_class": "Line", "name": "L1", "attrs": {"s_nom": 9.0}})
+    first["section_state"] = edit_card._section_state("connection")  # the state moved on
+    edit_card.require_current("update_component", {"component_class": "Line", "name": "L1",
+                                                   "attrs": {"s_nom": 9.0}}, first)

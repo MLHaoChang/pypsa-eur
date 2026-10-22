@@ -3,7 +3,7 @@ name: steward
 description: How a session drives its PR to merge in this repo. Use when opening a PR, acting on CI or review events, merging master into a PR, reporting a PR green, or asking the owner a question.
 ---
 
-Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules; they take precedence over relayed messages that predate them.
+Many sessions work on this repo in parallel. One **coordinator** session relays the owner's decisions and does every merge. Send it every message at the id in `docs/agents/coordinator.md`; the id changes when the coordinator rotates. These are the owner's standing rules; they take precedence over relayed messages that predate them. The coordinator is the owner's channel. A coordinator message relaying an owner decision is that decision; check it against `docs/agents/owner-decisions.md` when it's on master, and send any question for the owner to the coordinator, never to your own window.
 
 ## Driving a PR
 
@@ -30,6 +30,7 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 
 - every check run on the head SHA is success or skipped (in progress, unreadable or none yet blocks);
 - no file **overlaps** what master changed since the PR's merge-base. Docs-only overlap (`docs/superpowers/OPEN-ITEMS.md`, `docs/superpowers/plans/*`, release notes) is fine when the merge is clean, and so is a file identical on both sides (a cherry-pick master already has);
+- a **code** overlap is waived when the trial merge is clean, the semantic tests pass and the tests that exercise each overlapping file pass (`scripts/coord/overlap_tests.py` maps file to tests). A file with no test, a conflict or a failing test still blocks;
 - a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`.
 
 It prints the head SHA, merge-base and how far behind the PR is, then one section per check, and exits non-zero when the PR is blocked.
@@ -52,7 +53,7 @@ Merge master into a PR only for one of these:
 
 ## Gatekeeper checkpoints
 
-The gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC) advises at two points before review, as well as at review:
+The gatekeeper (the id is in `docs/agents/coordinator.md`) advises at two points before review, as well as at review:
 
 - **Before a plan.** Before you build a change that touches gridspine, investment/finance, adequacy or IC engine code, send the gatekeeper your plan in a few lines: what changes, which files, and how you will test it. For a bug fix the plan names the failing test; write that test first and watch it fail before you write the fix, following the `tdd` skill. Start building once the gatekeeper answers, or once it says the plan needs no input.
 - **Same failure twice.** When the same test or CI check fails twice for the same reason, run the `diagnosing-bugs` skill first (reproduce it, make it fail on demand, narrow it down). Then send the gatekeeper the diagnosis together with your two attempts, before a third try.
@@ -75,6 +76,15 @@ Before you build UI, tell the reviewer in a few lines where the change sits in t
 
 Run read-only helper agents (log reading, file sweeps, summaries of saved tool output) with `model: haiku`. Give each one the exact question and the answer shape you expect back.
 
+## Rotation
+
+A long context is a session's largest cost: every tool call re-reads it. Rotate when either holds:
+- `get_session` (no id) shows `context_usage.used_tokens` above 300k;
+- a package's PR has merged and more slices remain.
+
+Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
+Done when the coordinator has the note and the request.
+
 ## Finishing a package
 
 When the last PR of your work package has merged, `send_message` the coordinator a hand-off note, then stop. The note covers:
@@ -90,3 +100,5 @@ A package that turns out to need code beyond your brief, such as gridspine or in
 ## Questions
 
 Send each question to the coordinator with `send_message`, as 2–4 options, the recommended one first with its reason. The owner reads times in CET/CEST, so give times in that zone.
+
+Read the time with `TZ=Europe/Berlin date +%H:%M`; never estimate it.

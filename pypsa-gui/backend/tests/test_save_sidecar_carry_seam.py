@@ -234,6 +234,8 @@ def real_dirs(tmp_projects_dir, monkeypatch):
     (src / "sites" / "s1" / "context.json").write_text("source:context")
     (src / "uploads" / "u1").mkdir(parents=True)
     (src / "uploads" / "u1" / "f.txt").write_text("source:upload")
+    (src / "run_evidence" / "r1").mkdir(parents=True)
+    (src / "run_evidence" / "r1" / "manifest.json").write_text("source:evidence")
     dest = tmp_projects_dir / "B"
     dest.mkdir()
     # A STALE sidecar already in the destination (Save-As with force over an
@@ -254,6 +256,8 @@ def test_carry_on_move_copies_and_replaces_every_bundle_sidecar(real_dirs, rebin
             assert (dest / f).read_text() == f"source:{f}", f
     assert (dest / "sites" / "s1" / "context.json").read_text() == "source:context"
     assert (dest / "uploads" / "u1" / "f.txt").read_text() == "source:upload"
+    # History travels with a copy (SR-1, F10), unlike a fork or a snapshot.
+    assert (dest / "run_evidence" / "r1" / "manifest.json").read_text() == "source:evidence"
 
 
 def test_carry_on_move_is_best_effort(real_dirs, monkeypatch):

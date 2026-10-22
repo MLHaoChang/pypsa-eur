@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Library is one page: a "Commercial library" row in the Expert sidebar's Project group opens the existing tariff, contract and connection-agreement library, and the Economics › Library tab is replaced by an "Open the commercial library" link under Tariffs & contracts.

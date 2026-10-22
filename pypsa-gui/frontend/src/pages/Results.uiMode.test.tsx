@@ -54,8 +54,9 @@ import Results from './Results'
 
 // UX overhaul S3 (owner decision D1a): tabs sit under five groups, in this
 // order, and Asset detail stands apart on the right of the group row.
-const ALL_IDS = ['summary', 'overview', 'capex', 'economics', 'prices', 'investment', 'loadflow',
-  'adequacy', 'lostload', 'fmea', 'dispatch', 'flows', 'loadshape', 'storage', 'curtailment', 'emissions', 'asset']
+// In the strip's order: Summary, then each card's tabs (W10 R1), then Asset Detail.
+const ALL_IDS = ['summary', 'capex', 'overview', 'dispatch', 'flows', 'loadshape', 'storage', 'emissions', 'lostload',
+  'curtailment', 'prices', 'economics', 'loadflow', 'adequacy', 'fmea', 'investment', 'asset']
 
 async function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -74,16 +75,17 @@ function groupIds(): string[] {
 }
 
 // Every tab reachable through the group row, in group order, then Asset
-// detail. Opens each group in turn (a one-tab Summary group has no sub-row).
+// detail. Opens each group in turn (Summary has no sub-row; Control and
+// Hand-off have no tab yet).
 function tabIds(): string[] {
   const out: string[] = []
   for (const g of groupIds()) {
     fireEvent.click(screen.getByTestId(`results-group-${g}`))
     const sub = document.querySelector('[data-testid="results-subtabs"]')
     if (sub) {
-      out.push(...Array.from(sub.querySelectorAll('[data-testid^="results-tab-"]'))
-        .map(el => el.getAttribute('data-testid')!.slice('results-tab-'.length)))
-    } else {
+      out.push(...Array.from(sub.querySelectorAll('[data-views]'))
+        .flatMap(el => el.getAttribute('data-views')!.split(',').filter(Boolean)))
+    } else if (g === 'summary') {
       out.push(g)
     }
   }
@@ -101,14 +103,14 @@ describe('Results in Guided mode', () => {
 
   it('shows exactly the summary, adequacy, FMEA, energy-flow and load-shape tabs (M3: Summary in Guided too)', async () => {
     await renderResults()
-    expect(groupIds()).toEqual(['summary', 'reliability', 'operation'])
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea', 'flows', 'loadshape'])
+    expect(groupIds()).toEqual(['summary', 'capacity', 'reliability'])
+    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea'])
   })
 
   it('shows exactly those five tabs on a multi-period run too', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
-    expect(tabIds()).toEqual(['summary', 'adequacy', 'fmea', 'flows', 'loadshape'])
+    expect(tabIds()).toEqual(['summary', 'flows', 'loadshape', 'adequacy', 'fmea'])
   })
 
   it('a stored hidden tab renders adequacy and is not rewritten', async () => {
@@ -116,7 +118,7 @@ describe('Results in Guided mode', () => {
     await renderResults()
     expect(screen.getByTestId('adequacy-stub')).toBeTruthy()
     expect(screen.queryByTestId('dispatch-stub')).toBeNull()
-    expect(screen.getByTestId('results-tab-adequacy').className).toContain('border-accent')
+    expect(screen.getByTestId('results-cardtab-adequacy').className).toContain('border-accent')
     expect(localStorage.getItem('results:active-tab')).toBe('dispatch')
   })
 
@@ -138,7 +140,7 @@ describe('Results in Guided mode', () => {
   it('clicking FMEA switches and persists as usual', async () => {
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-reliability'))
-    fireEvent.click(screen.getByTestId('results-tab-fmea'))
+    fireEvent.click(screen.getByTestId('results-cardtab-stress_fmea'))
     expect(screen.getByTestId('fmea-stub')).toBeTruthy()
     expect(localStorage.getItem('results:active-tab')).toBe('fmea')
   })
@@ -149,14 +151,15 @@ describe('Results in Expert mode', () => {
 
   it('single-period: every tab except the multi-period Overview, in order', async () => {
     await renderResults()
-    expect(groupIds()).toEqual(['summary', 'investment', 'grid_plan', 'reliability', 'operation'])
+    expect(groupIds()).toEqual(['summary', 'capacity', 'grid', 'control', 'reliability', 'commercial', 'handoff'])
     expect(tabIds()).toEqual(ALL_IDS.filter(id => id !== 'overview'))
   })
 
   it('multi-period: all seventeen tabs, in order', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
-    await screen.findByTestId('results-subtabs')   // Summary + Overview: a sub-row appears
+    fireEvent.click(screen.getByTestId('results-group-capacity'))
+    await screen.findByTestId('results-subtabs')   // Build holds Capacity Expansion + Overview
     expect(screen.getByTestId('results-tab-overview')).toBeTruthy()
     expect(tabIds()).toEqual(ALL_IDS)
   })
@@ -237,8 +240,8 @@ describe('the Results header follows the group', () => {
     // As Guided's "Open the detail" does: request the Investment case tab.
     useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'investment' })
     await renderResults()
-    expect(header().querySelector('h1')!.textContent).toBe('Investment results')
-    expect(header().textContent).toContain('What to build, and what it costs and earns')
+    expect(header().querySelector('h1')!.textContent).toBe('Commercial & finance results')
+    expect(header().textContent).toContain('What it costs and earns')
     expect(header().textContent).not.toContain('Adequacy and failure-mode')
   })
 

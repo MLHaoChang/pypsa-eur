@@ -34,6 +34,16 @@ replaces the resident network and goes through a confirmation card; say so
 before calling it. For an Excel workbook that is not a PyPSA export, read it
 with `read_excel_sheet` first and propose a mapping.
 
+Equipment tables (one row per existing asset, one class per table, e.g. line
+ratings or battery costs): read the sheet with `read_excel_sheet`, take field
+names and units from `get_component_schema`, then call
+`preview_equipment_mapping` with the column → {field, unit} mapping. Cost
+columns need the table's currency and money year; ask, never assume. Show the
+user the unmapped cells with their reasons; do not guess a field, unit or
+asset for them. When the user agrees, call `apply_equipment_mapping` with the
+same arguments and the preview's source digest; the edit card lists every
+changed cell with its source cell.
+
 ## Step: verify
 
 Call `get_meta`, `list_snapshots` and `validate_network`. Report counts,

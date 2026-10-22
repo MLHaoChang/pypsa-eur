@@ -13,14 +13,9 @@ vi.mock('../results/investment/FinanceInputsEditor', () => ({
   default: () => <div data-testid="ic-finance-inputs" />,
 }))
 // IC's editors, mounted as they are (E0): stubs that show what the panel passes.
-vi.mock('../results/investment/SiteConnectionSection', () => ({
-  default: ({ config, needed }: { config: { poc_link?: string } | null; needed: boolean }) =>
-    <div data-testid="ic-site" data-needed={String(needed)} data-poc={config?.poc_link ?? ''} />,
-}))
 vi.mock('../results/investment/TariffSection', () => ({ default: () => <div data-testid="ic-tariff" /> }))
 vi.mock('../results/investment/ContractsEditor', () => ({ default: () => <div data-testid="ic-contracts" /> }))
 vi.mock('../results/investment/ParticipantsDesigner', () => ({ default: () => <div data-testid="ic-participants" /> }))
-vi.mock('../results/investment/LibraryBrowser', () => ({ default: () => <div data-testid="ic-library" /> }))
 const getCommercial = vi.hoisted(() => vi.fn())
 vi.mock('../../api/commercial', async (orig) => {
   const actual = await orig<typeof import('../../api/commercial')>()
@@ -68,7 +63,9 @@ const PAYLOAD: AssetCostsPayload = {
   ],
 }
 
-function renderPanel(cfg: Record<string, unknown> = { discount_rate: 0.07, inflation_rate: 0 }) {
+function renderPanel(cfg: Record<string, unknown> = {
+  discount_rate: 0.07, inflation_rate: 0, default_lifetime: 25, co2_price: 40, co2_price_per_period: { '2030': 60 },
+}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   qc.setQueryData(nk('Demo', 'solverConfig'), cfg)
   render(<QueryClientProvider client={qc}><EconomicsPanel /></QueryClientProvider>)
@@ -122,12 +119,12 @@ describe('the Asset costs tab', () => {
     expect(row.textContent).toContain('104 €/kW/yr')
   })
 
-  it('keeps branch money per MVA and a lifetime that never ends as never', async () => {
+  it('keeps branch money per MVA and marks a lifetime of its own kind: none means the project default', async () => {
     await openTab()
     const row = screen.getByTestId('asset-cost-Line-ab')
     expect(row.textContent).toContain('20,000')
     expect(row.textContent).toContain('€/MVA')
-    expect(row.textContent).toContain('never')
+    expect(row.textContent).toContain('25 y (default)')
   })
 
   it('flags a cost back-calculated from a typed capital cost, with its provenance chip', async () => {
@@ -161,20 +158,23 @@ describe('navigation', () => {
 })
 
 describe('E2: the site connection and IC’s editors', () => {
-  it('a project with no site connection gets the form on the Basis tab, before any solve', async () => {
+  it('a project with no site connection gets "not set" and a link to Connection & grid, not a form', async () => {
     getCommercial.mockResolvedValue({})
+    useUIStore.setState({ uiMode: 'expert' })
     renderPanel()
-    const site = await screen.findByTestId('ic-site')
-    expect(site.getAttribute('data-needed')).toBe('true')
-    expect(getCommercial).toHaveBeenCalled()
+    const line = await screen.findByTestId('site-connection-summary')
+    expect(line.textContent).toMatch(/not set/)
+    expect(screen.queryByTestId('site-connection-form')).toBeNull()
+    fireEvent.click(within(line).getByRole('button', { name: 'Edit in Connection & grid ›' }))
+    expect(useUIStore.getState().activeSection).toBe('connection')
+    expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
   })
 
-  it('a project with one gets its summary', async () => {
-    getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
+  it('a project with one gets its summary line', async () => {
+    getCommercial.mockResolvedValue({ poc_link: 'grid_import', export_link: 'grid_export', timezone: 'UTC' })
     renderPanel()
-    const site = await screen.findByTestId('ic-site')
-    expect(site.getAttribute('data-needed')).toBe('false')
-    expect(site.getAttribute('data-poc')).toBe('grid_import')
+    const line = await screen.findByTestId('site-connection-summary')
+    expect(line.textContent).toMatch(/imports through grid_import, exports through grid_export, site time UTC/)
   })
 
   it('the Tariffs & contracts tab mounts the tariff, contracts and participants editors', () => {
@@ -183,9 +183,26 @@ describe('E2: the site connection and IC’s editors', () => {
     for (const id of ['ic-tariff', 'ic-contracts', 'ic-participants']) expect(screen.getByTestId(id)).toBeTruthy()
   })
 
-  it('the Library tab mounts the library browser', () => {
+  it('has no Library tab: the commercial library is one page, opened from a link', () => {
     renderPanel()
-    fireEvent.click(screen.getByRole('tab', { name: 'Library' }))
-    expect(screen.getByTestId('ic-library')).toBeTruthy()
+    expect(screen.queryByRole('tab', { name: 'Library' })).toBeNull()
+    fireEvent.click(screen.getByRole('tab', { name: 'Tariffs & contracts' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Open the commercial library' }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('library')
+  })
+})
+
+describe('the solve assumptions on the Basis tab', () => {
+  it('shows the default lifetime and CO₂ price read-only, each linking to Solver Settings', async () => {
+    renderPanel()
+    const life = await screen.findByTestId('economics-default-lifetime')
+    expect(life.textContent).toContain('25 years')
+    const co2 = screen.getByTestId('economics-co2-price')
+    expect(co2.textContent).toContain('40 €/tCO₂')
+    expect(co2.textContent).toContain('Per-period overrides: 1')
+    expect(within(life).queryByRole('textbox')).toBeNull()
+    fireEvent.click(within(co2).getByRole('button', { name: /Edit in Scenarios & optimisation/ }))
+    expect(useUIStore.getState().solverBlockRequest).toBe('economic')
+    expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
   })
 })

@@ -1,7 +1,8 @@
 // Results → Investment → Investment case (IC P4 WP4.7b): run the finance case
 // (progress, abort), then its results — the headline returns, the WACC gate
 // chip, the incremental-vs-counterfactual statement, the cashflows by year
-// and stream, the debt schedule with DSCR, the tax by layer, the completeness
+// and stream, the revenue by stream and the capture prices (IPP ticket 05),
+// the debt schedule with DSCR, the tax by layer, the completeness
 // chips — the stale marker, and the xlsx export. A figure the report does not
 // establish is shown as "not established", never as 0 or a blank (ADR-0001).
 import { useEffect, useRef, useState } from 'react'
@@ -21,6 +22,9 @@ import {
   type GateState, type Table,
 } from './financeModel'
 import { fmtAmount } from './valueFlows'
+import RevenueByStream from './RevenueByStream'
+import CaptureTable from './CaptureTable'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -287,12 +291,17 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
       </section>
       <Counterfactual report={report} />
       <Cashflows report={report} />
+      {/* Commercial & finance owns the revenue and capture tables (W4a; #515). */}
+      <ScopeGate card="commercial" testId="ic-revenue-scope">
+        <RevenueByStream report={report} />
+        <CaptureTable />
+      </ScopeGate>
       <SectionBlock report={report} name="debt" title="Debt schedule and DSCR" testId="ic-debt" />
       <SectionBlock report={report} name="tax" title="Tax by layer" testId="ic-tax" />
       <details>
         <summary className="text-[11px]">More from the project section</summary>
         <SectionBlock report={report} name="project" title="Project" testId="ic-project"
-                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement'])} />
+                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement', 'revenue_streams'])} />
       </details>
       {(report.case_id || report.assumptions_hash) && (
         <p className="text-[10px] text-muted">

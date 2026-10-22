@@ -246,14 +246,20 @@ def _runs(u: np.ndarray, value: float) -> list[int]:
     return out
 
 
-@pytest.mark.live_solve
-def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
-    # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle.
-    n, _, _ = _plan("base")
+def _cycling_2027(n):
+    """The 2027 binary window of plan `n`: (status series u, model, window, grey NH3 bought in MWh)."""
     models, payload = _windows(n)
     assert payload["status"] == "ok", payload["message"]
     m, sns, _ = models[2027]["bin"]
     u = m.links_t.status["haber_bosch"].loc[sns].round().to_numpy()
+    return u, m, sns, float(m.generators_t.p["__buy_nh3"].loc[sns].sum())
+
+
+@pytest.mark.live_solve
+def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
+    # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle, on the template as shipped.
+    n, _, _ = _plan("base")
+    u, m, sns, _ = _cycling_2027(n)
     p = m.links_t.p0["haber_bosch"].loc[sns].to_numpy()
     assert set(np.unique(u)) <= {0.0, 1.0}
     assert (p >= 0.4 * m.links.at["haber_bosch", "p_nom"] * u - 1e-6).all()
@@ -261,6 +267,31 @@ def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
     assert stops, "the 2027 window should stop the loop at least once"
     assert min(stops) >= 8
     assert all(r >= 24 for r in _runs(u, 1.0))
+
+
+@pytest.mark.live_solve
+def test_at_the_honest_electrolysis_price_the_2027_loop_cycles(reset_backend):
+    """GS-2b ticket 03. The electrolyser price is the row's own (no cheap fixture); the sunk wind and PV fleet is
+    sized (RE_FLEET_SCALE) so the 2027 loop is on part of the week, stops for at least the restart time, runs for
+    at least its minimum up time, and no grey ammonia is bought. Structure only, not hour counts."""
+    n, _, _ = _plan("base")
+    u, _m, _sns, grey = _cycling_2027(n)
+    assert len(u) == 168 and u.sum() > 0
+    assert max(_runs(u, 0.0), default=0) >= 8
+    assert max(_runs(u, 1.0), default=0) >= 24
+    assert grey == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_re_fleet_scales_here_and_the_h2_hub_keeps_its_own(n0):
+    """The H2 hub is untouched (120 MW wind, 80 MW PV); the ammonia hub has RE_FLEET_SCALE times those, and
+    building one never leaks into the other."""
+    hub = T.BUILDERS["eh_h2_hub_staged"]()
+    k = A.RE_FLEET_SCALE
+    assert hub.generators.at["wind_farm", "p_nom"] == 120.0 and hub.generators.at["solar_park", "p_nom"] == 80.0
+    assert n0.generators.at["wind_farm", "p_nom"] == pytest.approx(k * 120.0)
+    assert n0.generators.at["solar_park", "p_nom"] == pytest.approx(k * 80.0)
+    again = T.BUILDERS["eh_h2_hub_staged"]()
+    assert again.generators.at["wind_farm", "p_nom"] == 120.0 and again.generators.at["solar_park", "p_nom"] == 80.0
 
 
 @pytest.mark.live_solve
@@ -347,3 +378,185 @@ def test_without_electrolysers_the_whole_delivery_is_bought_and_nothing_is_lost(
     delivered = (n.loads_t.p["nh3_delivery"] * n.snapshot_weightings.generators).groupby(level=0).sum()
     assert (_per_period(n, "__buy_nh3") - delivered).abs().max() < 1e-6 * delivered.max()
     assert _per_period(n, "__lost_nh3").abs().max() < 1e-6
+
+
+# ── the investment case against grey NH3 (ticket 06) ───────────────────────
+
+BUY, LOST = "asset:opex:Generator:__buy_nh3", "asset:opex:Generator:__lost_nh3"
+
+
+def _no_electrolysers(n):
+    for link in [a for a in n.links.index if a.startswith("electrolyser")]:
+        n.remove("Link", link)
+
+
+def _half_buy_in(n):
+    _no_electrolysers(n)
+    n.generators_t.p_max_pu["__buy_nh3"] *= 0.5
+
+
+def _ic_config(edit):
+    """The template's solver config; for a changed network its value flows are rebuilt (as the app does when the
+    template is stale) and the COD of a removed asset dropped."""
+    from models.commercial import CommercialConfig
+    from services.commercial import value_flow_templates as VFT
+
+    raw = T.solver_config(TID)
+    if edit is None:
+        return raw
+    n = T.BUILDERS[TID]()
+    edit(n)
+    base = CommercialConfig.model_validate({**raw["commercial"], "value_flows": None})
+    vf = VFT.build("single_owner", n, base).config
+    fin = {**raw["finance"], "cod_by_asset": {a: d for a, d in raw["finance"]["cod_by_asset"].items()
+                                              if a in n.links.index or a in n.generators.index
+                                              or a in n.storage_units.index or a in n.stores.index}}
+    return {**raw, "commercial": {**raw["commercial"], "value_flows": vf.model_dump(mode="json")},
+            "finance": fin}
+
+
+def _case(key: str, edit=None, *, site_today: bool):
+    """(network, case) on the site-today basis (the IC route's, with a baseline re-solve) or the analytic one."""
+    import routers.results as R
+    from models.finance import FinanceInputs
+    from services.results import baseline as Bl
+    from services.results.finance_case import baseline_plan, build_finance_case
+    from services.solver_service import SolverConfig
+
+    raw = _ic_config(edit)
+    n, state, _ = _plan(key, edit, **{k: raw[k] for k in ("commercial", "finance")})
+    cfg = SolverConfig(**raw)
+    base = None
+    if site_today:
+        Bl.clear_cache()
+        base = Bl.solve_baseline(n, cfg, baseline_plan(n, cfg))
+    try:
+        case = build_finance_case(n, cfg, FinanceInputs.model_validate(cfg.finance), result_df=R._result_df,
+                                  lost_load=state.get("last_lost_load"), baseline=base)
+    finally:
+        Bl.clear_cache()
+    return n, case
+
+
+def _line(case, key, year, side="templates"):
+    (t,) = [t for t in getattr(case, side) if t.first_year == year]
+    return sum(ln.amount for ln in t.lines if ln.key == key)
+
+
+def _cost_per_year(n, gen, year):
+    """Σ w·p·(dense marginal cost) of a Generator over one period, objective weights (one year of the period)."""
+    mc = n.get_switchable_as_dense("Generator", "marginal_cost")[gen].loc[year]
+    w = n.snapshot_weightings.objective.loc[year]
+    return float((w * n.generators_t.p[gen].loc[year] * mc).sum())
+
+
+def test_the_grey_purchase_carries_its_co2_only_in_its_cost_series(n0):
+    """The CO2 lives in `__buy_nh3`'s cost series alone: its carriers emit nothing, so the solver's CO2 adder
+    (which acts on emitting carriers) can never add it a second time (gatekeeper, ticket 06)."""
+    for g in ("__buy_nh3", "__lost_nh3"):
+        assert n0.carriers.at[n0.generators.at[g, "carrier"], "co2_emissions"] == 0.0
+    mc = n0.get_switchable_as_dense("Generator", "marginal_cost")["__buy_nh3"]
+    for y in YEARS:
+        assert mc.loc[y].to_numpy() == pytest.approx(A.buy_cost_eur_per_mwh(y), rel=1e-12)
+
+
+@pytest.mark.live_solve
+def test_the_investment_case_computes_against_buying_grey_ammonia(reset_backend):
+    n, case = _case("base", site_today=True)
+    assert "counterfactual_basis:site_today" in case.flags
+    assert not [f for f in case.flags if f.startswith("counterfactual_not_established")], case.flags
+    assert not {"__buy_nh3", "__lost_nh3"} & {a.name for a in case.assets}
+    # The solved purchase price still carries the CO2 once (no adder on top), and the case books the purchase at it.
+    mc = n.get_switchable_as_dense("Generator", "marginal_cost")["__buy_nh3"]
+    for y in YEARS:
+        assert mc.loc[y].to_numpy() == pytest.approx(A.buy_cost_eur_per_mwh(y), rel=1e-12)
+        assert _line(case, BUY, y) == pytest.approx(-_cost_per_year(n, "__buy_nh3", y), rel=1e-9, abs=1e-3)
+
+
+@pytest.mark.live_solve
+def test_without_electrolysers_the_case_is_worth_nothing_against_grey_ammonia(reset_backend):
+    """The site buys the same grey NH3 either way."""
+    from services.finance.engine import run_case
+
+    _n, case = _case("no_electrolysers", _no_electrolysers, site_today=True)
+    assert not [f for f in case.flags if f.startswith("counterfactual_not_established")], case.flags
+    assert abs(run_case(case).metrics["project_pre_tax_npv"]) < 1e3
+
+
+@pytest.mark.live_solve
+def test_on_the_analytic_basis_the_purchase_and_its_co2_match_the_buy_in_per_period(reset_backend):
+    """The buy-in (price plus CO2, in the plan) against the counterfactual's purchase plus its CO2 line: equal per
+    period, so the CO2 is counted once on each side."""
+    n, case = _case("no_electrolysers", _no_electrolysers, site_today=False)
+    assert "counterfactual_buys:nh3_delivery" in case.flags
+    # The purchase replaces the plan's own buy-in and shortfall; neither is copied into the counterfactual.
+    assert "counterfactual_purchase_replaces:__buy_nh3,__lost_nh3" in case.flags
+    assert not [ln for c in case.counterfactual for ln in c.lines if "_nh3" in ln.key and ln.source == "asset"]
+    for y in YEARS:
+        cf = _line(case, "counterfactual:purchase:nh3_delivery", y, "counterfactual") \
+            + _line(case, "co2:purchase:nh3_delivery", y, "counterfactual")
+        assert _line(case, BUY, y) == pytest.approx(cf, rel=1e-9)
+        assert _line(case, LOST, y) == 0.0
+
+
+@pytest.mark.live_solve
+def test_a_shortfall_is_lost_production_at_its_value_never_o_and_m_or_a_purchase(reset_backend):
+    """With half the delivery buyable and no electrolysis, the rest is short: the case books it once, as
+    `lost_production` at the lost-production value the LP priced (never VoLL), beside the purchase. The
+    counterfactual buys the whole delivery (grey NH3 is always there), so a lost tonne costs its value less the
+    purchase it avoids, once."""
+    from services.process_products import lost_production_value
+
+    n, case = _case("half_buy_in", _half_buy_in, site_today=False)
+    value = lost_production_value(n, "__lost_nh3")
+    assert value == pytest.approx(A.LOST_EUR_PER_MWH)
+    for y in YEARS:
+        (t,) = [t for t in case.templates if t.first_year == y]
+        (lost,) = [ln for ln in t.lines if ln.key == LOST]
+        assert lost.stream == "lost_production"
+        w = n.snapshot_weightings.objective.loc[y]
+        tonnes_eur = float((w * n.generators_t.p["__lost_nh3"].loc[y]).sum()) * value
+        assert tonnes_eur > 0
+        assert lost.amount == pytest.approx(-tonnes_eur, rel=1e-9)
+        assert lost.amount == pytest.approx(-_cost_per_year(n, "__lost_nh3", y), rel=1e-9)
+        delivered_t = float((w * n.loads_t.p["nh3_delivery"].loc[y]).sum()) / A.MWH_PER_T
+        assert _line(case, "counterfactual:purchase:nh3_delivery", y, "counterfactual") == \
+            pytest.approx(-delivered_t * 1000.0 * A.GREY_NH3["price_eur_per_kg"], rel=1e-9)
+        assert not [ln for c in case.counterfactual for ln in c.lines if "__lost_nh3" in ln.key]
+        assert _line(case, BUY, y) == pytest.approx(-_cost_per_year(n, "__buy_nh3", y), rel=1e-9)
+        assert not [ln for ln in t.lines if "__lost_nh3" in ln.key and ln.stream in ("vom", "fuel", "capex")]
+
+
+@pytest.mark.live_solve
+def test_the_two_leg_helper_leaves_the_ammonia_cash_alone():
+    """IPP ticket 05: no ammonia line is a difference line, so none takes the two-leg path,
+    and the revenue rows still sum to the operating cash. Not a byte pin of the lines: the
+    twin solar plants (one bus, one profile, no marginal cost) split their curtailment
+    arbitrarily and the plan is a MIP solved to a gap, so the per-plant lines differ by
+    machine. The helper's arithmetic is pinned on fixed cases in test_operating_pin.py."""
+    from services.finance.cashflow import build_operating
+    from services.finance.revenue_streams import revenue_by_stream
+    from services.finance.timeline import build_timeline
+
+    _n, case = _case("base", site_today=False)
+    op = build_operating(case, build_timeline(case))
+    assert op.legs == {}
+    rows = revenue_by_stream(op)["rows"]
+    np.testing.assert_allclose(sum(np.array(r["values"], dtype=float) for r in rows),
+                               op.revenue - op.costs, rtol=1e-12, atol=1e-6)
+
+
+@pytest.mark.live_solve
+def test_revenue_by_stream_names_what_it_cannot_place():
+    """IPP ticket 05 (GK): on this template, the keys in Other are listed by name. The one
+    there is the grey-ammonia buy-in, a product purchase (not O&M of an asset), so Other."""
+    from services.finance.cashflow import build_operating
+    from services.finance.revenue_streams import revenue_by_stream
+    from services.finance.timeline import build_timeline
+
+    _n, case = _case("base", site_today=False)
+    op = build_operating(case, build_timeline(case))
+    out = revenue_by_stream(op)
+    assert out["other_keys"] == ["asset:opex:Generator:__buy_nh3"]
+    rows = sum(np.array(r["values"], dtype=float) for r in out["rows"])
+    np.testing.assert_allclose(rows, op.revenue - op.costs, rtol=1e-9, atol=1e-6)

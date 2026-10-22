@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Load profiles over HTTP: `GET /api/profiles/load-archetypes` lists the archetypes and presets, `POST /api/projects/{name}/profiles/loads/generate` generates an archetype for named loads into the pending store, and the profile apply route writes it to the load's p_set (the target follows the profile's family, or is named).

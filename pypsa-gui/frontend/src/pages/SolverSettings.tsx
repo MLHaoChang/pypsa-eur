@@ -3,15 +3,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, AlertCircle, Leaf, ArrowRight, Pencil } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
+import StressScenarioEditor from './results/StressScenarioEditor'
 import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
+import { ScopeCards } from '../components/flowScope/ScopeCards'
+import { ScopeGate } from '../components/flowScope/ScopeGate'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
 // touch, and an "advanced" key:value table that flows straight into
@@ -118,6 +122,24 @@ function coerceValue(raw: string, kind: ParamSpec['kind']): number | string | bo
   return raw
 }
 
+/** The stress conditions (the registry the B/C sweep reads): the same editor
+ *  Guided's Goal card mounts, owned by Reliability › Stress conditions & FMEA
+ *  (W4a), so out of scope it gives way to adding that sub-option. */
+export function StressConditionsSection({ project }: { project: string | null }) {
+  return (
+    <section className="border border-border rounded" data-testid="solver-stress">
+      <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
+        Stress conditions
+      </div>
+      <div className="p-3">
+        <ScopeGate card="reliability" option="stress" testId="solver-stress-scope">
+          <StressScenarioEditor project={project} />
+        </ScopeGate>
+      </div>
+    </section>
+  )
+}
+
 export default function SolverSettings() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
@@ -216,6 +238,16 @@ export default function SolverSettings() {
   //   • Add. Constraints — global LP constraints (CO2 cap, etc).
   type Tab = 'general' | 'solver' | 'dispatch' | 'network' | 'constraints'
   const [tab, setTab] = useState<Tab>('general')
+  // A link from Assets or Economics asks for the Economic assumptions block: open
+  // its tab, then scroll to it once it is on screen.
+  const blockRequest = useUIStore(s => s.solverBlockRequest)
+  const clearBlockRequest = useUIStore(s => s.clearSolverBlockRequest)
+  useEffect(() => {
+    if (blockRequest !== 'economic' || !draft) return
+    if (tab !== 'dispatch') { setTab('dispatch'); return }
+    document.getElementById('solver-economic-assumptions')?.scrollIntoView({ block: 'start' })
+    clearBlockRequest()
+  }, [blockRequest, draft, tab, clearBlockRequest])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -283,6 +315,10 @@ export default function SolverSettings() {
         Solver-specific knobs (HiGHS / Gurobi options, presolve, raw <code>solver_options</code>)
         live under the <span className="font-medium text-text">Solver</span> tab.
       </p>
+
+      {/* Section 8's first decision (W4a): the work cards the Run computes,
+          the same component Guided and the Builder mount. */}
+      <ScopeCards testId="expert-scope-cards" />
 
       {/* ── Clustering ─────────────────────────────────────── */}
       <ClusteringSection />
@@ -853,6 +889,9 @@ export default function SolverSettings() {
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
       <ReliabilityAssumptions draft={draft} patch={patch} />
 
+      {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
+      <StressConditionsSection project={currentProject} />
+
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
       <SclopfPanel draft={draft} patch={patch} />
       </>}
@@ -1253,43 +1292,35 @@ function FuelLimitsPerPeriod({ existingRows }: { existingRows: GlobalConstraint[
 // EconomicAssumptions lives under the Dispatch tab. Three transient-at-solve
 // fields (discount rate, default lifetime, CO2 price) that the backend applies
 // before n.optimize() and reverts after — the network on disk stays unchanged.
-function EconomicAssumptions({
+/** A rate set under Economics (section 7): shown here, edited there. */
+function ReadOnlyRate({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid={`solver-rate-${label.split(' ')[0].toLowerCase()}`}>
+      <span className="text-[10px] text-muted">{label} (%)</span>
+      <span className="text-xs font-mono text-text py-0.5">
+        {value == null || Number.isNaN(value) ? 'not set' : Number((value * 100).toFixed(4))}
+      </span>
+      <button type="button" className="text-[10px] underline text-left" onClick={() => openSectionInExpert('commercial')}>
+        Edit in Commercial &amp; parties
+      </button>
+    </div>
+  )
+}
+
+export function EconomicAssumptions({
   draft, patch,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
 }) {
   return (
-    <section className="border border-border rounded">
+    <section id="solver-economic-assumptions" className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Economic assumptions
       </div>
       <div className="grid grid-cols-4 gap-3 p-3">
-        <NumberField
-          label="Discount rate"
-          unit="%"
-          // Strip FP rounding noise from the rate↔percent conversion
-          // (e.g. 0.07 × 100 = 7.000000000000001 in IEEE-754). toFixed(2)
-          // gives at most two decimal places; the step is 0.1 so two
-          // decimals comfortably exceeds any value the user can input.
-          // `?? 0` defends against legacy SolverConfig payloads missing
-          // `discount_rate` entirely — without it, `undefined * 100`
-          // becomes NaN, `(NaN).toFixed(2)` becomes "NaN", `Number("NaN")`
-          // becomes NaN, and the `<input value={NaN}>` renders blank
-          // with no controlled fallback (React warns).
-          value={Number(((draft.discount_rate ?? 0) * 100).toFixed(2))}
-          step={0.1}
-          onChange={v => patch({ discount_rate: v / 100 })}
-          hint="Used to annualise CAPEX via the annuity factor r(1+r)^L / ((1+r)^L−1). Applied to extendable assets whose overnight_cost is set. Typical: 5–10 %. If you enter a NOMINAL rate here, set the Inflation rate alongside so the cross-period PV factor uses the real rate; if your costs are already in real €, leave Inflation = 0."
-        />
-        <NumberField
-          label="Inflation rate"
-          unit="%"
-          value={Number(((draft.inflation_rate ?? 0) * 100).toFixed(2))}
-          step={0.1}
-          onChange={v => patch({ inflation_rate: v / 100 })}
-          hint="Expected inflation. Combined with the discount rate via the Fisher relation real = (1+nominal)/(1+inflation)−1 to derive the real discount used in the cross-period PV factor (when 'Auto-discount periods' is enabled under Model Horizon). Default 0 % preserves the previous behaviour where the discount rate is treated as real. Typical: 1.5–3 %."
-        />
+        <ReadOnlyRate label="Discount rate" value={draft.discount_rate} />
+        <ReadOnlyRate label="Inflation rate" value={draft.inflation_rate} />
         <NumberField
           label="Default lifetime"
           unit="yr"

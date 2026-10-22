@@ -39,3 +39,35 @@ it('renders old/new engineering values before application confirmation', () => {
   expect(screen.getByRole('table').textContent).toContain('G1marginal_cost1020currency/MWh')
   expect(screen.getByText(/No network changes applied/)).toBeTruthy()
 })
+
+const waiting = { ...task, status: 'waiting_job',
+  next_step: { id: 'run', tool: 'run_simulation', status: 'waiting', job_id: 'fg:0123abcd' } }
+
+it('LC-12: a waiting plan shows elapsed time and Stop waiting, not Resume', () => {
+  const onStop = vi.fn()
+  render(<AssistantResultCard result={{ _task: waiting }} disabled={false} onRequest={vi.fn()}
+    continuation={{ state: 'waiting', onStop }} />)
+  expect(screen.getByTestId('task-continuation-line').textContent).toMatch(/^Waiting for the solve to finish · 0:00/)
+  expect(screen.queryByText('Resume task')).toBeNull()
+  fireEvent.click(screen.getByText('Stop waiting'))
+  expect(onStop).toHaveBeenCalledTimes(1)
+  expect(screen.getByText('Cancel task')).toBeTruthy()
+})
+
+it('LC-12: a held continuation offers Continue now; other states are plain lines', () => {
+  const onContinueNow = vi.fn()
+  const { rerender } = render(<AssistantResultCard result={{ _task: waiting }} disabled={false} onRequest={vi.fn()}
+    continuation={{ state: 'held', onContinueNow }} />)
+  expect(screen.getByTestId('task-continuation-line').textContent).toContain("I'll continue when you're ready")
+  fireEvent.click(screen.getByText('Continue now'))
+  expect(onContinueNow).toHaveBeenCalledTimes(1)
+  rerender(<AssistantResultCard result={{ _task: waiting }} disabled={false} onRequest={vi.fn()}
+    continuation={{ state: 'elsewhere', project: 'oj-grid' }} />)
+  expect(screen.getByTestId('task-continuation-line').textContent).toBe("This plan's solve is in oj-grid: open it to continue")
+  rerender(<AssistantResultCard result={{ _task: waiting }} disabled={false} onRequest={vi.fn()}
+    continuation={{ state: 'continued' }} />)
+  expect(screen.getByTestId('task-continuation-line').textContent).toBe('The solve finished · continued below')
+  rerender(<AssistantResultCard result={{ _task: task }} disabled={false} onRequest={vi.fn()}
+    continuation={{ state: 'continued' }} />)
+  expect(screen.queryByTestId('task-continuation-line')).toBeNull()
+})

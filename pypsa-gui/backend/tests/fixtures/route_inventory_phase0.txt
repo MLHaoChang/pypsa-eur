@@ -94,11 +94,13 @@ GET     /api/chat/{session_id}/progress                                         
 POST    /api/chat/{session_id}/rewind                                              -> chat_rewind_api_chat__session_id__rewind_post
 GET     /api/dictation/config                                                      -> config_api_dictation_config_get
 POST    /api/dictation/transcribe                                                  -> transcribe_api_dictation_transcribe_post
+POST    /api/document_values/preview                                               -> preview_document_values_http_api_document_values_preview_post
 POST    /api/durable-conversations                                                 -> create_thread_api_durable_conversations_post
 GET     /api/durable-conversations/{thread_id}                                     -> get_thread_api_durable_conversations__thread_id__get
 POST    /api/durable-conversations/{thread_id}/checkpoint                          -> checkpoint_thread_api_durable_conversations__thread_id__checkpoint_post
 POST    /api/durable-conversations/{thread_id}/rebind                              -> rebind_thread_api_durable_conversations__thread_id__rebind_post
 POST    /api/durable-conversations/{thread_id}/resume                              -> resume_thread_api_durable_conversations__thread_id__resume_post
+POST    /api/equipment_table/preview                                               -> preview_equipment_mapping_http_api_equipment_table_preview_post
 GET     /api/geocode                                                               -> geocode_search_api_geocode_get
 GET     /api/geocode/status                                                        -> geocode_status_api_geocode_status_get
 POST    /api/gridspine/projects                                                    -> create_study_api_gridspine_projects_post
@@ -135,6 +137,8 @@ GET     /api/library/items/{kind}                                               
 GET     /api/library/items/{kind}/{name}                                           -> get_item_api_library_items__kind___name__get
 PUT     /api/library/items/{kind}/{name}                                           -> put_item_api_library_items__kind___name__put
 POST    /api/library/meter_data                                                    -> upload_meter_data_api_library_meter_data_post
+GET     /api/library/references                                                    -> list_references_api_library_references_get
+GET     /api/library/references/{technology}/{year}                                -> get_reference_api_library_references__technology___year__get
 GET     /api/library/series                                                        -> list_series_api_library_series_get
 POST    /api/library/series                                                        -> put_series_api_library_series_post
 POST    /api/library/series/upload                                                 -> upload_series_api_library_series_upload_post
@@ -161,6 +165,8 @@ DELETE  /api/network/carriers/{name}                                            
 PUT     /api/network/carriers/{name}                                               -> update_carrier_api_network_carriers__name__put
 GET     /api/network/catalog/{component}                                           -> get_attribute_catalog_api_network_catalog__component__get
 POST    /api/network/cluster                                                       -> apply_clustering_api_network_cluster_post
+POST    /api/network/document_values/apply                                         -> apply_document_values_api_network_document_values_apply_post
+POST    /api/network/equipment_table/apply                                         -> apply_equipment_mapping_api_network_equipment_table_apply_post
 GET     /api/network/generators                                                    -> get_generators_api_network_generators_get
 POST    /api/network/generators                                                    -> create_generator_api_network_generators_post
 GET     /api/network/generators/profiles                                           -> get_generator_profiles_api_network_generators_profiles_get
@@ -176,6 +182,8 @@ PATCH   /api/network/investment_period_weightings                               
 GET     /api/network/investment_periods                                            -> get_investment_periods_api_network_investment_periods_get
 POST    /api/network/investment_periods                                            -> set_investment_periods_api_network_investment_periods_post
 POST    /api/network/lengths/from_geometry                                         -> lengths_from_geometry_api_network_lengths_from_geometry_post
+POST    /api/network/library_reference/apply                                       -> apply_library_reference_http_api_network_library_reference_apply_post
+POST    /api/network/library_reference/preview                                     -> preview_library_reference_api_network_library_reference_preview_post
 GET     /api/network/lines                                                         -> get_lines_api_network_lines_get
 POST    /api/network/lines                                                         -> create_line_api_network_lines_post
 POST    /api/network/lines/recalculate_lengths                                     -> recalculate_line_lengths_api_network_lines_recalculate_lengths_post
@@ -237,6 +245,7 @@ DELETE  /api/network/vintage_bounds/{component_class}/{name}                    
 PUT     /api/network/vintage_bounds/{component_class}/{name}                       -> update_vintage_bounds_api_network_vintage_bounds__component_class___name__put
 GET     /api/network/vintage_results                                               -> list_vintage_results_api_network_vintage_results_get
 POST    /api/profiles/estimate                                                     -> estimate_profile_api_profiles_estimate_post
+GET     /api/profiles/load-archetypes                                              -> list_load_archetypes_api_profiles_load_archetypes_get
 GET     /api/profiles/presets                                                      -> list_profile_presets_api_profiles_presets_get
 GET     /api/projects/                                                             -> list_projects_api_projects__get
 GET     /api/projects/from_template/eh_site/form                                   -> get_site_template_form_api_projects_from_template_eh_site_form_get
@@ -265,8 +274,18 @@ GET     /api/projects/{name}/map_layout/osm_suggestions                         
 GET     /api/projects/{name}/members                                               -> get_project_members_api_projects__name__members_get
 PUT     /api/projects/{name}/members                                               -> put_project_members_api_projects__name__members_put
 POST    /api/projects/{name}/profiles/apply                                        -> apply_profile_api_projects__name__profiles_apply_post
+POST    /api/projects/{name}/profiles/availability/generate                        -> generate_availability_profiles_api_projects__name__profiles_availability_generate_post
+GET     /api/projects/{name}/profiles/current                                      -> get_current_series_api_projects__name__profiles_current_get
+POST    /api/projects/{name}/profiles/defaults/apply                               -> apply_default_series_api_projects__name__profiles_defaults_apply_post
+POST    /api/projects/{name}/profiles/defaults/preview                             -> preview_default_series_api_projects__name__profiles_defaults_preview_post
+POST    /api/projects/{name}/profiles/from-current                                 -> pending_from_current_api_projects__name__profiles_from_current_post
 POST    /api/projects/{name}/profiles/generate                                     -> generate_profiles_api_projects__name__profiles_generate_post
+POST    /api/projects/{name}/profiles/loads/generate                               -> generate_load_profiles_api_projects__name__profiles_loads_generate_post
+POST    /api/projects/{name}/profiles/loads/upload                                 -> upload_load_profiles_api_projects__name__profiles_loads_upload_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
+POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
+POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
+POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get
 POST    /api/projects/{name}/reports                                               -> create_report_api_projects__name__reports_post

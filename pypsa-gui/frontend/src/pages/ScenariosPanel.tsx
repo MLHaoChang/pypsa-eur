@@ -687,18 +687,13 @@ export default function ScenariosPanel() {
   const solvedCount = projectList.filter(
     p => p.objective != null && Number.isFinite(p.objective),
   ).length
-  const objectives = projectList
-    .map(p => p.objective)
-    .filter((o): o is number => o != null && Number.isFinite(o))
-  const bestObj = objectives.length ? formatObjective(Math.min(...objectives)) : '—'
 
   return (
     <div className="flex flex-col h-full">
       <PageBody>
-        <RowGrid cols={3}>
+        <RowGrid cols={2}>
           <StatCard accent eyebrow="Scenarios" value={projectList.length} sub="project variants" />
           <StatCard eyebrow="Solved" value={solvedCount} sub="have an objective" />
-          <StatCard eyebrow="Best objective" value={bestObj} sub="lowest system cost" />
         </RowGrid>
 
         {/* Lineage breadcrumb — visible only when the active project has at

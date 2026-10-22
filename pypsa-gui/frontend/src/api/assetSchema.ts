@@ -58,6 +58,12 @@ export interface ProvenanceEntry {
   currency_year: number | null
   range: [number, number] | null
   illustrative: boolean
+  /** Present on a value the user applied from a Library cost reference. */
+  currency?: string
+  approved_by?: string
+  approved_at?: string
+  /** The source the applied reference replaced (e.g. the defaults pack). */
+  replaces?: string
 }
 
 /** One investment part of an asset (`services/asset_schema/access.py` `upfront_parts`): EUR per unit of the

@@ -27,6 +27,11 @@ from services.solver_service import (
 
 # ── Stage 2: post-solve AC Power Flow ────────────────────────────────────────
 
+# Accessors whose `p_set` the AC PF prep overwrites and restores. Links are
+# local to Stage 2: adding them to `_DISPATCH_FIX_ACCESSORS` would make
+# `_clear_dispatch_fix` wipe a user's Link p_set before every LOPF.
+_PF_FIX_ACCESSORS: tuple[str, ...] = (*_DISPATCH_FIX_ACCESSORS, "links_t")
+
 # Names of the result DataFrames we snapshot before and after AC PF so the
 # frontend can flip between LOPF and AC PF result sets via `?source=...`.
 # Keep narrow: only the fields the existing /results/* endpoints surface, plus
@@ -81,6 +86,19 @@ def _snapshot_result_state(n) -> dict:
                 # anything that isn't pandas-shaped.
                 pass
     return out
+
+
+def _restore_result_state(n, snapshot: dict) -> None:
+    """Put the LP result tables of `snapshot` back into `n`. A PF that raised
+    midway may have overwritten some of them; the network must keep the LP
+    values so a retry snapshots the true LP baseline."""
+    import copy
+    for key, df in snapshot.items():
+        accessor_name, attr = key.split(".", 1)
+        try:
+            setattr(getattr(n, accessor_name), attr, copy.deepcopy(df))
+        except Exception:
+            pass
 
 
 def _pick_ac_pf_slack_bus(n, cfg: SolverConfig) -> str:
@@ -181,7 +199,7 @@ def _snapshot_dispatch_fix_state(n) -> dict:
     Returns a dict suitable for `_restore_dispatch_fix_state(n, snapshot)`.
     """
     snap: dict = {}
-    for accessor_name in _DISPATCH_FIX_ACCESSORS:
+    for accessor_name in _PF_FIX_ACCESSORS:
         accessor = getattr(n, accessor_name, None)
         if accessor is None:
             continue
@@ -246,6 +264,11 @@ def _fix_dispatch_for_ac_pf(n) -> None:
       • Storage units / stores: p_set is the net injection (positive = into
         the bus). PyPSA's storage_units_t.p uses the same sign convention,
         so a direct copy is correct.
+      • Links: PyPSA's PF sets p0 = p_set and p_i = -p0 * efficiency_i
+        for every further port, the relation the LP enforces, so copying
+        the LP's p0 reproduces every port's flow (multi-port and
+        time-varying efficiency included). A user-set Link p_set already
+        pinned p0 in the LP, so the copy keeps it.
       • Loads: already populated from input — no change.
       • Generators with control='PV' are left alone on the P side (set p_set
         from LP) but get v_mag_pu_set from the connected bus's existing
@@ -262,6 +285,7 @@ def _fix_dispatch_for_ac_pf(n) -> None:
         ("generators_t",    "p"),
         ("storage_units_t", "p"),
         ("stores_t",        "p"),
+        ("links_t",         "p0"),
     ):
         try:
             accessor = getattr(n, accessor_name, None)
@@ -363,7 +387,7 @@ def run_ac_pf_stage(
     #    these values survive autosave and PyPSA's create_model() adds
     #    Generator-p_set equality constraints on the next solve, making
     #    SCLOPF infeasible (no redispatch room for contingency LODF caps).
-    phase("Stage 2: Fixing dispatch from LOPF (generators, storage units, stores)...")
+    phase("Stage 2: Fixing dispatch from LOPF (generators, storage units, stores, links)...")
     dispatch_fix_snapshot = _snapshot_dispatch_fix_state(network)
     _fix_dispatch_for_ac_pf(network)
 
@@ -391,6 +415,7 @@ def run_ac_pf_stage(
             # zero-impedance lines, missing slack) does. Surface and re-raise so
             # the caller's `[PHASE] Failed` branch picks it up.
             phase(f"Stage 2: AC PF errored before completion: {exc}")
+            _restore_result_state(network, lopf_snapshot)
             raise
     finally:
         # Revert *_t.p_set so autosave writes a clean network. PyPSA's PF has

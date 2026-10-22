@@ -8,12 +8,15 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-router-dom'
 import { projectsApi } from '../api/projects'
+import { resultsApi } from '../api/simulation'
 import type { BundleImportResult } from '../api/types'
 import { getPostLoginPath } from '../auth/resume'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { blockerMessage } from '../utils/blockerMessage'
+import { nk } from '../utils/queryKeys'
 import { nameClashFrom, showNameClashToast } from '../utils/nameClashToast'
 
 /** A project switch refused because a study runs on the current network
@@ -112,6 +115,21 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       }
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
+      // Guided opens on its initial step; Expert lands in section 1 so the
+      // new project starts at the top of the flow, not on a bare canvas.
+      if (useUIStore.getState().uiMode === 'expert') openSectionInExpert('project')
+      // The template may name the Results tab (and section) its project
+      // opens on (IPP ticket 05): asked for once, here; an unreadable meta
+      // asks nothing.
+      const project = res.imported
+      void qc.fetchQuery({ queryKey: nk(project, 'adequacy', 'eh_template'),
+                           queryFn: () => resultsApi.getEhTemplate(project, { quiet: true }) })
+        .then(meta => {
+          if (!meta?.initial_results_tab) return
+          useUIStore.getState().requestResultsTab(meta.initial_results_tab,
+                                                  meta.initial_results_section ?? undefined)
+        })
+        .catch(() => { /* no template meta: Results opens as it would */ })
     },
     // A refused site parameter is shown beside its field by the form.
     onError: (e: unknown) => {

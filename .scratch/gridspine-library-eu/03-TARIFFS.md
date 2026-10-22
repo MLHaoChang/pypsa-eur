@@ -1,0 +1,35 @@
+# European DSO/TSO tariffs: detailed findings
+
+Research date: 2026-10-21. Refer to source-register.json for exact selected URLs, response hashes and access limitations. No numeric tariff has been made a common production default in this package.
+
+## Country-by-country assessment
+
+| Scope | Exact source inspected | Useful parameters | Integration boundary |
+| --- | --- | --- | --- |
+| Germany TSO | 50Hertz final 2026 four-page price sheet, dated 8 December 2025; current page also lists provisional 2027 | Annual power price, energy price, voltage level, annual utilisation selection, metering, reactive energy, construction contribution, tax exclusion | For EHV, below 2,500 utilisation hours: 11.39 EUR/kW/year + 2.36 ct/kWh; at/above 2,500: 53.06 + 0.69. These are separate applicable branches, not interchangeable generic fees. Select from annual energy/peak and validate boundary conditions. Legal surcharges and VAT are additional. No end-customer full-bill claim. |
+| Germany DSO | Netze BW previous discovery retained; two fresh fetch attempts timed out | Final/provisional distribution schedules and workbook remain candidate | No fresh workbook or rate extraction claimed. Preserve operator/customer specificity and distinguish TSO pass-through already embedded in DSO charges. |
+| Netherlands DSO | Liander 2026 large-business connection/transport PDF downloaded and inspected | Periodic connection, contracted transport capacity, measured monthly peak/energy and tariff-category rules | Categories and connection ratings matter. For >10 MVA connection charges may be bespoke. Contracted transport and physical connection are different; an overrun is not automatic permission to increase import. Do not add the TenneT schedule to an already bundled charge. |
+| Netherlands TSO | ACM TenneT 2026 final decision and calculation XLSX | Transmission-category rates, allowed-revenue/rate calculation context and non-firm product references | Regulator calculation model is not itself a universal site tariff. Identify direct-TSO versus DSO customer and final applicable category. |
+| France distribution | CRE decision 2026-105 TURPE 7 HTA/BT, effective 1 August 2026; corrected publication noted 17 June | Management, metering, subscribed-power/time-band charges and excess/reactive provisions | Source correction/version matters. Native periods are not the entire TURPE formula. Retain subscribed power, season/day/hour windows, applicability and unsupported terms. |
+| France transmission | CRE decision 2026-104 TURPE 7 HTB, effective 1 August 2026 | HTB-specific power, time and network-use components | Separate voltage-domain scheme; avoid adding an HTB bill to HTA/BT transport charges blindly. |
+| Spain | CNMC final RAP/DE/009/25, decision 18 December 2025, 2026 resolution PDF/allocation XLSX and BOE-A-2025-26348 | Transmission/distribution peajes, power/energy coefficients, tariff classes/time periods | Workbook has separate transport/distribution tables and combined peajes. Use one consistent decomposition. System cargos, reactive charges, excess-power formulas and taxes need their own applicable rules. Six-period calendars and holidays need validation. |
+| Italy | ARERA transmission and distribution pages, 2024–2027 parameter workbook, e-distribuzione component explanations updated April 2026 | Transmission, distribution, metering, ASOS/ARIM, UC and customer eligibility | Regulatory revenue/parameter tables and final customer rates are distinct. Official DSO explanation distinguishes energy-intensive customer treatment; do not infer eligibility or treat an exempt component as universal. |
+| Denmark | Energinet DatahubPricelist live API sample and full field metadata | ChargeOwner, GLN_Number, ChargeType/Code, ValidFrom/To, Price1–24, ResolutionDuration, VAT hints | Best structured pilot candidate. Current sample includes D01 monthly subscription, so a global column label saying DKK/kWh cannot determine every row's unit. D01/D02/D03 and duration must control interpretation. No DKK→EUR relabelling. |
+| Austria | E-Control industry system-use tariff page | Network level/area and statutory system-use component references | Exact final SNE-V table, customer class and new tariff-structure applicability still need a resource/bill pilot. No numeric tariff imported. |
+| Portugal | ERSE tariff/time-period page, updated 1 October 2026 | Voltage, mainland/island region, tariff option and temporal calendars | Official page describes new mainland non-residential periods from 1 April 2027 and phased residential changes later. Some boundaries are 09:00–10:30: current native integer-hour periods cannot represent that exactly. Refuse or extend deliberately; never round it to an hour. |
+
+Finland service context was reachable but the selected pricing URL returned 404. Belgium candidate URLs also failed. These are unresolved discovery leads, not established current datasets. This package does not claim every EU jurisdiction is covered.
+
+## Danish pilot: exact fields that require care
+
+The inspected API metadata states that Price1 is local 00:00–01:00; null later hourly prices inherit Price1. That source-specific inheritance is different from treating a missing charge or missing Price1 as zero. Metadata also gives a DST-affected-hour rule; preserve it with the underlying native timestamp model.
+
+`start`/`end` query filters apply to **ValidFrom**, not arbitrary interval overlap. A request starting six months ago can miss an older still-valid tariff. Selection therefore needs complete relevant revision history or a documented latest-record query per GLN/code, followed by local validity evaluation. Future records were present in the bounded sample; choosing the first row would incorrectly apply a 2027 price to 2026.
+
+VATClass is explicitly **indicative and may be erroneous**. It cannot establish the customer's tax treatment. Display names may change after DataHub 3.0; retain stable GLN plus charge identity. Resolve the effective end-date convention before translating to the native inclusive/exclusive boundary. Current terms-page HTTP 200 responses were JavaScript shells, so they did not independently establish current reuse rights.
+
+## Native mapping and numerical acceptance
+
+Map supported energy rates to `TariffItem(kind=energy, unit=per_kwh)`; convert ct/kWh by 0.01 and EUR/MWh by 0.001. Map supported demand/capacity rates to the correct `per_kw_month`, `per_kw_year` or apparent-power unit, with the actual measured/contracted basis. Monthly fixed fees remain monthly. Retain source operator, valid dates, voltage/customer constraints and a payee/decomposition map.
+
+Every admitted tariff needs an independent known-bill fixture and explicit completeness flag. Test utilisation-threshold branches, annual/monthly basis, kW versus MW/kVA, DST/holiday/half-hour boundaries, revisions and source corrections, tax exclusions, meter fees, reactive/excess terms, producer/consumer treatment and DSO/TSO duplication. `unsupported_fields` is a refusal/incomplete-bill signal, not a licence to silently drop an expensive term.

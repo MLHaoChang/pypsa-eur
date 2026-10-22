@@ -2,7 +2,7 @@
 // Run button still said "Abort" (the queue poll lags the log stream's `done`
 // by up to one poll), and nothing told the user where the answer was.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import toast from 'react-hot-toast'
@@ -66,14 +66,14 @@ describe('after a successful solve', () => {
     expect(screen.getByText('Optimal')).toBeTruthy()
   })
 
-  it('toasts the objective and opens Results on Economics when nothing else is open', async () => {
+  it('toasts the objective and opens Results on its Summary when nothing else is open', async () => {
     const success = vi.spyOn(toast, 'success')
     renderHeader()
     await screen.findByText('Abort')
     act(() => doneCallback()({ status: 'completed', objective: 1_234_567 }))
     expect(success).toHaveBeenCalled()
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
-    expect(useUIStore.getState().resultsTabRequest).toBe('economics')
+    expect(useUIStore.getState().resultsTabRequest).toBeNull()
   })
 
   it('leaves a panel the user opened during the solve where it is', async () => {
@@ -106,6 +106,11 @@ describe('a campus electrical job (E2E demo plan 2026-10-14, D1)', () => {
     act(() => doneCallback()({ status: 'completed' }))
     expect(useUIStore.getState().activeSlidePanel).toBeNull()          // Results not opened
     expect(screen.queryByText('Optimal')).toBeNull()
-    expect(String(success.mock.calls[success.mock.calls.length - 1][0])).toMatch(/Campus electrical study finished/)
+    // The toast carries the way to the results: the Grid study results panel.
+    const content = success.mock.calls[success.mock.calls.length - 1][0] as (t: { id: string }) => React.ReactElement
+    const { container } = render(content({ id: 't1' }))
+    expect(container.textContent).toMatch(/Grid study finished/)
+    fireEvent.click(within(container).getByRole('button', { name: /Open the results/ }))
+    expect(useUIStore.getState().activeSlidePanel).toBe('campusResults')
   })
 })

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The grid-readiness scorecard's ramp, oscillation and rapid-voltage-change rows show an "After battery/UPS" value beside their before-mitigation verdict when the project has an AI-training load and a committed battery/UPS, judged by the row's own limit under a declared rule; the summary counts rows that pass only after the battery/UPS (DC 03).

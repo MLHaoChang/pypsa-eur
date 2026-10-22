@@ -52,7 +52,8 @@ def _fake_build(monkeypatch, case_fn):
 
     calls: list[dict] = []
 
-    def factory(n, cfg, *, owner, lost_load, campus=None):     # IC G3 R-2: the campus source
+    def factory(n, cfg, *, owner, lost_load, campus=None,   # IC G3 R-2: the campus source
+                growth_flags=()):                      # E1: the growth placeholders
         calls.append({"owner": owner})
         return lambda: case_fn()
 
@@ -451,7 +452,7 @@ def test_an_adapter_refusal_is_investment_case_refused(s1b, monkeypatch):
     def refuse():
         raise FinanceRefused("template_not_annual", "stated by the test")
     monkeypatch.setattr(R, "_ic_build_case",
-                        lambda n, cfg, *, owner, lost_load, campus=None: refuse)
+                        lambda n, cfg, *, owner, lost_load, campus=None, growth_flags=(): refuse)
     with pytest.raises(HTTPException) as exc:
         _tool("solve_ppa_price", target_irr=0.1, target_year=10)
     assert exc.value.detail["error_kind"] == "investment_case_refused"

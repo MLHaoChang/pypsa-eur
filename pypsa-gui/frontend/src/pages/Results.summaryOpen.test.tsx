@@ -62,8 +62,8 @@ describe('Results opens on Summary after a new solve (M3)', () => {
 
   it('the same solve keeps the tab the user picked', async () => {
     const first = await renderResults()
-    fireEvent.click(screen.getByTestId('results-group-investment'))   // UX S3: tabs sit under groups
-    fireEvent.click(screen.getByTestId('results-tab-prices'))
+    fireEvent.click(screen.getByTestId('results-group-capacity'))   // UX S3: tabs sit under groups
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
     first.unmount()
     await renderResults()
     expect(screen.getByTestId('prices-stub')).toBeTruthy()
@@ -71,8 +71,8 @@ describe('Results opens on Summary after a new solve (M3)', () => {
 
   it('the next solve opens Summary again', async () => {
     const first = await renderResults()
-    fireEvent.click(screen.getByTestId('results-group-investment'))   // UX S3: tabs sit under groups
-    fireEvent.click(screen.getByTestId('results-tab-prices'))
+    fireEvent.click(screen.getByTestId('results-group-capacity'))   // UX S3: tabs sit under groups
+    fireEvent.click(screen.getByTestId('results-cardtab-costs_prices'))
     first.unmount()
     status.current = { ...status.current, objective: 90, solve_time: 2.1 }
     await renderResults()
