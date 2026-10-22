@@ -7,7 +7,7 @@
 export type ResultsTab =
   | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
-  | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape'
+  | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape' | 'grid_code' | 'electrical_design'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
 
@@ -22,7 +22,7 @@ export const RESULT_GROUPS: ReadonlyArray<{
   { id: 'investment', label: 'Investment', question: 'What to build, and what it costs and earns',
     tabs: ['capex', 'economics', 'prices', 'investment'] },
   { id: 'grid_plan', label: 'Grid plan', question: 'Whether the network and the connection carry it',
-    tabs: ['loadflow'] },
+    tabs: ['loadflow', 'grid_code', 'electrical_design'] },
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
     tabs: ['adequacy', 'lostload', 'fmea'] },
   { id: 'operation', label: 'Operation', question: 'How it runs hour by hour',
@@ -68,7 +68,11 @@ export const CARD_GROUPS: readonly CardGroup[] = [
       { id: 'costs_prices', label: 'Costs & prices', views: ['prices', 'economics'] },
     ] },
   { id: 'grid', label: 'AC power flow & grid', question: 'Whether the network and the connection carry it',
-    tabs: [{ id: 'load_flow', label: 'Load flow', views: ['loadflow'] }] },
+    tabs: [
+      { id: 'load_flow', label: 'Load flow', views: ['loadflow'] },
+      { id: 'grid_code', label: 'Grid code & connection', views: ['grid_code'] },
+      { id: 'electrical_design', label: 'Electrical design', views: ['electrical_design'] },
+    ] },
   { id: 'control', label: 'Control', question: 'How the plant is controlled', tabs: [] },
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
     tabs: [

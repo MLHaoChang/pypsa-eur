@@ -28,10 +28,19 @@ def _first_with_data(listing, exclude=()):
     return next(v for v in listing['views'] if v['data'] == 'available' and v['id'] not in exclude)
 
 
+def _read_of(results, pick):
+    """The picked view's own read: on its row (Summary, Asset Detail) or in its card's listing."""
+    view = pick(results[0])
+    if 'read' in view:
+        return view['read'][0]
+    return next(v for v in results[1]['views'] if v['id'] == view['id'])['read'][0]
+
+
 def _walk_step(pick):
-    """list -> the picked view's own read -> open its tab."""
+    """list -> the picked view's card listing (a repeat for a cardless one) -> its read -> open its tab."""
     return [lambda r: ('list_result_views', {'exclude_shown': True}),
-            lambda r: (pick(r[0])['read'][0]['tool'], pick(r[0])['read'][0]['args']),
+            lambda r: ('list_result_views', {'exclude_shown': True, **({'card': pick(r[0])['card']} if 'card' in pick(r[0]) else {})}),
+            lambda r: (_read_of(r, pick)['tool'], _read_of(r, pick)['args']),
             lambda r: ('ui_open_panel', {'panel_id': 'results', 'results_tab': pick(r[0])['id']}),
             lambda r: (None, {})]
 
@@ -43,7 +52,10 @@ def test_list_result_views_reports_data_and_no_values(oj_grid):
     by_id = {v['id']: v for v in listing['views']}
     assert set(by_id) >= {'summary', 'loadflow', 'dispatch', 'prices', 'adequacy', 'fmea'}
     assert by_id['loadflow']['data'] == 'available'
-    assert by_id['loadflow']['read'] == [{'tool': 'get_loadflow_summary', 'args': {}}]
+    # The plain listing carries no reads for a card's views; list_result_views(card=…) does.
+    assert 'read' not in by_id['loadflow'] and by_id['loadflow']['card'] == 'grid'
+    card_listing = chat_tools.DISPATCHERS['list_result_views'](card='grid')
+    assert next(v for v in card_listing['views'] if v['id'] == 'loadflow')['read'] == [{'tool': 'get_loadflow_summary', 'args': {}}]
     assert by_id['loadflow']['verification'] == 'displayed_data'
     assert by_id['overview']['data'] == 'not_applicable'   # single period
     assert by_id['asset']['data'] == 'needs_entity'
@@ -51,7 +63,7 @@ def test_list_result_views_reports_data_and_no_values(oj_grid):
     # Statuses only: no result values reach the model from this listing.
     assert 'MW' not in json.dumps({k: v for k, v in listing.items() if k != 'views'})
     assert not any(isinstance(x, float) for v in listing['views'] for x in v.values())
-    assert len(json.dumps(listing)) < 4000
+    assert len(json.dumps(listing)) < 3600 and not listing.get('compact')
 
 
 @pytest.mark.parametrize('kind,model,base_url,auth', PROVIDERS, ids=[row[0] for row in PROVIDERS])
@@ -61,13 +73,13 @@ def test_something_else_offers_only_unshown_sections_with_data(oj_grid, kind, mo
     calls, results, frames, _ = run_journey(kind, model, base_url, auth,
                                             _walk_step(lambda listing: _first_with_data(listing)),
                                             'Show me something else.', session=session)
-    listing, read, shown = results
+    listing, _, read, shown = results
     by_id = {v['id']: v for v in listing['views']}
     assert 'loadflow' not in by_id                    # exclude_shown drops it
     assert listing['shown'] == ['loadflow']
     assert all(v['data'] != 'available' or not v['shown'] for v in listing['views'])
     picked = _first_with_data(listing)
-    assert calls[1] == picked['read'][0]['tool']       # read before show
+    assert calls[2] == _read_of(results, lambda listing: _first_with_data(listing))['tool']   # read before show
     assert [d['results_tab'] for e, d in frames if e == 'ui_event'] == [picked['id']]
     assert not (isinstance(read, dict) and read.get('status') in {'no_data', 'unavailable'})
 
@@ -216,14 +228,14 @@ def test_each_walk_step_quotes_only_its_own_read(oj_grid):
     _, first, _, session = run_journey(*wire, _steps(), MESSAGE)
 
     def words(results):
-        facts = _leaf_numbers(results[1])[:2]
+        facts = _leaf_numbers(results[2])[:2]
         return 'Key points: ' + '; '.join(f'{k} {v}' for k, v in facts) + '. Next section?'
 
     calls, results, frames, _ = run_journey(*wire, _walk_step(lambda listing: _first_with_data(listing)),
                                             'Next.', session=session, answer=words)
     text = ''.join(d.get('delta', '') for e, d in frames if e == 'token')
     assert text.startswith('Key points: ') and _numbers(text)
-    assert _numbers(text) <= _numbers(json.dumps(results[1]))   # this step's read
+    assert _numbers(text) <= _numbers(json.dumps(results[2]))   # this step's read
     shown = [d for e, d in frames if e == 'ui_event'][0]
     assert shown['results_tab'] != 'loadflow'
 

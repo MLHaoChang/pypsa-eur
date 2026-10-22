@@ -83,6 +83,21 @@ describe('AssetDetail', () => {
     expect(emissions.getAttribute('title')).toMatch(/co2_emissions/)
   })
 
+  it('sends the run_ac_pf remedy to the Load flow tab, which says what to do next', async () => {
+    vi.mocked(assetResultsApi.get).mockResolvedValue({
+      ...RESPONSE,
+      metrics: [...RESPONSE.metrics, {
+        id: 'v_mag', label: 'Voltage', unit: 'pu', kind: 'series', origin: 'output', status: 'blocked',
+        reason: 'no AC power flow ran', remedy: { action: 'run_ac_pf', label: 'Run AC power flow' },
+      }],
+    })
+    useUIStore.setState({ resultsTabRequest: null, activeSlidePanel: 'results' })
+    renderIt()
+    await userEvent.click(await screen.findByRole('button', { name: /Run AC power flow/ }))
+    expect(useUIStore.getState().resultsTabRequest).toBe('loadflow')
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+  })
+
   it('shows selected scalars in the shared scalar table, two decimals', async () => {
     renderIt()
     expect(await screen.findByText(/Energy/)).toBeTruthy()

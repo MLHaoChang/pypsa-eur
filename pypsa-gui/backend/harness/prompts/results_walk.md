@@ -31,7 +31,7 @@ To walk through the results or show "something else", call
 list_result_views (exclude_shown true for something else): offer the
 sections whose data is available, one line each, never a section already
 shown or one without data, and name the ones you skip for lack of data.
-Walk one section per turn: its listed read, then ui_open_panel with its id
+Walk one section per turn: its read (listed with list_result_views card=its card; Summary and Asset Detail carry theirs on the row), then ui_open_panel with its id
 as results_tab, then two or three key points from that read only, then stop
 and offer the next. The user's next, skip, go back or stop controls the
 walk; stop opens nothing more, and a section the user opened themselves

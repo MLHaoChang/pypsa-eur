@@ -821,7 +821,10 @@ function capacityText(r: CapacityRow): string {
   return r.method === 'ac' ? `${fmt(v)} MW` : `≈ ${fmt(v)} MW`
 }
 
-function CapacitySection({ name, locked, onAssess }: { name: string; locked: boolean; onAssess: (bus: string) => void }) {
+/** `readOnly` is the Results view of the same table: no compute or assess buttons (those stay here). */
+export function CapacitySection({ name, locked, onAssess, readOnly = false }: {
+  name: string; locked: boolean; onAssess?: (bus: string) => void; readOnly?: boolean
+}) {
   const qc = useQueryClient()
   const [kind, setKind] = useState<CapacityKind>('load')
   const [hour, setHour] = useState<number | null>(null)
@@ -892,7 +895,7 @@ function CapacitySection({ name, locked, onAssess }: { name: string; locked: boo
                   <th className="font-normal pr-3 whitespace-nowrap">Capacity</th>
                   <th className="font-normal pr-3 whitespace-nowrap">Method</th>
                   <th className="font-normal">Binds on</th>
-                  <th />
+                  {!readOnly && <th />}
                 </tr>
               </thead>
               <tbody>
@@ -906,7 +909,7 @@ function CapacitySection({ name, locked, onAssess }: { name: string; locked: boo
                         <Tag tone={r.method === 'ac' ? 'ok' : 'neutral'}>{r.method === 'ac' ? 'AC' : 'DC est.'}</Tag>
                       </td>
                       <td className="text-muted align-top">{bindingText(r)}</td>
-                      <td className="text-right whitespace-nowrap align-top pl-2">
+                      {!readOnly && <td className="text-right whitespace-nowrap align-top pl-2">
                         <Btn
                           onClick={() => compute.mutate(r.bus)}
                           disabled={locked || compute.isPending}
@@ -916,13 +919,13 @@ function CapacitySection({ name, locked, onAssess }: { name: string; locked: boo
                           {busy ? 'Computing…' : 'Compute AC'}
                         </Btn>
                         <Btn
-                          onClick={() => onAssess(r.bus)}
+                          onClick={() => onAssess?.(r.bus)}
                           aria-label={`Assess a facility at ${r.bus}`}
                           title="Assess a facility at this bus against the grid code"
                         >
                           Assess
                         </Btn>
-                      </td>
+                      </td>}
                     </tr>
                   )
                 })}
@@ -980,10 +983,11 @@ function numberOr(v: string): number {
   return v.trim() === '' || !isFinite(n) ? NaN : n
 }
 
-function ConnectionSection({ name, locked, assessAt }: {
+export function ConnectionSection({ name, locked, assessAt, readOnly = false }: {
   name: string
   locked: boolean
   assessAt: { bus: string; nonce: number } | null
+  readOnly?: boolean
 }) {
   const qc = useQueryClient()
   const ref = useRef<HTMLDivElement>(null)
@@ -1052,7 +1056,7 @@ function ConnectionSection({ name, locked, assessAt }: {
           A steady-state screen for the connection engineer, not a compliance certificate: fault
           ride-through and dynamic support need the RMS/EMT study the handoff bundle is for.
         </p>
-        <div className="flex flex-wrap items-end gap-3 mb-2">
+        {!readOnly && <div className="flex flex-wrap items-end gap-3 mb-2">
           <Field label="Facility bus">
             <input className={`${INPUT} w-[110px] font-mono`} value={bus} onChange={e => setBus(e.target.value)} />
           </Field>
@@ -1076,7 +1080,7 @@ function ConnectionSection({ name, locked, assessAt }: {
           >
             {assess.isPending ? 'Assessing…' : 'Assess'}
           </Btn>
-        </div>
+        </div>}
         {refusal && <p className="text-[12px] text-danger mb-2">{refusal}</p>}
 
         {stored.isError && !assess.data ? (

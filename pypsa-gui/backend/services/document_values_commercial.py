@@ -657,9 +657,10 @@ def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
 
 
 def preview(args: dict) -> dict:
-    """The dialog's preview in commercial mode: `{document, targets, plan?, card?}`.
-    `targets` lists what can take a value (the import tariff's items and periods, the PPA
-    contracts, each with its unit and whether it is library-pinned); with `citations`,
+    """The dialog's preview in commercial mode: `{document, targets, candidates?, plan?,
+    card?}`. `targets` lists what can take a value (the import tariff's items and periods,
+    the PPA contracts, each with its unit and whether it is library-pinned); with `find`,
+    `candidates` (`wanted`); with `citations`,
     `plan` (`summary`) and `card`, None while a confirmation is missing or nothing
     changes. Writes nothing."""
     from harness import edit_card
@@ -667,10 +668,14 @@ def preview(args: dict) -> dict:
     from services.pypsa_service import PyPSAService
 
     doc = D.read_pages(chat_tools._require_active_project(), args.get("upload_id"))
-    out: dict = {"document": {"source": doc["source"]}, "targets": targets(stored_commercial())}
+    commercial = stored_commercial()
+    out: dict = {"document": {"source": doc["source"]}, "targets": targets(commercial)}
+    if args.get("find"):
+        out["candidates"] = D.find(doc["pages"], wanted(commercial), args.get("decimal_mark"))
     if not args.get("citations"):
         return out
-    args = {**args, "source_sha256": doc["source"]["sha256"]}
+    # `find` is the picker's, not the edit's: the card is the one the apply builds.
+    args = {**{k: v for k, v in args.items() if k != "find"}, "source_sha256": doc["source"]["sha256"]}
     with PyPSAService.get_lock():
         p = plan_active(args)
         out["plan"] = summary(p)
@@ -702,4 +707,29 @@ def targets(commercial: dict | None) -> dict:
                                "fields": [{"field": f, "label": v[0],
                                            "unit": "/MWh" if v[2] else PPA_UNIT_LABELS[f]}
                                           for f, v in PPA_FIELDS.items()]})
+    return out
+
+
+_CASE = (("kva", "kVA"), ("kwh", "kWh"), ("mwh", "MWh"), ("kw", "kW"), ("mw", "MW"))
+
+
+def _cased(unit: str) -> str:
+    for low, cased in _CASE:
+        unit = re.sub(rf"(?<![a-z]){low}(?![a-z])", cased, unit)
+    return unit
+
+
+def wanted(commercial: dict | None) -> dict[str, dict]:
+    """What the quote finder (`document_values.find`) looks for: `{"tariff:<item>": ...}`
+    for each import-tariff item (every rate of an item takes the same units) and
+    `{"ppa:<field>": ...}` for each PPA field (the same for every contract), each `{label,
+    units}` in the units `plan` accepts."""
+    out: dict[str, dict] = {}
+    tariff = (commercial or {}).get("import_tariff")
+    for item in (tariff.get("items") or []) if isinstance(tariff, dict) else []:
+        out[f"tariff:{item['id']}"] = {"label": f"{item['id']} {item.get('kind', '')}",
+                                       "units": [_cased(f"/{u}") for u in TARIFF_UNITS.get(item.get("unit"), {})]}
+    if any(c.get("type", "ppa") == "ppa" for c in (commercial or {}).get("contracts") or []):
+        for f, (label, units, money, _, _) in PPA_FIELDS.items():
+            out[f"ppa:{f}"] = {"label": label, "units": [_cased(f"/{u}" if money else u) for u in units]}
     return out

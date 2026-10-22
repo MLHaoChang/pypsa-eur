@@ -1645,11 +1645,11 @@ export default function TimeSeriesManager() {
             <span className="text-[9px] font-normal opacity-70">{tab.subtitle}</span>
           </button>
         ))}
-        {activeTab === 'renewable' && (
+        {activeTab === 'renewable' && uiMode === 'expert' && (
           <button type="button" data-testid="ts-open-profile-studio"
             onClick={() => useUIStore.getState().setSlidePanel('profiles')}
             className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
-            Generate with Profile Studio →
+            Generate with Profile Studio ›
           </button>
         )}
       </div>

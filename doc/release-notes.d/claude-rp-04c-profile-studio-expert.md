@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Profile Studio is an Expert-only advanced view: its sidebar entry is gone, the Time Series › Renewables link ("Generate with Profile Studio →") shows in Expert only, and a Guided request for the panel (the assistant's navigation) opens the Time Series drawer on the hub design. The solve queue's "profile generated" note names the assistant in Guided.

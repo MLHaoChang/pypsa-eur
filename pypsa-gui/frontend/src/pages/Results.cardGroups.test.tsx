@@ -31,6 +31,10 @@ vi.mock('./results/EnergyFlowsTab', () => stub('flows-stub'))
 vi.mock('./results/LoadShapeTab', () => stub('loadshape-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
 vi.mock('./results/InvestmentTab', () => stub('investment-stub'))
+vi.mock('./results/GridStudyTabs', () => ({
+  GridCodeTab: () => <div data-testid="gridcode-stub" />,
+  ElectricalDesignTab: () => <div data-testid="electrical-stub" />,
+}))
 vi.mock('./results/SummaryTab', () => stub('summary-stub'))
 vi.mock('./CompareView', () => ({ default: () => <div data-testid="compare-stub" /> }))
 vi.mock('../api/simulation', () => ({
@@ -179,5 +183,31 @@ describe('Asset Detail', () => {
     fireEvent.click(screen.getByTestId('asset-drawer-close'))
     expect(screen.queryByTestId('asset-drawer')).toBeNull()
     expect(screen.getByTestId('dispatch-stub')).toBeTruthy()
+  })
+})
+
+describe('the Grid card (W10 R2)', () => {
+  it('holds Load flow, Grid code & connection and Electrical design as its card tabs', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-grid'))
+    const tabs = Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent)
+    expect(tabs).toEqual(['Load flow', 'Grid code & connection', 'Electrical design'])
+    fireEvent.click(screen.getByTestId('results-cardtab-grid_code'))
+    expect(screen.getByTestId('gridcode-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-cardtab-electrical_design'))
+    expect(screen.getByTestId('electrical-stub')).toBeTruthy()
+  })
+
+  it('opens the study tab the assistant or the legacy Grid study results address asks for', async () => {
+    useUIStore.setState({ resultsTabRequest: 'electrical_design' })
+    await renderResults()
+    expect(screen.getByTestId('electrical-stub')).toBeTruthy()
+    expect(document.querySelector('[data-active-results-tab]')?.getAttribute('data-active-results-tab')).toBe('electrical_design')
+  })
+
+  it('Guided shows an asked-for study tab as an advanced tab', async () => {
+    useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'grid_code' })
+    await renderResults()
+    expect(screen.getByTestId('gridcode-stub')).toBeTruthy()
   })
 })
