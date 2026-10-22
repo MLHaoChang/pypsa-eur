@@ -823,6 +823,17 @@ class Turn:
                 }
                 for oid in self.navigation_actions
             ]
+            if self.request_scope is not None and self.request_evidence is not None and not draft_failed:
+                # S3b: does the Load flow tab show the solve and window that were checked?
+                from harness import navigation_join
+
+                for entry in receipt["navigation"]:
+                    joined = navigation_join.join(
+                        ctx, records.load(self.owner, entry["action_id"], "ui_action"),
+                        self.request_scope, self.request_evidence)
+                    if joined:
+                        # A note about the tab, not about the answer: the verdict is unchanged.
+                        entry.update(joined)
             if (
                 not public_blocks
                 and self.operation_contract is None

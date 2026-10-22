@@ -11,6 +11,37 @@ export interface AnswerReceipt {
     cost_basis?: { currency: 'EUR'; price_year: number; annual_fixed_cost_fraction: number } }
   result_slots?: { metric: string; disposition: 'answered' | 'unavailable' | 'needs_clarification'; reason?: string; valid_snapshots?: number; requested_snapshots?: number }[]
   chart?: CheckedChart
+  navigation?: NavigationEntry[]
+}
+
+/** A navigation outcome; for Load flow in a checked loading turn, whether the tab
+ * shows the solve and window that were checked (S3b). */
+export interface NavigationEntry {
+  action_id: string
+  outcome: string
+  shows?: 'checked_evidence' | 'different_view' | 'not_confirmed'
+  reason?: 'window_differs' | 'source_not_lopf' | 'inputs_changed' | 'fingerprint_basis_unknown' | 'project_differs'
+  window?: { start: string; end: string }
+}
+
+const SHOWS = new Set(['checked_evidence', 'different_view', 'not_confirmed'])
+const VIEW_REASONS = new Set(['window_differs', 'source_not_lopf', 'inputs_changed', 'fingerprint_basis_unknown',
+  'project_differs'])
+
+function validNavigation(entries: unknown): boolean {
+  return Array.isArray(entries) && entries.length <= 20 && entries.every(e => {
+    if (!e || typeof e !== 'object' || Array.isArray(e)) return false
+    const n = e as Partial<NavigationEntry>
+    if (typeof n.action_id !== 'string' || n.action_id.length > 128 || typeof n.outcome !== 'string'
+      || n.outcome.length > 64) return false
+    if (n.shows === undefined) return n.reason === undefined && n.window === undefined
+    if (!SHOWS.has(n.shows)) return false
+    if (n.shows === 'different_view') return typeof n.reason === 'string' && VIEW_REASONS.has(n.reason) && n.window === undefined
+    if (n.shows === 'checked_evidence') return n.reason === undefined && !!n.window
+      && typeof n.window.start === 'string' && n.window.start.length <= 64
+      && typeof n.window.end === 'string' && n.window.end.length <= 64
+    return n.reason === undefined && n.window === undefined
+  })
 }
 
 /** A checked chart (S10): drawn from the answer's own evidence, listed by series. */
@@ -98,6 +129,7 @@ export function parseApproval(value: Record<string, unknown>): ApprovedAnswerFra
         || [s.valid_snapshots, s.requested_snapshots].some(v => v !== undefined
           && (!Number.isInteger(v) || v < 0 || v > 512)))))
     || (receipt.chart !== undefined && !validChart(receipt.chart))
+    || (receipt.navigation !== undefined && !validNavigation(receipt.navigation))
     || !['evidence_ids', 'checked_block_ids', 'limitations'].every(key => {
       const values = receipt[key as keyof AnswerReceipt]
       return Array.isArray(values) && values.length <= 20
