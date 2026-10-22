@@ -869,6 +869,43 @@ brief grants nothing: every write or run step keeps its own card.
   `task_resolution_unverifiable` and the step stays to review; `retry`
   stays the explicit way on. `resume_task` settles a waiting job this
   process never registered as uncertain first.
+- **Queued run steps (slice 2, all plans).** `run_sensitivity_sweep` and
+  `solve_queue_enqueue` steps wait on their solve-queue jobs
+  (`assistant_tasks.QUEUE_WAIT_TOOLS`). `harness/loop.py` hands the jobs
+  (`continuation.queue_jobs`) to `await_job` and releases the turn at once;
+  one follower per step (`continuation.follow_queue_job`, its own thread with
+  the caller's identity, a fixed poll and a 6 h cap) settles it from native
+  records only (`continuation.queue_outcome`). A job is evidence when its
+  `q-<id>` manifest is completed with its job id, kind `solve_queue`, an
+  objective and intact sections, and the child's saved network carries the
+  solve's input fingerprints unchanged (`workflow_tools.solve_freshness`,
+  the stamp `_record_solve_inputs` wrote under the solve lock; the
+  experiment refresh uses the same check). All jobs evidenced: completed.
+  None completed (each failed or aborted): failed. A mix, drift or the cap:
+  uncertain, since a retry would re-enqueue what landed. A cancelled plan
+  stops the follower quietly. After a restart a waiting queued step has no
+  follower and settles uncertain (SC-09); nothing is re-enqueued. Queue
+  steps write no parent inputs, so they never advance the SC-11 chain;
+  `_gate_brief` still runs before every effectful step after one settles.
+  The evidence read takes the network lock the refresh takes; a busy lock is
+  retried at the next poll, never judged. A receipt that started a job never
+  completes the step by itself; a sweep whose every case was reused from a
+  solved child (no job) completes from its receipt.
+  A queued step that ends a card's phase pauses the plan; the continuation
+  turn cannot pass `paused_at_card`.
+- **What a brief can run (SC-10).** `start_task` refuses
+  `brief_cases_not_runnable` unless the brief's cases and every
+  `start_experiment` and `run_sensitivity_sweep` step fit `experiment_execution.runnable` (1 or 2
+  network cases), the rule `advance_experiment` applies. Under a brief
+  `wait_for_job` is no step (`invalid_task_tool`): run steps wait by
+  themselves. A `refresh_experiment` step completes only on a `completed`
+  case; a case still running is `failed` with "Case not finished; retry
+  after it completes", an unavailable one names its native `last_error`.
+- **Correction (SC-14, LC-19).** Under a brief, a failed or uncertain next
+  step carries `next_step.correction`: the triage reads to draft a fix from
+  (`get_simulation_log_history`, `diagnose_network`, `validate_network`) for
+  a run step, the read-back for an edit. It runs nothing. A failed effectful
+  step is refused (`task_step_needs_retry`) until `resolve_task_step(retry)`.
 
 ## Recorded runs, load flow, and experiment plans
 
