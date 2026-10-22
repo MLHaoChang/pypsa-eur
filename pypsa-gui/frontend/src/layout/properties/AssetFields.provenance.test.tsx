@@ -5,11 +5,16 @@
 // The collapsed read-out carries the same chips, so "open in Expert" shows
 // what is still the pack's default without opening the form.
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render as plainRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import fixture from '../../test/fixtures/assetSchema.json'
 import type { AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { AssetFieldsEdit, assetReadoutItems } from './AssetFields'
 import { ExpandedProps, type FS } from './cardKit'
+
+// The lifetime note under a card's field reads the project default from the query cache.
+const render = (ui: ReactElement) => plainRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
 
 const SCHEMA = (fixture as Record<string, unknown>).StorageUnit as AssetSchema
 const BESS: Record<string, unknown> = {

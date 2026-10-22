@@ -15,6 +15,7 @@ import SiteConnectionSection from '../results/investment/SiteConnectionSection'
 import TariffSection from '../results/investment/TariffSection'
 import AssetCostsTable from './AssetCostsTable'
 import RatesForm from './RatesForm'
+import SolveAssumptionsSummary from './SolveAssumptionsSummary'
 
 const TABS = [
   { id: 'basis', label: 'Basis' },
@@ -67,6 +68,7 @@ export default function EconomicsPanel() {
         {tab === 'basis' && (
           <div className="p-3 flex flex-col gap-3">
             <RatesForm />
+            <SolveAssumptionsSummary />
             <SiteConnection />
             <FinanceInputsEditor />
           </div>

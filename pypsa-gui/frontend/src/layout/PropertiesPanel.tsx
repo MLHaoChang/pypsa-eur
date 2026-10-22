@@ -56,7 +56,6 @@ import {
   ehBusPayload,
   ehLinkPayload,
   useGlobalDiscountRate,
-  useGlobalDefaultLifetime,
   useBuildYearOptions,
   defaultLifetime,
   TxtInput,
@@ -136,7 +135,6 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
@@ -183,9 +181,9 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    // Pre-fill lifetime from solver-config global when blank/inf — matches
-    // user expectation that "all assets default to the global lifetime".
-    base.lifetime = defaultLifetime(gen.lifetime, globalLt)
+    // A blank/inf lifetime stays blank: the asset inherits the project default
+    // (the field says so; see LifetimeInherit).
+    base.lifetime = defaultLifetime(gen.lifetime)
     if (!base.control) base.control = 'PQ'
     setForm(seedExtras(gen, base, loadExtras(editScope('Generator'))))
     setOpen(true)
@@ -479,7 +477,6 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
@@ -520,7 +517,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(store.lifetime, globalLt)
+    base.lifetime = defaultLifetime(store.lifetime)
     setForm(seedExtras(store, base, loadExtras(editScope('Store'))))
     setOpen(true)
   }
@@ -836,7 +833,6 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
@@ -881,7 +877,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(link.lifetime, globalLt)
+    base.lifetime = defaultLifetime(link.lifetime)
     setForm(seedExtras(link, { ...base, eh_role: link.eh_role ?? '' }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
@@ -1476,10 +1472,6 @@ export function LinePanel({ name }: { name: string }) {
   const [editing, setEditing] = useState(false)
   const [vintageOpen, setVintageOpen] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
-  // Solver-config global default_lifetime used to pre-fill the lifetime
-  // input when the asset's own lifetime is blank/inf — same behaviour as
-  // generators / storage / stores / links.
-  const globalLt = useGlobalDefaultLifetime()
   // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed per MVA and km; the backend derives the annualised
   // capital cost and fixed O&M from it times the length. The topology stays
@@ -1536,7 +1528,7 @@ export function LinePanel({ name }: { name: string }) {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(line.lifetime, globalLt)
+    base.lifetime = defaultLifetime(line.lifetime)
     const km = (v: number | null | undefined) => { const p = perKm(v); return p === null ? '' : String(p) }
     setForm(seedExtras(line, { ...base, r_per_km: km(line.r), x_per_km: km(line.x), b_per_km: km(line.b) },
       loadExtras(editScope('Line'))))
@@ -1677,9 +1669,6 @@ export function TransformerPanel({ name }: { name: string }) {
   const [editing, setEditing] = useState(false)
   const [vintageOpen, setVintageOpen] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
-  // Solver-config global default_lifetime — used to pre-fill the lifetime
-  // input when the transformer's own lifetime is blank/inf.
-  const globalLt = useGlobalDefaultLifetime()
   // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per MVA; the annualised capital
   // cost is derived and shown read-only. The windings stay read-only here.
@@ -1719,7 +1708,7 @@ export function TransformerPanel({ name }: { name: string }) {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(tr.lifetime, globalLt)
+    base.lifetime = defaultLifetime(tr.lifetime)
     setForm(seedExtras(tr, base, loadExtras(editScope('Transformer'))))
     setEditing(true)
   }

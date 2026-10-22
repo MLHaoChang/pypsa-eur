@@ -165,10 +165,10 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                   {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source">
                     {[r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell]
                       .filter(Boolean).join(' \u203a ')}{' '}
-                    ({show(r.source.raw)} {r.source.raw_unit}{r.source.formula ? ', saved formula value' : ''})
+                    ({[show(r.source.raw), r.source.raw_unit].filter(Boolean).join(' ')}{r.source.formula ? ', saved formula value' : ''})
                   </span>}
                   {r.money && <span className="block text-[10px] text-muted" data-testid="chat-edit-money">
-                    {r.money.currency}, {r.money.money_year} money, not adjusted
+                    {r.money.currency}, {r.money.money_year} money, not adjusted for inflation
                   </span>}
                   {follows && <span className="block text-[10px]">
                     {r.role === 'derived' ? 'Follows from the change, read-only'

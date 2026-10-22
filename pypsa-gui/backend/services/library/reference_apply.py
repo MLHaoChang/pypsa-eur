@@ -96,20 +96,42 @@ def money_disclosure(price_year: int, currency: str, read_as: int) -> str:
 COST_FIELDS = ("overnight_cost", "fom_cost", "inv_power_overnight", "inv_energy_overnight")
 
 
-def money_years_in_use(n) -> dict[int, list[tuple[str, str, str]]]:
-    """`{money year: [(class, asset, field), ...]}` over every recorded cost field of the
-    network. More than one key means the asset costs mix money years. Read-only; a field
-    without a recorded money year is left out (unknown is not a year)."""
+def _hand_typed(entry: dict) -> bool:
+    """A person typed this value: customised with no approval. An applied reference
+    is customised too, but `stamp` records its approval; `mark_customised` drops it."""
+    return entry.get("status") == "customised" and not entry.get("approved_at")
+
+
+def _cost_entries(n):
+    """`(class, asset, field, entry)` for every recorded cost field of the network."""
     meta = getattr(n, "meta", None)
     root = meta.get("asset_params", {}) if isinstance(meta, dict) else {}
-    years: dict[int, list[tuple[str, str, str]]] = {}
     for klass, assets in root.items():
         for name, fields in assets.items():
             for field in COST_FIELDS:
-                year = (fields.get(field) or {}).get("currency_year")
-                if isinstance(year, int):
-                    years.setdefault(year, []).append((klass, name, field))
+                entry = fields.get(field)
+                if isinstance(entry, dict):
+                    yield klass, name, field, entry
+
+
+def money_years_in_use(n) -> dict[int, list[tuple[str, str, str]]]:
+    """`{money year: [(class, asset, field), ...]}` over every recorded cost field of the
+    network. More than one key means the asset costs mix money years. Read-only; a field
+    without a recorded money year is left out (unknown is not a year), and so is one a
+    person typed (`_hand_typed`): `mark_customised` keeps the overridden source's keys,
+    so its `currency_year` is the replaced value's, not the typed one's."""
+    years: dict[int, list[tuple[str, str, str]]] = {}
+    for klass, name, field, entry in _cost_entries(n):
+        year = entry.get("currency_year")
+        if not _hand_typed(entry) and isinstance(year, int):
+            years.setdefault(year, []).append((klass, name, field))
     return {year: sorted(years[year]) for year in sorted(years)}
+
+
+def hand_typed_cost_fields(n) -> list[tuple[str, str, str]]:
+    """The cost fields a person typed (`_hand_typed`): their money year is not recorded."""
+    return sorted((klass, name, field) for klass, name, field, entry in _cost_entries(n)
+                  if _hand_typed(entry))
 
 
 def case_base_year(n, config) -> int | None:
