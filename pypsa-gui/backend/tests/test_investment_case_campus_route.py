@@ -770,6 +770,7 @@ def test_a_study_that_states_nothing_new_keeps_the_digest_and_adds_no_flag():
         src = R._ic_campus_from_response(resp, None, unsaved=False)
         assert src.refusal is None and src.flags == ()
         assert src.digest == before
+        assert src.summary is None          # so the case keeps its hash (issue 05 test 3)
     # The same statements give the same digest; each one changes it.
     seen = {before}
     for resp in (_with(old, unresolved=[NEED]), _with(old, study_method="milp"),
@@ -805,6 +806,14 @@ def test_a_cost_tag_of_the_wrong_type_is_refused_naming_the_asset_only(meta):
     assert src.summary is None and src.extras == ()
     assert src.detail.startswith("'campus:TR_132_33_40#1' has a cost provenance")
     assert SECRET not in src.detail and "yes" not in src.detail
+
+
+def test_a_meta_that_is_no_record_is_refused():
+    import routers.results as R
+
+    a = {**_asset(), "meta": SECRET}
+    src = R._ic_campus_from_response(_response([a]), None, unsaved=False)
+    assert src.refusal == "campus_assets_invalid" and SECRET not in src.detail
 
 
 def test_a_stale_or_refused_study_has_no_summary():

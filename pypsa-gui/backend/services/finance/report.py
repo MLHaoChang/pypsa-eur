@@ -410,7 +410,7 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
         money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
                  "not stated, so their price year is not checked against it (the "
                  "investment-case route still checks their currency)")
-    summary = getattr(case, "campus", None)
+    summary = getattr(case, "campus", None)          # a stand-in case may lack it, as extra_assets
     tags = {name: (prov, ill) for name, prov, ill in (summary.assets if summary else ())}
     out = []
     for e in getattr(case, "extra_assets", ()) or ():
@@ -435,8 +435,7 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
             "cod": cod,
             # The campus library's cost tag (campus-IC 02): `illustrative` is true
             # for an `assumed` cost; both None when the source did not say.
-            "provenance": tags.get(e.name, (None, None))[0],
-            "illustrative": tags.get(e.name, (None, None))[1],
+            **dict(zip(("provenance", "illustrative"), tags.get(e.name, (None, None)))),
         })
     return out
 

@@ -20,9 +20,12 @@ import dataclasses
 from contextlib import contextmanager
 import logging
 import re
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import threading as _threading
+
+if TYPE_CHECKING:
+    from services.finance.case import CampusSummary
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict
@@ -1614,7 +1617,7 @@ class CampusSource:
     refusal: str | None = None
     detail: str = ""
     digest: str | None = None
-    summary: object | None = None      # a `CampusSummary` for the report (campus-IC 02/05)
+    summary: CampusSummary | None = None    # the study's summary for the report (campus-IC 02/05)
 
     @property
     def run_flags(self) -> tuple[str, ...]:
@@ -1671,13 +1674,15 @@ def _ic_unresolved(resp: dict) -> list[dict] | None:
 def _ic_cost_tags(assets: list) -> list | str:
     """campus-IC 02: each asset's `(name, provenance, illustrative)` from its
     `meta`, a missing key as None; `provenance` is text (cut), `illustrative`
-    true or false. Any other value is the refusal detail (fixed text and the
-    asset's label only, GK plan condition 2)."""
+    true or false. Any other value (or a `meta` that is no record) is the
+    refusal detail (fixed text and the asset's label only, GK plan condition 2)."""
     tags = []
     for i, a in enumerate(assets):
-        meta = a.get("meta") if isinstance(a.get("meta"), dict) else {}
-        prov, ill = meta.get("provenance"), meta.get("illustrative")
-        if not (prov is None or isinstance(prov, str)) or not (ill is None or isinstance(ill, bool)):
+        meta = a.get("meta", {})
+        prov, ill = (meta.get("provenance"), meta.get("illustrative")) if isinstance(meta, dict) \
+            else (None, None)
+        if not isinstance(meta, dict) or not (prov is None or isinstance(prov, str)) \
+                or not (ill is None or isinstance(ill, bool)):
             return (f"{_ic_asset_label(a, i)} has a cost provenance that is not text or an "
                     "illustrative mark that is not true or false")
         tags.append((a.get("name"), None if prov is None else prov[:_IC_TAG_CUT], ill))
@@ -1687,14 +1692,18 @@ def _ic_cost_tags(assets: list) -> list | str:
 def _ic_campus_summary(resp: dict, tags: list, unresolved: list):
     """The report's view of the study (campus-IC 02/05): its method, each asset's
     cost tag, its unmet needs (deduplicated, cut). A method the route does not
-    know reads as not stated (None), never as the producer's text."""
+    know reads as not stated (None), never as the producer's text. None when
+    the study states none of them (an older producer), so the case keeps its
+    hash (issue 05 test 3)."""
     from services.finance.case import CampusSummary
 
     method = resp.get("study_method")
+    method = method if method in _IC_STUDY_METHODS else None
     needs = dict.fromkeys((u["need"][:_IC_NEED_CUT], u["reason"][:_IC_REASON_CUT])
                           for u in unresolved)
-    return CampusSummary(study_method=method if method in _IC_STUDY_METHODS else None,
-                         assets=tuple(tags), unresolved=tuple(needs))
+    if method is None and not needs and all((p, i) == (None, None) for _n, p, i in tags):
+        return None
+    return CampusSummary(study_method=method, assets=tuple(tags), unresolved=tuple(needs))
 
 
 def _ic_asset_label(a, i: int) -> str:

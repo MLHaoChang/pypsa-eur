@@ -212,12 +212,14 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
 
 /** A campus line's way to the panel that fixes it (UX: `openPanel`, never a
  *  bare slide panel; Guided stays Guided). */
-function CampusLinkButton({ link }: { link: CampusLink | { label: string; resultsTab: string } }) {
+function CampusLinkButton({ link }: { link: CampusLink }) {
   const requestResultsTab = useUIStore(st => st.requestResultsTab)
   return (
     <button type="button" className="underline"
-            onClick={() => ('resultsTab' in link ? requestResultsTab(link.resultsTab)
-              : openPanel(link.section, link.panel))}>{link.label}</button>
+            onClick={() => {
+              openPanel(link.section, link.panel)
+              if (link.resultsTab) requestResultsTab(link.resultsTab)
+            }}>{link.label}</button>
   )
 }
 
@@ -225,6 +227,8 @@ function CampusLinkButton({ link }: { link: CampusLink | { label: string; result
  *  campus result it came from, and the needs that study could not meet (05).
  *  The costs are the report's own, in its money year; no total and no
  *  freshness line of its own (the report's stale line names the campus study). */
+const MAX_NEEDS_LISTED = 20
+
 function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload }) {
   const expert = useUIStore(st => st.uiMode) !== 'guided'
   const c = campusEquipment(report)
@@ -275,8 +279,8 @@ function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload 
           <p>The grid study found no equipment for {n === 1 ? '1 need' : `${n} needs`}, so this design
             {' '}does not meet the grid-code profile:</p>
           <ul className="pl-3 list-disc">
-            {c.unresolved.slice(0, 20).map((u, i) => <li key={i}>{u.need}: {u.reason}</li>)}
-            {n > 20 && <li>+{n - 20} more</li>}
+            {c.unresolved.slice(0, MAX_NEEDS_LISTED).map((u, i) => <li key={i}>{u.need}: {u.reason}</li>)}
+            {n > MAX_NEEDS_LISTED && <li>+{n - MAX_NEEDS_LISTED} more</li>}
           </ul>
           <p><CampusLinkButton link={unmetNeedsLink(expert)} /></p>
         </div>
@@ -438,7 +442,7 @@ export default function InvestmentCaseView() {
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
   const failure = studyFailure(s)
-  const campusBlock = running ? null : campusRefusal(s, r)
+  const campusLine = running ? null : campusRefusal(s, r)
 
   return (
     <div className="space-y-3 text-[11px]" data-testid="investment-case">
@@ -463,9 +467,9 @@ export default function InvestmentCaseView() {
             Stopped: the run was aborted; the report below, if any, is from an earlier run.</span>
         )}
         {failure && <span className="text-danger" data-testid="ic-error">{failure}</span>}
-        {campusBlock && (
-          <span className="text-warn" data-testid="ic-campus-refusal">{campusBlock.text}
-            {campusBlock.links.map(l => <span key={l.label}>{' '}<CampusLinkButton link={l} /></span>)}</span>
+        {campusLine && (
+          <span className="text-warn" data-testid="ic-campus-refusal">{campusLine.text}
+            {campusLine.links.map(l => <span key={l.label}>{' '}<CampusLinkButton link={l} /></span>)}</span>
         )}
         {blocked && <span className="text-warn" data-testid="ic-blocked">Blocked: {blocked}</span>}
       </div>

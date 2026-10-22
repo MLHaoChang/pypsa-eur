@@ -726,25 +726,25 @@ export function campusEquipment(report: InvestmentCaseReportPayload | null | und
 }
 
 /** Where a campus line sends the user: a flow section's panel, opened with
- *  `openPanel` (mode-aware); the label ends in ">". */
-export interface CampusLink { label: string; section: FlowSectionId; panel: string }
+ *  `openPanel` (mode-aware); the label ends in "›" (review-ux.md). */
+export interface CampusLink { label: string; section: FlowSectionId; panel: string; resultsTab?: string }
 
 /** What a campus study stops, with where the user fixes it. */
 export interface CampusRefusal { text: string; links: CampusLink[] }
 
-const GRID_STUDY: CampusLink = { label: 'Grid study >', section: 'scenarios', panel: 'campusStudy' }
+const GRID_STUDY: CampusLink = { label: 'Grid study ›', section: 'scenarios', panel: 'campusStudy' }
 
 export const CAMPUS_REFUSALS: Record<string, CampusRefusal> = {
   // A flag, not a refusal: the case is built without the campus equipment.
   campus_study_stale: {
     text: 'The grid study no longer matches the campus file, the network or the asset library, so '
       + 'the case leaves out its equipment.',
-    links: [{ ...GRID_STUDY, label: 'Run the grid study again in Grid study >' }],
+    links: [{ ...GRID_STUDY, label: 'Run the grid study again in Grid study ›' }],
   },
   campus_assets_money_year_mismatch: {
-    text: 'The campus asset library and the finance inputs are in different money.',
-    links: [{ label: 'Grid connection >', section: 'connection', panel: 'campusElectrical' },
-            { label: 'Commercial & finance >', section: 'commercial', panel: 'economics' }],
+    text: 'Fix the money in',
+    links: [{ label: 'Grid connection ›', section: 'connection', panel: 'campusElectrical' },
+            { label: 'Commercial & finance ›', section: 'commercial', panel: 'economics' }],
   },
 }
 
@@ -760,6 +760,7 @@ export function campusRefusal(s: InvestmentCaseStudy | null | undefined,
 
 /** Where the unmet-needs line points: the Results "Electrical design" tab
  *  where it exists (Expert), else the Grid study panel. */
-export function unmetNeedsLink(expert: boolean): CampusLink | { label: string; resultsTab: string } {
-  return expert ? { label: 'See Electrical design >', resultsTab: 'electrical_design' } : GRID_STUDY
+export function unmetNeedsLink(expert: boolean): CampusLink {
+  return expert ? { label: 'See Electrical design ›', section: 'results', panel: 'results',
+                    resultsTab: 'electrical_design' } : GRID_STUDY
 }
