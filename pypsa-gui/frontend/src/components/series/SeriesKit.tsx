@@ -103,7 +103,7 @@ export function MeasuredFileTab({
       </div>
       {read.isError && (
         <p className="text-[11px] text-red-600" data-testid="measured-file-error">
-          {errorText(read.error)}
+          {sentence(errorText(read.error))}
         </p>
       )}
     </div>
@@ -138,6 +138,9 @@ export function SeriesStateLink({
     </div>
   )
 }
+
+/** A backend refusal as a sentence: they start in lower case. */
+export const sentence = (s: string) => s.charAt(0).toUpperCase() + s.slice(1)
 
 function sumModelled(m: Record<string, number> | null | undefined): number | null {
   if (!m) return null
@@ -342,7 +345,9 @@ export function PendingCard({
         <WeekChart week={pending.weeks[component]} unit={power ? 'MW' : unit} />
       )}
       <WarningList warnings={warnings} testId="pending-warnings" />
-      <div className="flex items-center gap-2 mt-2">
+      {/* Applied once: the receipt replaces the button (a second Apply would
+          only write the same series again). */}
+      {!applied && <div className="flex items-center gap-2 mt-2">
         <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending || !!blocked}>
           <Check size={13} /> Apply to {component}
         </Btn>
@@ -352,14 +357,15 @@ export function PendingCard({
           </span>
         )}
         {apply.isError && <span className="text-[11px] text-red-600" data-testid="apply-error">{errorText(apply.error)}</span>}
-      </div>
+      </div>}
       {applied && (
         <div className="text-[11px] text-green-700 mt-1" data-testid="applied">
           Applied to {applied.component}&apos;s {fieldLabel(applied.attribute ?? attribute ?? '')}:
           {' '}{power ? 'peak' : 'max'} {applied.before ? `${fmt(applied.before.peak, 3)} → ` : ''}{fmt(applied.peak, 3)}{u}
           {!power && <>, min {applied.before ? `${fmt(applied.before.min, 3)} → ` : ''}{fmt(applied.min, 3)}{u}</>}.
           {' '}Undo (Ctrl+Z) reverts it.
-          <WarningList warnings={applied.warnings ?? []} />
+          {/* Only what the preview did not already say. */}
+          <WarningList warnings={(applied.warnings ?? []).filter(w => !warnings.includes(w))} />
         </div>
       )}
     </div>

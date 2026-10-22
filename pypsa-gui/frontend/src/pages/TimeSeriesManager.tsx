@@ -24,7 +24,7 @@ import { Dialog } from '../components/Dialog'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import SeriesEditor from '../components/series/SeriesEditor'
-import { fieldLabel } from '../components/series/SeriesKit'
+import { fieldLabel, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 
@@ -952,10 +952,10 @@ export default function TimeSeriesManager() {
   const [activeTab, setActiveTab] = useState<TabId>('loads')
   const [selectedName, setSelectedName] = useState<string | null>(null)
   const uiMode = useUIStore(s => s.uiMode)
-  // The series editor drawer: one load's archetype or measured upload, the
-  // same editor its Properties panel mounts (TS-01, UX review 2026-10-20).
+  // "Generate defaults for all": the review list over every family's default.
   const [defaultsOpen, setDefaultsOpen] = useState(false)
-  // The series editor drawer: one host for every family's editor (TS UI).
+  // The series editor drawer: one host for every family's editor, the same
+  // editor each Properties panel mounts (TS-01, UX review 2026-10-20).
   const [seriesEditor, setSeriesEditor] = useState<
     | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
     | { family: 'availability'; component: string; componentType: 'generators' | 'links' }
@@ -1039,12 +1039,15 @@ export default function TimeSeriesManager() {
     }
     const conventional = focus.type === 'Link' || (focus.type === 'Generator'
       && !['renewable', 'dr'].includes((genProfiles as Record<string, GeneratorProfileMeta>)[focus.name]?.category ?? ''))
-    const slot = focus.field === 'p_min_pu' || focus.field === 'marginal_cost' ? focus.field : 'p_max_pu'
-    if (focus.field && focus.type === 'Generator' && conventional) setConvAttr(slot)
-    if (focus.field && focus.type === 'Link') setLinkAttr(slot)
+    // The slot the field lives in; a field with no slot here (a COP is in
+    // Properties only) opens the row and no editor.
+    const slot = !focus.field ? 'p_max_pu'
+      : (['p_max_pu', 'p_min_pu', 'marginal_cost'] as const).find(a => a === focus.field) ?? null
+    if (slot && focus.type === 'Generator' && conventional) setConvAttr(slot)
+    if (slot && focus.type === 'Link') setLinkAttr(slot)
     setSelectedName(focus.name)
     setSelectedNames(new Set())
-    if (focus.openEditor) {
+    if (focus.openEditor && (focus.type === 'Load' || slot)) {
       if (focus.type === 'Load') setSeriesEditor({ family: 'load', component: focus.name, tab: 'archetype' })
       else if (conventional) {
         const componentType = focus.type === 'Link' ? 'links' : 'generators'
@@ -1326,7 +1329,7 @@ export default function TimeSeriesManager() {
     onError: (e: Error) => {
       const target = pendingSingleGenRef.current
       pendingSingleGenRef.current = null
-      const message = errorText(e)
+      const message = sentence(errorText(e))
       if (target) setGenUploadError({ name: target, message })
       else toast.error(message)
       appLog('ERROR', `Generator profile upload failed: ${message}`)

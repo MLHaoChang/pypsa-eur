@@ -399,8 +399,6 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
-// Issue 06 — discussed historical run selected in Results chrome. Sticky
-// until cleared or the project switches; does not restore run inputs.
 /** Time Series opened on one component: its tab, the field's slot when
  *  given (e.g. marginal_cost), and that field's editor when asked. */
 export interface TimeSeriesFocus {
@@ -409,6 +407,9 @@ export interface TimeSeriesFocus {
   field?: string
   openEditor?: boolean
 }
+
+// Issue 06 — discussed historical run selected in Results chrome. Sticky
+// until cleared or the project switches; does not restore run inputs.
 
 export interface RunResultRequest {
   runId: string

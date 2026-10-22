@@ -116,6 +116,7 @@ describe('LoadSeriesEditor', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Apply to plant/ }))
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith('Site A', { job_id: 'job-1', component: 'plant' }))
     expect((await screen.findByTestId('applied')).textContent).toBe("Applied to plant's load: peak 10 → 80 MW. Undo (Ctrl+Z) reverts it.")
+    expect(screen.queryByRole('button', { name: /Apply to plant/ })).toBeNull()
   })
 
   it('holds Apply when the preview says this network cannot take the series', async () => {

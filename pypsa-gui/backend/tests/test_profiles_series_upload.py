@@ -82,3 +82,14 @@ def test_a_file_that_does_not_fit_says_what_to_change(client, project, blob, say
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "series_upload"
     assert says in detail["message"]
+
+
+@pytest.mark.parametrize("blob, says", [
+    (pd.concat([pd.DataFrame({"gt1": np.ones(len(IDX))}, index=IDX),
+                pd.DataFrame({"gt1": [1.0]}, index=IDX[:1])]).to_csv().encode(), "twice"),
+    (_csv(np.where(np.arange(len(IDX)) == 5, np.inf, 1.0)), "not a finite number"),
+])
+def test_a_repeated_hour_or_an_infinite_value_is_refused(client, project, blob, says):
+    resp = _upload(client, project, blob)
+    assert resp.status_code == 422, resp.text
+    assert says in resp.json()["detail"]["message"]

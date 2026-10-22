@@ -10,7 +10,7 @@ import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
-import { useSeriesFields } from '../components/series/useSeriesFields'
+import { generatorSeriesEditors, useSeriesFields } from '../components/series/useSeriesFields'
 import SeriesEditor from '../components/series/SeriesEditor'
 import { SeriesStateLink } from '../components/series/SeriesKit'
 import { useUIStore } from '../store/uiStore'
@@ -131,7 +131,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const [form, setForm] = useState<FS>({})
 
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: genProfiles = {} } = useQuery({
+  const { data: genProfiles = {}, isSuccess: profilesRead } = useQuery({
     queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
     staleTime: 30_000,
@@ -148,12 +148,8 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('Generator')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
-  // A renewable's or demand response's profile has no editor yet: Time
-  // Series' row upload is its one entry.
-  const noEditor = genMeta?.category === 'renewable' || genMeta?.category === 'dr'
-  const series = useSeriesFields(currentProject, 'generators', gen.name,
-    noEditor ? { p_max_pu: 'Time Series', p_min_pu: 'Time Series', marginal_cost: 'Price series' }
-      : { p_max_pu: 'Availability', p_min_pu: 'Availability', marginal_cost: 'Price series' })
+  const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
+  const series = useSeriesFields(currentProject, 'generators', gen.name, editors?.fields ?? {})
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
@@ -1861,13 +1857,13 @@ function GeneratorPanel({ name }: { name: string }) {
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const gen = (generators as Generator[]).find(g => g.name === name)
   const { data: schema } = useAssetSchema('Generator')
-  const { data: genProfiles = {} } = useQuery({
+  const { data: genProfiles = {}, isSuccess: profilesRead } = useQuery({
     queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
     staleTime: 30_000,
   })
-  const category = (genProfiles as Record<string, GeneratorProfileMeta>)[name]?.category
-  const noEditor = category === 'renewable' || category === 'dr'
+  const editors = generatorSeriesEditors(profilesRead
+    ? (genProfiles as Record<string, GeneratorProfileMeta>)[name]?.category ?? 'other' : undefined)
   if (!gen) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
@@ -1875,18 +1871,18 @@ function GeneratorPanel({ name }: { name: string }) {
         <Row label="Bus" value={gen.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <GeneratorCard key={gen.name} gen={gen} mode="detail" onRename={n => setSelectedComponent({ type: 'Generator', name: n })} />
-      {currentProject && noEditor && (
+      {currentProject && editors && !editors.availability && (
         <Section title="Profile">
           <SeriesStateLink project={currentProject} componentType="generators" attribute="p_max_pu" component={gen.name} />
         </Section>
       )}
-      {currentProject && !noEditor && (
+      {currentProject && editors?.availability && (
         <Section title="Availability">
           {/* The same editor the Time Series drawer mounts (TS-02). */}
           <AvailabilityEditor key={gen.name} project={currentProject} component={gen.name} componentType="generators" mode={uiMode} />
         </Section>
       )}
-      {currentProject && category !== 'dr' && (
+      {currentProject && editors?.price && (
         <Section title="Price series">
           <SeriesEditor key={gen.name} project={currentProject} component={gen.name} kind="tou" componentType="generators" mode={uiMode} />
         </Section>

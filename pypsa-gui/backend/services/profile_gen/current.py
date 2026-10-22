@@ -92,24 +92,28 @@ def series_from_upload(ctx, component_type: str, attribute: str, component: str,
             "(the row's template has the layout)")
     values = pd.to_numeric(frame[cols[0]], errors="coerce")
     n = ctx.network
-    snaps = pd.DatetimeIndex(n.snapshots.get_level_values(-1)
-                             if isinstance(n.snapshots, pd.MultiIndex) else n.snapshots)
-    if isinstance(n.snapshots, pd.MultiIndex) and snaps.has_duplicates:
+    if isinstance(n.snapshots, pd.MultiIndex):
         raise SeriesUploadError(
-            "the model repeats its hours over several investment periods; a "
-            "measured file covers one year — upload it from the Time Series row")
+            "the model has several investment periods and a measured file here "
+            "covers one year; generate the series instead")
+    snaps = pd.DatetimeIndex(n.snapshots)
     idx = pd.DatetimeIndex(frame.index)
+    if idx.has_duplicates:
+        raise SeriesUploadError(
+            f"the file gives the hour {idx[idx.duplicated()][0]} twice (a local "
+            "clock's autumn hour?): give each model hour once, in the model's "
+            "time (the row's template has them)")
     missing = snaps.difference(idx)
     if len(missing):
         raise SeriesUploadError(
             f"the file has no value for {len(missing)} of the model's "
             f"{len(snaps)} hours (first: {missing[0]}): give one row per model "
             "hour (the row's template has them)")
-    v = values[~idx.duplicated()].reindex(snaps)
-    if v.isna().any():
-        bad = v.index[v.isna()][0]
+    v = values.reindex(snaps)
+    if not np.isfinite(v.to_numpy(dtype=float)).all():
+        bad = v.index[~np.isfinite(v.to_numpy(dtype=float))][0]
         raise SeriesUploadError(
-            f"the value at {bad} is not a number: fill every hour with a number")
+            f"the value at {bad} is not a finite number: fill every hour with a number")
     if spec.kind == "per_unit" and (v.max() > spec.hi or v.min() < spec.lo):
         hint = (" — it looks like a percentage: divide by 100"
                 if v.max() > spec.hi and v.max() <= 100 * spec.hi else "")

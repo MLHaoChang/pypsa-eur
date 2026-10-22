@@ -50,6 +50,30 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+const DAYS = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
+
+/** The days a period applies on, as toggles; none ticked means every day.
+ *  Kept as the "0,1,2" list the period body sends (0 = Monday). */
+function DayToggles({ label, value, onChange }: {
+  label: string; value: string; onChange: (v: string) => void
+}) {
+  const on = new Set(ints(value))
+  return (
+    <span className="inline-flex" role="group" aria-label={`${label} days`}>
+      {DAYS.map((d, k) => (
+        <button key={d} type="button" aria-pressed={on.has(k)} aria-label={`${label} ${d}`}
+          className={`px-1 text-[10px] border border-border ${on.has(k) ? 'bg-accent/20 text-accent' : 'text-muted'}`}
+          onClick={() => {
+            const next = new Set(on)
+            if (next.has(k)) next.delete(k)
+            else next.add(k)
+            onChange([...next].sort((a, b) => a - b).join(','))
+          }}>{d}</button>
+      ))}
+    </span>
+  )
+}
+
 function periodBody(p: Period): Record<string, unknown> {
   const body: Record<string, unknown> = { name: p.name, rate: Number(p.rate) }
   if (p.months.trim()) body.months = ints(p.months)
@@ -233,14 +257,15 @@ export default function SeriesEditor({ project, component, kind, componentType =
                 <>
                   <p className="text-[11px] text-muted">
                     Periods in order; the first match prices the hour, so the catch-all goes last.
-                    Months 1–12, weekdays 0 = Monday, hours [from, to).
+                    Months 1–12 (blank: all), the days it applies on, hours [from, to).
                   </p>
                   {periods.map((p, i) => (
                     <div key={i} className="flex flex-wrap items-center gap-1" data-testid="tou-period">
                       <input aria-label={`Period ${i + 1} name`} className={`${INPUT} w-20`} value={p.name} onChange={e => setPeriod(i, { name: e.target.value })} />
                       <input aria-label={`Period ${i + 1} price`} className={`${INPUT} w-16`} placeholder="price" value={p.rate} onChange={e => setPeriod(i, { rate: e.target.value })} />
                       <input aria-label={`Period ${i + 1} months`} className={`${INPUT} w-20`} placeholder="months" value={p.months} onChange={e => setPeriod(i, { months: e.target.value })} />
-                      <input aria-label={`Period ${i + 1} weekdays`} className={`${INPUT} w-20`} placeholder="weekdays" value={p.weekdays} onChange={e => setPeriod(i, { weekdays: e.target.value })} />
+                      <DayToggles label={`Period ${i + 1}`} value={p.weekdays}
+                        onChange={weekdays => setPeriod(i, { weekdays })} />
                       <input aria-label={`Period ${i + 1} from hour`} className={`${INPUT} w-12`} placeholder="from" value={p.start} onChange={e => setPeriod(i, { start: e.target.value })} />
                       <input aria-label={`Period ${i + 1} to hour`} className={`${INPUT} w-12`} placeholder="to" value={p.end} onChange={e => setPeriod(i, { end: e.target.value })} />
                       {periods.length > 1 && (

@@ -274,8 +274,9 @@ export const seriesApi = {
     const form = new FormData()
     form.append('file', file)
     for (const [k, v] of Object.entries(target)) form.append(k, v)
-    return client.post<PendingSeries>(`${projectPath(project)}/series/upload`, form)
-      .then(r => r.data)
+    // The editor shows a refusal in place, with its fix; no toast as well.
+    return client.post<PendingSeries>(`${projectPath(project)}/series/upload`, form,
+      { skipErrorToast: true }).then(r => r.data)
   },
 
   generateAvailability: (project: string, body: {

@@ -40,3 +40,26 @@ export function useSeriesFields(
   })
   return out
 }
+
+/** Which of a generator's series have an editor, by the server's category
+ *  (the Time Series tab the generator sits on, so Properties and Time Series
+ *  agree on its one entry): a renewable's or demand response's profile has
+ *  none, its row upload is the entry; demand response's activation cost has
+ *  none either. Null while the category loads. */
+export function generatorSeriesEditors(category: string | undefined): {
+  availability: boolean
+  price: boolean
+  fields: Record<string, string>
+} | null {
+  if (category === undefined) return null
+  if (category === 'dr') {
+    return { availability: false, price: false,
+      fields: { p_max_pu: 'Time Series', p_min_pu: 'Time Series', marginal_cost: 'Time Series' } }
+  }
+  if (category === 'renewable') {
+    return { availability: false, price: true,
+      fields: { p_max_pu: 'Time Series', p_min_pu: 'Time Series', marginal_cost: 'Price series' } }
+  }
+  return { availability: true, price: true,
+    fields: { p_max_pu: 'Availability', p_min_pu: 'Availability', marginal_cost: 'Price series' } }
+}

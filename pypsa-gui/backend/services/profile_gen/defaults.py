@@ -44,6 +44,13 @@ _CARRIER_DEFAULT = {"ac": "commercial", "dc": "commercial", "electricity": "comm
                     "low voltage": "commercial", "heat": "heat"}
 
 
+def is_measured(meta) -> bool:
+    """A stored series is measured when it came from a file: a raw upload
+    (no meta) or one applied with provenance "measured" (the editors'
+    Measured file tab, a load meter upload). A default never replaces it."""
+    return not meta or str(meta.get("provenance") or "").startswith("measured")
+
+
 def guess_archetype(name: str, bus_carrier: str) -> tuple[str | None, str]:
     """(archetype, reason) for a load; (None, reason) when nothing fits."""
     low = name.lower()
@@ -73,7 +80,7 @@ def load_defaults(ctx, replace_generated: bool) -> list[dict[str, Any]]:
                                "attribute": "p_set", "component": str(load)}
         key = ("loads", "p_set", load)
         meta = ctx.user_ts_meta.get(key)
-        if key in ctx.user_ts and not meta:
+        if key in ctx.user_ts and is_measured(meta):
             rows.append({**row, "skipped": "carries a measured upload; never replaced"})
             continue
         if key in ctx.user_ts and not replace_generated:

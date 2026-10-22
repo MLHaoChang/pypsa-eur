@@ -1394,9 +1394,13 @@ def assign_profile(
     warnings, target, family_name = p.warnings, p.target, p.family_name
     align_meta, recorded_basis, unit_meta = p.align_meta, p.recorded_basis, p.unit_meta
     n = ctx.network
-    # What the field held before the write, for the receipt's old → new.
-    old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
-    before = {"peak": float(old.max()), "mean": float(old.mean()), "min": float(old.min())}
+    # What the field held before the write, for the receipt's old → new
+    # (None for a value an imported series left unset).
+    with PyPSAService.get_lock():
+        old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
+    finite = old[np.isfinite(old)]
+    before = ({"peak": float(finite.max()), "mean": float(finite.mean()),
+               "min": float(finite.min())} if len(finite) else None)
 
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).

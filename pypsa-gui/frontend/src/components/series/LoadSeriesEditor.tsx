@@ -29,7 +29,15 @@ function coerce(raw: string, like: unknown): unknown {
   if (raw === '') return like
   if (typeof like === 'number') return Number(raw)
   if (typeof like === 'boolean') return raw === 'true'
-  if (Array.isArray(like) || like === null) {
+  if (Array.isArray(like)) {
+    // A plain list, "2025-12-25, 2025-12-26" or "31, 32"; JSON still works.
+    if (raw.trim().startsWith('[')) {
+      try { return JSON.parse(raw) } catch { return raw }
+    }
+    return raw.split(',').map(x => x.trim()).filter(Boolean)
+      .map(x => (Number.isNaN(Number(x)) ? x : Number(x)))
+  }
+  if (like === null) {
     try { return JSON.parse(raw) } catch { return raw }
   }
   return raw
@@ -110,10 +118,17 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-1" data-testid="archetype-params">
               {Object.entries(defaults).filter(([k]) => !SCALE_KEYS.has(k)).map(([k, v]) => (
                 <label key={k} className="flex items-center gap-1">
-                  <span className="text-muted flex-1 min-w-0 break-words" title={k}>{k.replace(/_/g, ' ')}</span>
-                  <input aria-label={k} className={`${INPUT} w-24`}
-                    placeholder={v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
-                    value={overrides[k] ?? ''} onChange={e => setOverrides({ ...overrides, [k]: e.target.value })} />
+                  <span className="text-muted flex-1 min-w-0 break-words">{k.replace(/_/g, ' ')}</span>
+                  {typeof v === 'boolean' ? (
+                    <input aria-label={k} type="checkbox"
+                      checked={overrides[k] !== undefined ? overrides[k] === 'true' : v}
+                      onChange={e => setOverrides({ ...overrides, [k]: String(e.target.checked) })} />
+                  ) : (
+                    <input aria-label={k} className={`${INPUT} w-24`}
+                      placeholder={Array.isArray(v) ? (v.length ? v.join(', ') : 'none, comma-separated')
+                        : v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                      value={overrides[k] ?? ''} onChange={e => setOverrides({ ...overrides, [k]: e.target.value })} />
+                  )}
                 </label>
               ))}
             </div>

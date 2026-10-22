@@ -169,9 +169,9 @@ export default function AvailabilityEditor({ project, component, componentType, 
           <p className="text-muted text-[11px]">
             The dispatch keeps planned availability only, so an outage is never counted twice.
           </p>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex flex-col items-start gap-1 mt-1">
             <Btn onClick={editOutageInputs}><Pencil size={12} /> Edit the outage rate and repair time</Btn>
-            <button type="button" className="text-[11px] text-accent hover:underline" onClick={openReliability}>
+            <button type="button" className="text-[11px] text-accent hover:underline text-left" onClick={openReliability}>
               Forced outages are sampled in the reliability study &gt;
             </button>
           </div>

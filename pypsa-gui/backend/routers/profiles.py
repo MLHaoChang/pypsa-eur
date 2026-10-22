@@ -61,6 +61,7 @@ from services.profile_gen.apply import (
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
 from services.profile_gen.current import SeriesUploadError
+from services.profile_gen.defaults import is_measured
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
@@ -1247,7 +1248,7 @@ def apply_default_series(
         try:
             component_type, attribute = default_target(meta, None, None)
             key = (component_type, attribute, component)
-            if key in ctx.user_ts and not ctx.user_ts_meta.get(key):
+            if key in ctx.user_ts and is_measured(ctx.user_ts_meta.get(key)):
                 results.append({"job_id": job_id, "component": component, "applied": False,
                                 "error_kind": "measured_series_kept",
                                 "message": f"{component!r} carries a measured upload "

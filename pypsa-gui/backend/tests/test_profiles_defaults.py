@@ -116,6 +116,17 @@ def test_a_measured_upload_since_the_preview_is_kept(client, site, session_ctx):
     assert float(session_ctx(client).network.loads_t.p_set["office"].iloc[0]) == 7.0
 
 
+def test_a_measured_series_applied_through_an_editor_is_never_replaced(client, site, session_ctx):
+    # A meter file applied through the editor carries provenance "measured"
+    # in its stored meta; replacing generated series must still keep it.
+    ctx = session_ctx(client)
+    key = ("loads", "p_set", "office")
+    ctx.user_ts[key] = pd.Series(7.0, index=ctx.network.snapshots)
+    ctx.user_ts_meta[key] = {"provenance": "measured", "source": "upload", "family": "load"}
+    rows = _preview(client, site, replace_generated=True)
+    assert rows["office"]["skipped"] == "carries a measured upload; never replaced"
+
+
 def test_a_generated_series_is_skipped_unless_asked(client, site):
     rows = _preview(client, site)
     client.post(f"/api/projects/{site}/profiles/defaults/apply",
