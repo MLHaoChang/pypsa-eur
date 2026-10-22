@@ -85,12 +85,12 @@ describe('Island & ride-through', () => {
     expect(api.state).toHaveBeenCalled()
   })
 
-  it('with no island results says "Not yet available" and why, never an empty table', async () => {
+  it('with no island results says "Not yet available" with its why (not "Not offered"), never an empty table', async () => {
     api.island.mockResolvedValue({ config: null, study: null })
     api.islandReport.mockResolvedValue({ caveat: '', tables: [], missing: ['island_config.json'] })
     mount(<IslandTab />)
     expect((await screen.findByTestId('island-gate-why')).textContent)
-      .toBe('Not offered for this site: The one Run does not request this yet.')
+      .toBe('Not yet available: The one Run does not request this yet.')
     expect(screen.queryByTestId('island-report')).toBeNull()
     expect(screen.queryByTestId('island-table-requirements')).toBeNull()
   })

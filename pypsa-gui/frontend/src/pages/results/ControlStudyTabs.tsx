@@ -10,7 +10,7 @@ import { campusApi, errorText, isOtherKind } from '../../api/campusElectrical'
 import { inScope } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import { openPanel } from './openPanel'
-import { showGridReadiness } from '../../layout/flowNavigation'
+import { showGridReadiness, showResultsTab } from '../../layout/flowNavigation'
 import { Btn, PageSection } from '../../components/PageKit'
 import { StatePill } from '../../components/ResultState'
 import { ScopeGate } from '../../components/flowScope/ScopeGate'
@@ -25,7 +25,7 @@ function ControlNext() {
   const { scope, isSuccess } = useFlowScope()
   if (!isSuccess) return null
   const reliability = inScope(scope, 'reliability')
-  const go = () => (reliability ? useUIStore.getState().requestResultsTab('adequacy') : openPanel('results', 'reports'))
+  const go = () => (reliability ? showResultsTab('adequacy') : openPanel('results', 'reports'))
   return (
     <p data-testid="control-next" className="text-[11px] text-muted">
       Next: {reliability ? 'Reliability' : 'hand off'}{' '}
@@ -88,16 +88,32 @@ export function IslandTab() {
           </PageSection>
         </>
       ) : (
-        <ScopeGate card="control" option="island_checks" testId="island-gate">
+        <NoIslandResults>
           <div className="space-y-2" data-testid="island-tab-state">
             <Note testId="island-none">Not run yet: the island study has not produced results for this project.</Note>
             <Btn onClick={() => openPanel('scenarios', 'campusStudy')}>Run the island study in Grid study ›</Btn>
           </div>
-        </ScopeGate>
+        </NoIslandResults>
       )}
       <ControlNext />
     </div>
   )
+}
+
+/** No island results. island_checks is "not yet available" in the scope (the Run does not request
+ *  it), so the tab says "Not yet available" with its why (§2.3); a site that does not offer it, or
+ *  one where it can be switched on, gets ScopeGate's own words. */
+function NoIslandResults({ children }: { children: React.ReactNode }) {
+  const { registry } = useFlowScope()
+  const opt = registry?.cards.find(c => c.id === 'control')?.options.find(o => o.id === 'island_checks')
+  if (opt?.status === 'not_yet_available') {
+    return (
+      <p className="text-[12px] text-muted" data-testid="island-gate-why">
+        Not yet available{opt.reason ? `: ${opt.reason}` : '.'}
+      </p>
+    )
+  }
+  return <ScopeGate card="control" option="island_checks" testId="island-gate">{children}</ScopeGate>
 }
 
 export function GridFormingTab() {

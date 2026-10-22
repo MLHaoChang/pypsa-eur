@@ -22,7 +22,7 @@ import {
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection from './CampusIslandCutsSection'
-import { useUIStore } from '../store/uiStore'
+import { showResultsTab } from '../layout/flowNavigation'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -224,7 +224,7 @@ export default function CampusIslandSection({ name }: { name: string }) {
         <p className="text-[12px] text-muted mt-3" data-testid="island-results-link">
           The island report, the frequency cuts and the grid-forming settings are in Results › Control.{' '}
           <button type="button" className="text-accent hover:underline" data-testid="island-results-open"
-            onClick={() => { const ui = useUIStore.getState(); ui.setSlidePanel('results'); ui.requestResultsTab('island') }}>Open Island & ride-through ›</button>
+            onClick={() => showResultsTab('island')}>Open Island & ride-through ›</button>
         </p>
         {saved && <CampusIslandCutsSection name={name} mode="actions" />}
       </PageSection>
