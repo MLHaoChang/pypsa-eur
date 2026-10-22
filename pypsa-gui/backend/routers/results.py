@@ -1779,12 +1779,47 @@ def _ic_read_campus(finance: dict | None) -> CampusSource:
                                     "the campus study's owner assets could not be read")
 
 
-def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource | None = None):
+def _ic_growth_flags() -> tuple[str, ...]:
+    """``growth_placeholder:<kind>_<year>`` per growth value the active
+    project's template metadata marks not set (an example built for entered
+    planning years, E1): the case lists them by name (gatekeeper E1
+    condition 3). () without a project or metadata."""
+    import json
+    import uuid
+
+    from db import session as _db
+    from db.models import Project
+    from services import project_registry
+
+    pid = getattr(PyPSAService.get_active_context(), "project_uuid", None)
+    if not pid:
+        return ()
+    try:
+        with _db.SessionLocal() as db:
+            row = db.get(Project, uuid.UUID(str(pid)))
+            path = project_registry.project_dir(row) / "eh_template.json" if row else None
+        meta = json.loads(path.read_text()) if path is not None and path.is_file() else None
+    except (OSError, ValueError):
+        return ()
+    return _growth_flags_of(meta if isinstance(meta, dict) else None)
+
+
+def _growth_flags_of(meta: dict | None) -> tuple[str, ...]:
+    """The ``growth_placeholder`` flags of one template metadata dict."""
+    from services.adequacy.site_peak import unset_periods
+
+    return tuple(f"growth_placeholder:{kind}_{year}"
+                 for year, kinds in sorted(unset_periods(meta).items()) for kind in kinds)
+
+
+def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource | None = None,
+                   growth_flags: tuple[str, ...] = ()):
     """The adapter closure the runner calls in its worker (plan C1). A seam:
     tests replace this factory with one returning a fake `build_case`.
     `campus` (IC G3 R-2) is the request's campus source: its refusal is raised
     here, so it is a refused report like every adapter refusal; its extras go
-    to the adapter and its run flags onto the case."""
+    to the adapter and its run flags onto the case, as are ``growth_flags``
+    (``_ic_growth_flags``)."""
     def build():
         from models.finance import FinanceInputs
         from services.finance.case import FinanceRefused
@@ -1817,7 +1852,7 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
                                       owner=owner,
                                       extra_assets=campus.extras if campus is not None else (),
                                       baseline=base)
-        flags = campus.run_flags if campus is not None else ()
+        flags = (campus.run_flags if campus is not None else ()) + tuple(growth_flags)
         return dataclasses.replace(case, flags=case.flags + flags) if flags else case
     return build
 
@@ -1942,7 +1977,7 @@ def post_investment_case(body: InvestmentCaseRequest | None = None):
     return start_investment_case(
         body,
         build_case=_ic_build_case(n, cfg, owner=owner, lost_load=_state.get("last_lost_load"),
-                                  campus=campus),
+                                  campus=campus, growth_flags=_ic_growth_flags()),
         solver_state=_state,
         state_update=_state_update,
         publish_study=_publish_study,

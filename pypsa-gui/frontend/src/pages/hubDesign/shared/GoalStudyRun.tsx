@@ -10,12 +10,12 @@
 import { Loader2, Play, Square } from 'lucide-react'
 import { useRunGate } from '../../../hooks/useRunGate'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
-import { AddToScope } from '../../../components/flowScope/ScopeCards'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
 
 export const RELIABILITY_OUT_OF_SCOPE =
-  'Outside scope: add Reliability to set a goal and run the study.'
+  'Outside scope: add Reliability goal & study (below) to run the study.'
 
 export function GoalStudyRun() {
   const gate = useRunGate('all')
@@ -60,7 +60,7 @@ export function GoalStudyRun() {
         )}
       </div>
       {!reliabilityOn && (
-        <AddToScope card="reliability" option="goal_study" testId="hub-run-out-of-scope" />
+        <ScopeGate card="reliability" option="goal_study" testId="hub-run-out-of-scope">{null}</ScopeGate>
       )}
       {templateUnknown && (
         <p data-testid="hub-run-template-error" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">

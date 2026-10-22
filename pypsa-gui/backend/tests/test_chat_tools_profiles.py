@@ -37,6 +37,7 @@ PROFILE_TOOLS = (
     "list_load_profile_archetypes",
     "generate_load_profile",
     "generate_availability_profile",
+    "generate_series_profile",
 )
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
@@ -100,6 +101,7 @@ def test_safety_tiers_match_the_declared_markers():
     assert safety_tier_for("list_load_profile_archetypes") == "read"
     assert safety_tier_for("generate_load_profile") == "execution"
     assert safety_tier_for("generate_availability_profile") == "execution"
+    assert safety_tier_for("generate_series_profile") == "execution"
 
 
 def test_route_templates_are_in_the_phase0_inventory():
@@ -480,3 +482,18 @@ def test_a_maintenance_window_applies_through_the_chat_tools(
         )
     assert out["attribute"] == "p_max_pu"
     assert ("generators", "p_max_pu", "chp") in ctx.user_ts
+
+
+def test_a_series_generates_through_the_chat_tools(client, install_network, bound_ctx):
+    n = _wind_network()
+    n.add("StorageUnit", "dam", bus="B1", p_nom=5.0, max_hours=100.0)
+    install_network(n)
+    assert client.post("/api/projects/Chat Dam",
+                       params={"force": True, "rebind": True}).status_code == 200
+    with bound_ctx(client):
+        gen = chat_tools.DISPATCHERS["generate_series_profile"](
+            project_id="Chat Dam", kind="inflow", components=["dam"],
+            params={"annual_mwh": 500.0, "shape": "snowmelt"},
+        )
+    assert gen["target"] == ["storage_units", "inflow"]
+    assert gen["stats"]["dam"]["annual_mwh"] == pytest.approx(500.0)

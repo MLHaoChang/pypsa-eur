@@ -10,7 +10,7 @@ import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
 import { useGoalStudy } from '../useGoalStudy'
-import { AddToScope, ScopeCards } from '../../../components/flowScope/ScopeCards'
+import { ScopeCards } from '../../../components/flowScope/ScopeCards'
 import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
@@ -39,7 +39,7 @@ export function GoalCard() {
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
       <ScopeCards testId="hub-scope-cards" collapsed />
       {!reliabilityOn && (
-        <AddToScope card="reliability" option="goal_study" testId="hub-goal-out-of-scope" />
+        <ScopeGate card="reliability" option="goal_study" testId="hub-goal-out-of-scope">{null}</ScopeGate>
       )}
       {reliabilityOn && <>
       <label className="flex flex-col gap-1 text-[12px]">
