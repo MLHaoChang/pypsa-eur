@@ -150,6 +150,21 @@ it('a table-sourced row names its file, sheet and cell, and a cost its money bas
   expect(screen.getByTestId('chat-edit-money').textContent).toBe('EUR, 2025 money, not adjusted for inflation')
 })
 
+it('a PDF-sourced row names its file, page and quote, a long quote clipped with the full text in the tooltip', () => {
+  const pending = useChatStore.getState().pending!
+  const short = { ...typed, source: { filename: 'datasheet.pdf', page: 4, quote: 'Rated power 2 500 kW',
+    raw: '2 500', raw_unit: 'kW' } }
+  const long = 'Rated continuous AC output power at 25 C ambient and nominal voltage, per IEC 62109: 2 500 kW'
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_document_values',
+    edit_card: { ...card, tool: 'apply_document_values', rows: [short, { ...short, source: { ...short.source, quote: long } }] } } })
+  render(<ConfirmationCard />)
+  const [first, second] = screen.getAllByTestId('chat-edit-source')
+  expect(first.textContent).toBe('datasheet.pdf \u203a p. 4 \u00b7 \u201cRated power 2 500 kW\u201d (2 500 kW)')
+  expect(second.textContent).toContain('\u2026\u201d (2 500 kW)')
+  expect(second.textContent).not.toContain(long)
+  expect(second.getAttribute('title')).toBe(long)
+})
+
 it('a unitless table cell shows its raw value without a stray space', () => {
   const pending = useChatStore.getState().pending!
   const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'D2', raw: '3', raw_unit: '' } }

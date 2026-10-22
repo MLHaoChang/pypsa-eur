@@ -702,11 +702,19 @@ def _equipment_table_preview(args: dict) -> list[dict]:
     unit), plus one note per confirmation given, per left-out cell and per basis note. A
     plan missing a confirmation refuses before any card (`table_confirmation_needed`); a
     table that changes nothing refuses (`nothing_to_change`)."""
+    from services import equipment_table as T
+
+    return _mapped_rows(T.plan_active(args), "preview_equipment_mapping")
+
+
+def _mapped_rows(p: dict, counter: str) -> list[dict]:
+    """The card rows of an `equipment_table.plan`-shaped plan (a table, or PDF citations):
+    the native update's rows run on a copy, each typed row with its `source` (and `money`
+    for a cost), then the notes. `counter` is the read tool that counts left-out gaps."""
     from services import chat_tools
     from services import equipment_table as T
     from services.pypsa_service import PyPSAService
 
-    p = T.plan_active(args)
     T.require_confirmed(p)
     todo = T.changes(PyPSAService.get_network(), p)
     if not todo:
@@ -720,12 +728,15 @@ def _equipment_table_preview(args: dict) -> list[dict]:
 
     rows = _sandbox_rows(klass, list(todo.items()), run)
     lineage = {(c["name"], c["field"]): c for c in p["cells"]}
+    notes = []
     for row in rows:
         cell = lineage.get((row["name"], row["field"])) if row["role"] == "typed" else None
         if cell is not None:
             row["source"] = cell["source"]
             if cell["money_year"] is not None:
                 row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
+            notes += [_note(klass, row["name"], row["field"], text) for text in cell.get("notes", ())]
+    rows += notes
     for need in p["needs"]:
         rows.append({**_note(klass, "", need["confirmation"], need["text"]), "confirmed": True})
     for gap in p["unmapped"][:T.MAX_LISTED_GAPS]:
@@ -733,12 +744,26 @@ def _equipment_table_preview(args: dict) -> list[dict]:
                               gap["message"]), "gap": gap["kind"], **({"source": gap["source"]} if "source" in gap else {})})
     if len(p["unmapped"]) > T.MAX_LISTED_GAPS:
         rows.append(_note(klass, "", "", f"{len(p['unmapped']) - T.MAX_LISTED_GAPS} more cells are left out; "
-                          "preview_equipment_mapping counts them by kind."))
+                          f"{counter} counts them by kind."))
     rows += [_note(klass, "", "money_year", text) for text in p["notes"]]
     return rows
 
 
 register("apply_equipment_mapping", Adapter("parameter_edit", _equipment_table_preview, _component_readback))
+
+
+# ── PDF datasheets: apply_document_values (data-to-model slice 2) ──────────
+
+
+def _document_values_preview(args: dict) -> list[dict]:
+    """As an equipment table's card, each typed row's `source` naming the PDF's page and
+    the raw quote (`services/document_values.py`); the digest binds both."""
+    from services import document_values as D
+
+    return _mapped_rows(D.plan_active(args), "preview_document_values")
+
+
+register("apply_document_values", Adapter("parameter_edit", _document_values_preview, _component_readback))
 
 
 # ── Solver settings: update_solver_config ──────────────────────────────────

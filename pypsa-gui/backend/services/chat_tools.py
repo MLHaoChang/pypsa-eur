@@ -1733,6 +1733,43 @@ def apply_equipment_mapping(upload_id: str, component_class: str, name_column: s
     return out
 
 
+def preview_document_values(upload_id: str, component_class: str, citations: list, decimal_mark: str | None = None,
+                            currency: str | None = None, money_year: int | None = None,
+                            confirm: list[str] | None = None) -> dict:
+    """Check values cited from an uploaded PDF (page and quote) against assets of one
+    class and say what an apply would write and what stays out. Writes nothing."""
+    from services import document_values as D
+
+    p = D.plan_active({"upload_id": upload_id, "component_class": component_class, "citations": citations,
+                       "decimal_mark": decimal_mark, "currency": currency, "money_year": money_year,
+                       "confirm": confirm})
+    return {**D.summary(PyPSAService.get_network(), p),
+            "next": "apply_document_values with the same arguments and source_sha256 = source.sha256"}
+
+
+def apply_document_values(upload_id: str, component_class: str, citations: list, source_sha256: str,
+                          decimal_mark: str | None = None, currency: str | None = None,
+                          money_year: int | None = None, confirm: list[str] | None = None) -> dict:
+    """Write previewed PDF citations onto their assets through the network route, with the
+    digest of the card the user approved (the turn loop binds it)."""
+    from harness import edit_card
+    from routers.network_document_values import DocumentValuesHttp
+    from routers.network_document_values import apply_document_values as _h
+
+    if not edit_card.approved_digest():
+        from services import equipment_table as T
+
+        T._refuse("edit_preview_stale", "No approved edit card for these values; nothing was applied. "
+                  "Propose the edit again.", 409)
+    body = DocumentValuesHttp(upload_id=upload_id, component_class=component_class, citations=citations,
+                              decimal_mark=decimal_mark, currency=currency, money_year=money_year,
+                              confirm=list(confirm or []), source_sha256=source_sha256,
+                              digest=edit_card.approved_digest())
+    out = _route(_h, body)
+    out.pop("receipt", None)
+    return out
+
+
 def _urdb_rate(data, item_index: int | None = None):
     """The rate object of an uploaded URDB file: the object itself, one item
     of an OpenEI response, or a REopt scenario's `urdb_response`."""
@@ -7794,6 +7831,8 @@ DISPATCHERS: dict[str, Any] = {
     "apply_library_reference": apply_library_reference,
     "preview_equipment_mapping": preview_equipment_mapping,
     "apply_equipment_mapping": apply_equipment_mapping,
+    "preview_document_values": preview_document_values,
+    "apply_document_values": apply_document_values,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
