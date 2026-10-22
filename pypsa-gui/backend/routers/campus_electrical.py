@@ -505,11 +505,7 @@ def apply_gfm_settings(
         return cit.apply_settings(project)
     with edit_card.for_project(project):
         card = edit_card.preview(GFM_APPLY_TOOL, {}, with_state=False)
-        if card["digest"] != digest:
-            raise HTTPException(status_code=409, detail={
-                "error_kind": "edit_preview_stale",
-                "message": "The recommendation changed since the card was shown; nothing was applied. "
-                           "Review the card again."})
+        edit_card.require_current(GFM_APPLY_TOOL, {}, {"digest": digest})
         out = cit.apply_settings(project)
         return {**out, "receipt": edit_card.receipt(card, {})}
 
