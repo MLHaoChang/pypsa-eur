@@ -83,6 +83,10 @@ class FinanceResult:
     # The storage LCOS block (`services.finance.lcos.storage_lcos`; owner
     # decision 6): per asset and in total; the totals are also in `metrics`.
     lcos: dict = field(default_factory=dict)
+    # The LCOE's own inputs per year (checked-results S8b): the generation it
+    # divides by and the value it starts from, so the figure can be rebuilt
+    # from the report. Empty when the LCOE is not established.
+    lcoe_inputs: dict = field(default_factory=dict)
 
 
 # ── metrics ──────────────────────────────────────────────────────────────────
@@ -370,6 +374,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     # a counterfactual it is SAM's revenue exactly.
     energy = [e for e in op.energy_mwh.values()]
     lcoe = lcoe_r = None
+    lcoe_inputs: dict = {}
     if energy and all(e is not None for e in energy) and inc_net is not None and \
             cash["equity_post_tax"] is not None and fin.cost_of_equity is not None:
         e_tot = np.sum(energy, axis=0)
@@ -379,6 +384,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
         d = (1.0 + r) ** k
         num = float(np.sum(value / d) - np.sum(cash["equity_post_tax"] / d))
         de = float(np.sum(e_tot / d))
+        lcoe_inputs = {"energy_mwh": e_tot, "value": value}
         lcoe = num / de if de > 0 else None
         if de > 0:
             if fin.price_basis == "real":
@@ -405,7 +411,7 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
     result = FinanceResult(case=case, tl=tl, op=op, op_incremental={"net": inc_net, "counterfactual": cf_net},
                            debt=debt, incentives=inc, tax=tax, tax_unlevered=tax_u, cash=cash,
                            metrics=m, gate=gate, reasons=reasons, flags=sorted(set(flags)),
-                           terminal=terminal, op_counterfactual=cf_op, lcos=lcos)
+                           terminal=terminal, op_counterfactual=cf_op, lcos=lcos, lcoe_inputs=lcoe_inputs)
     sections = {"operating": "ok" if inc_net is not None and terminal is not None else "not_established",
                 "debt": "ok" if debt.established() else "not_established",
                 "incentives": "ok" if inc.established() else "not_established",

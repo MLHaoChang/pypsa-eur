@@ -67,7 +67,9 @@ const PAYLOAD: AssetCostsPayload = {
   ],
 }
 
-function renderPanel(cfg: Record<string, unknown> = { discount_rate: 0.07, inflation_rate: 0 }) {
+function renderPanel(cfg: Record<string, unknown> = {
+  discount_rate: 0.07, inflation_rate: 0, default_lifetime: 25, co2_price: 40, co2_price_per_period: { '2030': 60 },
+}) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   qc.setQueryData(nk('Demo', 'solverConfig'), cfg)
   render(<QueryClientProvider client={qc}><EconomicsPanel /></QueryClientProvider>)
@@ -121,12 +123,12 @@ describe('the Asset costs tab', () => {
     expect(row.textContent).toContain('104 €/kW/yr')
   })
 
-  it('keeps branch money per MVA and a lifetime that never ends as never', async () => {
+  it('keeps branch money per MVA and marks a lifetime of its own kind: none means the project default', async () => {
     await openTab()
     const row = screen.getByTestId('asset-cost-Line-ab')
     expect(row.textContent).toContain('20,000')
     expect(row.textContent).toContain('€/MVA')
-    expect(row.textContent).toContain('never')
+    expect(row.textContent).toContain('25 y (default)')
   })
 
   it('flags a cost back-calculated from a typed capital cost, with its provenance chip', async () => {
@@ -188,5 +190,20 @@ describe('E2: the site connection and IC’s editors', () => {
     fireEvent.click(screen.getByRole('tab', { name: 'Tariffs & contracts' }))
     fireEvent.click(screen.getByRole('button', { name: 'Open the commercial library' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('library')
+  })
+})
+
+describe('the solve assumptions on the Basis tab', () => {
+  it('shows the default lifetime and CO₂ price read-only, each linking to Solver Settings', async () => {
+    renderPanel()
+    const life = await screen.findByTestId('economics-default-lifetime')
+    expect(life.textContent).toContain('25 years')
+    const co2 = screen.getByTestId('economics-co2-price')
+    expect(co2.textContent).toContain('40 €/tCO₂')
+    expect(co2.textContent).toContain('Per-period overrides: 1')
+    expect(within(life).queryByRole('textbox')).toBeNull()
+    fireEvent.click(within(co2).getByRole('button', { name: /Edit in Scenarios & optimisation/ }))
+    expect(useUIStore.getState().solverBlockRequest).toBe('economic')
+    expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
   })
 })

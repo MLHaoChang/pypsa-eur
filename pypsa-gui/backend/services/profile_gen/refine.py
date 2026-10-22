@@ -56,11 +56,11 @@ import pandas as pd
 
 from services.profile_gen.apply import (
     TARGETS,
+    WINDOW_MEAN_BASIS,
     ProfileApplyError,
+    time_basis_for,
     _align_to_snapshots,
     commercial_timezone,
-    _profile_zone,
-    resolve_time_basis,
 )
 
 EARLIER_TARGET_WARNING = "earlier_target_broken"
@@ -81,6 +81,14 @@ class InvalidRefineOpError(RefineError):
 
 class WindowClockUnknownError(RefineError):
     """A window op on a series whose site clock is unknown."""
+
+
+class WindowSourceOpError(RefineError):
+    """An op that needs hours outside the window a source was read from."""
+
+
+class AnnualEnergyOnWindowSourceError(RefineError):
+    """An annual energy target on a source that only knows its window."""
 
 
 class RefineReplayError(RefineError):
@@ -118,9 +126,11 @@ class _Target:
         self.ctx, self.meta, self.spec = ctx, meta, spec
         self.key = [component_type, attribute]
         self.power = spec.kind == "power"
-        basis, _rec, _warn = resolve_time_basis(_profile_zone(ctx, meta, None),
-                                                commercial_timezone(ctx))
+        basis, _rec, _warn = time_basis_for(ctx, meta, None)
         self.basis = basis
+        # A source read from a snapshot window's current series: the year
+        # outside the window is unknown (NaN), see `current.py`.
+        self.window_source = meta.get("profile_annual_basis") == WINDOW_MEAN_BASIS
         self.resolution = str(meta.get("resolution") or "hourly")
 
     def clip(self, v: np.ndarray) -> tuple[np.ndarray, int]:
@@ -132,16 +142,18 @@ class _Target:
             out = np.clip(v, 1e-9, None)
         else:
             out = v
-        return out, int((out != v).sum())
+        return out, int(((out != v) & ~(np.isnan(out) & np.isnan(v))).sum())
 
     def aligned_peak(self, s: pd.Series) -> float:
         aligned, _ = _align_to_snapshots(s, self.ctx.network.snapshots,
                                          resolution=self.resolution, time_basis=self.basis)
-        return float(aligned.max())
+        return float(np.nanmax(aligned.to_numpy(dtype=float)))
 
 
 def _site_clock(ctx, meta: Mapping[str, Any]) -> str:
     zone = commercial_timezone(ctx)
+    if not zone and meta.get("source_clock") == "snapshot":
+        return "UTC"   # the snapshots are the site clock; the labels are its hours
     if not zone:
         params = meta.get("params")
         zone = params.get("timezone") if isinstance(params, Mapping) else None
@@ -203,6 +215,11 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
             "rescale_energy instead")
     v = s.to_numpy(dtype=float)
     extra: dict[str, Any] = {}
+    if t.window_source and name in ("shift", "smooth"):
+        raise WindowSourceOpError(
+            f"op {i} ({name}): this series was read from a snapshot window and "
+            "knows no hours outside it, which a shift or a smoothing would pull "
+            "in; use scale_window, floor, cap or a peak or energy target")
     if name == "scale_peak_to":
         current = t.aligned_peak(s)
         if not current > 0:
@@ -270,22 +287,35 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
         mwh = _num(op, "mwh")
         if mwh <= 0:
             raise InvalidRefineOpError(f"op {i}: rescale_energy.mwh must be positive")
-        total = float(v.sum())
+        basis = op.get("basis", "year")
+        if t.window_source and basis != "window":
+            raise AnnualEnergyOnWindowSourceError(
+                f"op {i}: this series was read from a snapshot window, so the "
+                "year outside it is unknown; state the window's MWh as "
+                "{mwh, basis: \"window\"}")
+        if not t.window_source and basis != "year":
+            raise InvalidRefineOpError(
+                f"op {i}: rescale_energy.basis {basis!r} is for a series read "
+                "from a snapshot window; this one holds its whole year")
+        total = float(np.nansum(v))
         if not total > 0:
             raise InvalidRefineOpError(f"op {i}: the series holds no energy to rescale")
         v = v * (mwh / total)
         extra["energy_requested_mwh"] = mwh
+        extra["energy_basis"] = basis
     clipped_v, clipped = t.clip(v)
     out = pd.Series(clipped_v, index=s.index, name=s.name)
     stats = {"op": name, "index": i, "peak_before": t.aligned_peak(s),
              "peak_after": t.aligned_peak(out),
-             "hours_touched": int((~np.isclose(out.to_numpy(), s.to_numpy())).sum()),
+             "hours_touched": int((~np.isclose(out.to_numpy(), s.to_numpy(), equal_nan=True)).sum()),
              "hours_clipped": clipped, **extra}
     if t.power:
         stats["energy_before_mwh"] = float(s.sum())
         stats["energy_after_mwh"] = float(out.sum())
         peak = float(out.max())
         stats["load_factor"] = float(out.mean() / peak) if peak > 0 else 0.0
+        # Not the edit card's: that one is weighted over the model's snapshots.
+        stats["load_factor_basis"] = "hourly mean / peak, source year"
     return out, stats
 
 
@@ -320,13 +350,19 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                     f"not {t.key[0]}/{t.key[1]}")
             try:
                 if op.get("connection") and op.get("of") == "connection":
+                    recorded = _num(op["connection"], "value") * _num(op, "fraction")
+                    if not np.isclose(_num(op, "resolved_mw"), recorded, rtol=1e-9):
+                        raise RefineReplayError(
+                            f"op {i} (scale_peak_to): {_num(op, 'resolved_mw'):g} MW is "
+                            f"not {_num(op, 'fraction'):g} of the recorded connection "
+                            f"({recorded:g} MW)")
                     try:
                         now = _connection(ctx)
                     except InvalidRefineOpError:
                         now = None
                     if now is None or now["hash"] != op["connection"].get("hash"):
-                        where = (f"the connection is now {now['value']:g} MW "
-                                 f"({now['source']})" if now else
+                        where = (f"the grid connection {now['link']!r} is now "
+                                 f"{now['value']:g} MW" if now else
                                  "the point-of-connection link is gone")
                         warnings.append(
                             f"{CONNECTION_CHANGED_WARNING}: op {i} kept its recorded "

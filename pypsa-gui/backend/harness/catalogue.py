@@ -81,6 +81,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The grid study's settings (section 8) and results (section 10).
+    "CampusStudy", "campusStudy", "CampusResults", "campusResults",
     # The guided investment study panel (frontend normalises both to 'decision').
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
@@ -1533,6 +1535,39 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "job_id", "component"],
     ),
     _t(
+        "preview_default_series",
+        "Generate a DEFAULT series for every component of the open project "
+        "that has none (\"generate default series for everything missing\"): "
+        "one row per component, each a pending series (nothing changes until "
+        "apply_default_series) or the reason it is skipped. Loads get an "
+        "archetype guessed from the load's name, else its bus carrier's "
+        "default; every row is marked assumed and says why it was picked "
+        "(relay it). Each is sized so the model's energy stays as it is (the "
+        "weighted mean equals the load's static p_set); `peak_sized` names "
+        "loads to size by their peak instead. A measured upload is never "
+        "replaced; a generated series only with `replace_generated`. Relay "
+        "default_peak_above_connection and energy warnings. Show the rows "
+        "and ask which to apply. `project_id` is the project NAME and must "
+        "be the open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "replace_generated": {"type": "boolean"},
+         "peak_sized": {"type": "array", "items": {"type": "string"}}},
+        ["project_id"],
+    ),
+    _t(
+        "apply_default_series",
+        "Apply the chosen default series from preview_default_series (their "
+        "job_ids) under ONE undo step; the confirmation card lists every "
+        "row's old → new numbers and why it was picked. Each row is re-checked "
+        "and reported on its own: a component that gained a measured upload "
+        "since is skipped (measured_series_kept) and the others still apply. "
+        "Report how many applied and each skipped row. `project_id` is the "
+        "project NAME and must be the open project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "job_ids": {"type": "array", "items": {"type": "string"}}},
+        ["project_id", "job_ids"],
+    ),
+    _t(
         "list_load_profile_archetypes",
         "List the load-profile archetypes (industrial, commercial, "
         "residential, ev_charging, heat, data_centre, library) with every "
@@ -2094,7 +2129,7 @@ TOOLS: list[dict[str, Any]] = [
         "scenario picks. Use project_picker when the user wants to browse "
         "saved projects without naming one. hubDesign opens the step-by-step "
         "Energy Hub design panel (Guided mode's main view). workspace, settings, "
-        "gridspine, reports and campusElectrical open their application panels; economics opens the rates, "
+        "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
         "price basis and every asset's investment costs; "
         "adequacy and fmea select their Results tabs. Safety: read.",
         {
@@ -4392,6 +4427,8 @@ TOOL_ROUTES: dict[str, list] = {
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
+    "preview_default_series": [("POST", "/api/projects/{name}/profiles/defaults/preview")],
+    "apply_default_series": [("POST", "/api/projects/{name}/profiles/defaults/apply")],
     "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
     "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     "generate_availability_profile": [

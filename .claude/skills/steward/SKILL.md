@@ -53,7 +53,7 @@ Merge master into a PR only for one of these:
 
 ## Gatekeeper checkpoints
 
-The gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC) advises at two points before review, as well as at review:
+The gatekeeper (the id is in `docs/agents/coordinator.md`) advises at two points before review, as well as at review:
 
 - **Before a plan.** Before you build a change that touches gridspine, investment/finance, adequacy or IC engine code, send the gatekeeper your plan in a few lines: what changes, which files, and how you will test it. For a bug fix the plan names the failing test; write that test first and watch it fail before you write the fix, following the `tdd` skill. Start building once the gatekeeper answers, or once it says the plan needs no input.
 - **Same failure twice.** When the same test or CI check fails twice for the same reason, run the `diagnosing-bugs` skill first (reproduce it, make it fail on demand, narrow it down). Then send the gatekeeper the diagnosis together with your two attempts, before a third try.

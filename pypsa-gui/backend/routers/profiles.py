@@ -32,6 +32,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -46,6 +47,8 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    CurrentChangedError,
+    CurrentSeriesError,
     DcLoadOwnedError,
     FamilyTargetMismatchError,
     InvalidSeriesUnitError,
@@ -53,9 +56,12 @@ from services.profile_gen.apply import (
     ProfileBoundConflictError,
     UnknownFamilyError,
     UnsupportedTargetError,
+    WindowSourceGapError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
+from services.profile_gen.current import SeriesUploadError
+from services.profile_gen.defaults import is_measured
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
@@ -69,9 +75,11 @@ from services.profile_gen.availability import (
     UnknownAvailabilityKindError,
 )
 from services.profile_gen.refine import (
+    AnnualEnergyOnWindowSourceError,
     InvalidRefineOpError,
     RefineReplayError,
     WindowClockUnknownError,
+    WindowSourceOpError,
 )
 from services.profile_gen.series import (
     CopAmbientUnknownError,
@@ -192,6 +200,25 @@ class SeriesGenerateRequest(BaseModel):
     params: dict[str, Any] | None = None
     year: int | None = None
     refinements: list[dict[str, Any]] | None = None
+
+
+class CurrentSeriesRequest(BaseModel):
+    # The series a component carries now, made into a pending artifact the
+    # refinement ops act on (services/profile_gen/current.py).
+    component_type: str
+    attribute: str
+    component: str
+
+
+class DefaultsPreviewRequest(BaseModel):
+    # "Generate defaults for all" (services/profile_gen/defaults.py).
+    replace_generated: bool = False
+    # Components sized by their peak (= static p_set) instead of their mean.
+    peak_sized: list[str] = Field(default_factory=list)
+
+
+class DefaultsApplyRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1)
 
 
 class RefineRequest(BaseModel):
@@ -406,6 +433,9 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (CopAmbientUnknownError, {"error_kind": "cop_ambient_unknown"}),
     (TwoWayFloorError, {"error_kind": "two_way_floor"}),
     (PocBoundError, {"error_kind": "poc_bound"}),
+    (CurrentChangedError, {"error_kind": "current_changed_since_refinement"}),
+    (WindowSourceGapError, {"error_kind": "window_source_gap"}),
+    (SeriesUploadError, {"error_kind": "series_upload"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -428,6 +458,9 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (InvalidRefineOpError, {"error_kind": "invalid_refine_op"}),
     (WindowClockUnknownError, {"error_kind": "window_clock_unknown"}),
     (RefineReplayError, {"error_kind": "refine_replay"}),
+    (WindowSourceOpError, {"error_kind": "window_source_op"}),
+    (AnnualEnergyOnWindowSourceError, {"error_kind": "annual_energy_on_window_source"}),
+    (CurrentSeriesError, {"error_kind": "no_current_series"}),
 )
 
 
@@ -676,6 +709,61 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
     return sorted(warnings)
 
 
+def _dry_run(ctx, frame: pd.DataFrame, record: dict) -> tuple[list[str], dict[str, dict]]:
+    """Apply's own decision for each column, written nowhere
+    (`prepare_profile`): its warnings show before Apply, and a refusal it
+    would give (a partial-year network, a family guard) shows as
+    ``not_applicable: <why>`` so the editor can hold the button. Also each
+    column's preview week (`_preview_week`) of what apply would write."""
+    from services.profile_gen.apply import ProfileApplyError, prepare_profile
+    from services.profile_gen.families import default_target
+
+    component_type, attribute = default_target(record, None, None)
+    warnings: set[str] = set(record.get("warnings") or [])
+    weeks: dict[str, dict] = {}
+    for col in frame.columns:
+        try:
+            prepared = prepare_profile(ctx, col, frame[col], record,
+                                       component_type=component_type,
+                                       attribute=attribute)
+        except ProfileApplyError as exc:
+            warnings.add(f"not_applicable: {public_message(exc, route='dry_run')}")
+            continue
+        warnings.update(prepared.warnings)
+        weeks[col] = _preview_week(ctx.network, prepared)
+    return sorted(warnings), weeks
+
+
+def _preview_week(n, prepared) -> dict:
+    """The calendar week (Monday 00:00 on) of the network's snapshots that
+    holds the series' most telling hour — its lowest for an availability
+    cap, its highest otherwise — as apply would write it, beside the
+    component's current series for the same snapshots when it has one."""
+    aligned = prepared.aligned
+    values = aligned.to_numpy(dtype=float)
+    low = prepared.attribute == "p_max_pu"
+    i = int(np.nanargmin(values) if low else np.nanargmax(values))
+    idx = aligned.index
+    stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
+    monday = stamps[i].normalize() - pd.Timedelta(days=stamps[i].weekday())
+    mask = (stamps >= monday) & (stamps < monday + pd.Timedelta(days=7))
+    if isinstance(idx, pd.MultiIndex):
+        mask &= np.asarray(idx.get_level_values(0) == idx[i][0])
+    table = getattr(n, f"{prepared.component_type}_t")[prepared.attribute]
+    current = None
+    if prepared.component in table.columns:
+        current = [round(float(v), 4) for v in
+                   table[prepared.component].reindex(idx).to_numpy(dtype=float)[mask]]
+    shown = stamps[mask]
+    return {
+        "label": "lowest week" if low else "peak week",
+        "period": int(idx[i][0]) if isinstance(idx, pd.MultiIndex) else None,
+        "snapshots": [t.isoformat() for t in shown],
+        "new": [round(float(v), 4) for v in values[mask]],
+        "current": current,
+    }
+
+
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
     hours = 8784 if pd.Timestamp(year=year, month=1, day=1).is_leap_year else 8760
     return {col: {"peak_mw": float(frame[col].max()) * scale,
@@ -740,7 +828,8 @@ def generate_load_profiles(
     stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
-    return {**record, "stats": stats, "warnings": warnings}
+    dry, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/loads/upload")
@@ -793,8 +882,9 @@ async def upload_load_profiles(
     write_pending(str(proj.directory), job_id, frame, record)
     stats = _load_stats(frame, 1.0, int(record["weather_year"]))
     preview = _preview_load_energy(ctx, frame, record, stats)
+    dry, weeks = _dry_run(ctx, frame, record)
     return {**record, "unmatched": unmatched, "stats": stats,
-            "warnings": preview}
+            "warnings": sorted({*preview, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/availability/generate")
@@ -888,7 +978,8 @@ def generate_availability_profiles(
             stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
-    return {**record, "stats": stats}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
@@ -990,7 +1081,196 @@ def generate_series_profiles(
         stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
-    return {**record, "stats": stats}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.get("/{name}/profiles/current")
+def get_current_series(
+    component_type: str,
+    attribute: str,
+    component: str,
+    proj: AuthorizedProject = ProjectAccessDep,
+):
+    """What the component carries now for that attribute: nothing, a
+    generated series (its family and provenance), or an upload."""
+    from services.profile_gen.current import describe_current
+
+    ctx = _foreground_ctx(proj, "read its series")
+    return describe_current(ctx, component_type, attribute, component)
+
+
+@project_router.post("/{name}/profiles/series/upload")
+async def upload_series(
+    file: UploadFile = File(...),
+    component_type: str = Form(...),
+    attribute: str = Form(...),
+    component: str = Form(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """A measured file for one field (the editors' "Measured file" tab) as a
+    pending artifact on the snapshot clock, like `from-current`: previewed,
+    then applied through `/profiles/apply` with the same old → new receipt.
+    A file that does not fit (its column, the model's hours, the field's
+    units) is a `series_upload` refusal saying what to change."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from services.profile_gen.current import series_from_upload
+    from services.upload_guard import read_capped
+    from services.user_timeseries import _parse_upload
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "upload")
+    blob = await read_capped(file)
+    frame = await run_in_threadpool(_parse_upload, blob, file.filename or "upload.csv")
+    try:
+        series, meta = series_from_upload(ctx, component_type, attribute, component, frame)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="series_upload")},
+        ) from exc
+    return _pending_series_response(ctx, proj, component_type, component, series, meta)
+
+
+@project_router.post("/{name}/profiles/from-current")
+def pending_from_current(
+    body: CurrentSeriesRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The component's current series as a pending artifact, on the
+    snapshot clock it was stored in, so the refinement ops act on a measured
+    upload the same way as on a generated series. Nothing touches the
+    network here; apply refuses the artifact once the stored series changes."""
+    from services.profile_gen.current import series_from_current
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine its series")
+    try:
+        series, meta = series_from_current(ctx, body.component_type, body.attribute,
+                                           body.component)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="from_current")},
+        ) from exc
+    return _pending_series_response(ctx, proj, body.component_type, body.component,
+                                    series, meta)
+
+
+def _pending_series_response(ctx, proj, component_type: str, component: str,
+                             series: pd.Series, meta: dict) -> dict:
+    """Write a snapshot-clock series as a pending artifact and answer with
+    its stats, the apply's dry-run warnings and the preview week."""
+    frame = series.to_frame(component)
+    job_id = str(uuid.uuid4())
+    record = dict(meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = [component]
+    write_pending(str(proj.directory), job_id, frame, record)
+    v = series.dropna()
+    stats = {component: {"min": float(v.min()), "mean": float(v.mean()),
+                         "max": float(v.max())}}
+    if meta.get("unit") == "MW":
+        hours = 24 * (366 if pd.Timestamp(year=int(meta["weather_year"]), month=1,
+                                          day=1).is_leap_year else 365)
+        stats[component].update(peak_mw=float(v.max()),
+                                annual_mwh=float(v.mean()) * hours)
+        if component_type == "loads":
+            _preview_load_energy(ctx, frame, record, stats)  # modelled_mwh, as generated loads show
+    warnings, weeks = _dry_run(ctx, frame, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.post("/{name}/profiles/defaults/preview")
+def preview_default_series(
+    body: DefaultsPreviewRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Every family's default series, one row per component: a generated
+    pending series (its reason, sizing, stats, warnings and preview week),
+    or why it is skipped. Nothing touches the network here."""
+    from services.profile_gen.defaults import preview_defaults
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "preview defaults")
+    rows = preview_defaults(ctx, str(proj.directory), proj.name,
+                            replace_generated=body.replace_generated,
+                            peak_sized=frozenset(body.peak_sized))
+    out = []
+    for row in rows:
+        record = row.pop("record", None)
+        if record is not None:
+            nc, _meta = _pending_artifact(proj, row["job_id"])
+            with pending_io_lock(), xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            dry, weeks = _dry_run(ctx, frame[[row["component"]]], record)
+            row["warnings"] = sorted({*row["warnings"], *dry})
+            row["week"] = weeks.get(row["component"])
+        out.append(row)
+    return {"rows": out}
+
+
+@project_router.post("/{name}/profiles/defaults/apply")
+def apply_default_series(
+    body: DefaultsApplyRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Apply the chosen default series under ONE undo step. Each row is
+    re-checked (a measured series is never replaced) and reported on its
+    own: a refusal does not roll the others back; undo reverts the batch."""
+    from services.network_undo import push_undo_snapshot
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "apply defaults")
+    push_undo_snapshot()
+    results = []
+    for job_id in body.job_ids:
+        try:
+            nc, meta = _pending_artifact(proj, job_id)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            results.append({"job_id": job_id, "component": None, "applied": False, **detail})
+            continue
+        component = (meta.get("points") or [None])[0]
+        try:
+            component_type, attribute = default_target(meta, None, None)
+            key = (component_type, attribute, component)
+            if key in ctx.user_ts and is_measured(ctx.user_ts_meta.get(key)):
+                results.append({"job_id": job_id, "component": component, "applied": False,
+                                "error_kind": "measured_series_kept",
+                                "message": f"{component!r} carries a measured upload "
+                                           "now; a default never replaces it"})
+                continue
+            with pending_io_lock(), xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            summary = assign_profile(ctx, component, frame[component], meta,
+                                     component_type=component_type, attribute=attribute)
+        except ProfileApplyError as exc:
+            results.append({"job_id": job_id, "component": component, "applied": False,
+                            **_apply_refusal_kind(exc),
+                            "message": public_message(exc, route="defaults_apply",
+                                                      job_id=job_id)})
+            continue
+        results.append({"job_id": job_id, "component": component, "applied": True,
+                        "warnings": summary.get("warnings", []),
+                        "peak": summary.get("peak"), "before": summary.get("before")})
+    return {"results": results,
+            "applied": sum(r["applied"] for r in results),
+            "undo": "one undo reverts every series applied here"}
 
 
 @project_router.post("/{name}/profiles/refine")
@@ -1007,7 +1287,7 @@ def refine_profile(
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "refine")
     nc, meta = _pending_artifact(proj, body.job_id)
-    with xr.open_dataset(nc) as ds:
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
         frame = ds.to_dataframe()
     frame.index = pd.DatetimeIndex(frame.index)
     frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
@@ -1028,7 +1308,8 @@ def refine_profile(
     record["project_id"] = proj.name
     record["points"] = list(new.columns)
     write_pending(str(proj.directory), job_id, new, record)
-    return {**record, "stats": stats, "warnings": warnings}
+    dry, weeks = _dry_run(ctx, new, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.get("/{name}/profiles/pending")

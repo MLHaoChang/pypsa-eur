@@ -45,19 +45,19 @@
     },
     {
       "item": "wind farm",
-      "note": "onwind costs from defaults pack 2026-10-20; forced size (the IC counts the capex)",
+      "note": "onwind costs from defaults pack 2026-10-22; forced size (the IC counts the capex)",
       "source": "pack",
       "value": "60 MW, fixed new build"
     },
     {
       "item": "PV plant",
-      "note": "solar-utility costs from defaults pack 2026-10-20",
+      "note": "solar-utility costs from defaults pack 2026-10-22",
       "source": "pack",
       "value": "50 MWp, fixed new build"
     },
     {
       "item": "battery",
-      "note": "battery power and energy parts from defaults pack 2026-10-20; throughput cost 2 EUR per MWh discharged (illustrative)",
+      "note": "battery power and energy parts from defaults pack 2026-10-22; throughput cost 2 EUR per MWh discharged (illustrative)",
       "source": "pack",
       "value": "candidate 0\u201350 MW at 2 h, round trip 0.88"
     },
@@ -105,7 +105,7 @@
     },
     {
       "item": "finance",
-      "note": "a nominal, post-tax case in base-year money (2030), escalated from that year. The defaults pack's 2026-10-20 discount rate (7 %) is real and pre-tax, so it is not this WACC; the optimisation's discount rate is the WACC (K0)",
+      "note": "a nominal, post-tax case in base-year money (2030), escalated from that year. The defaults pack's 2026-10-22 discount rate (7 %) is real and pre-tax, so it is not this WACC; the optimisation's discount rate is the WACC (K0)",
       "source": "assumed",
       "value": "7 % WACC, 9 % cost of equity, 2 % escalation, 25 years"
     },

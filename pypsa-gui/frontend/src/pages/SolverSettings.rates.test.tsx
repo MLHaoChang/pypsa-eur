@@ -34,4 +34,9 @@ describe('Solver settings: rates', () => {
     wrap(<EconomicAssumptions draft={{ ...DRAFT, discount_rate: undefined } as unknown as SolverConfig} patch={vi.fn()} />)
     expect(screen.getByTestId('solver-rate-discount').textContent).toContain('not set')
   })
+
+  it('is the anchor the lifetime and CO₂ links scroll to', () => {
+    const { container } = wrap(<EconomicAssumptions draft={DRAFT} patch={vi.fn()} />)
+    expect(container.querySelector('#solver-economic-assumptions')).toBeTruthy()
+  })
 })

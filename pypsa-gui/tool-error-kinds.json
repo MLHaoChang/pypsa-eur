@@ -959,6 +959,34 @@
       "surface": "inline",
       "why": "A recorded refinement no longer fits the regenerated series (a changed target, an op that cannot run). The detail names the op and its index; the assistant re-proposes the refinement, per call."
     },
+    "no_current_series": {
+      "surface": "inline",
+      "why": "A refinement of the current series was asked for, but the component has none for that attribute, or carries one over several investment periods. The detail says which; the assistant offers to generate or upload one, per call."
+    },
+    "current_changed_since_refinement": {
+      "surface": "inline",
+      "why": "A series made from the component's current one was applied after that current series changed (another apply, an upload, an undo). The detail says so; the assistant refines the current series again, per call."
+    },
+    "series_upload": {
+      "surface": "inline",
+      "why": "A measured file for one field does not fit it: no column named after the component, an hour of the model missing, a value that is not a number or outside the field's range (a percentage for a share). The detail says what to change; the editor shows it in place, per call."
+    },
+    "window_source_gap": {
+      "surface": "inline",
+      "why": "A series made from a snapshot window's current series meets an hour outside that window (the snapshots changed since). The detail names the hour; the assistant refines the current series again, per call."
+    },
+    "window_source_op": {
+      "surface": "inline",
+      "why": "A shift or smoothing was asked for on a series read from a snapshot window, which knows no hours outside it. The detail names the op; the assistant uses a window scale, floor, cap or peak/energy target instead, per call."
+    },
+    "annual_energy_on_window_source": {
+      "surface": "inline",
+      "why": "An annual energy target was asked for on a series read from a snapshot window, whose year outside the window is unknown. The detail asks for the window's MWh; the assistant restates it with basis window, per call."
+    },
+    "measured_series_kept": {
+      "surface": "inline",
+      "why": "A default series was about to replace a component that carries a measured upload (one arrived after the preview). The row is skipped and says so; the others apply. The assistant reports the row, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."

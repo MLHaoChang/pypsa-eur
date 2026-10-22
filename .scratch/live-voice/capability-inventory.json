@@ -2331,6 +2331,48 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "preview_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/preview"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "replace_generated",
+        "peak_sized"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "d2bffa1352e1c4f15d71f9e93afa5f173b66aba0eb08e0d07084622bbad1e62a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_ids"
+      ],
+      "required": [
+        "project_id",
+        "job_ids"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "4269f1d7d6b12df848df53620eeb7843392056062a9e9e4cd45573e6572dd0cc",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "list_load_profile_archetypes",
       "toolsets": [
         "network"
@@ -3305,7 +3347,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "9d68599e2baa3edfb739918d5fbcfca3cc1296ead8ee1ad03dd73bfaa21242bf",
+      "schema_sha256": "93bde255ba875a6460049fb764a44364390030a7e0b8538d53f38ae8025871c4",
       "behavioral_fixture": "pending"
     },
     {
@@ -6589,6 +6631,8 @@
     "hubDesign",
     "reports",
     "campusElectrical",
+    "campusStudy",
+    "campusResults",
     "decision",
     "economics",
     "profiles",
@@ -6650,6 +6694,10 @@
     "reports",
     "CampusElectrical",
     "campusElectrical",
+    "CampusStudy",
+    "campusStudy",
+    "CampusResults",
+    "campusResults",
     "DecisionStudy",
     "decision",
     "Economics",

@@ -16,6 +16,7 @@ from tests.test_chat_tools_investment_case import _report
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 PROFILE = "investment-case/1"
+LCOE = "investment-lcoe/1"
 # -100 then 60, 60: IRR 0.13066238629180748 (tests/test_finance_cashflow.py); at 10 %,
 # -100 + 60/1.1 + 60/1.21 = 4.132231404958677.
 EQUITY = [-100.0, 60.0, 60.0]
@@ -27,7 +28,7 @@ PROJECT_NPV = -200 + 50 / 1.07 + 120 / 1.07**2 + 80 / 1.07**3
 @pytest.fixture(autouse=True)
 def private_store(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", PROFILE)
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", PROFILE + "," + LCOE)
 
 
 @pytest.fixture
@@ -71,20 +72,20 @@ def hand(payload, equity=EQUITY, project=PROJECT, coe=0.10, wacc=0.07):
     payload["project_post_tax_irr"] = metrics.irr(project)[0]
 
 
-def published(ctx, expected):
+def published(ctx, expected, profile=PROFILE):
     """The profile's own values once they equal the hand ones (summation order differs by ulps)."""
     from harness import calculations, investment_calculations
 
-    scope = {"version": 1, "profile": PROFILE, "entity_id": "network"}
-    raw = investment_calculations.source(ctx, "network", investment_calculations.current(ctx))
+    scope = {"version": 1, "profile": profile, "entity_id": "network"}
+    raw = investment_calculations.source(ctx, "network", investment_calculations.current(ctx), profile)
     facts, _ = calculations.scoped_calculate(raw, scope)
     values = {f["metric"]: f["value"] for f in facts if f["metric"] in expected}
     assert values == pytest.approx(expected, rel=1e-12, abs=1e-12)
     return values
 
 
-def ask(checked, ctx, values):
-    scope = {"version": 1, "profile": PROFILE, "project_id": ctx.project_uuid,
+def ask(checked, ctx, values, profile=PROFILE):
+    scope = {"version": 1, "profile": profile, "project_id": ctx.project_uuid,
              "entity_id": "network", "retain": False}
     return checked.run(NumericalProvider(values), message="Check the returns.", checked_scope=scope)
 
@@ -111,7 +112,7 @@ def test_hand_cash_with_a_nonzero_first_year(project, checked):
     assert "cost of equity 10.0000%" in text and "WACC 7.0000%" in text
     assert "(financial close) is undiscounted" in text
     assert "Money basis, as the report states it: nominal basis" in text
-    assert "LCOE is not checkable yet" in text
+    assert "The LCOE is checked separately (investment-lcoe/1)" in text
 
 
 def test_the_sam_report_matches_its_own_headlines(project, checked):
@@ -195,3 +196,94 @@ def test_the_money_basis_is_the_reports_own_and_a_free_text_currency_is_no_unit(
     assert "costs in real 2027 EUR (2020 price data)" in text and "<b>" not in text
     answer = checked.client.get("/api/chat/answers/" + approval(frames)["answer_id"]).json()
     assert {b["unit"] for b in answer["blocks"]} == {"report currency", "fraction/year"}
+
+
+# ── LCOE (investment-lcoe/1) ──────────────────────────────────────────────
+
+
+def lcoe_hand(payload, energy=(0.0, 10.0, 10.0), value=(0.0, 100.0, 100.0), inflation=0.02, basis="nominal"):
+    """Value 100 and 10 MWh in years 1 and 2 beside the equity cash -100, 60, 60 at 10 %."""
+    hand(payload)
+    payload["years"] = payload["years"][:3]
+    payload["price_basis"] = basis
+    payload["lcoe_inputs"] = {"energy_mwh": list(energy), "value": list(value), "inflation": inflation}
+    r = 0.10
+    num = sum(v / (1 + r) ** k for k, v in enumerate(value)) - sum(c / (1 + r) ** k for k, c in enumerate(EQUITY))
+    den = sum(e / (1 + r) ** k for k, e in enumerate(energy))
+    payload["lcoe_nominal_per_mwh"] = num / den if den > 0 else None
+    rr = (1 + r) / (1 + inflation) - 1 if inflation is not None else None
+    payload["lcoe_real_per_mwh"] = (payload["lcoe_nominal_per_mwh"] if basis == "real" else None
+                                    if rr is None or den <= 0 else
+                                    num / sum(e / (1 + rr) ** k for k, e in enumerate(energy)))
+
+
+# (100/1.1 + 100/1.21 - 4.132231404958677) / (10/1.1 + 10/1.21) = 169.42148760330576 / 17.355371900826448
+LCOE_NOMINAL = 169.42148760330576 / 17.355371900826448
+
+
+def test_the_lcoe_from_the_retained_series(project, checked):
+    store(project, lcoe_hand)
+    assert LCOE_NOMINAL == pytest.approx(9.761904761904763)
+    values = published(project, {"lcoe_nominal": LCOE_NOMINAL,
+                                 "lcoe_real": 169.42148760330576 / (10 / 1.0784313725490196 + 10 / 1.0784313725490196**2)},
+                       LCOE)
+    frames = ask(checked, project, values, LCOE)
+    assert answered(checked, frames) == values
+    text = public_text(frames)
+    assert "USD/MWh" in text and "incremental value" not in text
+
+
+def test_the_sam_reports_lcoe_matches_its_headline(project, checked):
+    payload = store(project)
+    expected = {"lcoe_nominal": payload["lcoe_nominal_per_mwh"]}
+    if payload["lcoe_real_per_mwh"] is not None:
+        expected["lcoe_real"] = payload["lcoe_real_per_mwh"]
+    values = published(project, expected, LCOE)
+    assert values.keys() == expected.keys()
+
+
+def test_zero_generation_is_refused_not_divided(project, checked):
+    store(project, lambda p: lcoe_hand(p, energy=(0.0, 0.0, 0.0)))
+    frames = ask(checked, project, {}, LCOE)
+    assert reasons(frames) == {"lcoe_nominal": "no_discounted_generation", "lcoe_real": "no_discounted_generation"}
+
+
+def test_a_report_stored_before_the_series_were_retained(project, checked):
+    def old(payload):
+        lcoe_hand(payload)
+        del payload["lcoe_inputs"]
+    store(project, old)
+    assert set(reasons(ask(checked, project, {}, LCOE)).values()) == {"lcoe_inputs_not_retained"}
+
+
+def test_no_inflation_withholds_only_the_real_lcoe(project, checked):
+    store(project, lambda p: lcoe_hand(p, inflation=None))
+    values = published(project, {"lcoe_nominal": LCOE_NOMINAL}, LCOE)
+    frames = ask(checked, project, values, LCOE)
+    assert reasons(frames) == {"lcoe_real": "inflation_not_recorded"}
+
+
+def test_on_a_real_basis_the_real_lcoe_is_the_nominal_one(project, checked):
+    store(project, lambda p: lcoe_hand(p, basis="real"))
+    values = published(project, {"lcoe_nominal": LCOE_NOMINAL, "lcoe_real": LCOE_NOMINAL}, LCOE)
+    assert values["lcoe_real"] == values["lcoe_nominal"]
+
+
+def test_a_counterfactual_says_the_lcoe_is_on_incremental_value(project, checked):
+    def incremental(payload):
+        lcoe_hand(payload)
+        payload["has_counterfactual"] = True
+    store(project, incremental)
+    values = published(project, {"lcoe_nominal": LCOE_NOMINAL}, LCOE)
+    real = published(project, {"lcoe_real": 169.42148760330576 / (10 / 1.0784313725490196 + 10 / 1.0784313725490196**2)},
+                     LCOE)
+    frames = ask(checked, project, {**values, **real}, LCOE)
+    assert "on the incremental value against the counterfactual" in public_text(frames)
+
+
+def test_an_unknown_retained_year_is_named_as_such(project, checked):
+    def gap(payload):
+        lcoe_hand(payload)
+        payload["lcoe_inputs"]["energy_mwh"][1] = None
+    store(project, gap)
+    assert set(reasons(ask(checked, project, {}, LCOE)).values()) == {"lcoe_inputs_not_established"}
