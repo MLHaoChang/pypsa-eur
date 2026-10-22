@@ -3,7 +3,7 @@
 
 # Checked results: audit of every result surface
 
-Status: ready-for-agent
+Status: done (2026-10-22): every slice below is merged; the follow-ups are listed at the end.
 Type: task
 Baseline: master `8b5c707` (2026-10-20)
 
@@ -118,14 +118,14 @@ Each slice is one PR on its own `claude/*` branch, with a release-note fragment.
 | S3 (#460) | Load flow: `branch-loading/1` and `network-loading/1` (LOPF, P only). The v2 displayed-data ACK join is a later slice | Gatekeeper |
 | Fingerprint (#462) | Every profile requires the exact solve-input fingerprint as well as the recorded one | Gatekeeper |
 | S4 (#465) | Lost load: `lost-load/1` from the solve's VoLL capture | Gatekeeper (adequacy engine) |
-| S4b | COPT LOLE/EUE: independent two-state convolution | Gatekeeper (adequacy engine) |
-| S3b | Load flow v2 ACK join: a checked loading answer binds the shown window to its evidence | Gatekeeper and UX reviewer |
-| S5 | Prices, emissions, curtailment | Gatekeeper |
-| S6 | Capacity expansion and storage cycles | Gatekeeper |
-| S7 | Energy flow and Load shape (after #438 and #440 merge) | Gatekeeper |
-| S8 | Economics and investment case (withheld as "not checkable yet" until this lands) | Gatekeeper (finance) |
-| S9 | Grid-readiness scorecard rows (after #435 merges) | Gatekeeper |
-| S10 | Checked copilot charts: series slots, "Not drawn" list | Gatekeeper and UX reviewer, on the same head SHA |
+| S4b (#483) | COPT LOLE/EUE: independent two-state convolution (`copt-screening/1`) | Gatekeeper (adequacy engine) |
+| S3b (#488) | Load flow v2 ACK join: a checked loading answer binds the shown window to its evidence | Gatekeeper and UX reviewer |
+| S5 (#472) | Prices, emissions, curtailment | Gatekeeper |
+| S6 (#475) | Capacity expansion and storage cycles | Gatekeeper |
+| S7 (#476, #477) | Energy flow (`energy-balance/1`) and Load shape (`site-import/1`) | Gatekeeper |
+| S8 (#480, #481, #482, #484) | Economics and investment case: NPV and IRR (`investment-case/1`), retained LCOE series, nominal and real LCOE (`investment-lcoe/1`), the real-LCOE guard | Gatekeeper (finance) |
+| S9 (#493, #500) | Grid-readiness scorecard rows: declared rules (#493), then `scorecard-row/1` (#500) | Gatekeeper |
+| S10 (#486, #487) | Checked copilot charts: series slots, "Not drawn" list; the chart UI (#487) | Gatekeeper and UX reviewer, on the same head SHA |
 
 Every new profile:
 - joins the 133-case pilot evaluation with positive and adversarial cases (wrong value, unit, entity, window and sign; extra claim);
@@ -191,8 +191,21 @@ The gatekeeper reviewed these at `0a40442` and said "go with changes"; the chang
   - Energy, peak and cost cover every captured Load, matching the card; shed hours count the electrical Loads, as the engine does.
   - Bus-keyed legacy captures are refused.
   - Monte Carlo and the EH per-year LOLE are withheld: retaining samples would be an engine change with its own plan.
+- **S8 notes.** An `investment-case/1` answer never says its LCOE is on the incremental value; that note is gated on the LCOE profile as well as on a counterfactual (audit close-out).
 - **Display.** The Adequacy view's units read "over the modelled horizon"; the engines return horizon totals.
 
 ## Open questions
 
-- **S4b.** Which copt.py conventions (grid delta and rounding, strict or non-strict LOLP comparison, period-block sums, generator weights, `k_exact`) the independent convolution must pin.
+None open.
+- **S4b** (closed by #483). The independent convolution pins the classical two-state case only. Fleets with profiled units, period-varying or folded capacity, or capacities off the 1 MW grid are refused, named.
+
+## Follow-ups
+
+Each is outside this package and gets its own issue or PR.
+- **Results-tab window.** A checked answer's link to Results opens the tab without passing the evidence window (UX follow-up c on S3b).
+- **Scorecard rows without a numeric verdict.** The categorical and non-scalar rows (`grid_former`, `lole`, `oscillation`, `energization_peak:*`) each need their own profile; `scorecard-row/1` leaves them unchecked.
+- **Chart evidence messages (#486, GK nits).**
+  - `verify()` says "expired" when the evidence file is missing; it should say "evidence no longer stored".
+  - An orphan provenance JSON is left behind when `_save_agent_export` is refused.
+- **"Not drawn" names (#487, UX nit).** The line has no readable series name, because the receipt carries no entity or carrier. Fixing it changes the receipt contract.
+- **Guided reliability link.** `AvailabilityEditor.openReliability` opens the hub card in Guided mode, not Results (filed separately by the UX reviewer).

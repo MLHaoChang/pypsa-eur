@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A checked investment-case answer (NPV and IRR) no longer carries the LCOE's "incremental value against the counterfactual" note; only the LCOE answer does. The checked-results audit records every slice as delivered and lists the follow-ups.
