@@ -109,7 +109,12 @@ def evaluation_project(baseline, request):
             "lost_load_t": pd.DataFrame({"L1": [0.0, 5.0]}, index=n.snapshots),
             "voll_eur_per_mwh": 1000.0,
         }
-    return ctx
+    if case.profile == "investment-case/1":
+        from tests.test_investment_assurance import hand, store
+
+        store(ctx, lambda p: hand(p, equity=[-100.0, 150.0], project=[-100.0, 175.0], coe=0.25, wacc=0.25))
+    yield ctx
+    ctx.solver_state["investment_case_report"] = None
 
 
 @pytest.fixture
@@ -160,8 +165,16 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
     if case.fault == "battery":
         su = n.storage_units_t
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
-    if case.fault == "stale":
+    invested = case.profile == "investment-case/1"
+    if case.fault == "stale" and invested:
+        # The report's own key: a finance input changed since the run.
+        cfg = evaluation_project.solver_state["solver_config"]
+        cfg.finance = {**(cfg.finance or {}), "cost_of_equity": 0.2}
+    elif case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and invested:
+        report = evaluation_project.solver_state["investment_case_report"]
+        report["sections"]["project"]["payload"]["cash"]["equity_post_tax"][1] = None
     elif case.fault == "missing" and case.profile == "capacity/1":
         n.generators.at["G2", "p_nom_opt"] = float("nan")
     elif case.fault == "missing" and case.profile == "bus-price/1":
