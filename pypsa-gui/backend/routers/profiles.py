@@ -68,6 +68,11 @@ from services.profile_gen.availability import (
     TwoWayFloorError,
     UnknownAvailabilityKindError,
 )
+from services.profile_gen.refine import (
+    InvalidRefineOpError,
+    RefineReplayError,
+    WindowClockUnknownError,
+)
 from services.profile_gen.series import (
     CopAmbientUnknownError,
     CopBusError,
@@ -157,6 +162,9 @@ class LoadGenerateRequest(BaseModel):
     year: int | None = None
     # Archetypes are hourly shapes; the field stays for the shared engine call.
     resolution: Literal["hourly"] = "hourly"
+    # A previous artifact's `refinements`, replayed onto the new series
+    # (`profile_gen/refine.replay`).
+    refinements: list[dict[str, Any]] | None = None
 
 
 class AvailabilityGenerateRequest(BaseModel):
@@ -172,6 +180,7 @@ class AvailabilityGenerateRequest(BaseModel):
     # The source year. Unset: the network's (first period's) year, so dated
     # maintenance windows land where the user means them.
     year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
 
 
 class SeriesGenerateRequest(BaseModel):
@@ -182,6 +191,14 @@ class SeriesGenerateRequest(BaseModel):
     components: list[str] = Field(min_length=1)
     params: dict[str, Any] | None = None
     year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
+
+
+class RefineRequest(BaseModel):
+    # A pending artifact to refine by deterministic ops
+    # (services/profile_gen/refine.py); the result is a new pending artifact.
+    job_id: str
+    ops: list[dict[str, Any]] = Field(min_length=1)
 
 
 class ShapeRequest(BaseModel):
@@ -408,6 +425,9 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownSeriesKindError, {"error_kind": "unknown_series_kind"}),
     (MarketBundlesUnavailableError, {"error_kind": "market_bundles_unavailable"}),
     (InvalidSeriesParamsError, {"error_kind": "invalid_series_params"}),
+    (InvalidRefineOpError, {"error_kind": "invalid_refine_op"}),
+    (WindowClockUnknownError, {"error_kind": "window_clock_unknown"}),
+    (RefineReplayError, {"error_kind": "refine_replay"}),
 )
 
 
@@ -581,6 +601,42 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
+def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying: bool):
+    """Refine (or replay a recorded list over) every column of an artifact;
+    one meta (the ops are the same for every column), stats per column, and
+    the warnings."""
+    from services.profile_gen import refine
+    from services.profile_gen.families import default_target
+
+    ct, attr = default_target(meta, None, None)
+    run = refine.replay if replaying else refine.refine_series
+    cols, stats, warnings, new_meta = {}, {}, [], meta
+    for col in frame.columns:
+        out = run(ctx, frame[col], meta, ops, component_type=ct, attribute=attr)
+        cols[col], stats[col], new_meta = out.series, out.stats, out.meta
+        warnings += [w for w in out.warnings if w not in warnings]
+    return pd.DataFrame(cols, index=frame.index), new_meta, stats, warnings
+
+
+def _replay_refinements(ctx, result, refinements):
+    """A regenerated series replays the refinements it is given."""
+    if not refinements:
+        return result
+    from types import SimpleNamespace
+
+    try:
+        frame, meta, _stats, warnings = _refine_frame(ctx, result.series, dict(result.meta),
+                                                      refinements, replaying=True)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine_replay")},
+        ) from exc
+    meta["replay_warnings"] = warnings
+    return SimpleNamespace(series=frame, meta=meta)
+
+
 def _foreground_ctx(proj: AuthorizedProject, verb: str):
     """The active context, refused (409) unless it holds this project."""
     from services.pypsa_service import PyPSAService
@@ -673,6 +729,7 @@ def generate_load_profiles(
                     "message": public_message(exc, route="load_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -680,7 +737,7 @@ def generate_load_profiles(
     record["points"] = list(result.series.columns)
     write_pending(str(proj.directory), job_id, result.series, record)
 
-    stats = _load_stats(result.series, float(record["scale_mw"]),
+    stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
     return {**record, "stats": stats, "warnings": warnings}
@@ -814,6 +871,7 @@ def generate_availability_profiles(
                     "message": public_message(exc, route="availability_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -916,6 +974,7 @@ def generate_series_profiles(
                     "message": public_message(exc, route="series_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     if ambient_from_spec:
@@ -932,6 +991,44 @@ def generate_series_profiles(
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
     return {**record, "stats": stats}
+
+
+@project_router.post("/{name}/profiles/refine")
+def refine_profile(
+    body: RefineRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Refine a pending artifact by deterministic ops into a NEW pending
+    artifact (its meta records the ops, `based_on` and the user-refined
+    provenance); `/profiles/apply` writes it, behind the old → new card in
+    chat. Nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine")
+    nc, meta = _pending_artifact(proj, body.job_id)
+    with xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
+    try:
+        new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
+                                                       replaying=False)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine",
+                                              job_id=body.job_id)},
+        ) from exc
+    job_id = str(uuid.uuid4())
+    record = {k: v for k, v in new_meta.items() if k != "replay_warnings"}
+    record["job_id"] = job_id
+    record["based_on"] = body.job_id
+    record["project_id"] = proj.name
+    record["points"] = list(new.columns)
+    write_pending(str(proj.directory), job_id, new, record)
+    return {**record, "stats": stats, "warnings": warnings}
 
 
 @project_router.get("/{name}/profiles/pending")

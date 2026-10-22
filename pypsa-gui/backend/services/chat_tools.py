@@ -3642,6 +3642,12 @@ def generate_availability_profile(project_id: str, kind: str, generators: list,
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
+def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
+    from routers.profiles import RefineRequest, refine_profile as _h
+    body = RefineRequest(job_id=job_id, ops=ops)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
 def generate_series_profile(project_id: str, kind: str, components: list,
                             params: dict | None = None,
                             year: int | None = None) -> dict:
@@ -7741,6 +7747,7 @@ DISPATCHERS: dict[str, Any] = {
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,
     "generate_series_profile": generate_series_profile,
+    "refine_generated_profile": refine_generated_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,

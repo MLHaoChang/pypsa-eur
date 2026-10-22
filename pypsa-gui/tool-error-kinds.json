@@ -943,6 +943,18 @@
       "surface": "inline",
       "why": "A series kind's parameters are missing, unknown or out of range (an unpriced hour, a malformed period, a bad COP temperature). The detail names the parameter; the assistant fixes it and retries, per call."
     },
+    "invalid_refine_op": {
+      "surface": "inline",
+      "why": "A refinement op is unknown, malformed, or makes no sense for the series' target (rescale_energy on a price, keep_energy, a bad window). The detail names the op and its index; the assistant fixes it, per call."
+    },
+    "window_clock_unknown": {
+      "surface": "inline",
+      "why": "A refinement window was asked for on a series whose site clock is unknown (no project timezone, no profile timezone). The detail says so; the assistant asks the user to set the project's timezone, per call."
+    },
+    "refine_replay": {
+      "surface": "inline",
+      "why": "A recorded refinement no longer fits the regenerated series (a changed target, an op that cannot run). The detail names the op and its index; the assistant re-proposes the refinement, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."

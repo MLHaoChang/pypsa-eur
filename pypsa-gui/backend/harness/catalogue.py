@@ -1598,6 +1598,28 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "kind", "generators"],
     ),
     _t(
+        "refine_generated_profile",
+        "Refine a PENDING generated profile by deterministic ops into a new "
+        "pending profile (nothing changes until apply_generated_profile, "
+        "whose card shows old → new). Emit ops, never numbers for the series. "
+        "ops, in order: scale_peak_to {mw | value | fraction + of: "
+        "current_peak|connection} (the peak the model sees; connection is "
+        "the point-of-connection link, read server-side); scale_window "
+        "{hours: [start, end), weekdays?, months?, factor} on the site's "
+        "clock (refused if the project has no timezone); set_floor / set_cap "
+        "{value}; shift {hours}; smooth {window_h}; rescale_energy {mwh} "
+        "(loads and inflow). Put a peak or energy target LAST: a later op "
+        "that moves it is warned earlier_target_broken; relay warnings and "
+        "offer to reorder. The answer gives per-op stats (peak, energy, load "
+        "factor, hours touched and clipped) and the new job_id. "
+        "`project_id` is the project NAME and must be the open project. "
+        "Safety: execution.",
+        {"project_id": {"type": "string"},
+         "job_id": {"type": "string"},
+         "ops": {"type": "array", "items": {"type": "object"}}},
+        ["project_id", "job_id", "ops"],
+    ),
+    _t(
         "generate_series_profile",
         "Generate another model series into the pending store (nothing "
         "changes until apply_generated_profile writes it to the target it "
@@ -4226,7 +4248,7 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (10)
+    # profile generator (11)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
@@ -4239,6 +4261,7 @@ TOOL_ROUTES: dict[str, list] = {
         ("POST", "/api/projects/{name}/profiles/availability/generate")],
     "generate_series_profile": [
         ("POST", "/api/projects/{name}/profiles/series/generate")],
+    "refine_generated_profile": [("POST", "/api/projects/{name}/profiles/refine")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
