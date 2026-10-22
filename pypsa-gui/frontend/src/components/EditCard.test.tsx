@@ -30,9 +30,9 @@ it.each([['expert', 's_nom'], ['guided', 'Rating']] as const)('shows old → new
   useUIStore.setState({ uiMode })
   render(<ConfirmationCard />)
   const rows = within(screen.getByRole('table', { name: 'Changes to apply' })).getAllByRole('row')
-  expect(within(rows[1]).getAllByRole('cell').map(c => c.textContent)).toEqual(['Line L2', field, '300', '400', 'MVA'])
+  expect(within(rows[1]).getAllByRole('cell').map(c => c.textContent)).toEqual(["Line 'L2'", field, '300', '400', 'MVA'])
   expect(rows[2].textContent).toContain('Follows from the change, read-only')
-  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Line > L2')
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Line 'L2'")
   await userEvent.click(screen.getByRole('button', { name: 'Approve' }))
   expect(postChatConfirm).toHaveBeenCalledWith('session-1', { token: 'token-1', decision: 'approve' })
 })
@@ -74,7 +74,9 @@ it('a note row states the rule without inventing values', () => {
     new: 150000, unit: 'EUR/MWh', display: { old: null, new: 150, unit: 'EUR/kWh' } }
   useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [stored, note] } } })
   render(<ConfirmationCard />)
-  expect(screen.getByTestId('chat-edit-display').textContent).toBe('150 EUR/kWh = 150000 EUR/MWh stored')
+  expect(screen.getByTestId('chat-edit-display').textContent).toBe('stored as 150000 EUR/MWh')
+  // The display unit leads; an unset old value reads in words, an unbounded one as "no limit".
+  expect(screen.getAllByTestId('chat-edit-row-typed')[0].textContent).toContain('not set150EUR/kWh')
   expect(screen.getByTestId('chat-edit-row-note').textContent).toContain('Annualised by PyPSA at solve time')
   expect(screen.getByTestId('chat-edit-row-note').textContent).not.toContain('Empty')
 })
@@ -99,7 +101,7 @@ it('names the flow section and shows the field in Properties without leaving the
     section: { id: 'connection', label: 'Connection & grid' }, rows: [{ ...typed, target }] } } })
   useUIStore.setState({ selectedComponent: null, activeSlidePanel: null, assistantDockOpen: true })
   render(<ConfirmationCard />)
-  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Connection & grid > L2')
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe("Connection & grid \u203a Line 'L2'")
   await userEvent.click(screen.getByTestId('chat-edit-show'))
   expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Line', name: 'L2' })
   expect(useUIStore.getState().activeSlidePanel).toBeNull()
@@ -126,4 +128,68 @@ it.each([['complete', 'complete'], ['warning', 'to check'], ['incomplete', 'to d
     section: { id: 'assets', label: 'Assets & sizing', state, changed: true } }
   render(<AssistantResultCard result={{ _edit_receipt: receipt }} disabled={false} onRequest={vi.fn()} />)
   expect(screen.getByTestId('chat-edit-section').textContent).toBe(`Assets & sizing: ${words}.`)
+})
+
+it('an unbounded old value reads as "no limit", never "inf"', () => {
+  const pending = useChatStore.getState().pending!
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [{ ...typed, old: 'inf' }] } } })
+  render(<ConfirmationCard />)
+  const row = screen.getAllByTestId('chat-edit-row-typed')[0].textContent!
+  expect(row).toContain('no limit')
+  expect(row).not.toContain('inf')
+})
+
+it('a table-sourced row names its file, sheet and cell, and a cost its money basis', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'B3', raw: '400', raw_unit: 'MVA' },
+    money: { currency: 'EUR', money_year: 2025 } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('lines.csv \u203a B3 (400 MVA)')
+  expect(screen.getByTestId('chat-edit-money').textContent).toBe('EUR, 2025 money, not adjusted for inflation')
+})
+
+it('a PDF-sourced row names its file, page and quote, a long quote clipped with the full text in the tooltip', () => {
+  const pending = useChatStore.getState().pending!
+  const short = { ...typed, source: { filename: 'datasheet.pdf', page: 4, quote: 'Rated power 2 500 kW',
+    raw: '2 500', raw_unit: 'kW' } }
+  const long = 'Rated continuous AC output power at 25 C ambient and nominal voltage, per IEC 62109: 2 500 kW'
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_document_values',
+    edit_card: { ...card, tool: 'apply_document_values', rows: [short, { ...short, source: { ...short.source, quote: long } }] } } })
+  render(<ConfirmationCard />)
+  const [first, second] = screen.getAllByTestId('chat-edit-source')
+  expect(first.textContent).toBe('datasheet.pdf \u203a p. 4 \u00b7 \u201cRated power 2 500 kW\u201d (2 500 kW)')
+  expect(second.textContent).toContain('\u2026\u201d (2 500 kW)')
+  expect(second.textContent).not.toContain(long)
+  expect(second.getAttribute('title')).toBe(long)
+})
+
+it('a PDF-sourced row with no quote names its page alone', () => {
+  const pending = useChatStore.getState().pending!
+  const bare = { ...typed, source: { filename: 'datasheet.pdf', page: 4, quote: '', raw: '2 500', raw_unit: 'kW' } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_document_values',
+    edit_card: { ...card, tool: 'apply_document_values', rows: [bare] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('datasheet.pdf \u203a p. 4 (2 500 kW)')
+})
+
+it('a unitless table cell shows its raw value without a stray space', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'D2', raw: '3', raw_unit: '' } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('lines.csv \u203a D2 (3)')
+})
+
+it('a workbook row names its sheet, and a formula cell says its value was saved', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.xlsx', sheet: 'Lines', cell: 'B3', raw: 450, raw_unit: 'MVA',
+    formula: true } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent)
+    .toBe('lines.xlsx \u203a Lines \u203a B3 (450 MVA, saved formula value)')
 })

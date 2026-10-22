@@ -15,7 +15,7 @@ export type ChapterId = Exclude<ResultsGroup, 'summary'>
 /** Where a tile's detail is: a Results tab, the campus panel, or a Guided step. */
 export type ChapterOpen =
   | { panel: 'results'; tab: ResultsTab }
-  | { panel: 'campusElectrical' }
+  | { panel: 'campusStudy' | 'campusResults' }
   | { step: 'goal' }
 
 export interface ChapterTile {
@@ -101,7 +101,8 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
 }
 
 function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 'id' | 'group'> {
-  const open: ChapterOpen = { panel: 'campusElectrical' }
+  // Results once there are some; before that, the settings that run the study.
+  const open: ChapterOpen = { panel: (campus?.results?.compliance?.length ?? 0) > 0 ? 'campusResults' : 'campusStudy' }
   const label = 'Grid checks'
   if (notHub) {
     return { label, value: '', state: 'not_applicable', open,

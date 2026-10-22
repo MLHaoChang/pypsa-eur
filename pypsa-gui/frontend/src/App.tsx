@@ -33,12 +33,15 @@ import GridspinePanel from './pages/GridspinePanel'
 import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import EconomicsPanel from './pages/economics/EconomicsPanel'
-import CampusElectricalPanel from './pages/CampusElectricalPanel'
+import CommercialLibraryPage from './pages/economics/CommercialLibraryPage'
+import CampusElectricalPanel, { CampusResultsPanel, CampusStudyPanel } from './pages/CampusElectricalPanel'
 import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import { FieldDrawer } from './components/FieldDrawer'
+import { FlowReturnButton } from './layout/FlowReturnButton'
+import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -136,18 +139,24 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   solveQueue: { eyebrow: 'RUN',        title: 'Solve queue' },
   gridspine:  { eyebrow: 'STUDIES',    title: 'Planning → dynamics' },
   reports:    { eyebrow: 'REPORTS',    title: 'Reports' },
-  campusElectrical: { eyebrow: 'STUDIES', title: 'Campus electrical' },
+  campusElectrical: { eyebrow: 'CONNECTION & GRID', title: 'Grid connection' },
+  campusStudy: { eyebrow: 'SCENARIOS & OPTIMISATION', title: 'Grid study' },
+  campusResults: { eyebrow: 'RESULTS', title: 'Grid study results' },
   profiles:   { eyebrow: 'BUILD',     title: 'Profile studio' },
   decision:   { eyebrow: 'STUDIES',    title: 'Decision study' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
+  library:    { eyebrow: 'PROJECT',    title: 'Commercial library' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
 
+/** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
+const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'] }
+
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'decision', 'profiles'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'campusStudy', 'campusResults', 'decision', 'profiles'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -161,6 +170,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'overview':   return <OverviewPanel />
     case 'scenarios':  return <ScenariosPanel />
     case 'workspace':  return <WorkspacePanel />
+    case 'library':    return <CommercialLibraryPage />
     // Superseded by the docked comparison rail inside Results (the Compare
     // triggers now open Results + the rail). Kept so the SlidePanel union /
     // PANEL_META stay exhaustive; don't re-point the triggers back here.
@@ -171,6 +181,8 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'decision':   return <DecisionPanel />
     case 'reports':    return <ReportsPanel />
     case 'campusElectrical': return <CampusElectricalPanel />
+    case 'campusStudy': return <CampusStudyPanel />
+    case 'campusResults': return <CampusResultsPanel />
     case 'profiles':   return <ProfileStudioSection />
     case 'settings':   return <LocalSettings />
     case 'hubDesign':  return <HubDesignPanel />
@@ -182,7 +194,7 @@ export function FullPageTab({ panel, onClose }: { panel: SlidePanel; onClose: ()
   const uiMode = useUIStore(s => s.uiMode)
   // Guided reaches the grid checks from the hub design's Results step, so the
   // header names that step and offers the way back (UX template audit N5).
-  const fromHub = uiMode === 'guided' && panel === 'campusElectrical'
+  const fromHub = uiMode === 'guided' && (panel === 'campusElectrical' || panel === 'campusStudy' || panel === 'campusResults')
   const meta = fromHub ? { ...PANEL_META[panel], eyebrow: 'HUB DESIGN · GRID PLAN' } : PANEL_META[panel]
   // A page that draws its own PageHeader claims the header row: it renders
   // ONE compact row with the Close button, and this breadcrumb steps aside
@@ -793,13 +805,21 @@ export default function App() {
           <AssistantDock />
           {uiMode === 'guided' && (
             <FieldDrawer>
-              {t => t.component && t.entity
+              {t => LIMIT_FIELDS[t.field ?? '']
+                // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
+                // limit opens its line; the fault level keeps its value on the bus, so its source line sits under it.
+                ? (<>
+                    {t.field === 'eh_sk_mva' && <PropertiesPanel />}
+                    <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
+                  </>)
+                : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
             </FieldDrawer>
           )}
         </div>
 
+        <FlowReturnButton />
         <StatusBar />
         <CommandPalette />
         <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />

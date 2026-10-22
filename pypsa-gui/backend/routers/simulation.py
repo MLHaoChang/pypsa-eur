@@ -1431,6 +1431,14 @@ def ac_pf_refusal(n) -> tuple[str, str] | None:
                 "Dispatch tables exist but their column-set doesn't match the "
                 "current topology (rows added/removed since the last solve). "
                 "Re-run LOPF to regenerate consistent dispatch before Stage 2.")
+    # A first PF overwrote the LP flows and voltages in place. The claim nulls
+    # `lopf_results`, so a second PF would snapshot those PF values as the LP
+    # baseline and fix dispatch from the slack-adjusted p. A new LOPF clears
+    # `ac_pf_results` (`cleared_result_state`), which lifts this.
+    if PyPSAService.get_solver_state().get("ac_pf_results") is not None:
+        return ("ac_pf_already_run",
+                "AC power flow already ran on this solve, and its values replaced the "
+                "optimisation's. Run the solve again first.")
     return None
 
 
@@ -1526,6 +1534,10 @@ def run_ac_pf():
             # stale state (worker died) → fall through and claim
         _refusal = ac_pf_refusal(n)
         if _refusal is not None:
+            if _refusal[0] == "ac_pf_already_run":
+                # Structured so the chat tool result carries the kind.
+                raise HTTPException(400, {"error_kind": "ac_pf_already_run",
+                                          "message": _refusal[1]})
             raise HTTPException(400, _refusal[1])
         # Atomic claim — lifecycle reset + thread handle in one apply, so no
         # window where status="running" but thread is unset.

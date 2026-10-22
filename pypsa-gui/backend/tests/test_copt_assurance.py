@@ -176,3 +176,46 @@ def test_a_missing_availability_is_refused_not_filled(classical, checked):
 def test_a_missing_demand_is_refused_not_filled(classical, checked):
     classical.network.loads_t.p_set["L1"] = [float("nan"), 100.0]
     assert refused(checked, classical) == {"copt_inputs_not_finite"}
+
+
+def test_a_20_gw_fleet_over_a_year_is_checked_well_inside_the_tool_timeout():
+    import time
+
+    import numpy as np
+
+    from harness import copt_calculations
+
+    units = [{"name": f"u{i}", "capacity_mw": 100, "q": 0.05} for i in range(200)]
+    residual = [float(v) for v in np.linspace(15000.0, 20500.0, 8760)]
+    raw = {"version": 1, "profile": PROFILE, "entity_id": "network", "index": [str(i) for i in range(8760)],
+           "units": units, "weights": [1.0] * 8760, "engine_weights": [1.0] * 8760, "residual": residual,
+           "engine_residual": residual, "engine": dict.fromkeys(copt_calculations.METRICS)}
+    scope = {"version": 1, "profile": PROFILE, "entity_id": "network"}
+    start = time.perf_counter()
+    copt_calculations.calculate(raw, scope)
+    assert time.perf_counter() - start < 5.0
+
+
+def test_prefix_sums_match_the_direct_sum_hour_by_hour():
+    import math
+
+    import numpy as np
+
+    from harness import copt_calculations
+
+    p = copt_calculations.distribution([{"capacity_mw": 60, "q": 0.1}, {"capacity_mw": 40, "q": 0.2},
+                                        {"capacity_mw": 7, "q": 0.3}])
+    residual = [-5.0, 0.0, 0.5, 1.0, 40.0, 60.0, 60.0000000000001, 66.6, 107.0, 250.0]
+    for r, (lolp, eue) in zip(residual, copt_calculations.hourly(p, residual)):
+        k0 = min(int(math.ceil(r - 1e-12)), len(p)) if r > 0 else 0
+        k = np.arange(k0)
+        assert lolp == pytest.approx(min(math.fsum(p[:k0]), 1.0), rel=1e-12, abs=1e-15)
+        assert eue == pytest.approx(math.fsum(p[:k0] * (r - k)), rel=1e-12, abs=1e-12)
+
+
+def test_a_table_over_the_work_budget_is_refused_by_name(classical, checked, monkeypatch):
+    from harness import copt_calculations
+
+    # The hand table has 101 points and 2 units: 202 > 200.
+    monkeypatch.setattr(copt_calculations, "COPT_WORK_BUDGET", 200)
+    assert refused(checked, classical) == {"copt_table_too_large"}

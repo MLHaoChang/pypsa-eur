@@ -9,6 +9,7 @@ import type { SizingMode } from '../site3d/sizing'
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget } from '../api/flow'
+import type { FlowReturn } from '../layout/flowNavigation'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -61,7 +62,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'decision' | 'economics' | 'profiles'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'campusStudy' | 'campusResults' | 'decision' | 'economics' | 'profiles' | 'library'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -399,8 +400,18 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
+/** Time Series opened on one component: its tab, the field's slot when
+ *  given (e.g. marginal_cost), and that field's editor when asked. */
+export interface TimeSeriesFocus {
+  type: string
+  name: string
+  field?: string
+  openEditor?: boolean
+}
+
 // Issue 06 — discussed historical run selected in Results chrome. Sticky
 // until cleared or the project switches; does not restore run inputs.
+
 export interface RunResultRequest {
   runId: string
   status?: string
@@ -454,6 +465,8 @@ interface UIStore {
   // Guided: the field a section item opened in place, in a drawer over the
   // card, so the user finishes it without leaving Guided (design §3.5).
   fieldDrawer: FlowTarget | null
+  // The view the last fix link left; "Back to …" restores it (flowNavigation).
+  flowReturn: FlowReturn | null
   setFieldDrawer: (t: FlowTarget | null) => void
   activeSection: FlowSectionId | null
   setActiveSection: (s: FlowSectionId | null) => void
@@ -496,9 +509,13 @@ interface UIStore {
   /** A section within the requested Results tab (the Investment tab's
    *  `SECTIONS` ids, e.g. 'case'); consumed and cleared by that tab. */
   resultsSectionRequest: string | null
+  // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
+  economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
+  // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
+  solverBlockRequest: 'economic' | 'sclopf' | null
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
-  timeSeriesFocus: { type: string; name: string } | null
+  timeSeriesFocus: TimeSeriesFocus | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -642,7 +659,11 @@ interface UIStore {
   requestResultsTab: (tab: string, section?: string) => void
   clearResultsTabRequest: () => void
   clearResultsSectionRequest: () => void
-  focusTimeSeries: (type: string, name: string) => void
+  requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
+  clearEconomicsTabRequest: () => void
+  requestSolverBlock: (block: 'economic' | 'sclopf') => void
+  clearSolverBlockRequest: () => void
+  focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
@@ -712,6 +733,7 @@ export const useUIStore = create<UIStore>((set) => ({
   siteSizing: 'installed',
   activeSlidePanel: null,
   fieldDrawer: null,
+  flowReturn: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
   activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
@@ -728,6 +750,8 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   resultsSectionRequest: null,
+  economicsTabRequest: null,
+  solverBlockRequest: null,
   timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
@@ -970,8 +994,12 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
-  focusTimeSeries: (type, name) => set({
-    timeSeriesFocus: { type, name }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
+  requestEconomicsTab: (tab) => set({ economicsTabRequest: tab }),
+  clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
+  requestSolverBlock: (block) => set({ solverBlockRequest: block }),
+  clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
+  focusTimeSeries: (type, name, opts) => set({
+    timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),
   clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),

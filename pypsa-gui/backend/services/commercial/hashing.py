@@ -54,6 +54,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("PpaContract", "settlement"): "physical",           # IPP ticket 01 (G2)
     ("PpaContract", "suspend_on_negative_price"): None,  # IPP ticket 01 (G2)
     ("CommercialConfig", "import_price_ref"): None,      # IPP ticket 07 (G7)
+    ("CommercialConfig", "provenance"): {},              # data-to-model slice 2
 }
 
 

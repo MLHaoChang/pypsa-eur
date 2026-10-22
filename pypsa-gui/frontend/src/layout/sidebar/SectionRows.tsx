@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Clock, Coins, FileText, FlaskConical,
+  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Library, Clock, Coins, FileText, FlaskConical,
   GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp, Wand2,
 } from 'lucide-react'
 import type { FlowSectionId } from '../../api/flow'
@@ -51,8 +51,8 @@ function TableRow({ label, tab, title, onCloseModal }: { label: string; tab: str
 function ConnectionRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
-    <SItem icon={<Cable size={15} />} label="Campus electrical"
-      title="Take a solved hub to its electrical design: transformers, reactive compensation, short circuit and PCC grid-code compliance at the critical hours (AC load flow)."
+    <SItem icon={<Cable size={15} />} label="Grid connection"
+      title="The campus file, the grid code the PCC is held to, the connection power factor and the asset library the grid study works from."
       active={activeSlidePanel === 'campusElectrical'} onClick={() => toggle('campusElectrical')} />
   )
 }
@@ -107,7 +107,7 @@ function CommercialRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
     <SItem icon={<Coins size={15} />} label="Economics"
-      title="Discount rate, money year and price basis, and the overnight cost of every asset."
+      title="Discount and inflation rates, money basis, asset costs, finance inputs, tariffs, contracts and participants."
       active={activeSlidePanel === 'economics'} onClick={() => toggle('economics')} />
   )
 }
@@ -121,6 +121,9 @@ function ScenarioRows({ onCloseModal }: Props) {
         active={activeSlidePanel === 'simparams'} onClick={() => toggle('simparams')} />
       <SItem icon={<GitBranch size={15} />} label="Scenarios"
         active={activeSlidePanel === 'scenarios'} onClick={() => toggle('scenarios')} />
+      <SItem icon={<Cable size={15} />} label="Grid study"
+        title="Settings and run of the electrical design study (transformers, reactive compensation, short circuit, PCC compliance by AC load flow) and the island requirements."
+        active={activeSlidePanel === 'campusStudy'} onClick={() => toggle('campusStudy')} />
     </>
   )
 }
@@ -193,6 +196,9 @@ function ResultRows({ onCloseModal }: Props) {
     <>
       <SItem icon={<TrendingUp size={15} />} label="Results"
         active={activeSlidePanel === 'results'} onClick={() => toggle('results')} />
+      <SItem icon={<Cable size={15} />} label="Grid study results"
+        title="What the electrical design study found: transformers, reactive compensation, short circuit and PCC compliance at the critical hours."
+        active={activeSlidePanel === 'campusResults'} onClick={() => toggle('campusResults')} />
       {showDecision && (
         <SItem icon={<Scale size={15} />} label="Decision study"
           title="Answer an investment question (do I need a battery?) with a verdict, a size, a value and a report."
@@ -232,8 +238,13 @@ export function SectionRows({ id, onCloseModal }: { id: FlowSectionId } & Props)
 export function ProjectUtilityRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
-    <SItem icon={<Camera size={15} />} label="Snapshots"
-      title="Saved copies of the network: restore one, or compare it with the network you have now."
-      active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+    <>
+      <SItem icon={<Camera size={15} />} label="Snapshots"
+        title="Saved copies of the network: restore one, or compare it with the network you have now."
+        active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+      <SItem icon={<Library size={15} />} label="Commercial library"
+        title="Tariffs, contracts, connection agreements and price series your organisation keeps, with the versions a project pins."
+        active={activeSlidePanel === 'library'} onClick={() => toggle('library')} />
+    </>
   )
 }

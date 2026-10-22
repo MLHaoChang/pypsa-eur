@@ -27,9 +27,9 @@ starts withheld. See `.scratch/checked-results/audit.md`.
 `card`, `sub_option` and `card_tab` place a results view in the card
 workspaces (`.scratch/project-workflow/card-workspaces.md` §1.1, §3): the card
 and sub-option ids are `services/flow_scope`'s, `card_tab` the card's results
-tab. They are data only (R0): no listing, navigation or catalogue reads them
-yet. Summary (the landing) and Asset Detail (a drawer from every card) have
-none.
+tab. `list_result_views(card=…)` lists one card's views (H2a); navigation
+does not read them yet. Summary (the landing) and Asset Detail (a drawer from
+every card) have none.
 """
 from __future__ import annotations
 
@@ -242,6 +242,21 @@ def for_results_tab(tab: str) -> ResultView | None:
     return next((v for v in RESULT_VIEWS if v.panel == _RESULTS and v.tab == tab), None)
 
 
+def card_views(card: str) -> tuple[ResultView, ...]:
+    """One card's live results views, in registry order."""
+    return tuple(v for v in RESULT_VIEWS if v.panel == _RESULTS and v.card == card and v.live())
+
+
+def card_hint(ui_context) -> str | None:
+    """The card the browser has open (`ui_context.results_card`), or None.
+
+    A hint, so only an exact card id is taken; anything else is dropped and
+    never reaches the model as text.
+    """
+    raw = ui_context.get("results_card") if isinstance(ui_context, dict) else None
+    return raw if isinstance(raw, str) and raw in CARDS else None
+
+
 # ── list_result_views (LC-11, VS-2) ──────────────────────────────────────────
 # The registry projected on the active project: per view, whether its own read
 # has data now (status only, never a value), whether this conversation already
@@ -300,7 +315,7 @@ def note_shown(session, results_tab: str | None) -> None:
         shown.append(results_tab)
 
 
-def list_result_views(exclude_shown: bool = False) -> dict:
+def list_result_views(exclude_shown: bool = False, card: str | None = None) -> dict:
     from fastapi import HTTPException
 
     from services import chat_tools
@@ -308,6 +323,9 @@ def list_result_views(exclude_shown: bool = False) -> dict:
     if not isinstance(exclude_shown, bool):
         raise HTTPException(422, {"error_kind": "invalid_result_views",
                                   "message": "exclude_shown must be true or false."})
+    if card is not None and card not in CARDS:
+        raise HTTPException(422, {"error_kind": "invalid_result_views",
+                                  "message": "card must be one of: " + ", ".join(CARDS) + "."})
     session = chat_tools.chat_session()
     hints = getattr(session, "turn_ui_context", None) or {}
     mode = "guided" if hints.get("ui_mode") == "guided" else "expert"
@@ -318,7 +336,8 @@ def list_result_views(exclude_shown: bool = False) -> dict:
     if on_screen:
         note_shown(session, on_screen)
     shown = list((getattr(session, "shown_results", None) or {}).get(shown_key(), []))
-    views = [v for v in RESULT_VIEWS if v.panel == _RESULTS and v.live()]
+    views = (list(card_views(card)) if card is not None
+             else [v for v in RESULT_VIEWS if v.panel == _RESULTS and v.live()])
     if mode == "guided":
         views.sort(key=lambda v: v.guided_label is None)
     out = []
@@ -337,6 +356,9 @@ def list_result_views(exclude_shown: bool = False) -> dict:
         if data == "available" and v.tab not in shown:
             row["shows"] = v.shows
         out.append(row)
-    return {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
-            "note": ("Statuses only, no values: call a view's read before you open its tab, "
-                     "and quote numbers from that read.")}
+    listing = {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
+               "note": ("Statuses only, no values: call a view's read before you open its tab, "
+                        "and quote numbers from that read.")}
+    if card is not None:
+        listing["card"] = card
+    return listing

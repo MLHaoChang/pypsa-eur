@@ -55,6 +55,12 @@ export interface FlowItem {
   blocking: boolean
   /** A warning the user has checked (`POST …/flow/ack`); it no longer counts. */
   acknowledged: boolean
+  /** The work card the item belongs to (W4a), or null for the core model. */
+  card: ScopeCardId | null
+  /** false: its card or kind is outside the scope. It does not count toward
+   *  the section's state, is not to do or to check, and never blocks; Issues
+   *  lists it under "Not in scope". */
+  in_scope: boolean
 }
 
 export interface FlowSection {
@@ -77,6 +83,8 @@ export interface FlowRunBlocker {
   message: string
   /** The item's own message, the detail to fix from (unchanged by the title). */
   detail?: string
+  /** The validation code behind it ("sclopf_no_branches"). */
+  code?: string
   target: FlowTarget
 }
 export type FlowNote = FlowRunBlocker
@@ -101,6 +109,8 @@ export interface ProjectFlow {
   verdicts: { optimisation: FlowVerdict, study: FlowVerdict | null }
   /** Display-only gaps (non-blocking errors), shown beside an enabled Run. */
   notes: FlowNote[]
+  /** What the Run computes (W4a): stored, or the template's preset. */
+  scope: FlowScope
   deferred: boolean
   deferred_reason: string | null
 }
@@ -125,4 +135,78 @@ export function getProjectFlow(project: string): Promise<ProjectFlow> {
 export function ackFlowItem(project: string, code: string, entity: string | null): Promise<FlowAck> {
   return client.post<{ ack: FlowAck }>(`${flowPath(project)}/ack`, { code, entity })
     .then(r => r.data.ack)
+}
+
+// ── The scope (W4a): six work cards, each with at most three sub-options ──────
+
+export const SCOPE_CARDS = [
+  'capacity', 'grid', 'control', 'reliability', 'commercial', 'handoff',
+] as const
+export type ScopeCardId = (typeof SCOPE_CARDS)[number]
+
+/** `{version, groups, options}` as `flow_scope.json` stores it. A card is on
+ *  when it is in `groups` with a sub-option; one switched off keeps its
+ *  sub-options, so switching it on restores them. */
+export interface FlowScopeValue {
+  version: 1
+  groups: ScopeCardId[]
+  options: Record<ScopeCardId, string[]>
+}
+
+export interface FlowScope extends FlowScopeValue {
+  /** `project`: stored; `preset`: none stored yet, the template's preset. */
+  source: 'project' | 'preset'
+  preset_id: string
+}
+
+/** `available`; `required`: on and locked; `not_yet_available`: shown, never
+ *  selectable. */
+export type ScopeOptionStatus = 'available' | 'required' | 'not_yet_available'
+
+export interface ScopeCardDef {
+  id: ScopeCardId
+  label: string
+  options: { id: string, label: string, status: ScopeOptionStatus, reason: string | null }[]
+  /** Why the card cannot be switched off, or null. */
+  locked_reason: string | null
+  /** What the project's example intends, including sub-options not yet available. */
+  intended: string[]
+  /** The input sections whose blocks the card holds. */
+  sections: FlowSectionId[]
+  /** The section rows' chip ("Grid"), or null (Capacity, Hand-off). */
+  chip: string | null
+}
+
+export interface FlowScopeRegistry {
+  scope: FlowScope
+  cards: ScopeCardDef[]
+  preset_id: string
+  /** The example's name, for "Reset to <name>'s cards". */
+  preset_label: string
+  preset: FlowScopeValue
+  /** The solver config's size source: 'off' (sizing on), 'capacity_run' or 'nameplate'. */
+  fixed_sizes?: 'off' | 'capacity_run' | 'nameplate'
+}
+
+export function getFlowScope(project: string): Promise<FlowScopeRegistry> {
+  // A background read the sidebar chips and section 8 make: its readers show
+  // (or skip) their own state, so a failure never pops the global toast.
+  return client.get<FlowScopeRegistry>(`${flowPath(project)}/scope`, { skipErrorToast: true })
+    .then(r => r.data)
+}
+
+/** Store the scope. 422 with `flow_scope_unavailable` / `flow_scope_required` /
+ *  `flow_scope_unknown` / `flow_scope_invalid`. */
+export function putFlowScope(project: string, scope: FlowScopeValue): Promise<FlowScope> {
+  const { version, groups, options } = scope
+  return client.put<{ scope: FlowScope }>(`${flowPath(project)}/scope`, { version, groups, options })
+    .then(r => r.data.scope)
+}
+
+/** A card, or one of its sub-options, is in scope. */
+export function inScope(scope: FlowScopeValue | null | undefined, card: ScopeCardId,
+  option?: string): boolean {
+  if (!scope || !scope.groups.includes(card)) return false
+  const chosen = scope.options[card] ?? []
+  return option === undefined ? chosen.length > 0 : chosen.includes(option)
 }

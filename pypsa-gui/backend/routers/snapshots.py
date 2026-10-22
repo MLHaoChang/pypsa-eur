@@ -3,7 +3,9 @@ Project-level snapshot router.
 
 A snapshot is a frozen copy of a project's bundle files (`network.nc`,
 `user_ts.json`, `solver_config.json`, `metadata.json`, `layout.json` — the
-full `_BUNDLE_FILES` set) plus a small `snapshot.json` describing it.
+full `_BUNDLE_FILES` set) plus a small `snapshot.json` describing it and a
+`capture_manifest.json` recording which bundle files and folders were present
+when it was taken (see `_capture_presence`).
 Snapshots live under
 ``projects/<name>/snapshots/<snapshot_id>/`` where ``snapshot_id`` is
 ``<iso-ts>-<slug>`` so they list newest-first on lexicographic sort.
@@ -22,6 +24,7 @@ recent N restore points without the dir growing unbounded.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import pathlib
@@ -53,6 +56,7 @@ from services.atomic_io import (
     atomic_write_with as _atomic_write_with,
 )
 from routers.projects import (
+    _BUNDLE_DIRS,
     _BUNDLE_FILES,
     _enforce_project_lock,
     _force_rmtree,
@@ -121,6 +125,10 @@ class SnapshotInfo(BaseModel):
     # contains. 'none' = no dispatch in the snapshot at all (truly unsolved).
     # See services/dispatch_status.py for the classification rules.
     dispatch_status: str = "none"
+    # False for a snapshot taken before `capture_manifest.json` existed: its
+    # restore cannot tell "absent when taken" from "not tracked then", so it
+    # leaves later files in place. The restore preview says so.
+    has_capture_manifest: bool = False
 
 
 def _snapshots_dir(project_dir: pathlib.Path) -> pathlib.Path:
@@ -274,6 +282,62 @@ def _read_snapshot_meta(snap_dir: pathlib.Path) -> dict:
         return {}
 
 
+# Which bundle files and folders a snapshot's project had when it was taken.
+# Restore needs it to tell a file that was ABSENT then (remove the later one)
+# from a file the snapshot simply never tracked (a name `_BUNDLE_FILES` gained
+# in a later release: leave it). SR-1, findings F02/F03.
+_CAPTURE_MANIFEST = "capture_manifest.json"
+_CAPTURE_MANIFEST_VERSION = 1
+
+
+def _capture_presence(project_dir: pathlib.Path) -> dict:
+    """The tracked bundle names and which of them `project_dir` holds now.
+
+    Read from the SOURCE at copy time, not from what landed in the snapshot: a
+    folder whose copy failed was present, so a restore must not delete the live
+    one on its account.
+    """
+    tracked = {"tracked_files": list(_BUNDLE_FILES), "tracked_dirs": list(_BUNDLE_DIRS)}
+    return {
+        "version": _CAPTURE_MANIFEST_VERSION,
+        # Which bundle lists the manifest was judged against, so a reader can
+        # tell a manifest from another release at a glance.
+        "bundle_version": hashlib.sha256(
+            json.dumps(tracked, sort_keys=True).encode()).hexdigest()[:16],
+        **tracked,
+        "present_files": [f for f in _BUNDLE_FILES if (project_dir / f).exists()],
+        "present_dirs": [d for d in _BUNDLE_DIRS if (project_dir / d).exists()],
+    }
+
+
+def _absent_at_capture(snap_dir: pathlib.Path) -> tuple[set[str], set[str]] | None:
+    """The bundle (files, dirs) the snapshot's project did NOT have when taken.
+
+    ``None`` when the snapshot has no readable manifest (taken before it
+    existed, or a capture that crashed before writing it): absent and untracked
+    cannot be told apart, so nothing is removed. A manifest of a version this
+    code does not know is refused rather than read as legacy. Limited to
+    today's bundle names, so a manifest can never name a file outside the
+    bundle for removal.
+    """
+    try:
+        m = json.loads((snap_dir / _CAPTURE_MANIFEST).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(m, dict) or m.get("version") != _CAPTURE_MANIFEST_VERSION:
+        raise HTTPException(409, detail={
+            "error_kind": "snapshot_manifest_unknown",
+            "message": "This snapshot was taken by a newer or unknown version "
+                       "of the app; nothing was restored.",
+        })
+    try:
+        files = set(m["tracked_files"]) - set(m["present_files"])
+        dirs = set(m["tracked_dirs"]) - set(m["present_dirs"])
+    except (KeyError, TypeError):
+        return None
+    return files & set(_BUNDLE_FILES), dirs & set(_BUNDLE_DIRS)
+
+
 def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
     """
     Return existing snapshot subdirs, sorted by id descending (newest first).
@@ -334,6 +398,7 @@ def _to_info(snap_dir: pathlib.Path) -> SnapshotInfo:
         objective=meta.get("objective"),
         has_results=bool(meta.get("has_results", False)),
         dispatch_status=status,
+        has_capture_manifest=(snap_dir / _CAPTURE_MANIFEST).exists(),
     )
 
 
@@ -444,6 +509,7 @@ def _create_snapshot_internal(
     # on typical networks; the user is already paying for a multi-file copy).
     snap_dispatch_status = "none"
     with PyPSAService.get_lock():
+        presence = _capture_presence(project_dir)
         for fname in _BUNDLE_FILES:
             src = project_dir / fname
             if src.exists():
@@ -521,6 +587,11 @@ def _create_snapshot_internal(
     except Exception:  # noqa: BLE001 — never abort snapshot on chat lineage
         pass
 
+    # Last step of the capture, atomically: a crash before it leaves a snapshot
+    # without a manifest, which restores as a legacy one rather than with a
+    # manifest that lies about what was captured.
+    _atomic_write_text(snap_dir / _CAPTURE_MANIFEST, json.dumps(presence, indent=2))
+
     change_log_service.log(
         "snapshot", "Project", name,
         f"Created snapshot '{snap_meta['label'] or sid}' of '{name}' "
@@ -560,6 +631,72 @@ def list_snapshots(
     return [_to_info(d) for d in _list_snapshot_dirs(project_dir)]
 
 
+def _save_unsaved_live_state(project: AuthorizedProject, db, user) -> int | None:
+    """Save the project's unsaved in-memory edits before a restore (SR-1, F01).
+
+    The before-restore safety snapshot copies files on disk, and the restore
+    then reloads the snapshot and clears the undo stack — so an edit that was
+    never saved was lost, although the UI and the chat tool promise the current
+    state is kept. Saving first, through the normal save path, puts the live
+    state on disk for the safety snapshot to copy. A save refusal (a study or
+    solve in flight, the network bound elsewhere) propagates and refuses the
+    restore before anything has changed.
+
+    Only when the ACTIVE context is this project: another project's edits are
+    not what this restore replaces. Returns that context's edit revision once
+    memory and disk agree, for `_refuse_if_changed_since` to compare; ``None``
+    when the active context is another project.
+
+    Calls `_save_context`, which takes `PyPSAService.get_lock()` itself: call
+    this BEFORE the restore's own `with get_lock()` block, never inside it (the
+    lock is not re-entrant).
+    """
+    from services import dirty_state, undo_service
+    from routers.projects import _save_context
+
+    ctx = _bound_active_context(project)
+    if ctx is None:
+        return None
+    if dirty_state.is_dirty(ctx) or undo_service.depth() > 0:
+        _save_context(
+            ctx, project.name, expect=project.name,
+            storage_dir=project.directory, db=db, user=user,
+        )
+        dirty_state.clear(ctx)  # memory and disk now agree
+    return dirty_state.revision(ctx)
+
+
+def _bound_active_context(project: AuthorizedProject):
+    """The active context when it is bound to `project`, else ``None``."""
+    ctx = PyPSAService.get_active_context()
+    if ctx.loaded_project != project.name:
+        return None
+    if ctx.project_uuid is not None and str(ctx.project_uuid) != str(project.uuid):
+        return None
+    return ctx
+
+
+def _refuse_if_changed_since(project: AuthorizedProject, saved_revision: int | None) -> None:
+    """Refuse when the project was edited after `_save_unsaved_live_state`.
+
+    An autosave tick or a chat edit landing between that save and the restore's
+    lock would be in neither the safety snapshot nor the restored state. Call
+    with `get_lock()` held, before the first file is overwritten.
+    """
+    from services import dirty_state
+
+    if saved_revision is None:
+        return
+    ctx = _bound_active_context(project)
+    if ctx is None:
+        return
+    if dirty_state.is_dirty(ctx) or dirty_state.revision(ctx) != saved_revision:
+        raise HTTPException(409, detail={
+            "error_kind": "changed_during_restore",
+            "message": "Edits arrived while restoring; nothing was restored. Try again.",
+        })
+
+
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
 def restore_snapshot(
     snapshot_id: str,
@@ -573,18 +710,21 @@ def restore_snapshot(
 
     Order of operations matters:
     1. Validate the snapshot exists and is complete (network.nc present)
-    2. Create a "pre-restore" auto-snapshot so the user can undo the restore
+    2. Save unsaved in-memory edits, then create a "pre-restore"
+       auto-snapshot so the user can undo the restore
     3. Copy snapshot's bundle files over the project's (atomic per-file)
     4. Reset + reload the in-memory PyPSA network from the restored files
     5. Clear the undo stack (the in-memory state is now the new baseline)
 
     Step 2 is the safety net: a careless restore can't lose work because the
-    pre-restore state is itself saved as a snapshot named "before-restore-...".
+    pre-restore state, unsaved edits included, is itself saved as a snapshot
+    labelled "before-restore".
 
-    Files the snapshot does NOT carry are left as they are: a snapshot taken
-    before the adequacy worksheet and stress-scenario sidecars joined
-    `_BUNDLE_FILES` leaves the live worksheet and registry in place, the same
-    way an old snapshot without `layout.json` keeps the live layout.
+    A bundle file or folder the project did NOT have when the snapshot was
+    taken is removed (its `capture_manifest.json` says which); the safety
+    snapshot of step 2 keeps it. A name the manifest never tracked (it joined
+    `_BUNDLE_FILES` later) is left as it is, and so is everything when the
+    snapshot predates the manifest: it cannot tell absent from untracked.
     """
     # ★ Precheck BEFORE any destructive work (Phase 11 review).
     # The guard inside `reset_network` fires too late here: by then this
@@ -605,6 +745,13 @@ def restore_snapshot(
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
 
     _enforce_project_lock(db, _lock_target(project), user)
+
+    # Read before anything changes: an unknown manifest version refuses here.
+    absent = _absent_at_capture(snap_dir)
+    absent_files, absent_dirs = absent if absent is not None else (set(), set())
+
+    # Outside the `get_lock()` block below: the save takes that lock itself.
+    saved_revision = _save_unsaved_live_state(project, db, user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
@@ -645,6 +792,7 @@ def restore_snapshot(
     # the lock.
     from services import dirty_state, undo_service
     with PyPSAService.get_lock():
+        _refuse_if_changed_since(project, saved_revision)
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
         # snapshot file in place — never a half-written one.
@@ -672,21 +820,31 @@ def restore_snapshot(
                 # limits; a later limit must not survive the restore.
                 if fname == "grid_readiness_limits.json":
                     (project_dir / fname).unlink(missing_ok=True)
+                # Absent when the snapshot was taken, so a live copy was made
+                # later and must not outlive the restore (F02).
+                if fname in absent_files:
+                    (project_dir / fname).unlink(missing_ok=True)
                 continue
             _atomic_write_with(project_dir / fname, lambda p, src=src: shutil.copy2(src, p))
 
-        # Chatbot uploads (Phase A) — snapshot restore overwrites the live
-        # uploads dir with the snapshot bundle's copy. `_copy_bundle_dirs`
-        # already rmtree's the destination before copying, so a post-
-        # snapshot session's uploads are dropped (the pre-restore safety
-        # snapshot the route handler created earlier preserves them if the
-        # user wants to undo). Best-effort: a copy failure here must not
-        # abort restore.
+        # Bundle folders (uploads/, reports/, studies/, sites/): each one the
+        # snapshot carries replaces the live one. One the project did not have
+        # when the snapshot was taken is removed (F03); `_copy_bundle_dirs`
+        # skips a folder missing from its source, so it would survive. The
+        # pre-restore safety snapshot keeps both. Best-effort: a copy or
+        # removal failure here must not abort restore.
         try:
             from routers.projects import _copy_bundle_dirs
             _copy_bundle_dirs(snap_dir, project_dir)
         except Exception:  # noqa: BLE001 — best-effort
             pass
+        for dname in sorted(absent_dirs):
+            live = project_dir / dname
+            if live.exists() and not (snap_dir / dname).exists():
+                try:
+                    _force_rmtree(live)
+                except OSError as exc:
+                    logger.warning("restore: could not remove %s: %s", live, exc)
 
         # Reload in-memory network from the restored files. Lock is already
         # held — `reset_network()` and `import_from_netcdf()` are safe to

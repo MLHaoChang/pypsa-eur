@@ -236,6 +236,9 @@ class ChatSession:
     # LC-10 — the UI context of the turn in flight, for resolve_reference.
     # An untrusted hint, replaced every turn; the resolver re-reads it.
     turn_ui_context: dict[str, Any] | None = None
+    # W10 H2a — the task cap of the turn in flight (budget.task_cap), decided
+    # once at its start; None outside a bounded task.
+    turn_task_cap: Any = None
     # LC-10 — components that successful tool calls named, newest last, as
     # (project key, class, name): the "discussed last" rung. Keyed by project
     # so a switch, by a tool or another tab, never carries a name across.

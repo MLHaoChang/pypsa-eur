@@ -23,12 +23,13 @@ import pytest
 
 from services.library.defaults_pack import loader as D
 
-BASE = "2026-10-20"
+BASE = "2026-10-22"
 FIXTURES = Path(__file__).parent / "fixtures" / "defaults_pack"
 
 
 def _row(**kw) -> dict:
-    row = {c: "" for c in D._VALUE_COLUMNS}
+    row = {c: "" for c in D._TYPED_COLUMNS}
+    row.update(capacity_basis="not_applicable", includes_grid_connection="false")
     row.update(kw)
     return row
 
@@ -37,7 +38,8 @@ def _solar_overnight(**kw) -> dict:
     return _row(key="solar-utility.investment.overnight", technology="solar-utility",
                 part="investment", basis="per_MW", source_technology="Large Scale Solar PV",
                 parameter="overnight", label="Utility PV overnight cost", original_value="1000",
-                original_unit="XTS/kW", unit="XTS/MW", currency="XTS", currency_year="2024",
+                original_unit="XTS/kW", unit="XTS/MW", currency="XTS", money_year="2024", capacity_basis="output_electric_ac",
+                includes_grid_connection="false",
                 price_basis="real", source="src_test: Table 1", source_year="2026",
                 projection_year="2030", domain="[0, inf)", illustrative="false",
                 note="Synthetic.", **kw)
@@ -49,7 +51,8 @@ def _solar_lifetime() -> dict:
                 parameter="lifetime", label="Utility PV lifetime", original_value="35",
                 original_unit="years", unit="years", price_basis="real",
                 source="src_test: Table 1", source_year="2026", domain="[1, inf)",
-                illustrative="false", note="Synthetic.")
+                illustrative="false", note="Synthetic.", capacity_basis="output_electric_ac",
+                includes_grid_connection="false")
 
 
 def _write_region(root: Path, rows: list[dict], *, region="xt_test", currency="XTS",
@@ -74,7 +77,7 @@ def _write_region(root: Path, rows: list[dict], *, region="xt_test", currency="X
     manifest["source_cells"]["sha256"] = D._file_sha256(d / "source_cells.csv")
     (d / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     with (d / "values.csv").open("w", encoding="utf-8", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=D._VALUE_COLUMNS)
+        w = csv.DictWriter(fh, fieldnames=D._TYPED_COLUMNS)
         w.writeheader()
         w.writerows(rows)
     return d
@@ -287,7 +290,7 @@ def test_pricing_stamps_the_regional_source_and_never_the_eu_one(with_region):
 # ── the shipped regional packs: CA (CER), UK (DESNZ), US (EIA) ──────────────
 
 REGIONS = {"ca_federal": "CAD", "uk": "GBP", "us_federal": "USD"}
-SHIPPED = "2026-10-21"
+SHIPPED = "2026-10-22"
 CLEARANCE = "2026-10-21, coordinator-relayed (decision G2)"
 SOURCE_IDS = {"ca_federal": "cost_canada_cer_ef2026", "uk": "cost_uk_desnz_2025",
               "us_federal": "cost_eia_reference_plants"}
@@ -320,11 +323,14 @@ def test_regional_hashes_are_pinned_and_the_eu_pins_are_unchanged(shipped_caches
         "1266cc82fb8826c33281317f8916a7bf10f95c1bf72437e3ba0f77bd993ab231"
     regional = json.loads((FIXTURES / "regional_pack_hashes.json").read_text())[
         "generic_defaults_regional"]
-    assert set(regional) == {f"{SHIPPED}+{r}" for r in REGIONS}
+    # the 2026-10-21 versions are legacy (untyped, GS-2b) and stay pinned beside the typed ones
+    assert set(regional) == {f"{d}+{r}" for r in REGIONS for d in ("2026-10-21", SHIPPED)}
     for region in REGIONS:
-        pack = D.load_defaults_pack(region=region)
-        assert pack.hash == regional[pack.version]
-        assert pack.region_info.base_hash == pins["generic_defaults"][pack.region_info.base_version]
+        for date in ("2026-10-21", SHIPPED):
+            pack = D.load_defaults_pack(date, region=region)
+            assert pack.hash == regional[pack.version]
+            assert pack.region_info.base_hash == \
+                pins["generic_defaults"][pack.region_info.base_version]
 
 
 def test_every_shipped_source_records_licence_hash_and_the_owners_clearance(shipped_caches):
@@ -461,12 +467,12 @@ def test_pricing_carries_the_regions_currency_never_an_eur_label(shipped_caches)
     assert prov["overnight_cost"]["currency"] == "USD" and prov["fom_cost"]["currency"] == "USD"
     assert prov["overnight_cost"]["currency_year"] == 2023
     assert "currency" not in prov["lifetime"]
-    # the EU output keeps its label and records no currency or fallback key
+    # the EU output keeps its label (and names its currency) and records no currency or fallback key
     m = pypsa.Network()
     m.add("Bus", "b")
     m.add("Generator", "pv", bus="b", p_nom_extendable=True)
     eu = price_from_pack(m, "generators", "pv", "solar-utility", version=BASE)
-    assert "annualised_cost_eur_per_mw_yr" in eu and "currency" not in eu
+    assert "annualised_cost_eur_per_mw_yr" in eu and eu["currency"] == "EUR"
     assert all("currency" not in f and "fallback" not in f
                for f in provenance._root(m)["Generator"]["pv"].values())
 

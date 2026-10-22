@@ -33,6 +33,8 @@ import copy
 import hashlib
 import json
 import math
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -45,10 +47,12 @@ VERSION = 1
 SETTINGS_EDITS = frozenset({
     "update_solver_config", "set_site_connection", "attach_tariff", "import_urdb_tariff",
     "define_participants", "put_stress_scenarios", "record_asset_health", "set_study_parameter",
-    "apply_generated_profile", "update_project_layout",
+    "apply_generated_profile", "apply_generated_profiles", "apply_default_series",
+    "update_project_layout",
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
+    "apply_commercial_document_values",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -142,8 +146,11 @@ _UNBOUND = frozenset({"digest", "section_state"})
 
 def _digest(card: dict) -> str:
     """Binds what the card SHOWS: a different old, new or derived value is a
-    different card. Edits elsewhere in the project leave it valid."""
+    different card. Edits elsewhere in the project leave it valid. A row's source
+    cell is bound by its upload, sha256 and cell, never by the raw text it holds."""
     body = {k: v for k, v in card.items() if k not in _UNBOUND}
+    body["rows"] = [{**row, "source": {k: v for k, v in row["source"].items() if k != "raw"}}
+                    if isinstance(row.get("source"), dict) else row for row in body.get("rows", [])]
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str, allow_nan=False).encode()).hexdigest()
 
 
@@ -196,6 +203,12 @@ def _attach_targets(rows: list[dict]) -> list[dict]:
         klass, name = row.get("component_class"), row.get("name")
         if not klass or not name or klass == "Settings" or row["role"] == "note":
             continue
+        if klass == "Commercial":  # the import tariff and contracts: section 7, no component to open
+            from services import flow_sections as F
+
+            if "commercial" not in [s["id"] for s in sections]:
+                sections.append({"id": "commercial", "label": F.SECTION_LABELS["commercial"]})
+            continue
         if (klass, name) not in seen:
             try:
                 seen[(klass, name)] = flow_service.section_for_component(
@@ -239,6 +252,25 @@ def require_current(tool_name: str, args: dict, card: dict) -> None:
                 "Propose the edit again.", 409)
 
 
+# The digest of the card the user approved, bound by the turn loop around the
+# handler, never taken from model arguments. A handler that rechecks its card
+# under its own lock (`apply_equipment_mapping`) reads it here.
+_APPROVED: ContextVar[str | None] = ContextVar("edit_card_approved", default=None)
+
+
+@contextmanager
+def approved(digest: str):
+    token = _APPROVED.set(digest)
+    try:
+        yield
+    finally:
+        _APPROVED.reset(token)
+
+
+def approved_digest() -> str | None:
+    return _APPROVED.get()
+
+
 def _results_stale() -> bool:
     from services.pypsa_service import PyPSAService
 
@@ -274,6 +306,22 @@ def receipt(card: dict, args: dict) -> dict:
             before = card.get("section_state")
             out["section"] = {**after, "changed": before is None or before.get("state") != after["state"]}
     return out
+
+
+def reread(tool_name: str, args: dict, earlier: dict) -> dict | None:
+    """A fresh native read-back of an earlier receipt's rows (LC-23 SC-12):
+    the receipt, now verified, when every stored row reads back as its new
+    value; None when a row differs or the tool has no native adapter."""
+    adapter = ADAPTERS.get(tool_name)
+    rows = [{k: v for k, v in row.items() if k != "readback"} for row in earlier.get("rows") or []]
+    if adapter is None or not rows:
+        return None
+    values = adapter.readback(args or {}, rows)
+    rows = [{**row, "readback": _scalar(value)} for row, value in zip(rows, values)]
+    if len(rows) != len(earlier["rows"]) or not all(
+            _same(row["readback"], row["new"]) for row in rows if row["role"] not in ("at_solve", "note")):
+        return None
+    return {**earlier, "outcome": "verified", "rows": rows}
 
 
 # ── Components: update_component / bulk_update_components ──────────────────
@@ -397,9 +445,17 @@ def _solve_time_rows(component_class: str, network, attr: str, names: list[str])
     return rows
 
 
+def _component_attr(component_class: str) -> str:
+    """The network attribute holding a class's static frame (`Line` → `lines`)."""
+    from services import chat_tools
+
+    return chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
+        "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
+
+
 def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Callable[[], Any]) -> list[dict]:
     """Run the native handler on an isolated copy and diff each target row."""
-    from services import change_log_service, chat_tools, workflow_tools
+    from services import change_log_service, workflow_tools
     from services.pypsa_service import PyPSAService
 
     fields = _fields(component_class)
@@ -408,8 +464,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
             _check_value(component_class, key, value, fields.get(key))
             _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
-    attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
-        "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
+    attr = _component_attr(component_class)
     before = getattr(active.network, attr)
     missing = [name for name, _ in targets if name not in before.index]
     if missing:
@@ -604,6 +659,9 @@ register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _com
 # ── Library references: apply_library_reference ───────────────────────────
 
 
+_RATE_WORDS = {"component": "this asset's own", "project setting": "the project's", "default": "the default"}
+
+
 def _library_reference_preview(args: dict) -> list[dict]:
     """The native update's rows for the fields a shipped reference writes, each with
     the reference (source cell, money year) and the pack value beside it, plus one
@@ -611,6 +669,7 @@ def _library_reference_preview(args: dict) -> list[dict]:
     still missing a confirmation refuses before any card (`reference_confirmation_needed`)."""
     from services import chat_tools
     from services.library import reference_apply as A
+    from services.pypsa_service import PyPSAService
 
     p = A.plan_active(args)
     A.require_confirmed(p)
@@ -622,13 +681,116 @@ def _library_reference_preview(args: dict) -> list[dict]:
         if row["role"] == "typed" and row["name"] == name and row["field"] in beside:
             row.update({k: beside[row["field"]][k] for k in ("reference", "pack", "differs")})
     for need in p["needs"]:
-        rows.append({**_note(klass, name, need["confirmation"], need["text"]), "confirmed": True})
+        said = need.get("disclosure") or need["text"].replace(f" {A.LEFT_UNCONFIRMED}", "")
+        rows.append({**_note(klass, name, need["confirmation"], f"Confirmed: {said}"), "confirmed": True})
+    # One plain annualisation line in this card's money words, in place of the generic
+    # formula note (which names the pack's price-data year, not the reference's).
+    rows = [r for r in rows if not (r["role"] == "note" and r["field"] == "overnight_cost")]
+    frame = PyPSAService.get_network().components[klass].static
+    rate, rate_source = _rate(frame, name)
+    read_as = f", read as {p['base_year']} money" if p.get("base_year") not in (None, p["currency_year"]) else ""
+    rows.append(_note(klass, name, "overnight_cost",
+                      f"The optimisation annualises this cost over the {p['attrs']['lifetime']:g}-year lifetime "
+                      f"at {_RATE_WORDS.get(rate_source, 'a')} {rate * 100:g} % discount rate. Price data: "
+                      f"{p['currency_year']} {p['currency']}{read_as}."))
     rows += [_note(klass, name, "projection_year", text) for text in p["notes"]]
     rows.append(_note(klass, name, "licence", f"{p['attribution']} Licence {p['licence']}."))
     return rows
 
 
 register("apply_library_reference", Adapter("parameter_edit", _library_reference_preview, _component_readback))
+
+
+# ── Equipment tables: apply_equipment_mapping (data-to-model slice 1) ──────
+
+
+def _equipment_table_preview(args: dict) -> list[dict]:
+    """The native update's rows for every changed cell of the mapped table, each typed row
+    with its source cell (`source`: upload, full sha256, sheet, row, column, raw value and
+    unit), plus one note per confirmation given, per left-out cell and per basis note. A
+    plan missing a confirmation refuses before any card (`table_confirmation_needed`); a
+    table that changes nothing refuses (`nothing_to_change`)."""
+    from services import equipment_table as T
+
+    return _mapped_rows(T.plan_active(args), "preview_equipment_mapping")
+
+
+def _mapped_rows(p: dict, counter: str) -> list[dict]:
+    """The card rows of an `equipment_table.plan`-shaped plan (a table, or PDF citations):
+    the native update's rows run on a copy, each typed row with its `source` (and `money`
+    for a cost), then the notes. `counter` is the read tool that counts left-out gaps."""
+    from services import chat_tools
+    from services import equipment_table as T
+    from services.pypsa_service import PyPSAService
+
+    T.require_confirmed(p)
+    todo = T.changes(PyPSAService.get_network(), p)
+    if not todo:
+        _refuse("nothing_to_change", "Every mapped value already equals the network's; nothing to apply.")
+    T.require_card_size(todo)
+    klass = p["component_class"]
+
+    def run():
+        for name, attrs in todo.items():
+            chat_tools.update_component(klass, name, dict(attrs))
+
+    rows = _sandbox_rows(klass, list(todo.items()), run)
+    lineage = {(c["name"], c["field"]): c for c in p["cells"]}
+    notes = []
+    for row in rows:
+        cell = lineage.get((row["name"], row["field"])) if row["role"] == "typed" else None
+        if cell is not None:
+            row["source"] = cell["source"]
+            if cell["money_year"] is not None:
+                row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
+            notes += [_note(klass, row["name"], row["field"], text) for text in cell.get("notes", ())]
+    rows += notes
+    for need in p["needs"]:
+        rows.append({**_note(klass, "", need["confirmation"], need["text"]), "confirmed": True})
+    for gap in p["unmapped"][:T.MAX_LISTED_GAPS]:
+        rows.append({**_note(klass, gap.get("name") or "", gap.get("field") or gap.get("column") or "",
+                              gap["message"]), "gap": gap["kind"], **({"source": gap["source"]} if "source" in gap else {})})
+    if len(p["unmapped"]) > T.MAX_LISTED_GAPS:
+        rows.append(_note(klass, "", "", f"{len(p['unmapped']) - T.MAX_LISTED_GAPS} more cells are left out; "
+                          f"{counter} counts them by kind."))
+    rows += [_note(klass, "", "money_year", text) for text in p["notes"]]
+    return rows
+
+
+register("apply_equipment_mapping", Adapter("parameter_edit", _equipment_table_preview, _component_readback))
+
+
+# ── PDF datasheets: apply_document_values (data-to-model slice 2) ──────────
+
+
+def _document_values_preview(args: dict) -> list[dict]:
+    """As an equipment table's card, each typed row's `source` naming the PDF's page and
+    the raw quote (`services/document_values.py`); the digest binds both."""
+    from services import document_values as D
+
+    return _mapped_rows(D.plan_active(args), "preview_document_values")
+
+
+register("apply_document_values", Adapter("parameter_edit", _document_values_preview, _component_readback))
+
+
+def _commercial_document_values_preview(args: dict) -> list[dict]:
+    """The import tariff's and PPA contracts' values cited from a PDF: one typed row per
+    changed value with its page and quote and the stored config's `basis` (compare-and-
+    set), then the notes (`services/document_values_commercial.py`)."""
+    from services import document_values_commercial as DC
+
+    return DC.card_rows(DC.plan_active(args))
+
+
+def _commercial_document_values_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services import document_values_commercial as DC
+
+    return DC.readback(args, rows)
+
+
+register("apply_commercial_document_values", Adapter("settings_edit", _commercial_document_values_preview,
+                                                     _commercial_document_values_readback))
 
 
 # ── Solver settings: update_solver_config ──────────────────────────────────
@@ -769,6 +931,58 @@ def _undo_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 
 register("undo_last", Adapter("parameter_edit", _undo_preview, _undo_readback))
+
+
+# ── Generated series: apply_generated_profile (TS-04) ──────────────────────
+# The series the target holds now against the one the apply would write
+# (`services/profile_gen/card.py`): peak, energy and load factor for a power
+# target, max/mean/min for any other, notes for the hours that change, the
+# apply's warnings and any refinement ops.
+
+
+def _profile_preview(args: dict) -> list[dict]:
+    from services.profile_gen import card
+
+    return card.preview(args)
+
+
+def _profile_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.profile_gen import card
+
+    return card.readback(args, rows)
+
+
+register("apply_generated_profile", Adapter("series_edit", _profile_preview, _profile_readback))
+
+
+def _defaults_preview(args: dict) -> list[dict]:
+    from services.profile_gen import card
+
+    return card.preview_batch(args)
+
+
+def _defaults_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.profile_gen import card
+
+    return card.readback_batch(args, rows)
+
+
+register("apply_default_series", Adapter("series_edit", _defaults_preview, _defaults_readback))
+
+
+def _members_preview(args: dict) -> list[dict]:
+    from services.profile_gen import card
+
+    return card.preview_members(args)
+
+
+def _members_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.profile_gen import card
+
+    return card.readback_members(args, rows)
+
+
+register("apply_generated_profiles", Adapter("series_edit", _members_preview, _members_readback))
 
 
 # ── Any other edit: the requested arguments, no old value claimed ──────────

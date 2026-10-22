@@ -32,6 +32,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
@@ -46,6 +47,8 @@ from services import solve_queue as sq
 from services.profile_gen import engine, presets, shape
 from services.profile_gen.apply import (
     ComponentNotFoundError,
+    CurrentChangedError,
+    CurrentSeriesError,
     DcLoadOwnedError,
     FamilyTargetMismatchError,
     InvalidSeriesUnitError,
@@ -53,9 +56,12 @@ from services.profile_gen.apply import (
     ProfileBoundConflictError,
     UnknownFamilyError,
     UnsupportedTargetError,
+    WindowSourceGapError,
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
+from services.profile_gen.current import SeriesUploadError
+from services.profile_gen.defaults import is_measured
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
@@ -67,6 +73,13 @@ from services.profile_gen.availability import (
     PocBoundError,
     TwoWayFloorError,
     UnknownAvailabilityKindError,
+)
+from services.profile_gen.refine import (
+    AnnualEnergyOnWindowSourceError,
+    InvalidRefineOpError,
+    RefineReplayError,
+    WindowClockUnknownError,
+    WindowSourceOpError,
 )
 from services.profile_gen.series import (
     CopAmbientUnknownError,
@@ -148,6 +161,20 @@ class ApplyRequest(BaseModel):
     attribute: str | None = None
 
 
+class BatchMember(BaseModel):
+    component: str
+    point_id: str | None = None
+
+
+class BatchApplyRequest(BaseModel):
+    # Several points of one pending job, written in one validated, single-undo
+    # step. `all_from_job` takes every point named after a wind/solar generator.
+    job_id: str
+    members: list[BatchMember] = Field(default_factory=list)
+    all_from_job: bool = False
+    time_basis: str | None = None
+
+
 class LoadGenerateRequest(BaseModel):
     # A load archetype (`services/profile_gen/load_archetypes.py`) for the
     # named loads of the open network; one column per load, ids = names.
@@ -157,6 +184,9 @@ class LoadGenerateRequest(BaseModel):
     year: int | None = None
     # Archetypes are hourly shapes; the field stays for the shared engine call.
     resolution: Literal["hourly"] = "hourly"
+    # A previous artifact's `refinements`, replayed onto the new series
+    # (`profile_gen/refine.replay`).
+    refinements: list[dict[str, Any]] | None = None
 
 
 class AvailabilityGenerateRequest(BaseModel):
@@ -172,6 +202,7 @@ class AvailabilityGenerateRequest(BaseModel):
     # The source year. Unset: the network's (first period's) year, so dated
     # maintenance windows land where the user means them.
     year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
 
 
 class SeriesGenerateRequest(BaseModel):
@@ -182,6 +213,33 @@ class SeriesGenerateRequest(BaseModel):
     components: list[str] = Field(min_length=1)
     params: dict[str, Any] | None = None
     year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
+
+
+class CurrentSeriesRequest(BaseModel):
+    # The series a component carries now, made into a pending artifact the
+    # refinement ops act on (services/profile_gen/current.py).
+    component_type: str
+    attribute: str
+    component: str
+
+
+class DefaultsPreviewRequest(BaseModel):
+    # "Generate defaults for all" (services/profile_gen/defaults.py).
+    replace_generated: bool = False
+    # Components sized by their peak (= static p_set) instead of their mean.
+    peak_sized: list[str] = Field(default_factory=list)
+
+
+class DefaultsApplyRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1)
+
+
+class RefineRequest(BaseModel):
+    # A pending artifact to refine by deterministic ops
+    # (services/profile_gen/refine.py); the result is a new pending artifact.
+    job_id: str
+    ops: list[dict[str, Any]] = Field(min_length=1)
 
 
 class ShapeRequest(BaseModel):
@@ -389,6 +447,9 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (CopAmbientUnknownError, {"error_kind": "cop_ambient_unknown"}),
     (TwoWayFloorError, {"error_kind": "two_way_floor"}),
     (PocBoundError, {"error_kind": "poc_bound"}),
+    (CurrentChangedError, {"error_kind": "current_changed_since_refinement"}),
+    (WindowSourceGapError, {"error_kind": "window_source_gap"}),
+    (SeriesUploadError, {"error_kind": "series_upload"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -408,6 +469,12 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownSeriesKindError, {"error_kind": "unknown_series_kind"}),
     (MarketBundlesUnavailableError, {"error_kind": "market_bundles_unavailable"}),
     (InvalidSeriesParamsError, {"error_kind": "invalid_series_params"}),
+    (InvalidRefineOpError, {"error_kind": "invalid_refine_op"}),
+    (WindowClockUnknownError, {"error_kind": "window_clock_unknown"}),
+    (RefineReplayError, {"error_kind": "refine_replay"}),
+    (WindowSourceOpError, {"error_kind": "window_source_op"}),
+    (AnnualEnergyOnWindowSourceError, {"error_kind": "annual_energy_on_window_source"}),
+    (CurrentSeriesError, {"error_kind": "no_current_series"}),
 )
 
 
@@ -581,6 +648,42 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
+def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying: bool):
+    """Refine (or replay a recorded list over) every column of an artifact;
+    one meta (the ops are the same for every column), stats per column, and
+    the warnings."""
+    from services.profile_gen import refine
+    from services.profile_gen.families import default_target
+
+    ct, attr = default_target(meta, None, None)
+    run = refine.replay if replaying else refine.refine_series
+    cols, stats, warnings, new_meta = {}, {}, [], meta
+    for col in frame.columns:
+        out = run(ctx, frame[col], meta, ops, component_type=ct, attribute=attr)
+        cols[col], stats[col], new_meta = out.series, out.stats, out.meta
+        warnings += [w for w in out.warnings if w not in warnings]
+    return pd.DataFrame(cols, index=frame.index), new_meta, stats, warnings
+
+
+def _replay_refinements(ctx, result, refinements):
+    """A regenerated series replays the refinements it is given."""
+    if not refinements:
+        return result
+    from types import SimpleNamespace
+
+    try:
+        frame, meta, _stats, warnings = _refine_frame(ctx, result.series, dict(result.meta),
+                                                      refinements, replaying=True)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine_replay")},
+        ) from exc
+    meta["replay_warnings"] = warnings
+    return SimpleNamespace(series=frame, meta=meta)
+
+
 def _foreground_ctx(proj: AuthorizedProject, verb: str):
     """The active context, refused (409) unless it holds this project."""
     from services.pypsa_service import PyPSAService
@@ -618,6 +721,61 @@ def _preview_load_energy(ctx, frame: pd.DataFrame, record: dict,
         stats[col]["modelled_mwh"] = pv["modelled_mwh"]
         warnings.update(pv["warnings"])
     return sorted(warnings)
+
+
+def _dry_run(ctx, frame: pd.DataFrame, record: dict) -> tuple[list[str], dict[str, dict]]:
+    """Apply's own decision for each column, written nowhere
+    (`prepare_profile`): its warnings show before Apply, and a refusal it
+    would give (a partial-year network, a family guard) shows as
+    ``not_applicable: <why>`` so the editor can hold the button. Also each
+    column's preview week (`_preview_week`) of what apply would write."""
+    from services.profile_gen.apply import ProfileApplyError, prepare_profile
+    from services.profile_gen.families import default_target
+
+    component_type, attribute = default_target(record, None, None)
+    warnings: set[str] = set(record.get("warnings") or [])
+    weeks: dict[str, dict] = {}
+    for col in frame.columns:
+        try:
+            prepared = prepare_profile(ctx, col, frame[col], record,
+                                       component_type=component_type,
+                                       attribute=attribute)
+        except ProfileApplyError as exc:
+            warnings.add(f"not_applicable: {public_message(exc, route='dry_run')}")
+            continue
+        warnings.update(prepared.warnings)
+        weeks[col] = _preview_week(ctx.network, prepared)
+    return sorted(warnings), weeks
+
+
+def _preview_week(n, prepared) -> dict:
+    """The calendar week (Monday 00:00 on) of the network's snapshots that
+    holds the series' most telling hour — its lowest for an availability
+    cap, its highest otherwise — as apply would write it, beside the
+    component's current series for the same snapshots when it has one."""
+    aligned = prepared.aligned
+    values = aligned.to_numpy(dtype=float)
+    low = prepared.attribute == "p_max_pu"
+    i = int(np.nanargmin(values) if low else np.nanargmax(values))
+    idx = aligned.index
+    stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
+    monday = stamps[i].normalize() - pd.Timedelta(days=stamps[i].weekday())
+    mask = (stamps >= monday) & (stamps < monday + pd.Timedelta(days=7))
+    if isinstance(idx, pd.MultiIndex):
+        mask &= np.asarray(idx.get_level_values(0) == idx[i][0])
+    table = getattr(n, f"{prepared.component_type}_t")[prepared.attribute]
+    current = None
+    if prepared.component in table.columns:
+        current = [round(float(v), 4) for v in
+                   table[prepared.component].reindex(idx).to_numpy(dtype=float)[mask]]
+    shown = stamps[mask]
+    return {
+        "label": "lowest week" if low else "peak week",
+        "period": int(idx[i][0]) if isinstance(idx, pd.MultiIndex) else None,
+        "snapshots": [t.isoformat() for t in shown],
+        "new": [round(float(v), 4) for v in values[mask]],
+        "current": current,
+    }
 
 
 def _load_stats(frame: pd.DataFrame, scale: float, year: int) -> dict[str, dict]:
@@ -673,6 +831,7 @@ def generate_load_profiles(
                     "message": public_message(exc, route="load_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -680,10 +839,11 @@ def generate_load_profiles(
     record["points"] = list(result.series.columns)
     write_pending(str(proj.directory), job_id, result.series, record)
 
-    stats = _load_stats(result.series, float(record["scale_mw"]),
+    stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
-    return {**record, "stats": stats, "warnings": warnings}
+    dry, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/loads/upload")
@@ -736,8 +896,9 @@ async def upload_load_profiles(
     write_pending(str(proj.directory), job_id, frame, record)
     stats = _load_stats(frame, 1.0, int(record["weather_year"]))
     preview = _preview_load_energy(ctx, frame, record, stats)
+    dry, weeks = _dry_run(ctx, frame, record)
     return {**record, "unmatched": unmatched, "stats": stats,
-            "warnings": preview}
+            "warnings": sorted({*preview, *dry}), "weeks": weeks}
 
 
 @project_router.post("/{name}/profiles/availability/generate")
@@ -814,6 +975,7 @@ def generate_availability_profiles(
                     "message": public_message(exc, route="availability_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -830,7 +992,8 @@ def generate_availability_profiles(
             stats[col]["hours_reduced"] = int((v < 1.0 - 1e-9).sum())
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
-    return {**record, "stats": stats}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
 
 
 _SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
@@ -916,6 +1079,7 @@ def generate_series_profiles(
                     "message": public_message(exc, route="series_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     if ambient_from_spec:
@@ -931,7 +1095,236 @@ def generate_series_profiles(
         stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
         if body.kind == "inflow":
             stats[col]["annual_mwh"] = float(v.sum())
-    return {**record, "stats": stats}
+    warnings, weeks = _dry_run(ctx, result.series, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.get("/{name}/profiles/current")
+def get_current_series(
+    component_type: str,
+    attribute: str,
+    component: str,
+    proj: AuthorizedProject = ProjectAccessDep,
+):
+    """What the component carries now for that attribute: nothing, a
+    generated series (its family and provenance), or an upload."""
+    from services.profile_gen.current import describe_current
+
+    ctx = _foreground_ctx(proj, "read its series")
+    return describe_current(ctx, component_type, attribute, component)
+
+
+@project_router.post("/{name}/profiles/series/upload")
+async def upload_series(
+    file: UploadFile = File(...),
+    component_type: str = Form(...),
+    attribute: str = Form(...),
+    component: str = Form(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """A measured file for one field (the editors' "Measured file" tab) as a
+    pending artifact on the snapshot clock, like `from-current`: previewed,
+    then applied through `/profiles/apply` with the same old → new receipt.
+    A file that does not fit (its column, the model's hours, the field's
+    units) is a `series_upload` refusal saying what to change."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from services.profile_gen.current import series_from_upload
+    from services.upload_guard import read_capped
+    from services.user_timeseries import _parse_upload
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "upload")
+    blob = await read_capped(file)
+    frame = await run_in_threadpool(_parse_upload, blob, file.filename or "upload.csv")
+    try:
+        series, meta = series_from_upload(ctx, component_type, attribute, component, frame)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="series_upload")},
+        ) from exc
+    return _pending_series_response(ctx, proj, component_type, component, series, meta)
+
+
+@project_router.post("/{name}/profiles/from-current")
+def pending_from_current(
+    body: CurrentSeriesRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """The component's current series as a pending artifact, on the
+    snapshot clock it was stored in, so the refinement ops act on a measured
+    upload the same way as on a generated series. Nothing touches the
+    network here; apply refuses the artifact once the stored series changes."""
+    from services.profile_gen.current import series_from_current
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine its series")
+    try:
+        series, meta = series_from_current(ctx, body.component_type, body.attribute,
+                                           body.component)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="from_current")},
+        ) from exc
+    return _pending_series_response(ctx, proj, body.component_type, body.component,
+                                    series, meta)
+
+
+def _pending_series_response(ctx, proj, component_type: str, component: str,
+                             series: pd.Series, meta: dict) -> dict:
+    """Write a snapshot-clock series as a pending artifact and answer with
+    its stats, the apply's dry-run warnings and the preview week."""
+    frame = series.to_frame(component)
+    job_id = str(uuid.uuid4())
+    record = dict(meta)
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = [component]
+    write_pending(str(proj.directory), job_id, frame, record)
+    v = series.dropna()
+    stats = {component: {"min": float(v.min()), "mean": float(v.mean()),
+                         "max": float(v.max())}}
+    if meta.get("unit") == "MW":
+        hours = 24 * (366 if pd.Timestamp(year=int(meta["weather_year"]), month=1,
+                                          day=1).is_leap_year else 365)
+        stats[component].update(peak_mw=float(v.max()),
+                                annual_mwh=float(v.mean()) * hours)
+        if component_type == "loads":
+            _preview_load_energy(ctx, frame, record, stats)  # modelled_mwh, as generated loads show
+    warnings, weeks = _dry_run(ctx, frame, record)
+    return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}
+
+
+@project_router.post("/{name}/profiles/defaults/preview")
+def preview_default_series(
+    body: DefaultsPreviewRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Every family's default series, one row per component: a generated
+    pending series (its reason, sizing, stats, warnings and preview week),
+    or why it is skipped. Nothing touches the network here."""
+    from services.profile_gen.defaults import preview_defaults
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "preview defaults")
+    rows = preview_defaults(ctx, str(proj.directory), proj.name,
+                            replace_generated=body.replace_generated,
+                            peak_sized=frozenset(body.peak_sized))
+    out = []
+    for row in rows:
+        record = row.pop("record", None)
+        if record is not None:
+            nc, _meta = _pending_artifact(proj, row["job_id"])
+            with pending_io_lock(), xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            dry, weeks = _dry_run(ctx, frame[[row["component"]]], record)
+            row["warnings"] = sorted({*row["warnings"], *dry})
+            row["week"] = weeks.get(row["component"])
+        out.append(row)
+    return {"rows": out}
+
+
+@project_router.post("/{name}/profiles/defaults/apply")
+def apply_default_series(
+    body: DefaultsApplyRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Apply the chosen default series under ONE undo step. Each row is
+    re-checked (a measured series is never replaced) and reported on its
+    own: a refusal does not roll the others back; undo reverts the batch."""
+    from services.network_undo import push_undo_snapshot
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "apply defaults")
+    push_undo_snapshot()
+    results = []
+    for job_id in body.job_ids:
+        try:
+            nc, meta = _pending_artifact(proj, job_id)
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+            results.append({"job_id": job_id, "component": None, "applied": False, **detail})
+            continue
+        component = (meta.get("points") or [None])[0]
+        try:
+            component_type, attribute = default_target(meta, None, None)
+            key = (component_type, attribute, component)
+            if key in ctx.user_ts and is_measured(ctx.user_ts_meta.get(key)):
+                results.append({"job_id": job_id, "component": component, "applied": False,
+                                "error_kind": "measured_series_kept",
+                                "message": f"{component!r} carries a measured upload "
+                                           "now; a default never replaces it"})
+                continue
+            with pending_io_lock(), xr.open_dataset(nc) as ds:
+                frame = ds.to_dataframe()
+            frame.index = pd.DatetimeIndex(frame.index)
+            summary = assign_profile(ctx, component, frame[component],
+                                     {**meta, "point_id": component},
+                                     component_type=component_type, attribute=attribute)
+        except ProfileApplyError as exc:
+            results.append({"job_id": job_id, "component": component, "applied": False,
+                            **_apply_refusal_kind(exc),
+                            "message": public_message(exc, route="defaults_apply",
+                                                      job_id=job_id)})
+            continue
+        results.append({"job_id": job_id, "component": component, "applied": True,
+                        "warnings": summary.get("warnings", []),
+                        "peak": summary.get("peak"), "before": summary.get("before")})
+    return {"results": results,
+            "applied": sum(r["applied"] for r in results),
+            "undo": "one undo reverts every series applied here"}
+
+
+@project_router.post("/{name}/profiles/refine")
+def refine_profile(
+    body: RefineRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Refine a pending artifact by deterministic ops into a NEW pending
+    artifact (its meta records the ops, `based_on` and the user-refined
+    provenance); `/profiles/apply` writes it, behind the old → new card in
+    chat. Nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine")
+    nc, meta = _pending_artifact(proj, body.job_id)
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
+    try:
+        new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
+                                                       replaying=False)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine",
+                                              job_id=body.job_id)},
+        ) from exc
+    job_id = str(uuid.uuid4())
+    record = {k: v for k, v in new_meta.items() if k != "replay_warnings"}
+    record["job_id"] = job_id
+    record["based_on"] = body.job_id
+    record["project_id"] = proj.name
+    record["points"] = list(new.columns)
+    write_pending(str(proj.directory), job_id, new, record)
+    dry, weeks = _dry_run(ctx, new, record)
+    return {**record, "stats": stats, "warnings": sorted({*warnings, *dry}), "weeks": weeks}
 
 
 @project_router.get("/{name}/profiles/pending")
@@ -950,6 +1343,78 @@ def list_pending_profiles(
         and j.get("status") in ("queued", "running")
     ]
     return {"pending": records, "jobs": live, "keep": KEEP_PENDING}
+
+
+def _read_point_series(nc, job_id: str, point_id: str, component: str) -> pd.Series:
+    """One point's weather-year series from a pending artifact, named after
+    the component. A missing column is 422 `point_not_in_profile`, an
+    unreadable artifact a 422, never a 500."""
+    try:
+        with pending_io_lock(), xr.open_dataset(nc) as ds:
+            return _series_of(ds, point_id, component)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
+        raise HTTPException(
+            status_code=422,
+            detail=(f"pending profile for job {job_id!r} is unreadable: "
+                    f"{public_message(exc, route='apply', job_id=job_id)}"),
+        ) from exc
+
+
+def _series_of(ds, point_id: str, component: str) -> pd.Series:
+    """`_read_point_series` on an artifact already open (the batch opens it once)."""
+    if point_id not in ds.data_vars:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "point_not_in_profile",
+                "message": f"the pending profile has no column "
+                           f"{point_id!r}; it holds "
+                           f"{sorted(ds.data_vars)}",
+            },
+        )
+    series = ds[point_id].to_series()
+    return pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
+                     name=component, dtype=float)
+
+
+def _moved_bus_warning(ctx, meta: dict, point_id: str, component: str,
+                       component_type: str | None) -> str | None:
+    """A generator's bus that moved (or lost its coordinates) since the point
+    was generated, as the warning apply returns; None when it still fits."""
+    warning = None
+    coords = (meta.get("point_coords") or {}).get(point_id)
+    gen = ctx.network.generators
+    if (coords is not None and component in gen.index
+            and component_type in (None, "generators")):
+        bus = str(gen.at[component, "bus"])
+        if bus in ctx.network.buses.index:
+            from services.network_geometry import _bus_coord
+
+            now = _bus_coord(ctx.network, bus)
+            if now is None:
+                warning = (
+                    f"bus '{bus}' has no coordinates now: profile was made "
+                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
+                )
+            elif (abs(now[0] - coords[0]) > 0.5
+                  or abs(now[1] - coords[1]) > 0.5):
+                warning = (
+                    f"bus '{bus}' moved since generation: profile was made for "
+                    f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
+                    f"({now[0]:.3f}, {now[1]:.3f})"
+                )
+    return warning
+
+
+@project_router.get("/{name}/profiles/readiness")
+def profile_readiness(proj: AuthorizedProject = ProjectAccessDep):
+    """One row per wind/solar generator: its coordinate state, the profile it
+    carries now and whether a generated one is stale (RP-02, read-only)."""
+    from services.profile_gen.readiness import readiness_rows
+
+    return {"generators": readiness_rows(_foreground_ctx(proj, "read readiness"))}
 
 
 @project_router.post("/{name}/profiles/apply")
@@ -972,29 +1437,7 @@ def apply_profile(
     nc, meta = _pending_artifact(proj, body.job_id)
 
     point_id = body.point_id or body.component
-    try:
-        with pending_io_lock(), xr.open_dataset(nc) as ds:
-            if point_id not in ds.data_vars:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error_kind": "point_not_in_profile",
-                        "message": f"the pending profile has no column "
-                                   f"{point_id!r}; it holds "
-                                   f"{sorted(ds.data_vars)}",
-                    },
-                )
-            series = ds[point_id].to_series()
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
-        raise HTTPException(
-            status_code=422,
-            detail=(f"pending profile for job {body.job_id!r} is unreadable: "
-                    f"{public_message(exc, route='apply', job_id=body.job_id)}"),
-        ) from exc
-    series = pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
-                       name=body.component, dtype=float)
+    series = _read_point_series(nc, body.job_id, point_id, body.component)
 
     # Apply writes the FOREGROUND context — the project the caller is looking
     # at. Refuse to write a background project the user may not even have open.
@@ -1009,28 +1452,8 @@ def apply_profile(
                    "open it first, then apply",
         )
 
-    warning = None
-    coords = (meta.get("point_coords") or {}).get(point_id)
-    gen = ctx.network.generators
-    if (coords is not None and body.component in gen.index
-            and body.component_type in (None, "generators")):
-        bus = str(gen.at[body.component, "bus"])
-        if bus in ctx.network.buses.index:
-            from services.network_geometry import _bus_coord
-
-            now = _bus_coord(ctx.network, bus)
-            if now is None:
-                warning = (
-                    f"bus '{bus}' has no coordinates now: profile was made "
-                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
-                )
-            elif (abs(now[0] - coords[0]) > 0.5
-                  or abs(now[1] - coords[1]) > 0.5):
-                warning = (
-                    f"bus '{bus}' moved since generation: profile was made for "
-                    f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
-                    f"({now[0]:.3f}, {now[1]:.3f})"
-                )
+    warning = _moved_bus_warning(ctx, meta, point_id, body.component,
+                                 body.component_type)
 
     # Undo snapshot BEFORE the write — the middleware only covers
     # /api/network/ and /api/io/, and apply is neither.
@@ -1041,7 +1464,10 @@ def apply_profile(
     try:
         component_type, attribute = default_target(
             meta, body.component_type, body.attribute)
-        summary = assign_profile(ctx, body.component, series, meta,
+        # The point applied is recorded, so readiness can tell which of the
+        # job's point_coords the series came from (RP-02).
+        summary = assign_profile(ctx, body.component, series,
+                                 {**meta, "point_id": point_id},
                                  component_type=component_type,
                                  attribute=attribute,
                                  time_basis=body.time_basis)
@@ -1058,6 +1484,111 @@ def apply_profile(
     if warning:
         summary["warning"] = warning
     return summary
+
+
+@project_router.post("/{name}/profiles/apply-batch")
+def apply_profile_batch(
+    body: BatchApplyRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Write several points of one pending job under ONE undo step (RP-09).
+
+    Every member is validated first through `prepare_profile` (the pure half
+    of `assign_profile`: carrier guard, alignment, time basis); like a single
+    apply, an explicit batch replaces what a component carries (the receipt
+    shows `before`, one Undo restores it); any refusal is a 422 `batch_refused`
+    naming every bad member, and nothing is written. Only then is the undo
+    snapshot pushed and each member written. A write that fails midway is a
+    409 `batch_partially_applied` (applied / not_applied); one Undo reverts
+    the batch. No automatic undo: it re-imports the whole network."""
+    from services.network_undo import push_undo_snapshot
+    from services.profile_gen.apply import prepare_profile
+    from services.profile_gen.batch import batch_members
+
+    _check_lock(proj, db, user)
+    nc, meta = _pending_artifact(proj, body.job_id)
+    ctx = _foreground_ctx(proj, "apply")
+
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
+        columns = [str(c) for c in meta.get("points") or []]
+        chosen, skipped = batch_members(
+            columns, ctx.network.generators,
+            [(m.component, m.point_id) for m in body.members], body.all_from_job)
+        members = [BatchMember(component=c, point_id=pid) for c, pid in chosen]
+        if not members:
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "no_members",
+                "message": "nothing to apply: name `members` (component, "
+                           "optional point_id) or use all_from_job with points "
+                           "named after wind/solar generators"
+                           + (f"; the job's points {columns} are none" if body.all_from_job else ""),
+                "skipped": skipped})
+        refused: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        prepared: list[tuple[str, pd.Series, str, str, dict]] = []
+        for m in members:
+            if m.component in seen:
+                refused.append({"component": m.component, "error_kind": "duplicate_member",
+                                "message": f"{m.component!r} is listed twice"})
+                continue
+            seen.add(m.component)
+            point_id = m.point_id or m.component
+            try:
+                series = _series_of(ds, point_id, m.component)
+                member_meta = {**meta, "point_id": point_id}
+                component_type, attribute = default_target(member_meta, None, None)
+                prepare_profile(ctx, m.component, series, member_meta,
+                                component_type=component_type, attribute=attribute,
+                                time_basis=body.time_basis)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                refused.append({"component": m.component, **detail})
+                continue
+            except ProfileApplyError as exc:
+                refused.append({"component": m.component, **_apply_refusal_kind(exc),
+                                "message": public_message(exc, route="apply", job_id=body.job_id)})
+                continue
+            prepared.append((m.component, series, component_type, attribute, member_meta))
+    if refused:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "batch_refused",
+            "message": f"{len(refused)} of {len(members)} members cannot be applied; "
+                       "nothing was written",
+            "members": refused})
+
+    push_undo_snapshot()
+    applied: list[dict[str, Any]] = []
+    for i, (component, series, component_type, attribute, member_meta) in enumerate(prepared):
+        try:
+            summary = assign_profile(ctx, component, series, member_meta,
+                                     component_type=component_type, attribute=attribute,
+                                     time_basis=body.time_basis)
+        except Exception as exc:  # noqa: BLE001 — typed below, the raw text never leaves
+            kind = (_apply_refusal_kind(exc)["error_kind"]
+                    if isinstance(exc, ProfileApplyError) else "write_failed")
+            message = public_message(exc, route="apply", job_id=body.job_id)
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "batch_partially_applied",
+                "message": f"{len(applied)} of {len(prepared)} written before "
+                           f"{component!r} failed ({message}); one Undo reverts "
+                           "the whole batch",
+                "applied": [a["component"] for a in applied],
+                "not_applied": [{"component": c, "error_kind": kind if c == component
+                                 else "not_attempted"}
+                                for c, *_ in prepared[i:]],
+            }) from exc
+        warning = _moved_bus_warning(ctx, meta, member_meta["point_id"], component,
+                                     component_type)
+        if warning:
+            summary["warning"] = warning
+        applied.append(summary)
+
+    from routers.simulation import _state_update
+
+    _state_update(status="idle")
+    return {"applied": applied, "count": len(applied), "skipped": skipped}
 
 
 @project_router.post("/{name}/profiles/shape")

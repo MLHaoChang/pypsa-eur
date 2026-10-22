@@ -19,6 +19,7 @@
     "meter_history_peaks_kw": {},
     "poc_link": "subsea_tie",
     "power_factor": null,
+    "provenance": {},
     "reference_purchases": [],
     "site_party": "site",
     "timezone": "UTC",
