@@ -3,6 +3,8 @@
 
 # HV-D: decision study explanations and robustness
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 Status: proposed; no new scientific calculations or generic ranking delivered here.
 Owning work: native study/adequacy/commercial engines, LC-18/S6, LC-20/LC-21, per-card W10/H2 results and S8 explanations (with the existing S7 checked contracts).
 

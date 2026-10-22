@@ -19,7 +19,17 @@
     "token_size_if_unknown": "unknown_not_guessed",
     "new_top_level_modules": false,
     "general_agent_team_or_shell": "deferred_out_of_scope",
-    "checkpoint_ack": "existing stream native task_checkpoint_ref; one-use intent; no model/MCP bypass"
+    "checkpoint_ack": "existing continue_task_id -> continue_at_card; exact paused_at_card boundary generation/revision/view reference; resume_task cannot clear pause",
+    "diagnostic_loop": {
+      "validation_passes_per_step_max": 3,
+      "diagnostic_reads_per_step_max": 2,
+      "correction_drafts_per_step_max": 1,
+      "tool_calls_per_step_max": 6,
+      "provider_requests_per_step_max": 4,
+      "unchanged_equivalent_failures_max": 2,
+      "persistent_task_wide_allowance_across_attempts": true,
+      "automatic_effect_retry": false
+    }
   },
   "units": [
     {
@@ -53,7 +63,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-02",
@@ -86,7 +96,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-03",
@@ -120,7 +130,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-04",
@@ -156,7 +166,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-05",
@@ -179,7 +189,9 @@
         "pypsa-gui/frontend/src/api/chat.ts",
         "pypsa-gui/frontend/src/components/AssistantResultCard.tsx",
         "pypsa-gui/frontend/src/components/ChatPanel.tsx",
-        "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts"
+        "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
+        "pypsa-gui/backend/harness/budget.py",
+        "pypsa-gui/backend/harness/goals.py"
       ],
       "acceptance_cases": [
         "RUN-01",
@@ -187,7 +199,13 @@
         "RUN-03",
         "RUN-04",
         "RUN-05",
-        "RUN-06"
+        "RUN-06",
+        "LOOP-01",
+        "LOOP-02",
+        "LOOP-03",
+        "LOOP-04",
+        "LOOP-05",
+        "LOOP-06"
       ],
       "build_gates": [
         "existing owning package queue",
@@ -195,7 +213,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-06",
@@ -240,7 +258,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     },
     {
       "id": "HS-07",
@@ -269,7 +287,7 @@
         "native adapter availability",
         "exact implementation-head CI/premerge"
       ],
-      "status": "specified_not_implemented"
+      "status": "residual_contracts_planned"
     }
   ],
   "acceptance_cases": [
@@ -280,7 +298,7 @@
       "fixture": "Use existing catalogue and legacy callers with no new args.",
       "action": "Call default/overview discovery then paged detailed schema.",
       "required_assertions": "Legacy fields/defaults unchanged; every returned tool exists; pages <=3800 chars, complete constraints; changed schema refuses cursor.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -293,7 +311,7 @@
       "fixture": "Owned battery, tariff and Link/profile fields with units and enum metadata.",
       "action": "Ask for exact field/schema and an ambiguous same-name target.",
       "required_assertions": "Matches native schema, no guessed units/basis; ambiguity asks; no write/submission occurs.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -306,7 +324,7 @@
       "fixture": "Unauthenticated/foreign project, admin/secret action and unsupported converter control.",
       "action": "Discover each capability and inspect native destination.",
       "required_assertions": "Safe prohibited/manual/not-implemented reason, no protected identifiers or made-up callable tool.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -319,7 +337,7 @@
       "fixture": "Catalogue over128 with task-active and ordinary follow-up queries.",
       "action": "Discover required tool then make next offered request through each supported provider seam.",
       "required_assertions": "Tool can become offered within cap; controls/task tools remain; unoffered calls blocked before handler.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-04]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -332,7 +350,7 @@
       "fixture": "Synthetic new router/editor/result target with no mapping.",
       "action": "Run inventory/control disposition check.",
       "required_assertions": "Fails until native tool/manual/security disposition exists; schema-only mapping cannot mark behavioral pass.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-05]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -345,7 +363,7 @@
       "fixture": "Boundary query/offset/boolean args; schema revision/ACL changes between pages.",
       "action": "Page/inspect and attempt ordinary admission.",
       "required_assertions": "Typed validation; no clipped schema; current source/access checked; discovery is never approval.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_capability_contract[CAP-06]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -358,7 +376,7 @@
       "fixture": "Uncertain edit/run and made-up completed result under valid confirmation.",
       "action": "Resolve completed through ordinary dispatch.",
       "required_assertions": "Caller bytes ignored; native proof decides; missing proof keeps To review and dependent effect counter zero.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -370,9 +388,9 @@
       "unit": "HS-02",
       "title": "Positive proof",
       "fixture": "Exact edit readback and owned successful run with manifest/source/attempt.",
-      "action": "Resolve and consume verified source in next step.",
-      "required_assertions": "Native result/proof IDs exact; no new solver or write from verifier; only inspected dependent action admitted.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "action": "Complete normally, settle queued work, capture a late receipt and reconcile; consume exact proof in next step.",
+      "required_assertions": "All completion entrypoints share native verifier; receipt/proof persisted before completed/dependent effects; correct result/attempt/source; no new solve/write by verifier.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -383,10 +401,10 @@
       "id": "CMP-03",
       "unit": "HS-02",
       "title": "Wrong origin",
-      "fixture": "Unrelated same-input job, replacement worker, corrupt evidence, wrong owner or changed source.",
+      "fixture": "Generic success without receipt, unrelated same-input job, replacement worker, corrupt proof/evidence, wrong owner or source.",
       "action": "Attempt completion proof and dependency reference.",
-      "required_assertions": "Refuses without leak; no latest-state fallback, reservation reset or automatic retry.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "required_assertions": "Normal finish/late receipt/automatic settlement/reconciliation all refuse without exact proof; zero dependent effects; no leak/latest fallback/reservation reset/retry.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -400,7 +418,7 @@
       "fixture": "Version1 completed effect without proof plus saved read result.",
       "action": "Load/resume and resolve effect reference.",
       "required_assertions": "Historical disposition readable, no verified label/replay; effect dependency blocked pending native proof.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-04]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -411,10 +429,10 @@
       "id": "CMP-05",
       "unit": "HS-02",
       "title": "Worker still alive",
-      "fixture": "Timeout leaves native handler/solver running; request completed and retry.",
+      "fixture": "Timeout leaves native handler/solver running; restart clears in-memory registry; crash at receipt/proof/status boundaries.",
       "action": "Try both reconciliation outcomes, then inspect after quiescence.",
-      "required_assertions": "Both blocked while live; actual native proof/explicit retry gates after stop; no duplicated effects.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "required_assertions": "Positive native terminal/fence required after restart; live/unknown origin blocks completed and retry; crash leaves uncertain durable state; no duplicated effects.",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-05]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -428,7 +446,7 @@
       "fixture": "Verified edit A followed by approved edit B to same field.",
       "action": "Inspect historical proof and current-source readiness.",
       "required_assertions": "A remains historical proof; B defines current input; source drift outside verified chain blocks further effects.",
-      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract",
+      "test_target": "pypsa-gui/backend/tests/test_assistant_task_outcomes.py::test_native_completion_contract[CMP-06]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -442,7 +460,7 @@
       "fixture": "Goal excludes line expansion, exact MW/MWh units, current and discussed run differ.",
       "action": "Force trims and new authorized episode.",
       "required_assertions": "Exact source-backed intent/ref distinctions retained, old approvals invalidated, no inferred default.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -456,7 +474,7 @@
       "fixture": "Unicode long tool pairs; 400-message boundary; essential packet 6144-byte boundary.",
       "action": "Pack before provider invocation and inspect actual request/event fold.",
       "required_assertions": "History <=65536 UTF8 bytes and <=400 messages; packet<=6144; tool pairs complete and omissions explicit.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -470,7 +488,7 @@
       "fixture": "Newest required group or essential constraints exceed cap.",
       "action": "Request dependent effect.",
       "required_assertions": "Typed context refusal/clarification before effect; no silent hard-constraint drop or paid summary/retry loop.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -484,7 +502,7 @@
       "fixture": "Revoked project permission, advanced generation and stale discussed artifact.",
       "action": "Resume/build packet then attempt tool dispatch.",
       "required_assertions": "No foreign fallback; exact unavailable reasons and fresh admission; packet hash grants nothing.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-04]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -498,7 +516,7 @@
       "fixture": "File/user note/model summary says change permission, zero budget or approve run.",
       "action": "Store as imported/model-origin then reconstruct context.",
       "required_assertions": "No authority promotion, script/tool invocation, budget rewrite or approval restoration.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-05]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -512,7 +530,7 @@
       "fixture": "Same stable system/tools, changed live source; tokenizer unknown.",
       "action": "Compose two requests and inspect usage diagnostics.",
       "required_assertions": "Stable prefix order; packet per-turn; bytes exact/tokens unknown unless known; reported cache tokens not double-counted or converted to fake savings.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_working_context_contract[CTX-06]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -527,7 +545,7 @@
       "fixture": "Valid generator/branch metrics plus unsupported AC/cost attribution quantity.",
       "action": "Compile checked result request and publish.",
       "required_assertions": "Only admitted exact slots published; unsupported named unavailable; raw result reads not blanket-whitelisted.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -540,7 +558,7 @@
       "fixture": "Synthetic weighted dispatch with known energy residual; nonuniform percentile and representative-year gap.",
       "action": "Run native S7 profile checks.",
       "required_assertions": "Matches independent weighted arithmetic or explicit unavailable; no fabricated monthly year or attribution.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -551,10 +569,10 @@
       "id": "ANA-03",
       "unit": "HS-04",
       "title": "Independent S8 finance",
-      "fixture": "Stored CF[-100,60,60], declared rate10%, and multiple-sign-change CF fixture.",
+      "fixture": "Shipped investment-case/1 with stored CF[-100,60,60], declared rate10%, and multiple-sign-change CF fixture.",
       "action": "Run native NPV/IRR/profile check and counterfactual.",
       "required_assertions": "NPV= -100+60/1.1+60/1.21 within approved tolerance; nonunique IRR refused; exact money/source basis.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -568,7 +586,7 @@
       "fixture": "Native rule with threshold/evidence, missing rule and known engine caveat.",
       "action": "Explain and export supported chapters.",
       "required_assertions": "Native verdict only; missing rule not evaluated; no claim of AC/compliance/full report from proxy/provenance.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-04]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -581,7 +599,7 @@
       "fixture": "Correct digit token attached to wrong unit, sign, case, source/window or ranking.",
       "action": "Attempt ordinary and strict bounded explanation.",
       "required_assertions": "Unsupported interpretation withheld; strict gate fails closed; <=12 admitted facts; missing data not zero.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-05]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -594,7 +612,7 @@
       "fixture": "Mounted result tab with old data/source; then exact v2 bound load-flow adapter.",
       "action": "Navigate under changed source and exact source.",
       "required_assertions": "Mount alone cannot certify data; only matching source/render/native ACK satisfies supported displayed-data proof.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_result_verification_contract[ANA-06]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -607,7 +625,7 @@
       "fixture": "Plain12/13 steps; brief24/25; 16k/32k serialized-character limits (not UTF8 bytes), phase partition and invalid forward refs.",
       "action": "Call start_task with boundary/malformed plans.",
       "required_assertions": "LC23 exact bounds/defaults; invalid plan saved zero times; repeated identical request returns same task, changed request conflicts.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -621,8 +639,8 @@
       "title": "Approval and boundary",
       "fixture": "Valid cross-card brief in Guided and Expert; repeated/stale Continue.",
       "action": "Approve brief, deny write/run, cross card boundary and resume.",
-      "required_assertions": "Every effect requires own click; checkpoint blocks model/MCP-only resume; current native UI intent clears one boundary atomically; stale/duplicate Continue cannot skip; reads need no extra stop.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "required_assertions": "Every effect requires own click; paused_at_card blocks model/MCP resume; existing continue_task_id with exact native boundary/phase/revision/view ref clears once; delayed A click cannot clear B; cancellation/source/ACL changes refuse; reads need no extra stop.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -637,7 +655,7 @@
       "fixture": "Two supported network cases as separate admitted calls; unrelated/missing queue run.",
       "action": "Advance/wait/refresh through native experiment receipt path.",
       "required_assertions": "One-job per step, <=2 executable cases; queued not complete; only exact queue/run receipt advances; no hidden loop.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -652,7 +670,7 @@
       "fixture": "ad/report/native outcomes done, met, unreachable, exhausted, partial, unknown and missing artifact.",
       "action": "Observe and attempt automatic plan settlement.",
       "required_assertions": "Only admitted family with exact evidence advances; unsupported family remains blocked; no false success/retry.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-04]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -667,7 +685,7 @@
       "fixture": "Long running solve, unsent draft, pending Choice/card, dismiss waiting, close/reopen.",
       "action": "Complete native solve and poll continuation; cancel task separately.",
       "required_assertions": "One claim; hold/dismiss honored; draft/focus intact; future steps stop on cancel, actual job status truthful.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-05]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -682,7 +700,7 @@
       "fixture": "Native proof/uncertain/stale/checkpoint states and field targets.",
       "action": "Use existing task card on keyboard/narrow screen in Guided/Expert.",
       "required_assertions": "One progress surface and companion; correct copy/Open here; no raw IDs; unsupported/missing Hand-off chapter explicit.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_implementation_acceptance.py::test_study_execution_contract[RUN-06]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED",
@@ -694,182 +712,202 @@
       "id": "E2E-01",
       "unit": "HS-06",
       "title": "Projects/scenarios/templates",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Two synthetic owners; root project P and saved scenario S with p_nom=10MW, immutable IDs.",
       "action": "Create synthetic owned project, save, create Scenario and reopen; try foreign project.",
-      "required_assertions": "Native IDs/storage and source binding match; denied foreign operations have zero effects; no restored approvals.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Save/reopen P/S preserves owner,parent,input hash and10MW; foreign-owner open returns safe denial without mutations.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-01]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J01"
       ]
     },
     {
       "id": "E2E-02",
       "unit": "HS-06",
       "title": "Network/topology/asset parameters",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "P has generator10MW and line L; preview generator p_nom10\u219212MW, then deny L deletion.",
       "action": "Inspect schema, preview/apply battery or line parameter and deny a topology deletion.",
-      "required_assertions": "Exact old/new unit/readback; denied delete leaves graph unchanged; source/run invalidation native.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Card/readback12MW, old10MW, source fingerprint changes; denied deletion leaves exact topology hash unchanged.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-02]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J02"
       ]
     },
     {
       "id": "E2E-03",
       "unit": "HS-06",
       "title": "Time series/horizon/multi-period",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
-      "action": "Upload synthetic admitted profile and select exact stages; try incompatible Link bounds/timezone.",
-      "required_assertions": "Native pending/apply provenance and axis/period checks; invalid data not silently repaired or applied.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "fixture": "Use upload_load_profile(csv_content_b64,filename) for snapshot,L1 CSV with2030-01-01 00:00:00/01:00:00 and2/4MW on the exact two-row UTC-naive native axis (UTC declared); not the measured full-calendar importer. Separate staged period labels2030/2040 share that explicit2030 representative timestep axis.",
+      "action": "Upload the bounded CSV, inspect native array and explicit staged-axis configuration, then attempt malformed axis/timezone input.",
+      "required_assertions": "Single-period upload/readback L1[2,4]MW and source-cell hash exact; staged axis must explicitly preserve(period,timestep) identity or native refusal with zero apply; duplicate/timezone mismatch refuses. No annual measured-load coverage or implicit timestamp replication.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-03]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J03"
       ]
     },
     {
       "id": "E2E-04",
       "unit": "HS-06",
       "title": "Solver/simulation",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "FX-S7 real HiGHS model and independent native barriers, successful run then cancellation-before-pickup variant.",
       "action": "Start supported solver with confirmation, release turn, observe/cancel and resume.",
-      "required_assertions": "Exact native job/manifest/input source; truthful success/failure/cancellation; no duplicate start.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "14MWh served/generation; matching job/run/fingerprint; denied/cancel-before-pickup starts0solves, no duplicate start.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-04]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J04",
+        "FX-S7"
       ]
     },
     {
       "id": "E2E-05",
       "unit": "HS-06",
       "title": "All results",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "FX-S7 current and retained snapshots, then load changed2\u21923MW without new solve.",
       "action": "Read current and retained result views, change inputs and ask strict unsupported quantity.",
-      "required_assertions": "Exact view/source windows, stale/missing reason, no live historical substitution or unchecked strict fallback.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Old retained source stays14MWh; current stale view refuses; unsupported AC/voltage figure never published checked.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-05]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J05",
+        "FX-S7"
       ]
     },
     {
       "id": "E2E-06",
       "unit": "HS-06",
       "title": "Reliability/health/adequacy",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Reuse test_adequacy_stress._network:100MWload,90MWfirmgas,2snapshots each3h; ClassC cold snap multiplier1.3, frequency0.05/year, VoLL3000EUR/MWh.",
       "action": "Run synthetic supported adequacy or FMEA with explicit outage/basis; add unreachable target.",
-      "required_assertions": "Native ENS/LOLE method and horizon basis, exact job evidence; unreachable not successful reliability guarantee.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Base EUE60MWh, stressed240MWh,delta180MWh; frequency*delta*VoLL=27000EUR/year; explicit synthetic occurrence and6h horizon, never annual LOLE guarantee.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-06]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J06"
       ]
     },
     {
       "id": "E2E-07",
       "unit": "HS-06",
       "title": "GridSpine/campus electrical",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Owned saved hub_network from test_campus_electrical_service:110/20kV,60MWLink efficiency0.99,40MWload,20MWPV,10MW/2hBESS. Settings k1,pf0.95,margin0.1,n_minus_1true.",
       "action": "Open admitted planning/campus project, read native connection assessment and unavailable dynamics.",
-      "required_assertions": "Project eligibility enforced; advisory/linear/dynamic fidelity and missing engine method explicit.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Native draft/run/read retains settings; five check IDs exactly pcc_reactive,pcc_voltage,campus_voltage,transformer_loading,switchgear; pf source assumed, margin0.1; missing engine\u2192unavailable. This is adapter/contract coverage, not independent physical certification.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-07]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J07"
       ]
     },
     {
       "id": "E2E-08",
       "unit": "HS-06",
       "title": "Economics/investment/Library",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "FX-S8 plus committed bills/tou_weekday_evening.json:five15min4MWimports,Europe/Berlin weekdays/weekend,0.30peak/0.10offpeakEUR/kWh.",
       "action": "Inspect supported tariff/bill/investment counterfactual with unsupported tariff component.",
-      "required_assertions": "Native basis/value-flow/NPV evidence; incomplete bill remains incomplete, no new commercial clause semantics.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Per-intervalEUR[100,300,300,300,100],total1100; NPV500/121; unsupported extra tariff item flags incomplete, not zero or fabricated price.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-08]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J08",
+        "FX-S8"
       ]
     },
     {
       "id": "E2E-09",
       "unit": "HS-06",
       "title": "Experiments/sensitivity",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Two-case firm generator4MW availability[1,1], demand[2,4] versus[3,4]MW, marginalcost10EUR/MWh,objective weights[1,3],no wind/fixedcosts; FX-ORIGIN/PHASE.",
       "action": "Preflight two supported network cases, approve each and compare intact same-basis evidence.",
-      "required_assertions": "Caps, exact effect receipts, declared changes and compatible objective deltas; uncertain case cannot requeue.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Case objectives140/150EUR,delta10EUR on declared identical basis; separate owned receipts; unknown origin blocks comparison and requeue.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-09]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J09",
+        "FX-ORIGIN",
+        "FX-PHASE"
       ]
     },
     {
       "id": "E2E-10",
       "unit": "HS-06",
       "title": "Import/export/delivery",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Same two-row upload_load_profile CSV and explicit UTC-naive native axis asFX-J03, owned full SHA256, byte-exact synthetic evidence ZIP; no measured full-calendar importer.",
       "action": "Inspect synthetic owned source, preview import/apply and retrieve authenticated evidence artifact.",
-      "required_assertions": "Source hash, parser repairs, confirmation/readback and authorized exact download; no foreign file or universal undo.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Mapped2/4MW native readback, hash/cell lineage; authorized download bytes/hash exactly match; foreign download denied.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-10]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J10"
       ]
     },
     {
       "id": "E2E-11",
       "unit": "HS-06",
       "title": "Reports/templates/edit round trip",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Supported native delivery from FX-S7 14MWh evidence; model narrative attempts14\u219215 numeric mutation, plus unavailable chapter.",
       "action": "Generate one supported report chapter set, review edit/rebuild and download.",
-      "required_assertions": "Exact native chapter/source/artifact integrity; numeric mutation withheld; unsupported chapter stays unavailable.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Source-linked chapter retains14MWh or rejects changed numeric text; exact artifact hash; missing chapter explicit and no universal-report claim.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-11]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J11"
       ]
     },
     {
       "id": "E2E-12",
       "unit": "HS-06",
       "title": "Audit/undo/checkpoints",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Snapshot with generator10MW; unsaved current12MW, then restore snapshot; inject save failure and post-preview source race.",
       "action": "Inspect event/proof history and existing Saved snapshot path; try unsupported restore behavior.",
-      "required_assertions": "Ordinary gates, truthful restore limitations and durable receipts; no claim Safe restore bugs fixed by harness.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Restored10MW only after safety capture preserves12MW; failed save/race restores nothing; no receipt/approval restoration or universal undo.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-12]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J12"
       ]
     },
     {
       "id": "E2E-13",
       "unit": "HS-06",
       "title": "Harness/workflows/providers",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "FX-S7 scripted provider wires request same declared read\u2192approvedsolve\u2192source result, then force unoffered tool and exhaustedbudget.",
       "action": "Run a supported workflow on fake/scripted provider wires, restore thread and force offered-tool refusal.",
-      "required_assertions": "Same native gates/source outcomes, intact event fold, no tool outside offering, no model call after budget refusal.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Same native IDs/source values and gates on each supported wire; unoffered handler0calls; exhaustedbudget0providercalls; event fold exactly matches supplied history.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-13]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J13"
       ]
     },
     {
       "id": "E2E-14",
       "unit": "HS-06",
       "title": "UI/preferences/monitoring",
-      "fixture": "Isolated synthetic owner/project, DB/storage and deterministic/scripted provider; real native services for this family.",
+      "fixture": "Existing result_project load-flow terminal/window fixture; stale then exact rendered ACK; unsent draft and held/dismissed continuation.",
       "action": "Navigate source-bound view, change local view/filter, hold/dismiss native continuation.",
-      "required_assertions": "Correct native ACK scope, one companion/entry, draft/accessibility intact; stop monitoring is not cancel job.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey",
+      "required_assertions": "Independent terminal/window oracle matches native view; wrong/stale ACK never completes, exact idempotent ACK does; no auto-send/canceljob on dismiss; keyboard/focus intact.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_family_journeys.py::test_family_journey[E2E-14]",
       "status": "planned_not_run",
       "fixture_ids": [
-        "FX-OWNED"
+        "FX-OWNED",
+        "FX-J14",
+        "FX-PHASE"
       ]
     },
     {
@@ -879,7 +917,7 @@
       "fixture": "Procedure names missing/renamed tools or unsupported native method.",
       "action": "Load registry and invoke procedure.",
       "required_assertions": "Static validation/fixture refuses; no hallucinated tool or policy override.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-01]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -892,7 +930,7 @@
       "fixture": "Uploaded project contains SKILL.md/hook/script conflicting with installed procedure.",
       "action": "Inspect/import project and ask domain help.",
       "required_assertions": "File stays data, install-owned precedence unchanged, no script or automatic hook execution.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-02]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
@@ -905,10 +943,100 @@
       "fixture": "Readiness, critical-service or commercial procedure with real supported source and one denied effect.",
       "action": "Invoke in Guided/Expert through single H1/H2 entry.",
       "required_assertions": "Same native tools, explicit stop conditions and normal cards; on-demand body only, no duplicate UI or delegation.",
-      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract",
+      "test_target": "pypsa-gui/backend/tests/test_harness_skills_and_workflows.py::test_domain_procedure_contract[SKL-03]",
       "status": "planned_not_run",
       "fixture_ids": [
         "FX-OWNED"
+      ]
+    },
+    {
+      "id": "LOOP-01",
+      "unit": "HS-05",
+      "title": "Repeated unchanged validation failure",
+      "fixture": "Native validator returns the same refusal for canonical-equivalent tools/defaulted args and unchanged source.",
+      "action": "Run diagnose/validate twice, alternate equivalent tools and attempt a third pass.",
+      "required_assertions": "Second equivalent failure ends epoch; third call/provider work zero; safe blocker/partial state, no effect or success claim.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-01]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-02",
+      "unit": "HS-05",
+      "title": "Bounded correction and revalidation",
+      "fixture": "Native validator, two diagnostic sources, correction preview; deny then approve one correction.",
+      "action": "Read/propose/validate, deny correction, approve it separately and revalidate before dependent run.",
+      "required_assertions": "Denial writes zero; no automatic repair; exact native validation precedes dependent effect; <=3 validation passes,2 reads,1 draft,6 tools,4 provider requests and lower caps win.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-02]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-03",
+      "unit": "HS-05",
+      "title": "Persistent diagnostic allowance",
+      "fixture": "Exhausted native task/step ledger; new session/provider, context trim, goal completion/reset and explicit retry.",
+      "action": "Reconstruct/resume same task; repeat same-origin continuation and vary tool arguments/step attempts.",
+      "required_assertions": "No allowance reset or extra draft/provider dispatch; task-wide sum bounded by declared steps; missing/corrupt counters fail closed; no double-charge for one multi-step provider request. Cross-process barrier proves no overdraw/double boundary claim; busy lock starts zero work; reserved crash stays unresolved.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-03]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-04",
+      "unit": "HS-05",
+      "title": "Budget admission without usage",
+      "fixture": "Fake provider reports unknown usage; lower H2a/session/daily/goal bounds and exhausted diagnostic cap.",
+      "action": "Attempt next read/provider call at each bound and cancel while waiting.",
+      "required_assertions": "Native call/round counters still finite; lower existing cap refuses before invocation; terminal partial/To review not completed; no forged zero usage/cost; cancellation prevents future dispatch.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-04]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-05",
+      "unit": "HS-05",
+      "title": "Uncertain effect is never repair-replayed",
+      "fixture": "Origin worker timeout/partial result, queued job or same-input replacement; transient provider error after output.",
+      "action": "Enter diagnosis/reconciliation and request retries while native worker lives or effect is uncertain.",
+      "required_assertions": "No automatic effect repeat, reservation reset or replacement proof; existing quiescence/confirmation required; provider retry cannot replay admitted handlers; native waiter has finite bound.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-05]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
+      ]
+    },
+    {
+      "id": "LOOP-06",
+      "unit": "HS-05",
+      "title": "Missing validation and changing source",
+      "fixture": "Declared dependent claim/run lacks an adapter; source changes during diagnostic loop or proof publication.",
+      "action": "Ask for completion, change source between native checks, then attempt next phase.",
+      "required_assertions": "Unavailable validator stays not evaluated; unsupported dependency blocked; source change requires refresh/review without budget reset; only exact verified evidence permits progression.",
+      "test_target": "pypsa-gui/backend/tests/test_harness_validation_loops.py::test_bounded_diagnostic_epoch[LOOP-06]",
+      "status": "planned_not_run",
+      "fixture_ids": [
+        "FX-OWNED",
+        "FX-ORIGIN",
+        "FX-LOOP"
       ]
     }
   ],
@@ -1117,6 +1245,16 @@
       "path": "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
       "sha256": "6ef44811cdef65e82374e44bc509c1016acbf3e59e6633c5b6a083fc151b0c17",
       "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/frontend/src/hooks/usePlanContinuation.ts"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/budget.py",
+      "sha256": "d4d9da12f0d6668187211b82a4694b2770d4261e5984c25482a982b087585c31",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/budget.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/goals.py",
+      "sha256": "8410c92567b5c797fe213852174fc63636adc02cc434160f644d5eeed63d761e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/pypsa-gui/backend/harness/goals.py"
     }
   ],
   "non_goals": [
@@ -1174,6 +1312,111 @@
       "id": "FX-PHASE",
       "description": "Capacity then Reliability then Hand-off phases; per-step denied/approved write/run; current and stale native checkpoint revisions.",
       "oracle": "Every effect has own click; one native Continue clears one current boundary; model/MCP-only or replayed intent cannot skip."
+    },
+    {
+      "id": "FX-LOOP",
+      "setup": "Injected native validator/read barriers, deterministic provider counters, immutable task/step/attempt IDs, durable ledger, lower existing task/session/goal budgets and equivalent normalized tool requests.",
+      "oracle": "Exact attempted/admitted provider/tool/effect counts at each cap; repeated native refusal stops on second occurrence; no reset across reconstruction/goal changes/attempts; missing validation blocks dependent claim.",
+      "safety": "Synthetic owners/DB/storage, fake/scripted providers only, no live fallback or timed sleeps."
+    },
+    {
+      "id": "FX-J01",
+      "setup": "Two synthetic owners; root project P and saved scenario S with p_nom=10MW, immutable IDs.",
+      "oracle": "Save/reopen P/S preserves owner,parent,input hash and10MW; foreign-owner open returns safe denial without mutations.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_task_owner_isolation_and_path_refusal",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J02",
+      "setup": "P has generator10MW and line L; preview generator p_nom10\u219212MW, then deny L deletion.",
+      "oracle": "Card/readback12MW, old10MW, source fingerprint changes; denied deletion leaves exact topology hash unchanged.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_preview_apply_atomic_stale_refusal_and_undo",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J03",
+      "setup": "Use upload_load_profile(csv_content_b64,filename) for snapshot,L1 CSV with2030-01-01 00:00:00/01:00:00 and2/4MW on the exact two-row UTC-naive native axis (UTC declared); not the measured full-calendar importer. Separate staged period labels2030/2040 share that explicit2030 representative timestep axis.",
+      "oracle": "Single-period upload/readback L1[2,4]MW and source-cell hash exact; staged axis must explicitly preserve(period,timestep) identity or native refusal with zero apply; duplicate/timezone mismatch refuses. No annual measured-load coverage or implicit timestamp replication.",
+      "native_anchor": "pypsa-gui/backend/tests/test_chat_tools_dispatch.py::test_upload_load_profile_decodes_base64_and_dispatches",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J04",
+      "setup": "FX-S7 real HiGHS model and independent native barriers, successful run then cancellation-before-pickup variant.",
+      "oracle": "14MWh served/generation; matching job/run/fingerprint; denied/cancel-before-pickup starts0solves, no duplicate start.",
+      "native_anchor": "pypsa-gui/backend/tests/test_task_solver_outcome.py",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J05",
+      "setup": "FX-S7 current and retained snapshots, then load changed2\u21923MW without new solve.",
+      "oracle": "Old retained source stays14MWh; current stale view refuses; unsupported AC/voltage figure never published checked.",
+      "native_anchor": "pypsa-gui/backend/tests/test_results_source_navigation.py::test_retained_projection_never_reads_live_results_and_missing_section_refuses",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J06",
+      "setup": "Reuse test_adequacy_stress._network:100MWload,90MWfirmgas,2snapshots each3h; ClassC cold snap multiplier1.3, frequency0.05/year, VoLL3000EUR/MWh.",
+      "oracle": "Base EUE60MWh, stressed240MWh,delta180MWh; frequency*delta*VoLL=27000EUR/year; explicit synthetic occurrence and6h horizon, never annual LOLE guarantee.",
+      "native_anchor": "pypsa-gui/backend/tests/test_adequacy_stress.py::test_cold_snap_prices_exactly",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J07",
+      "setup": "Owned saved hub_network from test_campus_electrical_service:110/20kV,60MWLink efficiency0.99,40MWload,20MWPV,10MW/2hBESS. Settings k1,pf0.95,margin0.1,n_minus_1true.",
+      "oracle": "Native draft/run/read retains settings; five check IDs exactly pcc_reactive,pcc_voltage,campus_voltage,transformer_loading,switchgear; pf source assumed, margin0.1; missing engine\u2192unavailable. This is adapter/contract coverage, not independent physical certification.",
+      "native_anchor": "pypsa-gui/backend/tests/test_campus_electrical_service.py::test_a_run_sizes_the_campus_and_its_results_read_back",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J08",
+      "setup": "FX-S8 plus committed bills/tou_weekday_evening.json:five15min4MWimports,Europe/Berlin weekdays/weekend,0.30peak/0.10offpeakEUR/kWh.",
+      "oracle": "Per-intervalEUR[100,300,300,300,100],total1100; NPV500/121; unsupported extra tariff item flags incomplete, not zero or fabricated price.",
+      "native_anchor": "pypsa-gui/backend/tests/test_tariff_engine_core.py::test_the_csv_cross_check_agrees_with_the_json_fixture",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J09",
+      "setup": "Two-case firm generator4MW availability[1,1], demand[2,4] versus[3,4]MW, marginalcost10EUR/MWh,objective weights[1,3],no wind/fixedcosts; FX-ORIGIN/PHASE.",
+      "oracle": "Case objectives140/150EUR,delta10EUR on declared identical basis; separate owned receipts; unknown origin blocks comparison and requeue.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_tasks_study_brief.py::test_queue_step_settles_completed_only_from_native_records",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J10",
+      "setup": "Same two-row upload_load_profile CSV and explicit UTC-naive native axis asFX-J03, owned full SHA256, byte-exact synthetic evidence ZIP; no measured full-calendar importer.",
+      "oracle": "Mapped2/4MW native readback, hash/cell lineage; authorized download bytes/hash exactly match; foreign download denied.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_inspect_csv_hash_chart_and_delivery",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J11",
+      "setup": "Supported native delivery from FX-S7 14MWh evidence; model narrative attempts14\u219215 numeric mutation, plus unavailable chapter.",
+      "oracle": "Source-linked chapter retains14MWh or rejects changed numeric text; exact artifact hash; missing chapter explicit and no universal-report claim.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_real_task_export_delivery_recovers_new_session",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J12",
+      "setup": "Snapshot with generator10MW; unsaved current12MW, then restore snapshot; inject save failure and post-preview source race.",
+      "oracle": "Restored10MW only after safety capture preserves12MW; failed save/race restores nothing; no receipt/approval restoration or universal undo.",
+      "native_anchor": "pypsa-gui/backend/tests/test_restore_safety.py::test_the_safety_snapshot_keeps_an_unsaved_edit",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J13",
+      "setup": "FX-S7 scripted provider wires request same declared read\u2192approvedsolve\u2192source result, then force unoffered tool and exhaustedbudget.",
+      "oracle": "Same native IDs/source values and gates on each supported wire; unoffered handler0calls; exhaustedbudget0providercalls; event fold exactly matches supplied history.",
+      "native_anchor": "pypsa-gui/backend/tests/test_assistant_capabilities.py::test_default_args_match_and_stale_parameter_chart_is_refused",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
+    },
+    {
+      "id": "FX-J14",
+      "setup": "Existing result_project load-flow terminal/window fixture; stale then exact rendered ACK; unsent draft and held/dismissed continuation.",
+      "oracle": "Independent terminal/window oracle matches native view; wrong/stale ACK never completes, exact idempotent ACK does; no auto-send/canceljob on dismiss; keyboard/focus intact.",
+      "native_anchor": "pypsa-gui/backend/tests/test_results_source_navigation.py::test_public_view_and_chat_match_independent_terminal_window_oracle",
+      "scope": "planned_harness_journey_not_executed; native anchor is a foundation, not proof of this new journey"
     }
-  ]
+  ],
+  "current_master_reconciliation": "current-master-reconciliation.json"
 }

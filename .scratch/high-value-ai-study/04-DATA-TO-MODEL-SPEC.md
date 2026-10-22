@@ -3,6 +3,8 @@
 
 # HV-I: data-to-model onboarding assistant
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 Status: proposed; AI-567b includes documents as slice 2 after spreadsheet/equipment mapping.
 Owning work: existing profile upload/TS-01/TS-04 for profiles, LC-16 for equipment mapping and subsequent document extraction, native asset/parameter editors and W9/W10. Profiles are not Library items. Does not create another data Library or a generic contract interpreter.
 

@@ -77,6 +77,20 @@ def check_implementation_spec() -> None:
         and choices["new_top_level_modules"] is False,
         "Owner gate drift",
     )
+    require(
+        choices["diagnostic_loop"]
+        == {
+            "validation_passes_per_step_max": 3,
+            "diagnostic_reads_per_step_max": 2,
+            "correction_drafts_per_step_max": 1,
+            "tool_calls_per_step_max": 6,
+            "provider_requests_per_step_max": 4,
+            "unchanged_equivalent_failures_max": 2,
+            "persistent_task_wide_allowance_across_attempts": True,
+            "automatic_effect_retry": False,
+        },
+        "Diagnostic-loop contract drift",
+    )
     units = {item["id"]: item for item in spec["units"]}
     require(len(units) == len(spec["units"]) == 7, "Implementation unit IDs/count")
     require(
@@ -93,7 +107,7 @@ def check_implementation_spec() -> None:
         active.add(key)
         item = units[key]
         require(
-            item["status"] == "specified_not_implemented",
+            item["status"] == "residual_contracts_planned",
             "Unit falsely claimed implemented",
         )
         require(
@@ -113,7 +127,7 @@ def check_implementation_spec() -> None:
     ids = [item["id"] for item in cases]
     declared = [case for item in units.values() for case in item["acceptance_cases"]]
     require(
-        len(ids) == len(set(ids)) == len(declared) == len(set(declared)) == 47,
+        len(ids) == len(set(ids)) == len(declared) == len(set(declared)) == 53,
         "Implementation acceptance count/duplicates",
     )
     require(set(ids) == set(declared), "Unmapped implementation acceptance")
@@ -125,6 +139,7 @@ def check_implementation_spec() -> None:
     expected_ids |= {f"E2E-{i:02}" for i in range(1, 15)} | {
         f"SKL-{i:02}" for i in range(1, 4)
     }
+    expected_ids |= {f"LOOP-{i:02}" for i in range(1, 7)}
     require(set(ids) == expected_ids, "Missing required acceptance family")
     table = (HERE / "10-HARNESS-DELIVERY-AND-TESTS.md").read_text()
     for case in cases:
@@ -149,6 +164,10 @@ def check_implementation_spec() -> None:
             f"{case['required_assertions']} | `{case['test_target']}` |"
         )
         require(table.count(row) == 1, f"Implementation matrix drift: {case['id']}")
+        require(
+            case["test_target"].endswith(f"[{case['id']}]"),
+            f"Missing individual evidence node: {case['id']}",
+        )
     require(
         len(spec["coverage_families"]) == len(set(spec["coverage_families"])) == 14,
         "Coverage family count/duplicates",
@@ -159,12 +178,17 @@ def check_implementation_spec() -> None:
         "Missing family journey contract",
     )
     fixture_ids = [item["id"] for item in spec["fixtures"]]
-    require(len(fixture_ids) == len(set(fixture_ids)) == 7, "Fixture IDs/count")
+    require(len(fixture_ids) == len(set(fixture_ids)) == 22, "Fixture IDs/count")
     for case in cases:
         require(
             bool(case["fixture_ids"]) and set(case["fixture_ids"]) <= set(fixture_ids),
             f"Unknown/missing concrete fixture: {case['id']}",
         )
+        if case["id"].startswith("E2E-"):
+            require(
+                f"FX-J{case['id'][-2:]}" in case["fixture_ids"],
+                f"Missing domain setup/oracle: {case['id']}",
+            )
     paths = [item["path"] for item in spec["source_pins"]]
     require(len(paths) == len(set(paths)), "Duplicate implementation source pin")
     require(
@@ -204,7 +228,138 @@ def check_implementation_spec() -> None:
         "Implementation-spec scope changed",
     )
     print(
-        "Implementation specs passed: 7 existing-owner units, 47 PLANNED acceptance cases, 14 families; runtime NOT implemented."
+        "Implementation specs passed: 7 existing-owner units, 53 PLANNED acceptance cases, 14 families; this PR changes no runtime."
+    )
+
+
+def check_current_master_review() -> None:
+    review = read_json("current-master-reconciliation.json")
+    sha = review["assessed_master"]
+    require(re.fullmatch(r"[0-9a-f]{40}", sha) is not None, "Review source SHA")
+    require(
+        review["runtime_modified"] is False
+        and review["paid_model_calls"] == 0
+        and review["standing_reviewers_contacted"] is False,
+        "Independent review exceeded scope",
+    )
+    require(
+        review["new_acceptance_cases"] == 53
+        and review["new_acceptance_execution"] == "planned_not_run",
+        "Planned journeys misrepresented as executed",
+    )
+    require(
+        review["review_verdict"] in {"pending_independent_rereview", "GO", "NO_GO"},
+        "Unknown independent verdict",
+    )
+    require(
+        {x["unit"] for x in review["unit_reconciliation"]}
+        == {f"HS-{i:02}" for i in range(1, 8)},
+        "Missing residual delivery disposition",
+    )
+    for pin in review["source_pins"]:
+        path = Path(pin["path"])
+        require(
+            not path.is_absolute() and ".." not in path.parts, "Unsafe review source"
+        )
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{pin['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        require(
+            result.returncode == 0
+            and hashlib.sha256(result.stdout).hexdigest() == pin["sha256"]
+            and pin["url"]
+            == f"https://github.com/MLHaoChang/pypsa-eur/blob/{sha}/{pin['path']}",
+            "Current-master source drift",
+        )
+    spec = read_json("harness-implementation-plan.json")
+    for fixture in spec["fixtures"]:
+        if not fixture["id"].startswith("FX-J"):
+            continue
+        require(
+            bool(fixture["setup"]) and bool(fixture["oracle"]),
+            "Incomplete domain fixture",
+        )
+        anchor = fixture["native_anchor"].split("::")
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{anchor[0]}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        require(result.returncode == 0, "Missing native fixture foundation")
+        if len(anchor) > 1:
+            require(
+                f"def {anchor[1]}(" in result.stdout.decode(),
+                "Missing native test anchor",
+            )
+    baseline = review["current_master_baseline_tests"]
+    if baseline["status"] == "passed":
+        report = (HERE / baseline["report"]).resolve()
+        require(report.is_relative_to(HERE), "Unsafe current baseline report")
+        require(
+            hashlib.sha256(report.read_bytes()).hexdigest() == baseline["sha256"],
+            "Current baseline report drift",
+        )
+        suite = ET.parse(report).getroot().find("testsuite")
+        require(suite is not None, "Missing current baseline suite")
+        for key in ("tests", "failures", "errors", "skipped"):
+            require(int(suite.attrib[key]) == baseline[key], "Baseline count drift")
+        require(
+            baseline["source_commit"] == sha
+            and baseline["failures"] == baseline["errors"] == baseline["skipped"] == 0,
+            "Current baseline source/outcome mismatch",
+        )
+    later = review.get("later_master_review")
+    if later:
+        require(later["baseline_relabelled"] is False, "Historical tests relabelled")
+        for pin in later["changed_source_pins"]:
+            result = subprocess.run(
+                ["git", "show", f"{later['sha']}:{pin['path']}"],
+                cwd=ROOT,
+                capture_output=True,
+                check=False,
+            )
+            require(
+                result.returncode == 0
+                and hashlib.sha256(result.stdout).hexdigest() == pin["sha256"],
+                "Later-master delta source drift",
+            )
+        if later["targeted_tests_status"] == "passed":
+            evidence = later["targeted_tests"]
+            path = (HERE / evidence["report"]).resolve()
+            require(path.is_relative_to(HERE), "Unsafe later-master report")
+            require(
+                hashlib.sha256(path.read_bytes()).hexdigest() == evidence["sha256"],
+                "Later-master test report drift",
+            )
+            suite = ET.parse(path).getroot().find("testsuite")
+            require(suite is not None, "Missing later-master test suite")
+            for key in ("tests", "failures", "errors", "skipped"):
+                require(
+                    int(suite.attrib[key]) == evidence[key], "Later test count drift"
+                )
+            require(
+                evidence["source_commit"] == later["sha"]
+                and evidence["failures"]
+                == evidence["errors"]
+                == evidence["skipped"]
+                == 0,
+                "Later-master test source/outcome mismatch",
+            )
+    if review["review_verdict"] == "GO":
+        require(bool(review.get("reviewed_spec_files")), "Unbound GO verdict")
+        for pin in review["reviewed_spec_files"]:
+            path = (HERE / pin["path"]).resolve()
+            require(path.is_relative_to(HERE), "Unsafe reviewed specification path")
+            require(
+                hashlib.sha256(path.read_bytes()).hexdigest() == pin["sha256"],
+                "Reviewed specification changed after verdict",
+            )
+    print(
+        f"Fresh-master reconciliation passed; independent design verdict: {review['review_verdict']}. No runtime/merge certification."
     )
 
 
@@ -474,6 +629,7 @@ def main() -> None:
     )
     check_harness_supplement(plan)
     check_implementation_spec()
+    check_current_master_review()
 
     markdown = [
         *HERE.glob("*.md"),

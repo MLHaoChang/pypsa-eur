@@ -3,6 +3,8 @@
 
 # Value, priorities and implementation baseline
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 ## Answer to the product question
 
 The earlier three suggestions are good first investments in usability: explain the next step, explain a result, and suggest a small number of useful scenarios. They are not necessarily the three largest sources of total value. They mostly explain or propose; a user still assembles inputs, manages study execution, and decides what the evidence supports.

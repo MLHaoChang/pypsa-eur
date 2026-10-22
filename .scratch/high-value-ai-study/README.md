@@ -3,6 +3,8 @@
 
 # Higher-value AI assistance for GridSpine
 
+**Latest review:** [current-master reconciliation and residual scope](11-CURRENT-MASTER-AND-REVIEW.md). Master now contains LC-23 S1/S2 and other foundations. Use the amended 08/09/10 specs and 53-case plan; preserve shipped work. The independent verdict is separate from runtime/CI/merge approval.
+
 Status: implementation specifications for review; runtime implementation and product-value measurements pending. Historical research and test evidence are retained separately.
 Assessed master: `87546ef5d184a9b20c80a65e2164f7fac0930f15` (2026-10-21).
 
@@ -18,7 +20,7 @@ The original three ideas improve understanding cheaply. The next three aim to sh
 8. [Owner disposition and amendments](OWNER-DISPOSITION.md)
 9. [Session handoff](HANDOFF.md)
 
-**Start here for implementation:** [08 — functional specification](08-HARNESS-IMPLEMENTATION-SPEC.md), [09 — data/state contracts](09-HARNESS-DATA-AND-STATE-CONTRACTS.md), [10 — code delivery and required tests](10-HARNESS-DELIVERY-AND-TESTS.md), and [harness-implementation-plan.json](harness-implementation-plan.json). These define seven implementation units inside existing packages, exact task/discovery/context/result contracts, migration and rollback behavior, code targets and 47 planned acceptance cases. They adopt the merged LC-23 design on master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`; they are not recommendations alone.
+**Start here for implementation:** [08 — functional specification](08-HARNESS-IMPLEMENTATION-SPEC.md), [09 — data/state contracts](09-HARNESS-DATA-AND-STATE-CONTRACTS.md), [10 — code delivery and required tests](10-HARNESS-DELIVERY-AND-TESTS.md), and [harness-implementation-plan.json](harness-implementation-plan.json). These define seven implementation units inside existing packages, exact task/discovery/context/result contracts, migration and rollback behavior, code targets and 53 planned acceptance cases. They adopt the merged LC-23 design on master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`; they are not recommendations alone.
 
 The harness supplement assesses newer master `322df0cf495260442eb35bb9c0c5d8e11a274ffe` against Claude Code's published behavior. Its eight findings and 24 planned foundation checks are recorded in [harness-assessment.json](harness-assessment.json), separately from the original 48 capability cases. It recognizes newly merged browser continuation and preserves the earlier test records as historical evidence.
 

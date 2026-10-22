@@ -3,6 +3,8 @@
 
 # Delivery, tests and value measurement
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 ## Sequence and gates
 
 Traceability IDs are slices inside existing packages, not new runtime modules or permission to start implementation. Preserve the owner's package order, design-first W10 and the normal UX/domain gatekeeper review before code. Start with one already-supported native path. Native adapter availability and all external gates below are required; a satisfied internal dependency alone does not make a slice runnable.

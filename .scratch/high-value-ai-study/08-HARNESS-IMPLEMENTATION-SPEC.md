@@ -6,6 +6,8 @@
 Status: concrete implementation specification for review; runtime not implemented by this PR.
 Source baseline: `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. This document makes the five priority harness improvements implementable in the existing owning packages. H06 journey evidence and H07 procedures are included as supporting delivery work; H08 general agent teams/code workspaces remain deferred.
 
+**Current-master amendment:** [11 — delivery reconciliation and review](11-CURRENT-MASTER-AND-REVIEW.md) supersedes historical absence claims and the initial delivery order. On `7a14d27038de424d07a832b16e2465297c7b8b7d`, LC-23 S1/S2, checked investment/site-import adapters and other foundations already ship. Preserve those implementations; build only the residual contracts below. “Runtime not implemented by this PR” describes this documentation diff, not an assertion that master has none of these features.
+
 Normative words: **must** is an acceptance condition; **may** is optional. A source or adapter listed below is a dependency, not a claim that its proposed behavior already ships. The original assessment remains historical context; this spec and [OWNER-DISPOSITION.md](OWNER-DISPOSITION.md) govern delivery where recommendations were less precise.
 
 ## 1. Scope, ownership and accepted design
@@ -16,7 +18,7 @@ Master now contains [LC-23](https://github.com/MLHaoChang/pypsa-eur/blob/089aea2
 
 The six card IDs in this contract are `capacity`, `grid`, `control`, `reliability`, `commercial`, `hand-off`, matching LC-23. W0/flow support remains the authority on runnable combinations. Missing W0/card code is a dependency; the model cannot implement a missing combination by choosing a label.
 
-Every write/run step in a brief must require its own current card click in Guided **and** Expert. At a card boundary, `status=checkpoint` blocks the next phase until `resume_task`; the plan card sends that ordinary request as a user message with the native checkpoint reference described in the contract. A model-only resume call cannot clear the checkpoint. Reads need no extra approval. Brief review and boundary continuation grant no effect authority. No paid calibration, reviewer contact or production activation is included in this specification PR.
+Every write/run step in a brief must require its own current card click in Guided **and** Expert. Preserve master's `status=paused_at_card`, authenticated stream `continue_task_id` and `assistant_tasks.continue_at_card`; `resume_task` cannot clear this pause. Harden that existing path with the boundary-bound reference described in the contract, rather than adding another checkpoint state or resume protocol. Reads need no extra approval. Brief review and boundary continuation grant no effect authority. No paid calibration, reviewer contact or production activation is included in this specification PR.
 
 ## 2. HS-01: capability and schema discovery
 
@@ -31,6 +33,8 @@ Extend `services/assistant_tools.py::find_capabilities` and its catalogue/wrappe
 Existing callers retain their defaults. `goal` remains bounded to 1,000 characters, `limit` to 1–8; `offset` is an integer 0–10,000. Reject booleans used as integers. `overview=True` keeps the existing family overview; its output adds the same native support dispositions, without exposing protected project data.
 
 Rank the existing catalogue first, then apply offset. Return `returned`, `has_more`, `next_offset` so queries can be completed beyond the first eight results. Keep stable catalogue order for ties. Schema expansion is performed only when `details=True` and the query resolves exactly one existing capability/tool; otherwise return a clarification with candidate IDs and no large schema. Preserve the 3,800-character result bound. A schema field whose full constraints cannot fit must yield a typed unavailable reason, never a clipped validation contract. For `details=False`, offset pages ranked capability items. For `details=True`, the exact native tool query is fixed and offset pages its schema fields, not search matches. Subsequent detail pages require `schema_sha256` from the first page; mismatches refuse as `capability_schema_changed`. The first page returns its native hash; a changed schema requires restarting inspection.
+
+Every successful page with `has_more=true` must advance `next_offset` beyond the supplied offset. An individually oversized schema field returns a terminal typed refusal with its native field identifier; never emit an endless zero-return page or retry it automatically. CAP-01/CAP-06 include this progress invariant.
 
 Enrich each existing tool item with native `support`, `schema_ref`, `result_view_ids`, `job_family` and `evidence_kind`. Derive input schemas from catalogue/Pydantic/native field descriptors; do not hand-copy monetary units or enum values. Reuse `component_discovery.py` paging for service-model metadata in the same module. Resolve only internal native `$defs` references to depth four with cycle detection; include all referenced constraints on the page or report an oversized/unsupported field, never resolve a URL or import a model by user-supplied path. The tool catalogue remains the single list of callable tools; supplemental metadata does not create executable tools.
 
@@ -50,7 +54,7 @@ CAP-01–CAP-06 pass; route/tool/GUI disposition coverage is complete for the de
 
 ### Changes
 
-Implement LC-23's native resolution rule in `assistant_tasks.resolve_task_step`. Keep `result` accepted for wire compatibility and bounded at 4,000 characters, but never use it to populate a verified result or decide completion. The ordinary destructive confirmation remains mandatory. Verify owner/project, account, lock/restrictions where relevant, expected step/attempt and originating worker quiescence first.
+Retain the shipped LC-23 native resolution rule in `assistant_tasks.resolve_task_step`: `result` is already ignored for proof and bounded at 4,000 characters. Extend its verifier coverage and durable proof contract below; do not rebuild S1. The ordinary destructive confirmation remains mandatory. Verify owner/project, account, lock/restrictions where relevant, expected step/attempt and originating worker quiescence first.
 
 For `outcome=completed`, select a native verifier by the step's actual tool/family:
 
@@ -71,6 +75,8 @@ Store `completion_proof` on the existing task step: verifier kind/version, exact
 A legacy completed effect step without proof stays visible as a historical disposition. Do not replay it or retroactively label it verified. Before a dependent effect or `$step...` reference consumes it as verified evidence, block and require ordinary native reconciliation. Existing read results may remain readable as historical observations but cannot gain checked numerical authority from this migration.
 
 A historical effect proof remains historical if later legitimate steps change inputs. Distinguish “this effect was verified at that step” from “these are the current inputs.” Use LC-23's input-fingerprint chain and current freshness checks; do not recheck an old edit against an intentionally changed current value and silently reinterpret its history.
+
+Use the same native verifier contract on **normal `finish_step`, late-worker receipt handling, automatic queue/foreground settlement and explicit reconciliation**, not only on `resolve_task_step`. Generic handler success, `outcome=completed` or a stored late result without the required family receipt is insufficient. Under the existing native lock/store transaction, retain the exact receipt/proof and only then publish completed or permit dependent references/effects. A crash between native effect, receipt, proof and status publication leaves recoverable uncertain state; reconstruction must not infer success or replay from a missing write. After process loss, an empty in-memory session/worker registry is not positive proof of quiescence: require a native terminal origin/fence, or stay Needs review. No matching verifier means no verified effect-dependent completion.
 
 ### Completion condition
 
@@ -124,8 +130,8 @@ The initial delivered adapter work is the existing S7/S8 scope, not a new univer
 | Result family | Required native semantics and oracle | Exclusion kept explicit |
 |---|---|---|
 | Energy flow / load shape (S7) | Native energy totals and conservation residual ≤ 1e-6·throughput; any percentile uses actual weights or refuses; representative snapshots cannot become a full calendar-year monthly profile | Attribution paths, unsupported groupings and absent time coverage remain withheld |
-| Investment / economics (S8) | Rebuild NPV from stored cashflows at declared rate/money basis; tolerance 1e-6·Σ|CF|; IRR must satisfy native NPV residual and refuses non-unique sign-changing cashflows; LCOE follows the native finance definition and exact counterfactual | No guessed FX/price year, hidden cost completeness or general finance/risk ranking |
-| Grid loading | Preserve existing exact LOPF proxy/profile and source-bound browser ACK where supported | No AC thermal/N-1/voltage claim from a P-only profile; Link-connected AC defect is a native prerequisite |
+| Investment / economics (S8) | Preserve shipped `investment-case/1` equity/project NPV and unique IRR, its cash rows, declared rate/basis, native residual checks and independent oracles. LCOE is a separate future adapter using the native finance definition and exact counterfactual | LCOE, payback, cover ratios and solved PPA price remain unchecked until their own acceptance gates pass; no guessed FX/price year, hidden cost completeness or general finance/risk ranking |
+| Grid loading | Preserve existing exact LOPF proxy/profile, shipped `site-import/1`, and source-bound browser ACK where supported; retain the merged Link-dispatch fix and its numerical regression | No AC thermal/N-1/voltage claim from a P-only profile; the fixed native defect does not establish universal AC/compliance coverage |
 
 The detailed calculation semantics in the pinned [checked-results audit](https://github.com/MLHaoChang/pypsa-eur/blob/089aea276c75b098c8d349cb5fa0eb4cb7267d64/.scratch/checked-results/audit.md) are normative where narrower than this table. If a required native engine fix or retained artifact is absent, keep the path unavailable until that owning slice lands and passes its independent oracle. Do not duplicate formulas in chat prose.
 
@@ -145,14 +151,14 @@ Adopt the exact LC-23 brief schema, card checkpoint and limits. Use `ask_user` o
 
 A case label is not execution authority. First delivery admits at most two supported network cases via the existing experiment preflight/advance/refresh path. A one-step sweep submission under a brief must represent one case/job; a two-case brief uses two explicit admitted submissions. A direct multi-job step is refused at preflight until a native aggregate receipt adapter is implemented. Ordinary sweep behavior outside a brief is unchanged. More cases or other execution domains require a separately reviewed future brief/adapter, not an internal loop.
 
-Extend `job_adapters` and existing continuation to settle queue-backed steps from their own owned queue record and run/effect evidence. Do not pass a queue UUID to a foreground-only reader or certify whichever job happens to occupy live state. `wait_for_job` is excluded as a brief step per LC-23; native waiting settlement avoids interpreting its observation timeout as solve failure.
+Preserve S2's shipped queue-backed settlement from each owned queue record and run/effect evidence. Extend only missing family/proof contracts and regressions. Do not pass a queue UUID to a foreground-only reader or certify whichever job happens to occupy live state. `wait_for_job` is already excluded as a brief step per LC-23; native waiting settlement avoids interpreting its observation timeout as solve failure.
 
 Native family matrix:
 
 | Family | First delivery | Required terminal interpretation |
 |---|---|---|
 | Foreground `fg:` solve / AC | Retain current LC-12 behavior and LC-23 proof | Completed only with exact run evidence; unknown/failed/aborted are distinct |
-| Queue network case | Add LC-23 adapter | Native case completion + exact queue/run receipt; started/queued is waiting |
+| Queue network case | Retain shipped LC-23 S2 adapter; harden residual proof where needed | Native case completion + exact queue/run receipt; started/queued is waiting |
 | Adequacy/FMEA/MC/frontier/coupling/EH/investment `ad:` | Observation stays supported; automatic proof-dependent progression enabled only per native adapter | `done`/`met` can be success only with declared evidence and objective; unreachable/exhausted/refused are not success |
 | Reports `rpt:` | Closing phase after LC-21/artifact adapter | Native successful artifact and source integrity; no file-name-only success |
 
@@ -165,6 +171,20 @@ Extend existing `AssistantResultCard`, `ChatPanel` and `usePlanContinuation`: ob
 ### Completion condition
 
 RUN-01–RUN-06 and the corresponding native LC-23 SC cases pass with fake/scripted providers, real native effects and synthetic solver fixtures. Live model quality is separate. A new family cannot be enabled by a UI button without its receipt/settlement adapter.
+
+### Bounded validation and correction loop
+
+Keep master's existing turn/session/daily limits, H2a explanation cap, goal-round bounds and pre-output transient-stream retry policy. They are delivered controls, not new features. Add the following native accounting to the existing task/budget records; no new planner or budget endpoint. This bounds **additional diagnostic work**, not the original reviewed step list, which keeps its own 12/24-step caps and ordinary dispatch limits.
+
+For a given native task/step/attempt, allow at most three validation passes, two diagnostic reads and one correction draft. Across that diagnostic epoch allow at most six ordinary tool dispatches and four provider requests; lower existing limits always win. Debit before dispatch/provider invocation. A native waiter polling its exact submitted job is governed by its existing finite wait/watch limits and never starts a replacement job; polls are observations, not new validation passes. Waiting does not imply success or reserve another effect. Counters persist across turns, resumes, context trims, session reconstruction and provider changes. Missing/corrupt counters refuse dependent progression. Keep a task-wide diagnostic ledger: maxima are three validation passes, two diagnostic reads, one correction draft, six tool calls and four provider requests **per declared step**, summed across all attempts. An explicitly confirmed retry can create a new attempt but cannot reset that task-wide allowance. Starting/completing/changing a goal cannot manufacture a new task/epoch allowance. One provider request spanning several steps is charged once to the step active at request admission and to the task ledger; returned tool calls are individually charged to their actual step. Non-task diagnosis stays within the originating user turn and existing goal/session caps; automatic continuation is not a new user request or a new allowance.
+
+Native progress means new matching evidence, a changed source revision or a successfully verified declared step, never different model wording or a repeated status poll. Record a stagnation key from canonical tool arguments (defaults applied), native target/family, source revision and native validation/refusal code. Two equivalent failures without new evidence end that epoch immediately; alternating equivalent tools for the same target/reason share the same key. Different arguments/tools still consume the same finite allowance, preventing evasion by paraphrase or ID churn. If equivalence cannot be established, enforce the absolute caps rather than guessing success. A source change invalidates the diagnosis and follows the existing stale/review path; it does not silently restart the epoch.
+
+Validation passes and supplemental diagnostic reads are distinct categories: the allowance of two reads does not prevent three native validator calls, but both consume the six-tool total when dispatched as tools. Internal synchronous validation consumes a validation pass without pretending to be a separate tool call. Atomically reserve/debit counters before work across concurrent sessions, including each provider SDK retry/fallback or rejected output; debit a correction draft before publication. Tokens/usage reporting never controls these counters. Task-wide limits are `3*N`, `2*N`, `N`, `6*N`, `4*N` respectively for `N` declared steps, shared across attempts. Existing task records without a ledger may retain observation/history access, but cannot start diagnostic progression until an explicitly reviewed compatible plan establishes a native ledger; unknown prior usage is not zero or unlimited. Ordinary resume/retry/goal changes cannot initialize/reset it. A newly user-reviewed plan can establish its own ledger under ordinary admission; no automatic task-ID churn is allowed to bypass a stop.
+
+The loop is read/propose → native validate →, if needed, bounded diagnose/correction draft → revalidate **after a separately approved correction**. The draft itself changes nothing. A changed constraint, parameter or run always needs its normal current card. Native validation is required before dependent effects and engineering claims; when no applicable validator exists, say not evaluated and block the unsupported dependent claim/action. There is no automatic effect retry after timeout/unknown/partial outcome, no repair of a corrupt record by the model, and no re-running an original solve to obtain proof. Stream retry may replay a provider request only under the existing pre-output transient policy; it is not permission to repeat a handler. On stagnation/cap/refusal, preserve receipts and present partial/To review with the blocker and one next action; never set completed, goal success or verified publication because a limit ended the loop. Provider usage being unknown cannot make call/round counters zero or lift any limit.
+
+LOOP-01–LOOP-06 specify these invariants, including persistence, native validation before progression, lower-cap precedence and truthful termination. This is a proposed incremental guard over the existing loop, not a claim that Claude Code has these exact limits or that its private harness was inspected.
 
 ## 7. HS-06: journey evidence and diagnostics
 

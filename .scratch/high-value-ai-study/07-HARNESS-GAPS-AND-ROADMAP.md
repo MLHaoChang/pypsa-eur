@@ -3,6 +3,8 @@
 
 # GridSpine harness: gaps and a capability roadmap
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 Status: research/specification only; no runtime changes or implementation approval.
 Runtime assessed and tested master: `322df0cf495260442eb35bb9c0c5d8e11a274ffe`. This supplements the earlier value assessment; it does not relabel its older test results.
 

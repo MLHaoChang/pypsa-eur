@@ -3,7 +3,9 @@
 
 # Making the GridSpine harness more capable
 
-**Implementation specs are now included:** [functional behavior](../../.scratch/high-value-ai-study/08-HARNESS-IMPLEMENTATION-SPEC.md), [data/state contracts](../../.scratch/high-value-ai-study/09-HARNESS-DATA-AND-STATE-CONTRACTS.md), [code delivery and test matrix](../../.scratch/high-value-ai-study/10-HARNESS-DELIVERY-AND-TESTS.md). They define seven delivery units in existing packages and 47 planned acceptance cases, using the merged LC-23 design on master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. Runtime implementation is not part of this PR.
+**Latest review:** [current-master reconciliation and residual scope](../../.scratch/high-value-ai-study/11-CURRENT-MASTER-AND-REVIEW.md). Master now contains LC-23 S1/S2 and other foundations. Use the amended 08/09/10 specs and 53-case plan; preserve shipped work. The independent verdict is separate from runtime/CI/merge approval.
+
+**Implementation specs are now included:** [functional behavior](../../.scratch/high-value-ai-study/08-HARNESS-IMPLEMENTATION-SPEC.md), [data/state contracts](../../.scratch/high-value-ai-study/09-HARNESS-DATA-AND-STATE-CONTRACTS.md), [code delivery and test matrix](../../.scratch/high-value-ai-study/10-HARNESS-DELIVERY-AND-TESTS.md). They define seven delivery units in existing packages and 53 planned acceptance cases, using the merged LC-23 design on master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. Runtime implementation is not part of this PR.
 
 GridSpine already has an agent loop, typed tools, permission/approval checks, skills, MCP, durable records, replay, job tracking and bounded checked answers. The main opportunity is to complete the native workflow coverage and verification around those foundations.
 

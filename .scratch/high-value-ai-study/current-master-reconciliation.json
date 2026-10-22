@@ -1,0 +1,436 @@
+{
+  "schema_version": 1,
+  "assessed_master": "7a14d27038de424d07a832b16e2465297c7b8b7d",
+  "reviewed_pr": 567,
+  "initial_pr_head": "36b5342ad5588ecad8400cd1b9af29a36864431b",
+  "scope": "residual_implementation_spec_readiness_not_runtime_or_merge_certification",
+  "runtime_modified": false,
+  "paid_model_calls": 0,
+  "standing_reviewers_contacted": false,
+  "independent_design_reviewer": "/root/harness_567_independent_review",
+  "source_pins": [
+    {
+      "path": ".scratch/checked-results/audit.md",
+      "sha256": "ebc41ab43e92c441adef82aeb7b26e967a09af48d74fdde3e1b7b0c83b27bb3a",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/.scratch/checked-results/audit.md"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/23-study-copilot.md",
+      "sha256": "c2090ca4a7fb6db32becd6e34196e5a04396c5a4b210c2da5146d733fb8f5519",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/.scratch/live-copilot/issues/23-study-copilot.md"
+    },
+    {
+      "path": "docs/agents/owner-decisions.md",
+      "sha256": "c3268fb09843637ae39c1a3cca41a3ca1e6b16c67bbb3789a0ffc27a62bd5a83",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/docs/agents/owner-decisions.md"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "4fa492a051895026583d46dcfe4a961a861642ef7b42da3eab72a481e861abc9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/README.md"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/assurance.py",
+      "sha256": "aab9fde10f20b649ba3cc3e39e37ed12990beb24d6b753b607a2616b7334899e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/assurance.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/assurance_scope.py",
+      "sha256": "0b661fa53a3b05ee3d54569765bdfe4c014a3efc80c33b6349191a833c8b6863",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/assurance_scope.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/budget.py",
+      "sha256": "24f4d78d4220c9e8a9270fbe3b050b8548ba73d97055e0650e0e221465205960",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/budget.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/calculations.py",
+      "sha256": "74acc16dbbb7cadf6805447a203753fe6de6f18201a998963868a73797f26741",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/calculations.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/catalogue.py",
+      "sha256": "0a073f0fd83608a499ec4fc8398ccd6d6a6b6ce7ef740e673a04fa97d43db7af",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/catalogue.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/compose.py",
+      "sha256": "b9d5795f4bf060e1a33d3697d8954bb4e03268b1f232abbb0ac8b6980dd71ac6",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/compose.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/confirm.py",
+      "sha256": "f367e3dd1ec2717e6565b69d6503f73d999dcd4fd81046b0c21cb92ab9512c07",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/confirm.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/continuation.py",
+      "sha256": "8c814c5069a5d493540181a998b71c2a02c2fe6a6b8319faa525c4b4e52085e2",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/continuation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/eventlog.py",
+      "sha256": "aee0cb80bf85bbf19c762864c5af13eb7a6166868a47b498afa35cc1575d2fd3",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/eventlog.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/goals.py",
+      "sha256": "8410c92567b5c797fe213852174fc63636adc02cc434160f644d5eeed63d761e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/goals.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/history.py",
+      "sha256": "77842bb064ba77415f17221c11982fa69ce8f6e8c84c25806950bb812ff5bf66",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/history.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/investment_calculations.py",
+      "sha256": "a92c3606411a4ba11510bbce3d05633779d5b80c9b9512df25877ed82bbd22fb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/investment_calculations.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/job_adapters.py",
+      "sha256": "6f6e8d199197a4116d2e97a2d383fb5ea11b1978e06a9a486930c14e701ad9ba",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/job_adapters.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/loop.py",
+      "sha256": "b1fadd1bf1ce891495d74546f224a772f5536ba45b160c1f9105693cd62c0913",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/loop.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/metrics.py",
+      "sha256": "2d1c99c835923ebfce42e38fe55506c2b854da0fd4c2258ec4e62e96ed9c20f5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/metrics.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/providers/wiring.py",
+      "sha256": "85a7d06ae8a4b9f65b7ee57a14b30254a7a3986c6ae06a861e5cd3df68dda1fb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/providers/wiring.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/replay.py",
+      "sha256": "e72ad6d24c281c062569cfafccf4e0da6e1ba8376c7de87c8bdcd47ffd3a3126",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/replay.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/site_import_calculations.py",
+      "sha256": "54d10bc7b40ce74d9f85feba00b104b272f2a622344e9001161fc45a16c6c9e8",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/site_import_calculations.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/skills/registry.py",
+      "sha256": "68d2a447693d49fb2f0a03933b9a137c056aa4b8ee58b81bf6bc8153ed3d5afb",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/skills/registry.py"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/workflows/registry.py",
+      "sha256": "1b3f02f2b3f13e8ef183a8617de5377fb483ac47f8479c22506c1bbae48a45ba",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/harness/workflows/registry.py"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/chat.py",
+      "sha256": "e46e2d0ad644dfaa64215bcd48d748ca856e99870302be2c9cc3d1d388fe5cfe",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/routers/chat.py"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/snapshots.py",
+      "sha256": "55be579440a81731403fcb9093fd3997148edf0d395b63ef3247b87f9effc191",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/routers/snapshots.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/ac_pf_service.py",
+      "sha256": "b22c76cd218f55eeae9addb88a990e5555b1dd0facaa80f08a9800be438d46bc",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/ac_pf_service.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tasks.py",
+      "sha256": "118a732e1883df9ecbf9663debabe43a649f2209bb22e92712f43f7cfc4b0965",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/assistant_tasks.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/assistant_tools.py",
+      "sha256": "fafb1edd36952045e24b3a4cd4b232b81f5a2365c22471e935a5253861d1d598",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/assistant_tools.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/chat_tools.py",
+      "sha256": "f337cb616fe60f8ceb41d436caa892e2e4a63a94b5792cafaaac323193f55cc7",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/chat_tools.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/component_discovery.py",
+      "sha256": "7873fe0c7726e2394f93c3febd45555fe7abf93f6ece010cb7bbdab0a4d9b631",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/component_discovery.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/durable_conversation.py",
+      "sha256": "afb7f4abed6b4e984e38dd57bdf9d33db87fefe0571867b7db63b33ac0fc2846",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/durable_conversation.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/equipment_table.py",
+      "sha256": "757a6a7ccaccd7a033d9825195c49ce94a57775007a2b40024a65dc02fcd6503",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/equipment_table.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/evidence.py",
+      "sha256": "bf1b7c9c133c30fcc2cb2aebc400439cba7fe4cd63562069d4afe08305916053",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/reports/evidence.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/reports/number_audit.py",
+      "sha256": "12901fef78978e4d7a3e3768bba5726566ac4790a22a3f7caf89fbad75728367",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/reports/number_audit.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/result_views.py",
+      "sha256": "3de045ed1e17e42674bd2942a91be47b22a2e305952d70d1ecc2cd56876972f5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/result_views.py"
+    },
+    {
+      "path": "pypsa-gui/backend/services/run_evidence.py",
+      "sha256": "3d1198124dbec39bde2a373a8980d22a8321c21eee2b0959329f0504a3833f57",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/services/run_evidence.py"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_control_matrix.py",
+      "sha256": "3ac086953db90b4398d3a4eaffba6012712a47d4765ec9e0bec35aac8d15e6ff",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/smoke/assistant_control_matrix.py"
+    },
+    {
+      "path": "pypsa-gui/backend/smoke/assistant_inventory.py",
+      "sha256": "3231cf40a6db7b0a102cb6783166499a8d547470c4024e641eb3df8c4ca8e60d",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/smoke/assistant_inventory.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/fixtures/investment_case/bills/tou_weekday_evening.json",
+      "sha256": "e030bbd9d73c8adb1d69d8529f6adbf262c82f1a36084a77923cfbd137c67f18",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/tests/fixtures/investment_case/bills/tou_weekday_evening.json"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_ac_pf_link_dispatch.py",
+      "sha256": "b57561e8054e6f9ffc5e4b90658216f303e9d76486416749f39be2f2fbfd89b9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/tests/test_ac_pf_link_dispatch.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_adequacy_stress.py",
+      "sha256": "f462192d28324dbc0b5a6346f78901706d516b691ff48c1a8d1e64384e10dab5",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/tests/test_adequacy_stress.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_assistant_tasks_study_brief.py",
+      "sha256": "a90879b53ef2ec50786303a7da9e09929733e14f3e64ad69416c3432d574585e",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/tests/test_assistant_tasks_study_brief.py"
+    },
+    {
+      "path": "pypsa-gui/backend/tests/test_campus_electrical_service.py",
+      "sha256": "0411bbbc85bbbef0719a3a383210db0868d235824e8c507801e1c89009ff0a43",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/backend/tests/test_campus_electrical_service.py"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/api/chat.ts",
+      "sha256": "428d8f92cc739bb38cac4bde511c544901d169873f95666f0765a530f4eb75e0",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/frontend/src/api/chat.ts"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/AssistantResultCard.tsx",
+      "sha256": "e2d0e1f9248e00caf42a2026e38672fda4f190e145bb59cf44bc70ddfc662483",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/frontend/src/components/AssistantResultCard.tsx"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/ChatPanel.tsx",
+      "sha256": "f1215fbc0f4e1436202536162876362204b4cf99f1464e6eee24519b38e9e0a9",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/frontend/src/components/ChatPanel.tsx"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/hooks/usePlanContinuation.ts",
+      "sha256": "6ef44811cdef65e82374e44bc509c1016acbf3e59e6633c5b6a083fc151b0c17",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/blob/7a14d27038de424d07a832b16e2465297c7b8b7d/pypsa-gui/frontend/src/hooks/usePlanContinuation.ts"
+    }
+  ],
+  "unit_reconciliation": [
+    {
+      "unit": "HS-01",
+      "state": "partly_delivered_residual_hardening"
+    },
+    {
+      "unit": "HS-02",
+      "state": "partly_delivered_residual_hardening"
+    },
+    {
+      "unit": "HS-03",
+      "state": "residual_contract_not_delivered"
+    },
+    {
+      "unit": "HS-04",
+      "state": "partly_delivered_residual_hardening"
+    },
+    {
+      "unit": "HS-05",
+      "state": "partly_delivered_residual_hardening"
+    },
+    {
+      "unit": "HS-06",
+      "state": "partly_delivered_residual_hardening"
+    },
+    {
+      "unit": "HS-07",
+      "state": "partly_delivered_residual_hardening"
+    }
+  ],
+  "new_acceptance_cases": 53,
+  "new_acceptance_execution": "planned_not_run",
+  "review_verdict": "pending_independent_rereview",
+  "review_report": "12-INDEPENDENT-REVIEW.md",
+  "current_master_baseline_tests": {
+    "status": "passed",
+    "scope": "six existing native foundation suites; not the53plannedacceptancecases",
+    "source_commit": "7a14d27038de424d07a832b16e2465297c7b8b7d",
+    "report": "evidence/harness-foundations-7a14d27.xml",
+    "sha256": "fe27c97e77b9983054b9af52e86224baa062cc30a3ef4a01345fc1744a75a944",
+    "tests": 142,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 72.769,
+    "execution_mode": "fake/scripted providers and native HiGHS; local HTTP TestClient requires network-enabled sandbox",
+    "environment_note": "Initial restricted-network run stalled in TestClient portal setup, interrupted; unchanged suite passed with local networking. No test relaxation or paidcalls.",
+    "command": "PYTHONPATH=. NUMBA_CACHE_DIR=<isolated> MPLCONFIGDIR=<isolated> OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <test-env-python> -m pytest tests/test_assistant_tasks_study_brief.py tests/test_investment_assurance.py tests/test_site_import_assurance.py tests/test_result_views.py tests/test_equipment_table.py tests/test_ac_pf_link_dispatch.py -q -p no:warnings -o faulthandler_timeout=45 --junitxml=<report>",
+    "cwd": "pypsa-gui/backend"
+  },
+  "public_references": [
+    {
+      "name": "how-claude-code-works",
+      "url": "https://code.claude.com/docs/en/how-claude-code-works.md",
+      "final_url": "https://code.claude.com/docs/en/how-claude-code-works.md",
+      "http_status": 200,
+      "bytes": 18484,
+      "sha256": "c3cfd24cbd4f08f42bb1c38207a64b6db1b0ffb9e277062c87da9e2c00770388",
+      "retrieved_utc": "2026-10-21T22:16:40.798477+00:00"
+    },
+    {
+      "name": "memory",
+      "url": "https://code.claude.com/docs/en/memory.md",
+      "final_url": "https://code.claude.com/docs/en/memory.md",
+      "http_status": 200,
+      "bytes": 51857,
+      "sha256": "d951a26e6662ef73a97566b7e9bac1d84d477d1a15e0b193148340d05081a88c",
+      "retrieved_utc": "2026-10-21T22:16:40.912749+00:00"
+    },
+    {
+      "name": "sub-agents",
+      "url": "https://code.claude.com/docs/en/sub-agents.md",
+      "final_url": "https://code.claude.com/docs/en/sub-agents.md",
+      "http_status": 200,
+      "bytes": 110784,
+      "sha256": "89aa73eb3f28e274650634620113a19585dd09b7f40be3dd16d584800cb60aed",
+      "retrieved_utc": "2026-10-21T22:16:40.854329+00:00"
+    },
+    {
+      "name": "hooks",
+      "url": "https://code.claude.com/docs/en/hooks.md",
+      "final_url": "https://code.claude.com/docs/en/hooks.md",
+      "http_status": 200,
+      "bytes": 269876,
+      "sha256": "5a5cc139bc639ced7c328a509c3962da375dfba672dc54713356940a354bd79f",
+      "retrieved_utc": "2026-10-21T22:16:40.851835+00:00"
+    },
+    {
+      "name": "sandboxing",
+      "url": "https://code.claude.com/docs/en/sandboxing.md",
+      "final_url": "https://code.claude.com/docs/en/sandboxing.md",
+      "http_status": 200,
+      "bytes": 95397,
+      "sha256": "b77ce86ffbdb116b82c2a289d6edf1d5e2eb09953cb0f5e6eee1aaca0b1970ea",
+      "retrieved_utc": "2026-10-21T22:16:40.845474+00:00"
+    },
+    {
+      "name": "skills",
+      "url": "https://code.claude.com/docs/en/skills.md",
+      "final_url": "https://code.claude.com/docs/en/skills.md",
+      "http_status": 200,
+      "bytes": 111106,
+      "sha256": "8f70b9f034eaba99f49608220efd5ccea4f3cf27b6da98531074c93552a0c80a",
+      "retrieved_utc": "2026-10-21T22:16:40.813955+00:00"
+    },
+    {
+      "name": "costs",
+      "url": "https://code.claude.com/docs/en/costs.md",
+      "final_url": "https://code.claude.com/docs/en/costs.md",
+      "http_status": 200,
+      "bytes": 44374,
+      "sha256": "9daf33a0e41a0af2a0a5ec91c0c2017b3cec87e836496dd00d3c53576b31ad54",
+      "retrieved_utc": "2026-10-21T22:16:40.872745+00:00"
+    }
+  ],
+  "optional_reference_fetch": {
+    "url": "https://code.claude.com/docs/en/best-practices.md",
+    "status": "HTTP403_not_used_as_retrieved_evidence"
+  },
+  "outstanding": [
+    "implementation acceptance and exact-head CI/premerge",
+    "independent domain review",
+    "real-use calibration"
+  ],
+  "current_inventory": {
+    "status": "passed",
+    "tools": 279,
+    "result_tabs": 17,
+    "panels": 21
+  },
+  "current_control_matrix": {
+    "status": "passed",
+    "controls": 170,
+    "families": 14,
+    "full_coverage": "not_established"
+  },
+  "later_master_review": {
+    "sha": "1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5",
+    "previous_sha": "7a14d27038de424d07a832b16e2465297c7b8b7d",
+    "pull_request": 583,
+    "result": "reviewed compatible advisory money-year disclosure; no overlapping harness runtime changes",
+    "design_implication": "Mixed money years are advisory, not a run blocker; acknowledged warning never validates normalized monetary basis. Hand-typed replacement costs have unknown year, not inherited reference year. Native money/source checks still required before checked finance claims.",
+    "baseline_relabelled": false,
+    "targeted_tests_status": "passed",
+    "changed_source_pins": [
+      {
+        "path": "doc/release-notes.d/claude-b9-money-years-to-check.md",
+        "sha256": "57c657a15f5b87ee44f23e53e1dbc523659e88e0f6f897c22a913a4bd262a6ad",
+        "url": "https://github.com/MLHaoChang/pypsa-eur/blob/1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5/doc/release-notes.d/claude-b9-money-years-to-check.md"
+      },
+      {
+        "path": "pypsa-gui/backend/services/flow_service.py",
+        "sha256": "8adaaf16a3648001d000bbf32c7f344c93e7cb74146704be79e256c0af311630",
+        "url": "https://github.com/MLHaoChang/pypsa-eur/blob/1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5/pypsa-gui/backend/services/flow_service.py"
+      },
+      {
+        "path": "pypsa-gui/backend/services/library/reference_apply.py",
+        "sha256": "3c47eb65bd44d6a33ba3ed458bdca51a167e1a290e69aafa276983abd05fe707",
+        "url": "https://github.com/MLHaoChang/pypsa-eur/blob/1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5/pypsa-gui/backend/services/library/reference_apply.py"
+      },
+      {
+        "path": "pypsa-gui/backend/tests/test_flow_money_years.py",
+        "sha256": "8e06f38d7e219e3d737d6124a682e1f216c46e33b842818435915a6fdd02f22c",
+        "url": "https://github.com/MLHaoChang/pypsa-eur/blob/1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5/pypsa-gui/backend/tests/test_flow_money_years.py"
+      },
+      {
+        "path": "pypsa-gui/backend/tests/test_library_reference_apply.py",
+        "sha256": "5afaf0c14e63b176173d01b664f92db0870ef35bab8a7a1173afa546b9bc79ed",
+        "url": "https://github.com/MLHaoChang/pypsa-eur/blob/1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5/pypsa-gui/backend/tests/test_library_reference_apply.py"
+      }
+    ],
+    "targeted_tests": {
+      "source_commit": "1b1aa5ccc5dd4c8ca9fdf2ec680fd96cb5f687b5",
+      "report": "evidence/money-years-1b1aa5c.xml",
+      "sha256": "50515cb9c1e52a34bba9f985f1d7e870c804588d6d147b9c574e98645df1f762",
+      "tests": 30,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "duration_seconds": 9.004,
+      "scope": "test_flow_money_years.py and test_library_reference_apply.py on1b; not53plannedharnesscases orfullregression"
+    }
+  }
+}

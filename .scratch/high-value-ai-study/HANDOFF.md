@@ -3,15 +3,17 @@
 
 # Handoff: next high-value AI capabilities
 
+**Latest review:** [current-master reconciliation and residual scope](11-CURRENT-MASTER-AND-REVIEW.md). Master now contains LC-23 S1/S2 and other foundations. Use the amended 08/09/10 specs and 53-case plan; preserve shipped work. The independent verdict is separate from runtime/CI/merge approval.
+
 Status: implementation specifications for review; runtime unchanged. Do not implement automatically on reading this file.
 
 ## Latest request and concrete implementation entry point
 
-The owner explicitly asked to turn the harness recommendations into implementation specifications and publish them in a PR. Read `08-HARNESS-IMPLEMENTATION-SPEC.md`, `09-HARNESS-DATA-AND-STATE-CONTRACTS.md`, `10-HARNESS-DELIVERY-AND-TESTS.md` and `harness-implementation-plan.json` first. These now specify seven delivery units, exact contracts/code targets/dependencies and 47 planned acceptance cases, rather than relying on this handoff or the older assessment as the build plan.
+The owner explicitly asked to turn the harness recommendations into implementation specifications and publish them in a PR. Read `08-HARNESS-IMPLEMENTATION-SPEC.md`, `09-HARNESS-DATA-AND-STATE-CONTRACTS.md`, `10-HARNESS-DELIVERY-AND-TESTS.md` and `harness-implementation-plan.json` first. These now specify seven delivery units, exact contracts/code targets/dependencies and 53 planned acceptance cases, rather than relying on this handoff or the older assessment as the build plan.
 
 Fresh source for this concretization: `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. #559 is merged; its owner decisions are now on master. #569 also merged LC-23's concrete design: brief plans use 24 steps/32,000 serialized characters, plain plans retain 12/16,000, with 1,800-char step arguments. Adopt it, not another task schema. A proposed native checkpoint reference on the existing stream binds the actual Continue click; a model/MCP resume alone cannot grant it. New context limits are packing bounds, not token/cost guarantees.
 
-The 47 cases remain planned and unexecuted because runtime is not implemented here. Historical 370-test/244-case evidence is not relabeled for this source. Current inventory/matrix checks passed (276 tools/17 tabs/20 panels; 170 controls/14 families/full coverage not established). Keep speculative H08 agents/code workspaces out of the build.
+The 53 cases remain planned and unexecuted; this docs PR changes no runtime, although several foundations have since shipped on master. Historical 370-test/244-case evidence is not relabeled for this source. Current inventory/matrix checks passed (276 tools/17 tabs/20 panels; 170 controls/14 families/full coverage not established). Keep speculative H08 agents/code workspaces out of the build.
 
 ## Context to carry forward
 
@@ -35,7 +37,7 @@ Publication also reviewed the incoming master change to `49791da3e1197f3872b9273
 1. Inspect environment/network readiness without credentials disclosure; read root AGENTS, steward, harness README and current owner decisions.
 2. Fetch/inspect actual master, #558, #559 and this PR. Reassess source pins and overlapping work; do not copy closed or superseded proposals into code.
 3. Run `python .scratch/high-value-ai-study/validate_specs.py`. It verifies spec consistency only. Read VALIDATION.json for actual baseline tests versus future tests.
-4. Obtain required product/design/domain reviews in the existing process before building UI/engine changes. No review was contacted or approval claimed in this research session.
+4. Obtain required product/design/domain reviews in the existing process before building UI/engine changes. The owner-authorized independent design review is recorded in 12; standing product/engine/UX reviewers were not contacted and their implementation gates remain separate.
 5. Implement one admitted acceptance slice in the owning package, with its matrix cases, semantic tests, source-bound browser/effect evidence and normal CI/premerge requirements. Do not count baseline tests as new-feature acceptance.
 6. Update outcome measurements and scope honestly. Independent domain review and real-use calibration remain pending by owner choice; no paid calls or reviewer contact are authorized by this handoff.
 
@@ -45,7 +47,7 @@ The owner's subsequent voice request asked how to make the harness more powerful
 
 Priorities: complete native capability/evidence coverage and task-completion proof; improve structured context; widen checked analysis; extend admitted cross-domain study phases, with journey evidence throughout. Existing skills, MCP, replay, durable memory and browser continuation already exist. Do not propose them as entirely missing. Keep optional specialist reads/code workspaces conditional and later; no general terminal or new agent runtime is authorized.
 
-The current manual task reconciliation can record caller-supplied completion after confirmation. New verified claims must independently read native evidence; confirmation alone is not engineering proof. Source inventory/matrix counts do not prove every feature works. Consult the supplement's completed validation records before reporting results.
+On the historical assessment baseline, manual task reconciliation could record caller-supplied completion after confirmation; current master LC-23 S1 ignores those bytes and reads native evidence. The remaining scope is shared proof/legacy/crash hardening. New verified claims must independently read native evidence; confirmation alone is not engineering proof. Source inventory/matrix counts do not prove every feature works. Consult the supplement's completed validation records before reporting results.
 
 This PR is not a merge/deployment request. No production activation, equipment control, two-case follow-up implementation or external account/data acquisition occurs here. Scope ends at publication of these specifications and their validation evidence.
 

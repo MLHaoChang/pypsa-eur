@@ -3,6 +3,8 @@
 
 # HV-S: goal-to-study copilot
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 Status: proposed; runtime integration not implemented by this PR.
 Owning work: W9/W10, LC-05/LC-12/LC-19, S5/S6/S7 where applicable. Native support is decided by W0 and the catalogue, not this document.
 

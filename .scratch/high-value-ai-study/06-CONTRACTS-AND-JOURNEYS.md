@@ -3,6 +3,8 @@
 
 # Proposed records, lifecycle and end-to-end journeys
 
+**Historical baseline:** absence/status statements below describe their pinned source. [Current-master reconciliation](11-CURRENT-MASTER-AND-REVIEW.md) and amended 08/09/10 contracts supersede them for implementation; do not rebuild shipped LC-23/S8/equipment/restore work.
+
 These are design records, not existing API endpoints or catalogue tool declarations. Names must be reconciled with native contracts before any implementation. Extend existing owners only when needed; do not create a parallel planner/approval/evidence store.
 
 ## Shared source and action contract
