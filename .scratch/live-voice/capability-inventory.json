@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 285,
+  "tool_count": 287,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5447,6 +5447,55 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "46573de48a4a62e0bb4c508693111f48a010a18e99117287a02f243d95c0a841",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_commercial_document_values",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "citations"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "7f50006ac302589d9049d83ac66817e442fae231251b237ec9ff2c32c1f09408",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_commercial_document_values",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/document_values/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "citations",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "a2f996059bf4aa0189649ac477ae22ed074e6dec2ab839f7dd44635dec053c96",
       "behavioral_fixture": "pending"
     },
     {

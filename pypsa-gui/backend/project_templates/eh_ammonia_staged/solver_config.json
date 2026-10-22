@@ -70,6 +70,7 @@
     "meter_history_peaks_kw": {},
     "poc_link": "grid_import",
     "power_factor": null,
+    "provenance": {},
     "reference_purchases": [
       {
         "co2_t_per_kg": 0.002,

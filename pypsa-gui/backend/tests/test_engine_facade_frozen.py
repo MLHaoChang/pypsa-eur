@@ -281,7 +281,9 @@ MODEL_FIELDS: dict[str, tuple[str, ...]] = {
         # H2e (2026-10-15): the counterfactual's reference purchases and CO2 price.
         "co2_price", "reference_purchases",
         # IPP ticket 07 (G7): the wholesale import price series.
-        "import_price_ref"),
+        "import_price_ref",
+        # Data-to-model slice 2: where a tariff or PPA value was read from (metadata, not LP).
+        "provenance"),
     "models.finance.FinanceInputs": (
         "acquisition_date", "analysis_years", "annualise", "capex_phasing", "cod_by_asset",
         "construction_months_by_asset", "construction_start", "contingency_share",
