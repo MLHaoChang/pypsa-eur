@@ -359,9 +359,10 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     # The RP-01 rule (NaN, out of range and 0/0 all count as missing), so the
     # flow and the profile refusal agree on what "placed" means.
     placed = sum(1 for b in n.buses.index if _bus_coord(n, b) is not None)
-    from services.profile_gen.readiness import unplaced_renewables
+    from services.profile_gen.readiness import supplied_profiles, unplaced_renewables
     from services.pypsa_service import PyPSAService
 
+    supplied = supplied_profiles(PyPSAService.get_active_context(), [str(g) for g in n.generators.index])
     p_nom = None
     if imports:
         try:
@@ -390,7 +391,7 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)}),
         connection_links=sorted(connection), import_p_nom_mw=p_nom,
         asset_count=assets, buses=len(n.buses), buses_placed=placed,
-        renewables_unplaced=unplaced_renewables(n, PyPSAService.get_active_context()), voll=voll,
+        renewables_unplaced=unplaced_renewables(n, supplied), voll=voll,
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,

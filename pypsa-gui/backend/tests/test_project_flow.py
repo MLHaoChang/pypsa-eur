@@ -231,17 +231,21 @@ def test_profile_location_skips_profiles_not_generated(client, site):
 def test_unplaced_renewables_by_profile_state():
     from types import SimpleNamespace
 
-    from services.profile_gen.readiness import unplaced_renewables
+    from services.profile_gen.readiness import supplied_profiles, unplaced_renewables
 
     n = _unplaced_wind_site()
     n.add("Generator", "g3", bus="B1", carrier="wind", p_nom=1.0)
+    n.add("Generator", "g4", bus="B1", carrier="wind", p_nom=1.0)
+    n.generators_t.p_max_pu["g4"] = 0.4                      # native
     key = lambda g: ("generators", "p_max_pu", g)            # noqa: E731
     ctx = SimpleNamespace(
-        user_ts={key("g1"): 1, key("g2"): 1},
+        network=n, user_ts={key("g1"): 1, key("g2"): 1},
         user_ts_meta={key("g2"): {"provenance": "generated: era5"}})
-    assert unplaced_renewables(n) == [("g1", "B1"), ("g2", "B1"), ("g3", "B1")]
-    # g1: uploaded (no record) → skipped; g2: generated → still needs a point.
-    assert unplaced_renewables(n, ctx) == [("g2", "B1"), ("g3", "B1")]
+    names = [str(g) for g in n.generators.index]
+    # g1 uploaded (no record), g4 native: supplied. g2 generated, g3 none: need a point.
+    assert supplied_profiles(ctx, names) == {"g1", "g4"}
+    assert unplaced_renewables(n) == [(g, "B1") for g in ("g1", "g2", "g3", "g4")]
+    assert unplaced_renewables(n, supplied_profiles(ctx, names)) == [("g2", "B1"), ("g3", "B1")]
 
 
 def test_profile_location_ignores_non_renewables(client, site):
