@@ -56,7 +56,7 @@ import Results from './Results'
 // order, and Asset detail stands apart on the right of the group row.
 // In the strip's order: Summary, then each card's tabs (W10 R1), then Asset Detail.
 const ALL_IDS = ['summary', 'capex', 'overview', 'dispatch', 'flows', 'loadshape', 'storage', 'emissions', 'lostload',
-  'curtailment', 'prices', 'economics', 'loadflow', 'grid_code', 'electrical_design', 'adequacy', 'fmea', 'investment', 'asset']
+  'curtailment', 'prices', 'economics', 'loadflow', 'grid_code', 'electrical_design', 'island', 'grid_forming', 'adequacy', 'fmea', 'investment', 'asset']
 
 async function renderResults() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -155,7 +155,7 @@ describe('Results in Expert mode', () => {
     expect(tabIds()).toEqual(ALL_IDS.filter(id => id !== 'overview'))
   })
 
-  it('multi-period: all nineteen tabs, in order', async () => {
+  it('multi-period: all twenty-one tabs, in order', async () => {
     snapState.periods = [2030, 2040]
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-capacity'))

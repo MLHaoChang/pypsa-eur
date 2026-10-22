@@ -6,7 +6,7 @@ import { CARD_GROUPS, RESULT_GROUPS, cardPlaceOf, groupOf, type ResultsTab } fro
 const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
-  'grid_code', 'electrical_design',
+  'grid_code', 'electrical_design', 'island', 'grid_forming',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -18,8 +18,12 @@ describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
   it('puts every tab but Asset detail in exactly one group', () => {
     const grouped = RESULT_GROUPS.flatMap(g => g.tabs)
     expect(new Set(grouped).size).toBe(grouped.length)
-    expect(new Set(grouped)).toEqual(new Set(ALL_TABS.filter(t => t !== 'asset')))
+    // The Control tabs (W10 R3) are filed under the Control card only: the five Guided chapters
+    // have no Control tile until R7, and a tab filed under none of them opens no chapter.
+    const control = ['island', 'grid_forming']
+    expect(new Set(grouped)).toEqual(new Set(ALL_TABS.filter(t => t !== 'asset' && !control.includes(t))))
     expect(groupOf('asset')).toBeNull()
+    for (const t of control) expect(groupOf(t as ResultsTab)).toBeNull()
   })
 
   it.each([
@@ -62,6 +66,6 @@ describe('Results card groups (W10 R1)', () => {
       expect({ id: m[1], ...place }).toEqual({ id: m[1], group: card, cardTab })
       seen++
     }
-    expect(seen).toBe(17)
+    expect(seen).toBe(19)
   })
 })

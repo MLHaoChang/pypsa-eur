@@ -2,15 +2,17 @@
 // It holds the section to the backend's contract:
 // - the form edits the requirements and control modes in the sidecar it was
 //   sent, and Save sends that whole sidecar; a 422 renders inline;
-// - Run asks for the study and the report is read again;
-// - every report table shows its model and the screening caveat, and its
-//   assumed rows are tagged; what is missing is said.
+// - Run asks for the study and the island data is read again;
+// - every report table (now shown in Results › Control › Island & ride-through, by
+//   IslandReportView) shows its model and the screening caveat, and its assumed rows
+//   are tagged; what is missing is said; the section itself points there (W10 R3).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { IslandConfig, IslandReport } from '../api/campusElectrical'
-import CampusIslandSection from './CampusIslandSection'
+import CampusIslandSection, { IslandReportView } from './CampusIslandSection'
+import { useUIStore } from '../store/uiStore'
 
 const api = vi.hoisted(() => ({
   island: vi.fn(), saveIsland: vi.fn(), runIslandStudy: vi.fn(), islandReport: vi.fn(),
@@ -66,9 +68,13 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+function renderReport(report: IslandReport = REPORT) {
+  return render(<IslandReportView report={report} />)
+}
+
 describe('island section: the report', () => {
   it('shows every table with its model and the caveat', async () => {
-    renderSection()
+    renderReport()
     for (const id of ['requirements', 'costs']) {
       const table = await screen.findByTestId(`island-table-${id}`)
       expect(within(table).getByTestId('island-caveat').textContent).toBe(CAVEAT)
@@ -79,7 +85,7 @@ describe('island section: the report', () => {
   })
 
   it('tags the assumed rows and only those', async () => {
-    renderSection()
+    renderReport()
     const table = await screen.findByTestId('island-table-requirements')
     const rows = table.querySelectorAll('tbody tr')
     expect(rows[0].getAttribute('data-assumed')).toBe('yes')
@@ -88,7 +94,7 @@ describe('island section: the report', () => {
   })
 
   it('heads each group once, in the order the report gives', async () => {
-    renderSection()
+    renderReport()
     await screen.findByTestId('island-table-freq_events')
     const heads = screen.getAllByTestId('island-group').map(h => h.textContent)
     expect(heads).toEqual([
@@ -102,8 +108,7 @@ describe('island section: the report', () => {
 
   it('keeps a long cell to one line with the full text on hover, and scrolls a table in its own box', async () => {
     const long = Array.from({ length: 40 }, (_, i) => `unit_${i}.droop_pct`).join('; ')
-    api.islandReport.mockResolvedValue({ ...REPORT, tables: [{ ...REPORT.tables[2], rows: [[0, 3, true, long]] }] })
-    renderSection()
+    renderReport({ ...REPORT, tables: [{ ...REPORT.tables[2], rows: [[0, 3, true, long]] }] })
     const table = await screen.findByTestId('island-table-static_flow')
     const cell = within(table).getByTitle(long)
     expect(cell.textContent).toBe(long)
@@ -114,7 +119,7 @@ describe('island section: the report', () => {
   })
 
   it('says what is missing', async () => {
-    renderSection()
+    renderReport()
     expect((await screen.findByTestId('island-missing')).textContent).toContain('campus run with island tables')
   })
 })
@@ -154,14 +159,23 @@ describe('island section: the form', () => {
     expect((await screen.findByTestId('island-refusal')).textContent).toContain('pickup_blocks')
   })
 
-  it('runs the study on a saved, unchanged config and reads the report again', async () => {
+  it('runs the study on a saved, unchanged config and reads the island data again', async () => {
     renderSection()
     const user = userEvent.setup()
     await screen.findByTestId('island-form')
-    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(api.island).toHaveBeenCalledTimes(1))
     await user.click(screen.getByRole('button', { name: /Run cost-of-islanding study/ }))
     await waitFor(() => expect(api.runIslandStudy).toHaveBeenCalledWith('Hub A'))
-    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.island).toHaveBeenCalledTimes(2))
+  })
+
+  it('keeps no report here: it points to Results › Control, which opens on the island tab', async () => {
+    renderSection()
+    await screen.findByTestId('island-form')
+    expect(screen.queryByTestId('island-report')).toBeNull()
+    await userEvent.click(screen.getByTestId('island-results-open'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().resultsTabRequest).toBe('island')
   })
 
   it('cannot run an unsaved edit', async () => {

@@ -6,18 +6,21 @@
 //   (not run, ready, stale) and labelled heuristic screening;
 // - Recommend queues gridspine's search as a campus job: the panel's busy
 //   banner follows it, and the recommendation is read again when it ends;
-// - a recommended result can be applied (the island data and the campus
-//   file); it then says the hub must be re-solved, with the Solve button
-//   (owner decision 2026-10-15: no stale marker on the hub);
+// - a recommended result is applied through the edit card (W10 R3): the card
+//   shows each setting old → new and what follows, the user approves it, and
+//   the write is refused when the recommendation moved since; the receipt reads
+//   the values back from both files. It then says the hub must be re-solved,
+//   with the Solve button (owner decision 2026-10-15: no stale marker on the hub);
 // - when no setting within the bounds passes, the capacity it would take is
 //   listed instead: capacity is needed, settings do not fix it.
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Play } from 'lucide-react'
+import { Check, Play, X } from 'lucide-react'
 import {
   campusApi, errorText, type GfmRecommendation, type GfmStatus, type GfmUnitSettings,
 } from '../api/campusElectrical'
 import { Btn, Tag } from '../components/PageKit'
+import { EditCardTable, EditReceiptLine, type EditCard, type EditReceipt } from '../components/EditCard'
 import { useUIStore } from '../store/uiStore'
 import { StatePill } from '../components/ResultState'
 import { GFM_NOTHING_TO_TUNE, ISLAND_ROWS_OFF_NOTE, nothingToTune } from './hubDesign/chapters'
@@ -65,15 +68,24 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: STATE_KEY(name) }),
     onError: e => setRefusal(errorText(e)),
   })
-  const apply = useMutation({
-    mutationFn: () => campusApi.applyGfmSettings(name),
-    onMutate: () => setRefusal(null),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: GFM_KEY(name) })
-      qc.invalidateQueries({ queryKey: STATE_KEY(name) })
-      qc.invalidateQueries({ queryKey: ['campusElectrical', 'island', name] })
-    },
+  const [card, setCard] = useState<EditCard | null>(null)
+  const [receipt, setReceipt] = useState<EditReceipt | null>(null)
+  const refreshApplied = () => {
+    qc.invalidateQueries({ queryKey: GFM_KEY(name) })
+    qc.invalidateQueries({ queryKey: STATE_KEY(name) })
+    qc.invalidateQueries({ queryKey: ['campusElectrical', 'island', name] })
+  }
+  const review = useMutation({
+    mutationFn: () => campusApi.gfmApplyCard(name),
+    onMutate: () => { setRefusal(null); setReceipt(null) },
+    onSuccess: setCard,
     onError: e => setRefusal(errorText(e)),
+  })
+  const apply = useMutation({
+    mutationFn: (digest: string) => campusApi.applyGfmSettings(name, digest),
+    onMutate: () => setRefusal(null),
+    onSuccess: out => { setCard(null); setReceipt(out.receipt); refreshApplied() },
+    onError: e => { setCard(null); setRefusal(errorText(e)); refreshApplied() },
   })
 
   const data = gfm.data
@@ -88,7 +100,7 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
       {gfm.isError && <p className="text-[12px] text-danger">{errorText(gfm.error)}</p>}
       {data && data.state !== 'ready' && (
         <p className="text-[12px] text-muted mb-1" data-testid="gfm-reason">
-          {data.state === 'stale' && <><Tag tone="warn">stale</Tag>{' '}</>}{data.reason}
+          {data.state === 'stale' && <><StatePill state="stale" />{' '}</>}{data.reason}
         </p>
       )}
       {refusal && <p className="text-[12px] text-danger mb-2" data-testid="gfm-refusal">{refusal}</p>}
@@ -102,13 +114,25 @@ export default function CampusIslandGfmSection({ name }: { name: string }) {
         </label>
       </div>
       {rec && <RecommendationView rec={rec} islandRowsOff={data?.island_rows_now === false} />}
-      {canApply && (
+      {canApply && !card && (
         <div className="mt-2">
-          <Btn onClick={() => apply.mutate()} disabled={apply.isPending || busy}>
-            <Check size={13} /> Apply to the island data and the campus file
+          <Btn onClick={() => review.mutate()} disabled={review.isPending || busy} data-testid="gfm-review">
+            <Check size={13} /> Review the changes to apply
           </Btn>
         </div>
       )}
+      {card && (
+        <div className="mt-2 space-y-2" data-testid="gfm-card">
+          <EditCardTable card={card} guided />
+          <div className="flex gap-2">
+            <Btn onClick={() => apply.mutate(card.digest)} disabled={apply.isPending || busy} data-testid="gfm-apply">
+              <Check size={13} /> Apply to the island data and the campus file
+            </Btn>
+            <Btn onClick={() => setCard(null)} disabled={apply.isPending}><X size={13} /> Cancel</Btn>
+          </div>
+        </div>
+      )}
+      {receipt && <EditReceiptLine receipt={receipt} disabled onRequest={() => undefined} />}
       {applied && (
         <p className="text-[12px] mt-2" data-testid="gfm-resolve" role="status">
           Applied ({applied.changes.length} setting{applied.changes.length === 1 ? '' : 's'}).{' '}

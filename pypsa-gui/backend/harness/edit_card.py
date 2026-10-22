@@ -94,6 +94,9 @@ class Adapter:
     kind: str
     preview: Callable[[dict], list[dict]]
     readback: Callable[[dict, list[dict]], list[Any]]
+    # The flow section a settings edit lands in, when its rows name no component (a card
+    # with a class-keyed row gets its section from the component).
+    section_id: str | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -172,6 +175,10 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+    if not sections and adapter.section_id:
+        from services import flow_sections as F
+
+        sections = [{"id": adapter.section_id, "label": F.SECTION_LABELS[adapter.section_id]}]
     if sections:
         card["section"] = sections[0]
     card["digest"] = _digest(card)
@@ -1001,3 +1008,47 @@ def _arguments_preview(args: dict) -> list[dict]:
 
 
 _ARGUMENTS = Adapter("arguments", _arguments_preview, lambda args, rows: [None] * len(rows))
+
+
+# ── Campus island: campus_apply_gfm_settings ───────────────────────────────
+# The grid-forming recommendation's apply (W10 R3): the same card for the copilot and the
+# Control › Grid-forming tab. The project is the call's `project_id` in chat; the panel's route
+# names the project it already authorised with `for_project`, never an argument a model supplies.
+
+_PROJECT: ContextVar[Any] = ContextVar("edit_card_project", default=None)
+
+
+@contextmanager
+def for_project(project):
+    """Name the (already authorised) project row the campus adapters read for this call."""
+    token = _PROJECT.set(project)
+    try:
+        yield
+    finally:
+        _PROJECT.reset(token)
+
+
+def _campus(args: dict, run: Callable[[Any], Any]):
+    named = _PROJECT.get()
+    if named is not None:
+        return run(named)
+    from services import chat_tools
+
+    with chat_tools._acting() as (db, user):
+        return run(chat_tools._gridspine_project(db, user, (args or {}).get("project_id")))
+
+
+def _gfm_preview(args: dict) -> list[dict]:
+    from services import campus_island_tuning as cit
+
+    return _campus(args, cit.card_rows)
+
+
+def _gfm_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services import campus_island_tuning as cit
+
+    return _campus(args, lambda project: cit.card_readback(project, rows))
+
+
+# Section 5: the Controls block of each converter-coupled asset (card-workspaces.md §3.3).
+register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets"))

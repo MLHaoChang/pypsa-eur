@@ -27,6 +27,7 @@ import StorageCycling from './results/StorageCycling'
 import EnergyFlowsTab from './results/EnergyFlowsTab'
 import LoadShapeTab from './results/LoadShapeTab'
 import { GridCodeTab, ElectricalDesignTab } from './results/GridStudyTabs'
+import { IslandTab, GridFormingTab } from './results/ControlStudyTabs'
 import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
@@ -71,6 +72,7 @@ const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
   'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
+  'island', 'grid_forming',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -105,6 +107,8 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
   { id: 'grid_code',  label: 'Grid code & connection', Icon: ShieldCheck, tip: 'The grid study: campus PCC compliance against the grid code, and a planning → dynamics study\'s connection capacity and connection-point assessment', expertOnly: true },
   { id: 'electrical_design', label: 'Electrical design', Icon: Zap, tip: 'The campus study: transformer sizing, reactive compensation, short circuit, critical hours and the investment that meets them', expertOnly: true },
+  { id: 'island',     label: 'Island & ride-through', Icon: ShieldAlert, tip: 'The island study: ride-through hours, the instant of islanding, the cost of island capability, the pickup sequence and the frequency cuts', expertOnly: true },
+  { id: 'grid_forming', label: 'Grid-forming',   Icon: Zap,              tip: 'The recommended grid-forming settings per unit, the cases before and after, and the capacity needed when no setting passes', expertOnly: true },
   { id: 'flows',      label: 'Energy flow',        Icon: Workflow,         tip: 'Where the site\'s energy came from, what it passed through and where it went — Source → Via → Destination in MWh, with a CSV export' },
   { id: 'loadshape',  label: 'Load shape',         Icon: CalendarClock,    tip: 'How the site\'s load and grid exchange are shaped in time — import and export heatmaps, a one-week profile, monthly and annual site energy' },
   { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
@@ -156,6 +160,8 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   // The grid studies are not result frames the rail can compare.
   grid_code: 'overview',
   electrical_design: 'overview',
+  island: 'overview',
+  grid_forming: 'overview',
 }
 
 export default function Results() {
@@ -715,6 +721,8 @@ export default function Results() {
       {t === 'investment'  && <InvestmentTab />}
       {t === 'grid_code'   && <GridCodeTab />}
       {t === 'electrical_design' && <ElectricalDesignTab />}
+      {t === 'island'      && <IslandTab />}
+      {t === 'grid_forming' && <GridFormingTab />}
     </>
   )
 

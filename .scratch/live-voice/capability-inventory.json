@@ -3394,7 +3394,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "1e17d8c1f596d8dee3f33d2b367a9532262e93d943d98011aa364430684e166c",
+      "schema_sha256": "35b8610813f01928bc62b179f710a796da2132329b4585e51f4e741d865133e3",
       "behavioral_fixture": "pending"
     },
     {
@@ -6057,7 +6057,7 @@
         "run_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "6ace21a74894e610e1a2a17da053d3a217e0f73e959df6594231203f3f928ea7",
+      "schema_sha256": "3739720ac25eaba3d2985f5ee0f5902599cced67ea8a509a9c2081ca379c0ead",
       "behavioral_fixture": "pending"
     },
     {
@@ -6600,6 +6600,14 @@
       "label": "Electrical design"
     },
     {
+      "id": "island",
+      "label": "Island & ride-through"
+    },
+    {
+      "id": "grid_forming",
+      "label": "Grid-forming"
+    },
+    {
       "id": "flows",
       "label": "Energy flow"
     },
@@ -6667,7 +6675,9 @@
     "flows",
     "loadshape",
     "grid_code",
-    "electrical_design"
+    "electrical_design",
+    "island",
+    "grid_forming"
   ],
   "result_tabs_not_in_tool_enum": [],
   "slide_panels": [

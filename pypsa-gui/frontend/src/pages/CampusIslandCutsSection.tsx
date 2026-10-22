@@ -11,6 +11,10 @@
 //   it ends;
 // - the trials and the applied cuts are listed; a cut can be taken back.
 // The limit is stated: bridge-energy failures get no cut.
+//
+// W10 R3: the cuts have two places. `mode="read"` is the Control › Island & ride-through tab
+// (the proposals, the trials and the applied cuts, read-only); `mode="actions"` is Grid study
+// (apply the loop, take a cut back). `all` is both, as before.
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, Square, Trash2 } from 'lucide-react'
@@ -33,7 +37,11 @@ const refreshedText = (r: RefreshedRating) =>
 const TH = 'text-left font-medium px-2'
 const TD = 'px-2'
 
-export default function CampusIslandCutsSection({ name }: { name: string }) {
+export type CutsMode = 'all' | 'read' | 'actions'
+
+export default function CampusIslandCutsSection({ name, mode = 'all' }: { name: string; mode?: CutsMode }) {
+  const read = mode !== 'actions'
+  const act = mode !== 'read'
   const qc = useQueryClient()
   const cuts = useQuery({ queryKey: CUTS_KEY(name), queryFn: () => campusApi.islandCuts(name), retry: false })
   const job = useQuery({
@@ -83,7 +91,7 @@ export default function CampusIslandCutsSection({ name }: { name: string }) {
       {data && <p className="text-[11.5px] text-muted mb-2" data-testid="cuts-limit">{data.limit}</p>}
       {refusal && <p className="text-[12px] text-danger mb-2" data-testid="cuts-refusal">{refusal}</p>}
 
-      {data && (
+      {data && read && (
         <>
           <ProposedTable rows={data.proposed} />
           <p className="text-[11px] text-muted italic mt-1" data-testid="cuts-estimate-note">
@@ -91,6 +99,14 @@ export default function CampusIslandCutsSection({ name }: { name: string }) {
             It is not a solve. Inertia and headroom cuts are heuristic: the units' response is held at
             the current solution.
           </p>
+        </>
+      )}
+      {data && act && (
+        <>
+          {!read && <p className="text-[12px] text-muted" data-testid="cuts-where">
+            {data.proposed.length} cut{data.proposed.length === 1 ? '' : 's'} proposed by the last campus run.
+            Review them in Results › Control › Island & ride-through.
+          </p>}
           <div className="flex gap-2 items-center mt-2">
             <Btn onClick={() => apply.mutate()} disabled={!applicable || isRunning || apply.isPending}>
               <Play size={13} /> Apply cuts (up to {data.max_trials} trials)
@@ -113,7 +129,7 @@ export default function CampusIslandCutsSection({ name }: { name: string }) {
         </p>
       )}
 
-      {data && data.trials.length > 0 && (
+      {data && read && data.trials.length > 0 && (
         <div className="mt-3">
           <h4 className="text-[12.5px] font-semibold">Trials</h4>
           <table className="text-[12px] whitespace-nowrap" data-testid="cuts-trials">
@@ -145,19 +161,19 @@ export default function CampusIslandCutsSection({ name }: { name: string }) {
                   <td className={TD}>{c.kind}</td>
                   <td className={TD}>p{c.period} h{c.hour}</td>
                   <td className={TD}>≥ {num(c.required)}</td>
-                  <td className={TD}>
+                  {act && <td className={TD}>
                     <Btn onClick={() => remove.mutate(c)} disabled={isRunning || remove.isPending}>
                       <Trash2 size={12} /> Remove
                     </Btn>
-                  </td>
+                  </td>}
                 </tr>
               ))}
             </tbody>
           </table>
-          <Btn onClick={() => { if (window.confirm('Take every cut back, and the trials with them?')) clear.mutate() }}
+          {act && <Btn onClick={() => { if (window.confirm('Take every cut back, and the trials with them?')) clear.mutate() }}
                disabled={isRunning || clear.isPending}>
             <Trash2 size={12} /> Clear all cuts
-          </Btn>
+          </Btn>}
         </div>
       )}
     </div>

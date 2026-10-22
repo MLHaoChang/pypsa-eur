@@ -165,6 +165,16 @@ export function openN1BranchSelector(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show one Results tab from where the user is (the Control tabs' links): the Results panel on
+ *  that tab, Back returning to the view it left. Never flips the mode. */
+export function showResultsTab(tab: string): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    ui.setSlidePanel('results')
+    ui.requestResultsTab(tab)
+  })
+}
+
 /** Show the Grid readiness scorecard ("Readiness › Grid readiness ›"): Issues
  *  scrolled to its group in Expert; in Guided the Site card, in place, with the
  *  scorecard expanded (never flips the mode). Back returns to the view it left. */

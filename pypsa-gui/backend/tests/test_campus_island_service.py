@@ -73,7 +73,15 @@ def _sidecar_path(project):
 def test_a_project_without_a_sidecar_has_no_island_config_and_no_study(project):
     out = ce.get_island(project)
     assert (out["config"], out["study"], out["services"], out["warnings"]) == (None, None, None, [])
-    assert set(out) == {"config", "study", "presets", "services", "warnings"}
+    assert set(out) == {"config", "study", "study_at", "presets", "services", "warnings"}
+    assert out["study_at"] is None
+
+
+def test_the_study_says_when_it_was_written(project):
+    ce.save_island(project, _config())
+    ce._island_paths(project)[1].write_text("{}")
+    at = ce.get_island(project)["study_at"]
+    assert at.endswith("+00:00") and len(at) == 25      # UTC, ISO 8601, to the second
 
 
 def test_the_sidecar_round_trips_as_written(project):

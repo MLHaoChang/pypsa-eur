@@ -197,6 +197,29 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                             "adopted into the model until the user applies it.",
                units="MVA, Mvar, kA, EUR",
                card="grid", sub_option="grid_code", card_tab="electrical_design"),
+    # R3 (card-workspaces.md §3.3 C): Control's results. The Run does not request the island
+    # study yet (island_checks is "not yet available"), so both views show what a campus
+    # island study already holds, read-only (O2); they are mounted-view only and outside the
+    # checked scope. The load-smoothing screen is the scorecard's after-battery rows
+    # (RLR-527), so the island view links to it and reads nothing from the readiness tool.
+    ResultView("island", _RESULTS, "island", "Island & ride-through",
+               "the island study of a hub project: report rows, pickup sequence, frequency "
+               "cuts (the load-smoothing screen stays in the grid-readiness scorecard)", "results",
+               (_rp("campus_island_config", "study"), _rp("campus_island_cuts", probed=False)),
+               claim_limits="A screening on the hub LP, not a certificate; say which values "
+                            "are assumed. Rows exist only after an island study run, and are "
+                            "out of date when the inputs changed since.",
+               units="h, s, Hz, Hz/s, MW",
+               card="control", sub_option="island_checks", card_tab="island"),
+    ResultView("grid_forming", _RESULTS, "grid_forming", "Grid-forming",
+               "the recommended grid-forming settings per unit, the cases before and after, "
+               "and the capacity needed when no setting passes", "results",
+               (_rp("campus_island_gfm_settings", "recommendation"),),
+               claim_limits="Heuristic screening, never a certificate. When no setting passes, "
+                            "capacity is needed; settings do not fix it. Applying goes through "
+                            "an edit card, never from the tab alone.",
+               units="MVA, %, s, pu",
+               card="control", sub_option="presets", card_tab="grid_forming"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",
                (_r("get_results", result_kind="prices"),

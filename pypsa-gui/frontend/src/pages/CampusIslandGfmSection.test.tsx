@@ -6,8 +6,9 @@
 // - not achievable lists the capacity needed and offers no Apply;
 // - Recommend queues the job (with allow_i_max when ticked) and is disabled
 //   while a campus job runs;
-// - Apply writes, then says the hub must be re-solved with a Solve button
-//   (owner decision 2026-10-15).
+// - Apply goes through the edit card (W10 R3): the card shows the changes, the write carries
+//   its digest, a moved recommendation is refused, and the receipt reads the values back;
+//   then it says the hub must be re-solved with a Solve button (owner decision 2026-10-15).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -19,7 +20,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const api = vi.hoisted(() => ({
-  gfmSettings: vi.fn(), recommendGfmSettings: vi.fn(), applyGfmSettings: vi.fn(), state: vi.fn(),
+  gfmSettings: vi.fn(), recommendGfmSettings: vi.fn(), applyGfmSettings: vi.fn(), gfmApplyCard: vi.fn(), state: vi.fn(),
 }))
 vi.mock('../api/campusElectrical', async () => {
   const real = await vi.importActual<typeof import('../api/campusElectrical')>('../api/campusElectrical')
@@ -158,7 +159,7 @@ describe('CampusIslandGfmSection', () => {
     api.gfmSettings.mockResolvedValue({ state: 'stale', recommendation: rec(),
                                         reason: 'The campus run changed since these settings were recommended; recommend them again' })
     renderSection()
-    expect((await screen.findByTestId('gfm-reason')).textContent).toMatch(/stale.*recommend them again/)
+    expect((await screen.findByTestId('gfm-reason')).textContent).toMatch(/Out of date.*recommend them again/)
     expect(screen.getByRole('button', { name: /Recommend again/ })).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Apply/ })).toBeNull()
   })
@@ -188,22 +189,62 @@ describe('CampusIslandGfmSection', () => {
     expect((await screen.findByTestId('gfm-refusal')).textContent).toMatch(/no frequency check/)
   })
 
-  it('Apply writes, then asks for a re-solve with the Solve button', async () => {
+  const card = {
+    version: 1, kind: 'settings_edit', tool: 'campus_apply_gfm_settings', complete: true, digest: 'd1',
+    says: 'BESS1 droop_pct 4 → 2.5 %; BESS1 tau_f_s 0.1 → 0.6 s', section: { id: 'assets', label: 'Network elements' },
+    rows: [
+      { component_class: 'Settings', name: 'BESS1', field: 'droop_pct', label: 'Droop', old: 4, new: 2.5, unit: '%', role: 'typed' },
+      { component_class: 'Settings', name: 'BESS1', field: 'tau_f_s', label: 'Frequency filter time τ_f', old: 0.1, new: 0.6, unit: 's', role: 'typed' },
+      { component_class: 'Settings', name: 'Island study', field: 'note_1', label: 'Note', old: null, new: null, unit: '', role: 'note',
+        note: 'The island study made with the current settings is discarded.' }],
+  }
+  const receipt = { version: 1, digest: 'd1', outcome: 'verified', says: card.says, results_stale: false,
+    undo: { tool: 'undo_last', available: false }, rows: card.rows }
+
+  it('Apply shows the edit card first, writes with its digest, then asks for a re-solve with the Solve button', async () => {
     const requestRunSolve = vi.fn()
     useUIStore.setState({ requestRunSolve })
     api.gfmSettings.mockResolvedValueOnce(ready())
     api.gfmSettings.mockResolvedValue({ ...ready(), state: 'stale', applied: { at: 1, hub_resolve_needed: true, changes: [
       { unit: 'BESS1', pypsa_name: 'bess', field: 'droop_pct', from: 4, to: 2.5 },
       { unit: 'BESS1', pypsa_name: 'bess', field: 'tau_f_s', from: 0.1, to: 0.6 }] } })
-    api.applyGfmSettings.mockResolvedValue({ changes: [], hub_resolve_needed: true })
+    api.gfmApplyCard.mockResolvedValue(card)
+    api.applyGfmSettings.mockResolvedValue({ changes: [], hub_resolve_needed: true, receipt })
     renderSection()
-    await userEvent.click(await screen.findByRole('button', { name: /Apply to the island data/ }))
-    await waitFor(() => expect(api.applyGfmSettings).toHaveBeenCalledWith('Hub'))
+    expect(screen.queryByTestId('gfm-card')).toBeNull()
+    await userEvent.click(await screen.findByTestId('gfm-review'))
+    expect(await screen.findByTestId('gfm-card')).toBeTruthy()
+    expect(api.applyGfmSettings).not.toHaveBeenCalled()          // nothing is written by looking
+    await userEvent.click(screen.getByRole('button', { name: /Apply to the island data/ }))
+    await waitFor(() => expect(api.applyGfmSettings).toHaveBeenCalledWith('Hub', 'd1'))
+    expect((await screen.findByTestId('chat-edit-receipt')).textContent).toMatch(/Read back from the project/)
     const resolve = await screen.findByTestId('gfm-resolve')
     expect(resolve.textContent).toMatch(/Applied \(2 settings\).*Re-solve the hub: these settings change its island rows/)
     expect(screen.queryByRole('button', { name: /Apply to the island data/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /Solve/ }))
     expect(requestRunSolve).toHaveBeenCalled()
+  })
+
+  it('a recommendation that moved since the card was shown is refused, and the card goes', async () => {
+    api.gfmSettings.mockResolvedValue(ready())
+    api.gfmApplyCard.mockResolvedValue(card)
+    api.applyGfmSettings.mockRejectedValue({ response: { status: 409, data: { detail: {
+      error_kind: 'edit_preview_stale', message: 'The recommendation changed since the card was shown; nothing was applied.' } } } })
+    renderSection()
+    await userEvent.click(await screen.findByTestId('gfm-review'))
+    await userEvent.click(await screen.findByRole('button', { name: /Apply to the island data/ }))
+    expect((await screen.findByTestId('gfm-refusal')).textContent).toMatch(/nothing was applied/)
+    expect(screen.queryByTestId('gfm-card')).toBeNull()
+  })
+
+  it('Cancel closes the card and writes nothing', async () => {
+    api.gfmSettings.mockResolvedValue(ready())
+    api.gfmApplyCard.mockResolvedValue(card)
+    renderSection()
+    await userEvent.click(await screen.findByTestId('gfm-review'))
+    await userEvent.click(await screen.findByRole('button', { name: /Cancel/ }))
+    expect(screen.queryByTestId('gfm-card')).toBeNull()
+    expect(api.applyGfmSettings).not.toHaveBeenCalled()
   })
 
   it('the re-solve line stays after a campus run removed the recommendation (#310 review)', async () => {

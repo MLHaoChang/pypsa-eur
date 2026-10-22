@@ -264,6 +264,21 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Campus island: `campus_apply_gfm_settings` (W10 R3).** The grid-forming
+  recommendation's apply, one card for the Control › Grid-forming tab and the
+  copilot. The adapter names its section (`Adapter.section_id="assets"`, rows
+  of class `Settings` carry no component), and takes the project from the call's
+  `project_id`, or from `edit_card.for_project(project)` where a route has
+  already authorised it (never from a model argument). Rows are each changed
+  setting current → recommended, then notes (the recommendation's time, the
+  island study discarded, the hub re-solve). The digest binds the recommendation's
+  time and values; the loop rechecks it before the handler, and the handler once
+  more right before the write. The panel reads the card at
+  `GET /api/campus-electrical/{name}/island/gfm-settings/card` and sends its
+  digest to `POST …/gfm-settings/apply` (which then answers with the `receipt`;
+  without a digest the route applies as before). `apply_settings`' refusals
+  map to the card's kinds: 409 `edit_preview_stale`, nothing to change
+  `nothing_to_change`, a refused value `invalid_edit_value`.
 - **Flow section (PR-2).** Each component row carries a FlowTarget
   `{section, panel, component, entity, field}` from
   `flow_service.section_for_component` (the flow's own class rule), and the

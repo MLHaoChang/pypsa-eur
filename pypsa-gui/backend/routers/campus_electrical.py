@@ -465,18 +465,49 @@ def recommend_gfm_settings(
                                 allow_i_max=bool(body.allow_i_max) if body else False)
 
 
+GFM_APPLY_TOOL = "campus_apply_gfm_settings"
+
+
+class GfmApplyIn(BaseModel):
+    digest: str | None = None
+
+
+@router.get("/{name}/island/gfm-settings/card")
+def gfm_settings_card(
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The edit card for applying the recommendation (old → new per unit, the consequences):
+    the one the copilot shows for ``campus_apply_gfm_settings``. Writes nothing."""
+    from harness import edit_card
+    with edit_card.for_project(_row(proj, db)):
+        return edit_card.preview(GFM_APPLY_TOOL, {}, with_state=False)
+
+
 @router.post("/{name}/island/gfm-settings/apply")
 def apply_gfm_settings(
+    body: GfmApplyIn | None = None,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
     """Write the recommended settings into the island sidecar and the campus
     file (tagged assumed); the island study goes, and the hub must be
-    re-solved: ``{changes, hub_resolve_needed}``."""
+    re-solved: ``{changes, hub_resolve_needed}``. With the digest of the card the user
+    approved (``…/card``), the card must still be current, and the response carries
+    its ``receipt``: the values read back from both files."""
+    from harness import edit_card
     from services import campus_island_tuning as cit
     _check_lock(proj, db, user)
-    return cit.apply_settings(_row(proj, db))
+    project = _row(proj, db)
+    digest = body.digest if body else None
+    if digest is None:
+        return cit.apply_settings(project)
+    with edit_card.for_project(project):
+        card = edit_card.preview(GFM_APPLY_TOOL, {}, with_state=False)
+        edit_card.require_current(GFM_APPLY_TOOL, {}, {"digest": digest})
+        out = cit.apply_settings(project)
+        return {**out, "receipt": edit_card.receipt(card, {})}
 
 
 # ── the asset library (plan C9) ────────────────────────────────────────────
