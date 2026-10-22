@@ -173,7 +173,8 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                   {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source"
                     title={r.source.quote}>
                     {(r.source.page != null
-                      ? [r.source.filename, `p. ${r.source.page} \u00b7 \u201c${clip(r.source.quote ?? '')}\u201d`]
+                      ? [r.source.filename, r.source.quote
+                          ? `p. ${r.source.page} \u00b7 \u201c${clip(r.source.quote)}\u201d` : `p. ${r.source.page}`]
                       : [r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell])
                       .filter(Boolean).join(' \u203a ')}{' '}
                     ({[show(r.source.raw), r.source.raw_unit].filter(Boolean).join(' ')}{r.source.formula ? ', saved formula value' : ''})

@@ -139,10 +139,13 @@ def normal(text: str) -> str:
 # ── Numbers ────────────────────────────────────────────────────────────────
 
 _MINUS = "-−"
-# A unit may sit between the two numbers of a range ("10 kW - 12 kW").
+# A unit may sit between the two numbers of a range ("10 kW - 12 kW"). The separators: the
+# hyphen and dashes U+2010-U+2015, the minus sign U+2212, "to", "bis", and two or three dots
+# (an ellipsis is "..." after NFKC).
+_RANGE_SEP = r"(?:[-\u2010-\u2015\u2212]|to|bis|\.{2,3}|\u2026)"
 _UNIT_WORD = r"(?:[A-Za-z%°/²³·]+\s?)?"
-_RANGE_AFTER = re.compile(rf"^\s?{_UNIT_WORD}(?:[-‐-―]|to|bis|\.\.)\s?[+\-−]?\d", re.IGNORECASE)
-_RANGE_BEFORE = re.compile(rf"\d\s?{_UNIT_WORD}(?:[-‐-―]|to|bis|\.\.)\s?$", re.IGNORECASE)
+_RANGE_AFTER = re.compile(rf"^\s?{_UNIT_WORD}{_RANGE_SEP}\s?[+\-\u2212]?\d", re.IGNORECASE)
+_RANGE_BEFORE = re.compile(rf"\d\s?{_UNIT_WORD}{_RANGE_SEP}\s?$", re.IGNORECASE)
 # Page text on each side of a quote that its numbers are read with: a quote cannot cut a
 # range, a sign, a tolerance or a separator off its number.
 CONTEXT_CHARS = 16
