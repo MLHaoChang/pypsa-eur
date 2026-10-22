@@ -31,7 +31,7 @@ export function readinessBadge(row: ReadinessRow): { text: string; tone: 'ok' | 
 
 export function ReadinessBadge({ row }: { row: ReadinessRow }) {
   const b = readinessBadge(row)
-  const color = b.tone === 'ok' ? 'text-success' : b.tone === 'warn' ? 'text-amber-700' : 'text-muted'
+  const color = b.tone === 'ok' ? 'text-success' : b.tone === 'warn' ? 'text-amber-600' : 'text-muted'
   return (
     <span data-testid={`readiness-${row.generator}`} className={`text-[10px] ${color}`}>{b.text}</span>
   )
@@ -50,15 +50,15 @@ export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
   if (missing.length === 0) return null
   return (
     <div data-testid="missing-coordinates-banner"
-      className="px-3 py-2 border-b border-border/40 bg-amber-50 text-[11px]">
+      className="px-3 py-2 border-b border-border/40 bg-amber-500/10 text-[11px]">
       <p className="font-medium text-text">
         {missing.length === 1 ? 'One generator has' : `${missing.length} generators have`} no location
         {' '}› a weather profile needs where it is.
       </p>
       <ul className="mt-1 space-y-0.5">
         {missing.map(r => (
-          <li key={r.generator} className="flex items-center gap-2">
-            <span className="font-mono">{r.generator}</span>
+          <li key={r.generator} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="font-mono text-text">{r.generator}</span>
             <span className="text-muted">on bus {r.bus}</span>
             <button type="button" className="text-accent hover:underline"
               data-testid={`set-coordinates-${r.generator}`}
