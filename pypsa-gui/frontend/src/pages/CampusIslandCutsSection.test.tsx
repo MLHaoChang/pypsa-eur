@@ -60,6 +60,18 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+describe('frequency cuts: the heading', () => {
+  it('is shown where the section is the page, and left out of the read-only tab', async () => {
+    const { unmount } = renderSection('actions')
+    await screen.findByTestId('cuts-section')
+    expect(screen.getByRole('heading', { name: 'Frequency cuts' })).toBeTruthy()
+    unmount()
+    renderSection('read')
+    await screen.findByTestId('cuts-limit')
+    expect(screen.queryByRole('heading', { name: 'Frequency cuts' })).toBeNull()
+  })
+})
+
 describe('frequency cuts: the preview', () => {
   it('states the limit', async () => {
     renderSection()

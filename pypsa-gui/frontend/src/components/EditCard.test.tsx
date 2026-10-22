@@ -206,3 +206,13 @@ it('a workbook row names its sheet, and a formula cell says its value was saved'
   expect(screen.getByTestId('chat-edit-source').textContent)
     .toBe('lines.xlsx \u203a Lines \u203a B3 (450 MVA, saved formula value)')
 })
+
+it('a row without a display value rounds a long number like one with it', () => {
+  const pending = useChatStore.getState().pending!
+  const long = { ...typed, field: 'capital_cost', old: 123456789012.3456, new: 0.123456789012, unit: 'EUR' }
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [long] } } })
+  render(<ConfirmationCard />)
+  const cells = screen.getAllByTestId('chat-edit-row-typed')[0].textContent ?? ''
+  expect(cells).toContain('123,456,789,012.35')
+  expect(cells).toContain('0.1235')
+})

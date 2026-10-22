@@ -78,4 +78,20 @@ describe('the checked window request', () => {
     expect(screen.getByTestId('results-window-note').textContent).toMatch(/outside this network's horizon/)
     expect(useUIStore.getState().resultsWindowRequest).toBeNull()
   })
+
+  it('gives a reversed window its own wording', async () => {
+    await open(SNAPSHOTS[20], SNAPSHOTS[10])
+    const note = screen.getByTestId('results-window-note').textContent ?? ''
+    expect(note).toMatch(/ends before it starts/)
+    expect(note).not.toMatch(/outside/)
+  })
+
+  it('clears the note when the user edits From or To', async () => {
+    await open('2020-01-01T00:00:00', '2020-01-02T00:00:00')
+    expect(screen.getByTestId('results-window-note')).toBeTruthy()
+    fireEvent.click(screen.getByText('Horizon filter'))
+    const from = screen.getByText('From').closest('label')!.querySelector('input')!
+    fireEvent.change(from, { target: { value: SNAPSHOTS[5].slice(0, 16) } })
+    expect(screen.queryByTestId('results-window-note')).toBeNull()
+  })
 })

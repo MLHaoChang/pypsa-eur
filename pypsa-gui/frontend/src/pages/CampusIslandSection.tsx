@@ -103,7 +103,7 @@ const fieldWords = (f: string) => {
   const [head, ...rest] = f.split('.')
   if (!rest.length) return FIELD_WORDS[f] ?? f.replace(/_/g, ' ')
   const field = rest.join('.')
-  return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`
+  return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`.replace(/^./, c => c.toUpperCase())
 }
 
 /** A cell longer than this stays on one line, its full text on hover. */
