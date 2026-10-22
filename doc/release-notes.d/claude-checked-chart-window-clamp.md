@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): "Open in Results" on a checked chart now clamps a window that reaches past the loaded horizon (or says plainly that it lies outside it) instead of dropping it, and opens through the shared panel opener, so it stays in place in Guided and has a Back route.

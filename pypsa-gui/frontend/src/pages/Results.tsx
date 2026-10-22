@@ -7,6 +7,7 @@ import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { readableWindow } from '../utils/readableTime'
 import { ResultsFilterProvider, defaultWindow } from './results/filterContext'
 import { type TSPayload, type WeightCtx } from './results/shared'
 import CompareView, { type Tab as CompareTab } from './CompareView'
@@ -496,13 +497,25 @@ export default function Results() {
   // A checked chart's "Open in Results" brings its window: the tab then shows
   // the window that was checked, not the opening default. Applied once the
   // horizon is seeded (the effect above runs first), then cleared.
+  // A window partly outside the loaded horizon is clamped to it; one wholly
+  // outside cannot be shown, and the note says so rather than dropping it.
+  const [windowNote, setWindowNote] = useState<string | null>(null)
   useEffect(() => {
     if (!resultsWindowRequest || !firstSnap16 || !lastSnap16) return
     const from16 = resultsWindowRequest.start.replace(' ', 'T').slice(0, 16)
     const to16 = resultsWindowRequest.end.replace(' ', 'T').slice(0, 16)
-    if (from16 >= firstSnap16 && to16 <= lastSnap16 && from16 <= to16) {
-      setFromIso(from16)
-      setToIso(to16)
+    const clampedFrom = from16 < firstSnap16 ? firstSnap16 : from16
+    const clampedTo = to16 > lastSnap16 ? lastSnap16 : to16
+    const chartWindow = readableWindow(resultsWindowRequest.start, resultsWindowRequest.end)
+    const horizon = readableWindow(firstSnap16, lastSnap16)
+    if (from16 > to16 || clampedFrom > clampedTo) {
+      setWindowNote(`The chart's window (${chartWindow}) is outside this network's horizon (${horizon}), so Results shows the horizon as loaded.`)
+    } else {
+      setFromIso(clampedFrom)
+      setToIso(clampedTo)
+      setWindowNote(clampedFrom !== from16 || clampedTo !== to16
+        ? `The chart's window (${chartWindow}) reaches past this network's horizon (${horizon}); Results shows the part inside it.`
+        : null)
     }
     clearResultsWindowRequest()
   }, [resultsWindowRequest, firstSnap16, lastSnap16, clearResultsWindowRequest])
@@ -891,6 +904,11 @@ export default function Results() {
             >clear</span>
           )}
         </button>
+        {windowNote && <p role="status" data-testid="results-window-note"
+          className="px-3 pb-1.5 text-[11px] text-muted">
+          {windowNote}{' '}
+          <button type="button" className="underline" onClick={() => setWindowNote(null)}>Dismiss</button>
+        </p>}
         {filterOpen && (
           <div className="px-3 pb-3 pt-1 flex items-end gap-2 text-[11px]">
             <label className="flex flex-col gap-0.5">
