@@ -233,8 +233,8 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                       {card.id === 'capacity' && o.id === 'sizing' && on && !checked && (
                         <p data-testid={`${testId}-fixed-sizes`}
                           className="pl-5 text-[10.5px] text-muted">
-                          Dispatch on fixed sizes, not sized in this run. The source is the last
-                          capacity run unless Solver settings name another.
+                          Dispatch on fixed sizes from the{' '}
+                          {registry.fixed_sizes === 'nameplate' ? 'nameplate' : 'last capacity run'}.
                           {gate.blocked && (
                             <span data-testid={`${testId}-fixed-sizes-blocked`} role="alert"
                               className="block text-warn">

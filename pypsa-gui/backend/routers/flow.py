@@ -175,6 +175,8 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
     no_load = _no_load(project, template)
     return {"scope": flow_scope.read_scope(project.directory, template, settings,
                                            no_load=no_load),
+            # The size source Asset sizing off dispatches on (read-only here).
+            "fixed_sizes": (settings or {}).get("fixed_sizes", "off"),
             **flow_scope.registry(template, settings, no_load=no_load)}
 
 
