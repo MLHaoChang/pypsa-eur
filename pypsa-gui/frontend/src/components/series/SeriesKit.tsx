@@ -88,13 +88,11 @@ export function MeasuredFileTab({
         One value per model hour in the {fieldLabel(attribute)}&apos;s own units, in a column named
         after {component} (or a single column).
       </p>
-      <div className="flex items-center gap-2">
-        <input aria-label="Measured file" type="file" accept=".csv,.xlsx,.xls"
-          onChange={e => { setFile(e.target.files?.[0] ?? null); read.reset() }} />
-        <button type="button" className="text-[11px] text-accent hover:underline" onClick={() => void template()}>
-          <Download size={11} className="inline" /> Download the template
-        </button>
-      </div>
+      <input aria-label="Measured file" type="file" accept=".csv,.xlsx,.xls" className="block max-w-full"
+        onChange={e => { setFile(e.target.files?.[0] ?? null); read.reset() }} />
+      <button type="button" className="block text-[11px] text-accent hover:underline" onClick={() => void template()}>
+        <Download size={11} className="inline" /> Download the template
+      </button>
       <div className="flex items-center gap-2">
         <Btn variant="primary" onClick={() => read.mutate()} disabled={!file || read.isPending}>
           <Upload size={12} /> Read file
