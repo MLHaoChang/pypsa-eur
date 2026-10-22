@@ -201,3 +201,40 @@ def readback_batch(args: dict, rows: list[dict]) -> list[Any]:
         for i, v in zip(idx, readback(one, [rows[i] for i in idx])):
             out[i] = v
     return out
+
+
+# ── Several points of one job: apply_generated_profiles (RP-09) ─────────────
+
+
+def _members(args: dict) -> list[dict]:
+    """One `preview`/`readback` argument set per member, in the order the
+    batch route writes them: the named components, or with `all_from_job`
+    every point of the job named after a wind/solar generator."""
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    base = {"project_id": str(args.get("project_id") or ""),
+            "job_id": str(args.get("job_id") or ""),
+            "time_basis": args.get("time_basis")}
+    names = [str(c) for c in args.get("components") or []]
+    if args.get("all_from_job"):
+        meta = _job_meta(base["project_id"], base["job_id"])
+        gens = PyPSAService.get_active_context().network.generators
+        names = [str(c) for c in meta.get("points") or [] if str(c) in gens.index
+                 and any(k in str(gens.at[str(c), "carrier"]).lower()
+                         for k in ("wind", "solar", "pv"))]
+    chat_tools._authorized_project(base["project_id"])
+    return [{**base, "component": c} for c in names]
+
+
+def preview_members(args: dict) -> list[dict]:
+    return [row for one in _members(args) for row in preview(one)]
+
+
+def readback_members(args: dict, rows: list[dict]) -> list[Any]:
+    out: list[Any] = [None] * len(rows)
+    for one in _members(args):
+        idx = [i for i, r in enumerate(rows) if r.get("name") == one["component"]]
+        for i, v in zip(idx, readback(one, [rows[i] for i in idx])):
+            out[i] = v
+    return out
