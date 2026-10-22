@@ -246,28 +246,20 @@ def _runs(u: np.ndarray, value: float) -> list[int]:
     return out
 
 
-#: What the staged electrolysers cost before GS-2b (the row's 1,886,002 EUR/MW x the 0.68 efficiency),
-#: written out by asset name so a later pack change cannot move this test by accident.
-_PRE_GS2B_ELECTROLYSER = {"overnight_cost": 1_282_481.292, "fom_cost": 51_299.25168}
-
-
-def _electrolysis_at_the_pre_gs2b_price(n):
-    """Electrolysis at the pre-GS-2b price so the 2027 loop is built and cycles. At the row's own
-    price per MW of electrical input no 2027 electrolyser is built and the loop never runs in the
-    2027 week, so the restart-time rule needs this cheaper plan to be exercised."""
-    for name in ("electrolyser_new_2027", "electrolyser_new_2030", "electrolyser_new_2035"):
-        for col, value in _PRE_GS2B_ELECTROLYSER.items():
-            n.links.at[name, col] = value
-
-
-@pytest.mark.live_solve
-def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
-    # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle.
-    n, _, _ = _plan("cheap_electrolysis", edit=_electrolysis_at_the_pre_gs2b_price)
+def _cycling_2027(n):
+    """The 2027 binary window of plan `n`: (status series u, model, window, grey NH3 bought in MWh)."""
     models, payload = _windows(n)
     assert payload["status"] == "ok", payload["message"]
     m, sns, _ = models[2027]["bin"]
     u = m.links_t.status["haber_bosch"].loc[sns].round().to_numpy()
+    return u, m, sns, float(m.generators_t.p["__buy_nh3"].loc[sns].sum())
+
+
+@pytest.mark.live_solve
+def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
+    # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle, on the template as shipped.
+    n, _, _ = _plan("base")
+    u, m, sns, _ = _cycling_2027(n)
     p = m.links_t.p0["haber_bosch"].loc[sns].to_numpy()
     assert set(np.unique(u)) <= {0.0, 1.0}
     assert (p >= 0.4 * m.links.at["haber_bosch", "p_nom"] * u - 1e-6).all()
@@ -278,19 +270,28 @@ def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
 
 
 @pytest.mark.live_solve
-def test_at_the_honest_electrolysis_price_the_2027_loop_stays_off(reset_backend):
-    """Pins what the template now does (GS-2b, measured 2026-10-21): no 2027 electrolyser is built and
-    the loop is off all 168 h of the 2027 binary window, which costs 41.2 M EUR against 6.9 M
-    linearised. A change to either shows here; restoring the 2027 cycling story is a template ticket."""
+def test_at_the_honest_electrolysis_price_the_2027_loop_cycles(reset_backend):
+    """GS-2b ticket 03. The electrolyser price is the row's own (no cheap fixture); the sunk wind and PV fleet is
+    sized (RE_FLEET_SCALE) so the 2027 loop is on part of the week, stops for at least the restart time, runs for
+    at least its minimum up time, and no grey ammonia is bought. Structure only, not hour counts."""
     n, _, _ = _plan("base")
-    assert float(n.links.at["electrolyser_new_2027", "p_nom_opt"]) == pytest.approx(0.0, abs=1e-6)
-    models, payload = _windows(n)
-    assert payload["status"] == "ok", payload["message"]
-    m, sns, bin_cost = models[2027]["bin"]
-    u = m.links_t.status["haber_bosch"].loc[sns].round().to_numpy()
-    assert len(u) == 168 and u.sum() == 0.0
-    assert bin_cost == pytest.approx(41_211_788.66, rel=0.01)
-    assert models[2027]["lin"][2] == pytest.approx(6_855_981.19, rel=0.01)
+    u, _m, _sns, grey = _cycling_2027(n)
+    assert len(u) == 168 and u.sum() > 0
+    assert max(_runs(u, 0.0), default=0) >= 8
+    assert max(_runs(u, 1.0), default=0) >= 24
+    assert grey == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_re_fleet_scales_here_and_the_h2_hub_keeps_its_own(n0):
+    """The H2 hub is untouched (120 MW wind, 80 MW PV); the ammonia hub has RE_FLEET_SCALE times those, and
+    building one never leaks into the other."""
+    hub = T.BUILDERS["eh_h2_hub_staged"]()
+    k = A.RE_FLEET_SCALE
+    assert hub.generators.at["wind_farm", "p_nom"] == 120.0 and hub.generators.at["solar_park", "p_nom"] == 80.0
+    assert n0.generators.at["wind_farm", "p_nom"] == pytest.approx(k * 120.0)
+    assert n0.generators.at["solar_park", "p_nom"] == pytest.approx(k * 80.0)
+    again = T.BUILDERS["eh_h2_hub_staged"]()
+    assert again.generators.at["wind_farm", "p_nom"] == 120.0 and again.generators.at["solar_park", "p_nom"] == 80.0
 
 
 @pytest.mark.live_solve
