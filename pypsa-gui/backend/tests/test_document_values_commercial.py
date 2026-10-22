@@ -190,8 +190,10 @@ def test_cdv05_a_ppa_price_money_year(site):
     assert out["missing"] == [] and [c["path"] for c in out["cells"]] == ["price", "base_year"]
     assert out["cells"][1]["value"] == base and out["cells"][1]["old"] is None
     assert any("not adjusted for inflation" in n for n in out["cells"][0]["notes"])
-    _, result, _ = _dispatch(site, "apply_commercial_document_values", args)
+    cards, result, _ = _dispatch(site, "apply_commercial_document_values", args)
     assert result["_edit_receipt"]["outcome"] == "verified"
+    assert cards[0]["edit_card"]["says"].startswith("Contracts › Ppa1: price ")  # words, no field id
+    assert "EUR/MWh" in cards[0]["edit_card"]["says"]
     stored = _stored()["contracts"][0]
     assert (stored["price"], stored["base_year"]) == (61.5, base)
 

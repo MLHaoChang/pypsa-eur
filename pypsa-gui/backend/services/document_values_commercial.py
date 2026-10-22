@@ -219,7 +219,7 @@ def _ppa_slot(commercial: dict, c: dict) -> tuple[dict | None, dict | None]:
                           f"{sorted(PPA_FIELDS)}.", c)
     label, units, money, signed, whole = PPA_FIELDS[field]
     return {"entity": contract["id"], "path": field, "where": (field,), "units": units,
-            "unit_label": "/MWh" if money else PPA_UNIT_LABELS[field], "label": f"{contract['id']}: {label.lower()}",
+            "unit_label": "/MWh" if money else PPA_UNIT_LABELS[field], "label": f"{_item_words(contract)}: {label.lower()}",
             "money": money, "signed": signed, "whole": whole, "base_year": contract.get("base_year")}, None
 
 
