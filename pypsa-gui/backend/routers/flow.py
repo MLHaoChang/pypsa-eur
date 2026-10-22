@@ -212,6 +212,7 @@ def _store_owned(project: AuthorizedProject, wanted: dict[str, bool], db, user) 
         with PyPSAService.get_solver_state_lock():
             now, change = decide(asdict(_state["solver_config"]))
             if change:
+                _refuse_while_running()                 # a solve claimed in the gap
                 update_solver_config(SolverConfigSchema(**change), db, user)
             return now
     path = project.directory / "solver_config.json"

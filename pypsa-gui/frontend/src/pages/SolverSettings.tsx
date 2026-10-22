@@ -1878,7 +1878,7 @@ function SclopfPanel({
 // Newton-Raphson tolerance. Whether Stage 2 runs at all is the scope's call
 // (What the Run computes › Load flow, W4b): this panel shows it read-only, and
 // the one Run (the header Run) chains it after the solve.
-function Stage2Panel({
+export function Stage2Panel({
   draft, patch, loadFlowOn,
 }: {
   draft: SolverConfig
