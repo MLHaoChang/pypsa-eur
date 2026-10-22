@@ -88,7 +88,7 @@ export function returnToOrigin(): void {
   ui.setUiMode(o.mode)
   ui.setActiveSection(o.section)
   if (o.mode === 'guided') {
-    ui.setSlidePanel('hubDesign')
+    ui.setSlidePanel(o.panel ?? 'hubDesign')
     if (o.selected) ui.setSelectedComponent(o.selected as never)
     ui.setFieldDrawer(o.drawer)
   } else {

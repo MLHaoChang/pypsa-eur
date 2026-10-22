@@ -65,6 +65,16 @@ describe('fix link return to origin', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 
+  it('Guided: a jump from a non-hub panel returns to that panel, not the hub', () => {
+    reset({ uiMode: 'guided', activeSlidePanel: 'results', activeSection: 'results' })
+    render(<FlowReturnButton />)
+    act(() => openFlowTargetInPlace(prop))
+    expect(useUIStore.getState().fieldDrawer).toEqual(prop)
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().fieldDrawer).toBeNull()
+  })
+
   it('other navigation clears the return; opening the view already shown adds none', () => {
     reset({ uiMode: 'expert', activeSlidePanel: 'issues', activeSection: 'readiness' })
     act(() => openFlowTarget(issues))
