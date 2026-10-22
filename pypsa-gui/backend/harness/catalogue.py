@@ -87,6 +87,8 @@ SAFETY_PANEL_ENUM = [
     "Economics", "economics",
     # The renewable profile generator (Profile Studio) slide panel.
     "ProfileStudio", "profiles",
+    # The workspace-level Commercial library page (tariffs, contracts, series).
+    "CommercialLibrary", "library",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
