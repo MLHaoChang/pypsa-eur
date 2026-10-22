@@ -10,6 +10,7 @@ import type {
   CashflowLine, FinanceInputs, InvestmentCaseReportPayload, InvestmentCaseStudy, IcSectionState,
 } from '../../../api/types'
 import type { CompletenessRow } from '../../../components/CompletenessChips'
+import type { FlowSectionId } from '../../../api/flow'
 import { fmtAmount } from './valueFlows'
 
 /** The form's draft: a stored object, or a new one the server will judge. */
@@ -684,7 +685,7 @@ export interface CampusEquipment {
 }
 
 const CAMPUS_METHODS: Record<string, string> = {
-  milp: 'joint optimisation (MILP)',
+  milp: 'joint optimisation',
   least_cost: 'least cost',
 }
 
@@ -724,22 +725,41 @@ export function campusEquipment(report: InvestmentCaseReportPayload | null | und
   }
 }
 
-/** The refusals that a campus study causes, with where the user fixes them. */
-export interface CampusRefusal { text: string; panel: 'campusStudy' | 'campusElectrical'; open: string }
+/** Where a campus line sends the user: a flow section's panel, opened with
+ *  `openPanel` (mode-aware); the label ends in ">". */
+export interface CampusLink { label: string; section: FlowSectionId; panel: string }
+
+/** What a campus study stops, with where the user fixes it. */
+export interface CampusRefusal { text: string; links: CampusLink[] }
+
+const GRID_STUDY: CampusLink = { label: 'Grid study >', section: 'scenarios', panel: 'campusStudy' }
 
 export const CAMPUS_REFUSALS: Record<string, CampusRefusal> = {
+  // A flag, not a refusal: the case is built without the campus equipment.
   campus_study_stale: {
-    text: 'The campus study no longer matches the campus file, the network or the asset library.',
-    panel: 'campusStudy', open: 'Open the campus study to run it again',
+    text: 'The grid study no longer matches the campus file, the network or the asset library, so '
+      + 'the case leaves out its equipment.',
+    links: [{ ...GRID_STUDY, label: 'Run the grid study again in Grid study >' }],
   },
   campus_assets_money_year_mismatch: {
     text: 'The campus asset library and the finance inputs are in different money.',
-    panel: 'campusElectrical', open: 'Open the campus electrical inputs',
+    links: [{ label: 'Grid connection >', section: 'connection', panel: 'campusElectrical' },
+            { label: 'Commercial & finance >', section: 'commercial', panel: 'economics' }],
   },
 }
 
-/** The campus refusal a failed run ended in, or null. */
-export function campusRefusal(s: InvestmentCaseStudy | null | undefined): CampusRefusal | null {
+/** The campus line a run ended in: the refusal, else the report's (or the
+ *  run's) `campus_study_stale` flag; null otherwise. */
+export function campusRefusal(s: InvestmentCaseStudy | null | undefined,
+                              report?: InvestmentCaseReportPayload | null): CampusRefusal | null {
   const code = s?.status === 'refused' ? (s.error_code ?? s.code ?? null) : null
-  return code && code in CAMPUS_REFUSALS ? CAMPUS_REFUSALS[code] : null
+  if (code) return code in CAMPUS_REFUSALS ? CAMPUS_REFUSALS[code] : null
+  const flags = [...(s?.flags ?? []), ...(report ? reportFlags(report, 'project') : [])]
+  return flags.includes('campus_study_stale') ? CAMPUS_REFUSALS.campus_study_stale : null
+}
+
+/** Where the unmet-needs line points: the Results "Electrical design" tab
+ *  where it exists (Expert), else the Grid study panel. */
+export function unmetNeedsLink(expert: boolean): CampusLink | { label: string; resultsTab: string } {
+  return expert ? { label: 'See Electrical design >', resultsTab: 'electrical_design' } : GRID_STUDY
 }

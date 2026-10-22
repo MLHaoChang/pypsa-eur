@@ -31,6 +31,10 @@ vi.mock('../../../api/flow', async (importOriginal) => ({
   getFlowScope: (...a: unknown[]) => getFlowScope(...a),
 }))
 
+// The campus lines open their panels through the shared navigation (UX).
+const openPanel = vi.fn()
+vi.mock('../openPanel', () => ({ openPanel: (...a: unknown[]) => openPanel(...a) }))
+
 const api = vi.mocked(financeApi)
 
 const YEARS = [2030, 2031, 2032]
@@ -421,5 +425,144 @@ describe('InvestmentCaseView', () => {
     expect(screen.getByTestId('ic-debt').textContent).toMatch(/serves no detail/)
     expect(screen.getByTestId('ic-tax').textContent).toMatch(/Not established/)
     expect(screen.getByTestId('ic-export-xlsx')).toBeTruthy()
+  })
+})
+
+// ── campus-IC 02 and 05: the campus equipment the case took ─────────────────
+
+const MONEY = 'EUR, 2026 money (the case currency year)'
+const campusAsset = (name: string, over: Record<string, unknown> = {}) => ({
+  name, kind: 'transformer', basis: 'lump', quantity: 1, overnight_cost: 1800000, build_year: 2030,
+  source: 'campus_study', source_hash: '0123456789abcdef', money_year: MONEY, cod: '2030-01-01',
+  provenance: 'assumed', illustrative: true, ...over })
+
+function campusReport(project: Record<string, unknown>, flags: string[] = []): InvestmentCaseReportPayload {
+  const rep = structuredClone(REPORT)
+  const p = rep.sections!.project!.payload as Record<string, unknown>
+  Object.assign(p, project, { flags: [...(p.flags as string[]), ...flags] })
+  return rep
+}
+
+async function renderCampus(project: Record<string, unknown>, flags: string[] = [],
+                            study: Partial<InvestmentCaseStudy> = {}) {
+  api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true, stale: false },
+                                            ...study })
+  api.getReport.mockResolvedValue(campusReport(project, flags))
+  const view = renderView()
+  await screen.findByTestId('ic-report')
+  return view
+}
+
+describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', () => {
+  beforeEach(() => useUIStore.setState({ uiMode: 'expert' }))
+
+  it('lists each campus asset with its overnight cost and build year; none, no block', async () => {
+    const { container } = await renderCampus({
+      extra_assets: [campusAsset('campus:TR_132_33_40#1'),
+                     campusAsset('campus:CB_33_AL95#1', { kind: 'cable', basis: 'per_km', quantity: 2.5,
+                                                          overnight_cost: 550000, build_year: 2031,
+                                                          provenance: 'literature', illustrative: false })],
+      campus_study: { study_method: 'least_cost', unresolved: [] } })
+    const tr = screen.getByTestId('ic-campus-asset-campus:TR_132_33_40#1')
+    expect(tr.textContent).toMatch(/1,800,000/)
+    expect(tr.textContent).toMatch(/2030/)
+    const cb = screen.getByTestId('ic-campus-asset-campus:CB_33_AL95#1')
+    expect(cb.textContent).toMatch(/550,000/)
+    expect(cb.textContent).toMatch(/2\.5 km/)
+    expect(cb.textContent).toMatch(/2031/)
+    expect(screen.getByTestId('ic-campus-assets').textContent).toContain(MONEY)
+    // The report's own costs, no second total.
+    expect(screen.getByTestId('ic-campus').textContent).not.toMatch(/total/i)
+    expectAllButtonsNamed(container)
+    cleanup()
+    await renderCampus({})
+    expect(screen.queryByTestId('ic-campus')).toBeNull()
+  })
+
+  it.each([['milp', "From the grid study's joint optimisation result."],
+           ['least_cost', "From the grid study's least cost result."]])(
+    'states the campus result the case took (%s)', async (method, words) => {
+      await renderCampus({ extra_assets: [campusAsset('campus:TR_132_33_40#1')],
+                           campus_study: { study_method: method, unresolved: [] } })
+      const line = screen.getByTestId('ic-campus-method').textContent ?? ''
+      expect(line).toContain(words)
+      expect(line).not.toMatch(/MILP/)
+    })
+
+  it('tags assumed costs and says they are generic defaults', async () => {
+    await renderCampus({
+      extra_assets: [campusAsset('campus:TR_132_33_40#1'),
+                     campusAsset('campus:CB_33_AL95#1', { provenance: 'literature', illustrative: false })],
+      campus_study: { study_method: 'least_cost', unresolved: [] } })
+    expect(screen.getByTestId('ic-campus-asset-campus:TR_132_33_40#1').textContent).toMatch(/assumed/)
+    expect(screen.getByTestId('ic-campus-asset-campus:CB_33_AL95#1').textContent).not.toMatch(/assumed/)
+    expect(screen.getByTestId('ic-campus-illustrative').textContent)
+      .toMatch(/^Generic default \(illustrative\): 1 of 2 campus costs are assumed/)
+  })
+
+  it('a stale report naming the campus study says so in the report\'s one stale line', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'done',
+      report: { present: true, stale: true, changed: ['extra_assets'] } })
+    api.getReport.mockResolvedValue(campusReport({
+      extra_assets: [campusAsset('campus:TR_132_33_40#1')],
+      campus_study: { study_method: 'least_cost', unresolved: [] } }))
+    renderView()
+    expect((await screen.findByTestId('ic-stale')).textContent).toMatch(/Stale: the campus study changed/)
+    // No freshness line of the block's own.
+    expect(within(screen.getByTestId('ic-campus')).queryByText(/stale|changed|since/i)).toBeNull()
+  })
+
+  it('a stale grid study points to running it again in Grid study', async () => {
+    await renderCampus({}, ['campus_study_stale'])
+    const line = screen.getByTestId('ic-campus-refusal')
+    expect(line.textContent).toMatch(/no longer matches/)
+    expect(screen.queryByTestId('ic-campus')).toBeNull()
+    fireEvent.click(within(line).getByRole('button', { name: 'Run the grid study again in Grid study >' }))
+    expect(openPanel).toHaveBeenCalledWith('scenarios', 'campusStudy')
+  })
+
+  it('a money mismatch says so and points to Grid connection and Commercial & finance', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'campus_assets_money_year_mismatch',
+                                              error: 'the campus asset library is in USD' })
+    renderView()
+    const line = await screen.findByTestId('ic-campus-refusal')
+    expect(line.textContent).toMatch(/different money/)
+    fireEvent.click(within(line).getByRole('button', { name: 'Grid connection >' }))
+    expect(openPanel).toHaveBeenLastCalledWith('connection', 'campusElectrical')
+    fireEvent.click(within(line).getByRole('button', { name: 'Commercial & finance >' }))
+    expect(openPanel).toHaveBeenLastCalledWith('commercial', 'economics')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+
+  it('another refusal shows no campus line', async () => {
+    api.getInvestmentCase.mockResolvedValue({ status: 'refused', error_code: 'campus_assets_invalid',
+                                              error: 'asset 0 is not a valid extra owner asset' })
+    renderView()
+    await screen.findByTestId('ic-error')
+    expect(screen.queryByTestId('ic-campus-refusal')).toBeNull()
+  })
+
+  it('unmet needs say the design misses the grid-code profile and point to Electrical design', async () => {
+    const needs = [{ need: 'reactive', reason: 'campus_voltage: 0.88 pu at MV' },
+                   { need: 'short_circuit', reason: 'no further candidate' }]
+    await renderCampus({ extra_assets: [], campus_study: { study_method: 'milp', unresolved: needs } },
+                       ['campus_needs_unresolved'])
+    const note = screen.getByTestId('ic-campus-unresolved')
+    expect(note.textContent).toMatch(
+      /^The grid study found no equipment for 2 needs, so this design does not meet the grid-code profile:/)
+    expect(note.textContent).toContain('reactive: campus_voltage: 0.88 pu at MV')
+    fireEvent.click(within(note).getByRole('button', { name: 'See Electrical design >' }))
+    expect(useUIStore.getState().resultsTabRequest).toBe('electrical_design')
+  })
+
+  it('in Guided, unmet needs point to Grid study and Guided stays Guided', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    await renderCampus({ extra_assets: [], campus_study: { study_method: 'least_cost',
+                                                          unresolved: [{ need: 'reactive', reason: 'why' }] } })
+    const note = screen.getByTestId('ic-campus-unresolved')
+    expect(note.textContent).toMatch(/no equipment for 1 need,/)
+    fireEvent.click(within(note).getByRole('button', { name: 'Grid study >' }))
+    expect(openPanel).toHaveBeenCalledWith('scenarios', 'campusStudy')
+    expect(useUIStore.getState().uiMode).toBe('guided')
   })
 })
