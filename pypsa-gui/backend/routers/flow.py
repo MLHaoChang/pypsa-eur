@@ -134,33 +134,50 @@ def _no_load(project: AuthorizedProject, template: dict | None) -> bool:
     return flow_scope.no_load_plant(template, loads)
 
 
-def _store_fixed_sizes(project: AuthorizedProject, value: str) -> None:
-    """Set ``fixed_sizes`` and nothing else in the project's solver config: the
-    live config under the solver-state lock when the project is open (the merge
-    ``PUT /solver_config`` makes), else its saved ``solver_config.json``."""
+def _store_fixed_sizes(project: AuthorizedProject, sizing: bool, db, user) -> str:
+    """Apply the scope's sizing transition to ``fixed_sizes`` and nothing else,
+    on the LIVE value, and return the value in force. The open project goes
+    through ``update_solver_config`` (the one writer) inside the solver-state
+    lock, so a concurrent Solver-settings save is never overwritten; a closed
+    project's saved ``solver_config.json`` is edited the same way."""
     import json
     from dataclasses import asdict
 
-    from routers.simulation import SolverConfig, _state
-    from services import network_lengths
+    from models.schemas import SolverConfigSchema
+    from routers.simulation import _state, update_solver_config
+    from services import flow_scope, network_lengths
     from services.atomic_io import atomic_write_text
     from services.pypsa_service import PyPSAService
 
     active = network_lengths.active_project_dir()
     if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
         with PyPSAService.get_solver_state_lock():
-            merged = asdict(_state["solver_config"])
-            merged["fixed_sizes"] = value
-            _state["solver_config"] = SolverConfig(**merged)
-        return
+            current = asdict(_state["solver_config"]).get("fixed_sizes", "off")
+            new = flow_scope.fixed_sizes_transition(sizing, current)
+            if new is None:
+                return current
+            update_solver_config(SolverConfigSchema(fixed_sizes=new), db, user)
+            return new
     path = project.directory / "solver_config.json"
     try:
         raw = json.loads(path.read_text("utf-8"))
     except (OSError, ValueError):
-        return                                   # no saved config: the default is "off"
-    if isinstance(raw, dict):
-        raw["fixed_sizes"] = value
-        atomic_write_text(path, json.dumps(raw, indent=2) + "\n")
+        raw = None
+    if not isinstance(raw, dict):
+        # No saved config: the default is "off". Only a change needs a file.
+        if flow_scope.fixed_sizes_transition(sizing, "off") is None:
+            return "off"
+        raise flow_scope.ScopeError(
+            "solver_config_unavailable",
+            "Open the project first: Asset sizing is stored in its solver settings, "
+            "which are not saved yet.")
+    current = raw.get("fixed_sizes", "off")
+    new = flow_scope.fixed_sizes_transition(sizing, current)
+    if new is None:
+        return current
+    raw["fixed_sizes"] = new
+    atomic_write_text(path, json.dumps(raw, indent=2) + "\n")
+    return new
 
 
 @router.get("/{name}/flow/scope")
@@ -204,7 +221,7 @@ def put_flow_scope(body: dict,
         scope = flow_scope.write_scope(project.directory, body, template,
                                        _solver_settings(project),
                                        no_load=_no_load(project, template),
-                                       store_fixed_sizes=lambda v: _store_fixed_sizes(project, v))
+                                       store_fixed_sizes=lambda w: _store_fixed_sizes(project, w, db, user))
     except flow_scope.ScopeError as exc:
         raise HTTPException(422, {"error_kind": exc.error_kind,
                                   "message": exc.message}) from exc

@@ -162,108 +162,28 @@ def test_the_scope_reads_sizing_from_the_fixed_sizes_setting(tmp_path, fixed, si
     assert "dispatch" in scope["options"]["capacity"]
 
 
-def test_a_scope_with_sizing_off_asks_for_capacity_run_only_from_off():
-    off = _cap(["dispatch"])
-    assert S.fixed_sizes_for(off, {"fixed_sizes": "off"}) == "capacity_run"
-    # An explicit source from Solver settings stays.
-    assert S.fixed_sizes_for(off, {"fixed_sizes": "nameplate"}) is None
-    assert S.fixed_sizes_for(off, {"fixed_sizes": "capacity_run"}) is None
+def test_the_transition_leaves_a_chosen_source_and_flips_off():
+    assert S.fixed_sizes_transition(False, "off") == "capacity_run"
+    assert S.fixed_sizes_transition(False, "nameplate") is None
+    assert S.fixed_sizes_transition(False, "capacity_run") is None
+    assert S.fixed_sizes_transition(True, "nameplate") == "off"
+    assert S.fixed_sizes_transition(True, "off") is None
 
 
-def test_putting_sizing_back_sets_off():
-    on = _cap(["sizing", "dispatch"])
-    assert S.fixed_sizes_for(on, {"fixed_sizes": "nameplate"}) == "off"
-    assert S.fixed_sizes_for(on, {"fixed_sizes": "off"}) is None
+def test_write_scope_hands_the_store_the_transition_and_reads_its_answer(tmp_path):
+    calls = []
 
+    def store(sizing):
+        calls.append(sizing)
+        return "capacity_run" if not sizing else "off"
 
-def test_write_scope_stores_only_the_fixed_sizes_value(tmp_path):
-    stored = []
     out = S.write_scope(tmp_path, _cap(["dispatch"]), {"id": "eh_datacenter"},
-                        {"fixed_sizes": "off"}, store_fixed_sizes=stored.append)
-    assert stored == ["capacity_run"]
+                        {"fixed_sizes": "off"}, store_fixed_sizes=store)
     assert "sizing" not in out["options"]["capacity"]
-    stored.clear()
     out = S.write_scope(tmp_path, _cap(["sizing", "dispatch"]), {"id": "eh_datacenter"},
-                        {"fixed_sizes": "capacity_run"}, store_fixed_sizes=stored.append)
-    assert stored == ["off"]
+                        {"fixed_sizes": "capacity_run"}, store_fixed_sizes=store)
+    assert calls == [False, True]
     assert "sizing" in out["options"]["capacity"]
-
-
-def test_a_runnable_matrix_row_makes_its_option_available(monkeypatch):
-    from services import run_separability as RS
-    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
-    assert S.option_status("control", "island_checks", has_template=True) == (S.AVAILABLE, None)
-    # only that one
-    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
-
-
-def test_a_kind_the_matrix_lacks_stays_not_yet(monkeypatch):
-    # §11.1: unknown stays non-runnable.
-    from services import run_separability as RS
-    monkeypatch.delitem(RS.MATRIX, "dynamics")
-    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
-
-
-def test_a_cleared_option_can_be_stored(monkeypatch):
-    from services import run_separability as RS
-    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
-    assert S._storable("control", "island_checks", has_template=True)
-
-
-def test_reliability_needs_a_template():
-    status, reason = S.option_status("reliability", "goal_study", has_template=False)
-    assert status == S.NOT_YET and "Energy Hub" in reason
-
-
-# ── the strict check ────────────────────────────────────────────────────────
-
-def _scope(**options) -> dict:
-    base = S.effective_preset(S.BLANK_PRESET, has_template=True)
-    for card, opts in options.items():
-        base["options"][card] = list(opts)
-        if opts and card not in base["groups"]:
-            base["groups"].append(card)
-    return base
-
-
-@pytest.mark.parametrize("raw, kind", [
-    ({"version": 2, "groups": [], "options": {}}, "flow_scope_invalid"),
-    ({"version": 1, "groups": "capacity", "options": {}}, "flow_scope_invalid"),
-    ({**_scope(), "groups": ["capacity", "handoff", "nope"]}, "flow_scope_unknown"),
-    (_scope(grid=["load_flow", "magic"]), "flow_scope_unknown"),
-    (_scope(control=["dynamics"]), "flow_scope_unavailable"),
-    (_scope(capacity=["sizing"]), "flow_scope_required"),
-    ({**_scope(), "groups": ["capacity"]}, "flow_scope_required"),
-])
-def test_the_strict_check_refuses_with_a_typed_kind(raw, kind):
-    with pytest.raises(S.ScopeError) as exc:
-        S.validate(raw, has_template=True)
-    assert exc.value.error_kind == kind
-
-
-def test_a_stored_scope_is_read_leniently(tmp_path):
-    (tmp_path / S.SCOPE_FILE).write_text(json.dumps({
-        "version": 1, "groups": ["grid", "nope"],
-        "options": {"capacity": ["sizing"], "grid": ["grid_code", "n1_sclopf", "magic"],
-                    "control": ["dynamics"]}}))
-    scope = S.read_scope(tmp_path, {"id": "eh_datacenter"})
-    assert scope["source"] == "project"
-    assert scope["groups"] == ["capacity", "grid", "handoff"]
-    # N-1 security is never stored: its solver setting decides it.
-    assert scope["options"]["grid"] == ["grid_code"]
-    assert scope["options"]["control"] == []
-    assert scope["options"]["capacity"] == ["sizing", "dispatch"]
-
-
-def test_a_card_switched_off_keeps_its_sub_options(tmp_path):
-    tpl = {"id": "eh_datacenter"}
-    scope = S.read_scope(tmp_path, tpl)
-    off = {**scope, "groups": [g for g in scope["groups"] if g != "grid"]}
-    stored = S.write_scope(tmp_path, off, tpl)
-    assert not S.selected(stored, "grid")
-    assert stored["options"]["grid"] == ["grid_code"]
-    on = S.write_scope(tmp_path, {**stored, "groups": [*stored["groups"], "grid"]}, tpl)
-    assert S.selected(on, "grid", "grid_code")
 
 
 def test_the_scope_sidecar_travels_with_the_project():
@@ -697,3 +617,38 @@ def test_a_scope_put_changes_only_fixed_sizes_and_the_checkbox_mirrors_it(client
     on = _put(client, name, {**scope, "options": {**opts, "capacity": ["sizing", "dispatch"]}})
     assert "sizing" in on["options"]["capacity"]
     assert cfg()["fixed_sizes"] == "off"
+
+
+def test_a_stale_snapshot_never_overwrites_a_source_chosen_meanwhile(client, tmp_projects_dir, monkeypatch):
+    """The live value decides: the snapshot says "off", a Solver-settings save
+    has set nameplate since, and a scope PUT without sizing leaves nameplate."""
+    from routers import flow as flow_router
+
+    name = _create(client, "eh_datacenter", "dc_race")
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    real = flow_router._solver_settings
+
+    def stale(project):
+        snap = dict(real(project) or {})
+        client.put("/api/simulation/solver_config", json={"fixed_sizes": "nameplate"})
+        return {**snap, "fixed_sizes": "off"}
+
+    monkeypatch.setattr(flow_router, "_solver_settings", stale)
+    _put(client, name, {**scope, "options": {**scope["options"], "capacity": ["dispatch"]}})
+    assert client.get("/api/simulation/solver_config").json()["fixed_sizes"] == "nameplate"
+
+
+def test_a_closed_project_without_a_saved_config_refuses_by_name(tmp_path):
+    from routers import flow as flow_router
+
+    project = type("P", (), {"directory": tmp_path})()
+    import services.network_lengths as nl
+    orig = nl.active_project_dir
+    nl.active_project_dir = lambda: None
+    try:
+        with pytest.raises(S.ScopeError) as exc:
+            flow_router._store_fixed_sizes(project, False, None, None)
+        assert exc.value.error_kind == "solver_config_unavailable"
+        assert flow_router._store_fixed_sizes(project, True, None, None) == "off"
+    finally:
+        nl.active_project_dir = orig

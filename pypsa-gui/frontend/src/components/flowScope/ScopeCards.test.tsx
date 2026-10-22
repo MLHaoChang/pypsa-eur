@@ -131,12 +131,12 @@ describe('ScopeCards', () => {
     expect(sent.options.capacity).toEqual(['dispatch'])
   })
 
-  it('names the nameplate when that is the size source (W4b)', async () => {
+  it('names the entered sizes when that is the size source (W4b)', async () => {
     getFlowScope.mockResolvedValue({ ...registry({ ...PRESET,
       options: { ...PRESET.options, capacity: ['dispatch'] } }), fixed_sizes: 'nameplate' })
     mount()
     expect((await screen.findByTestId('scope-cards-fixed-sizes')).textContent)
-      .toBe('Dispatch on fixed sizes from the nameplate.')
+      .toBe('Dispatch on fixed sizes from the sizes entered on each asset.')
   })
 
   it('shows the Run blocker in words under unchecked Asset sizing (W4b)', async () => {

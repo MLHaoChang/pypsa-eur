@@ -363,15 +363,18 @@ def sizing_in_scope(settings: dict | None) -> bool | None:
     return settings.get("fixed_sizes", "off") == "off"
 
 
-def fixed_sizes_for(scope: dict, settings: dict | None) -> str | None:
+def fixed_sizes_transition(sizing: bool, current: str) -> str | None:
     """The ``fixed_sizes`` value a scope write asks for, or None to leave it:
     sizing out of scope turns ``off`` into ``capacity_run`` (a source the user
-    chose in Solver settings stays); sizing back in sets ``off``."""
-    current = (settings or {}).get("fixed_sizes", "off")
-    wanted = "sizing" in (scope["options"].get("capacity") or ())
-    if wanted:
+    chose stays); sizing back in sets ``off``. Applied to the LIVE value under
+    the solver-state lock, never to a snapshot."""
+    if sizing:
         return "off" if current != "off" else None
     return "capacity_run" if current == "off" else None
+
+
+def sizing_wanted(scope: dict) -> bool:
+    return "sizing" in (scope["options"].get("capacity") or ())
 
 
 def apply_settings(scope: dict, settings: dict | None) -> dict:
@@ -417,18 +420,17 @@ def read_scope(project_dir: pathlib.Path, template: dict | None,
 
 def write_scope(project_dir: pathlib.Path, raw: Any, template: dict | None,
                 settings: dict | None = None, *, no_load: bool = False,
-                store_fixed_sizes: Callable[[str], None] | None = None) -> dict:
+                store_fixed_sizes: Callable[[bool], str] | None = None) -> dict:
     """Check and store a scope atomically; returns what ``read_scope`` now reads.
-    ``store_fixed_sizes`` writes the one config field the scope owns (Asset
-    sizing, W4b) through the caller's own solver-config path."""
+    ``store_fixed_sizes(sizing_wanted)`` applies the transition to the one
+    config field the scope owns (Asset sizing, W4b) through the caller's own
+    solver-config path, on the live value, and returns the value now in force."""
     from services.atomic_io import atomic_write_text
 
     scope = validate(raw, has_template=template is not None, no_load=no_load)
-    wanted = fixed_sizes_for(scope, settings) if run_separability.runnable("fixed_sizes") else None
     with _write_lock:
-        if wanted is not None and store_fixed_sizes is not None:
-            store_fixed_sizes(wanted)
-            settings = {**(settings or {}), "fixed_sizes": wanted}
+        if store_fixed_sizes is not None and run_separability.runnable("fixed_sizes"):
+            settings = {**(settings or {}), "fixed_sizes": store_fixed_sizes(sizing_wanted(scope))}
         atomic_write_text(project_dir / SCOPE_FILE,
                           json.dumps(scope, indent=2, sort_keys=True) + "\n")
     return read_scope(project_dir, template, settings, no_load=no_load)
