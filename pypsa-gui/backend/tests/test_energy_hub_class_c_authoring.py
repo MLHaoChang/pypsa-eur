@@ -194,7 +194,8 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     for version in ("2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20",     # one manifest per version (IC G1, S3)
                     "2026-10-21+ca_federal", "2026-10-21+uk", "2026-10-21+us_federal",   # GS-2 regional
                     "2026-10-22", "2026-10-22+ca_federal", "2026-10-22+uk",   # GS-2b typed cost units
-                    "2026-10-22+us_federal"):
+                    "2026-10-22+us_federal",
+                    "2026-10-23"):                                           # campus-IC 03A
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")
