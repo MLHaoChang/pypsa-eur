@@ -33,6 +33,8 @@ import copy
 import hashlib
 import json
 import math
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -240,6 +242,25 @@ def require_current(tool_name: str, args: dict, card: dict) -> None:
     if preview(tool_name, args, with_state=False)["digest"] != card["digest"]:
         _refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
                 "Propose the edit again.", 409)
+
+
+# The digest of the card the user approved, bound by the turn loop around the
+# handler, never taken from model arguments. A handler that rechecks its card
+# under its own lock (`apply_equipment_mapping`) reads it here.
+_APPROVED: ContextVar[str | None] = ContextVar("edit_card_approved", default=None)
+
+
+@contextmanager
+def approved(digest: str):
+    token = _APPROVED.set(digest)
+    try:
+        yield
+    finally:
+        _APPROVED.reset(token)
+
+
+def approved_digest() -> str | None:
+    return _APPROVED.get()
 
 
 def _results_stale() -> bool:

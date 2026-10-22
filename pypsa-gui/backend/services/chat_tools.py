@@ -1704,18 +1704,7 @@ def preview_equipment_mapping(upload_id: str, component_class: str, name_column:
     p = T.plan_active({"upload_id": upload_id, "sheet": sheet, "component_class": component_class,
                        "name_column": name_column, "columns": columns, "currency": currency,
                        "money_year": money_year, "confirm": confirm})
-    todo = T.changes(PyPSAService.get_network(), p)
-    T.require_card_size(todo)
-    gaps = p["unmapped"]
-    return {"source": p["source"], "component_class": component_class,
-            "cells": [c for c in p["cells"] if c["field"] in todo.get(c["name"], {})],
-            "changed_cells": sum(len(v) for v in todo.values()),
-            "unchanged_cells": len(p["cells"]) - sum(len(v) for v in todo.values()),
-            "unmapped": gaps[:T.MAX_LISTED_GAPS], "unmapped_total": len(gaps),
-            "unmapped_by_kind": {k: sum(g["kind"] == k for g in gaps) for k in dict.fromkeys(g["kind"] for g in gaps)},
-            "needs": p["needs"], "missing": p["missing"], "notes": p["notes"],
-            "limits": {"rows": T.MAX_ROWS, "columns": T.MAX_COLUMNS, "card_cells": T.MAX_CARD_CELLS,
-                       "listed_gaps": T.MAX_LISTED_GAPS},
+    return {**T.summary(PyPSAService.get_network(), p),
             "next": "apply_equipment_mapping with the same arguments and source_sha256 = source.sha256"}
 
 
@@ -1723,13 +1712,19 @@ def apply_equipment_mapping(upload_id: str, component_class: str, name_column: s
                             source_sha256: str, sheet: str | None = None, currency: str | None = None,
                             money_year: int | None = None, confirm: list[str] | None = None) -> dict:
     """Write a previewed equipment table onto its assets through the network route (the
-    edit card is shown and confirmed before this runs)."""
-    from routers.network_equipment_table import EquipmentMappingRun
+    edit card is shown and confirmed before this runs; the route rechecks the digest of
+    the card the user approved, which the turn loop binds)."""
+    from harness import edit_card
+    from routers.network_equipment_table import EquipmentMappingHttp
     from routers.network_equipment_table import apply_equipment_mapping as _h
 
-    body = EquipmentMappingRun(upload_id=upload_id, sheet=sheet, component_class=component_class,
-                               name_column=name_column, columns=columns, currency=currency,
-                               money_year=money_year, confirm=list(confirm or []), source_sha256=source_sha256)
+    if not edit_card.approved_digest():
+        raise HTTPException(409, {"error_kind": "edit_preview_stale", "message": (
+            "No approved edit card for this table; nothing was applied. Propose the edit again.")})
+    body = EquipmentMappingHttp(upload_id=upload_id, sheet=sheet, component_class=component_class,
+                                name_column=name_column, columns=columns, currency=currency,
+                                money_year=money_year, confirm=list(confirm or []), source_sha256=source_sha256,
+                                digest=edit_card.approved_digest())
     out = _route(_h, body)
     # The turn loop attaches the card's receipt as `_edit_receipt`; the route's copy would repeat it.
     out.pop("receipt", None)

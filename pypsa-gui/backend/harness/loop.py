@@ -2726,7 +2726,8 @@ def _dispatch_real_tool_call(
                         return invoke(session, tool_name, args or {}, handler)
                 if edit_card is not None:
                     edit_cards.require_current(tool_name, args or {}, edit_card)
-                    out = invoke(session, tool_name, args or {}, handler)
+                    with edit_cards.approved(edit_card["digest"]):
+                        out = invoke(session, tool_name, args or {}, handler)
                     if isinstance(out, dict):
                         out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
                     return out

@@ -1286,6 +1286,11 @@ app.include_router(asset_results.router, prefix="/api/results/asset", tags=["ass
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# The manual-mapping form's preview of an equipment table: a read, mounted outside
+# /api/network so it takes no undo snapshot and clears no results.
+from routers.network_equipment_table import preview_router as _equipment_table_preview  # noqa: E402
+
+app.include_router(_equipment_table_preview, prefix="/api/equipment_table", tags=["network"])
 # Path-scoped per-project READ endpoints (B6). Mounted BEFORE projects/snapshots
 # so its `{project_id}/network/...` routes (static `network` segment) resolve
 # first — they don't collide with projects.py's `{name}/<static>` routes, but

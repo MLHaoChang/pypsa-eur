@@ -285,7 +285,14 @@ component (`frontend/src/components/EditCard.tsx`).
   the native update per asset, so a native refusal part-way returns `partial`
   with `written`, `failed` and `not_attempted`; one undo snapshot (the turn's,
   or the HTTP middleware's) reverts the whole table. Provenance source:
-  `upload:<id>#<sha16> <sheet>!<cell>`.
+  `upload:<id>#<sha16> <sheet>!<cell>`. The in-lock check also compares each
+  value written with its row's `new`. The route always compares the approved
+  digest: the turn loop binds the shown card's digest
+  (`edit_card.approved`) around the handler, and the tool passes it on. The
+  Expert manual-mapping form (asset table › "Import rows from a table…")
+  previews through `POST /api/equipment_table/preview`, a read outside
+  `/api/network` (no undo snapshot, no results cleared), and applies through
+  the same route with the card's digest.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

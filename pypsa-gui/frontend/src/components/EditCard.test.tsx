@@ -136,7 +136,16 @@ it('a table-sourced row names its file, sheet and cell, and a cost its money bas
     edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
   render(<ConfirmationCard />)
   expect(screen.getByTestId('chat-edit-source').textContent).toBe('lines.csv \u203a B3 (400 MVA)')
-  expect(screen.getByTestId('chat-edit-money').textContent).toBe('EUR, 2025 money, not adjusted')
+  expect(screen.getByTestId('chat-edit-money').textContent).toBe('EUR, 2025 money, not adjusted for inflation')
+})
+
+it('a unitless table cell shows its raw value without a stray space', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'D2', raw: '3', raw_unit: '' } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('lines.csv \u203a D2 (3)')
 })
 
 it('a workbook row names its sheet, and a formula cell says its value was saved', () => {
