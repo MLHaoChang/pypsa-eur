@@ -115,7 +115,7 @@ describe('the group strip', () => {
     getFlowScope.mockResolvedValue(registry(['capacity', 'control', 'reliability']))
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-control'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Campus electrical >')
+    expect(screen.getByTestId('results-gempty').textContent).toContain('Campus electrical ›')
     fireEvent.click(screen.getByTestId('results-gempty-open'))
     expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
     fireEvent.click(screen.getByTestId('results-group-control'))
@@ -125,6 +125,21 @@ describe('the group strip', () => {
     expect(tabs).toEqual(['Build', 'Operation', 'Curtailment', 'Costs & prices'])
     fireEvent.click(screen.getByTestId('results-cardtab-operation'))
     expect(screen.getByTestId('results-subviews').textContent).toContain('Dispatch')
+  })
+})
+
+describe('the empty groups', () => {
+  it('Hand-off opens Reports in Expert and its section in Guided, through the shared navigation', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-handoff'))
+    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
+    fireEvent.click(screen.getByTestId('results-gempty-open'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+    expect(useUIStore.getState().activeSection).toBe('results')
+    useUIStore.setState({ uiMode: 'guided' })
+    fireEvent.click(screen.getByTestId('results-group-handoff'))
+    fireEvent.click(screen.getByTestId('results-gempty-open'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
   })
 })
 

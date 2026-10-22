@@ -295,7 +295,7 @@ function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports 
               {hasResults && fresh !== 'fresh' && <StatePill state={fresh} />}
               <button type="button" onClick={open} data-testid={`summary-row-open-${g.id}`}
                 className="text-[10.5px] text-accent hover:underline inline-flex items-center gap-1">
-                Open &gt;
+                Open ›
               </button>
             </li>
           )

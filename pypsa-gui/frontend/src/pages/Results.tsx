@@ -50,6 +50,18 @@ import { ScopeGate } from '../components/flowScope/ScopeGate'
 import { useFlowScope } from '../components/flowScope/useFlowScope'
 import { inScope, type ScopeCardId } from '../api/flow'
 import { X } from 'lucide-react'
+import { openFlowTarget, openSectionInGuided } from '../layout/flowNavigation'
+import type { FlowTarget } from '../api/flow'
+
+// What an empty card group points to (one line each to re-point; #545 moves the
+// island study to its Grid study panel). Mode-aware, through the shared navigation.
+const flowTarget = (section: FlowTarget['section'], panel: string): FlowTarget =>
+  ({ section, panel, component: null, entity: null, field: null })
+const EMPTY_GROUP_NEXT: Record<string, { note: string; label: string; section: FlowTarget['section']; panel: string }> = {
+  control: { note: 'Control results come from the island study. ', label: 'Run the island study in Campus electrical',
+    section: 'connection', panel: 'campusElectrical' },
+  handoff: { note: 'Reports and exports are made from Reports. ', label: 'Open Reports', section: 'results', panel: 'reports' },
+}
 import BackToHubResults from '../components/BackToHubResults'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
@@ -182,7 +194,6 @@ export default function Results() {
   const setCompareRailOpen  = useUIStore(s => s.setCompareRailOpen)
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
@@ -947,13 +958,15 @@ export default function Results() {
                       <div className="p-4"><ScopeGate card={g as ScopeCardId} testId="results-outside-scope">{null}</ScopeGate></div>
                     ) : (
                       <p data-testid="results-gempty" className="p-4 text-[12px] text-muted">
-                        {g === 'control'
-                          ? 'Control results come from the island study. '
-                          : 'Reports and exports are made from Reports. '}
+                        {EMPTY_GROUP_NEXT[g]?.note}
                         <button type="button" data-testid="results-gempty-open"
-                          onClick={() => setSlidePanel(g === 'control' ? 'campusElectrical' : 'reports')}
+                          onClick={() => {
+                            const n = EMPTY_GROUP_NEXT[g]
+                            if (useUIStore.getState().uiMode === 'guided') openSectionInGuided(n.section)
+                            else openFlowTarget(flowTarget(n.section, n.panel))
+                          }}
                           className="text-accent hover:underline">
-                          {g === 'control' ? 'Run the island study in Campus electrical' : 'Open Reports'} &gt;
+                          {EMPTY_GROUP_NEXT[g]?.label} ›
                         </button>
                       </p>
                     )}
