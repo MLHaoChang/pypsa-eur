@@ -7,6 +7,7 @@
 // carry `hub-rail-section-*` ids.
 import { Loader2 } from 'lucide-react'
 import { FlowStateDot } from '../../components/FlowStateDot'
+import { ScopeChips, useScopeChips } from '../../components/flowScope/ScopeChips'
 import { countOpen, countWords } from '../../utils/flowItems'
 import type { FlowSectionId, FlowSectionState } from '../../api/flow'
 import { FLOW_STATE_WORDS } from '../../api/flow'
@@ -65,7 +66,9 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
   const counts = countWords(countOpen(flowSection?.items ?? []))
   const stateWord = stateless ? null : isError || !flowSection ? FLOW_STATE_WORDS.unknown
     : counts || FLOW_STATE_WORDS[state ?? 'unknown']
-  const label = `${meta.label}${stateWord ? `: ${stateWord}` : ''}`
+  // The cards in scope whose blocks this section holds (W4a chips).
+  const chips = useScopeChips(id)
+  const label = `${meta.label}${stateWord ? `: ${stateWord}` : ''}${chips.length ? ` · ${chips.join(', ')}` : ''}`
   return (
     <div className="flex items-center gap-1">
       {id !== 'project' && <span aria-hidden className="h-px w-3 bg-border" />}
@@ -79,6 +82,7 @@ function RailButton({ id, testId, ...props }: RailProps & { id: FlowSectionId; t
         {/* Narrow windows keep the number and dot; the label stays on the
             current pill and in every pill's title. */}
         <span className={bs === 'current' ? '' : 'hidden min-[900px]:inline'}>{meta.label}</span>
+        {bs === 'current' && <ScopeChips section={id} testId="hub-rail-scope-chips" />}
         {!stateless && bs !== 'blocked' && <FlowStateDot state={isError ? null : state} />}
         {id === 'scenarios' && props.flow === 'running' && (
           <Loader2 size={11} className="animate-spin" data-testid="hub-rail-spinner" />

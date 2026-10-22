@@ -27,7 +27,16 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The scope (W4a): unread by default, so every block shows; one test reads
+// a scope with Reliability off.
+const getFlowScope = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+})
+
 beforeEach(() => {
+  getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
@@ -146,6 +155,24 @@ describe('GoalCard voll line', () => {
     expect(await screen.findByTestId('stress-editor')).toBeTruthy()
   })
 
+  it('out of Reliability › Stress, the stress editor gives way to adding it in place (W4a)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'reliability', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study', 'stress'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null },
+          { id: 'stress', label: 'Stress conditions & FMEA', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    mount()
+    await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
+    expect((await screen.findByTestId('hub-goal-stress-scope-add')).textContent).toBe('Add Stress conditions & FMEA')
+    expect(screen.queryByTestId('stress-editor')).toBeNull()
+  })
+
   it('opens More settings with the stress editor when a link asks for it, once', async () => {
     useHubDesignStore.setState({ goalAdvancedRequested: true })
     mount()
@@ -185,5 +212,27 @@ describe('GoalCard while a risk check runs (A1-FE)', () => {
       client.setQueryData(nk('Demo', 'results', 'fmea_modes'), { per_mode: [], sweep_status: 'done' })
     })
     await waitFor(() => expect(fix.disabled).toBe(false))
+  })
+})
+
+describe('GoalCard scope (W4a)', () => {
+  it('with Reliability off the goal hides and VOLL stays', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
+    mount()
+    expect((await screen.findByTestId('hub-goal-out-of-scope-add')).textContent)
+      .toBe('Add Reliability goal & study')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
+    expect(screen.queryByTestId('hub-goal-run')).toBeNull()
   })
 })

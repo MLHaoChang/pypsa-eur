@@ -271,6 +271,21 @@ component (`frontend/src/components/EditCard.tsx`).
   the card outside the digest (`section_state`); the receipt adds `section`
   with the state after the write and whether it `changed`. The browser's
   "Show in Properties" selects the component in place; the chat stays open.
+- **Equipment tables (data-to-model slice 1).** `apply_equipment_mapping`
+  writes a mapped CSV/XLSX table onto assets of one class
+  (`services/equipment_table.py`). Each typed row also carries `source`
+  (upload id, filename, full sha256, sheet, row, column, cell, raw value and
+  unit) and, for a cost, `money`; left-out cells ride as `note` rows with
+  `gap`. The digest binds each row's source cell but not its `raw` text.
+  Changed table bytes refuse (`source_changed`); an XLSX zip bomb or DOCTYPE
+  refuses before parsing (`table_unsafe`); time-series fields stay out
+  (`time_series_not_supported_here`). The live write holds the mutation lock
+  across the loop and writes exactly the card's typed cells, refusing
+  (`edit_preview_stale`) before the first write if any `old` moved. It loops
+  the native update per asset, so a native refusal part-way returns `partial`
+  with `written`, `failed` and `not_attempted`; one undo snapshot (the turn's,
+  or the HTTP middleware's) reverts the whole table. Provenance source:
+  `upload:<id>#<sha16> <sheet>!<cell>`.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -682,7 +697,7 @@ Guided write confirmation still applies. See the
 [prerequisite contract](../../../.scratch/live-voice/experiment-prerequisites.md).
 
 `start_task(title, steps, request_id)` persists an owner/project-scoped plan
-with 1–12 ordinary calls. Create/activate/import a project first: rebinding
+with 1–12 ordinary calls (1–24 with a study brief, below). Create/activate/import a project first: rebinding
 and task-control tools cannot be steps. `list_tasks`, `get_task` and
 `resume_task` discover and recover plans across chat sessions and providers.
 `resume_task` returns the next exact call; it does not execute hidden actions.
@@ -695,7 +710,8 @@ IDs. Task views stay within the ordinary result budget.
 A denied confirmation leaves a step pending. An interrupted effectful call
 requires review; native exports count as effectful despite their legacy read
 tier. `resolve_task_step` requires ordinary destructive confirmation to
-record verified completion or an explicit retry. Reconciliation refuses a
+record verified completion or an explicit retry; completion comes from native
+evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
 still-running originating session or detached timeout worker. `cancel_task`
 stops future task steps and retains checkpoints; it never aborts a queued job.
 Tasks live in the authorized project directory, are atomically replaced,
@@ -810,6 +826,54 @@ is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
 never disagree with it, also after an AC power flow. `get_results` adds a
 `freshness_note`: stale when the inputs changed, not current when the guard
 fails for another reason.
+
+### Study brief (LC-23)
+
+Owner decisions AI-567b and COP-1; design in
+`.scratch/live-copilot/issues/23-study-copilot.md`. The user states a goal,
+the model drafts a decision study brief and shows it on a plan-review Choice
+card; on approval it calls `start_task(..., brief=)`. The brief is the plan's
+label, not a second system: `objective` (≤ 240 chars), `cards` (≤ 6 of
+`assistant_tasks.CARDS`), `cases` (≤ 8 names) and `phases`, which split the
+step ids in step order, one declared card each (`invalid_brief` otherwise).
+A plan with a brief admits 1–24 steps and 32 000 chars (plain plans keep
+12 and 16 000); the excluded tools are unchanged. Such a task file is
+version 2; version-1 files are read and saved as they are. Approving the
+brief grants nothing: every write or run step keeps its own card.
+
+- **View.** `get_task` condenses a brief to its objective, cards, case names,
+  the current phase (`phase`, `phases` counts) and that phase's steps. Every
+  step names its server-derived `limit` (`args_chars`, `result_chars` = the
+  model-facing result cap, `wait`); resolved arguments over the limit are
+  refused before dispatch (`task_reference_too_large`).
+- **Card pause (COP-1).** When a step completes and the next step belongs to
+  another card, the task is `paused_at_card` (`paused_at_card` names the
+  card). `admit`/`begin_step` refuse the next step (`task_paused_at_card`),
+  and `resume_task` refuses too (`task_pause_needs_user`). Only the user's
+  "Continue to <card>" clears it: `/stream` with `continue_task_id` (no
+  message, attachments or checked fields) calls
+  `assistant_tasks.continue_at_card`, and the harness writes the turn's
+  message. A refused continue is `plan_continue_unavailable`. Reads inside a
+  card run without stopping.
+- **Freshness (SC-11).** The task keeps the input fingerprint
+  (`workflow_tools._network_input_fingerprint`) the brief was approved on;
+  each completed effectful step replaces it with the inputs after it. When
+  the current inputs differ (an edit by the user or an off-plan call), the
+  view says `brief_stale: "inputs_changed_outside_plan"` and the next
+  effectful step is refused (`task_brief_stale`); the model drafts a new
+  brief for the user to review. A reconcile never advances the chain, so a
+  reconciled effectful step leaves the brief stale (fail closed). An edit
+  that lands during a plan step's own call is taken into the chain with that
+  step; the window is one call long.
+- **Reconciliation (SC-12, all plans).** `resolve_task_step(completed)`
+  ignores `result`. The step resolves from its late worker receipt (a timed
+  out call whose worker went on to succeed, recorded by `register_worker`),
+  its job's published run (`run_evidence`, status, job id, objective and
+  fingerprint, no `inputs_changed_before_publish`), or a fresh read-back of
+  its edit receipt (`edit_card.reread`). Without one it is
+  `task_resolution_unverifiable` and the step stays to review; `retry`
+  stays the explicit way on. `resume_task` settles a waiting job this
+  process never registered as uncertain first.
 
 ## Recorded runs, load flow, and experiment plans
 

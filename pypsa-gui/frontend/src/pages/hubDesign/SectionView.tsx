@@ -4,9 +4,11 @@ import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
+import { SectionNotInScope } from '../../components/flowScope/NotInScopeGroup'
 import { useFieldLabels } from '../../hooks/useFieldLabels'
 import { useRunGate } from '../../hooks/useRunGate'
 import { useUIStore } from '../../store/uiStore'
+import { CommercialCard } from './cards/CommercialCard'
 import { GoalStudyRun } from './shared/GoalStudyRun'
 import { NextSectionButton } from '../../components/NextSectionButton'
 import { sectionMeta } from '../../layout/flowSections'
@@ -75,6 +77,7 @@ export function SectionView({ id, onNext, children }: {
           {items.map((it, i) => <ItemRow key={`${it.code}-${it.target.entity ?? ''}-${i}`} item={it} />)}
         </ul>
       )}
+      {!stateless && <SectionNotInScope section={id} />}
       {infos.length > 0 && (
         <ul data-testid="section-infos" className="flex flex-col gap-0.5 text-[11px] text-muted">
           {infos.map((it, i) => <li key={`${it.code}-${i}`}>{it.message}</li>)}
@@ -153,6 +156,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
     )
   }
   const s = section(id)
+  if (id === 'commercial') return <CommercialCard />
   return (
     <div data-testid={`hub-card-${id}`} className="flex flex-col gap-3 rounded border border-border bg-panel p-4">
       <p className="text-[12px] text-muted">

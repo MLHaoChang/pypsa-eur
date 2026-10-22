@@ -11,7 +11,7 @@ import TariffSection from './TariffSection'
 
 vi.mock('../../../api/commercial', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/commercial')>()
-  return { ...actual, commercialApi: { ...actual.commercialApi, getCommercial: vi.fn() } }
+  return { ...actual, commercialApi: { ...actual.commercialApi, getCommercial: vi.fn(), getPocState: vi.fn() } }
 })
 
 function renderSection() {
@@ -20,9 +20,17 @@ function renderSection() {
   return render(<QueryClientProvider client={qc}><TariffSection /></QueryClientProvider>)
 }
 
-afterEach(() => { cleanup(); vi.mocked(commercialApi.getCommercial).mockReset() })
+afterEach(() => { cleanup(); vi.mocked(commercialApi.getCommercial).mockReset(); vi.mocked(commercialApi.getPocState).mockReset() })
 
 describe('TariffSection', () => {
+  it('on an island (open PoC) says there is no tariff to set, in both modes', async () => {
+    vi.mocked(commercialApi.getCommercial).mockResolvedValue({ poc_link: 'import' } as never)
+    vi.mocked(commercialApi.getPocState).mockResolvedValue({ poc_link: 'import', open: true })
+    renderSection()
+    expect((await screen.findByTestId('ic-tariff-island')).textContent).toMatch(/island buys no grid power/)
+    expect(screen.queryByText('The project has no import tariff: build one.')).toBeNull()
+  })
+
   it('offers to build a tariff when the project has none', async () => {
     vi.mocked(commercialApi.getCommercial).mockResolvedValue({ poc_link: 'import' } as never)
     renderSection()
