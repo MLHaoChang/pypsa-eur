@@ -1257,7 +1257,8 @@ def apply_default_series(
             with pending_io_lock(), xr.open_dataset(nc) as ds:
                 frame = ds.to_dataframe()
             frame.index = pd.DatetimeIndex(frame.index)
-            summary = assign_profile(ctx, component, frame[component], meta,
+            summary = assign_profile(ctx, component, frame[component],
+                                     {**meta, "point_id": component},
                                      component_type=component_type, attribute=attribute)
         except ProfileApplyError as exc:
             results.append({"job_id": job_id, "component": component, "applied": False,
@@ -1328,6 +1329,15 @@ def list_pending_profiles(
         and j.get("status") in ("queued", "running")
     ]
     return {"pending": records, "jobs": live, "keep": KEEP_PENDING}
+
+
+@project_router.get("/{name}/profiles/readiness")
+def profile_readiness(proj: AuthorizedProject = ProjectAccessDep):
+    """One row per wind/solar generator: its coordinate state, the profile it
+    carries now and whether a generated one is stale (RP-02, read-only)."""
+    from services.profile_gen.readiness import readiness_rows
+
+    return {"generators": readiness_rows(_foreground_ctx(proj, "read readiness"))}
 
 
 @project_router.post("/{name}/profiles/apply")
@@ -1419,7 +1429,10 @@ def apply_profile(
     try:
         component_type, attribute = default_target(
             meta, body.component_type, body.attribute)
-        summary = assign_profile(ctx, body.component, series, meta,
+        # The point applied is recorded, so readiness can tell which of the
+        # job's point_coords the series came from (RP-02).
+        summary = assign_profile(ctx, body.component, series,
+                                 {**meta, "point_id": point_id},
                                  component_type=component_type,
                                  attribute=attribute,
                                  time_basis=body.time_basis)
