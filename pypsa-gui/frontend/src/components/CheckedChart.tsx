@@ -25,7 +25,10 @@ function openNative(tab: string, window: Chart['window']) {
 
 /** The checked chart's download and its footer (S10). Every line comes from the
  * receipt's series slots, never from the model's text. */
-export function CheckedChart({ chart, profile, compact = false }: { chart: Chart; profile?: string; compact?: boolean }) {
+/** `entity`: the one asset the chart is about (the receipt's request scope), named in the not-drawn lines. */
+export function CheckedChart({ chart, profile, entity, compact = false }: {
+  chart: Chart; profile?: string; entity?: string; compact?: boolean
+}) {
   const drawn = chart.series.filter(s => s.disposition === 'drawn')
   const notDrawn = chart.series.filter(s => s.disposition !== 'drawn')
   const native = profile ? NATIVE[profile] : undefined
@@ -44,7 +47,7 @@ export function CheckedChart({ chart, profile, compact = false }: { chart: Chart
       Chart drawn from checked evidence · {drawn.length} series · {readableWindow(chart.window.start, chart.window.end)}
     </p>}
     {notDrawn.length > 0 && <ul className="mt-1" aria-label="Not drawn">{notDrawn.map(s =>
-      <li key={s.series}>Not drawn: {s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
+      <li key={s.series}>Not drawn: {entity ? `${entity} ` : ''}{s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
     {native && <button type="button" className="mt-1 underline" data-testid="checked-chart-native"
       onClick={() => openNative(native.tab, chart.window)}>
       Open in Results › {native.label}</button>}

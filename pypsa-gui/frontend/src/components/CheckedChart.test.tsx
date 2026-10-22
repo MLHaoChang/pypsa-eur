@@ -18,11 +18,11 @@ afterEach(cleanup)
 
 describe('CheckedChart', () => {
   it('shows the bound download, the footer from the series slots and the not-drawn list', () => {
-    render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
+    render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" entity="G1" />)
     expect(screen.getByTestId('checked-chart-download').getAttribute('href')).toBe(DRAWN.download_url)
     expect(screen.getByTestId('checked-chart-footer').textContent).toBe(
       'Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00')
-    expect(screen.getByText("Not drawn: marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
+    expect(screen.getByText("Not drawn: G1 marginal cost — Not part of this answer's checked evidence")).toBeTruthy()
   })
 
   it.each(['guided', 'expert'] as const)('opens Results on the native tab and stays in %s', mode => {

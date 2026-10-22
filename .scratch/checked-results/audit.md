@@ -207,6 +207,6 @@ Each is outside this package and gets its own issue or PR.
 - **Chart evidence messages (#486, GK nits).** Done (small-fixes bundle).
   - `verify()` says "evidence no longer stored" when the evidence file is missing, and "expired" only when it has expired.
   - A refused `_save_agent_export` removes the provenance JSON it was about to bind.
-- **"Not drawn" names (#487, UX nit).** The line has no readable series name, because the receipt carries no entity or carrier. Fixing it changes the receipt contract; open, with the engine gatekeeper.
+- **"Not drawn" names (#487, UX nit).** Done (small-fixes bundle), with no slot change (engine gatekeeper): the PNG caption and the card name the chart's entity (`request_scope.entity_id`) in each not-drawn line. The series slot contract and its validator are unchanged, so charts drawn earlier still verify.
 - **Guided reliability link.** Done (small-fixes bundle). `AvailabilityEditor.openReliability` opens the Results panel in Guided, not the hub card.
 - **Navigation join tests.** Done (small-fixes bundle). `tests/test_navigation_join.py` covers a `network-loading/1` join and the `project_differs` and `fingerprint_basis_unknown` reasons.
