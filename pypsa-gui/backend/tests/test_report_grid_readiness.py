@@ -120,3 +120,32 @@ def test_a_project_without_the_template_keeps_its_report(client, api_project):
     name = api_project("rep-gr-none")
     ids = [s["section_id"] for s in _post(client, name)["document"]["sections"]]
     assert chapters.GRID_READINESS not in ids
+
+
+def _mitigated():
+    s = _scorecard()
+    s["rows"][0]["after_battery"] = {"value": 3.2, "verdict": "pass", "rule": {}, "units": ["BESS"],
+                                     "note": "n"}
+    s["rows"][1]["after_battery"] = {"value": None, "verdict": "unknown", "rule": {}, "units": ["BESS"],
+                                     "note": "not known yet"}
+    s["summary"]["pass_after_mitigation"] = 1
+    return s
+
+
+def test_the_after_battery_value_is_its_own_column_beside_the_before_verdict():
+    ev = _collect(grid_readiness=_mitigated())
+    table = ev.tables[chapters.GRID_READINESS]
+    assert table.columns == ["Requirement", "Limit", "Project", "Verdict", "After battery/UPS",
+                             "Assumed", "Source"]
+    assert table.rows[0][3:5] == ["Fail", "3.2 MW/min, Pass"]
+    assert table.rows[1][4] == "not known yet"
+    assert table.rows[2][4] == ""
+    text = " ".join(ev.required_disclosures)
+    assert "1 of 1 red flag(s) pass after the site's battery/UPS smoothing" in text
+    assert "before UPS/BESS smoothing" in text
+
+
+def test_without_an_after_battery_value_the_table_and_hash_are_unchanged():
+    plain = _collect(grid_readiness=_scorecard())
+    assert "After battery/UPS" not in plain.tables[chapters.GRID_READINESS].columns
+    assert not any("after the site's battery" in d for d in plain.required_disclosures)

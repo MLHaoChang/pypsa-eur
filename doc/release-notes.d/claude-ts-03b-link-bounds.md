@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Availability bounds on Links (process shutdowns and floors): links p_max_pu and p_min_pu (down to -1) are profile targets; a shutdown on a two-way link closes both directions; a floor on a two-way or point-of-connection link is refused; a committable link's floor is a min stable level; the must-run sink check follows a link's output through its efficiencies.

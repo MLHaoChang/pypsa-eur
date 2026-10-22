@@ -289,8 +289,16 @@ def _price_meta(**over) -> dict:
     return meta
 
 
+def _project_money(**finance):
+    from types import SimpleNamespace
+
+    state = _ctx().solver_state.setdefault("solver_config", SimpleNamespace())
+    state.finance = finance
+
+
 def test_a_price_series_of_any_sign_lands_on_marginal_cost_with_its_money_basis():
     n = _net()
+    _project_money(currency="EUR", price_basis="real", currency_year=2020)
     s = pd.Series(np.linspace(-20.0, 120.0, 8760), index=_year(2023))
     assign_profile(_ctx(), "CHP", s, _price_meta(),
                    attribute="marginal_cost", now=NOW)

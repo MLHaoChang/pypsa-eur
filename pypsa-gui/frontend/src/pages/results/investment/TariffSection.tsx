@@ -13,6 +13,12 @@ export default function TariffSection() {
   const project = useUIStore(s => s.currentProject)
   const current = useQuery({ queryKey: nk(project, 'commercial', 'config'),
                              queryFn: () => commercialApi.getCommercial() })
+  // An open PoC (an island's normally open tie): no grid in operation, so no tariff to set.
+  const poc = useQuery({ queryKey: nk(project, 'commercial', 'poc'), queryFn: () => commercialApi.getPocState() })
+  if (poc.data?.open === true) {
+    return <p className="text-[11px] text-muted py-2" data-testid="ic-tariff-island">
+      No tariff: the island buys no grid power.</p>
+  }
   if (current.isPending) return <p className="text-[11px] text-muted py-2">Loading the tariff…</p>
   // A failed read must not open a blank builder whose save would replace the
   // real tariff (WP3.7b review #11).

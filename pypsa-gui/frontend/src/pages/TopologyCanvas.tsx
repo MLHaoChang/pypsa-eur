@@ -3130,33 +3130,16 @@ export default function TopologyCanvas() {
                 className="flex flex-col gap-0.5 border border-border rounded-[10px] p-1 shadow-md"
                 style={{ background: 'color-mix(in srgb, var(--color-bg) 92%, transparent)', backdropFilter: 'blur(8px)' }}
               >
-                <button aria-label="Add bus (auto-name, rename via Properties)"
-                  title="Add bus (auto-name, rename via Properties)"
+                <button aria-label="Add bus"
+                  title="Add bus: opens the creation form, the same as the Assets palette"
                   className="flex items-center justify-center w-8 h-8 rounded-md text-ink-600 hover:bg-panel hover:text-accent transition-colors"
-                  onClick={() => {
-                    // Auto-name avoids the native `prompt()` which blocks the
-                    // main thread and can't be styled. User renames via the
-                    // right-panel Properties editor — the bus comes pre-selected
-                    // so the rename field is one click away.
-                    const existing = new Set((buses as Bus[]).map(b => b.name))
-                    let i = (buses as Bus[]).length + 1
-                    let name = `bus_${i}`
-                    while (existing.has(name)) { i += 1; name = `bus_${i}` }
-                    networkApi.createBus({ name, v_nom: 1, carrier: 'AC', x: 0, y: 0 } as Bus)
-                      .then(() => {
-                        queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
-                        setSelectedComponent({ type: 'Bus', name })
-                      })
-                      .catch((e: { response?: { data?: { detail?: string } } }) => {
-                        toast.error(e.response?.data?.detail ?? `Failed to create ${name}`)
-                      })
-                  }}
+                  onClick={() => useUIStore.getState().setCreationItem({ id: 'bus', label: 'Bus (Node)' })}
                 >
                   <Plus size={15} />
                 </button>
                 <button aria-label="Connect buses — route a line between two buses"
                   onClick={() => setCanvasMode(canvasMode === 'connect' ? 'select' : 'connect')}
-                  title="Connect buses — route a line between two buses"
+                  title="Connect buses (C) — route a line between two buses; V or Esc returns to Select"
                   className={`flex items-center justify-center w-8 h-8 rounded-md transition-colors
                     ${canvasMode === 'connect'
                       ? 'bg-accent-50 text-accent'

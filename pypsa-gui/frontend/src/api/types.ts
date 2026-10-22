@@ -1278,6 +1278,26 @@ export interface InvestmentCaseReport {
   cashflow_lines?: CashflowLine[]
 }
 
+/** One row of the project section's `revenue_streams` (IPP ticket 05): per
+ *  axis year, owner-signed (income +, costs −); null where not established. */
+export interface RevenueStreamRow {
+  id: string
+  label: string
+  values: Array<number | null>
+}
+
+/** The owner's operating cash by stream per year (`sections.project.payload.
+ *  revenue_streams`); null when the operating cash is not established. Row
+ *  ids in order: ppa, merchant, cfd, grid_imports, om, other. */
+export interface RevenueStreams {
+  years: number[]
+  rows: RevenueStreamRow[]
+  total: RevenueStreamRow
+  replacements: RevenueStreamRow
+  /** The streams folded into `other`. */
+  other_keys: string[]
+}
+
 /** GET /results/investment_case/report: `export_investment_case(report)` and
  *  whatever of the full report rides beside it. */
 export type InvestmentCaseReportPayload =

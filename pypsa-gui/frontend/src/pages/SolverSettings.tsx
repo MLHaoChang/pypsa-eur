@@ -8,6 +8,7 @@ import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
@@ -1281,7 +1282,22 @@ function FuelLimitsPerPeriod({ existingRows }: { existingRows: GlobalConstraint[
 // EconomicAssumptions lives under the Dispatch tab. Three transient-at-solve
 // fields (discount rate, default lifetime, CO2 price) that the backend applies
 // before n.optimize() and reverts after — the network on disk stays unchanged.
-function EconomicAssumptions({
+/** A rate set under Economics (section 7): shown here, edited there. */
+function ReadOnlyRate({ label, value }: { label: string; value: number | null | undefined }) {
+  return (
+    <div className="flex flex-col gap-1" data-testid={`solver-rate-${label.split(' ')[0].toLowerCase()}`}>
+      <span className="text-[10px] text-muted">{label} (%)</span>
+      <span className="text-xs font-mono text-text py-0.5">
+        {value == null || Number.isNaN(value) ? 'not set' : Number((value * 100).toFixed(4))}
+      </span>
+      <button type="button" className="text-[10px] underline text-left" onClick={() => openSectionInExpert('commercial')}>
+        Edit in Commercial &amp; parties
+      </button>
+    </div>
+  )
+}
+
+export function EconomicAssumptions({
   draft, patch,
 }: {
   draft: SolverConfig
@@ -1293,31 +1309,8 @@ function EconomicAssumptions({
         Economic assumptions
       </div>
       <div className="grid grid-cols-4 gap-3 p-3">
-        <NumberField
-          label="Discount rate"
-          unit="%"
-          // Strip FP rounding noise from the rate↔percent conversion
-          // (e.g. 0.07 × 100 = 7.000000000000001 in IEEE-754). toFixed(2)
-          // gives at most two decimal places; the step is 0.1 so two
-          // decimals comfortably exceeds any value the user can input.
-          // `?? 0` defends against legacy SolverConfig payloads missing
-          // `discount_rate` entirely — without it, `undefined * 100`
-          // becomes NaN, `(NaN).toFixed(2)` becomes "NaN", `Number("NaN")`
-          // becomes NaN, and the `<input value={NaN}>` renders blank
-          // with no controlled fallback (React warns).
-          value={Number(((draft.discount_rate ?? 0) * 100).toFixed(2))}
-          step={0.1}
-          onChange={v => patch({ discount_rate: v / 100 })}
-          hint="Used to annualise CAPEX via the annuity factor r(1+r)^L / ((1+r)^L−1). Applied to extendable assets whose overnight_cost is set. Typical: 5–10 %. If you enter a NOMINAL rate here, set the Inflation rate alongside so the cross-period PV factor uses the real rate; if your costs are already in real €, leave Inflation = 0."
-        />
-        <NumberField
-          label="Inflation rate"
-          unit="%"
-          value={Number(((draft.inflation_rate ?? 0) * 100).toFixed(2))}
-          step={0.1}
-          onChange={v => patch({ inflation_rate: v / 100 })}
-          hint="Expected inflation. Combined with the discount rate via the Fisher relation real = (1+nominal)/(1+inflation)−1 to derive the real discount used in the cross-period PV factor (when 'Auto-discount periods' is enabled under Model Horizon). Default 0 % preserves the previous behaviour where the discount rate is treated as real. Typical: 1.5–3 %."
-        />
+        <ReadOnlyRate label="Discount rate" value={draft.discount_rate} />
+        <ReadOnlyRate label="Inflation rate" value={draft.inflation_rate} />
         <NumberField
           label="Default lifetime"
           unit="yr"

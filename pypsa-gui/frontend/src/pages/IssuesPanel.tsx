@@ -12,6 +12,7 @@ import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
 import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
+import { RunFromReadiness } from '../components/RunFromReadiness'
 import { FlowStateDot } from '../components/FlowStateDot'
 import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
 import { useProjectFlow } from '../hooks/useProjectFlow'
@@ -201,10 +202,14 @@ export default function IssuesPanel() {
           count={total}
           hint="Live preflight — the same gate Run LOPF uses"
           right={
-            <Btn onClick={revalidate} disabled={isRevalidating || isFetching}>
-              <RefreshCw size={11} className={isRevalidating || isFetching ? 'animate-spin' : ''} />
-              Revalidate
-            </Btn>
+            <div className="flex items-center gap-2">
+              {/* Warnings do not block the run: the Run is here too, not only in the all-clear. */}
+              {!allOk && data && data.errors === 0 && <RunFromReadiness testId="issues-run-with-warnings" />}
+              <Btn onClick={revalidate} disabled={isRevalidating || isFetching}>
+                <RefreshCw size={11} className={isRevalidating || isFetching ? 'animate-spin' : ''} />
+                Revalidate
+              </Btn>
+            </div>
           }
           bodyClassName=""
         >
@@ -265,6 +270,7 @@ export default function IssuesPanel() {
               <span className="text-xs text-muted max-w-sm">
                 The model is ready to run. The solver may still hit numerical issues during the actual solve.
               </span>
+              <RunFromReadiness testId="issues-run" />
             </div>
           ) : !data ? (
             <div className="px-4 py-10 text-center text-[11.5px] text-muted">Loading validation…</div>

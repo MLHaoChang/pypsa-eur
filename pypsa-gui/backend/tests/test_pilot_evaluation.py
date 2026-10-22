@@ -18,7 +18,16 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile == "capacity/1":
+    if case.profile == "energy-balance/1":
+        n.loads.at["L1", "p_set"] = 0
+        n.add("Bus", "prod")
+        n.add("Carrier", ["product_shortfall"])
+        n.add("Link", "unit", bus0="B1", bus1="prod", p_nom=3, efficiency=1.0)
+        n.add("Generator", "__lost_prod", bus="prod", carrier="product_shortfall", p_nom=100,
+              marginal_cost=1e4, process_role="shortfall")
+        n.add("Load", "delivery", bus="prod", p_set=5.0)
+        n.snapshot_weightings.loc[:, :] = 1.0
+    elif case.profile == "capacity/1":
         n.add("Generator", "G2", bus="B1", p_nom_extendable=True, p_nom_max=3, capital_cost=1, marginal_cost=0)
         n.loads_t.p_set = pd.DataFrame({"L1": [5, 7]}, index=n.snapshots)
     elif case.profile == "bus-price/1":
