@@ -1,0 +1,223 @@
+"""Availability bounds on Links: process shutdowns and floors (ticket 03 E).
+
+Link bounds act on p0 (the bus0 flow). Gatekeeper conditions (2026-10-20):
+
+  * p_min_pu on a link may be in [-1, 1];
+  * a shutdown window on a two-way link (p_min_pu < 0) closes both
+    directions: its reverse bound is scaled by the same availability;
+  * a floor on a two-way link is refused (it would forbid reverse flow), and
+    so is a floor on the point-of-connection links;
+  * a committable link's floor is a min stable level, and a crossing bound
+    warns bound_forces_off, as for generators;
+  * the must-run sink check follows a link's output: p0 x efficiency on
+    bus1, and bus2/bus3 with their efficiencies.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pandas as pd
+import pytest
+
+from services.profile_gen.apply import (
+    MIN_STABLE_WARNING,
+    MUST_RUN_SINK_WARNING,
+    assign_profile,
+)
+from services.profile_gen.availability import TwoWayFloorError, PocBoundError
+from services.profile_gen.engine import generate_profile
+from services.profile_gen.families import default_target
+from services.pypsa_service import PyPSAService
+from services.user_timeseries import _user_ts, _user_ts_meta
+
+NOW = "2026-10-20T00:00:00+00:00"
+
+
+def _ctx():
+    return PyPSAService.get_active_context()
+
+
+def _net(*, two_way=False, committable=False, sink_mw=50.0, eff=0.9):
+    n = PyPSAService.get_network()
+    idx = pd.date_range("2023-01-01", "2023-12-31T23:00", freq="h")
+    idx.name = "snapshot"
+    n.set_snapshots(idx)
+    n.add("Bus", "E", carrier="AC")
+    n.add("Bus", "H2", carrier="H2")
+    n.add("Load", "offtake", bus="H2", p_set=sink_mw)
+    n.add("Link", "electrolyser", bus0="E", bus1="H2", p_nom=100.0,
+          efficiency=eff, p_min_pu=-1.0 if two_way else 0.0,
+          committable=committable)
+    state = _ctx().solver_state.setdefault("solver_config", SimpleNamespace())
+    state.commercial = {"poc_link": "grid_import", "export_link": None}
+    return n
+
+
+def _gen(kind, params):
+    return generate_profile(points=["x"], technology=kind, params=params,
+                            year=2023, now=NOW, family="availability")
+
+
+def _apply(res, link="electrolyser"):
+    ct, attr = default_target(res.meta, "links", None)
+    return assign_profile(_ctx(), link, res.series["x"], res.meta,
+                          component_type=ct, attribute=attr, time_basis="UTC",
+                          now=NOW)
+
+
+def test_a_shutdown_window_lands_on_the_links_p_max_pu():
+    n = _net()
+    out = _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    assert out["component_type"] == "links" and out["attribute"] == "p_max_pu"
+    p = n.links_t.p_max_pu["electrolyser"]
+    assert float(p.loc["2023-07-03T12:00"]) == 0.0
+    assert float(p.loc["2023-07-05T12:00"]) == 1.0
+
+
+def test_a_shutdown_on_a_two_way_link_closes_both_directions():
+    n = _net(two_way=True)
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04",
+                                             "available": 0.0}]}))
+    lo = n.links_t.p_min_pu["electrolyser"]
+    assert float(lo.loc["2023-07-03T12:00"]) == 0.0
+    assert float(lo.loc["2023-07-05T12:00"]) == -1.0
+    assert ("links", "p_min_pu", "electrolyser") in _user_ts
+    assert _user_ts_meta[("links", "p_min_pu", "electrolyser")]["companion_of"] == "p_max_pu"
+
+
+def test_a_floor_on_a_two_way_link_is_refused():
+    _net(two_way=True)
+    with pytest.raises(TwoWayFloorError, match="reverse"):
+        _apply(_gen("must_run", {"share": 0.3}))
+
+
+def test_a_floor_on_the_poc_link_is_refused():
+    n = _net()
+    n.add("Link", "grid_import", bus0="E", bus1="H2", p_nom=10.0)
+    with pytest.raises(PocBoundError, match="point-of-connection"):
+        _apply(_gen("must_run", {"share": 0.3}), link="grid_import")
+
+
+def test_a_committable_links_floor_is_a_min_stable_level():
+    _net(committable=True)
+    out = _apply(_gen("must_run", {"share": 0.3}))
+    assert any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("links", "p_min_pu", "electrolyser")]["kind"] == "min_stable_level"
+
+
+def test_the_sink_check_follows_the_links_output_through_its_efficiency():
+    # 0.8 x 100 MW of p0 at 90 % is 72 MW onto a bus taking 50 MW.
+    _net(sink_mw=50.0, eff=0.9)
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    warn = [w for w in out["warnings"] if w.startswith(MUST_RUN_SINK_WARNING)]
+    assert warn and "72" in warn[0] and "50" in warn[0]
+
+
+def test_a_floor_whose_output_the_bus_takes_does_not_warn():
+    _net(sink_mw=80.0, eff=0.9)
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_a_link_p_min_pu_may_be_negative_within_minus_one():
+    n = _net()
+    s = pd.Series(-0.5, index=n.snapshots)
+    meta = {"family": "availability", "kind": "manual", "resolution": "hourly",
+            "target": ["links", "p_min_pu"]}
+    n.links.loc["electrolyser", "p_min_pu"] = -1.0
+    out = assign_profile(_ctx(), "electrolyser", s, meta, component_type="links",
+                         attribute="p_min_pu", time_basis="UTC", now=NOW)
+    assert out["min"] == -0.5
+
+
+def test_a_two_way_link_with_its_own_reverse_series_is_refused_not_overwritten():
+    from services.profile_gen.apply import ProfileBoundConflictError
+
+    n = _net(two_way=True)
+    n.links_t.p_min_pu["electrolyser"] = pd.Series(-0.5, index=n.snapshots)
+    with pytest.raises(ProfileBoundConflictError, match="reverse bound"):
+        _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    assert float(n.links_t.p_min_pu["electrolyser"].iloc[0]) == -0.5
+
+
+def test_the_companion_meta_names_its_own_target():
+    _net(two_way=True)
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    meta = _user_ts_meta[("links", "p_min_pu", "electrolyser")]
+    assert meta["target"] == ["links", "p_min_pu"]
+    assert meta["kind"] == "maintenance (reverse bound)"
+    assert "replaced_series" not in meta
+
+
+def test_regenerating_a_two_way_shutdown_does_not_compound():
+    n = _net(two_way=True)
+    _apply(_gen("derating", {"threshold_c": -50.0, "per_k": 0.01, "floor": 0.5}))
+    _apply(_gen("derating", {"threshold_c": -50.0, "per_k": 0.01, "floor": 0.5}))
+    lo = n.links_t.p_min_pu["electrolyser"]
+    hi = n.links_t.p_max_pu["electrolyser"]
+    assert (lo.to_numpy() == -hi.to_numpy()).all()
+
+
+def test_eh_ammonia_staged_2027_haber_bosch_floor_is_a_min_stable_level(install_network):
+    # g2p-05 hand-off: the committable Haber-Bosch loop at p_min_pu 0.4 makes
+    # 64 t/d while on, above the 2027 NH3 delivery of 50 t/d; the tank and the
+    # stops absorb it, so its floor is a min stable level, never a hard
+    # must-run that exceeds the sink.
+    import pathlib
+    import sys
+
+    tpl = pathlib.Path(__file__).resolve().parents[1] / "project_templates"
+    sys.path.insert(0, str(tpl))
+    import eh_templates as T  # noqa: E402
+
+    install_network(T.BUILDERS["eh_ammonia_staged"]())
+    state = _ctx().solver_state.setdefault("solver_config", SimpleNamespace())
+    state.commercial = {"poc_link": "grid_import", "export_link": None}
+    res = generate_profile(points=["x"], technology="must_run", params={"share": 0.4},
+                           year=2027, now=NOW, family="availability")
+    out = _apply(res, link="haber_bosch")
+    assert out["attribute"] == "p_min_pu"
+    assert any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("links", "p_min_pu", "haber_bosch")]["kind"] == "min_stable_level"
+
+
+# ── review round 2 (gatekeeper on #554) ─────────────────────────────────────
+
+def test_a_committable_link_whose_floor_crosses_its_shutdown_is_forced_off():
+    from services.profile_gen.apply import BOUND_FORCES_OFF_WARNING
+
+    _net(committable=True)
+    _apply(_gen("maintenance", {"windows": [{"from": "07-03", "to": "07-04"}]}))
+    out = _apply(_gen("must_run", {"share": 0.3}))
+    assert any(w.startswith(BOUND_FORCES_OFF_WARNING) for w in out["warnings"])
+
+
+def test_an_input_on_bus2_is_not_counted_as_output_in_the_sink_check():
+    # efficiency2 < 0: bus2 is an input (e.g. H2 drawn by a synthesis loop).
+    n = _net(sink_mw=500.0)
+    n.add("Bus", "X", carrier="X")
+    n.links.at["electrolyser", "bus2"] = "X"
+    n.links.at["electrolyser", "efficiency2"] = -0.5
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    assert not any(w.startswith(MUST_RUN_SINK_WARNING) for w in out["warnings"])
+
+
+def test_an_output_on_bus2_that_overflows_it_warns_naming_bus2():
+    n = _net(sink_mw=500.0)
+    n.add("Bus", "O2", carrier="O2")
+    n.add("Load", "o2_offtake", bus="O2", p_set=5.0)
+    n.links.at["electrolyser", "bus2"] = "O2"
+    n.links.at["electrolyser", "efficiency2"] = 0.5   # 0.8 x 100 x 0.5 = 40 MW
+    out = _apply(_gen("must_run", {"share": 0.8}))
+    warn = [w for w in out["warnings"] if w.startswith(MUST_RUN_SINK_WARNING)]
+    assert warn and "'O2'" in warn[0] and "40" in warn[0]
+
+
+def test_an_all_zero_floor_is_not_labelled_a_min_stable_level():
+    # A p_min_pu of zero everywhere is no floor (and a two-way link's
+    # companion bound is never positive): no floor semantics, no label.
+    _net(committable=True)
+    out = _apply(_gen("must_run", {"share": 0.0}))
+    assert not any(w.startswith(MIN_STABLE_WARNING) for w in out["warnings"])
+    assert _user_ts_meta[("links", "p_min_pu", "electrolyser")].get("kind") != "min_stable_level"

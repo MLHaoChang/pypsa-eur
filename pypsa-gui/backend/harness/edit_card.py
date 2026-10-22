@@ -142,8 +142,11 @@ _UNBOUND = frozenset({"digest", "section_state"})
 
 def _digest(card: dict) -> str:
     """Binds what the card SHOWS: a different old, new or derived value is a
-    different card. Edits elsewhere in the project leave it valid."""
+    different card. Edits elsewhere in the project leave it valid. A row's source
+    cell is bound by its upload, sha256 and cell, never by the raw text it holds."""
     body = {k: v for k, v in card.items() if k not in _UNBOUND}
+    body["rows"] = [{**row, "source": {k: v for k, v in row["source"].items() if k != "raw"}}
+                    if isinstance(row.get("source"), dict) else row for row in body.get("rows", [])]
     return hashlib.sha256(json.dumps(body, sort_keys=True, default=str, allow_nan=False).encode()).hexdigest()
 
 
@@ -413,9 +416,17 @@ def _solve_time_rows(component_class: str, network, attr: str, names: list[str])
     return rows
 
 
+def _component_attr(component_class: str) -> str:
+    """The network attribute holding a class's static frame (`Line` → `lines`)."""
+    from services import chat_tools
+
+    return chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
+        "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
+
+
 def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Callable[[], Any]) -> list[dict]:
     """Run the native handler on an isolated copy and diff each target row."""
-    from services import change_log_service, chat_tools, workflow_tools
+    from services import change_log_service, workflow_tools
     from services.pypsa_service import PyPSAService
 
     fields = _fields(component_class)
@@ -424,8 +435,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
             _check_value(component_class, key, value, fields.get(key))
             _check_rating(name, key, value, fields.get(key))
     active = PyPSAService.get_active_context()
-    attr = chat_tools._GENERIC_CRUD_ATTRS.get(component_class) or {
-        "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
+    attr = _component_attr(component_class)
     before = getattr(active.network, attr)
     missing = [name for name, _ in targets if name not in before.index]
     if missing:
@@ -645,6 +655,54 @@ def _library_reference_preview(args: dict) -> list[dict]:
 
 
 register("apply_library_reference", Adapter("parameter_edit", _library_reference_preview, _component_readback))
+
+
+# ── Equipment tables: apply_equipment_mapping (data-to-model slice 1) ──────
+
+
+def _equipment_table_preview(args: dict) -> list[dict]:
+    """The native update's rows for every changed cell of the mapped table, each typed row
+    with its source cell (`source`: upload, full sha256, sheet, row, column, raw value and
+    unit), plus one note per confirmation given, per left-out cell and per basis note. A
+    plan missing a confirmation refuses before any card (`table_confirmation_needed`); a
+    table that changes nothing refuses (`nothing_to_change`)."""
+    from services import chat_tools
+    from services import equipment_table as T
+    from services.pypsa_service import PyPSAService
+
+    p = T.plan_active(args)
+    T.require_confirmed(p)
+    todo = T.changes(PyPSAService.get_network(), p)
+    if not todo:
+        _refuse("nothing_to_change", "Every mapped value already equals the network's; nothing to apply.")
+    T.require_card_size(todo)
+    klass = p["component_class"]
+
+    def run():
+        for name, attrs in todo.items():
+            chat_tools.update_component(klass, name, dict(attrs))
+
+    rows = _sandbox_rows(klass, list(todo.items()), run)
+    lineage = {(c["name"], c["field"]): c for c in p["cells"]}
+    for row in rows:
+        cell = lineage.get((row["name"], row["field"])) if row["role"] == "typed" else None
+        if cell is not None:
+            row["source"] = cell["source"]
+            if cell["money_year"] is not None:
+                row["money"] = {"currency": cell["currency"], "money_year": cell["money_year"]}
+    for need in p["needs"]:
+        rows.append({**_note(klass, "", need["confirmation"], need["text"]), "confirmed": True})
+    for gap in p["unmapped"][:T.MAX_LISTED_GAPS]:
+        rows.append({**_note(klass, gap.get("name") or "", gap.get("field") or gap.get("column") or "",
+                              gap["message"]), "gap": gap["kind"], **({"source": gap["source"]} if "source" in gap else {})})
+    if len(p["unmapped"]) > T.MAX_LISTED_GAPS:
+        rows.append(_note(klass, "", "", f"{len(p['unmapped']) - T.MAX_LISTED_GAPS} more cells are left out; "
+                          "preview_equipment_mapping counts them by kind."))
+    rows += [_note(klass, "", "money_year", text) for text in p["notes"]]
+    return rows
+
+
+register("apply_equipment_mapping", Adapter("parameter_edit", _equipment_table_preview, _component_readback))
 
 
 # ── Solver settings: update_solver_config ──────────────────────────────────

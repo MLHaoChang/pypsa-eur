@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 275,
+  "tool_count": 278,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2388,6 +2388,7 @@
         "project_id",
         "kind",
         "generators",
+        "component_type",
         "params",
         "year"
       ],
@@ -2397,7 +2398,34 @@
         "generators"
       ],
       "safety_tier": "execution",
-      "schema_sha256": "f41a3cdcbb9086b9c62ce9d9d12a3804f4abaef4fb91c44d690776d2dde0d146",
+      "schema_sha256": "9a8958ce2c7ba44d44c476dbbf9a70f2b0660d95c91708439d58ed5fa749ab10",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_series_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/series/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "components",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "components"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "48bae26db000db4ba9df339c0ea20af456d40e4ba2d2a07f3b54b36c25f331cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -5194,6 +5222,63 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1c2443ff6f0d5d79a2626d5d1c850603441be36936b236c8173cc55dc934e281",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/equipment_table/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
       "behavioral_fixture": "pending"
     },
     {

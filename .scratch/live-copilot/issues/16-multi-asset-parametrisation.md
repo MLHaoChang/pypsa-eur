@@ -59,3 +59,11 @@ sensitivities (LC-17).
 
 OJ-21, OJ-22, OJ-23 and OJ-26 pass in Tier A with native read-back of every
 row; LC-D02 and LC-D09 batch cases pass; pilot gate unchanged.
+
+## Rules folded in from #567 HV-I (data-to-model: equipment tables)
+
+Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), research only; owner decision AI-567 (2026-10-21). Adopt the listed cases into this ticket's own numbering; each must name its token/packet limit.
+- New: map an equipment table (CSV/XLSX) onto several assets with cell-level lineage, preview, then apply through LC-04 edit cards with native readback; manual mapping when no model is available.
+- Load profiles keep the existing upload path (`upload_load_profile`, `profile_gen/load_upload.py`, pending profile store), not the Library.
+- Deferred: PDF documents, tariff and PPA extraction.
+- Cases: #567 I-series.

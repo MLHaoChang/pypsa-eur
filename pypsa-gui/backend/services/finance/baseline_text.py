@@ -25,7 +25,8 @@ _PLAIN = {
 
 #: ``growth_placeholder:<kind>_<year>`` (``routers.results._ic_growth_flags``):
 #: the growth input in words.
-_GROWTH_LABELS = {"it_mw": "The IT load", "energized_mw": "The energized import"}
+_GROWTH_LABELS = {"it_mw": "The IT load", "energized_mw": "The energized import",
+                  "h2_offtake_mw": "The H2 offtake", "load_scale": "The load growth"}
 _GROWTH_TEXT = ("{label} in {year} is a placeholder (the example's value for the same stage, "
                 "not set for this year): the plan and this case rest on it.")
 
