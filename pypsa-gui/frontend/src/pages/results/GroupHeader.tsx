@@ -5,6 +5,8 @@
 import type { ReactNode } from 'react'
 import { StatePill, type NonValueState } from '../../components/ResultState'
 import type { SimulationStatus } from '../../api/types'
+import { useUIStore } from '../../store/uiStore'
+import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 import type { CardGroup } from './groups'
 
 /** The group's freshness: from the solve's dispatch freshness (the rail's
@@ -29,6 +31,7 @@ export default function GroupHeader({ group, status, outsideScope, children }: {
   children?: ReactNode
 }) {
   const fresh = freshnessOf(status)
+  const uiMode = useUIStore(st => st.uiMode)
   const failed = !!status && !status.running && !!status.failure
   return (
     <div data-testid="results-ghead" data-group={group.id}
@@ -43,6 +46,10 @@ export default function GroupHeader({ group, status, outsideScope, children }: {
       {failed && !outsideScope && (
         <span data-testid="results-ghead-failed" className="text-[11px] text-danger">
           Did not complete: {status!.failure!.title}{status!.failure!.hint ? `. ${status!.failure!.hint}` : ''}
+          {' '}
+          <button type="button" data-testid="results-ghead-failed-open"
+            onClick={() => (uiMode === 'guided' ? openSectionInGuided : openSectionInExpert)('scenarios')}
+            className="text-accent hover:underline">Open Scenarios & optimisation &gt;</button>
         </span>
       )}
       <span className="flex-1" />

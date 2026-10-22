@@ -182,6 +182,7 @@ export default function Results() {
   const setCompareRailOpen  = useUIStore(s => s.setCompareRailOpen)
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
@@ -946,13 +947,20 @@ export default function Results() {
                       <div className="p-4"><ScopeGate card={g as ScopeCardId} testId="results-outside-scope">{null}</ScopeGate></div>
                     ) : (
                       <p data-testid="results-gempty" className="p-4 text-[12px] text-muted">
-                        No {label} results here yet.
+                        {g === 'control'
+                          ? 'Control results come from the island study. '
+                          : 'Reports and exports are made from Reports. '}
+                        <button type="button" data-testid="results-gempty-open"
+                          onClick={() => setSlidePanel(g === 'control' ? 'campusElectrical' : 'reports')}
+                          className="text-accent hover:underline">
+                          {g === 'control' ? 'Run the island study in Campus electrical' : 'Open Reports'} &gt;
+                        </button>
                       </p>
                     )}
                     {outside && emptyGroup == null && hasEarlierResults && (
                       <div data-testid="results-earlier" className="border-t border-border">
                         <p className="px-4 py-2 text-[11px] text-muted">
-                          From the latest run, before {label} was switched off. Read-only.
+                          From the latest run. Read-only while {label} is outside the scope.
                         </p>
                         <div inert className="opacity-50 pointer-events-none select-none">
                           {renderBody(t)}

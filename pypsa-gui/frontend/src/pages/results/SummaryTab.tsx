@@ -21,7 +21,7 @@ import type { AdequacyReportPayload } from './adequacy'
 import { CARD_GROUPS, type CardGroupId } from './groups'
 import { freshnessOf } from './GroupHeader'
 import { StatePill } from '../../components/ResultState'
-import { AddCardToScope } from '../../components/flowScope/ScopeCards'
+import { ScopeGate } from '../../components/flowScope/ScopeGate'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope, type ScopeCardId } from '../../api/flow'
 import type { SimulationStatus } from '../../api/types'
@@ -308,7 +308,7 @@ function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports 
             {outRows.map(g => (
               <li key={g.id} data-testid={`summary-out-${g.id}`} className="flex items-center gap-3 py-0.5">
                 <span className="w-44 shrink-0">{g.label}</span>
-                <AddCardToScope card={g.id as ScopeCardId} testId={`summary-out-add-${g.id}`} />
+                <ScopeGate card={g.id as ScopeCardId} testId={`summary-out-gate-${g.id}`}>{null}</ScopeGate>
               </li>
             ))}
           </ul>
