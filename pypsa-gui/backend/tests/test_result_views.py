@@ -276,3 +276,58 @@ def test_a_card_listing_carries_the_reads_the_plain_one_leaves_out(monkeypatch):
     assert [r['tool'] for r in next(v for v in grid['views'] if v['id'] == 'grid_code')['read']] == [
         'campus_get_study', 'gridspine_get_capacity', 'gridspine_get_connection_assessments']
     assert 'shows' in next(v for v in grid['views'] if v['id'] == 'grid_code')
+
+
+# --- R2 grid views: the reads resolve the active project -----------------------
+
+_GRID_VIEWS = ('grid_code', 'electrical_design')
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_each_listed_grid_read_binds_to_its_dispatcher(monkeypatch, view_id):
+    import inspect
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    for read in rv.for_results_tab(view_id).reads:
+        call = read.call()
+        assert call['args']['project_id'] == 'proj-1'
+        inspect.signature(chat_tools.DISPATCHERS[call['tool']]).bind(**call['args'])
+
+
+def _fake_study(monkeypatch, *, results, kind='hub'):
+    """The real dispatchers' signatures (project_id required), with a canned service."""
+    from fastapi import HTTPException
+
+    def campus_get_study(project_id):
+        if kind != 'hub':
+            raise HTTPException(status_code=409, detail='study project')
+        return {'results': results}
+
+    def gridspine_get_capacity(project_id, bus=None, kind_=None, hour=None):
+        if kind != 'study':
+            raise HTTPException(status_code=409, detail='hub project')
+        if results is None:
+            raise HTTPException(status_code=404, detail='no run')
+        return {'rows': results}
+
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'campus_get_study', campus_get_study)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'gridspine_get_capacity', gridspine_get_capacity)
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_a_project_with_no_campus_study_is_no_data_not_unavailable(monkeypatch, view_id):
+    _fake_study(monkeypatch, results=None)
+    assert rv._probe(rv.for_results_tab(view_id)) == ('no_data', None)
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_a_run_campus_study_makes_both_views_available(monkeypatch, view_id):
+    _fake_study(monkeypatch, results={'transformers': []})
+    assert rv._probe(rv.for_results_tab(view_id)) == ('available', None)
+
+
+def test_grid_code_reads_a_planning_to_dynamics_project_through_gridspine(monkeypatch):
+    _fake_study(monkeypatch, results=[{'bus': 'B1'}], kind='study')
+    assert rv._probe(rv.for_results_tab('grid_code')) == ('available', None)
+    # Electrical design is the campus study's alone.
+    assert rv._probe(rv.for_results_tab('electrical_design'))[0] == 'no_data'

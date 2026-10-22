@@ -276,7 +276,7 @@ def _results_card_addendum(session: Any) -> str | None:
              "navigate. Its views, each with the read that grounds it:"]
     for v in result_views.card_views(card):
         reads = "; ".join(
-            r.tool + "(" + ", ".join(f"{k}={val}" for k, val in r.args.items()) + ")"
+            r.tool + "(" + ", ".join(f"{k}={val}" for k, val in r.call()["args"].items()) + ")"
             for r in v.reads)
         lines.append(f"- {v.label} [{v.view_id}]: {v.shows}. Read: {reads}." + (
             f" Needs: {', '.join(v.needs)}." if v.needs else ""))
