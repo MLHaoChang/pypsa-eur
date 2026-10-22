@@ -18,6 +18,25 @@ p_min_pu is clipped to [0, 1] whoever writes it.
 
 A meta without ``family`` is renewable: every artifact and pending job made
 before families existed is a wind/solar capacity factor.
+
+"Generate defaults for all" (`defaults.py`, the Time Series review list and
+the assistant's preview/apply_default_series) asks every family that sets
+``defaults``. To add a family's rows — the renewable plugin (RP-04/RP-09)
+is the next — register (or re-register) the family with::
+
+    def _renewable_defaults(ctx, replace_generated: bool) -> list[dict]:
+        # One row per component: {"family", "component_type", "attribute",
+        # "component"} plus either {"skipped": "why"} or {"plan": {"kind",
+        # "reason", ...}}. Mark nothing measured for replacement; skip a
+        # generated series unless replace_generated.
+        ...
+
+    register_family(Family("renewable", ..., defaults=_renewable_defaults))
+
+and add its generator to `defaults._GENERATORS` ((ctx, row, peak_sized) ->
+(frame, meta, stats)). A family with rows but no generator shows them as
+skipped, never through another family's generator. The rows then appear in the same list, under the same Apply-all and
+the same single undo step.
 """
 from __future__ import annotations
 
@@ -50,6 +69,10 @@ class Family:
     generate: _Generate | None = None
     # Where an artifact of this family goes when the caller names no target.
     default_target: Target | None = None
+    # (ctx, replace_generated) -> rows: the family's "Generate defaults for
+    # all" plugin (`profile_gen/defaults.py`) — per component a plan
+    # {"plan": {...}} or {"skipped": reason}. None: the family has no default.
+    defaults: Callable[[Any, bool], list[dict[str, Any]]] | None = None
 
 
 _FAMILIES: dict[str, Family] = {}
@@ -58,6 +81,10 @@ _FAMILIES: dict[str, Family] = {}
 def register_family(family: Family) -> None:
     """Register (or replace) a family."""
     _FAMILIES[family.name] = family
+
+
+def all_families() -> list[Family]:
+    return list(_FAMILIES.values())
 
 
 def family_of(meta: Mapping[str, Any]) -> str:
@@ -181,9 +208,15 @@ def _load_generate(ids, archetype, params, year):
     return generate_frame(ids, archetype, params, year)
 
 
+def _load_defaults(ctx, replace_generated: bool) -> list[dict[str, Any]]:
+    from services.profile_gen.defaults import load_defaults
+
+    return load_defaults(ctx, replace_generated)
+
+
 register_family(Family("load", frozenset({("loads", "p_set")}),
                        guard=_load_guard, generate=_load_generate,
-                       default_target=("loads", "p_set")))
+                       default_target=("loads", "p_set"), defaults=_load_defaults))
 _WEATHER = re.compile(r"wind|solar|(?<![a-z])pv(?![a-z])")
 
 

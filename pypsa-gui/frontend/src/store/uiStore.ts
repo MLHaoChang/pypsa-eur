@@ -399,8 +399,18 @@ export interface AssetDetailRequest {
   chart?: boolean
 }
 
+/** Time Series opened on one component: its tab, the field's slot when
+ *  given (e.g. marginal_cost), and that field's editor when asked. */
+export interface TimeSeriesFocus {
+  type: string
+  name: string
+  field?: string
+  openEditor?: boolean
+}
+
 // Issue 06 — discussed historical run selected in Results chrome. Sticky
 // until cleared or the project switches; does not restore run inputs.
+
 export interface RunResultRequest {
   runId: string
   status?: string
@@ -502,7 +512,7 @@ interface UIStore {
   solverBlockRequest: 'economic' | null
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
-  timeSeriesFocus: { type: string; name: string } | null
+  timeSeriesFocus: TimeSeriesFocus | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -650,7 +660,7 @@ interface UIStore {
   clearEconomicsTabRequest: () => void
   requestSolverBlock: (block: 'economic') => void
   clearSolverBlockRequest: () => void
-  focusTimeSeries: (type: string, name: string) => void
+  focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
@@ -984,8 +994,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
   clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
-  focusTimeSeries: (type, name) => set({
-    timeSeriesFocus: { type, name }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
+  focusTimeSeries: (type, name, opts) => set({
+    timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),
   clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),

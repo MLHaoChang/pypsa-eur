@@ -281,3 +281,12 @@ def test_replay_keeps_the_recorded_mw_when_the_connection_link_is_gone():
                    component_type="loads", attribute="p_set")
     assert float(again.series.max()) == pytest.approx(75.0)
     assert any(w.startswith(CONNECTION_CHANGED_WARNING) for w in again.warnings)
+
+
+def test_replay_refuses_a_resolved_mw_that_is_not_the_recorded_fraction():
+    _net(tz="Europe/Berlin")
+    s, meta = _load("industrial", {"timezone": "Europe/Berlin"})
+    first = _refine(s, meta, [{"op": "scale_peak_to", "fraction": 0.75, "of": "connection"}])
+    ops = [{**first.meta["refinements"][0], "resolved_mw": 90.0}]
+    with pytest.raises(RefineReplayError, match="op 0.*0.75 of the recorded"):
+        replay(_ctx(), s, meta, ops, component_type="loads", attribute="p_set")
