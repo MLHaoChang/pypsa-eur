@@ -53,16 +53,17 @@ import { X } from 'lucide-react'
 import { openFlowTarget, openSectionInGuided } from '../layout/flowNavigation'
 import type { FlowTarget } from '../api/flow'
 
-// What an empty card group points to (one line each to re-point; #545 moves the
-// island study to its Grid study panel). Mode-aware, through the shared navigation.
+import BackToHubResults from '../components/BackToHubResults'
+
+// What an empty card group points to (one line each to re-point).
+// Mode-aware, through the shared navigation.
 const flowTarget = (section: FlowTarget['section'], panel: string): FlowTarget =>
   ({ section, panel, component: null, entity: null, field: null })
 const EMPTY_GROUP_NEXT: Record<string, { note: string; label: string; section: FlowTarget['section']; panel: string }> = {
-  control: { note: 'Control results come from the island study. ', label: 'Run the island study in Campus electrical',
-    section: 'connection', panel: 'campusElectrical' },
+  control: { note: 'Control results come from the island study. ', label: 'Run the island study in Grid study',
+    section: 'scenarios', panel: 'campusStudy' },
   handoff: { note: 'Reports and exports are made from Reports. ', label: 'Open Reports', section: 'results', panel: 'reports' },
 }
-import BackToHubResults from '../components/BackToHubResults'
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
