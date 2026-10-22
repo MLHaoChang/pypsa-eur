@@ -24,6 +24,7 @@ from services.library.defaults_pack.loader import (
     CAPACITY_BASES, LEGACY_VERSIONS, DefaultsPackError, LegacyPackVersion, load_defaults_pack)
 
 TYPED = "2026-10-22"
+LATEST = "2026-10-23"      # campus-IC 03A: the cited campus costs, typed as TYPED
 FIXTURES = Path(__file__).parent / "fixtures" / "defaults_pack"
 
 
@@ -211,7 +212,7 @@ def test_legacy_versions_load_for_provenance_but_cannot_price():
         assert pack.typed is False and all(r.capacity_basis is None for r in pack.cost_values)
         with pytest.raises(LegacyPackVersion) as err:
             price_from_pack(_net(), "generators", "g", "onwind", version=v)
-        assert TYPED in str(err.value) and err.value.successor == TYPED
+        assert LATEST in str(err.value) and err.value.successor == LATEST    # the newest typed
 
 
 def test_a_legacy_regional_version_is_refused_and_names_its_successor():
@@ -234,7 +235,7 @@ def test_the_legacy_set_is_pinned():
 
 
 def test_the_latest_versions_are_typed():
-    assert load_defaults_pack().version == TYPED and load_defaults_pack().typed
+    assert load_defaults_pack().version == LATEST and load_defaults_pack().typed
     for r in loader.available_regions():
         assert load_defaults_pack(region=r).typed
 

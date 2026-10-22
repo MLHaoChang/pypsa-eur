@@ -7,6 +7,10 @@ two faces" §3 rule 4). The pack holds:
 - from version 2026-10-07, the campus electrical equipment costs (transformers, cables, capacitor
   banks, shunt reactors, STATCOMs, switchgear), transcribed from
   `gridspine/templates/data/campus_assets.yaml`, in 2026 EUR, all illustrative placeholders;
+- from version 2026-10-23, those campus rows take cited reference costs in 2025 EUR (Ei's
+  *Normvärdeslista elnät 2024-2027*, the Danish Energy Agency's *Technology Data for Energy
+  Transport*; `docs/superpowers/research/2026-10-12-campus-asset-reference-costs.md`), with each
+  row's source and URL; a value no source covers stays `assumed`;
 - from version 2026-10-13, the Energy Hub template technologies (IC S3 seeds): a gas genset (OCGT),
   a diesel genset (diesel engine farm), onshore wind, a fuel cell (LT-PEMFC) and an electrolyser
   (AEC), from technology-data v0.14.0 in 2020 EUR, one `investment` part per MW each;
@@ -174,7 +178,8 @@ are:
 | USD/kW, CAD/kW, GBP/kW | USD/MW, CAD/MW, GBP/MW (regional packs) | ×1000 |
 
 Each row carries its own money year in `currency` and `money_year` (`currency_year` in the legacy versions): 2020 for the catalogue rows
-(technology-data v0.14.0), 2026 for the campus equipment rows (the campus library's `price_year`).
+(technology-data v0.14.0), the campus library's `price_year` for the campus equipment rows (2026 up
+to 2026-10-22, 2025 from 2026-10-23).
 The finance defaults and the seed tariffs are in 2020 EUR. No row is converted with a price index,
 so a caller that mixes rows of both years converts them itself.
 
@@ -193,7 +198,7 @@ Costs use the asset schema's part vocabulary (S0):
   STATCOMs), per km (`per_km`: cables) or per bay (`per_bay`: switchgear), with its lifetime and
   `fom_share` (the campus `opex_frac`). Electrical ratings stay in the campus YAML; the manifest
   pins that file's sha256 (`seeded_from.campus_equipment`), and a changed YAML needs a new pack
-  version.
+  version: the parity test compares the YAML with the latest version that pins its sha256.
 
 A field the catalogue does not carry is None, never 0. For example, technology-data books the
 battery's FOM on the inverter only, so the energy part's `fom_share` row has no value, status
@@ -217,8 +222,9 @@ Every row carries a source, a year and an `illustrative` flag.
   - the two seed tariffs;
   - the synthetic load profiles;
   - stated assumptions, such as the sizing-limit multiple;
-  - every campus equipment row (`source = "assumed (gridspine campus_assets.yaml placeholder)"`).
-- Catalogue rows (DEA, PyPSA-Eur) are `false`.
+  - every campus equipment row up to 2026-10-22 (`source = "assumed (gridspine campus_assets.yaml placeholder)"`);
+  - from 2026-10-23, a campus row whose value no source covers (`source = "assumed (gridspine campus_assets.yaml)"`).
+- Catalogue rows (DEA, PyPSA-Eur) and the cited campus rows from 2026-10-23 are `false`.
 - A range marked `assumed` (±30 %) is flagged on the range itself, not through this flag.
 
 `DefaultsPack.assumption_rows()` lists every row with its provenance and the pack's id,

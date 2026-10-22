@@ -307,7 +307,8 @@ def shipped_caches():
 
 def test_the_three_regions_ship_with_their_currency_and_are_not_versions(shipped_caches):
     assert D.available_regions() == tuple(sorted(REGIONS))
-    assert D.available_versions()[-1] == BASE and not any("+" in v for v in D.available_versions())
+    # The regional packs sit on BASE; a later EU version (2026-10-23, campus-IC 03A) leaves them as they are.
+    assert BASE in D.available_versions() and not any("+" in v for v in D.available_versions())
     for region, currency in REGIONS.items():
         pack = D.load_defaults_pack(region=region)
         assert pack.version == f"{SHIPPED}+{region}"
