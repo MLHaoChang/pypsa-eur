@@ -1,5 +1,6 @@
 """Action outcomes, detached workers and semantic queue failures."""
 import pytest
+from fastapi import HTTPException
 from services import assistant_tasks as tasks, chat_tools, chat_service
 from tests.test_workflow_tools import baseline, helpers_state  # noqa: F401
 
@@ -22,9 +23,12 @@ def test_failed_terminal_job_cannot_complete_wait_step(session, result):
     state = tasks.finish_step(ticket, result=result)
     assert state['completed_steps'] == 0 and state['status'] != 'completed'
     assert state['next_step']['status'] == 'failed'
-    # Explicit confirmation at the normal dispatch seam is required to accept
-    # a verified replacement outcome; the handler never grants permission.
-    assert chat_tools.resolve_task_step(task['task_id'], 'completed', {'job': {'status': 'completed'}})['status'] == 'completed'
+    # LC-23 SC-12: a caller-supplied result is no evidence; without a native
+    # record the step stays to review, and only an explicit retry goes on.
+    with pytest.raises(HTTPException) as failure:
+        chat_tools.resolve_task_step(task['task_id'], 'completed', {'job': {'status': 'completed'}})
+    assert failure.value.detail['error_kind'] == 'task_resolution_unverifiable'
+    assert chat_tools.resolve_task_step(task['task_id'], 'retry')['next_step']['status'] == 'pending'
 
 
 def test_partial_effectful_submission_requires_review(session):

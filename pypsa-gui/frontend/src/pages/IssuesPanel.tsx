@@ -20,6 +20,7 @@ import { sectionForComponent, sectionMeta } from '../layout/flowSections'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
+import { NotInScopeGroup } from '../components/flowScope/NotInScopeGroup'
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
@@ -286,6 +287,8 @@ export default function IssuesPanel() {
               ))}
             </div>
           )}
+          {/* Out-of-scope flow items: collapsed, last, in no count (W4a). */}
+          <NotInScopeGroup />
         </PageSection>
 
         {layoutSite && layoutFindings.length > 0 && (

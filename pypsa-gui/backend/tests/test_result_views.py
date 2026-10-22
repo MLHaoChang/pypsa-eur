@@ -6,10 +6,13 @@ the catalogue without an entry fails here, as does an entry whose read is
 not a real read-tier tool.
 """
 import dataclasses
+import json
+from pathlib import Path
 
 import pytest
 
 from harness.catalogue import RESULTS_TAB_ENUM, TOOLS, safety_tier_for
+from services import chat_service, chat_tools
 from services import result_views as rv
 
 _TOOLS = {t['name']: t for t in TOOLS}
@@ -76,3 +79,103 @@ def test_every_view_declares_its_units():
 def test_a_results_view_id_is_its_tab():
     """list_result_views sends only the id; ui_open_panel takes it as results_tab."""
     assert all(v.view_id == v.tab for v in rv.RESULT_VIEWS if v.panel == 'results')
+
+
+# ── R0: the registry by card (card-workspaces.md §3, §8) ─────────────────────
+# Data only: each results view names its card, the card's sub-option and the
+# card's results tab. The ids are flow_scope's (W4a); the tests below check them
+# against flow_scope.CARDS and AVAILABILITY.
+
+CARD_IDS = ('capacity', 'grid', 'control', 'reliability', 'commercial', 'handoff')
+CARD_TABS = {
+    'capacity': {'build', 'operation', 'curtailment', 'costs_prices'},
+    'grid': {'load_flow', 'grid_code', 'electrical_design', 'n1_security'},
+    'control': {'island', 'grid_forming', 'dynamics'},
+    'reliability': {'adequacy', 'outage_screening', 'stress_fmea'},
+    'commercial': {'bill', 'contracts_revenue', 'investment_case', 'parties'},
+    'handoff': {'reports', 'exports', 'specialist_packet'},
+}
+SUB_OPTIONS = {
+    'capacity': {'sizing', 'dispatch', 'process_detail'},
+    'grid': {'load_flow', 'grid_code', 'n1_sclopf'},
+    'control': {'presets', 'island_checks', 'dynamics'},
+    'reliability': {'goal_study', 'stress', 'outage_screening'},
+    'commercial': {'tariffs', 'contracts', 'investment_case'},
+    'handoff': {'reports', 'exports', 'specialist_packet'},
+}
+# §1.1's "New home" column. Summary is the landing and Asset Detail the drawer
+# reached from every card (§3.7, §4): neither belongs to one card.
+BY_CARD = {
+    'summary': (None, None, None),
+    'overview': ('capacity', 'sizing', 'build'),
+    'capex': ('capacity', 'sizing', 'build'),
+    'dispatch': ('capacity', 'dispatch', 'operation'),
+    'flows': ('capacity', 'dispatch', 'operation'),
+    'loadshape': ('capacity', 'dispatch', 'operation'),
+    'storage': ('capacity', 'dispatch', 'operation'),
+    'emissions': ('capacity', 'dispatch', 'operation'),
+    'lostload': ('capacity', 'dispatch', 'operation'),
+    'curtailment': ('capacity', 'dispatch', 'curtailment'),
+    'prices': ('capacity', 'dispatch', 'costs_prices'),
+    'economics': ('capacity', 'dispatch', 'costs_prices'),
+    'loadflow': ('grid', 'load_flow', 'load_flow'),
+    'adequacy': ('reliability', 'goal_study', 'adequacy'),
+    'fmea': ('reliability', 'stress', 'stress_fmea'),
+    'investment': ('commercial', 'investment_case', 'investment_case'),
+    'asset': (None, None, None),
+}
+
+
+def test_every_results_view_names_its_card_option_and_tab():
+    got = {v.view_id: (v.card, v.sub_option, v.card_tab)
+           for v in rv.RESULT_VIEWS if v.panel == 'results'}
+    assert got == BY_CARD
+
+
+def test_card_fields_use_the_card_ids():
+    assert rv.CARDS == CARD_IDS
+    for v in rv.RESULT_VIEWS:
+        if v.card is None:
+            assert v.sub_option is None and v.card_tab is None, v.view_id
+            continue
+        assert v.sub_option in SUB_OPTIONS[v.card], v.view_id
+        assert v.card_tab in CARD_TABS[v.card], v.view_id
+
+
+def test_card_ids_are_flow_scopes():
+    from services import flow_scope
+    assert rv.CARDS == tuple(c.id for c in flow_scope.CARDS)
+
+
+def test_every_views_card_and_sub_option_is_a_scope_option():
+    from services import flow_scope
+    for v in rv.RESULT_VIEWS:
+        if v.card is None:
+            continue
+        assert (v.card, v.sub_option) in flow_scope.AVAILABILITY, v.view_id
+
+
+def test_views_outside_results_have_no_card():
+    assert all(v.card is None for v in rv.RESULT_VIEWS if v.panel != 'results')
+
+
+def test_card_fields_are_frozen():
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        rv.view('loadflow').card = 'capacity'
+
+
+def test_list_result_views_payload_is_unchanged(monkeypatch):
+    """R0 adds data only: the listing the model sees is byte-identical to the
+    one before the card fields (no new ids, labels or keys)."""
+    golden = json.loads((Path(__file__).parent / 'golden' / 'result_views_listing.json').read_text())
+    monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'golden')
+    got = {}
+    for mode in ('expert', 'guided'):
+        session = chat_service.ChatSession()
+        session.turn_ui_context = {'ui_mode': mode, 'panel': 'results', 'results_tab': 'loadflow'}
+        chat_tools.set_chat_session(session)
+        got[mode] = rv.list_result_views()
+        got[mode + '_exclude_shown'] = rv.list_result_views(exclude_shown=True)
+    chat_tools.set_chat_session(None)
+    assert json.dumps(got, indent=1) == json.dumps(golden, indent=1)

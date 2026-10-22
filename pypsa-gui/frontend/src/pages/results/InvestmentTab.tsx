@@ -11,31 +11,21 @@ import {
   type ValueFlowsPayload,
 } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
+import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
-import ParticipantsDesigner from './investment/ParticipantsDesigner'
-import TariffSection from './investment/TariffSection'
-import LibraryBrowser from './investment/LibraryBrowser'
-import ContractsEditor from './investment/ContractsEditor'
-import FinanceInputsEditor from './investment/FinanceInputsEditor'
 import InvestmentCaseView from './investment/InvestmentCaseView'
 import SiteConnectionSection from './investment/SiteConnectionSection'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
   { id: 'bill', label: 'Bill' },
-  { id: 'library', label: 'Library' },
-  { id: 'tariff', label: 'Tariff' },
-  { id: 'contracts', label: 'Contracts' },
-  { id: 'finance', label: 'Finance inputs' },
   { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 const isSection = (v: string | null): v is SectionId => SECTIONS.some(s => s.id === v)
-// The sections that edit inputs: Expert → Economics edits the same ones (E3).
-const INPUT_SECTIONS: ReadonlySet<SectionId> = new Set(['tariff', 'library', 'contracts', 'finance'])
 
 export { fmtAmount }
 
@@ -137,9 +127,11 @@ export default function InvestmentTab() {
     if (isSection(sectionRequest)) setSection(sectionRequest)
     clearSectionRequest()
   }, [sectionRequest, clearSectionRequest])
-  const [designing, setDesigning] = useState(false)
   const expert = useUIStore(s => s.uiMode === 'expert')
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const openCommercial = () => {
+    if (expert) openSectionInExpert('commercial')
+    else openSectionInGuided('commercial')
+  }
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -196,13 +188,6 @@ export default function InvestmentTab() {
       </div>
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
-        {expert && INPUT_SECTIONS.has(section) && (
-          <p className="text-[11px] text-muted pb-2" data-testid="ic-edit-in-economics">
-            These inputs are also under Expert → Economics.{' '}
-            <button type="button" className="underline"
-                    onClick={() => setSlidePanel('economics')}>Open Economics</button>
-          </p>
-        )}
         {section === 'bill' && (
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}
@@ -213,20 +198,14 @@ export default function InvestmentTab() {
                 {participantsText}
               </p>
             )}
-            <button type="button" className="text-[11px] underline" aria-expanded={designing}
-                    onClick={() => setDesigning(d => !d)}>
-              {designing ? 'Close the participants designer' : 'Define participants'}
-            </button>
-            {designing && <ParticipantsDesigner />}
+            <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
+              The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
+              <button type="button" className="underline" onClick={openCommercial}>
+                Open Commercial &amp; parties
+              </button>
+            </p>
           </div>
         )}
-        {section === 'tariff' && (island
-          ? <p className="text-[11px] text-muted py-2" data-testid="ic-tariff-island">
-              No tariff: the island buys no grid power.</p>
-          : <TariffSection />)}
-        {section === 'library' && <LibraryBrowser />}
-        {section === 'contracts' && <ContractsEditor />}
-        {section === 'finance' && <FinanceInputsEditor />}
         {section === 'case' && <InvestmentCaseView />}
       </div>
     </div>

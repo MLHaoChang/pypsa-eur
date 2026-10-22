@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 276,
+  "tool_count": 278,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5225,6 +5225,63 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "preview_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1c2443ff6f0d5d79a2626d5d1c850603441be36936b236c8173cc55dc934e281",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/equipment_table/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "set_site_connection",
       "toolsets": [
         "network"
@@ -6013,7 +6070,8 @@
       "input_keys": [
         "title",
         "request_id",
-        "steps"
+        "steps",
+        "brief"
       ],
       "required": [
         "title",
@@ -6021,7 +6079,7 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
     {
