@@ -21,6 +21,7 @@ import { CATEGORY_ORDER, type AssetRef, type Remedy, type ViewMode } from './typ
 export default function AssetDetail() {
   const currentProject = useUIStore(s => s.currentProject)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const requestResultsTab = useUIStore(s => s.requestResultsTab)
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
   const assetDetailRequest = useUIStore(s => s.assetDetailRequest)
   const clearAssetDetailRequest = useUIStore(s => s.clearAssetDetailRequest)
@@ -157,7 +158,8 @@ export default function AssetDetail() {
 
   const onRemedy = (r: Remedy) => {
     if (r.action === 'run_simulation') setSlidePanel('simparams')
-    else if (r.action === 'run_ac_pf') setSlidePanel('simparams')
+    // The Load flow tab says what is missing: Not modelled and the toggle, or Run again.
+    else if (r.action === 'run_ac_pf') requestResultsTab('loadflow')
     else if (r.action === 'open_properties' && asset) {
       setSelectedComponent({ type: asset.class, name: asset.name })
       setSlidePanel(null)

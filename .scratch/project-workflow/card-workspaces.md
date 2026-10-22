@@ -96,7 +96,7 @@ Inputs still hosted by results (design §2.2 says none):
 - Results › Investment: participants, tariff, library, contracts, finance inputs, site connection. **#533 (W3b-1) moves them.**
 - Results › FMEA: stress-scenario editor (#535 moves it to 8). Expert rows and mitigability stay on the worksheet: they annotate a result, they are not model inputs (UX ruling O4b). They are stored per project, and no run ever reads them.
 - Results › Adequacy: the EH pack settings, Loop and Margin-loop targets, MC draws. Audit #1's **W3b-R** moves the goal to 8; each panel keeps only its Run.
-- Solver settings › "Run AC power flow on current solution" (audit #4): becomes an action on AC power flow & grid › Load flow through the gate.
+- Solver settings › "Run AC power flow on current solution" (audit #4): is removed (R2): AC power flow is the header Run with the Stage 2 toggle on; Results › Load flow offers "Run again" (the full Run). A PF-only re-run waits for its own gated slice (a second run overwrites the LP baseline).
 
 ---
 
