@@ -23,6 +23,13 @@ Check answers is on (`harness/calculations.py`); the reads above are refused in
 a checked turn. `checked_gap` says why the rest is not checked: it is withheld
 as "Requested results unavailable", never published as checked. A new view
 starts withheld. See `.scratch/checked-results/audit.md`.
+
+`card`, `sub_option` and `card_tab` place a results view in the card
+workspaces (`.scratch/project-workflow/card-workspaces.md` §1.1, §3): the card
+and sub-option ids are `services/flow_scope`'s, `card_tab` the card's results
+tab. They are data only (R0): no listing, navigation or catalogue reads them
+yet. Summary (the landing) and Asset Detail (a drawer from every card) have
+none.
 """
 from __future__ import annotations
 
@@ -63,6 +70,9 @@ class ResultView:
     requires_tools: tuple[str, ...] = ()
     checked_profiles: tuple[str, ...] = ()
     checked_gap: str | None = "outside_checked_scope"
+    card: str | None = None
+    sub_option: str | None = None
+    card_tab: str | None = None
 
     def live(self, tool_names: set[str] | None = None) -> bool:
         """True when every tool this view depends on is in the catalogue."""
@@ -80,6 +90,8 @@ class ResultView:
 
 
 _RESULTS = "results"
+# flow_scope.CARDS' ids, in its order.
+CARDS = ("capacity", "grid", "control", "reliability", "commercial", "handoff")
 _PROXY = ("LOPF flows are an active-power proxy, not an AC thermal assessment: "
           "no N-1, no voltage limits.")
 
@@ -97,20 +109,23 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("get_vintage_results"),),
                multi_period_only=True,
                units="MW, MWh, EUR per period",
-               checked_gap="unsupported_snapshot_scope"),
+               checked_gap="unsupported_snapshot_scope",
+               card="capacity", sub_option="sizing", card_tab="build"),
     ResultView("capex", _RESULTS, "capex", "Capacity Expansion",
                "sized assets and their capital cost", "results",
                (_r("get_results", result_kind="cost_breakdown"),
                 _r("get_results", result_kind="economics_by_carrier")),
                units="MW, MWh, EUR/a",
-               checked_profiles=("generator-cost/1", "storage-unit-cost/1", "capacity/1")),
+               checked_profiles=("generator-cost/1", "storage-unit-cost/1", "capacity/1"),
+               card="capacity", sub_option="sizing", card_tab="build"),
     ResultView("dispatch", _RESULTS, "dispatch", "Dispatch",
                "hourly generation and storage operation", "results",
                (_r("get_results", result_kind="generators"),
                 _r("get_results", result_kind="storage_dispatch")),
                units="MW per snapshot, MWh",
                checked_profiles=("generator-dispatch/1", "storage-unit-dispatch/1",
-                                 "carrier-energy/1")),
+                                 "carrier-energy/1"),
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     # Gated: the copilot read for energy flows lands with the catalogue work
     # (site commercial UX A1); the tab itself is navigable now.
     ResultView("flows", _RESULTS, "flows", "Energy flow",
@@ -121,7 +136,8 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                claim_limits="Energy carriers only; a flow the server cannot prove to conserve "
                             "energy is unavailable, not zero.",
                checked_profiles=("energy-balance/1",),
-               units="MWh"),
+               units="MWh",
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     # Gated like flows: the copilot read lands with the catalogue work.
     ResultView("loadshape", _RESULTS, "loadshape", "Load shape",
                "how import, export and the site's own generation are shaped by weekday, hour, week, month and year",
@@ -131,55 +147,66 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                checked_profiles=("site-import/1",),
                claim_limits="Energy carriers only; a group the network does not model, or the run "
                             "cannot establish, is named, not shown as zero.",
-               units="MW, MWh"),
+               units="MW, MWh",
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("loadflow", _RESULTS, "loadflow", "Load Flow",
                "line and transformer loading against their ratings", "results",
                (_r("get_loadflow_summary"),),
                verification="displayed_data", claim_limits=_PROXY,
                checked_profiles=("branch-loading/1", "network-loading/1"),
                historical_section="loadflow",
-               units="%, MW (active-power proxy) or MVA, weighted hours"),
+               units="%, MW (active-power proxy) or MVA, weighted hours",
+               card="grid", sub_option="load_flow", card_tab="load_flow"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",
                (_r("get_results", result_kind="prices"),
                 _r("get_results", result_kind="price_drivers")),
-               units="EUR/MWh", checked_profiles=("bus-price/1",)),
+               units="EUR/MWh", checked_profiles=("bus-price/1",),
+               card="capacity", sub_option="dispatch", card_tab="costs_prices"),
     ResultView("economics", _RESULTS, "economics", "Economics",
                "per-asset revenue, cost and LCOE", "results",
                (_r("get_results", result_kind="asset_economics"),),
-               units="EUR, EUR/MWh"),
+               units="EUR, EUR/MWh",
+               card="capacity", sub_option="dispatch", card_tab="costs_prices"),
     ResultView("emissions", _RESULTS, "emissions", "Emissions",
                "CO2 totals and any cap's shadow price", "results",
                (_r("get_results", result_kind="emissions"),),
                units="t CO2, EUR/t",
-               checked_profiles=("generator-emissions/1", "network-emissions/1")),
+               checked_profiles=("generator-emissions/1", "network-emissions/1"),
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("curtailment", _RESULTS, "curtailment", "Curtailment",
                "renewable energy available but not used", "results",
                (_r("get_results", result_kind="curtailment"),),
-               units="MWh, %", checked_profiles=("curtailment/1",)),
+               units="MWh, %", checked_profiles=("curtailment/1",),
+               card="capacity", sub_option="dispatch", card_tab="curtailment"),
     ResultView("lostload", _RESULTS, "lostload", "Lost load",
                "demand that could not be served", "results",
                (_r("get_results", result_kind="lost_load"),),
-               units="MWh, MW", checked_profiles=("lost-load/1",)),
+               units="MWh, MW", checked_profiles=("lost-load/1",),
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("adequacy", _RESULTS, "adequacy", "Adequacy",
                "loss-of-load expectation against the reliability target", "adequacy",
                (_r("get_adequacy_results", kind="adequacy"),),
                guided_label="Adequacy",
-               units="h (LOLE), MWh (EUE) over the modelled horizon"),
+               units="h (LOLE), MWh (EUE) over the modelled horizon",
+               card="reliability", sub_option="goal_study", card_tab="adequacy"),
     ResultView("storage", _RESULTS, "storage", "Storage cycling",
                "storage cycles and state of charge", "results",
                (_r("get_results", result_kind="storage"),),
                units="cycles, MWh",
-               checked_profiles=("storage-unit-dispatch/1", "storage-cycles/1")),
+               checked_profiles=("storage-unit-dispatch/1", "storage-cycles/1"),
+               card="capacity", sub_option="dispatch", card_tab="operation"),
     ResultView("fmea", _RESULTS, "fmea", "FMEA",
                "failure modes ranked by their effect on supply", "adequacy",
                (_r("get_adequacy_results", kind="fmea_modes"),),
                guided_label="FMEA",
-               units="MW, h/a"),
+               units="MW, h/a",
+               card="reliability", sub_option="stress", card_tab="stress_fmea"),
     ResultView("investment", _RESULTS, "investment", "Investment case",
                "the investment case verdict and its cash flows", "investment",
                (_r("get_investment_case"),),
-               units="EUR, %"),
+               units="EUR, %",
+               card="commercial", sub_option="investment_case", card_tab="investment_case"),
     ResultView("asset", _RESULTS, "asset", "Asset Detail",
                "one asset's time series and KPIs", "results",
                (_r("get_asset_results"),), needs=("component_class", "name"),
