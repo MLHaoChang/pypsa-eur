@@ -1719,8 +1719,10 @@ def apply_equipment_mapping(upload_id: str, component_class: str, name_column: s
     from routers.network_equipment_table import apply_equipment_mapping as _h
 
     if not edit_card.approved_digest():
-        raise HTTPException(409, {"error_kind": "edit_preview_stale", "message": (
-            "No approved edit card for this table; nothing was applied. Propose the edit again.")})
+        from services import equipment_table as T
+
+        T._refuse("edit_preview_stale", "No approved edit card for this table; nothing was applied. "
+                  "Propose the edit again.", 409)
     body = EquipmentMappingHttp(upload_id=upload_id, sheet=sheet, component_class=component_class,
                                 name_column=name_column, columns=columns, currency=currency,
                                 money_year=money_year, confirm=list(confirm or []), source_sha256=source_sha256,

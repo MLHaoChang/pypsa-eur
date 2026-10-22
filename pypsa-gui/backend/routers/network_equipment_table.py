@@ -72,11 +72,7 @@ class EquipmentPreviewIn(BaseModel):
     confirm: list[str] = Field(default_factory=list)
 
 
-# Data rows the preview shows of the table itself; the plan reads every row.
-SAMPLE_ROWS = 5
-
-
-def args_of(body: BaseModel) -> dict[str, Any]:
+def args_of(body: EquipmentPreviewIn | EquipmentMappingIn) -> dict[str, Any]:
     out = body.model_dump(exclude={"digest"})
     out["columns"] = {k: v.model_dump() for k, v in body.columns.items()}
     return out
@@ -87,32 +83,11 @@ preview_router = APIRouter()
 
 @preview_router.post("/preview")
 def preview_equipment_mapping_http(body: EquipmentPreviewIn, user: User = Depends(require_user)) -> dict:
-    """`{table, fields?, plan?, card?}`. `table` = `{source, headers, rows, row_count}` with
-    the first `SAMPLE_ROWS` rows' raw values; `fields` the class's mappable fields
-    (`equipment_table.mappable_fields`); `plan` what `preview_equipment_mapping`
-    reports; `card` the edit card the apply will check, only while no confirmation is
-    missing and some cell changes (else `plan` says why). Writes nothing."""
-    from harness import edit_card
-    from services import chat_tools
+    """The form's read: the table, the class's mappable fields, the plan and the card
+    (`equipment_table.preview`). Writes nothing."""
     from services import equipment_table as T
-    from services.pypsa_service import PyPSAService
 
-    table = T.read_table(chat_tools._require_active_project(), body.upload_id, body.sheet)
-    out: dict[str, Any] = {"table": {
-        "source": table["source"], "headers": table["headers"], "row_count": len(table["rows"]),
-        "rows": [{"row": r["row"], "cells": {h: c["raw"] for h, c in r["cells"].items()}}
-                 for r in table["rows"][:SAMPLE_ROWS]]}}
-    if not body.component_class:
-        return out
-    out["fields"] = T.mappable_fields(edit_card._fields(body.component_class))
-    if not body.name_column or not body.columns:
-        return out
-    args = {**args_of(body), "source_sha256": table["source"]["sha256"]}
-    p = T.plan_active(args)
-    out["plan"] = T.summary(PyPSAService.get_network(), p)
-    out["card"] = (edit_card.preview(TOOL, args)
-                   if not p["missing"] and T.changes(PyPSAService.get_network(), p) else None)
-    return out
+    return T.preview(args_of(body))
 
 
 @router.post("/equipment_table/apply")

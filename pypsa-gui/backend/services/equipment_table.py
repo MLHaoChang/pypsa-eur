@@ -498,6 +498,38 @@ def summary(n, p: dict) -> dict:
                        "listed_gaps": MAX_LISTED_GAPS}}
 
 
+# Data rows the form's preview shows of the table itself; the plan reads every row.
+SAMPLE_ROWS = 5
+
+
+def preview(args: dict) -> dict:
+    """The manual-mapping form's preview, for the active project: `{table, fields?, plan?,
+    card?}`. `table` = `{source, headers, row_count, rows}` with the first `SAMPLE_ROWS`
+    rows' raw values; with `component_class`, `fields` (`mappable_fields`); with
+    `name_column` and `columns` too, `plan` (`summary`) and `card`, the edit card the
+    apply checks, None while a confirmation is missing or nothing changes. Writes nothing."""
+    from harness import edit_card
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    table = read_table(chat_tools._require_active_project(), args.get("upload_id"), args.get("sheet"))
+    head = [{"row": r["row"], "cells": {h: c["raw"] for h, c in r["cells"].items()}} for r in table["rows"][:SAMPLE_ROWS]]
+    out: dict = {"table": {"source": table["source"], "headers": table["headers"],
+                           "row_count": len(table["rows"]), "rows": head}}
+    klass = args.get("component_class")
+    if not klass:
+        return out
+    out["fields"] = mappable_fields(edit_card._fields(klass))
+    if not args.get("name_column") or not args.get("columns"):
+        return out
+    args = {**args, "source_sha256": table["source"]["sha256"]}
+    p = plan_active(args)
+    out["plan"] = summary(PyPSAService.get_network(), p)
+    out["card"] = None if p["missing"] or not out["plan"]["changed_cells"] else edit_card.preview(
+        "apply_equipment_mapping", args)
+    return out
+
+
 def require_confirmed(p: dict) -> None:
     if p["missing"]:
         _refuse("table_confirmation_needed", "Confirm before applying: " + " ".join(

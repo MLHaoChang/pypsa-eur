@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Dialog } from './Dialog'
 import { EditCardTable, EditReceiptLine } from './EditCard'
 import { equipmentTableApi, type ColumnMap, type EquipmentPreview, type MappingApplied } from '../api/equipmentTable'
-import { listUploads, type UploadMeta } from '../api/uploads'
+import { listUploads, uploadFile, type UploadMeta } from '../api/uploads'
 import { networkApi } from '../api/network'
 import type { FlowSectionId } from '../api/flow'
 import { openSectionInExpert } from '../layout/flowNavigation'
@@ -17,7 +17,7 @@ import { useUIStore } from '../store/uiStore'
 
 const TABLE_FILE = /\.(csv|xlsx|xlsm)$/i
 
-/** The asset-table classes a table maps onto, with the label the button uses. */
+/** The asset-table classes a table maps onto (section 3: lines and transformers; 5: the rest). */
 export const TABLE_IMPORT_CLASSES: ReadonlySet<string> = new Set([
   'Line', 'Transformer', 'Generator', 'StorageUnit', 'Store', 'Link',
 ])
@@ -26,13 +26,16 @@ function errorText(e: unknown, fallback: string): string {
   const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (typeof detail === 'string') return detail
   if (detail && typeof detail === 'object' && 'message' in detail) return String((detail as { message: unknown }).message)
+  if (e instanceof Error && e.message) return e.message
   return fallback
 }
 
 const select = 'border border-border rounded bg-bg px-1.5 py-1 text-[11px] focus:outline-none focus:border-accent'
 
-export default function EquipmentTableImport({ componentClass, onClose, onApplied }: {
+export default function EquipmentTableImport({ componentClass, assetsLabel, onClose, onApplied }: {
   componentClass: string
+  /** What the asset table calls these assets ("generators"). */
+  assetsLabel: string
   onClose: () => void
   /** After a write: refresh what shows the class's assets. */
   onApplied: () => void
@@ -61,6 +64,18 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
     return () => { cancelled = true }
   }, [project])
 
+  // A table added here joins the same project uploads list chat uses.
+  const addUpload = async (file: File | undefined) => {
+    if (!file || !project) return
+    setBusy(true); setError(null)
+    try {
+      const meta = await uploadFile(project, file)
+      setUploads(prev => [meta, ...(prev ?? []).filter(u => u.file_id !== meta.file_id)])
+      setUploadId(meta.file_id); setSheet(null)
+    } catch (e) { setError(errorText(e, 'The file could not be uploaded.')) }
+    finally { setBusy(false) }
+  }
+
   // Reading the table: its headers, a few rows, and the class's mappable fields.
   useEffect(() => {
     if (!uploadId) { setTable(null); return }
@@ -80,10 +95,6 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
 
   const fields = useMemo(() => new Map((table?.fields ?? []).map(f => [f.field, f])), [table])
   const costPicked = Object.values(columns).some(c => fields.get(c.field)?.currency)
-  useEffect(() => {
-    const cost = Object.values(columns).map(c => fields.get(c.field)?.currency).find(Boolean)
-    if (cost && !currency) setCurrency(cost)
-  }, [columns, fields, currency])
 
   const request = () => ({
     upload_id: uploadId, sheet, component_class: componentClass, name_column: nameColumn, columns,
@@ -97,7 +108,8 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
     setColumns(prev => {
       const next = { ...prev }
       if (!field) delete next[header]
-      else next[header] = { field, unit: fields.get(field)?.units[0] ?? '' }
+      // The unit is the user's statement about the table, never assumed.
+      else next[header] = { field, unit: '' }
       return next
     })
   }
@@ -138,7 +150,7 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
       <div className="px-4 py-3 border-b border-border">
         <div className="text-sm font-semibold text-text">Import rows from a table</div>
         <div className="text-[11px] text-muted">
-          One row per existing {componentClass} named in the table. Each value is checked against its field before anything is written.
+          One row per existing asset among the {assetsLabel}, named in the table. Each value is checked against its field before anything is written.
         </div>
       </div>
       <div className="flex-1 overflow-auto px-4 py-3 text-xs flex flex-col gap-4" data-testid="table-import">
@@ -156,17 +168,21 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
           <section className="flex flex-col gap-1.5">
             <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted">Table</h3>
             {uploads === null ? <p className="text-muted">Reading the project's uploads…</p>
-              : uploads.length === 0 ? (
-                <p className="text-muted" data-testid="table-import-no-uploads">
-                  No CSV or XLSX in this project's uploads. Add one in the assistant panel (drop or attach a file), then come back here.
-                </p>
-              ) : (
+              : (
                 <div className="flex flex-wrap items-center gap-2">
-                  <select aria-label="Uploaded table" className={select} value={uploadId} data-testid="table-import-upload"
+                  {uploads.length === 0 && <span className="text-muted" data-testid="table-import-no-uploads">
+                    No CSV or XLSX in this project's uploads yet.
+                  </span>}
+                  {uploads.length > 0 && <select aria-label="Uploaded table" className={select} value={uploadId} data-testid="table-import-upload"
                     onChange={e => { setUploadId(e.target.value); setSheet(null) }}>
                     <option value="">Choose an upload…</option>
                     {uploads.map(u => <option key={u.file_id} value={u.file_id}>{u.filename}</option>)}
-                  </select>
+                  </select>}
+                  <label className="cursor-pointer text-accent hover:underline">
+                    Upload a table…
+                    <input type="file" accept=".csv,.xlsx,.xlsm" className="sr-only" data-testid="table-import-file"
+                      disabled={busy} onChange={e => { void addUpload(e.target.files?.[0]); e.target.value = '' }} />
+                  </label>
                   {source && source.sheets.length > 1 && (
                     <select aria-label="Sheet" className={select} value={source.sheet}
                       onChange={e => setSheet(e.target.value)}>
@@ -213,6 +229,7 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
                           {pick && (
                             <select aria-label={`Unit for ${h}`} className={select} value={pick.unit}
                               onChange={e => { setPreview(null); setColumns(prev => ({ ...prev, [h]: { ...pick, unit: e.target.value } })) }}>
+                              <option value="">Choose…</option>
                               {units.map(u => <option key={u} value={u}>{u}</option>)}
                             </select>
                           )}
@@ -276,7 +293,7 @@ export default function EquipmentTableImport({ componentClass, onClose, onApplie
           )}
         </>) : (<>
           <button type="button" onClick={onClose} className="px-3 py-1.5 text-xs rounded border border-border text-text hover:bg-border/30">Cancel</button>
-          <button type="button" disabled={busy || !table || !nameColumn || mapped === 0} onClick={() => { void runPreview() }}
+          <button type="button" disabled={busy || !table || !nameColumn || mapped === 0 || Object.values(columns).some(c => !c.unit)} onClick={() => { void runPreview() }}
             data-testid="table-import-preview-btn"
             className="px-3 py-1.5 text-xs rounded border border-border text-text hover:bg-border/30 disabled:opacity-40">
             Preview

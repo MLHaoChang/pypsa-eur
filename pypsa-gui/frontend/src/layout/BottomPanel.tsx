@@ -1082,7 +1082,7 @@ function AssetTable({
           </button>
         )}
         {tableImportOpen && (
-          <EquipmentTableImport componentClass={componentClass} onClose={() => setTableImportOpen(false)}
+          <EquipmentTableImport componentClass={componentClass} assetsLabel={tab.toLowerCase()} onClose={() => setTableImportOpen(false)}
             onApplied={() => {
               lastMutationAtRef.current = Date.now()
               const projectId = useUIStore.getState().currentProject

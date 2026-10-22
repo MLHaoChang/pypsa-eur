@@ -14,7 +14,9 @@ const openSection = vi.fn()
 vi.mock('../api/equipmentTable', () => ({
   equipmentTableApi: { preview: (b: unknown) => preview(b), apply: (b: unknown) => apply(b) },
 }))
+const uploadFile = vi.fn()
 vi.mock('../api/uploads', () => ({
+  uploadFile: (p: string, f: File) => uploadFile(p, f),
   listUploads: vi.fn(async () => [
     { file_id: 'u1', filename: 'lines.csv', kind: 'user_upload' },
     { file_id: 'u2', filename: 'photo.png', kind: 'user_upload' },
@@ -49,7 +51,7 @@ describe('EquipmentTableImport', () => {
       version: 1, digest: CARD.digest, outcome: 'verified', rows: [{ ...ROW, readback: 500 }], says: CARD.says,
       results_stale: false, undo: { tool: 'undo_last', available: true },
       section: { id: 'connection', label: 'Connection & grid', state: 'complete', changed: false } } })
-    render(<EquipmentTableImport componentClass="Line" onClose={onClose} onApplied={onApplied} />)
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={onClose} onApplied={onApplied} />)
 
     const upload = await screen.findByTestId('table-import-upload')
     expect([...upload.querySelectorAll('option')].map(o => o.textContent)).toEqual(['Choose an upload…', 'lines.csv'])
@@ -58,7 +60,10 @@ describe('EquipmentTableImport', () => {
 
     expect(screen.getByTestId('table-import-apply')).toHaveProperty('disabled', true)
     await userEvent.selectOptions(await screen.findByLabelText('Field for rating'), 's_nom')
-    expect((screen.getByLabelText('Unit for rating') as HTMLSelectElement).value).toBe('MVA')
+    // The table's unit is the user's statement: never pre-filled, and no preview without it.
+    expect((screen.getByLabelText('Unit for rating') as HTMLSelectElement).value).toBe('')
+    expect(screen.getByTestId('table-import-preview-btn')).toHaveProperty('disabled', true)
+    await userEvent.selectOptions(screen.getByLabelText('Unit for rating'), 'MVA')
     expect(screen.queryByTestId('table-import-money')).toBeNull()
     await userEvent.click(screen.getByTestId('table-import-preview-btn'))
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -78,25 +83,39 @@ describe('EquipmentTableImport', () => {
   })
 
   it('a cost field asks for the table currency and money year', async () => {
-    render(<EquipmentTableImport componentClass="Line" onClose={() => {}} onApplied={() => {}} />)
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={() => {}} onApplied={() => {}} />)
     await userEvent.selectOptions(await screen.findByTestId('table-import-upload'), 'u1')
     await userEvent.selectOptions(await screen.findByLabelText('Field for rating'), 'capital_cost')
+    await userEvent.selectOptions(screen.getByLabelText('Unit for rating'), 'EUR/MVA')
     expect(screen.getByTestId('table-import-money')).toBeTruthy()
-    expect((screen.getByLabelText('Currency') as HTMLInputElement).value).toBe('EUR')
+    // Not assumed: the user states the table's currency.
+    expect((screen.getByLabelText('Currency') as HTMLInputElement).value).toBe('')
+    await userEvent.type(screen.getByLabelText('Currency'), 'eur')
     await userEvent.type(screen.getByLabelText('Money year'), '2024')
     await userEvent.click(screen.getByTestId('table-import-preview-btn'))
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({ currency: 'EUR', money_year: 2024 }))
   })
 
   it('a refused preview shows the server reason and offers no apply', async () => {
-    render(<EquipmentTableImport componentClass="Line" onClose={() => {}} onApplied={() => {}} />)
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={() => {}} onApplied={() => {}} />)
     await userEvent.selectOptions(await screen.findByTestId('table-import-upload'), 'u1')
     await userEvent.selectOptions(await screen.findByLabelText('Field for rating'), 's_nom')
+    await userEvent.selectOptions(screen.getByLabelText('Unit for rating'), 'MVA')
     preview.mockRejectedValueOnce({ response: { data: { detail: { error_kind: 'source_changed',
       message: 'The upload’s bytes no longer match its recorded digest.' } } } })
     await userEvent.click(screen.getByTestId('table-import-preview-btn'))
     expect((await screen.findByTestId('table-import-error')).textContent).toContain('no longer match')
     expect(screen.getByTestId('table-import-apply')).toHaveProperty('disabled', true)
     expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('a table can be uploaded from the form itself and is then selected', async () => {
+    uploadFile.mockResolvedValue({ file_id: 'u3', filename: 'trafos.xlsx', kind: 'user_upload' })
+    render(<EquipmentTableImport componentClass="Line" assetsLabel="lines" onClose={() => {}} onApplied={() => {}} />)
+    const file = new File(['x'], 'trafos.xlsx')
+    await userEvent.upload(await screen.findByTestId('table-import-file'), file)
+    expect(uploadFile).toHaveBeenCalledWith('P', file)
+    await waitFor(() => expect((screen.getByTestId('table-import-upload') as HTMLSelectElement).value).toBe('u3'))
+    await waitFor(() => expect(preview).toHaveBeenCalledWith({ upload_id: 'u3', sheet: null, component_class: 'Line' }))
   })
 })
