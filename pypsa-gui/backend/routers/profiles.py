@@ -1428,7 +1428,10 @@ def apply_profile(
     try:
         component_type, attribute = default_target(
             meta, body.component_type, body.attribute)
-        summary = assign_profile(ctx, body.component, series, meta,
+        # The point applied is recorded, so readiness can tell which of the
+        # job's point_coords the series came from (RP-02).
+        summary = assign_profile(ctx, body.component, series,
+                                 {**meta, "point_id": point_id},
                                  component_type=component_type,
                                  attribute=attribute,
                                  time_basis=body.time_basis)

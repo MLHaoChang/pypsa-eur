@@ -8,7 +8,8 @@ measured one, is `uploaded`; any other is `generated`), then the network's own
 
 A generated profile is stale when its bus moved since generation (the
 apply route's 0.5° rule) or when the model's snapshots are no longer the
-hours it was written on.
+hours it was written on. A bus that has lost its coordinates since is
+reported as `coord_source: missing` and is not called stale.
 """
 from __future__ import annotations
 
@@ -58,9 +59,13 @@ def _profile_state(ctx, name: str) -> tuple[str, dict | None, str | None]:
     return "generated", provenance, stale
 
 
-def _bus_moved(meta: dict, name: str, now: tuple[float, float] | None) -> bool:
+def _bus_moved(meta: dict, now: tuple[float, float] | None) -> bool:
+    """Whether the point the series was made for is now far from the bus.
+    The point is the applied `point_id` the apply route records; a profile
+    applied before that was recorded falls back to a single-point job, and
+    one with several points and no `point_id` stays unchecked (not stale)."""
     coords = meta.get("point_coords") or {}
-    then = coords.get(name)
+    then = coords.get(meta.get("point_id"))
     if then is None and len(coords) == 1:
         then = next(iter(coords.values()))
     if then is None or now is None:
@@ -88,7 +93,7 @@ def readiness_rows(ctx) -> list[dict[str, Any]]:
         }
         if provenance is not None:
             row["provenance"] = provenance
-            if _bus_moved(ctx.user_ts_meta.get((*KEY, name)) or {}, name, coord):
+            if _bus_moved(ctx.user_ts_meta.get((*KEY, name)) or {}, coord):
                 stale = "bus_moved"
             if stale:
                 row["stale_reason"] = stale

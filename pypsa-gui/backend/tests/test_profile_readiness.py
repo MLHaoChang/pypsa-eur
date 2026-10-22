@@ -124,3 +124,33 @@ def test_the_chat_tool_returns_the_same_rows(client, project, bound_ctx):
         out = chat_tools.DISPATCHERS["get_profile_readiness"](project_id=project)
     via_route = client.get(f"/api/projects/{project}/profiles/readiness").json()
     assert out == via_route
+
+
+def test_bus_moved_follows_the_applied_point_not_the_generator_name(
+        client, project, ctx_of):
+    # A two-point job whose ids are not generator names: "site_b" is applied
+    # to g_ok. The row must know which point it came from (gatekeeper, #603).
+    import time
+    from services import solve_queue as sq
+    import uuid
+
+    resp = client.post(f"/api/projects/{project}/profiles/generate", json={
+        "points": [{"id": "site_a", "lon": 20.0, "lat": 40.0},
+                   {"id": "site_b", "lon": 8.0, "lat": 50.0}],
+        "technology": "wind", "year": 2023})
+    assert resp.status_code in (200, 202), resp.text
+    job_id = resp.json()["id"]
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        job = sq.solve_queue.get_job(uuid.UUID(job_id))
+        if job and job["status"] in sq._TERMINAL:
+            break
+        time.sleep(0.1)
+    assert job["status"] == "completed", job.get("error")
+    resp = client.post(f"/api/projects/{project}/profiles/apply", json={
+        "job_id": job_id, "component": "g_ok", "point_id": "site_b"})
+    assert resp.status_code == 200, resp.text
+    row = _rows(client, project)["g_ok"]
+    assert row["profile"] == "generated" and "stale_reason" not in row
+    ctx_of().network.buses.loc["B_ok", ["x", "y"]] = [15.0, 45.0]
+    assert _rows(client, project)["g_ok"]["stale_reason"] == "bus_moved"
