@@ -1,6 +1,6 @@
 import type { CheckedChart as Chart } from '../utils/answerAssurance'
 import { useUIStore } from '../store/uiStore'
-import { openSectionInExpert, openSectionInGuided } from '../layout/flowNavigation'
+import { openSectionInExpert } from '../layout/flowNavigation'
 import { readableWindow } from '../utils/readableTime'
 
 // The Results tab that draws the same data natively, per checked profile.
@@ -11,11 +11,12 @@ const NATIVE: Record<string, { tab: string; label: string }> = {
   'branch-loading/1': { tab: 'loadflow', label: 'Load Flow' },
 }
 
-// The Results section on that tab, in the mode the user is in (as the
-// availability editor's reliability link does): Guided stays Guided.
+// The Results panel on that tab, in the mode the user is in. Guided opens the
+// panel itself (as ResultsCard and ImproveCard do), never the hub card, and
+// stays Guided: Results shows an Expert-only tab there as its advanced tab.
 function openNative(tab: string) {
   const ui = useUIStore.getState()
-  if (ui.uiMode === 'guided') openSectionInGuided('results')
+  if (ui.uiMode === 'guided') ui.setSlidePanel('results')
   else openSectionInExpert('results')
   ui.requestResultsTab(tab)
 }

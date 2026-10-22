@@ -31,9 +31,8 @@ describe('CheckedChart', () => {
     fireEvent.click(screen.getByTestId('checked-chart-native'))
     const ui = useUIStore.getState()
     expect(ui.uiMode).toBe(mode)
-    expect(ui.activeSection).toBe('results')
+    expect(ui.activeSlidePanel).toBe('results')
     expect(ui.resultsTabRequest).toBe('dispatch')
-    if (mode === 'guided') expect(ui.activeSlidePanel).toBe('hubDesign')
     expect(screen.getByTestId('checked-chart-native').textContent).toBe('Open in Results › Dispatch')
   })
 
