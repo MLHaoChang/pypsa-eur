@@ -96,6 +96,75 @@ def test_data_centre_preset_exemplifies_grid_control_and_reliability():
     assert eff["options"]["commercial"] == ["tariffs"]         # investment case: not yet
 
 
+# ── availability follows the separability matrix (W0) ───────────────────────
+
+def _matrix_row(kind, *, runnable):
+    from services.run_separability import Row
+    return Row(kind, kind, "supported" if runnable else "unsupported", runnable,
+               entry="-", inputs="-", outputs="-", locks_and_state="-",
+               implicit_steps="-", freshness="-", evidence=())
+
+
+def test_every_not_yet_row_is_decided_by_the_matrix():
+    # A static not-yet row with no matrix kind could only be flipped by editing
+    # this table; the matrix is the one place that says a kind can run.
+    for key, (status, _reason) in S.AVAILABILITY.items():
+        if status == S.NOT_YET:
+            assert key in S.MATRIX_KIND, key
+
+
+# Why each row the matrix does not decide is not its to decide.
+_NOT_THE_MATRIXS = {
+    ("capacity", "sizing"): "always part of the run (sizing off is W4b's fixed-sizes option)",
+    ("capacity", "dispatch"): "always part of the run",
+    ("grid", "load_flow"): "the run_ac_pf_after_lopf solver setting decides",
+    ("grid", "grid_code"): "an advisory scorecard, not a run kind",
+    ("grid", "n1_sclopf"): "the sclopf solver setting decides",
+    ("control", "presets"): "inputs only; nothing runs",
+    ("reliability", "goal_study"): "the study's own start gate decides",
+    ("reliability", "stress"): "inputs to the study; nothing runs on its own",
+    ("reliability", "outage_screening"): "inputs to the study; nothing runs on its own",
+    ("commercial", "tariffs"): "terms the optimisation reads",
+    ("commercial", "contracts"): "terms the optimisation reads",
+    ("handoff", "reports"): "a read of results, not a run kind",
+    ("handoff", "exports"): "a read of results, not a run kind",
+    ("handoff", "specialist_packet"): "a read of results, not a run kind",
+}
+
+
+def test_every_option_is_matrix_decided_or_says_why_not():
+    assert not set(_NOT_THE_MATRIXS) & set(S.MATRIX_KIND)
+    assert set(_NOT_THE_MATRIXS) | set(S.MATRIX_KIND) == set(S.AVAILABILITY)
+
+
+def test_today_the_matrix_clears_none_of_them():
+    from services import run_separability as RS
+    for (card, option), kind in S.MATRIX_KIND.items():
+        assert not RS.runnable(kind), kind
+        assert S.option_status(card, option, has_template=True)[0] == S.NOT_YET
+
+
+def test_a_runnable_matrix_row_makes_its_option_available(monkeypatch):
+    from services import run_separability as RS
+    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
+    assert S.option_status("control", "island_checks", has_template=True) == (S.AVAILABLE, None)
+    # only that one
+    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
+
+
+def test_a_kind_the_matrix_lacks_stays_not_yet(monkeypatch):
+    # §11.1: unknown stays non-runnable.
+    from services import run_separability as RS
+    monkeypatch.delitem(RS.MATRIX, "dynamics")
+    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
+
+
+def test_a_cleared_option_can_be_stored(monkeypatch):
+    from services import run_separability as RS
+    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
+    assert S._storable("control", "island_checks", has_template=True)
+
+
 def test_reliability_needs_a_template():
     status, reason = S.option_status("reliability", "goal_study", has_template=False)
     assert status == S.NOT_YET and "Energy Hub" in reason

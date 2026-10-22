@@ -238,6 +238,16 @@ export default function SolverSettings() {
   //   • Add. Constraints — global LP constraints (CO2 cap, etc).
   type Tab = 'general' | 'solver' | 'dispatch' | 'network' | 'constraints'
   const [tab, setTab] = useState<Tab>('general')
+  // A link from Assets or Economics asks for the Economic assumptions block: open
+  // its tab, then scroll to it once it is on screen.
+  const blockRequest = useUIStore(s => s.solverBlockRequest)
+  const clearBlockRequest = useUIStore(s => s.clearSolverBlockRequest)
+  useEffect(() => {
+    if (blockRequest !== 'economic' || !draft) return
+    if (tab !== 'dispatch') { setTab('dispatch'); return }
+    document.getElementById('solver-economic-assumptions')?.scrollIntoView({ block: 'start' })
+    clearBlockRequest()
+  }, [blockRequest, draft, tab, clearBlockRequest])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -1304,7 +1314,7 @@ export function EconomicAssumptions({
   patch: (p: Partial<SolverConfig>) => void
 }) {
   return (
-    <section className="border border-border rounded">
+    <section id="solver-economic-assumptions" className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
         Economic assumptions
       </div>

@@ -24,6 +24,13 @@ export function openSectionInGuided(id: FlowSectionId): void {
   ui.setSlidePanel('hubDesign')
 }
 
+/** Show the Economic assumptions block of Solver Settings (default lifetime,
+ *  CO₂ price): the section's panel, on the Dispatch tab, scrolled to the block. */
+export function openEconomicAssumptions(): void {
+  useUIStore.getState().requestSolverBlock('economic')
+  openSectionInExpert('scenarios')
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {

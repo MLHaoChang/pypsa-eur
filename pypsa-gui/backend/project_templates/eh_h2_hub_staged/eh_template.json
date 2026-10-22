@@ -118,7 +118,7 @@
     },
     {
       "item": "island rows",
-      "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on this plan: at 1 h sustained they add about 33 MW of battery in 2027, hold the grid import to about 3 MW and take the demo NPV from +14.6 M to -2.1 M EUR; at 4 h the NPV is -32 M EUR; at 24 h no plan meets them (owner: island data on, rows off, the user opts in)",
+      "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on this plan (electrolysis priced per MW of electrical input, GS-2b, 2026-10-21): at 1 h sustained they add about 43 MW of battery in 2027, hold the grid import to about 3 MW and take the demo NPV from -2.6 M to -30.5 M EUR; at 4 h the NPV is -51.9 M EUR; at 24 h no plan meets them (owner: island data on, rows off, the user opts in)",
       "source": "assumed",
       "value": "off (island_constraints false)"
     },

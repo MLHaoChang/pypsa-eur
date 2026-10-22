@@ -7,6 +7,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { assetSchemaApi, type AssetCostRow } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
+import { useGlobalDefaultLifetime } from '../../layout/properties/cardKit'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 
@@ -21,10 +22,12 @@ function money(v: number | null, scale: number): string {
   return v == null ? '—' : (v * scale).toLocaleString(undefined, { maximumFractionDigits: v * scale >= 100 ? 0 : 2 })
 }
 
-function Row({ a, onOpen }: { a: AssetCostRow; onOpen: () => void }) {
+function Row({ a, onOpen, defaultLife }: { a: AssetCostRow; onOpen: () => void; defaultLife?: number }) {
   const d = DISPLAY[a.basis]
   const priced = a.parts.length > 0
-  const life = [...new Set(a.parts.map(p => p.lifetime == null ? 'never' : `${p.lifetime} y`))].join(' / ')
+  // A part with no lifetime of its own inherits the project default.
+  const life = [...new Set(a.parts.map(p => p.lifetime != null ? `${p.lifetime} y`
+    : defaultLife != null ? `${defaultLife} y (default)` : 'default'))].join(' / ')
   const stamp = OVERNIGHT_FIELDS.map(k => a.provenance[k]).find(Boolean)
   return (
     <tr className="border-b border-border/50 hover:bg-panel cursor-pointer" onClick={onOpen}
@@ -55,6 +58,7 @@ export default function AssetCostsTable() {
   const project = useUIStore(s => s.currentProject)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
+  const defaultLife = useGlobalDefaultLifetime()
   const { data, isLoading, isError } = useQuery({
     queryKey: nk(project, 'assetCosts'), queryFn: assetSchemaApi.costs, enabled: !!project, staleTime: 0,
   })
@@ -80,7 +84,7 @@ export default function AssetCostsTable() {
         </thead>
         <tbody>
           {data.assets.map(a => (
-            <Row key={`${a.component}:${a.name}`} a={a} onOpen={() => {
+            <Row key={`${a.component}:${a.name}`} a={a} defaultLife={defaultLife} onOpen={() => {
               setSlidePanel(null)
               setSelectedComponent({ type: a.component, name: a.name })
             }} />

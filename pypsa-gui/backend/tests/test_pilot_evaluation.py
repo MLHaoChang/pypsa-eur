@@ -109,10 +109,16 @@ def evaluation_project(baseline, request):
             "lost_load_t": pd.DataFrame({"L1": [0.0, 5.0]}, index=n.snapshots),
             "voll_eur_per_mwh": 1000.0,
         }
-    if case.profile == "investment-case/1":
+    if case.profile.startswith("investment-"):
         from tests.test_investment_assurance import hand, store
 
-        store(ctx, lambda p: hand(p, equity=[-100.0, 150.0], project=[-100.0, 175.0], coe=0.25, wacc=0.25))
+        def report(payload):
+            hand(payload, equity=[-100.0, 150.0], project=[-100.0, 175.0], coe=0.25, wacc=0.25)
+            payload["years"], payload["price_basis"] = payload["years"][:2], "nominal"
+            payload["lcoe_inputs"] = {"energy_mwh": [0.0, 10.0], "value": [0.0, 125.0], "inflation": 0.25}
+            payload["lcoe_nominal_per_mwh"], payload["lcoe_real_per_mwh"] = 10.0, 8.0
+
+        store(ctx, report)
     yield ctx
     ctx.solver_state["investment_case_report"] = None
 
@@ -165,7 +171,7 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
     if case.fault == "battery":
         su = n.storage_units_t
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
-    invested = case.profile == "investment-case/1"
+    invested = case.profile.startswith("investment-")
     if case.fault == "stale" and invested:
         # The report's own key: a finance input changed since the run.
         cfg = evaluation_project.solver_state["solver_config"]

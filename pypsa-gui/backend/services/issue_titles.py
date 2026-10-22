@@ -123,6 +123,9 @@ ISSUE_TITLES: dict[str, str] = {
     "tariff_export_exceeds_import": "Export pays more than import in some hours",
     "tariff_export_exceeds_import_via_storage": "Export pays more than import after storage losses",
 
+    # Commercial preflight
+    "commercial.grid_connection_double_count": "Grid connection may be paid twice",
+
     # Outages and availability
     "outage_params_implausible": "Outage data looks implausible",
     "profile_and_outage_modelled": "Outages may be counted twice (profile and sampled outages)",

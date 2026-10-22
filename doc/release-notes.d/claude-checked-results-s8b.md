@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The investment-case report now keeps the LCOE's own per-year generation and value and the inflation its real figure uses, so the LCOE can be rebuilt from the stored report. Reports stored before this lack them; re-run the investment case to retain them.
