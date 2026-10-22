@@ -72,5 +72,16 @@
     "current_control_matrix": "passed:170controls,14families,full_coverage_not_established",
     "historical_evidence_reused_without_relabeling": true,
     "current_master_reconciliation": "current-master-reconciliation.json"
+  },
+  "independent_design_review": {
+    "verdict": "GO",
+    "scope": "implementation_spec_readiness_only",
+    "latest_reviewed_master": "880496ef679af1efc51a6dd3d62f9e41a75f2937",
+    "record": "independent-review.json",
+    "normative_file_hashes": 7,
+    "unresolved_blockers": 0,
+    "planned_harness_acceptance_not_run": 53,
+    "runtime_certification": false,
+    "merge_certification": false
   }
 }

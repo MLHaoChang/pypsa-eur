@@ -21,7 +21,7 @@ Assessed master: `322df0cf495260442eb35bb9c0c5d8e11a274ffe`. The comparison uses
 
 Journey tests and existing diagnostics support every step. Add trusted domain procedures as native coverage grows. General specialist teams and code-analysis sandboxes are conditional later options, not required for the first gains. Broader access alone does not establish better engineering conclusions.
 
-Current inventory/matrix checks report **275 tools, 17 result tabs, 20 panels and 170 creation controls**. The matrix still marks all 14 family-journey links pending and full coverage not established. Passing subset journeys exist; the ledger is not complete proof of all-domain behavior.
+At the historical322df0c source, inventory/matrix checks reported **275 tools,17 result tabs,20 panels and170 creation controls**;11 records newer source-bound checks. The matrix still marks all 14 family-journey links pending and full coverage not established. Passing subset journeys exist; the ledger is not complete proof of all-domain behavior.
 
 Newly merged LC-05 already continues the chat after a long solve, holds for unsent text/cards and supports dismissing the continuation. The remaining work is broader admitted job/evidence coverage, not rebuilding that feature.
 

@@ -343,11 +343,28 @@ def check_current_master_review() -> None:
                 )
             require(
                 evidence["source_commit"] == later["sha"]
-                and evidence["failures"]
-                == evidence["errors"]
-                == evidence["skipped"]
-                == 0,
+                and evidence["failures"] == evidence["errors"] == 0,
                 "Later-master test source/outcome mismatch",
+            )
+            skipped = [
+                (case, case.find("skipped"))
+                for case in suite.findall("testcase")
+                if case.find("skipped") is not None
+            ]
+            require(
+                len(skipped) == evidence["skipped"] == 1
+                and skipped[0][0].attrib["name"]
+                == "test_every_known_gap_is_still_a_gap[NOTSET]"
+                and skipped[0][1].attrib["message"]
+                == "got empty parameter set for (tool)"
+                and evidence["expected_skips"]
+                == [
+                    {
+                        "node": "tests/test_write_surface_lock_policy.py::test_every_known_gap_is_still_a_gap[NOTSET]",
+                        "reason": "got empty parameter set for (tool)",
+                    }
+                ],
+                "Unexpected skip in frozen-master evidence",
             )
     if review["review_verdict"] == "GO":
         require(bool(review.get("reviewed_spec_files")), "Unbound GO verdict")
