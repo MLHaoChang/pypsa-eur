@@ -257,7 +257,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                         <p data-testid={`${testId}-option-blocked-${o.id}`} role="alert"
                           className="pl-5 text-[10.5px] text-warn">
                           {needsBranches
-                            ? 'N-1 security has no branches to check yet.'
+                            ? 'N-1 security needs at least one branch to check.'
                             : `The Run can't start yet: ${gate.reason}`}
                           {needsBranches && (
                             <>
