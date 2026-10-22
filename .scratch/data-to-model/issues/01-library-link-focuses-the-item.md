@@ -1,6 +1,6 @@
 # "Update it there ›" focuses the pinned item in the Commercial library
 
-Status: ready-for-agent
+Status: done
 Blocked by: #586 merging (it owns `store/uiStore.ts` and `layout/flowNavigation.ts`)
 
 ## What

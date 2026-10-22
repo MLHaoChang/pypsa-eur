@@ -177,6 +177,7 @@ describe('DocumentValuesPicker, section 7', () => {
     expect(onClose).toHaveBeenCalledTimes(1)  // the dialog does not stay over the library page
     expect(openTarget).toHaveBeenCalledWith(expect.objectContaining({ section: 'commercial', panel: 'library' }))
     expect(openInPlace).not.toHaveBeenCalled()
+    expect(useUIStore.getState().libraryFocus).toEqual({ kind: 'tariff', id: 'grid-de', version: 3 })
 
     await userEvent.click(screen.getByTestId('document-values-apply'))
     expect(await screen.findByTestId('chat-edit-receipt')).toBeTruthy()

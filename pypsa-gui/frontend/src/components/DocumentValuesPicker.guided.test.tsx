@@ -4,6 +4,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import EquipmentTableImport from './EquipmentTableImport'
+import { LibraryLink } from './DocumentValuesPicker'
 import { useUIStore } from '../store/uiStore'
 
 const SOURCE = { upload_id: 'p1', filename: 'ppa.pdf', sha256: 'b'.repeat(64), pages: 1, truncated: [] }
@@ -36,4 +37,14 @@ it('opens the library in the field drawer and stays in Guided', async () => {
   const ui = useUIStore.getState()
   expect(ui.fieldDrawer?.panel).toBe('library')
   expect(ui.uiMode).toBe('guided')
+})
+
+it('names the pinned item for the library page, in the field drawer and in Guided', async () => {
+  useUIStore.setState({ libraryFocus: null })
+  render(<LibraryLink onClose={() => {}} item={{ kind: 'contract', id: 'ppa-wind', version: '2' }} />)
+  await userEvent.click(screen.getByTestId('document-values-library-link'))
+  const ui = useUIStore.getState()
+  expect(ui.fieldDrawer?.panel).toBe('library')
+  expect(ui.uiMode).toBe('guided')
+  expect(ui.libraryFocus).toEqual({ kind: 'contract', id: 'ppa-wind', version: 2 })
 })

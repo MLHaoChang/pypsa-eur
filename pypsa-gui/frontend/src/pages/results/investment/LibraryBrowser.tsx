@@ -3,7 +3,7 @@
 // item as JSON with a summary), a URDB tariff import, and price / meter series
 // uploads. "Attach as import tariff" follows the P2 rule: an inline tariff that
 // is not this item is never replaced silently (a confirm dialog).
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   commercialApi, libraryApi, type LibraryItemKind, type MeterDataResult, type UrdbImportResult,
@@ -53,11 +53,14 @@ function itemSummary(kind: LibraryItemKind, p: Record<string, unknown>): string 
     [...parties, ...money].join(', ')}${p.tenor_years ? `; ${String(p.tenor_years)} years` : ''}`
 }
 
-function ItemView({ kind, refItem, onAttach }: {
+function ItemView({ kind, refItem, onAttach, startVersion }: {
   kind: LibraryItemKind; refItem: LibraryItemRef; onAttach: (ref: LibraryItemRef) => void
+  /** The version to show first (a linked pin); the latest when it is not one of this item's. */
+  startVersion?: number
 }) {
   const project = useUIStore(s => s.currentProject)
-  const [version, setVersion] = useState(refItem.version)
+  const [version, setVersion] = useState(
+    startVersion && startVersion >= 1 && startVersion <= refItem.version ? startVersion : refItem.version)
   const item = useQuery({ queryKey: nk(project, 'library', 'item', kind, refItem.id, version),
                           queryFn: () => libraryApi.getItem(kind, refItem.id, version) })
   const commercial = useQuery({ queryKey: nk(project, 'commercial', 'config'),
@@ -302,6 +305,27 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
   // The open item follows the list: a new version imported shows at once (review #6).
   const open = (items.data ?? []).find(r => r.id === openId) ?? null
 
+  // "Update it there ›" from the document dialog: open that item at that version, once.
+  const focus = useUIStore(s => s.libraryFocus)
+  const [startVersion, setStartVersion] = useState<number | undefined>(undefined)
+  const scrollToItem = useRef(false)
+  const itemView = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!focus) return
+    const kinds: string[] = KINDS.map(k => k.id)
+    if (kinds.includes(focus.kind)) {
+      setKind(focus.kind as LibraryItemKind); setOpenId(focus.id)
+      setStartVersion(focus.version); scrollToItem.current = true
+    }
+    useUIStore.getState().clearLibraryFocus()
+  }, [focus])
+  useEffect(() => {
+    if (open && scrollToItem.current) {
+      scrollToItem.current = false
+      itemView.current?.scrollIntoView?.({ block: 'center' })
+    }
+  }, [open])
+
   const attach = async (ref: LibraryItemRef) => {
     setMessage(null)
     try {
@@ -333,7 +357,7 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
         {KINDS.map(k => (
           <label key={k.id} className="flex items-center gap-1">
             <input type="radio" name="lib-kind" checked={kind === k.id}
-                   onChange={() => { setKind(k.id); setOpenId(null); setMessage(null) }} />{k.label}</label>
+                   onChange={() => { setKind(k.id); setOpenId(null); setStartVersion(undefined); setMessage(null) }} />{k.label}</label>
         ))}
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
@@ -347,14 +371,19 @@ export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => 
         {(items.data ?? []).map(r => (
           <li key={r.id} className="flex items-center gap-2">
             <button type="button" className="underline" aria-expanded={openId === r.id}
-                    onClick={() => setOpenId(openId === r.id ? null : r.id)}>{r.id}</button>
+                    onClick={() => { setStartVersion(undefined); setOpenId(openId === r.id ? null : r.id) }}>{r.id}</button>
             <span className="text-muted">v{r.version}</span>
           </li>
         ))}
         {items.data?.length === 0 && <li className="text-muted">No items of this kind yet.</li>}
       </ul>
-      {open && <ItemView key={`${kind}:${open.id}:${open.version}`} kind={kind} refItem={open}
-                         onAttach={r => { void requestAttach(r) }} />}
+      {open && (
+        <div ref={itemView}>
+          <ItemView key={`${kind}:${open.id}:${open.version}`} kind={kind} refItem={open}
+                    startVersion={openId === open.id ? startVersion : undefined}
+                    onAttach={r => { void requestAttach(r) }} />
+        </div>
+      )}
       {kind === 'tariff' && (
         <UrdbImport onDone={() => { void qc.invalidateQueries({ queryKey: nk(project, 'library', 'items', 'tariff') }) }} />
       )}

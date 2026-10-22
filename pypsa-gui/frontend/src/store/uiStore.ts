@@ -409,6 +409,13 @@ export interface TimeSeriesFocus {
   openEditor?: boolean
 }
 
+/** The Commercial library item to open once: its kind, id and the version a gap names. */
+export interface LibraryFocus {
+  kind: string
+  id: string
+  version: number
+}
+
 // Issue 06 — discussed historical run selected in Results chrome. Sticky
 // until cleared or the project switches; does not restore run inputs.
 
@@ -518,6 +525,8 @@ interface UIStore {
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
   timeSeriesFocus: TimeSeriesFocus | null
+  /** One-shot: the Commercial library opens this item at this version ("Update it there ›"). */
+  libraryFocus: LibraryFocus | null
   /** One-shot: bumped by a "Run the solve" outside the header (a result tab's
    *  empty state, UX template audit H2). The header runs its own run path when
    *  it changes, so there is one way to queue a solve. */
@@ -669,6 +678,8 @@ interface UIStore {
   clearGridReadinessRequest: () => void
   focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
+  focusLibraryItem: (focus: LibraryFocus) => void
+  clearLibraryFocus: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
   requestReportGenerate: () => void
@@ -758,6 +769,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   solverBlockRequest: null,
   gridReadinessRequest: false,
   timeSeriesFocus: null,
+  libraryFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
   reportGenerateRequest: false,
@@ -1018,6 +1030,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
     timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),
   clearTimeSeriesFocus: () => set({ timeSeriesFocus: null }),
+  focusLibraryItem: (focus) => set({ libraryFocus: focus }),
+  clearLibraryFocus: () => set({ libraryFocus: null }),
   requestRunSolve: () => set(s => ({ runSolveRequest: s.runSolveRequest + 1 })),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
