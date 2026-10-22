@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { gridspineApi, isNotAStudy } from '../../api/gridspine'
 import { errorText } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
-import { openFlowTarget } from '../../layout/flowNavigation'
+import { openPanel } from './openPanel'
 import { Btn, PageSection } from '../../components/PageKit'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope } from '../../api/flow'
@@ -15,10 +15,9 @@ import { CapacitySection, ConnectionSection, STATUS_KEY } from '../GridspinePane
 /** Next from the Grid results (§3.2 A): Control when it is in scope, else Hand-off. */
 function GridNext() {
   const { scope, isSuccess } = useFlowScope()
-  const control = isSuccess && inScope(scope, 'control')
-  const go = () => openFlowTarget(control
-    ? { section: 'scenarios', panel: 'campusStudy', component: null, entity: null, field: null }
-    : { section: 'results', panel: 'reports', component: null, entity: null, field: null })
+  if (!isSuccess) return null
+  const control = inScope(scope, 'control')
+  const go = () => (control ? openPanel('scenarios', 'campusStudy') : openPanel('results', 'reports'))
   return (
     <p data-testid="grid-next" className="text-[11px] text-muted">
       Next: {control ? 'Control' : 'hand off'}{' '}
@@ -29,20 +28,33 @@ function GridNext() {
   )
 }
 
+/** Which study a project has: a planning → dynamics study answers its status, a hub project 409s. */
+function useStudyKind(name: string | null) {
+  const q = useQuery({ queryKey: STATUS_KEY(name ?? ''), queryFn: () => gridspineApi.status(name!), retry: false, enabled: !!name })
+  return { isStudy: q.isSuccess, isHub: q.isError && isNotAStudy(q.error),
+    pending: !!name && q.isPending, failure: q.isError && !isNotAStudy(q.error) ? errorText(q.error) : null }
+}
+
+function Loading() {
+  return <p className="text-[12px] text-muted" data-testid="grid-tab-state">Loading…</p>
+}
+
 function NoProject() {
   return <p className="text-[12px] text-muted" data-testid="grid-tab-state">Open a solved project to see its grid study results.</p>
 }
 
 /** A planning → dynamics project's connection capacity and assessments, read-only. */
 function StudyConnection({ name }: { name: string }) {
-  const openStudy = () => openFlowTarget({ section: 'results', panel: 'gridspine', component: null, entity: null, field: null })
+  const openStudy = () => openPanel('results', 'gridspine')
   const status = useQuery({ queryKey: STATUS_KEY(name), queryFn: () => gridspineApi.status(name), retry: false })
   if (!status.data) return null
   if (status.data.status !== 'completed') {
+    const running = status.data.status === 'running'
     return (
       <div data-testid="grid-tab-state" className="text-[12px] text-muted space-y-2">
-        <p>Not run yet: the planning → dynamics study has not finished.</p>
-        <Btn onClick={openStudy}>Open Planning → dynamics ›</Btn>
+        <p>{running ? 'Running: the planning → dynamics study is still going.'
+          : 'Not run yet: the planning → dynamics study has not finished.'}</p>
+        {!running && <Btn onClick={openStudy}>Open Planning → dynamics ›</Btn>}
       </div>
     )
   }
@@ -60,9 +72,7 @@ export function GridCodeTab() {
   const name = useUIStore(s => s.currentProject)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   // Which kind of project this is decides which study the tab reads.
-  const kind = useQuery({
-    queryKey: STATUS_KEY(name ?? ''), queryFn: () => gridspineApi.status(name!), retry: false, enabled: !!name,
-  })
+  const kind = useStudyKind(name)
   if (!name) return <NoProject />
   return (
     <div className="space-y-3 p-4 h-full overflow-y-auto" data-testid="grid-code-tab">
@@ -73,11 +83,10 @@ export function GridCodeTab() {
             onClick={() => setSlidePanel('issues')}>Readiness › Grid readiness ›</button>
         </p>
       </PageSection>
-      {kind.isSuccess
-        ? <StudyConnection name={name} />
-        : kind.isError && !isNotAStudy(kind.error)
-          ? <p className="text-[12px] text-muted" data-testid="grid-tab-state">{errorText(kind.error)}</p>
-          : kind.isError ? <CampusResultsTab name={name} part="grid_code" /> : null}
+      {kind.pending ? <Loading />
+        : kind.isStudy ? <StudyConnection name={name} />
+          : kind.failure ? <p className="text-[12px] text-muted" data-testid="grid-tab-state">{kind.failure}</p>
+            : <CampusResultsTab name={name} part="grid_code" />}
       <GridNext />
     </div>
   )
@@ -85,11 +94,9 @@ export function GridCodeTab() {
 
 export function ElectricalDesignTab() {
   const name = useUIStore(s => s.currentProject)
-  const kind = useQuery({
-    queryKey: STATUS_KEY(name ?? ''), queryFn: () => gridspineApi.status(name!), retry: false, enabled: !!name,
-  })
+  const kind = useStudyKind(name)
   if (!name) return <NoProject />
-  if (kind.isSuccess) {
+  if (kind.isStudy) {
     return (
       <p className="p-4 text-[12px] text-muted" data-testid="grid-tab-state">
         The electrical design comes from the campus study of a capacity-expansion (hub) project, not from a
@@ -99,9 +106,9 @@ export function ElectricalDesignTab() {
   }
   return (
     <div className="space-y-3 p-4 h-full overflow-y-auto" data-testid="electrical-design-tab">
-      {kind.isError && !isNotAStudy(kind.error)
-        ? <p className="text-[12px] text-muted" data-testid="grid-tab-state">{errorText(kind.error)}</p>
-        : kind.isError ? <CampusResultsTab name={name} part="electrical_design" /> : null}
+      {kind.pending ? <Loading />
+        : kind.failure ? <p className="text-[12px] text-muted" data-testid="grid-tab-state">{kind.failure}</p>
+          : <CampusResultsTab name={name} part="electrical_design" />}
       <GridNext />
     </div>
   )

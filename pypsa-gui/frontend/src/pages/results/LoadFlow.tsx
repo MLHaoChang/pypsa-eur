@@ -17,10 +17,9 @@ import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, S
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import { useUIStore } from '../../store/uiStore'
-import ResultState from '../../components/ResultState'
+import ResultState, { StatePill } from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
-import { StatePill } from '../../components/ResultState'
-import { openFlowTarget } from '../../layout/flowNavigation'
+import { openPanel } from './openPanel'
 
 // Branch loading is the native, source-attested server projection used by
 // get_loadflow_summary. Bus/reactive/voltage/loss diagnostics retain their
@@ -45,12 +44,13 @@ function RunAgain({ acPfAvailable }: { acPfAvailable: boolean }) {
         className="rounded-[6px] border border-border-2 bg-bg px-2 py-1 text-[11px] font-semibold text-text hover:border-border-3">
         Run again
       </button>
+      <span className="text-muted">Runs the whole solve again{acPfAvailable ? '' : '; AC power flow follows when switched on'}.</span>
       {!acPfAvailable && (
         <>
           <StatePill state="not_modelled" />
           <span className="text-muted">AC power flow was not part of this run.</span>
           <button type="button" data-testid="loadflow-switch-on-acpf" className="text-accent hover:underline"
-            onClick={() => openFlowTarget({ section: 'scenarios', panel: 'simparams', component: null, entity: null, field: null })}>
+            onClick={() => openPanel('scenarios', 'simparams')}>
             Switch it on in Solver settings ›
           </button>
         </>

@@ -36,7 +36,7 @@ import {
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
-import { openFlowTarget } from '../layout/flowNavigation'
+import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
@@ -787,9 +787,7 @@ export function CampusResultsTab({ name, part }: { name: string; part: Exclude<C
     return (
       <div data-testid="campus-tab-state" className="text-[12px] text-muted space-y-2">
         <p>Not run yet: the grid study has not produced results for this project.</p>
-        <Btn onClick={() => openFlowTarget({ section: 'scenarios', panel: 'campusStudy', component: null, entity: null, field: null })}>
-          Run the grid checks in Grid study ›
-        </Btn>
+        <Btn onClick={() => openPanel('scenarios', 'campusStudy')}>Run the grid checks in Grid study ›</Btn>
       </div>
     )
   }

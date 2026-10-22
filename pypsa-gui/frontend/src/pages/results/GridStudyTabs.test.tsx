@@ -100,6 +100,13 @@ describe('Grid code & connection', () => {
     expect(screen.queryByTestId('capacity-section')).toBeNull()
   })
 
+  it('says a running planning → dynamics study is running, without an action', async () => {
+    api.gsStatus.mockResolvedValue({ status: 'running' })
+    mount(<GridCodeTab />)
+    expect(await screen.findByText(/Running: the planning → dynamics study/)).toBeTruthy()
+    expect(screen.queryByText('Open Planning → dynamics ›')).toBeNull()
+  })
+
   it('next step is Hand-off while Control is outside the scope', async () => {
     api.campusState.mockResolvedValue(hubState(false))
     mount(<GridCodeTab />)
