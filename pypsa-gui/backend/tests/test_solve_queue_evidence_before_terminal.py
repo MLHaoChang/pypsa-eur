@@ -66,3 +66,49 @@ def test_finish_publishes_evidence_before_the_status_flip(publishes):
     job = _job(kind=sq.KIND_GRIDSPINE)
     sq.solve_queue._run_gridspine_job(job)
     _assert_published_before_flip(publishes, job, "failed")
+
+
+@pytest.fixture
+def failing_publish(monkeypatch):
+    from services import solve_job_store
+
+    recorded: list[str] = []
+
+    def hook(job, status=None):
+        raise RuntimeError("evidence store down")
+
+    monkeypatch.setattr(run_evidence, "publish_queue_run", hook)
+    monkeypatch.setattr(solve_job_store, "record_status",
+                        lambda job: recorded.append(job.status) or True)
+    sq.solve_queue.reset_for_tests()
+    yield recorded
+    sq.solve_queue.reset_for_tests()
+
+
+def _drain(log_queue) -> list:
+    items = []
+    while not log_queue.empty():
+        items.append(log_queue.get_nowait())
+    return items
+
+
+def test_run_job_still_finishes_when_publishing_raises(failing_publish, monkeypatch):
+    import routers.projects as projects
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("hydrate failed")
+
+    monkeypatch.setattr(projects, "_hydrate_context_from_disk", boom)
+    job = _job()
+    sq.solve_queue._run_job(job)
+    assert job.status == "failed" and job.finished_at is not None
+    assert failing_publish[-1] == "failed"
+    assert _drain(job.log_queue)[-1] is None
+
+
+def test_finish_still_finishes_when_publishing_raises(failing_publish):
+    job = _job(kind=sq.KIND_GRIDSPINE)
+    sq.solve_queue._run_gridspine_job(job)
+    assert job.status == "failed" and job.finished_at is not None
+    assert failing_publish[-1] == "failed"
+    assert None in _drain(job.log_queue)

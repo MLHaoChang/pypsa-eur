@@ -1010,8 +1010,16 @@ class SolveQueue:
     def _finish(self, job: SolveJob, status: str, *, error: str | None = None) -> None:
         """Record a terminal state once, the same way for both runners."""
         with self._lock:
-            job.status = status
             job.error = error
+        # Evidence BEFORE the status flip: `wait_for_job` returns as soon as
+        # the status is terminal, and its caller reads the evidence next.
+        try:
+            from services import run_evidence as _re
+            _re.publish_queue_run(job, status=status)
+        except Exception:  # noqa: BLE001
+            logger.exception("solve_queue: run evidence publish failed for %s", job.id)
+        with self._lock:
+            job.status = status
             job.finished_at = time.time()
         try:
             from services import solve_job_store
@@ -1019,11 +1027,6 @@ class SolveQueue:
             solve_job_store.record_status(job)
         except Exception:  # noqa: BLE001
             logger.exception("solve_queue: could not persist job %s", job.id)
-        try:
-            from services import run_evidence as _re
-            _re.publish_queue_run(job)
-        except Exception:  # noqa: BLE001
-            logger.exception("solve_queue: run evidence publish failed for %s", job.id)
 
     def _run_gridspine_job(self, job: SolveJob) -> None:
         """Run one planning → dynamics study.
@@ -1537,11 +1540,21 @@ class SolveQueue:
             # reached), so there is no SSE stream to close.
             if not parked:
                 with self._lock:
-                    job.status = final_status
                     job.condition = condition
                     job.objective = objective
                     job.solve_time = solve_time
                     job.error = error
+                # Evidence BEFORE the status flip, as in `_finish`: a caller
+                # that sees the terminal status reads the evidence next.
+                try:
+                    from services import run_evidence as _re
+                    _re.publish_queue_run(job, status=final_status)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "solve_queue: run evidence publish failed for %s", job.id,
+                    )
+                with self._lock:
+                    job.status = final_status
                     job.finished_at = time.time()
                 # Mirror the terminal record to the job table, OUTSIDE `_lock`:
                 # the store opens a database session and `_lock` is documented as
@@ -1552,13 +1565,6 @@ class SolveQueue:
                     solve_job_store.record_status(job)
                 except Exception:  # noqa: BLE001 — bookkeeping must not fail a solve
                     logger.exception("solve_queue: could not persist job %s", job.id)
-                try:
-                    from services import run_evidence as _re
-                    _re.publish_queue_run(job)
-                except Exception:  # noqa: BLE001
-                    logger.exception(
-                        "solve_queue: run evidence publish failed for %s", job.id,
-                    )
                 # Close the SSE log stream for this job so the foreground consumer's
                 # `done` event fires (run_simulation pushes None on its own success
                 # path, but the abort/error paths above may not have).
