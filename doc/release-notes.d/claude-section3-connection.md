@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The site connection (point of connection, export link, time zone) has one editor, at the top of Connection & grid. Economics › Basis and Results › Investment show it read-only with an "Edit in Connection & grid ›" link, and the investment case points there when the connection is missing.

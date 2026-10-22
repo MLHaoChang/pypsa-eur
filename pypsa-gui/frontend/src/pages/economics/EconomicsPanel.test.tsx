@@ -13,10 +13,6 @@ vi.mock('../results/investment/FinanceInputsEditor', () => ({
   default: () => <div data-testid="ic-finance-inputs" />,
 }))
 // IC's editors, mounted as they are (E0): stubs that show what the panel passes.
-vi.mock('../results/investment/SiteConnectionSection', () => ({
-  default: ({ config, needed }: { config: { poc_link?: string } | null; needed: boolean }) =>
-    <div data-testid="ic-site" data-needed={String(needed)} data-poc={config?.poc_link ?? ''} />,
-}))
 vi.mock('../results/investment/TariffSection', () => ({ default: () => <div data-testid="ic-tariff" /> }))
 vi.mock('../results/investment/ContractsEditor', () => ({ default: () => <div data-testid="ic-contracts" /> }))
 vi.mock('../results/investment/ParticipantsDesigner', () => ({ default: () => <div data-testid="ic-participants" /> }))
@@ -162,20 +158,23 @@ describe('navigation', () => {
 })
 
 describe('E2: the site connection and IC’s editors', () => {
-  it('a project with no site connection gets the form on the Basis tab, before any solve', async () => {
+  it('a project with no site connection gets "not set" and a link to Connection & grid, not a form', async () => {
     getCommercial.mockResolvedValue({})
+    useUIStore.setState({ uiMode: 'expert' })
     renderPanel()
-    const site = await screen.findByTestId('ic-site')
-    expect(site.getAttribute('data-needed')).toBe('true')
-    expect(getCommercial).toHaveBeenCalled()
+    const line = await screen.findByTestId('site-connection-summary')
+    expect(line.textContent).toMatch(/not set/)
+    expect(screen.queryByTestId('site-connection-form')).toBeNull()
+    fireEvent.click(within(line).getByRole('button', { name: 'Edit in Connection & grid ›' }))
+    expect(useUIStore.getState().activeSection).toBe('connection')
+    expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
   })
 
-  it('a project with one gets its summary', async () => {
-    getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
+  it('a project with one gets its summary line', async () => {
+    getCommercial.mockResolvedValue({ poc_link: 'grid_import', export_link: 'grid_export', timezone: 'UTC' })
     renderPanel()
-    const site = await screen.findByTestId('ic-site')
-    expect(site.getAttribute('data-needed')).toBe('false')
-    expect(site.getAttribute('data-poc')).toBe('grid_import')
+    const line = await screen.findByTestId('site-connection-summary')
+    expect(line.textContent).toMatch(/imports through grid_import, exports through grid_export, site time UTC/)
   })
 
   it('the Tariffs & contracts tab mounts the tariff, contracts and participants editors', () => {

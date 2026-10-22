@@ -40,6 +40,7 @@ import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } f
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
 import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
+import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
@@ -212,6 +213,9 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         </div>
       )}
       {part === 'inputs' && (<>
+        <PageSection title="Site connection" hint="The point of connection the bill and the investment case read">
+          <SiteConnectionEditor />
+        </PageSection>
         <CampusFileSection name={name} state={state.data} onChange={refresh} />
         <GridConnectionSection name={name} state={state.data} />
         <ConnectionLimits />
