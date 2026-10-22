@@ -7,12 +7,13 @@
 // on the connection link. Guided and Expert get the same control: here in
 // Expert, and in Guided the field drawer a to-check item opens (App.tsx).
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageSection } from '../PageKit'
 import type { FlowTarget } from '../../api/flow'
 import {
   campusApi, type GridLimitItem, type GridLimitSetting, type GridLimitSource, type GridReadinessRow,
 } from '../../api/campusElectrical'
+import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { blockerMessage } from '../../utils/blockerMessage'
@@ -23,13 +24,13 @@ const SHOWN: Record<string, string> = {
   energization_peak: 'Energization',
   ramp_rate: 'Connection ramp limit',
   oscillation: 'Oscillation band',
-  scr: 'Fault level source',
+  scr: 'Fault level',
 }
 
 /** The three limits the user can set: row kind → unit the value is entered in and its valid range. */
 const EDITABLE: Record<string, { unit: string; max: number | null; hint: string }> = {
   ramp_rate: { unit: 'MW/min', max: null, hint: 'above 0' },
-  oscillation: { unit: '% of connection', max: 100, hint: 'above 0, at most 100' },
+  oscillation: { unit: '% of connection, peak-to-peak', max: 100, hint: 'above 0, at most 100' },
   scr: { unit: '', max: null, hint: '' },
 }
 
@@ -107,9 +108,10 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
           <span className="text-muted">{unit}</span>
         </div>
       ) : (
-        <span className="text-[11px] text-muted">Its value is set on the point-of-connection bus; here only where it comes from.</span>
+        <span className="text-[11px] text-muted">The value is edited on the point-of-connection bus; here, where it comes from.</span>
       )}
       <div className="flex flex-wrap items-center gap-1 text-[11px]">
+        <span className="text-muted">Source:</span>
         <select aria-label={`${label} source`} value={source}
           onChange={e => setSource(e.target.value as GridLimitSource)}
           className="rounded border border-border bg-bg px-1 py-0.5">
@@ -137,14 +139,24 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
 }
 
 /** `only` narrows the list to some row kinds: the Guided field drawer opens the one line a to-check item points at. */
+/** The fault level on the point-of-connection bus(es): the lowest, as the readiness check takes it. */
+function usePocFaultLevel(): number | null {
+  const project = useUIStore(s => s.currentProject)
+  const q = useQuery({ queryKey: nk(project, 'buses'), queryFn: networkApi.getBuses, enabled: !!project, staleTime: 30_000 })
+  const vals = (q.data ?? []).filter(b => b.eh_poc).map(b => Number(b.eh_sk_mva)).filter(v => Number.isFinite(v) && v > 0)
+  return vals.length ? Math.min(...vals) : null
+}
+
 export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const q = useGridReadiness()
+  const faultMva = usePocFaultLevel()
   const expert = useUIStore(s => s.uiMode === 'expert')
   // Same button in both modes: Expert opens the Link's properties, Guided the field drawer over the card.
   const open = (t: FlowTarget) => (expert ? openFlowTarget(t) : openFlowTargetInPlace(t))
   const rows = (q.data?.rows ?? []).filter(r => kindOf(r) in SHOWN && (kindOf(r) !== 'scr' || r.setting) && (!only || only.includes(kindOf(r))))
   // One line per kind. Energization has one row per period: every period is listed,
   // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
+  const link = rows.find(r => kindOf(r) === 'ramp_rate')?.target as FlowTarget | undefined
   const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))
   return (
     <PageSection title="Connection limits" hint="Set the ones you know">
@@ -159,7 +171,7 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
                 const lead = group[0]
                 const staged = group.length > 1 || lead.id.includes(':')
                 const editable = k in EDITABLE && lead.setting
-                const figures = k === 'scr' ? null : staged
+                const figures = k === 'scr' ? (faultMva != null ? `${Number(faultMva.toPrecision(4))} MVA` : 'not set') : staged
                   ? group.map(r => `${r.id.split(':')[1] ?? ''} ${fmt(r.limit, r.unit)}`.trim()).join(' · ')
                   : fmt(lead.limit, lead.unit)
                 return (
@@ -170,7 +182,20 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
                     <span className="block text-muted">{lead.source}{lead.note && !staged ? `. ${lead.note}` : ''}</span>
                     {editable
                       // Keyed on what is stored, so a saved or reset limit reloads the fields.
-                      ? <LimitEditor key={JSON.stringify(lead.setting)} row={lead} setting={lead.setting!} label={SHOWN[k]} />
+                      ? (<>
+                          <LimitEditor key={JSON.stringify(lead.setting)} row={lead} setting={lead.setting!} label={SHOWN[k]} />
+                          {!only && k === 'scr' && lead.target.field && (
+                            <button type="button" className="underline text-[11px]" onClick={() => open(lead.target as FlowTarget)}>
+                              Edit the fault level ›
+                            </button>
+                          )}
+                          {!only && k === 'ramp_rate' && link && (
+                            <span className="block text-[11px] text-muted">
+                              Checked by Grid readiness; the optimisation's ramp is set on the connection link{' '}
+                              <button type="button" className="underline" onClick={() => open(link)}>Edit the link ›</button>
+                            </span>
+                          )}
+                        </>)
                       : k === 'energization_peak' && lead.target.field && (
                         <button type="button" className="underline text-[11px]" onClick={() => open(lead.target as FlowTarget)}>
                           Edit the energization schedule

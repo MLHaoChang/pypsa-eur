@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { campusApi } from '../../api/campusElectrical'
+import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
 import { ConnectionLimits } from './ConnectionLimits'
 
+vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
+  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]) } }))
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
@@ -27,7 +30,7 @@ const setting = (item: string, over: Record<string, unknown> = {}) => ({
   item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
 
 describe('ConnectionLimits', () => {
-  it('lists energization, ramp and oscillation read-only with their source and assumed tag', async () => {
+  it('lists energization, ramp, oscillation and fault level with their source and assumed tag', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
       row('energization_peak', { unit: 'MW', limit: null, target: { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' } }),
       row('ramp_rate', { assumed: true }), row('oscillation', { unit: '% of connection, peak-to-peak', limit: 1 }),
@@ -108,8 +111,8 @@ describe('ConnectionLimits', () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level', { default: { value: null, source: 'assumed', origin: 'placeholder' } }) })] } as never)
     vi.mocked(campusApi.setGridLimit).mockResolvedValue({})
     mount()
-    fireEvent.change(await screen.findByLabelText('Fault level source source'), { target: { value: 'datasheet' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save fault level source' }))
+    fireEvent.change(await screen.findByLabelText('Fault level source'), { target: { value: 'datasheet' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save fault level' }))
     await waitFor(() => expect(campusApi.setGridLimit).toHaveBeenCalledWith('Demo', 'fault_level', { source: 'datasheet', note: '' }))
   })
 
@@ -139,5 +142,18 @@ describe('ConnectionLimits', () => {
       <ConnectionLimits only={['oscillation']} /></QueryClientProvider>)
     expect(await screen.findByLabelText('Oscillation band value')).toBeTruthy()
     expect(screen.queryByLabelText('Connection ramp limit value')).toBeNull()
+  })
+
+  it('the fault level shows its figure from the PoC bus and routes to that bus field; ramp says what else sets a ramp', async () => {
+    const bus = { section: 'connection', panel: null, component: 'Bus', entity: 'grid', field: 'eh_sk_mva' }
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('ramp_rate', { setting: setting('connection_ramp') }),
+      row('scr', { target: bus, setting: setting('fault_level') })] } as never)
+    useUIStore.setState({ uiMode: 'expert' })
+    mount()
+    expect((await screen.findByTestId('connection-limit-scr')).textContent).toMatch(/Fault level: 250 MVA/)
+    expect(screen.getByTestId('connection-limit-ramp_rate').textContent).toMatch(/optimisation's ramp is set on the connection link/)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit the fault level ›' }))
+    expect(useUIStore.getState().selectedComponent).toMatchObject({ type: 'Bus', name: 'grid' })
   })
 })
