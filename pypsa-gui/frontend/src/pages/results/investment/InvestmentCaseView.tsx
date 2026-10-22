@@ -251,7 +251,7 @@ function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload 
               <th scope="col" className="text-right">Quantity</th>
               <th scope="col" className="text-right">Overnight cost</th>
               <th scope="col" className="text-right">Build year</th>
-              <th scope="col" className="text-left">COD</th>
+              <th scope="col" className="text-left pl-3">COD</th>
             </tr></thead>
             <tbody>{c.rows.map(r => (
               <tr key={r.name} data-testid={`ic-campus-asset-${r.name}`}>
@@ -262,7 +262,7 @@ function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload 
                 <td className="text-right" data-established={r.overnight !== null}>
                   {r.overnight === null ? NOT_ESTABLISHED : fmtAmount(r.overnight)}</td>
                 <td className="text-right">{r.buildYear ?? NOT_ESTABLISHED}</td>
-                <td className="text-left text-muted">{r.cod ?? NOT_ESTABLISHED}</td>
+                <td className="text-left pl-3 text-muted">{r.cod ?? NOT_ESTABLISHED}</td>
               </tr>
             ))}</tbody>
           </table>
