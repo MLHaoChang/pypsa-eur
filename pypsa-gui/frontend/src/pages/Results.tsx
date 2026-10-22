@@ -44,8 +44,26 @@ import {
 // All three share the same status query (objective / solve_time / condition)
 // at the top so the user always sees solve metadata regardless of tab.
 
-import { RESULT_GROUPS, groupOf, type ResultsGroup, type ResultsTab } from './results/groups'
+import { CARD_GROUPS, cardPlaceOf, type CardGroupId, type ResultsTab } from './results/groups'
+import GroupHeader from './results/GroupHeader'
+import { ScopeGate } from '../components/flowScope/ScopeGate'
+import { useFlowScope } from '../components/flowScope/useFlowScope'
+import { inScope, type ScopeCardId } from '../api/flow'
+import { X } from 'lucide-react'
+import { openFlowTarget, openSectionInGuided } from '../layout/flowNavigation'
+import type { FlowTarget } from '../api/flow'
+
 import BackToHubResults from '../components/BackToHubResults'
+
+// What an empty card group points to (one line each to re-point).
+// Mode-aware, through the shared navigation.
+const flowTarget = (section: FlowTarget['section'], panel: string): FlowTarget =>
+  ({ section, panel, component: null, entity: null, field: null })
+const EMPTY_GROUP_NEXT: Record<string, { note: string; label: string; section: FlowTarget['section']; panel: string }> = {
+  control: { note: 'Control results come from the island study. ', label: 'Run the island study in Grid study',
+    section: 'scenarios', panel: 'campusStudy' },
+  handoff: { note: 'Reports and exports are made from Reports. ', label: 'Open Reports', section: 'results', panel: 'reports' },
+}
 const RESULTS_TAB_KEY = 'results:active-tab'
 
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
@@ -136,7 +154,10 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
 
 export default function Results() {
   const [tab, setTabState] = useState<ResultsTab>(loadInitialTab)
+  // A group with no tab yet (Control, Hand-off) is picked as a group.
+  const [emptyGroup, setEmptyGroup] = useState<CardGroupId | null>(null)
   const setTab = (t: ResultsTab) => {
+    setEmptyGroup(null)
     setTabState(t)
     try { localStorage.setItem(RESULTS_TAB_KEY, t) } catch { /* ignore */ }
   }
@@ -154,7 +175,9 @@ export default function Results() {
   // UX overhaul S3: the tab last used in each group, so returning to a group
   // lands where the user left it (in memory only; the stored active tab is
   // still the one thing persisted).
-  const lastInGroup = useRef<Partial<Record<ResultsGroup, ResultsTab>>>({})
+  const lastInGroup = useRef<Partial<Record<CardGroupId, ResultsTab>>>({})
+  // Asset Detail is a drawer over the tab beneath it (R1): the last other tab.
+  const lastBodyTab = useRef<ResultsTab>('summary')
 
   // ── Docked comparison rail ─────────────────────────────────────────────
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
@@ -578,17 +601,40 @@ export default function Results() {
   const tabVisible = (t: (typeof TABS)[number]) =>
     (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)
   const visibleTabIds = new Set<ResultsTab>(TABS.filter(tabVisible).map(t => t.id))
-  const activeGroup = groupOf(effectiveTab)
-  const groupTabs = activeGroup
-    ? (RESULT_GROUPS.find(g => g.id === activeGroup)!.tabs
-        .map(id => TABS.find(t => t.id === id)!)
-        .filter(t => visibleTabIds.has(t.id)))
-    : []
-  if (activeGroup) lastInGroup.current[activeGroup] = effectiveTab
-  const pickGroup = (g: ResultsGroup) => {
-    const tabs = RESULT_GROUPS.find(x => x.id === g)!.tabs.filter(id => visibleTabIds.has(id))
+  // The drawer sits over the last non-asset tab; a first load on 'asset' falls back to Summary.
+  const bodyTab: ResultsTab = effectiveTab === 'asset' ? lastBodyTab.current : effectiveTab
+  if (effectiveTab !== 'asset') lastBodyTab.current = effectiveTab
+  const place = cardPlaceOf(bodyTab)
+  const activeGroup: CardGroupId | null = emptyGroup ?? place?.group ?? null
+  const shownGroup = CARD_GROUPS.find(g => g.id === activeGroup)
+  // Card tabs with at least one visible view, per group.
+  const visibleCardTabs = (g: (typeof CARD_GROUPS)[number]) =>
+    g.tabs.filter(ct => ct.views.some(v => visibleTabIds.has(v)))
+  const groupTabs = shownGroup && emptyGroup == null ? visibleCardTabs(shownGroup) : []
+  const activeCardTab = place?.cardTab ?? null
+  const subViews = (() => {
+    const ct = shownGroup?.tabs.find(t => t.id === activeCardTab)
+    return ct ? ct.views.filter(v => visibleTabIds.has(v)).map(id => TABS.find(t => t.id === id)!) : []
+  })()
+  if (activeGroup && emptyGroup == null) lastInGroup.current[activeGroup] = bodyTab
+  const { scope: flowScope, isSuccess: scopeRead } = useFlowScope()
+  // While the scope is unread everything counts as in scope (no flicker); the
+  // Summary landing and a group's own tabs never depend on it.
+  const groupOutside = (g: CardGroupId) =>
+    g !== 'summary' && scopeRead && !inScope(flowScope, g as ScopeCardId)
+  const pickGroup = (g: CardGroupId) => {
+    const group = CARD_GROUPS.find(x => x.id === g)!
+    const cts = visibleCardTabs(group)
+    if (cts.length === 0) { manualNavigation(); setRequestedTab(null); setEmptyGroup(g); return }
+    const views = cts.flatMap(ct => ct.views.filter(v => visibleTabIds.has(v)))
     const remembered = lastInGroup.current[g]
-    pickTab(remembered && tabs.includes(remembered) ? remembered : tabs[0])
+    pickTab(remembered && views.includes(remembered) ? remembered : views[0])
+  }
+  const pickCardTab = (id: string) => {
+    const ct = shownGroup!.tabs.find(t => t.id === id)!
+    const views = ct.views.filter(v => visibleTabIds.has(v))
+    pickTab(views.includes(lastInGroup.current[shownGroup!.id] as ResultsTab)
+      ? lastInGroup.current[shownGroup!.id]! : views[0])
   }
   const renderTab = ({ id, label, Icon, tip }: (typeof TABS)[number]) => {
     const active = effectiveTab === id
@@ -618,13 +664,35 @@ export default function Results() {
 
   // Guided names the group on screen, not always the reliability entry it was
   // opened from (UX template audit M1).
-  const shownGroup = RESULT_GROUPS.find(g => g.id === activeGroup)
   // Summary and Reliability keep the hub design's reliability header (P29).
   const hubHeader = !shownGroup || shownGroup.id === 'reliability' || shownGroup.id === 'summary'
+  const outside = activeGroup != null && groupOutside(activeGroup)
+  const hasEarlierResults = status != null && status.objective != null
   const guidedTitle = hubHeader ? 'Reliability results' : `${shownGroup.label} results`
   const guidedSubtitle = hubHeader
     ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
     : `${shownGroup.question}.`
+
+  const renderBody = (t: ResultsTab) => (
+    <>
+      {t === 'summary'     && <SummaryTab onOpenTab={pickTab} onOpenGroup={pickGroup} />}
+      {t === 'overview'    && <AggregatedResultsBody />}
+      {t === 'capex'       && <CapacityExpansion />}
+      {t === 'dispatch'    && <Dispatch />}
+      {t === 'loadflow'    && <LoadFlow />}
+      {t === 'prices'      && <Prices />}
+      {t === 'economics'   && <Economics />}
+      {t === 'emissions'   && <Emissions />}
+      {t === 'curtailment' && <Curtailment />}
+      {t === 'lostload'    && <LostLoadTab />}
+      {t === 'adequacy'    && <AdequacyTab />}
+      {t === 'fmea'        && <FmeaTab />}
+      {t === 'storage'     && <StorageCycling />}
+      {t === 'flows'       && <EnergyFlowsTab />}
+      {t === 'loadshape'   && <LoadShapeTab />}
+      {t === 'investment'  && <InvestmentTab />}
+    </>
+  )
 
   return (
     <div
@@ -700,17 +768,20 @@ export default function Results() {
           results_tab are unchanged. Asset detail is an inspector, not a
           category: it sits on the right of the group row. */}
       <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
-        {RESULT_GROUPS.filter(g => g.tabs.some(id => visibleTabIds.has(id))).map(g => {
+        {CARD_GROUPS.filter(g => g.id === 'summary' || uiMode === 'expert' || visibleCardTabs(g).length > 0).map(g => {
           const active = activeGroup === g.id
+          const off = groupOutside(g.id)
           return (
             <button
               key={g.id}
               onClick={() => pickGroup(g.id)}
-              title={g.question}
+              title={off ? `${g.question}. Outside scope: add ${g.label} to the scope to run it.` : g.question}
               data-testid={`results-group-${g.id}`}
+              data-outside-scope={off ? 'true' : undefined}
               aria-pressed={active}
               className={`h-9 px-3 shrink-0 flex items-center text-[12.5px] font-semibold border-b-2 -mb-px transition-colors
-                ${active ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}`}
+                ${active ? 'border-accent text-text' : 'border-transparent text-muted hover:text-text'}
+                ${off ? 'opacity-50' : ''}`}
             >
               {g.label}
             </button>
@@ -732,10 +803,29 @@ export default function Results() {
           Compare
         </button>
       </div>
-      {activeGroup && groupTabs.length > 0 && !(activeGroup === 'summary' && groupTabs.length === 1) && (
+      {shownGroup && (
+        <GroupHeader group={shownGroup} status={status} outsideScope={outside} />
+      )}
+      {shownGroup && groupTabs.length > 0 && !(shownGroup.id === 'summary') && (
         <div className="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto"
           data-testid="results-subtabs">
-          {groupTabs.map(t => renderTab(t))}
+          {groupTabs.map(ct => {
+            const tabActive = activeCardTab === ct.id
+            return (
+              <button key={ct.id} onClick={() => pickCardTab(ct.id)} data-testid={`results-cardtab-${ct.id}`}
+                data-views={ct.views.filter(v => visibleTabIds.has(v)).join(',')}
+                className={`h-8 px-3 shrink-0 flex items-center text-[12px] font-medium border-b-2 -mb-px transition-colors
+                  ${tabActive ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-text'}`}>
+                {ct.label}
+              </button>
+            )
+          })}
+        </div>
+      )}
+      {(subViews.length > 1 || subViews.some(t => t.id === advancedTab)) && (
+        <div className="flex items-center shrink-0 border-b border-border bg-bg px-2 gap-0 overflow-x-auto"
+          data-testid="results-subviews">
+          {subViews.map(t => renderTab(t))}
         </div>
       )}
 
@@ -856,32 +946,59 @@ export default function Results() {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
               if (discussedRun) return <RunBoundView run={discussedRun} tab={effectiveTab} />
-              const t = (effectiveTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : effectiveTab
-              return (
-                <>
-                  {t === 'summary'     && <SummaryTab onOpenTab={pickTab} />}
-                  {t === 'overview'    && <AggregatedResultsBody />}
-                  {t === 'capex'       && <CapacityExpansion />}
-                  {t === 'dispatch'    && <Dispatch />}
-                  {t === 'loadflow'    && <LoadFlow />}
-                  {t === 'prices'      && <Prices />}
-                  {t === 'economics'   && <Economics />}
-                  {t === 'emissions'   && <Emissions />}
-                  {t === 'curtailment' && <Curtailment />}
-                  {t === 'lostload'    && <LostLoadTab />}
-                  {t === 'adequacy'    && <AdequacyTab />}
-                  {t === 'fmea'        && <FmeaTab />}
-                  {t === 'storage'     && <StorageCycling />}
-                  {t === 'flows'       && <EnergyFlowsTab />}
-                  {t === 'loadshape'   && <LoadShapeTab />}
-                  {t === 'asset'       && <AssetDetail />}
-                  {t === 'investment'  && <InvestmentTab />}
-                </>
-              )
+              const t = (bodyTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : bodyTab
+              // A group with no tab yet, or a card outside the scope (RC3 A):
+              // the scope gate says so, the earlier results stay below, dimmed
+              // and read-only.
+              if (emptyGroup != null || outside) {
+                const g = emptyGroup ?? activeGroup!
+                const label = CARD_GROUPS.find(x => x.id === g)!.label
+                return (
+                  <div className="h-full overflow-auto" data-testid="results-gbody">
+                    {outside ? (
+                      <div className="p-4"><ScopeGate card={g as ScopeCardId} testId="results-outside-scope">{null}</ScopeGate></div>
+                    ) : (
+                      <p data-testid="results-gempty" className="p-4 text-[12px] text-muted">
+                        {EMPTY_GROUP_NEXT[g]?.note}
+                        <button type="button" data-testid="results-gempty-open"
+                          onClick={() => {
+                            const n = EMPTY_GROUP_NEXT[g]
+                            if (useUIStore.getState().uiMode === 'guided') openSectionInGuided(n.section)
+                            else openFlowTarget(flowTarget(n.section, n.panel))
+                          }}
+                          className="text-accent hover:underline">
+                          {EMPTY_GROUP_NEXT[g]?.label} ›
+                        </button>
+                      </p>
+                    )}
+                    {outside && emptyGroup == null && hasEarlierResults && (
+                      <div data-testid="results-earlier" className="border-t border-border">
+                        <p className="px-4 py-2 text-[11px] text-muted">
+                          From the latest run. Read-only while {label} is outside the scope.
+                        </p>
+                        <div inert className="opacity-50 pointer-events-none select-none">
+                          {renderBody(t)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+              return renderBody(t)
             })()}
           </div>
         </ResultsFilterProvider>
-
+        {effectiveTab === 'asset' && (
+          <aside data-testid="asset-drawer" aria-label="Asset detail"
+            className="w-[min(900px,72%)] shrink-0 min-w-0 overflow-auto border-l border-border bg-bg">
+            <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
+              <span className="text-[12px] font-semibold">Asset Detail</span>
+              <button type="button" data-testid="asset-drawer-close" aria-label="Close asset detail"
+                onClick={() => pickTab(lastBodyTab.current)} className="text-muted hover:text-text"><X size={14} /></button>
+            </div>
+            <ResultsFilterProvider value={filterValue}><AssetDetail /></ResultsFilterProvider>
+          </aside>
+        )}
         {/* Comparison rail — embeds the A-vs-B CompareView. data-no-panel-close
             is REQUIRED: native <select> dropdowns dismiss via a document
             mousedown whose target is outside the panel, which would otherwise
