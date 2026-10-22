@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Expert sidebar is regrouped into the ten project-flow sections (Set-up, Model, Question & run, Results), each with the same state dot as the project flow; the sidebar Assistant button is removed (the companion is the one entry); the UI keeps an `activeSection` shared by Guided and Expert.

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-21",
+  "generated_at": "2026-10-22",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 268,
+  "tool_count": 284,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -47,11 +47,12 @@
         "_service_call_"
       ],
       "input_keys": [
-        "exclude_shown"
+        "exclude_shown",
+        "card"
       ],
       "required": [],
       "safety_tier": "read",
-      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "schema_sha256": "9c914e11d02c18d953c65eab78934c415263d4c751d906ca74139b6ad0246887",
       "behavioral_fixture": "pending"
     },
     {
@@ -2271,6 +2272,27 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "get_profile_readiness",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/readiness"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "generate_renewable_profile",
       "toolsets": [
         "network"
@@ -2316,7 +2338,9 @@
         "job_id",
         "component",
         "point_id",
-        "time_basis"
+        "time_basis",
+        "component_type",
+        "attribute"
       ],
       "required": [
         "project_id",
@@ -2324,7 +2348,173 @@
         "component"
       ],
       "safety_tier": "write",
-      "schema_sha256": "2d1ca8a47aa130e9388f8cff4a688ee54fa1a64322fb2100afabfaac8dec1354",
+      "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/preview"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "replace_generated",
+        "peak_sized"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "d2bffa1352e1c4f15d71f9e93afa5f173b66aba0eb08e0d07084622bbad1e62a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_ids"
+      ],
+      "required": [
+        "project_id",
+        "job_ids"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "4269f1d7d6b12df848df53620eeb7843392056062a9e9e4cd45573e6572dd0cc",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_load_profile_archetypes",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/profiles/load-archetypes"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_load_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/loads/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "archetype",
+        "loads",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "archetype",
+        "loads"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "7e4c6f8350d345f5d6c9908cc9f9944961f4b7ea0c7e540c60046c3b9ce33e97",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_availability_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/availability/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "generators",
+        "component_type",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "generators"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "9a8958ce2c7ba44d44c476dbbf9a70f2b0660d95c91708439d58ed5fa749ab10",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "refine_generated_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/refine"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_id",
+        "ops"
+      ],
+      "required": [
+        "project_id",
+        "job_id",
+        "ops"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "14771d18c344f4d2ba2c0783cf73e8ecc8c6396b6c8071a9de620c98d2da3c98",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "generate_series_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/series/generate"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "kind",
+        "components",
+        "params",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "kind",
+        "components"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "48bae26db000db4ba9df339c0ea20af456d40e4ba2d2a07f3b54b36c25f331cd",
       "behavioral_fixture": "pending"
     },
     {
@@ -2784,7 +2974,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "7f6fa839e4b0c8795add790518d68197b05c7b9dcf927cb0a28456c6f10d6fba",
+      "schema_sha256": "ca48da82f598cd3ad8996b65bec04dfe94961be6da8fb4e63d35cce295e29e0f",
       "behavioral_fixture": "pending"
     },
     {
@@ -3178,7 +3368,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
+      "schema_sha256": "93bde255ba875a6460049fb764a44364390030a7e0b8538d53f38ae8025871c4",
       "behavioral_fixture": "pending"
     },
     {
@@ -4621,6 +4811,25 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "campus_grid_readiness",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "project_id",
+        "profile"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b638f21159458f54ae0ee6a3d6916a963a83d51be4d58eb13da126e2f7368d09",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "campus_set_island_config",
       "toolsets": [
         "gridspine"
@@ -5031,6 +5240,187 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_references",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/references"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/asset_schema/{component}/provenance/{name}"
+        ],
+        [
+          "GET",
+          "/api/library/references/{technology}/{year}"
+        ]
+      ],
+      "input_keys": [
+        "technology",
+        "projection_year",
+        "component",
+        "asset"
+      ],
+      "required": [
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d0bb21532317ba1c4c749f14f1728a4d2bbc9a1fe3c8d786f7c82ad4dbd6fb60",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/library_reference/apply"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year",
+        "confirm"
+      ],
+      "required": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1c2443ff6f0d5d79a2626d5d1c850603441be36936b236c8173cc55dc934e281",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/equipment_table/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_document_values",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "citations"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "fe307619891fdb555f3f48c4ff2bf60efb91021de3d320b94bc3d9f982254fa1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_document_values",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/document_values/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "46573de48a4a62e0bb4c508693111f48a010a18e99117287a02f243d95c0a841",
       "behavioral_fixture": "pending"
     },
     {
@@ -5822,7 +6212,8 @@
       "input_keys": [
         "title",
         "request_id",
-        "steps"
+        "steps",
+        "brief"
       ],
       "required": [
         "title",
@@ -5830,7 +6221,7 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
     {
@@ -6139,7 +6530,7 @@
     },
     {
       "id": "economics",
-      "label": "Economics"
+      "label": "Asset economics"
     },
     {
       "id": "emissions",
@@ -6212,9 +6603,12 @@
     "hubDesign",
     "reports",
     "campusElectrical",
+    "campusStudy",
+    "campusResults",
     "decision",
     "economics",
-    "profiles"
+    "profiles",
+    "library"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6272,12 +6666,18 @@
     "reports",
     "CampusElectrical",
     "campusElectrical",
+    "CampusStudy",
+    "campusStudy",
+    "CampusResults",
+    "campusResults",
     "DecisionStudy",
     "decision",
     "Economics",
     "economics",
     "ProfileStudio",
-    "profiles"
+    "profiles",
+    "CommercialLibrary",
+    "library"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

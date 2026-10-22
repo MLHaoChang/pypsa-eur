@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant's `create_project_from_template` tool now describes `params.planning` (start year, end year, optional dates) for the staged data center, H2 hub and microgrid examples, and the placeholders an entered year can leave to be set.

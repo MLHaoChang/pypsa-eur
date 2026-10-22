@@ -3,13 +3,15 @@
 // renderer replaces each card's four hand-written lists (read-out rows,
 // `startEdit` keys, save mapping, edit inputs). Derived rows (capital cost,
 // a battery's lifetime and fixed O&M) are shown read-only, never typed.
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
-import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
+import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
+import { derivedStored, displayValue, isRevealed, tidy, unitLabel } from '../../utils/assetForm'
+import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
-  BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
+  BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, LifetimeInherit, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
 } from './cardKit'
 
@@ -46,7 +48,8 @@ function chipOf(stamps: Stamps, key: string) {
  * an unstamped one has no `badge` key at all, so the items are as before.
  */
 export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record<string, unknown>,
-  hidden: ReadonlySet<string> = new Set(), stamps?: Stamps): ExpandedItem[] {
+  hidden: ReadonlySet<string> = new Set(), stamps?: Stamps,
+  series?: Record<string, SeriesField>): ExpandedItem[] {
   const fs: FS = Object.fromEntries(Object.entries(asset).map(([k, v]) => [k, String(v)]))
   const out: ExpandedItem[] = []
   const push = (f: AssetFieldSpec, item: ExpandedItem) => {
@@ -56,6 +59,11 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
   for (const f of schemaFields(schema)) {
     if (f.group === 'identity' || hidden.has(f.key) || !isRevealed(f, fs)) continue
     const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
+    if (series?.[f.key]?.set) {
+      // A series wins over the scalar in the model; show that, not the constant.
+      push(f, { label: f.label, value: `Time series, ${series[f.key].set}`, tip: f.help })
+      continue
+    }
     if (f.kind === 'bool') {
       if (v === true) push(f, { label: f.label, value: true, tip: f.help })
       continue
@@ -81,6 +89,15 @@ function chipRow(stamps: Stamps, key: string) {
 }
 
 const LABEL_ONLY_KINDS: ReadonlySet<string> = new Set(['text', 'bus', 'carrier'])
+
+function SeriesSetRow({ label, field, k }: { label: string; field: SeriesField; k: string }) {
+  return (
+    <div className="col-span-2 text-[10px]" data-testid={`asset-series-${k}`}>
+      <span className="text-muted">{label}: </span>
+      Time series set ({field.set}). Edit it in {field.editor}.
+    </div>
+  )
+}
 
 function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unknown; stamps?: Stamps }) {
   const d = displayValue(spec, value)
@@ -173,12 +190,49 @@ function PartsTable({ parts, fs, set, stamps }: { parts: AssetFieldSpec[]; fs: F
   )
 }
 
+// The cost fields whose stamp carries a money year, shown beside the unit:
+// on its own line under the field ("In 2025 €"). A value is in the money year it was priced in.
+const MONEY_FIELDS: ReadonlySet<string> = new Set(['overnight_cost', 'fom_cost'])
+
+function moneyYear(key: string, stamps: Stamps): string | null {
+  const entry = MONEY_FIELDS.has(key) ? stamps?.[key] : undefined
+  return entry?.currency_year == null ? null : `${entry.currency_year} ${unitLabel(entry.currency ?? 'EUR')}`
+}
+
+/** The open form takes in what an applied reference wrote (stored → display), so a later
+ *  Save writes the applied values back unchanged instead of the form's stale ones. */
+export function appliedFields(schema: AssetSchema, written: Record<string, number>): FS {
+  const out: FS = {}
+  for (const f of schemaFields(schema)) {
+    if (f.key in written && !f.derived) out[f.key] = tidy(written[f.key] * f.scale)
+  }
+  return out
+}
+
+/** The asset-side entry to the Library's cost references: a link beside the investment
+ *  cost that opens the compare-and-apply drawer for this asset, and returns to the form. */
+function CompareReferences({ componentClass, name, money, onApplied }: {
+  componentClass: 'Generator' | 'Link'; name: string; money: string | null
+  onApplied: (written: Record<string, number>) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="col-span-2 -mt-0.5 flex gap-2 text-[9px]">
+      {money && <span className="text-muted" data-testid="asset-money-overnight_cost">In {money}</span>}
+      <button type="button" className="text-[9px] text-accent underline" data-testid="asset-compare-references"
+        onClick={() => setOpen(true)}>Compare with references</button>
+      {open && <ReferenceApplyDrawer open onClose={() => setOpen(false)} componentClass={componentClass} name={name}
+        onApplied={onApplied} />}
+    </div>
+  )
+}
+
 /**
  * The edit form's fields. `current` feeds the derived rows; `onCheck` hooks a
  * boolean's side effect (Extendable seeds the minimum); `after` places a card's
  * own control after a field (e.g. the per-period bounds link after the maximum).
  */
-export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance }: {
+export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onCheck, after, hidden, provenance, series }: {
   schema: AssetSchema
   fs: FS
   set: SetFS
@@ -195,11 +249,20 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
    * shows no chip (unknown is not "default").
    */
   provenance?: Record<string, ProvenanceEntry>
+  /**
+   * Fields a series editor also writes (`useSeriesFields`): with a series set
+   * the field is read-only here and points to its editor; without one it is
+   * the constant that editor starts from (UX review, checklist §6.2).
+   */
+  series?: Record<string, SeriesField>
 }) {
   // The typed parts of a composite asset render together, as one table where
   // the first of them would have been (the Investment group).
   const parts = schemaFields(schema).filter(f => f.part && !f.derived)
   const firstPart = parts[0]?.key
+  // Generators and Links can take a shipped cost reference (wind, PV, electrolysers).
+  const referenceClass = schema.component === 'Generator' || schema.component === 'Link' ? schema.component : null
+  const assetName = typeof current.name === 'string' ? current.name : null
   return (
     <>
       {schema.groups.map(g => {
@@ -219,6 +282,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                     {parts.map(p => <Fragment key={p.key}>{after?.[p.key]}</Fragment>)}
                   </>
                 )
+                  : series?.[f.key]?.set ? <SeriesSetRow label={f.label} field={series[f.key]} k={f.key} />
                   : f.derived ? <DerivedRow spec={f} value={derivedStored(f.key, current)} stamps={provenance} />
                   : f.kind === 'bool' ? <ChkInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} onCheck={onCheck?.[f.key]}
                       badge={chipOf(provenance, f.key)} />
@@ -226,8 +290,19 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   : f.kind === 'carrier' ? <CarrierGroupSelect k={f.key} fs={fs} set={set} carriers={carriers} tip={f.help} />
                   : f.kind === 'text' ? <TxtInput label={f.label} k={f.key} fs={fs} set={set} tip={f.help} />
                   : f.kind === 'enum' ? <EnumInput spec={f} fs={fs} set={set} badge={chipOf(provenance, f.key)} />
-                  : <NumInput label={f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined} tip={f.help}
+                  : <NumInput label={series?.[f.key] ? `Constant ${f.label.charAt(0).toLowerCase()}${f.label.slice(1)}` : f.label} k={f.key} fs={fs} set={set} unit={f.unit_display ? unitLabel(f.unit_display) : undefined}
+                      tip={series?.[f.key]
+                        ? `${f.help ?? ''} The constant the ${series[f.key].editor} editor starts from; a series set there replaces it.`.trim()
+                        : f.help}
                       badge={chipOf(provenance, f.key)} />}
+                {f.key === 'overnight_cost' && referenceClass && assetName ? (
+                  <CompareReferences componentClass={referenceClass} name={assetName} money={moneyYear(f.key, provenance)}
+                    onApplied={written => set(prev => ({ ...prev, ...appliedFields(schema, written) }))} />
+                ) : MONEY_FIELDS.has(f.key) && moneyYear(f.key, provenance) && (
+                  <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-money-${f.key}`}>
+                    In {moneyYear(f.key, provenance)}</div>
+                )}
+                {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>

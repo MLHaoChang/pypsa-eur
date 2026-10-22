@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Study copilot slice 1 (LC-23): `start_task` takes a study brief (objective, cards, cases, one phase per card, up to 24 steps), pauses before each new card until the user continues, stops when inputs change outside the plan, and `resolve_task_step` completes a step only from native evidence.

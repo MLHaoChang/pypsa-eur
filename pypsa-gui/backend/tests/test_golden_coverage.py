@@ -192,6 +192,9 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_energy_flows_csv"):            frozenset(),
     # Site commercial UX A2: load shape (MW, MWh), not an economics figure.
     ("routers/results.py", "get_load_shape"):                  frozenset(),
+    # IPP ticket 05: curtailed MWh split by cause, physical energy, not an
+    # economics figure; covered by tests/test_curtailment_by_cause.py.
+    ("routers/results.py", "get_curtailment_by_cause"):        frozenset(),
     ("routers/results.py", "preview_billing"):                 frozenset(),   # P3 WP3.7b
     # IC P4 WP4.6b — the finance run and its report: its own oracle gate
     # (tests/qa_investment_case.py, the SAM parity cases), not a coverage SURFACE.

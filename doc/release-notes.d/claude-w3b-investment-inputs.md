@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Results › Investment case no longer edits inputs: the tariff, contracts, finance inputs, library and participants editors live only under Economics, and Solver settings shows the discount and inflation rates read-only with a link to Economics. The Economics sidebar tooltip no longer says it holds the overnight cost of every asset.

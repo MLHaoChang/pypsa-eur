@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Which scope cards are available now follows the run-separability matrix. Process detail, island checks, frequency & dynamics and the investment case stay "not yet available" until the matrix marks their run kind runnable in the one Run; a kind the matrix does not list stays not yet available. No change today: none of them is runnable yet.

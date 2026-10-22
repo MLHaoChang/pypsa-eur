@@ -565,3 +565,21 @@ def test_a_template_saved_through_the_routes_solves_and_closes_the_ledger(
         drafted = {ln.contract_id for p in ledger.periods for ln in ledger.periods[p]
                    if ln.contract_id}
         assert body["draft_contracts"][0]["id"] in drafted
+
+
+def test_a_product_slack_is_never_an_owned_asset():
+    """Grid-to-process ticket 06: the buy-in and the shortfall on a product bus are LP terms, found by their
+    `process_role` column; no template gives them an owner (so the case asks them for no COD)."""
+    n = build_edge_15min()
+    n.add("Bus", "nh3", carrier="NH3")
+    n.add("Link", "hb", bus0="site", bus1="nh3", p_nom=1.0, efficiency=4.0)
+    n.add("Load", "nh3_delivery", bus="nh3", p_set=1.0)
+    n.add("Generator", "grey", bus="nh3", carrier="NH3 import", p_nom=1.0, marginal_cost=97.0)
+    n.add("Generator", "short", bus="nh3", carrier="NH3 shortfall", p_nom=1.0, marginal_cost=155.0)
+    n.generators["process_role"] = ""
+    n.generators.loc[["grey", "short"], "process_role"] = ["buy_in", "shortfall"]
+    cfg = _build("single_owner", n, _commercial()).config
+    owned = {(o.component, o.asset_id) for o in cfg.asset_owners}
+    assert ("Link", "hb") in owned
+    assert "offtaker" in cfg.externals                          # the shortfall's payee
+    assert not {("Generator", "grey"), ("Generator", "short")} & owned

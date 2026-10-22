@@ -499,7 +499,8 @@ export type ValueStreamKind =
   | 'energy_import' | 'energy_export' | 'network_capacity' | 'network_energy'
   | 'demand_charge' | 'retail_fixed' | 'ancillary' | 'dr_availability' | 'dr_activation'
   | 'ppa_settlement' | 'cfd_settlement' | 'certificates' | 'lease' | 'eaas_fee' | 'fuel'
-  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'energy_wholesale' | 'other'
+  | 'fom' | 'vom' | 'capex' | 'incentive' | 'tax' | 'debt_service' | 'energy_wholesale'
+  | 'lost_production' | 'other'
 export interface Participant {
   id: string; name: string; role: ParticipantRole; currency?: string
 }
@@ -636,6 +637,8 @@ export interface ValidationIssue {
   component_class: string
   name: string
   message: string
+  /** The server's plain title for `code` (`services/issue_titles.py`). */
+  title: string
 }
 export interface PreflightResult {
   ok: boolean
@@ -1273,6 +1276,26 @@ export interface InvestmentCaseReport {
   completeness: Record<IcReportSection, IcSectionStatus>
   pipeline?: IcStudyPipeline
   cashflow_lines?: CashflowLine[]
+}
+
+/** One row of the project section's `revenue_streams` (IPP ticket 05): per
+ *  axis year, owner-signed (income +, costs −); null where not established. */
+export interface RevenueStreamRow {
+  id: string
+  label: string
+  values: Array<number | null>
+}
+
+/** The owner's operating cash by stream per year (`sections.project.payload.
+ *  revenue_streams`); null when the operating cash is not established. Row
+ *  ids in order: ppa, merchant, cfd, grid_imports, om, other. */
+export interface RevenueStreams {
+  years: number[]
+  rows: RevenueStreamRow[]
+  total: RevenueStreamRow
+  replacements: RevenueStreamRow
+  /** The streams folded into `other`. */
+  other_keys: string[]
 }
 
 /** GET /results/investment_case/report: `export_investment_case(report)` and

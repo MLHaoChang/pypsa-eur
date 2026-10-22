@@ -2,8 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import {
-  AlertTriangle, ArrowRight, Building2, Clock, GitBranch, Layers,
-  LayoutGrid, Lock, LockOpen, Plus, Users,
+  AlertTriangle, Building2, GitBranch, LayoutGrid, Lock, LockOpen, Plus, Users,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { projectsApi } from '../api/projects'
@@ -15,7 +14,6 @@ import { useUIStore } from '../store/uiStore'
 import { switchToProject } from '../utils/projectActions'
 import { readOnlyBannerMessage } from '../utils/mutationGuard'
 import { PageBody, PageSection, Btn, Tag } from '../components/PageKit'
-import { buildScenarioForest, type ScenarioNode } from './ScenariosPanel'
 
 /**
  * Workspace panel — the workbench's single view of "which project am I in,
@@ -23,16 +21,17 @@ import { buildScenarioForest, type ScenarioNode } from './ScenariosPanel'
  *
  * Replaces the old sidebar Project block's single-user framing ("New project /
  * Open from disk / Import / From template"), which is now on the projects home
- * where creating a project actually belongs. Four bands:
+ * where creating a project actually belongs. Two bands:
  *
  *   1. Identity + state — name, root-vs-branch, organisation, and the edit
  *      lock UP FRONT. Previously the lock only appeared as a banner AFTER a
  *      mutation was refused, which is the wrong moment to learn about it.
- *   2. Scenario tree    — the forest built from `parent_project` pointers,
- *      with branch / compare inline.
- *   3. People           — the assign-members dialog promoted out of a hidden
+ *   2. People           — the assign-members dialog promoted out of a hidden
  *      modal, with the whole-tree ACL stated rather than implied.
- *   4. Move between projects — recents plus the way back to Projects home.
+ *
+ * The scenario tree is only under Scenarios, recent projects only in the
+ * sidebar's project menu, and the way back to Projects home is the header's
+ * breadcrumb (UX-flow #8, #18): one entry point each.
  *
  * Note the caveat rendered in band 1: the backend's active network is
  * process-global, so two people editing DIFFERENT projects against the same
@@ -48,11 +47,9 @@ export default function WorkspacePanel() {
   const readOnly = useUIStore(s => s.readOnly)
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
   const lockHolderEmail = useUIStore(s => s.lockHolderEmail)
-  const recents = useUIStore(s => s.recents)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const [membersFor, setMembersFor] = useState<string | null>(null)
 
-  const { data: projects = [], isLoading } = useQuery({
+  const { data: projects = [] } = useQuery({
     queryKey: ['projects'],
     queryFn: projectsApi.list,
     staleTime: 30_000,
@@ -79,18 +76,6 @@ export default function WorkspacePanel() {
     }
     return node
   }, [active, projects])
-
-  // Only the branch the user is in, so the tree stays readable on a workspace
-  // with many unrelated roots. The full forest lives on the projects home.
-  const forest = useMemo(() => {
-    if (!root) return []
-    return buildScenarioForest(projects).filter(n => n.project.name === root.name)
-  }, [projects, root])
-
-  const recentOthers = useMemo(
-    () => recents.filter(name => name !== currentProject).slice(0, 5),
-    [recents, currentProject],
-  )
 
   async function open(name: string) {
     try {
@@ -124,11 +109,6 @@ export default function WorkspacePanel() {
       {/* ── Band 1: identity + state ──────────────────────────────────── */}
       <PageSection
         title="This project"
-        right={(
-          <Btn onClick={() => navigate('/projects')} title="Browse every project you can access">
-            <LayoutGrid size={13} /> Projects home
-          </Btn>
-        )}
       >
         <div className="px-4 py-3.5 flex flex-col gap-3">
           <div className="flex items-center gap-2 flex-wrap">
@@ -200,39 +180,6 @@ export default function WorkspacePanel() {
         </div>
       </PageSection>
 
-      {/* ── Band 2: scenario tree ─────────────────────────────────────── */}
-      <PageSection
-        title="Scenario tree"
-        count={forest.length ? countNodes(forest[0]) : 0}
-        right={(
-          <Btn
-            onClick={() => setSlidePanel('scenarios')}
-            title="Full scenario panel — branch, compare, delete"
-          >
-            <Layers size={13} /> Manage
-          </Btn>
-        )}
-      >
-        {isLoading ? (
-          <p className="px-4 py-4 text-[11px] text-muted">Loading…</p>
-        ) : forest.length === 0 ? (
-          <p className="px-4 py-4 text-[11px] text-muted">
-            No scenario tree yet — this project has no branches.
-          </p>
-        ) : (
-          <ul className="list-none m-0 p-0">
-            {flatten(forest[0]).map(node => (
-              <TreeRow
-                key={node.project.name}
-                current={node.project.name === currentProject}
-                node={node}
-                onOpen={() => open(node.project.name)}
-              />
-            ))}
-          </ul>
-        )}
-      </PageSection>
-
       {/* ── Band 3: people ────────────────────────────────────────────── */}
       <PageSection
         title="People"
@@ -262,36 +209,6 @@ export default function WorkspacePanel() {
         </div>
       </PageSection>
 
-      {/* ── Band 4: move between projects ─────────────────────────────── */}
-      <PageSection title="Move between projects" count={recentOthers.length}>
-        {recentOthers.length === 0 ? (
-          <p className="px-4 py-4 text-[11px] text-muted">
-            No other recent projects in this workspace yet.
-          </p>
-        ) : (
-          <ul className="list-none m-0 p-0">
-            {recentOthers.map(name => (
-              <li key={name}>
-                <button
-                  className="w-full flex items-center gap-2.5 px-4 py-2 text-left hover:bg-accent/5 transition-colors"
-                  onClick={() => open(name)}
-                  type="button"
-                >
-                  <Clock className="text-ink-400 shrink-0" size={13} />
-                  <span className="flex-1 min-w-0 truncate text-[11.5px] text-text">{name}</span>
-                  <ArrowRight className="text-ink-400 shrink-0" size={12} />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <div className="px-4 py-3 border-t border-border">
-          <Btn onClick={() => navigate('/projects')} variant="primary">
-            <LayoutGrid size={13} /> Projects home — create, import, duplicate
-          </Btn>
-        </div>
-      </PageSection>
-
       {membersFor && (
         <AssignMembersDialog
           onClose={() => setMembersFor(null)}
@@ -304,44 +221,6 @@ export default function WorkspacePanel() {
 }
 
 // ── helpers ──────────────────────────────────────────────────────────────────
-
-function countNodes(node: ScenarioNode): number {
-  return 1 + node.children.reduce((sum, child) => sum + countNodes(child), 0)
-}
-
-/** Depth-first flatten so the tree renders as indented rows. */
-function flatten(node: ScenarioNode): ScenarioNode[] {
-  return [node, ...node.children.flatMap(flatten)]
-}
-
-function TreeRow({ node, current, onOpen }: {
-  node: ScenarioNode
-  current: boolean
-  onOpen: () => void
-}) {
-  const { project, depth } = node
-  const solved = project.objective != null
-  return (
-    <li>
-      <button
-        className={`w-full flex items-center gap-2 py-2 pr-4 text-left transition-colors ${
-          current ? 'bg-accent/8' : 'hover:bg-accent/5'
-        }`}
-        disabled={current}
-        onClick={onOpen}
-        style={{ paddingLeft: 16 + depth * 14 }}
-        type="button"
-      >
-        <GitBranch className={current ? 'text-accent shrink-0' : 'text-ink-400 shrink-0'} size={12} />
-        <span className={`flex-1 min-w-0 truncate text-[11.5px] ${current ? 'text-accent font-semibold' : 'text-text'}`}>
-          {project.name}
-        </span>
-        {solved ? <Tag tone="ok">solved</Tag> : <Tag tone="neutral">unsolved</Tag>}
-        {current && <span className="text-[9.5px] text-muted">open</span>}
-      </button>
-    </li>
-  )
-}
 
 function MemberList({ projectId, enabled }: { projectId: string; enabled: boolean }) {
   // Gated on `enabled` rather than firing and handling the failure: with auth

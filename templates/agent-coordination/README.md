@@ -31,10 +31,11 @@ The coordinator skill holds the steps, under "Bootstrap" and "Taking on tasks".
 | `.claude/hooks/block-dangerous-git.sh`, `test-block-dangerous-git.sh` | PreToolUse hook on Bash: allows a normal `git push`, blocks force-push, `reset --hard`, `rebase`, `commit --amend`, `filter-branch`/`filter-repo`, `clean -f`, `branch -D`; with its matcher tests |
 | `docs/agents/roles.md` | The one place for the gatekeeper's session id, the dashboard link, the routine id and the template home |
 | `docs/agents/coordinator.md` | The current coordinator session id, which changes when the coordinator rotates |
+| `docs/agents/owner-decisions.md` | The owner's decisions, one row each; the coordinator appends, briefs cite a row |
 | `docs/agents/session-brief.md` | The first message the coordinator sends each new session |
 | `docs/agents/issue-tracker.md`, `triage-labels.md`, `domain.md` | Local markdown issues under `.scratch/`, triage roles, glossary layout |
 | `scripts/coord/premerge.sh` | The whole merge gate: conflicts, overlap, optional semantic tests, every check run |
-| `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result |
+| `scripts/coord/sessions.py` | One line per live session from a saved `list_sessions` result, with context used and a `ROTATE` flag past 300k |
 | `scripts/coord/events.py` | Time, assistant text and last tool call per event from a saved `list_events` result |
 | `scripts/coord/board.py` | Edits the dashboard's `board.json` from flags, logs the change and prints the upload path |
 | `scripts/coord/board.example.json` | The dashboard's row shape |
@@ -57,7 +58,7 @@ These stay in this folder and are not copied:
 - `apply.sh` never overwrites a file that already exists. It lists what it skipped, and every `{{...}}` placeholder it couldn't fill; it exits 1 when any are left.
 - After it runs, set the project-specific parts:
   - `.claude/hooks/session-start.sh`: install the project's dependencies.
-  - `scripts/coord/premerge.sh`: `docs_only_re`, `semantic_re` and `semantic_cmd`. Point `semantic_cmd` at the interpreter the hook builds.
+  - `scripts/coord/premerge.sh`: `docs_only_re`, `semantic_re` and `semantic_cmd`. Point `semantic_cmd` at the interpreter the hook builds. To waive code overlaps that tests cover, write a script that maps a file to its tests and set `overlap_tests_script` and `overlap_test_cmd` (the contract is in the script's comments; this repo's `scripts/coord/overlap_tests.py` is an example).
   - `.claude/skills/coordinator/SKILL.md`: the model table and the known environment failures.
   - `AGENTS.md`: "Project notes".
   - `.gitignore`: if it ignores `.claude/hooks/*`, add exceptions for `block-dangerous-git.sh` and `test-block-dangerous-git.sh`, or the guardrail files are never committed.

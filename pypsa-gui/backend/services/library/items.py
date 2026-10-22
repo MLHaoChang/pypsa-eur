@@ -35,7 +35,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -65,6 +65,21 @@ class ItemMeta(BaseModel):
     # Disclosures of how the item was made (P2 WP2.4b-i: the URDB importer's
     # assumptions, e.g. `cyclic_year_set_by_importer`).
     notes: list[str] = []
+    # Where the item lives (GS-EU P2d): `org` (stored per organization) or `common`
+    # (shipped in-tree, the same for every organization, read-only; `services.library.
+    # common`). Unhashed metadata, like the rest of `meta`, so a later promotion never
+    # breaks a pin; library-and-live-lookup L6 extends it (`local`, `verification`).
+    scope: Literal["org", "common"] = "org"
+    licence: str | None = None
+    attribution: str | None = None
+    source_url: str | None = None
+    source_sha256: str | None = None
+    # The source cells each value was taken from: {name: {cell, label, value, unit}}.
+    source_cells: dict[str, dict[str, Any]] | None = None
+
+
+class LibraryItemCommonReadonly(ValueError):
+    """A shipped (common) item cannot be written, and its name cannot be taken."""
 
 
 def _default_root() -> Path:
@@ -194,11 +209,19 @@ def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
     name = (name or "").strip()
     if not name or len(name) > _NAME_MAX:
         raise ValueError(f"item name must be 1..{_NAME_MAX} characters")
+    from services.library import common
+
+    if common.is_common(kind, name):
+        raise LibraryItemCommonReadonly(
+            f"{kind} {name!r} is a shipped common Library item and cannot be overwritten; "
+            "store your own version under another name")
     model = validate_payload(kind, payload)
     try:
         meta_ok = ItemMeta.model_validate(meta or {})
     except ValidationError as exc:
         raise ValueError(f"invalid item meta: {exc.errors()[0]['msg']}") from exc
+    if meta_ok.scope != "org":
+        raise ValueError("only shipped items are common; an organization's item has scope 'org'")
     data = _canonical_bytes(kind, model, payload)
     digest = hashlib.sha256(data).hexdigest()
     rel = Path("items") / kind / f"{_slug(name)}-{digest[:16]}.json"
@@ -224,12 +247,21 @@ def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
 
 
 def latest_ref(db: DBSession, org_id: UUID, kind: str, name: str) -> M.LibraryItemRef | None:
+    from services.library import common
+
+    if common.is_common(kind, name):
+        return common.ref(kind, name)
     row = _latest_row(db, org_id, kind, name)
     return None if row is None else _ref(row)
 
 
 def ref_for(db: DBSession, org_id: UUID, kind: str, name: str,
             version: int) -> M.LibraryItemRef | None:
+    from services.library import common
+
+    if common.is_common(kind, name):
+        shipped = common.ref(kind, name)
+        return shipped if shipped.version == version else None
     row = db.scalars(select(LibraryItem).where(
         LibraryItem.org_id == org_id, LibraryItem.kind == kind,
         LibraryItem.name == name, LibraryItem.version == version)).first()
@@ -239,6 +271,16 @@ def ref_for(db: DBSession, org_id: UUID, kind: str, name: str,
 def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
             root: Path | None = None) -> dict:
     """Exactly the payload `ref` names (a JSON object); refuse any mismatch."""
+    from services.library import common
+
+    if common.is_common(ref.kind, ref.id):
+        shipped = common.ref(ref.kind, ref.id)
+        label = f"{ref.kind} {ref.id!r} v{ref.version}"
+        if ref.version != shipped.version:
+            raise LibraryRefNotFound(f"no {label}: the shipped common item is v{shipped.version}")
+        if ref.hash != shipped.hash:
+            raise LibraryRefStale(f"ref hash for {label} does not match the shipped common item")
+        return common.payload(ref.kind, ref.id)
     row = db.scalars(select(LibraryItem).where(
         LibraryItem.org_id == org_id, LibraryItem.kind == ref.kind,
         LibraryItem.name == ref.id, LibraryItem.version == ref.version)).first()
@@ -265,6 +307,10 @@ def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
 
 def item_meta(db: DBSession, org_id: UUID, ref: M.LibraryItemRef) -> dict:
     """The stored meta of the version `ref` names ({} when absent)."""
+    from services.library import common
+
+    if common.is_common(ref.kind, ref.id):
+        return common.meta(ref.kind, ref.id)
     row = db.scalars(select(LibraryItem).where(
         LibraryItem.org_id == org_id, LibraryItem.kind == ref.kind,
         LibraryItem.name == ref.id, LibraryItem.version == ref.version)).first()
@@ -283,4 +329,7 @@ def list_items(db: DBSession, org_id: UUID, kind: str) -> list[M.LibraryItemRef]
         latest, (LibraryItem.name == latest.c.name) & (LibraryItem.version == latest.c.v))
         .where(LibraryItem.org_id == org_id, LibraryItem.kind == kind)
         .order_by(LibraryItem.name)).all()
-    return [_ref(r) for r in rows]
+    from services.library import common
+
+    shipped = [common.ref(kind, name) for name in common.names(kind)]
+    return sorted([_ref(r) for r in rows] + shipped, key=lambda r: r.id)

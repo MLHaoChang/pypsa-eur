@@ -73,8 +73,9 @@ def _fake_build(monkeypatch, *, hold: threading.Event | None = None, refuse: str
 
     calls: list[dict] = []
 
-    # IC G3 R-2: the factory takes the request's campus source (None: no study).
-    def factory(n, cfg, *, owner, lost_load, campus=None):
+    # IC G3 R-2: the factory takes the request's campus source (None: no study),
+    # and E1's growth-placeholder flags (None: the example's own years).
+    def factory(n, cfg, *, owner, lost_load, campus=None, growth_flags=()):
         calls.append({"owner": owner, "finance": cfg.finance})
 
         def build():

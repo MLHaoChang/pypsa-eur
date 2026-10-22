@@ -1,0 +1,1588 @@
+{
+  "research_date": "2026-10-21",
+  "scope": "EU-first; explicitly labelled non-EU comparators",
+  "records": [
+    {
+      "source_id": "DEA-POWER",
+      "title": "DEA August 2026 electricity/heat workbook",
+      "regions": [
+        "DK",
+        "EU benchmark"
+      ],
+      "parameter_ids": [
+        "K01",
+        "K02",
+        "K03",
+        "K04",
+        "K05",
+        "K06",
+        "K07",
+        "K09",
+        "D01",
+        "D02",
+        "D03",
+        "D04"
+      ],
+      "rights_status": "CC-BY-4.0 selected workbook",
+      "usable_scope": "24-entry library reference set includes wind/PV subset; technical/O&M cells also assessed",
+      "admission_gaps": "Danish technology benchmark; AC capacity; separate money years; VOM/outages/degradation not all imported",
+      "prior_source_ids": [
+        "cost_dea_generation"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "dea_power",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-generation-electricity-and-district-heating",
+          "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-generation-electricity-and-district-heating",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 39343,
+          "sha256": "fcde3293d8211430283d81d35174d689b364c8fa966f929e037dfc0146de4357"
+        },
+        {
+          "id": "dea_power_xlsx",
+          "url": "https://ens.dk/media/8615/download",
+          "final_url": "https://ens.dk/media/8615/download",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 1846175,
+          "sha256": "afb78dede13a17d17dca371ce74689bad98e55149ca58996fb3a535ac2704bb9"
+        },
+        {
+          "id": "dea_pv_brief",
+          "url": "https://ens.dk/media/8720/download",
+          "final_url": "https://ens.dk/media/8720/download",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 238400,
+          "sha256": "c0c9afbe4fc6e8943e3d3741656bf93a97c6ca9fcbde98fcda0ee867ab452d05"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DEA-FUELS",
+      "title": "DEA August 2026 energy-carrier conversion workbook",
+      "regions": [
+        "DK",
+        "EU benchmark"
+      ],
+      "parameter_ids": [
+        "H01",
+        "H02",
+        "H03",
+        "H04",
+        "H05",
+        "H08",
+        "K04",
+        "K06",
+        "K09"
+      ],
+      "rights_status": "CC-BY-4.0 selected workbook",
+      "usable_scope": "100 MW AEC and PEM cost/lifetime/LHV efficiency included in optional library references",
+      "admission_gaps": "SOEC lifetime anomaly not imported; published projections use mixed public/internal estimation; no raw private/OEM data access",
+      "prior_source_ids": [
+        "cost_dea_renewable_fuels"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "dea_fuels",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-renewable-fuels",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 39108,
+          "sha256": "ffc4f8c5cc5301f6a21f35b98a31c1e9228a2ddc4f31fcc8d395b791b9e4b928"
+        },
+        {
+          "id": "dea_fuels_xlsx",
+          "url": "https://ens.dk/media/6444/download",
+          "final_url": "https://ens.dk/media/6444/download",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 1453032,
+          "sha256": "07ac3ef166883591a438e739ac69c7768b5419964abdd43e668130bd7a55ffee"
+        },
+        {
+          "id": "dea_h2_brief",
+          "url": "https://ens.dk/media/3352/download",
+          "final_url": "https://ens.dk/media/3352/download",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 423958,
+          "sha256": "8faad103315953bb8ea67a608b6ca7dec663449f1b9d1b036165b56ec4365e31"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DEA-STORAGE",
+      "title": "DEA storage workbook",
+      "regions": [
+        "DK",
+        "EU benchmark"
+      ],
+      "parameter_ids": [
+        "H06",
+        "D05",
+        "K04",
+        "K07"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Tank/cavern and battery planning references",
+      "admission_gaps": "Inspect exact licence and note/denominator semantics; tank FOM per MW vs storage investment per MWh cannot be divided without power/energy ratio",
+      "prior_source_ids": [
+        "cost_dea_storage"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "dea_storage",
+          "url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "final_url": "https://ens.dk/en/analyses-and-statistics/technology-data-energy-storage",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 37930,
+          "sha256": "f15c0813371ee39b0ff39e5f4d4c0ae0213ccc6db4fb9d94015e0ac384e7aa8b"
+        },
+        {
+          "id": "dea_storage_xlsx",
+          "url": "https://ens.dk/media/6589/download",
+          "final_url": "https://ens.dk/media/6589/download",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 336703,
+          "sha256": "227c63de212697978815a0a6ed86d84527899d2ae309fd411a6a8490fe122405"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "TECHNOLOGY-DATA",
+      "title": "PyPSA technology-data v0.14 baseline and v0.15 discovery",
+      "regions": [
+        "EU benchmark"
+      ],
+      "parameter_ids": [
+        "K01",
+        "K02",
+        "K03",
+        "K04",
+        "K05",
+        "K06",
+        "H01",
+        "H06",
+        "H07",
+        "H08"
+      ],
+      "rights_status": "mixed_input_rights",
+      "usable_scope": "Existing source lineage and three explicit forecast files inspected; latest release observed v0.15.0",
+      "admission_gaps": "GPL software licence is not all input-data rights; v0.14 money-year mismatch and private-communication electrolysis CapEx require review; no global source upgrade",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "td_readme",
+          "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/README.md",
+          "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/README.md",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 1861,
+          "sha256": "b6f6f0102509e980553ef00bd1540f19aff484b1d0d7d14fb0c01e3836047669"
+        },
+        {
+          "id": "td_2030",
+          "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2030.csv",
+          "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2030.csv",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 277614,
+          "sha256": "34eea67816627a80ecf2893cd49c5f642f7b7ee2698db76ea8bcce4b3ce1d4d5"
+        },
+        {
+          "id": "td_2040",
+          "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2040.csv",
+          "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2040.csv",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 277631,
+          "sha256": "d1bd7ac0e1e0a59c21ea955375e4d19d31383a1095d3c9014c6de2c11bbb5b2c"
+        },
+        {
+          "id": "td_2050",
+          "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2050.csv",
+          "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.14.0/outputs/costs_2050.csv",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 277553,
+          "sha256": "8fde1021aed881bedd6f7f89cbc3614e662d74bb8758cfe9ad0feae5410abae8"
+        },
+        {
+          "id": "td_latest",
+          "url": "https://api.github.com/repos/PyPSA/technology-data/releases/latest",
+          "final_url": "https://api.github.com/repos/PyPSA/technology-data/releases/latest",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 3353,
+          "sha256": "1f9eef1b667dfae125b67eff96b98f4d908147f37828d9fad83796f5234b35f7"
+        },
+        {
+          "id": "td15_2030",
+          "url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.15.0/outputs/costs_2030.csv",
+          "final_url": "https://raw.githubusercontent.com/PyPSA/technology-data/v0.15.0/outputs/costs_2030.csv",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 281355,
+          "sha256": "6f97aa2164d5e28a81e104fd6ef7092f8cea637564374c19f08a5a5892383227"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DE-TSO",
+      "title": "50Hertz final 2026 transmission schedule",
+      "regions": [
+        "DE"
+      ],
+      "parameter_ids": [
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T08",
+        "T10",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Four-page final schedule inspected; EHV/EHV-HV, 2500-hour selection, meter/reactive/connection terms",
+      "admission_gaps": "No importer yet; year-end vs revisions; final 2026 distinct from provisional 2027; upstream charges may already be in DSO bill",
+      "prior_source_ids": [
+        "EU-C06"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "50hertz",
+          "url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+          "final_url": "https://www.50hertz.com/Partners/Gridcustomers/Gridaccess",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 195176,
+          "sha256": "4ae47df8cc9d4bf1127be5dbda65fad6b04f2555573cf169fdc485c4ac30d6f3"
+        },
+        {
+          "id": "hertz26_pdf",
+          "url": "https://www.50hertz.com/cdn/files/ccee42bb-4c36-410b-cd8b-08df1e03d14c/price%20sheet%202026.pdf",
+          "final_url": "https://www.50hertz.com/cdn/files/ccee42bb-4c36-410b-cd8b-08df1e03d14c/price%20sheet%202026.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 130101,
+          "sha256": "ff102004e4bc3d539044642f863aee5dd199ac48c7725847c382092ecc78275f"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DE-DSO",
+      "title": "Netze BW published distribution schedules",
+      "regions": [
+        "DE"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T08",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "not_retrieved",
+      "usable_scope": "Retain previous discovery lead only",
+      "admission_gaps": "Both fresh fetches timed out; no fresh workbook extraction claimed",
+      "prior_source_ids": [
+        "EU-C07"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "netze_bw",
+          "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+          "error": "The read operation timed out"
+        },
+        {
+          "id": "de_dso_retry",
+          "url": "https://www.netze-bw.de/partner/marktpartner/veroeffentlichungen",
+          "error": "The read operation timed out"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "NL-DSO",
+      "title": "Liander 2026 large-business connection/transport schedule",
+      "regions": [
+        "NL"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T08",
+        "T09",
+        "T10",
+        "T11"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Actual 2026 PDF inspected, including category and transport/connection distinctions",
+      "admission_gaps": "Tariff category, measured/contracted capacity, exemptions and bill oracle required; do not add TenneT again blindly",
+      "prior_source_ids": [
+        "EU-C08"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "liander",
+          "url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "final_url": "https://www.liander.nl/grootzakelijk/tarieven",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 226317,
+          "sha256": "a3b8cb0e2e9d41d7c5afce53bace6ff23e436de4015c2ce1362afe61b7b438c9"
+        },
+        {
+          "id": "liander26_pdf",
+          "url": "https://www.liander.nl/-/media/files/tarieven/grootzakelijk/tarieven-2026/tarieven-voor-aansluiting-en-transport-elektriciteit-2026_2.pdf?v=1&amp;d=20251204T155708Z",
+          "final_url": "https://www.liander.nl/-/media/files/tarieven/grootzakelijk/tarieven-2026/tarieven-voor-aansluiting-en-transport-elektriciteit-2026_2.pdf?v=1&amp;d=20251204T155708Z",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 170837,
+          "sha256": "8a31dc13006a7586182b615167ed4631d781bfa6fc76dbf44b990bf85ba0ff37"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "NL-TSO",
+      "title": "ACM TenneT 2026 decision and calculation workbook",
+      "regions": [
+        "NL"
+      ],
+      "parameter_ids": [
+        "T02",
+        "T03",
+        "T04",
+        "T08",
+        "T09",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Regulatory decision and real XLSX obtained; workbook inspected",
+      "admission_gaps": "Authority/TSO level and allocation model are not automatically an end-customer DSO bill",
+      "prior_source_ids": [
+        "EU-C09"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "acm_tennet",
+          "url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "final_url": "https://www.acm.nl/nl/publicaties/tarievenbesluit-tennet-2026",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 74565,
+          "sha256": "08ed8ad18adba129f5496e25ebafcba09b66ad23dbb6dca4f439fd724a0cc6fa"
+        },
+        {
+          "id": "acm26_xlsx",
+          "url": "https://www.acm.nl/system/files/documents/rekenmodule-tarievenbesluit-tennet-2026.xlsx",
+          "final_url": "https://www.acm.nl/system/files/documents/rekenmodule-tarievenbesluit-tennet-2026.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 478181,
+          "sha256": "5e490437f77111ad81cd89e2d75ec40452a2e76cbac5515359b6fd7ab5de1db8"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "FR-DSO",
+      "title": "CRE TURPE 7 HTA/BT 1 August 2026 decision",
+      "regions": [
+        "FR"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T10",
+        "T11"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official decision 2026-105 and corrected June publication examined",
+      "admission_gaps": "Select voltage, temporal option, subscribed power and amendment; excess/reactive provisions not generic TariffItem arithmetic",
+      "prior_source_ids": [
+        "EU-C10"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "cre26",
+          "url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "final_url": "https://www.cre.fr/actualites/toute-lactualite/la-cre-publie-levolution-annuelle-des-tarifs-dutilisation-des-reseaux-publics-delectricite-au-1er-aout-2026.html",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 74516,
+          "sha256": "157e41cf15f646c291d0734a887a14ff28ebb8551ed235ae5cdecf57258646e3"
+        },
+        {
+          "id": "cre_hta",
+          "url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-les-domaines-de-tension-hta-et-bt-et-sur-levolution-du-parametre-rf.html",
+          "final_url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-les-domaines-de-tension-hta-et-bt-et-sur-levolution-du-parametre-rf.html",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 68838,
+          "sha256": "f58807e39389c81f0137a75dbdeac1f6f5a78cb65534f26333697ca7238177a0"
+        },
+        {
+          "id": "cre_hta_pdf",
+          "url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-105_Evolution_TURPE_7_HTA-BT.pdf",
+          "final_url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-105_Evolution_TURPE_7_HTA-BT.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1093608,
+          "sha256": "5d4b2e13e91469182c4bac5c9c24997b29f276a7ebad185c4784c15a0e199523"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "FR-TSO",
+      "title": "CRE TURPE 7 HTB 1 August 2026 decision",
+      "regions": [
+        "FR"
+      ],
+      "parameter_ids": [
+        "T02",
+        "T03",
+        "T04",
+        "T06",
+        "T08",
+        "T11"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Separate official transmission-domain decision 2026-104 obtained",
+      "admission_gaps": "Do not add HTB charges independently to an HTA/BT total; exact subscribed-power and reactive rules",
+      "prior_source_ids": [
+        "EU-C10"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "cre_htb",
+          "url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-le-domaine-de-tension-htb.html",
+          "final_url": "https://www.cre.fr/documents/deliberations/evolution-au-1er-aout-2026-de-la-grille-tarifaire-des-tarifs-dutilisation-des-reseaux-publics-delectricite-dans-le-domaine-de-tension-htb.html",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 67042,
+          "sha256": "8af0fcb9990c7842e3daa62488a24a28f0952222940b92134603df03ebe0b5fd"
+        },
+        {
+          "id": "cre_htb_pdf",
+          "url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-104_Evolution_TURPE_7_HTB.pdf",
+          "final_url": "https://www.cre.fr/fileadmin/Documents/Deliberations/2026/260521_2026-104_Evolution_TURPE_7_HTB.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 1409805,
+          "sha256": "b4d85baf7243bfaea3227cb29ac225aff1faa6088a7f2f75f4fb08c44374dacd"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "ES-TOLLS",
+      "title": "CNMC/BOE 2026 transmission and distribution access tolls",
+      "regions": [
+        "ES"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T06",
+        "T10",
+        "T11"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Final regulator package, actual allocation workbook and official gazette examined",
+      "admission_gaps": "Peajes are not all system cargos/taxes; six-period/calendar/excess terms need explicit support",
+      "prior_source_ids": [
+        "EU-C11"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "cnmc26",
+          "url": "https://www.cnmc.es/gl/node/417840",
+          "final_url": "https://www.cnmc.es/gl/node/417840",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 77684,
+          "sha256": "926b08f6cd1af3621618acbf4ecdfb35e28c83856e7fae3b1eff4bb044525b26"
+        },
+        {
+          "id": "cnmc26_xlsx",
+          "url": "https://www.cnmc.es/sites/default/files/6331871.xlsx",
+          "final_url": "https://www.cnmc.es/sites/default/files/6331871.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 298772,
+          "sha256": "036e9f3b9110b942fd2ea85fd4f16cbd7bc9b9091f055ad544f84a73249e67bd"
+        },
+        {
+          "id": "cnmc26_pdf",
+          "url": "https://www.cnmc.es/sites/default/files/6331866.pdf",
+          "final_url": "https://www.cnmc.es/sites/default/files/6331866.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 417240,
+          "sha256": "828973ac6d50c008ce034cdbbe58945f22e2b19a1b1f90fa33a48537358e9354"
+        },
+        {
+          "id": "es_boe26",
+          "url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-26348",
+          "final_url": "https://www.boe.es/diario_boe/txt.php?id=BOE-A-2025-26348",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 91986,
+          "sha256": "d8fe55826ccacba16a7005d69623c7ae3e6ff435458334e84fd7a83cb9d46bf2"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "IT-TARIFFS",
+      "title": "ARERA and e-distribuzione transport/distribution/system components",
+      "regions": [
+        "IT"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T10",
+        "T11"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official TSO and DSO tables and multi-year workbook inspected",
+      "admission_gaps": "Distinguish tariff parameters/revenue tables from customer rates; ASOS/ARIM and UC items, eligibility and update dates",
+      "prior_source_ids": [
+        "EU-C12"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "arera_tx",
+          "url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/tariffa-per-il-servizio-di-trasmissione",
+          "final_url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/tariffa-per-il-servizio-di-trasmissione",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 240976,
+          "sha256": "87f0654aecc9aa23912f4b42ebc6d4150e11b7a10409b828bfaa2a9736ce52f9"
+        },
+        {
+          "id": "arera_dso",
+          "url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/distr",
+          "final_url": "https://www.arera.it/area-operatori/prezzi-e-tariffe/distr",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 198656,
+          "sha256": "63c7128a310cce23702f164d371b5a5fa637c32d11ee672556026ef01c55f6a3"
+        },
+        {
+          "id": "it_dso_xlsx",
+          "url": "https://www.arera.it/fileadmin/area_operatori/prezzi_e_tariffe/tariffe_di_distribuzione/616-23TIT_ti__2_.xlsx",
+          "final_url": "https://www.arera.it/fileadmin/area_operatori/prezzi_e_tariffe/tariffe_di_distribuzione/616-23TIT_ti__2_.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 23014,
+          "sha256": "582158f28e449260aef16b3c90887119ac45222cdce6cbff96f5c63029d6bc5d"
+        },
+        {
+          "id": "italy_dso",
+          "url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+          "final_url": "https://www.e-distribuzione.it/a-chi-ci-rivolgiamo/societa-di-vendita/tariffe-di-distribuzione.html",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 51823,
+          "sha256": "f96a7b260d07961bf26e58ee91424c479fd90fbfc1c81238cc4ae094d26bbb6d"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DK-TARIFF",
+      "title": "Energinet DataHub Price List API and field metadata",
+      "regions": [
+        "DK"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T02",
+        "T05",
+        "T07",
+        "T10",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "terms_unconfirmed",
+      "usable_scope": "Bounded real API sample; GLN+charge code+validity identity, 24 local-hour rates, monthly subscription examples",
+      "admission_gaps": "Terms pages JS shells did not establish exact reuse rights; DKK conversion/explicit currency support, DST, indicative VAT, date filtering and complete-bill coverage",
+      "prior_source_ids": [
+        "EU-C03"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "dk_tariff_meta",
+          "url": "https://api.energidataservice.dk/meta/dataset/DatahubPricelist",
+          "final_url": "https://api.energidataservice.dk/meta/dataset/DatahubPricelist",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 12539,
+          "sha256": "b451e3b4471eec27e09a5223d6881e10f3a277b700c2fa87c9decf49853577e1"
+        },
+        {
+          "id": "dk_tariff_sample",
+          "url": "https://api.energidataservice.dk/dataset/DatahubPricelist?limit=3",
+          "final_url": "https://api.energidataservice.dk/dataset/DatahubPricelist?limit=3",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 2271,
+          "sha256": "48a23dba779db448ac7e02c87052442f3e5a03e4be4152c3dfd1ebddd2c98aa5"
+        },
+        {
+          "id": "dk_terms",
+          "url": "https://www.energidataservice.dk/Guides/Terms",
+          "final_url": "https://www.energidataservice.dk/Guides/Terms",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 18164,
+          "sha256": "39b2a9cf2e4bb6e5159c8a9bb4d05047defaff9843471d7055fb32caa77accf6"
+        },
+        {
+          "id": "dk_terms2",
+          "url": "https://www.energidataservice.dk/terms-conditions",
+          "final_url": "https://www.energidataservice.dk/terms-conditions",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 18366,
+          "sha256": "ddf59231c878e4453683299fc89b51a5439028853efc5c0da12b6346d44a696a"
+        },
+        {
+          "id": "dk_api_guide",
+          "url": "https://www.energidataservice.dk/guides/api-guides",
+          "final_url": "https://www.energidataservice.dk/guides/api-guides",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 49127,
+          "sha256": "9912443843f0ae960b78b346fe220b134cb7b797f588aa5e8b16d6480dd71737"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DK-MARKET",
+      "title": "Energinet DayAheadPrices metadata",
+      "regions": [
+        "DK",
+        "Nordic/DE zones in dataset"
+      ],
+      "parameter_ids": [
+        "M01"
+      ],
+      "rights_status": "terms_unconfirmed",
+      "usable_scope": "15-minute series from 2025-10-01; metadata names prior hourly dataset",
+      "admission_gaps": "No time-series import in this package; exact zone/time/currency/rights and interval handling",
+      "prior_source_ids": [
+        "EU-C03"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "dk_price_meta",
+          "url": "https://api.energidataservice.dk/meta/dataset/DayAheadPrices",
+          "final_url": "https://api.energidataservice.dk/meta/dataset/DayAheadPrices",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 5579,
+          "sha256": "fed02b2bc94874cc312a848bb96f8a13238874794f4646980a1a0cf2b2c5fd66"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "AT-NETWORK",
+      "title": "E-Control industry system-use tariffs",
+      "regions": [
+        "AT"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T02",
+        "T03",
+        "T05",
+        "T06",
+        "T10",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official tariff structure and regulatory references inspected",
+      "admission_gaps": "Network levels/areas, exact SNE-V schedule and new tariff structure; no numeric extract admitted",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "at_econtrol",
+          "url": "https://www.e-control.at/industrie/strom/strompreis/systemnutzungsentgelte",
+          "final_url": "https://www.e-control.at/industrie/strom/strompreis/systemnutzungsentgelte",
+          "status": 200,
+          "content_type": "text/html;charset=UTF-8",
+          "bytes": 481035,
+          "sha256": "eec31444bff3dd58a7a91283cc561cb9c763a7e3caaeb9484b1c566b48381e66"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "PT-NETWORK",
+      "title": "ERSE tariffs and electricity time periods",
+      "regions": [
+        "PT"
+      ],
+      "parameter_ids": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T10",
+        "T11",
+        "T12"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official tariff/time-band page inspected; identifies 2027 calendar transition",
+      "admission_gaps": "Half-hour boundaries exceed native integer-hour TariffPeriod; distinguish mainland/Azores/Madeira and voltage; no numeric extract admitted",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "pt_erse",
+          "url": "https://www.erse.pt/atividade/regulacao/tarifas-e-precos-eletricidade/",
+          "final_url": "https://www.erse.pt/atividade/regulacao/tarifas-e-precos-eletricidade/",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 109063,
+          "sha256": "c2df4cdcd5fa82cd90f027204d72f95d9c54cde7594058fcef128d291b42a1eb"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "FI-LEAD",
+      "title": "Fingrid main-grid services discovery lead",
+      "regions": [
+        "FI"
+      ],
+      "parameter_ids": [
+        "T02",
+        "T03",
+        "T11"
+      ],
+      "rights_status": "not_retrieved",
+      "usable_scope": "Official service context only",
+      "admission_gaps": "Selected pricing URL returned 404; no current fee table established",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "fingrid_services",
+          "url": "https://www.fingrid.fi/en/grid/main-grid-services/",
+          "final_url": "https://www.fingrid.fi/en/grid/main-grid-services/",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 276386,
+          "sha256": "ba81cb94ebffe24dbabac557834f4fbace590daed8a9af974933ca891978f989"
+        },
+        {
+          "id": "fi_pricing",
+          "url": "https://www.fingrid.fi/en/grid/main-grid-services/main-grid-service-pricing/",
+          "error": "HTTP Error 404: Not Found"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "PPA-FILES",
+      "title": "Energy Traders Europe standard PPA and power documents",
+      "regions": [
+        "European jurisdictions"
+      ],
+      "parameter_ids": [
+        "M02",
+        "M03",
+        "M04",
+        "M05",
+        "M07"
+      ],
+      "rights_status": "restricted_terms",
+      "usable_scope": "Link to official full PDF, execution DOCX, general terms and country translations",
+      "admission_gaps": "Site terms prohibit commercial exploitation/redistribution without permission; individual-document permission may differ, not inspected; no template copied",
+      "prior_source_ids": [
+        "EU-C17"
+      ],
+      "terms_evidence_ids": [
+        "trader_terms"
+      ],
+      "evidence": [
+        {
+          "id": "trader_ppa",
+          "url": "https://www.energytraderseurope.org/our-contracts-overview/power-purchase-agreement",
+          "final_url": "https://www.energytraderseurope.org/our-contracts-overview/power-purchase-agreement",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 834509,
+          "sha256": "51a8d133657d7ef2866e7101965db980967e476fd049256889049d854186c0d7"
+        },
+        {
+          "id": "trader_power",
+          "url": "https://www.energytraderseurope.org/our-contracts-overview/standard-form-contracts-gas-power-biomethane",
+          "final_url": "https://www.energytraderseurope.org/our-contracts-overview/standard-form-contracts-gas-power-biomethane",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 805426,
+          "sha256": "ac896d8c2a6746b1d26ab0b90074c36597101f033e708c08d3b5dde038907ef8"
+        },
+        {
+          "id": "trader_terms",
+          "url": "https://www.energytraderseurope.org/terms-of-use",
+          "final_url": "https://www.energytraderseurope.org/terms-of-use",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 807978,
+          "sha256": "62a414f1d2b5f8e61dc6feababd038822c4620c0414e370c0580618868eaea20"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "ACER-PPA",
+      "title": "ACER PPA market-monitoring discovery",
+      "regions": [
+        "EU"
+      ],
+      "parameter_ids": [
+        "M02",
+        "M04",
+        "M07"
+      ],
+      "rights_status": "not_retrieved",
+      "usable_scope": "Preserve prior researched reference",
+      "admission_gaps": "Fresh pages returned 503; not a validated PPA quote feed",
+      "prior_source_ids": [
+        "EU-C17"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "acer_ppa",
+          "url": "https://www.acer.europa.eu/electricity/market-monitoring/ppas",
+          "error": "HTTP Error 503: Service Unavailable"
+        },
+        {
+          "id": "acer_ppa2",
+          "url": "https://www.acer.europa.eu/monitoring/MMR/ppas",
+          "error": "HTTP Error 503: Service Unavailable"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "EEX-MARKET",
+      "title": "EEX market-data hub and auction references",
+      "regions": [
+        "European markets"
+      ],
+      "parameter_ids": [
+        "M08",
+        "M09"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official market-data access/licensing context",
+      "admission_gaps": "No open redistributable forward/swap/GO quotation series established; auction carbon prices are not electricity forwards",
+      "prior_source_ids": [
+        "EU-C21"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "eex_power",
+          "url": "https://www.eex.com/en/market-data/power/futures",
+          "final_url": "https://www.eex.com/en/market-data/market-data-hub",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 194375,
+          "sha256": "9ed85070982e6c08c712cb37cb54a698f9d8ea13c15248731e0976d393d47660"
+        },
+        {
+          "id": "eex_legal",
+          "url": "https://www.eex.com/en/market-data/market-data-hub",
+          "final_url": "https://www.eex.com/en/market-data/market-data-hub",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 194375,
+          "sha256": "9ed85070982e6c08c712cb37cb54a698f9d8ea13c15248731e0976d393d47660"
+        },
+        {
+          "id": "emissions_auctions",
+          "url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+          "final_url": "https://www.eex.com/en/markets/environmentals/eu-ets1-eu-ets2-auctions/eu-ets1-auctions",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 208364,
+          "sha256": "0a94239524ccf37dab424b3b5d20307c608e29acf8fc10d5a5f9f73ad1aaab2b"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "EU-MARKET-RULES",
+      "title": "European Commission electricity-market design",
+      "regions": [
+        "EU"
+      ],
+      "parameter_ids": [
+        "M02",
+        "M03",
+        "M06",
+        "M07"
+      ],
+      "rights_status": "reference_reuse_conditions",
+      "usable_scope": "Public PPA/two-way CfD legal policy context",
+      "admission_gaps": "Not commercial quote data or a verified complete scheme implementation; third-party/exception rights remain",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "eu_market_design",
+          "url": "https://energy.ec.europa.eu/topics/markets-and-consumers/market-legislation/electricity-market-design_en",
+          "final_url": "https://energy.ec.europa.eu/topics/markets-and-consumers/electricity-market-design_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 110226,
+          "sha256": "90e07ba4f77f83ae7b463856e0dd2e196b4da94d52760f431f30cf0d373584a1"
+        },
+        {
+          "id": "ec_reuse",
+          "url": "https://commission.europa.eu/legal-notice_en",
+          "final_url": "https://commission.europa.eu/legal-notice_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 154050,
+          "sha256": "14e68e8ddf0f518009d4dfbd6caa15b312f0b08c9679ecf4c0e8409a1c945fde"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "AIB-CERTIFICATES",
+      "title": "AIB certificate statistics",
+      "regions": [
+        "Participating European domains"
+      ],
+      "parameter_ids": [
+        "M09"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Certificate issuance/transfer/cancellation statistics",
+      "admission_gaps": "Not GO forward prices, hourly carbon intensity, contractual ownership or green H2 certification",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "grexel",
+          "url": "https://www.aib-net.org/facts/market-information/statistics",
+          "final_url": "https://www.aib-net.org/facts/market-information/statistics",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 58786,
+          "sha256": "92ec65d63563dbff41c369f604250989e47601c9a7420c5b79c4b729645ec4f3"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "EU-H2-SUPPORT",
+      "title": "European Hydrogen Bank IF25 auction page",
+      "regions": [
+        "EU/EEA eligibility per call"
+      ],
+      "parameter_ids": [
+        "M10"
+      ],
+      "rights_status": "reference_reuse_conditions",
+      "usable_scope": "Official call/support scheme reference",
+      "admission_gaps": "Observed call page not executed offtake price; select actual award if/when published; support in EUR/kg not electricity EUR/MWh",
+      "prior_source_ids": [
+        "EU-C18"
+      ],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "ec_h2_auctions",
+          "url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+          "final_url": "https://climate.ec.europa.eu/areas-action/eu-funding-climate-action/innovation-fund/calls-proposals/if25-hydrogen-auction_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 110251,
+          "sha256": "1a4b01bbc9fc8e2e195f5c10ff88be67db3551749d324d086aeee141c3c91f57"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "H2-OBS-DATA",
+      "title": "European Hydrogen Observatory downloadable cost datasets",
+      "regions": [
+        "EU27 and named European comparators"
+      ],
+      "parameter_ids": [
+        "H01",
+        "H03",
+        "H05",
+        "H08",
+        "M10",
+        "K04"
+      ],
+      "rights_status": "reproduction_with_attribution_exceptions",
+      "usable_scope": "Actual XLSX sheets/cells inspected: 2025 stack/BoP/other cost components, country LCOH components and sector break-even values",
+      "admission_gaps": "Year in file name is not every row year; component scopes may overlap; LCOH contribution EUR/kg is not asset CapEx EUR/kW; exact table attribution/third-party rules before next import",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [
+        "h2legal"
+      ],
+      "evidence": [
+        {
+          "id": "h2datasets",
+          "url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/datasets",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/datasets",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 62233,
+          "sha256": "ddfac97094dc7744a36a8d6f080812616101ea73d333cab61c3378f995411e60"
+        },
+        {
+          "id": "h2cost_xlsx",
+          "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-04/Electrolyser%20cost%202025.xlsx",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-04/Electrolyser%20cost%202025.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 175251,
+          "sha256": "2bd5f1e5e842ffc4b012d45ce9bc2757c46af557ae459155ae21270a6d5b7242"
+        },
+        {
+          "id": "h2production_xlsx",
+          "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2025-09/Hydrogen%20production%20costs%202024.xlsx",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2025-09/Hydrogen%20production%20costs%202024.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 232711,
+          "sha256": "4c10193a2a62ea05defbe191fd5b05c14226b08104221d37b1d3dbf7f736e01a"
+        },
+        {
+          "id": "h2breakeven_xlsx",
+          "url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-07/Break-even%20prices%20of%20renewable%20hydrogen%202025.xlsx",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/sites/default/files/2026-07/Break-even%20prices%20of%20renewable%20hydrogen%202025.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 541059,
+          "sha256": "27f856551e2c35a2c42bd42386a930003b79e31ec8f3ce68687e39f130057144"
+        },
+        {
+          "id": "h2legal",
+          "url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 37982,
+          "sha256": "d8ac9fda777537cfbd59c04180b4c580a4a462e5b20a2c6d5267bcb07a878bd3"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "H2-OBS-CALC",
+      "title": "Hydrogen Observatory LCOH calculator assumptions",
+      "regions": [
+        "EU27",
+        "NO comparator",
+        "UK comparator"
+      ],
+      "parameter_ids": [
+        "H01",
+        "H03",
+        "H05",
+        "M10",
+        "K04"
+      ],
+      "rights_status": "reproduction_with_attribution_exceptions",
+      "usable_scope": "Public calculator methodology, explicitly best estimates not operating-plant observations",
+      "admission_gaps": "Default OPEX includes stack replacement: do not add it twice; 4000 cheapest-hour example is not a chronological feasible project dispatch",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [
+        "h2legal"
+      ],
+      "evidence": [
+        {
+          "id": "hydrogen_observatory",
+          "url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/levelised-cost-hydrogen-calculator",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/tools-reports/levelised-cost-hydrogen-calculator",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 38540,
+          "sha256": "6f507d6b793b184dd021ff91de5b98e4578cd9874174a5df9800e10b781b3780"
+        },
+        {
+          "id": "h2legal",
+          "url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+          "final_url": "https://observatory.clean-hydrogen.europa.eu/legal-notice",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 37982,
+          "sha256": "d8ac9fda777537cfbd59c04180b4c580a4a462e5b20a2c6d5267bcb07a878bd3"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "JRC-CETO",
+      "title": "JRC Clean Energy Technology Observatory",
+      "regions": [
+        "EU"
+      ],
+      "parameter_ids": [
+        "K01",
+        "K02",
+        "K04",
+        "H01",
+        "H08"
+      ],
+      "rights_status": "reference_reuse_conditions",
+      "usable_scope": "Annual technology status/trend references and dated 2022 H2 report",
+      "admission_gaps": "Select current report, original source and exact tables; no numeric default seeded",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "jrc_ceto",
+          "url": "https://setis.ec.europa.eu/clean-energy-technology-observatory-ceto_en",
+          "final_url": "https://setis.ec.europa.eu/publications-and-documents/clean-energy-technology-observatory_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 84378,
+          "sha256": "b489f635609762d85f73b15b57feedf72ba3f9c87c7a59ec3ecabbef033c8683"
+        },
+        {
+          "id": "jrc_h2_cost",
+          "url": "https://publications.jrc.ec.europa.eu/repository/handle/JRC130683",
+          "final_url": "https://publications.jrc.ec.europa.eu/repository/handle/JRC130683",
+          "status": 200,
+          "content_type": "text/html;charset=UTF-8",
+          "bytes": 165707,
+          "sha256": "432357651381b9fcb05095da32a6c027d6a10523102c2c1f9ce9667a23979308"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "FRAUNHOFER-LCOE",
+      "title": "Fraunhofer ISE July 2024 renewable LCOE study",
+      "regions": [
+        "DE"
+      ],
+      "parameter_ids": [
+        "K01",
+        "K02",
+        "K03",
+        "K04",
+        "K05",
+        "K08"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Actual study PDF inspected; German cost/operation/projection context to 2045",
+      "admission_gaps": "LCOE is derived outcome with irradiation/WACC assumptions, not directly CapEx or tariff; exact reuse terms before table redistribution",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "fraunhofer_lcoe",
+          "url": "https://www.ise.fraunhofer.de/en/publications/studies/cost-of-electricity.html",
+          "final_url": "https://www.ise.fraunhofer.de/en/publications/studies/cost-of-electricity.html",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 202224,
+          "sha256": "b85f1304f0567d0443c5aa07f07e93663b8e33568c84896c194a7daa67ca3a9c"
+        },
+        {
+          "id": "fraunhofer_lcoe_pdf",
+          "url": "https://www.ise.fraunhofer.de/content/dam/ise/en/documents/publications/studies/EN2024_ISE_Study_Levelized_Cost_of_Electricity_Renewable_Energy_Technologies.pdf",
+          "final_url": "https://www.ise.fraunhofer.de/content/dam/ise/en/documents/publications/studies/EN2024_ISE_Study_Levelized_Cost_of_Electricity_Renewable_Energy_Technologies.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 9236124,
+          "sha256": "cbf916be79a8792caa54adf7cf1ca1d430008b90869fa62ce22b7ba7a14b2f38"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "PVGIS",
+      "title": "JRC PVGIS technical resource and API",
+      "regions": [
+        "European sites; dataset-specific"
+      ],
+      "parameter_ids": [
+        "K02",
+        "K03",
+        "D01"
+      ],
+      "rights_status": "reference_reuse_conditions",
+      "usable_scope": "PV resource/performance and API method references",
+      "admission_gaps": "Not procurement costs, measured site yield or calibrated degradation; underlying radiation dataset rights/basis",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "pvgis",
+          "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
+          "final_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 117997,
+          "sha256": "f80bcbd8431bbc99cd0efa1663037dd53e6242edc937a3d5bee1acd15f2ac558"
+        },
+        {
+          "id": "pvgis_api",
+          "url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/getting-started-pvgis/api-non-interactive-service_en",
+          "final_url": "https://joint-research-centre.ec.europa.eu/photovoltaic-geographical-information-system-pvgis/using-pvgis-5/api-non-interactive-service_en",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 178534,
+          "sha256": "5720f2040be4c2d83df3818753bd4fffedcbe3899e8297b1dd53c208a5136db0"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "PVPS-DEGRADATION",
+      "title": "IEA PVPS Task 13 performance loss and failure reports",
+      "regions": [
+        "International; European application needs matching cohort"
+      ],
+      "parameter_ids": [
+        "D01",
+        "D02",
+        "D03"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Performance-loss estimation methods and module failure/degradation references",
+      "admission_gaps": "PLR confounds soiling/availability/climate/measurement; no single universal Europe degradation value",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "pvps_performance",
+          "url": "https://iea-pvps.org/key-topics/assessment-of-performance-loss-rate-of-pv-power-systems/",
+          "final_url": "https://iea-pvps.org/key-topics/assessment-of-performance-loss-rate-of-pv-power-systems/",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 121591,
+          "sha256": "1d885f48aeeef6bb7b9ab0802db527cac0059b2eecda0af7800e6f5281ec3d4c"
+        },
+        {
+          "id": "pvps_report_139",
+          "url": "https://iea-pvps.org/key-topics/degradation-failure-modes-new-cell-module-technologies/",
+          "final_url": "https://iea-pvps.org/key-topics/degradation-failure-modes-new-cell-module-technologies/",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 128332,
+          "sha256": "3b242557681cc55682ff384f4e9d868ba2983fe57019e52e548dc1e0b5077d86"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "PVPS-OM",
+      "title": "IEA PVPS operation and maintenance guidelines",
+      "regions": [
+        "Climate/technology-specific"
+      ],
+      "parameter_ids": [
+        "D04",
+        "K04",
+        "K07"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "O&M indicators, inspections and climate-specific practice",
+      "admission_gaps": "Guideline is not complete priced maintenance or failure/exposure dataset",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "pvps_om",
+          "url": "https://iea-pvps.org/key-topics/guidelines-for-operation-and-maintenance-of-photovoltaic-power-plants-in-different-climates/",
+          "final_url": "https://iea-pvps.org/key-topics/guidelines-for-operation-and-maintenance-of-photovoltaic-power-plants-in-different-climates/",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 123348,
+          "sha256": "7e3eebcae75c98544a658e27343b597917068c466c95c2481755d965500ba538"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "OREDA",
+      "title": "OREDA equipment reliability data access",
+      "regions": [
+        "Industry cohorts, applicability specific"
+      ],
+      "parameter_ids": [
+        "D03",
+        "D04",
+        "H06"
+      ],
+      "rights_status": "restricted_or_subscription",
+      "usable_scope": "Public access/membership discovery only",
+      "admission_gaps": "Do not copy subscription equipment-failure tables or treat them as campus/H2 priors",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "oreda",
+          "url": "https://www.oreda.com/",
+          "final_url": "https://oreda.com/",
+          "status": 200,
+          "content_type": "text/html; charset=UTF-8",
+          "bytes": 108796,
+          "sha256": "5017360b53de86abd2ddabe62b7c2dd8dc552da14d20bb606caf2ea48bb6105f"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "ENGIE-SCADA",
+      "title": "ENGIE La Haute Borne onshore wind discovery lead",
+      "regions": [
+        "FR"
+      ],
+      "parameter_ids": [
+        "D02",
+        "D03"
+      ],
+      "rights_status": "not_retrieved",
+      "usable_scope": "Known candidate official data portal URL attempted",
+      "admission_gaps": "Blocked request; no file/licence/event labels validated; SCADA alone cannot establish failure frequency",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "engie_scada",
+          "url": "https://opendata-renewables.engie.com/explore/dataset/la-haute-borne-data/information/",
+          "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "WOMBAT",
+      "title": "WOMBAT O&M simulation software",
+      "regions": [
+        "Geography follows supplied inputs"
+      ],
+      "parameter_ids": [
+        "D04",
+        "K04",
+        "K07"
+      ],
+      "rights_status": "software_only_Apache-2.0",
+      "usable_scope": "Open O&M simulation candidate, separate source-specific input-data rights",
+      "admission_gaps": "Not a public European maintenance cost database; calibrated onshore/site logistics and numerical adapter review required",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "github_om",
+          "url": "https://api.github.com/repos/WISDEM/WOMBAT",
+          "final_url": "https://api.github.com/repositories/359557010",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 6698,
+          "sha256": "046b4aee63c4e046deeede66d3263739469a3c29a2028fe2eab47aa3dd3cba73"
+        },
+        {
+          "id": "wombat_readme",
+          "url": "https://raw.githubusercontent.com/WISDEM/WOMBAT/main/README.md",
+          "final_url": "https://raw.githubusercontent.com/WISDEM/WOMBAT/main/README.md",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 9799,
+          "sha256": "4a1480d187e47ddd95639e912cd63c2a9b34117b7e4b3e8ab680cc46004772a4"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "ORE-QUANTLIB",
+      "title": "Open Source Risk Engine and QuantLib software",
+      "regions": [
+        "Market instruments require scoped configuration"
+      ],
+      "parameter_ids": [
+        "M03",
+        "M08"
+      ],
+      "rights_status": "software_licence_review",
+      "usable_scope": "Potential future valuation/hedging methods; repository identity inspected",
+      "admission_gaps": "QuantLib LICENSE.TXT inspected: BSD-style source/binary redistribution with notices and no endorsement; ORE licence unresolved here. No dependency or instrument validation; engines supply no market curves",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "ore_engine",
+          "url": "https://api.github.com/repos/OpenSourceRisk/Engine",
+          "final_url": "https://api.github.com/repos/OpenSourceRisk/Engine",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 6555,
+          "sha256": "2b3e9ba83e0c145f47c5c744a36cf6a90765aa5ca32c3f0d24fad3bf343040d9"
+        },
+        {
+          "id": "quantlib",
+          "url": "https://api.github.com/repos/lballabio/QuantLib",
+          "final_url": "https://api.github.com/repos/lballabio/QuantLib",
+          "status": 200,
+          "content_type": "application/json; charset=utf-8",
+          "bytes": 5280,
+          "sha256": "ec7f3519aa3689dc0ee927e15bf2e7227475d00a77530b089137ab4da34aa85a"
+        },
+        {
+          "id": "quantlib_license",
+          "url": "https://raw.githubusercontent.com/lballabio/QuantLib/master/LICENSE.TXT",
+          "final_url": "https://raw.githubusercontent.com/lballabio/QuantLib/master/LICENSE.TXT",
+          "status": 200,
+          "content_type": "text/plain; charset=utf-8",
+          "bytes": 8832,
+          "sha256": "a0f9ffa00d1f9d1388fd2e3390729667f78b41f1a4d4b13df441c9d16103eba9"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "DE-AUCTION",
+      "title": "Bundesnetzagentur completed onshore wind auction statistics",
+      "regions": [
+        "DE"
+      ],
+      "parameter_ids": [
+        "M02",
+        "M06"
+      ],
+      "rights_status": "resource_terms_review",
+      "usable_scope": "Official round-level volume-weighted awards, min/max bids and realization references inspected",
+      "admission_gaps": "EEG award/support value is not a corporate PPA price or automatically a symmetric two-way CfD; exact round, reference-yield, index and support rules",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "bnetza_wind_root",
+          "url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/start.html",
+          "final_url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/start.html",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 79462,
+          "sha256": "ac160de04b55b3fa0b19c9fe105435698d3a9b595a3956cc8c2cbf03b3e37c63"
+        },
+        {
+          "id": "bnetza_awards",
+          "url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/BeendeteAusschreibungen/start.html",
+          "final_url": "https://www.bundesnetzagentur.de/DE/Fachthemen/ElektrizitaetundGas/Ausschreibungen/Wind_Onshore/BeendeteAusschreibungen/start.html",
+          "status": 200,
+          "content_type": "text/html;charset=utf-8",
+          "bytes": 127539,
+          "sha256": "c33d3aba3cf4e3126284d376c5de218c69144453cf62efa4cc6fa1ca0b286ce2"
+        }
+      ],
+      "production_import_approved": false
+    },
+    {
+      "source_id": "IE-RESS",
+      "title": "EirGrid RESS auction results",
+      "regions": [
+        "IE"
+      ],
+      "parameter_ids": [
+        "M06",
+        "M07"
+      ],
+      "rights_status": "restricted_report_workbook_terms_review",
+      "usable_scope": "Actual final RESS 5 report and RESS 4 results workbook obtained",
+      "admission_gaps": "RESS 5 report page 3 explicitly prohibits reproduction without prior written permission; results are final/provisional and round-specific. Workbook rights require separate determination; no common seed",
+      "prior_source_ids": [],
+      "terms_evidence_ids": [],
+      "evidence": [
+        {
+          "id": "eirgrid_ress",
+          "url": "https://www.eirgrid.ie/industry/renewable-electricity-support-scheme-ress",
+          "final_url": "https://www.eirgrid.ie/industry/renewable-electricity-support-scheme-ress",
+          "status": 200,
+          "content_type": "text/html; charset=utf-8",
+          "bytes": 409317,
+          "sha256": "a6199ec6e47482c99440a4e2bb2adf23e1d919d0a68332ddcdce635a491152f0"
+        },
+        {
+          "id": "ress5_pdf",
+          "url": "https://cms.eirgrid.ie/sites/default/files/publications/RESS-5-Final-Auction-Results-R5FAR.pdf",
+          "final_url": "https://www.eirgrid.ie/sites/default/files/publications/RESS-5-Final-Auction-Results-R5FAR.pdf",
+          "status": 200,
+          "content_type": "application/pdf",
+          "bytes": 353842,
+          "sha256": "cfacb615167083ebf0269a14240aa8eceb09b2c0f673f3786768de58d604350e"
+        },
+        {
+          "id": "ress4_xlsx",
+          "url": "https://cms.eirgrid.ie/sites/default/files/publications/Final-Auction-Results-RESS-4.xlsx",
+          "final_url": "https://www.eirgrid.ie/sites/default/files/publications/Final-Auction-Results-RESS-4.xlsx",
+          "status": 200,
+          "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "bytes": 17136,
+          "sha256": "cb5f6528e13b4a65226744001084ce7fa2cacd1a588385e66e5e2035d104ef3c"
+        }
+      ],
+      "production_import_approved": false
+    }
+  ]
+}
