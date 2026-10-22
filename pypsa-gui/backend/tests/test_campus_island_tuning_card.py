@@ -43,6 +43,18 @@ def test_the_card_shows_each_changed_setting_old_to_new_and_what_follows(drafted
     assert _sidecar_of(drafted) == before              # a card writes nothing
 
 
+def test_the_card_shows_a_rounded_value_in_words_and_keeps_the_stored_one(drafted):  # noqa: F811
+    from services.campus_island_tuning import _round_for_reading
+
+    assert _round_for_reading(0.526130756579) == 0.526 and _round_for_reading(1.19) == 1.19
+    assert _round_for_reading(None) is None and _round_for_reading(4.0) == 4.0
+    _recommend(drafted)
+    for r in (r for r in _card(drafted)["rows"] if r["role"] == "typed"):
+        assert r["display"] == {"old": _round_for_reading(r["old"]), "new": _round_for_reading(r["new"]),
+                                "unit": r["unit"]}
+        assert r["says_name"] == f"{r['name']} {r['label']}"
+
+
 def test_with_the_island_rows_off_the_card_says_the_hub_solve_does_not_read_them(drafted):  # noqa: F811
     (project_registry.project_dir(drafted) / "solver_config.json").write_text(json.dumps({}))
     _recommend(drafted)

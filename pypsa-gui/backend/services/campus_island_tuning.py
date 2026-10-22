@@ -488,6 +488,11 @@ _FIELD_WORDS = {"droop_pct": ("Droop", "%"), "tau_f_s": ("Frequency filter time 
                 "H_v_s": ("Virtual inertia H_v", "s"), "i_max_pu": ("Current limit i_max", "pu")}
 
 
+def _round_for_reading(value):
+    """``0.526130756579`` as ``0.526``: three significant figures, for the card; the stored value is unchanged."""
+    return float(f"{value:.3g}") if isinstance(value, (int, float)) and not isinstance(value, bool) else value
+
+
 def _card_refusal(exc: HTTPException) -> HTTPException:
     """The apply's own refusal as the card's: a stale or missing recommendation (409) is
     ``edit_preview_stale``, nothing to change ``nothing_to_change``, any other 422 ``invalid_edit_value``."""
@@ -515,7 +520,11 @@ def card_rows(project) -> list[dict]:
     for c in plan["changes"]:
         label, unit = _FIELD_WORDS[c["field"]]
         rows.append({"component_class": "Settings", "name": c["unit"], "field": c["field"], "label": label,
-                     "old": c["from"], "new": c["to"], "unit": unit, "role": "typed"})
+                     "says_name": f"{c['unit']} {label}", "old": c["from"], "new": c["to"], "unit": unit,
+                     "role": "typed",
+                     # the search's raw float, rounded for reading; the card shows this (same unit)
+                     "display": {"old": _round_for_reading(c["from"]), "new": _round_for_reading(c["to"]),
+                                 "unit": unit}})
     when = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(plan["rec_path"].stat().st_mtime))
     notes = [f"From the grid-forming recommendation made {when}: heuristic screening, not a certificate; "
              "the values are written tagged assumed to the island data and the campus file.",

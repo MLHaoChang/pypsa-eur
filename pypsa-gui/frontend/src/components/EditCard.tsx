@@ -103,6 +103,8 @@ function showDisplay(value: number | null | undefined): string {
 
 /** "Generator 'pv'": the class in the user's words and the component's name. */
 function assetWords(componentClass: string, name: string): string {
+  // "Settings" is a bucket, not a thing: the unit or item is named as it is ("BESS_NEW")
+  if (componentClass === 'Settings') return name
   return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
 }
 
@@ -193,7 +195,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                   {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
-                  {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
+                  {r.display && r.display.unit !== r.unit && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     stored as {show(r.new)} {r.unit}
                   </span>}
                 </td>
