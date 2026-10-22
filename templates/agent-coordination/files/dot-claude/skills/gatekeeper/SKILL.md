@@ -25,7 +25,7 @@ A work session sends a failure it has hit twice, with its diagnosis (from the `d
 
 1. Expect the session to have run `mp-code-review` on the PR first; its fixes, or its reasons for leaving a finding, are in the PR body. Review the PR at its current head. Read the diff against its merge-base, the tests it adds, and the owner decisions the brief quotes.
 2. Check each finding against a real caller or input before you report it. Report blocking findings with the path you traced and the fix you expect.
-3. When the PR is sound, `send_message` the coordinator: `OK #<pr> <full 40-character head SHA>`, plus one line on what you checked.
+3. Post the verdict as a PR comment, with the attribution footer: `GK OK @<full 40-character head SHA>: <what you checked>`, or `GK NOT OK @<sha>: <what to fix>`. The PR's session sees it through its subscription and `scripts/coord/premerge.sh` reads it; the coordinator relays nothing. Your standing rules are in `docs/agents/review-gk.md`.
 4. When the head moves after an OK, review only the new commits. A clean `{{BASE_BRANCH}}` merge with no overlap gets a fresh OK without a re-review; say so in the message.
 
 ## Scope

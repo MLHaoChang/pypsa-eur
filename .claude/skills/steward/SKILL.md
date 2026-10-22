@@ -7,22 +7,26 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
 
 ## Driving a PR
 
-1. **Branch.** Open each PR on its own `claude/*` branch, against `master`, with a body that follows `.github/pull_request_template.md`.
+1. **Branch.** Open each PR on its own `claude/*` branch, against `master`, with a body that follows `.github/pull_request_template.md`. A PR whose plan went to review (see [Gatekeeper checkpoints](#gatekeeper-checkpoints)) opens after the plan verdicts arrive.
    Done when the PR exists and its head is pushed.
 2. **Release note.** Add a fragment file under `doc/release-notes.d/` as `doc/release-notes.d/README.md` describes; `doc/release_notes.md` stays untouched.
    Done when the PR diff contains one new fragment and no change to `doc/release_notes.md`.
-3. **Wait for CI on the head.** Let every run on the current head finish. Each push cancels the ~2 h "GUI backend" run (concurrency cancel-in-progress), so batch fixes into one validated push.
+3. **Wait for CI on the head.** You own CI for your PR: the coordinator does not watch it. Let every run on the current head finish. Each push cancels the ~2 h "GUI backend" run (concurrency cancel-in-progress), so batch fixes into one validated push.
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures); loop back to step 3 after each push.
    Done when every check run is success or skipped.
-5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`:
+5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`. Premerge's "reviewer verdicts" section shows which GK and UX OKs are current on the head; ask a reviewer again only when its OK is missing or stale. The message holds:
    - the PR number;
    - the full 40-character head SHA, copied from premerge.sh's `head:` line;
    - the premerge.sh output.
 
    Report only after "GUI backend" is completed/success on that exact SHA.
    Done when the message is sent and premerge.sh exited 0, or the message names what blocks it.
-6. **Hold.** The coordinator merges; the PR's own session leaves the merge button alone. Act again only on a new CI or review event, a conflict, or a coordinator request.
+6. **Hold.** The coordinator merges, and runs premerge once more at merge; the PR's own session leaves the merge button alone. Act again only on a new CI or review event, a conflict, or a coordinator request.
+
+## Messages to the coordinator
+
+Send the coordinator only: `premerge ok <full sha>`, a review request, a question, a hand-off note. No "ready", FYI or resend. A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
 
 ## Merge gate
 
@@ -32,6 +36,8 @@ The coordinator merges a PR when `scripts/coord/premerge.sh <pr>` exits 0 and Gi
 - no file **overlaps** what master changed since the PR's merge-base. Docs-only overlap (`docs/superpowers/OPEN-ITEMS.md`, `docs/superpowers/plans/*`, release notes) is fine when the merge is clean, and so is a file identical on both sides (a cherry-pick master already has);
 - a **code** overlap is waived when the trial merge is clean, the semantic tests pass and the tests that exercise each overlapping file pass (`scripts/coord/overlap_tests.py` maps file to tests). A file with no test, a conflict or a failing test still blocks;
 - a PR that touches a path in its `semantic_re` passes the `semantic_tests` it lists on a trial merge with current master, plus the assistant inventory check when it touches `harness/catalogue*`.
+
+- the latest `GK NOT OK` or `UX NOT OK` verdict comment is not newer than that reviewer's last OK. Missing and stale OKs are printed, not blocking: premerge cannot know whether the PR needs that review.
 
 It prints the head SHA, merge-base and how far behind the PR is, then one section per check, and exits non-zero when the PR is blocked.
 
@@ -60,17 +66,17 @@ The gatekeeper (the id is in `docs/agents/coordinator.md`) advises at two points
 
 Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this.
 
-The gatekeeper advises; it does not write the code.
+The gatekeeper advises; it does not write the code. Plan verdicts come back through the coordinator, since there is no PR yet. Review verdicts are PR comments, `GK OK @<full sha>: <what was checked>` or `GK NOT OK @<sha>: …`. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
 
 ## UX reviewer
 
-A PR that changes UI also needs the UX reviewer's OK on its exact head SHA (the id is in `docs/agents/coordinator.md`). The reviewer checks the PR against the approved project workflow, `.scratch/project-workflow/design.md`:
+A PR that changes UI also needs the UX reviewer's OK on its exact head SHA (the id is in `docs/agents/coordinator.md`), posted as a PR comment, `UX OK @<full sha>: <what was checked>`. The reviewer's standing rules are in `docs/agents/review-ux.md`; it checks the PR against the approved project workflow, `.scratch/project-workflow/design.md`:
 - every input belongs to its workflow section;
 - the user never has to jump away and back;
 - the section's completion state is wired;
 - Guided and Expert agree.
 
-Before you build UI, tell the reviewer in a few lines where the change sits in the workflow. A clean master merge carries the OK.
+Before you build UI, tell the reviewer in a few lines where the change sits in the workflow. A clean master merge carries the OK; premerge says whether it does.
 
 ## Helper agents
 
@@ -79,7 +85,7 @@ Run read-only helper agents (log reading, file sweeps, summaries of saved tool o
 ## Rotation
 
 A long context is a session's largest cost: every tool call re-reads it. Rotate when either holds:
-- `get_session` (no id) shows `context_usage.used_tokens` above 300k;
+- the context-guard hook says "Context at <N>k (limit 200k)" (owner decision USE-1; it repeats every +20k, so don't poll `get_session`);
 - a package's PR has merged and more slices remain.
 
 Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
@@ -87,13 +93,14 @@ Done when the coordinator has the note and the request.
 
 ## Finishing a package
 
-When the last PR of your work package has merged, `send_message` the coordinator a hand-off note, then stop. The note covers:
-- the decisions made;
-- the open items;
-- file pointers;
+When the last PR of your work package has merged, `send_message` the coordinator a hand-off note, then stop. The note carries only live state, never standing rules (those live in `docs/agents/`):
+- OKs received, each with its full SHA;
+- open NOT OKs;
+- what the session is waiting on;
+- follow-ups and file pointers;
 - the last merged SHA.
 
-The coordinator opens the next package as a fresh session from that note.
+A reviewer's hand-off carries the same; a new standing rule goes to the coordinator as its own message, to land in `docs/agents/review-ux.md` or `review-gk.md`. The coordinator opens the next package as a fresh session from that note.
 
 A package that turns out to need code beyond your brief, such as gridspine or investment-engine code in a frontend or template-data package, goes back to the coordinator before you change that code.
 
