@@ -51,7 +51,7 @@ function RunAgain({ acPfAvailable }: { acPfAvailable: boolean }) {
           <span className="text-muted">AC power flow was not part of this run.</span>
           <button type="button" data-testid="loadflow-switch-on-acpf" className="text-accent hover:underline"
             onClick={() => openPanel('scenarios', 'simparams')}>
-            Switch it on in Solver settings ›
+            Switch it on under What the Run computes › Load flow ›
           </button>
         </>
       )}
