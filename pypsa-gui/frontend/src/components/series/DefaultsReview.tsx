@@ -3,12 +3,16 @@
 // row is a pending default with why it was picked (assumed) and how it is
 // sized, or why the component is skipped. Apply all writes the ticked rows
 // under one undo step and reports each row; a measured series is never
-// replaced. Renewables join the list through their family's own plugin.
+// replaced. Wind and solar join as one block (RP-04b): one generation per
+// technology with the weather bar's year, written with one batch apply.
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, ChevronDown, ChevronRight } from 'lucide-react'
 import { Btn, Seg, Tag } from '../PageKit'
-import { errorText, seriesApi, type DefaultRow, type DefaultsApplyResult } from '../../api/profiles'
+import { errorText, profilesApi, seriesApi, type DefaultRow, type DefaultsApplyResult } from '../../api/profiles'
+import { nk } from '../../utils/queryKeys'
+import { generateAndApply, notReadyReason, readyRows, type GenerationOutcome } from './renewableGeneration'
+import { weatherKey } from './WeatherBar'
 import { WarningList, WeekChart } from './SeriesKit'
 
 const fmt = (v: number | undefined, d = 2) =>
@@ -31,22 +35,35 @@ export default function DefaultsReview({ project, onOpenEditor }: {
   const [ticked, setTicked] = useState<Set<string>>(new Set())
   const [open, setOpen] = useState<string | null>(null)
   const [result, setResult] = useState<DefaultsApplyResult | null>(null)
+  const [renewTick, setRenewTick] = useState(true)
+  const [renewResult, setRenewResult] = useState<GenerationOutcome[] | null>(null)
+
+  const readiness = useQuery({ queryKey: nk(project, 'profile_readiness'), queryFn: () => profilesApi.readiness(project) })
+  const weather = useQuery({ queryKey: weatherKey(project), queryFn: () => profilesApi.weather(project) })
+  const allRenewables = readiness.data ?? []
 
   const preview = useMutation({
     mutationFn: () => seriesApi.previewDefaults(project, { replace_generated: replace, peak_sized: peakSized }),
     onSuccess: r => setTicked(new Set(r.rows.filter(x => x.job_id).map(x => x.component))),
   })
   // Re-preview when the options change: sizing changes the generated rows.
-  useEffect(() => { setResult(null); preview.mutate() }, [replace, peakSized.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setResult(null); setRenewResult(null); preview.mutate() }, [replace, peakSized.join('|')]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const rows = preview.data?.rows ?? []
   const planned = useMemo(() => rows.filter(r => r.job_id), [rows])
   const skipped = useMemo(() => rows.filter(r => r.skipped), [rows])
 
+  const renewables = useMemo(() => readyRows(allRenewables, replace), [allRenewables, replace])
+  const renewCount = renewTick ? renewables.length : 0
+
   const apply = useMutation({
-    mutationFn: () => seriesApi.applyDefaults(project,
-      planned.filter(r => ticked.has(r.component)).map(r => r.job_id as string)),
-    onSuccess: r => { setResult(r); void qc.invalidateQueries() },
+    mutationFn: async () => {
+      const jobs = planned.filter(r => ticked.has(r.component)).map(r => r.job_id as string)
+      const series = jobs.length ? await seriesApi.applyDefaults(project, jobs) : null
+      const generated = renewCount ? await generateAndApply(project, renewables) : null
+      return { series, generated }
+    },
+    onSuccess: r => { setResult(r.series); setRenewResult(r.generated); void qc.invalidateQueries() },
   })
 
   const toggle = (c: string) => setTicked(t => {
@@ -71,6 +88,29 @@ export default function DefaultsReview({ project, onOpenEditor }: {
       </label>
       {preview.isPending && <p className="text-muted">Generating defaults…</p>}
       {preview.isError && <p className="text-red-600" data-testid="defaults-error">{errorText(preview.error)}</p>}
+
+      <div className="mb-2 border border-border rounded p-2" data-testid="defaults-renewables">
+        <p className="text-[10px] uppercase text-muted">Wind and solar</p>
+        {readiness.isPending ? <p className="text-muted">Reading the wind and solar generators…</p>
+          : readiness.isError ? <p className="text-[11px] text-warn" data-testid="defaults-renewables-reason">The wind and solar generators could not be read.</p>
+          : renewables.length > 0 ? (
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={renewTick} onChange={e => setRenewTick(e.target.checked)}
+                aria-label="Generate weather profiles for the ready wind and solar generators" />
+              <span>
+                Generate a weather profile for {renewables.length} generator{renewables.length === 1 ? '' : 's'}
+                {' '}({renewables.map(r => r.generator).join(', ')}).
+                <span className="block text-[10px] text-muted" data-testid="defaults-renewables-weather">
+                  {weather.data
+                    ? `${weather.data.source === 'atlite' ? 'ERA5' : 'Synthetic'} weather, ${weather.data.year} (${weather.data.year_source === 'saved' ? 'your choice' : weather.data.year_source === 'snapshots' ? 'from your snapshots' : 'default'}). Change them in the weather bar of Renewables.`
+                    : 'The weather choice is read from the weather bar of Renewables.'}
+                </span>
+              </span>
+            </label>
+          ) : (
+            <p className="text-[11px] text-muted" data-testid="defaults-renewables-reason">{notReadyReason(allRenewables)}</p>
+          )}
+      </div>
 
       {planned.length > 0 && (
         <table className="w-full border-collapse" data-testid="defaults-rows">
@@ -105,16 +145,25 @@ export default function DefaultsReview({ project, onOpenEditor }: {
       )}
 
       <div className="flex items-center gap-2 mt-3">
-        <Btn variant="primary" onClick={() => apply.mutate()} disabled={!ticked.size || apply.isPending || preview.isPending}>
-          <Check size={13} /> Apply {ticked.size} default{ticked.size === 1 ? '' : 's'}
+        <Btn variant="primary" onClick={() => apply.mutate()} disabled={(!ticked.size && !renewCount) || apply.isPending || preview.isPending}>
+          <Check size={13} /> Apply {ticked.size + renewCount} default{ticked.size + renewCount === 1 ? '' : 's'}
         </Btn>
-        {!ticked.size && !preview.isPending && (
+        {!ticked.size && !renewCount && !preview.isPending && (
           <span className="text-[11px] text-muted" data-testid="defaults-apply-reason">
-            {planned.length ? 'Tick a row to apply its default.' : 'Every component already has a series, or is skipped for the reason shown.'}
+            {planned.length || renewables.length ? 'Tick a row to apply its default.' : 'Every component already has a series, or is skipped for the reason shown.'}
           </span>
         )}
         {apply.isError && <span className="text-red-600">{errorText(apply.error)}</span>}
       </div>
+      {renewResult && (
+        <ul className="mt-2 text-[11px] list-disc pl-4" data-testid="defaults-renewables-result">
+          {renewResult.map(o => o.error
+            ? <li key={o.technology} className="text-amber-700">{o.technology}: {o.error}</li>
+            : <li key={o.technology} className="text-green-700">
+                {o.technology}: {o.applied} profile{o.applied === 1 ? '' : 's'} applied. One undo (Ctrl+Z) reverts them.
+              </li>)}
+        </ul>
+      )}
       {result && (
         <div className="mt-2 text-[11px]" data-testid="defaults-result">
           <p className="text-green-700">Applied {result.applied}. One undo (Ctrl+Z) reverts them all.</p>

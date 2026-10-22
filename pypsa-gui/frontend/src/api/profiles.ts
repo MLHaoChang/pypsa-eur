@@ -62,6 +62,8 @@ export interface PendingList {
 
 export interface GenerateSpec {
   points: ProfilePoint[]
+  /** Generator names; the bus coordinates seed the sites (the point ids are the names). */
+  from_generators?: string[]
   technology: ProfileTechnology
   preset?: string
   params?: Record<string, unknown>
@@ -122,7 +124,36 @@ export interface ReadinessRow {
   stale_reason?: 'horizon_changed' | 'bus_moved'
 }
 
+/** The weather bar's choice (RP-04b): saved in the project, else the snapshots' year. */
+export interface WeatherChoice {
+  source: ProfileSource
+  year: number
+  /** Where `year` came from: your choice, the snapshots, or the last completed year. */
+  year_source: 'saved' | 'snapshots' | 'default'
+  /** What the snapshots are read as; set in the site connection, never here. */
+  time_basis: { value: string; assumed: boolean }
+}
+
+export interface BatchApplyResult {
+  applied: ApplyResult[]
+  count: number
+  skipped: unknown[]
+}
+
 export const profilesApi = {
+  weather: (project: string) =>
+    client.get<WeatherChoice>(`/projects/${encodeURIComponent(project)}/profiles/weather`).then(r => r.data),
+
+  saveWeather: (project: string, choice: { source: ProfileSource; year: number }) =>
+    client.put<WeatherChoice>(`/projects/${encodeURIComponent(project)}/profiles/weather`, choice).then(r => r.data),
+
+  /** Every point of one pending job named after a generator, in one undo step. */
+  applyBatch: (project: string, jobId: string) =>
+    client.post<BatchApplyResult>(
+      `/projects/${encodeURIComponent(project)}/profiles/apply-batch`,
+      { job_id: jobId, all_from_job: true },
+    ).then(r => r.data),
+
   readiness: (project: string) =>
     client.get<{ generators: ReadinessRow[] }>(
       `/projects/${encodeURIComponent(project)}/profiles/readiness`,
