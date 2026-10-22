@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Load flow is a scope-owned option: switch it on or off under What the Run computes › Load flow. The Solver settings Stage 2 panel now shows its state read-only, and the standalone "Run AC Power Flow on current solution" button is gone (the header Run chains it after the solve).

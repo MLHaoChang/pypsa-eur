@@ -922,10 +922,10 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
             "snapshot index. Disable one of the two."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("rolling_with_ac_pf", "", "",
-            "Auto-chained AC PF is not yet supported with the rolling-horizon "
-            "strategy — the dispatch fix needs a per-window slack story. "
-            "Disable `run_ac_pf_after_lopf` or use the standalone Stage 2 "
-            "trigger after the rolling solve completes."))
+            "Load flow (AC power flow after the solve) can't run with the "
+            "rolling-horizon strategy yet: the dispatch fix needs a per-window "
+            "slack story. Switch off What the Run computes › Load flow, or use "
+            "the full solve."))
     total = len(n.snapshots) if hasattr(n, "snapshots") else 0
     if H > total and total > 0:
         out.append(_warn("rolling_horizon_exceeds_snapshots", "", "",
@@ -1045,10 +1045,10 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
                     "pure single-period."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("myopic_with_ac_pf", "", "",
-            "Auto-chained AC PF is not yet supported with the myopic-foresight "
-            "solve strategy — the dispatch fix needs a per-period story. "
-            "Disable `run_ac_pf_after_lopf` or use the standalone Stage 2 "
-            "trigger after the myopic solve completes."))
+            "Load flow (AC power flow after the solve) can't run with the "
+            "myopic-foresight strategy yet: the dispatch fix needs a "
+            "per-period story. Switch off What the Run computes › Load flow, "
+            "or use the full solve."))
     out.extend(_check_myopic_capacity_lock(n, network_periods or cfg_periods))
     return out
 
@@ -1176,9 +1176,10 @@ def _check_stage2_ac_pf(n, cfg) -> list[Issue]:
     # Multi-investment-period + AC PF: incompatible
     if getattr(cfg, "multi_investment_periods", False):
         out.append(_err("stage2_multi_period", "", "",
-            "Stage 2 (AC Power Flow) does not support multi-investment-period "
-            "snapshots — PyPSA's `n.pf()` accepts a flat snapshot index only. "
-            "Disable `run_ac_pf_after_lopf` or `multi_investment_periods`."))
+            "Load flow (AC power flow after the solve) doesn't support "
+            "multi-investment-period snapshots: PyPSA's power flow takes a "
+            "flat snapshot index only. Switch off What the Run computes › "
+            "Load flow, or use a single investment period."))
 
     # Zero-impedance lines: singular Y-bus
     if not n.lines.empty:
