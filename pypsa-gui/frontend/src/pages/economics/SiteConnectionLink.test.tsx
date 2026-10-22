@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { commercialApi } from '../../api/commercial'
-import { SiteConnectionEditor } from './SiteConnectionLink'
+import { useUIStore } from '../../store/uiStore'
+import { SiteConnectionEditor, SiteConnectionNeeded, SiteConnectionSummary } from './SiteConnectionLink'
 
 vi.mock('../../api/commercial', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/commercial')>()
@@ -48,3 +49,27 @@ describe('SiteConnectionEditor', () => {
     expect(await screen.findByTestId('site-connection-form')).toBeTruthy()
   })
 })
+
+// The link is mode-aware: Expert opens the panel, Guided opens it in place over the card.
+describe.each([['summary', <SiteConnectionSummary key="s" />], ['needed', <SiteConnectionNeeded key="n" />]])(
+  'the %s link to Connection & grid', (_n, node) => {
+    const open = () => render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{node}</QueryClientProvider>)
+    const click = async () => fireEvent.click(await screen.findByRole('button', { name: /Connection & grid ›$/ }))
+
+    it('Expert: sets the section and the campusElectrical panel', async () => {
+      vi.mocked(commercialApi.getCommercial).mockResolvedValue(null)
+      useUIStore.setState({ uiMode: 'expert', activeSlidePanel: null, fieldDrawer: null })
+      open(); await click()
+      expect(useUIStore.getState().activeSection).toBe('connection')
+      expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
+    })
+
+    it('Guided: stays in Guided and opens the panel in the field drawer', async () => {
+      vi.mocked(commercialApi.getCommercial).mockResolvedValue(null)
+      useUIStore.setState({ uiMode: 'guided', activeSlidePanel: null, fieldDrawer: null })
+      open(); await click()
+      expect(useUIStore.getState().uiMode).toBe('guided')
+      expect(useUIStore.getState().fieldDrawer?.panel).toBe('campusElectrical')
+    })
+  })

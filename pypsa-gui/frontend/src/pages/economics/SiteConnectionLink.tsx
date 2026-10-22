@@ -35,7 +35,7 @@ export function SiteConnectionEditor() {
   const config = useSiteConnection()
   if (config.isPending) return <p className="text-[11px] text-muted">Loading the site connection…</p>
   if (config.isError) return <p className="text-[11px] text-warn">The site connection could not be read.</p>
-  return <SiteConnectionSection config={config.data} needed={!config.data?.poc_link} />
+  return <SiteConnectionSection config={config.data} needed={!config.data?.poc_link} hideTitle />
 }
 
 /** The read-only line (PoC, export link, timezone, or "not set") and the link to the editor. */
