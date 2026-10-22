@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Solver settings › Stage 2 shows whether the Load flow runs after a solve, read-only, with a link that scrolls to the Load flow row in What the Run computes, as N-1 security already does.

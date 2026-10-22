@@ -257,16 +257,16 @@ export default function SolverSettings() {
     document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
   }, [blockRequest, draft, tab, clearBlockRequest])
-  // "Switch it under What the Run computes › N-1 security": the General tab,
-  // scrolled to the scope cards' N-1 row.
-  const [showN1Row, setShowN1Row] = useState(false)
+  // "Switch it under What the Run computes › N-1 security" (or › Load flow): the
+  // General tab, scrolled to that scope cards' row.
+  const [showScopeRow, setShowScopeRow] = useState<'n1_sclopf' | 'load_flow' | null>(null)
   useEffect(() => {
-    if (!showN1Row) return
+    if (!showScopeRow) return
     if (tab !== 'general') { setTab('general'); return }
-    document.querySelector('[data-testid="expert-scope-cards-row-grid-n1_sclopf"]')
+    document.querySelector(`[data-testid="expert-scope-cards-row-grid-${showScopeRow}"]`)
       ?.scrollIntoView({ block: 'center' })
-    setShowN1Row(false)
-  }, [showN1Row, tab])
+    setShowScopeRow(null)
+  }, [showScopeRow, tab])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -549,7 +549,8 @@ export default function SolverSettings() {
           LP. Lives next to Solve strategy / Validate so the user configures
           the full solve pipeline in one place. */}
       <div className="border-t border-border pt-4">
-        <Stage2Panel draft={draft} patch={patch} loadFlowOn={loadFlowOn} />
+        <Stage2Panel draft={draft} patch={patch} loadFlowOn={loadFlowOn}
+          onShowSwitch={() => setShowScopeRow('load_flow')} />
       </div>
 
       {/* ── Pre-run validation CTA ──────────────────────────────
@@ -912,7 +913,7 @@ export default function SolverSettings() {
       <StressConditionsSection project={currentProject} />
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
-      <SclopfPanel draft={draft} patch={patch} n1On={n1On} onShowSwitch={() => setShowN1Row(true)} />
+      <SclopfPanel draft={draft} patch={patch} n1On={n1On} onShowSwitch={() => setShowScopeRow('n1_sclopf')} />
       </>}
 
       {tab === 'constraints' && <>
@@ -1902,11 +1903,13 @@ export function SclopfPanel({
 // (What the Run computes › Load flow, W4b): this panel shows it read-only, and
 // the one Run (the header Run) chains it after the solve.
 export function Stage2Panel({
-  draft, patch, loadFlowOn,
+  draft, patch, loadFlowOn, onShowSwitch,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
   loadFlowOn: boolean
+  /** Show the scope cards' Load flow row (the one on/off). */
+  onShowSwitch: () => void
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
@@ -1933,7 +1936,11 @@ export function Stage2Panel({
         {loadFlowOn
           ? 'AC power flow runs after each solve.'
           : 'AC power flow does not run after a solve.'}{' '}
-        Switch it under What the Run computes › Load flow, above.
+        Switch it under{' '}
+        <button type="button" data-testid="stage2-show-switch" onClick={onShowSwitch}
+          className="text-accent hover:underline">
+          What the Run computes › Load flow ›
+        </button>
       </p>
 
       <div className="grid grid-cols-2 gap-3 mb-3">

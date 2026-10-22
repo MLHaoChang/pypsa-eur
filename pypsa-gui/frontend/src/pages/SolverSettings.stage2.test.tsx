@@ -14,12 +14,13 @@ vi.mock('../api/network', async (importOriginal) => ({
 beforeEach(() => useUIStore.setState({ currentProject: 'Demo' }))
 afterEach(() => cleanup())
 
-function mount(loadFlowOn: boolean) {
+function mount(loadFlowOn: boolean, onShowSwitch = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={qc}>
     <Stage2Panel draft={{ run_ac_pf_after_lopf: false } as SolverConfig} patch={() => {}}
-      loadFlowOn={loadFlowOn} />
+      loadFlowOn={loadFlowOn} onShowSwitch={onShowSwitch} />
   </QueryClientProvider>)
+  return { onShowSwitch }
 }
 
 it('reads On from the scope, whatever the hydrated draft says', () => {
@@ -32,5 +33,12 @@ it('reads On from the scope, whatever the hydrated draft says', () => {
 it('reads Off with the pointer to the scope row', () => {
   mount(false)
   expect(screen.getByTestId('stage2-state').textContent)
-    .toMatch(/^Off:.*What the Run computes › Load flow, above\./)
+    .toMatch(/^Off:.*Switch it under What the Run computes › Load flow ›/)
+})
+
+it('the link to the scope row has no toggle of its own beside it', () => {
+  const { onShowSwitch } = mount(false)
+  screen.getByTestId('stage2-show-switch').click()
+  expect(onShowSwitch).toHaveBeenCalledOnce()
+  expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
 })
