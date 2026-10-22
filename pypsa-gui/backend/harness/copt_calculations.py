@@ -9,7 +9,9 @@ P[available < r(t)] with the grid index ceil(r/1 - 1e-12), EUE(t) =
 sum over k < that index of p_k (r - k), hours with r <= 0 add nothing, and
 LOLE and EUE are generator-weighted horizon totals. Fleets the plain table does
 not describe (a profiled unit, a period-varying capacity, a folded static
-availability, a capacity off the 1 MW grid) are refused, named.
+availability, a capacity off the 1 MW grid) are refused, named, and so is a
+table whose convolution would outgrow COPT_WORK_BUDGET. Each hour is then O(1)
+from prefix sums of the table.
 """
 
 import math
@@ -24,8 +26,10 @@ SNAP = 1e-12  # the engine's grid snap
 REL_TOLERANCE = 1e-9
 REFUSALS = frozenset({
     "network_scope_required", "no_copt_fleet", "unusable_outage_rate", "copt_conventions_not_reproduced",
-    "unsupported_snapshot_scope", "copt_inputs_not_finite",
+    "unsupported_snapshot_scope", "copt_inputs_not_finite", "copt_table_too_large",
 })
+# Table points x units: the convolution's work, about 1 s at this size.
+COPT_WORK_BUDGET = 1_000_000_000
 GRID_TOLERANCE = 1e-12  # the engine splits any larger fraction across two grid points
 METRICS = {
     "screening_lole": {
@@ -131,6 +135,9 @@ def source(ctx, entity):
         for u in units
     ) or _must_take_varies(n):
         raise ValueError("copt_conventions_not_reproduced")
+    points = sum(int(round(u.capacity_mw)) for u in units) + 1
+    if points * len(units) > COPT_WORK_BUDGET:
+        raise ValueError("copt_table_too_large")
     residual, weights_here = _residual(n, cfg), _weights(n)
     engine_weights = weights.reindex(n.snapshots).to_numpy(dtype=float)
     if not (np.isfinite(residual).all() and np.isfinite(weights_here).all()
@@ -165,14 +172,21 @@ def distribution(units):
     return p
 
 
-def hourly(p, r):
-    """(LOLP, EUE) of one hour at residual load r on the 1 MW grid, strict."""
-    if r <= 0:
-        return 0.0, 0.0
-    k0 = min(int(math.ceil(r / DELTA_MW - SNAP)), len(p))
-    k = np.arange(k0)
+def hourly(p, residual):
+    """(LOLP, EUE) per hour at residual load r on the 1 MW grid, strict.
+
+    From prefix sums P[k] = sum_{j<k} p_j and M[k] = sum_{j<k} j p_j:
+    LOLP = P[k0] and EUE = r P[k0] - M[k0], with k0 the strict grid index.
+    """
+    r = np.asarray(residual, dtype=float)
+    prob = np.concatenate(([0.0], np.cumsum(p)))
+    moment = np.concatenate(([0.0], np.cumsum(p * (np.arange(len(p)) * DELTA_MW))))
+    positive = r > 0
+    k0 = np.where(positive, np.minimum(np.ceil(r / DELTA_MW - SNAP), len(p)), 0).astype(int)
     # A probability: summation can land an ulp above 1 when r exceeds the whole fleet.
-    return min(max(math.fsum(p[:k0]), 0.0), 1.0), math.fsum(p[:k0] * (r - k * DELTA_MW))
+    lolp = np.clip(prob[k0], 0.0, 1.0)
+    eue = np.where(positive, np.maximum(r * prob[k0] - moment[k0], 0.0), 0.0)
+    return list(zip(lolp.tolist(), eue.tolist()))
 
 
 def calculate(raw, scope):
@@ -190,7 +204,7 @@ def calculate(raw, scope):
         reasons = dict.fromkeys(METRICS, "weights_mismatch")
     else:
         p = distribution(raw["units"])
-        hours = [hourly(p, r) for r in residual]
+        hours = hourly(p, residual)
         figures = {
             "screening_lole": math.fsum(w * lolp for w, (lolp, _e) in zip(raw["weights"], hours)),
             "screening_eue": math.fsum(w * eue for w, (_l, eue) in zip(raw["weights"], hours)),
