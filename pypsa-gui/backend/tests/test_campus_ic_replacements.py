@@ -470,3 +470,37 @@ def test_a_renewal_unlike_its_lineage_is_refused_with_its_label_only(hub, mutate
     assert src.refusal == "campus_assets_invalid"
     assert src.detail.startswith("'campus:TR_132_33_63#")
     assert "3.0" not in src.detail and "statcom" not in src.detail
+
+
+@pytest.mark.parametrize("rule", ["fixed", "part_lifetimes"])
+def test_the_c14_study_through_the_case_buys_each_campus_purchase_once(hub, rule):  # noqa: F811
+    """Issue test 2 on `c14_rows` (horizon 2060, no escalation, no contingency):
+    the capex, the stages and the replacements sum, by hand, to every purchase
+    the study lists, plus the IC's own purchases after a lineage's last life
+    ends; the campus renewals are paid once each, in build_year − 1."""
+    from services import campus_electrical_service as ce
+    from services.finance.replacements import _resumed, lineages
+    from services.finance.timeline import build_timeline
+
+    fake_c14(hub, c14_rows())
+    resp = ce.owner_assets_response(hub, replacements=True)
+    src = _fold(resp)
+    assert src.refusal is None, src.detail
+    stages = {e.name: date(e.build_year, 1, 1) for e in src.extras if e.build_year > 2030}
+    zero = {c: 0.0 for c in ESCALATION_CLASSES}
+    case = _case(*src.extras, asset_cod=stages, replacement_rule=rule, escalation=zero)
+    r = _run(case)
+    assert r.op.status["capex"] == "ok", r.op.reasons
+    renewals = sorted((a["name"], a["build_year"]) for a in resp["assets"] if a["meta"]["replaces"])
+    by_renewal = {rn.name: e.name for e in src.extras for rn in e.renewals}
+    assert sorted((x.asset, x.year) for x, _v in r.op.replacement_items if x.source == "campus_study") \
+        == sorted((by_renewal[n], y - 1) for n, y in renewals)
+    tl = build_timeline(case)
+    own = sum(p.overnight_cost for a in case.assets if a.name in lineages(case)
+              for p in a.parts for _s in _resumed(case, tl, lineages(case)[a.name], a, p)) \
+        if rule == "part_lifetimes" else 0.0
+    listed = sum(a["quantity"] * a["parts"][0]["upfront_per_unit"] for a in resp["assets"])
+    paid = r.op.capex.sum() + r.op.stage_capex.sum() + r.op.replacement.sum()
+    assert paid == pytest.approx(listed + own, rel=1e-12)
+    if rule == "fixed":
+        assert all(x.source != "part_lifetimes" for x, _v in r.op.replacement_items)

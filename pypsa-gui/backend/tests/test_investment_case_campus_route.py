@@ -962,3 +962,29 @@ def test_the_report_rows_carry_the_cost_tag_and_the_case_hash_ignores_no_summary
     plain = S.to_finance_case("s2")
     assert finance_case_hash(dataclasses.replace(plain, campus=None)) == finance_case_hash(plain)
     assert finance_case_hash(dataclasses.replace(plain, campus=summary)) != finance_case_hash(plain)
+
+
+def test_the_route_takes_the_studys_replacements_folded_into_their_lineage(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    """Campus-IC 04 (issue point 4): the route asks the producer for every
+    purchase (`replacements=True`) and hands the case each lineage once, its
+    renewals folded in."""
+    from services import campus_electrical_service as ce
+    from tests.test_campus_electrical_service import c14_rows, fake_c14
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_renewals")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_c14(row, c14_rows())
+    seen = []
+    real = ce.owner_assets_response
+    monkeypatch.setattr(ce, "owner_assets_response",
+                        lambda p, **kw: (seen.append(kw), real(p, **kw))[1])
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["status"] == "done", body
+    assert seen and all(kw == {"replacements": True} for kw in seen)
+    by = {e.name: e for e in calls[0]["extra_assets"]}
+    assert [r.name for r in by["campus:TR_132_33_63#1"].renewals] == [
+        "campus:TR_132_33_63#2", "campus:TR_132_33_63#3"]
+    assert "campus:TR_132_33_63#2" not in by
