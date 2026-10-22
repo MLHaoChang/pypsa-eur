@@ -131,6 +131,14 @@ describe('ScopeCards', () => {
     expect(sent.options.capacity).toEqual(['dispatch'])
   })
 
+  it('shows the Run blocker in words under unchecked Asset sizing (W4b)', async () => {
+    getFlowScope.mockResolvedValue(registry({ ...PRESET,
+      options: { ...PRESET.options, capacity: ['dispatch'] } }))
+    mount()
+    expect((await screen.findByTestId('scope-cards-fixed-sizes')).textContent)
+      .toMatch(/Dispatch on fixed sizes/)
+  })
+
   it('switching a card off writes the scope without it and keeps its sub-options', async () => {
     const user = mount()
     await user.click(await screen.findByTestId('scope-cards-toggle-grid'))
