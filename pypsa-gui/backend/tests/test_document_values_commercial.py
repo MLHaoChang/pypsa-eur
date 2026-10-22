@@ -128,6 +128,8 @@ def test_cdv02_mwh_into_a_per_kwh_item_is_the_one_scale_and_the_apply_reads_it_b
     (row,) = [r for r in card["edit_card"]["rows"] if r["role"] == "typed"]
     assert (row["old"], row["new"], row["field"]) == (0.2, 0.0725, "periods[peak].rate")
     assert (row["source"]["page"], row["source"]["raw"], row["source"]["raw_unit"]) == (1, "72.50", "EUR/MWh")
+    assert card["edit_card"]["says"] == "Import tariff › Energy, peak period: rate 0.2 → 0.0725 EUR/kWh"
+    assert row["unit"] == "EUR/kWh" and row["label"] == "Energy, peak period: rate"
     assert len(row["basis"]) == 64  # the stored config's sha256 at preview (compare-and-set)
     assert card["edit_card"]["section"]["id"] == "commercial"
     assert result["written"] == [{"target": "tariff", "entity": "energy", "path": "periods[peak].rate",
@@ -188,8 +190,10 @@ def test_cdv05_a_ppa_price_money_year(site):
     assert out["missing"] == [] and [c["path"] for c in out["cells"]] == ["price", "base_year"]
     assert out["cells"][1]["value"] == base and out["cells"][1]["old"] is None
     assert any("not adjusted for inflation" in n for n in out["cells"][0]["notes"])
-    _, result, _ = _dispatch(site, "apply_commercial_document_values", args)
+    cards, result, _ = _dispatch(site, "apply_commercial_document_values", args)
     assert result["_edit_receipt"]["outcome"] == "verified"
+    assert cards[0]["edit_card"]["says"].startswith("Contracts › Ppa1: price ")  # words, no field id
+    assert "EUR/MWh" in cards[0]["edit_card"]["says"]
     stored = _stored()["contracts"][0]
     assert (stored["price"], stored["base_year"]) == (61.5, base)
 
@@ -464,3 +468,11 @@ def test_cdv15_the_http_apply_writes_as_the_signed_in_user(client, site, session
     assert chat_tools.acting_user_id() is None  # restored
     with _bound_to(session_ctx(client)):
         assert _stored()["import_tariff"]["items"][0]["periods"][0]["rate"] == 0.0725
+
+
+def test_tariff_labels_name_tiers_and_periods_in_words():
+    item = {"id": "energy_tou", "unit": "per_kwh"}
+    label = DC._tariff_label
+    assert label(item, "periods[peak].rate") == "Energy tou, peak period: rate"
+    assert label(item, "periods[peak].tier_rates[1]") == "Energy tou, peak period: tier 2 rate"
+    assert label(item, "tiers[0].rate") == "Energy tou: tier 1 rate"

@@ -130,6 +130,24 @@ def _gap(kind: str, message: str, c: dict, **extra) -> dict:
             "quote": str(c.get("quote") or "")[:D.MAX_QUOTE_CHARS], **extra}
 
 
+def _item_words(item: dict) -> str:
+    """The item's name in words: its own name, else its id with spaces and a capital."""
+    text = str(item.get("name") or item["id"]).replace("_", " ").strip()
+    return text[:1].upper() + text[1:]
+
+
+def _tariff_label(item: dict, path: str) -> str:
+    """A tariff value's name in words, never the raw path."""
+    name = _item_words(item)
+    if m := _PERIOD_RATE.match(path):
+        return f"{name}, {m.group('period')} period: rate"
+    if m := _PERIOD_TIER.match(path):
+        return f"{name}, {m.group('period')} period: tier {int(m.group('tier')) + 1} rate"
+    if m := _TIER_RATE.match(path):
+        return f"{name}: tier {int(m.group('tier')) + 1} rate"
+    return f"{name}: {path}"
+
+
 def _tariff_slot(commercial: dict, c: dict) -> tuple[dict | None, dict | None]:
     """`({item, path, getter, setter, unit, label, sign}, None)` for a tariff citation, else
     `(None, gap)`."""
@@ -150,7 +168,7 @@ def _tariff_slot(commercial: dict, c: dict) -> tuple[dict | None, dict | None]:
     if _TIER_THRESHOLD.match(path):
         return None, _gap("field_not_supported", "A tier threshold is not read from a document here; set it "
                           "in the Import tariff block.", c)
-    label = f"{item['id']} {path}"
+    label = _tariff_label(item, path)
     m = _PERIOD_RATE.match(path) or _PERIOD_TIER.match(path)
     if m:
         period = next((p for p in item.get("periods") or [] if p.get("name") == m.group("period")), None)
@@ -201,7 +219,7 @@ def _ppa_slot(commercial: dict, c: dict) -> tuple[dict | None, dict | None]:
                           f"{sorted(PPA_FIELDS)}.", c)
     label, units, money, signed, whole = PPA_FIELDS[field]
     return {"entity": contract["id"], "path": field, "where": (field,), "units": units,
-            "unit_label": "/MWh" if money else PPA_UNIT_LABELS[field], "label": f"{contract['id']} {label}",
+            "unit_label": "/MWh" if money else PPA_UNIT_LABELS[field], "label": f"{_item_words(contract)}: {label.lower()}",
             "money": money, "signed": signed, "whole": whole, "base_year": contract.get("base_year")}, None
 
 
@@ -467,6 +485,12 @@ def summary(p: dict) -> dict:
 # ── Card ───────────────────────────────────────────────────────────────────
 
 
+def _money_unit(c: dict) -> str:
+    """The unit as shown: a money value carries its stated currency ("EUR/kWh")."""
+    unit = c["unit"]
+    return f"{c['currency']}{unit}" if c["currency"] and unit.startswith("/") else unit
+
+
 def card_rows(p: dict) -> list[dict]:
     """The edit card's rows: one typed row per changed value (with its `source` and the
     `basis` it was read from), then the notes, confirmations and left-out citations."""
@@ -483,8 +507,8 @@ def card_rows(p: dict) -> list[dict]:
     for c in todo:
         name = f"{BLOCKS[c['target']]} › {c['entity']}"
         row = {"component_class": "Commercial", "name": name, "field": c["path"], "label": c["label"],
-               "old": edit_card._scalar(c["old"]), "new": c["value"], "unit": c["unit"], "role": "typed",
-               "target_kind": c["target"], "entity": c["entity"], "basis": p["basis"]}
+               "old": edit_card._scalar(c["old"]), "new": c["value"], "unit": _money_unit(c), "role": "typed",
+               "says_name": f"{BLOCKS[c['target']]} › {c['label']}", "target_kind": c["target"], "entity": c["entity"], "basis": p["basis"]}
         if c["source"] is not None:
             row["source"] = c["source"]
         if c["money_year"] is not None or c["currency"]:
