@@ -3667,6 +3667,67 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["component_class", "name", "technology", "projection_year"],
     ),
+    # ── Equipment tables (2) — data-to-model slice 1 (AI-567) ─────────────
+    _t(
+        "preview_equipment_mapping",
+        "Map an uploaded CSV/XLSX equipment table (one row per asset) onto assets "
+        "of ONE class: `name_column` holds each asset's name, matched exactly and "
+        "case-sensitively after trimming spaces, `columns` maps "
+        "a header to {field, unit} (fields from get_component_schema; the unit is "
+        "the field's stored or display unit, nothing else is converted). Cost "
+        "fields need `currency` and `money_year`. The server reads the file "
+        "(at most 500 rows, 40 columns; formulas are never evaluated), checks "
+        "every cell and returns {source (upload_id, sha256, sheet), cells (each "
+        "CHANGED cell: asset, field, value, unit, source cell), changed_cells, "
+        "unchanged_cells, unmapped (the first 50, each with its kind and reason), "
+        "unmapped_total, unmapped_by_kind, needs, missing}. More than 200 changed "
+        "cells refuses (mapping_too_large). Time-series fields are left out "
+        "(time_series_not_supported_here); static-or-series fields are written as "
+        "static. Writes nothing. Show the user the "
+        "unmapped cells; never guess a field, unit or asset for them. Safety: read.",
+        {
+            "upload_id": {"type": "string"},
+            "sheet": {"type": "string"},
+            "component_class": {"type": "string"},
+            "name_column": {"type": "string"},
+            "columns": {"type": "object", "additionalProperties": {
+                "type": "object", "properties": {"field": {"type": "string"}, "unit": {"type": "string"}},
+                "required": ["field", "unit"]}},
+            "currency": {"type": "string"},
+            "money_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string", "enum": ["money_year"]}},
+        },
+        ["upload_id", "component_class", "name_column", "columns"],
+    ),
+    _t(
+        "apply_equipment_mapping",
+        "Write a previewed equipment-table mapping onto its assets. Same arguments "
+        "as preview_equipment_mapping plus `source_sha256` (the preview's "
+        "source.sha256; different bytes refuse with source_changed). The user sees "
+        "one old→new card listing every changed cell with its file, sheet and cell; "
+        "at most 200 changed cells per card (mapping_too_large). Unmapped cells are not "
+        "written. Refusals: nothing_to_change (every value already set), "
+        "table_confirmation_needed with `missing` (money_year: the table's money "
+        "year is not the investment case's base year; the value is copied "
+        "unadjusted): ask the user, then call again with confirm=[...] naming only "
+        "what they confirmed. Never confirm on the user's behalf. Not one "
+        "transaction: a refusal part-way returns partial=true with `written`, "
+        "`failed` and `not_attempted`; offer undo_last. Returns {written, unmapped, "
+        "notes, receipt}. Safety: write.",
+        {**{
+            "upload_id": {"type": "string"},
+            "sheet": {"type": "string"},
+            "component_class": {"type": "string"},
+            "name_column": {"type": "string"},
+            "columns": {"type": "object", "additionalProperties": {
+                "type": "object", "properties": {"field": {"type": "string"}, "unit": {"type": "string"}},
+                "required": ["field", "unit"]}},
+            "currency": {"type": "string"},
+            "money_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string", "enum": ["money_year"]}},
+        }, "source_sha256": {"type": "string"}},
+        ["upload_id", "component_class", "name_column", "columns", "source_sha256"],
+    ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
         "set_site_connection",
@@ -4236,6 +4297,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_uploads": [("GET", "/api/projects/{name}/uploads")],
     "read_upload_meta": [("GET", "/api/projects/{name}/uploads/{file_id}/meta")],
     "read_excel_sheet": _SERVICE_CALL,
+    "preview_equipment_mapping": _SERVICE_CALL,
     "apply_demand_from_excel": _SERVICE_CALL,
     "delete_upload": [("DELETE", "/api/projects/{name}/uploads/{file_id}")],
     # uploads — vision (Phase C dependency stub)
@@ -4353,6 +4415,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
                               ("GET", "/api/library/references/{technology}/{year}")],
     "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
+    "apply_equipment_mapping": [("POST", "/api/network/equipment_table/apply")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),

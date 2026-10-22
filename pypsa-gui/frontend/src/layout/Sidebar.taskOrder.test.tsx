@@ -70,7 +70,7 @@ const ORDER = ['setup', 'model', 'run', 'results', 'reports']
 // mocked project list is empty (unknown is not "not a study").
 const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
-  model: ['Grid connection', 'Loads', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
+  model: ['Grid connection', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
   run: ['Solver Settings', 'Scenarios', 'Grid study', 'Issues', 'Solve Queue'],
   results: ['Results', 'Grid study results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots'],

@@ -63,7 +63,7 @@ def test_the_shipped_series_are_the_shapes_and_read_as_illustrative():
     from services.library import template_series as TS
 
     series = {s.name: s for s in TS.read(TPL_DIR / TID)}
-    assert set(series) == set(M.SERIES.values())
+    assert set(series) == set(M.SERIES.values()) | set(M.OBSERVED)
     base = series[M.SERIES["base"]]
     assert np.allclose(base.series.to_numpy(), M.price_shape("base").to_numpy())
     assert "illustrative" in base.meta["notes"] and len(base.series) == 8760
