@@ -968,7 +968,7 @@ export default function Results() {
         </ResultsFilterProvider>
         {effectiveTab === 'asset' && (
           <aside data-testid="asset-drawer" aria-label="Asset detail"
-            className="w-[min(640px,60%)] shrink-0 min-w-0 overflow-auto border-l border-border bg-bg">
+            className="w-[min(900px,72%)] shrink-0 min-w-0 overflow-auto border-l border-border bg-bg">
             <div className="flex items-center justify-between px-3 py-1.5 border-b border-border">
               <span className="text-[12px] font-semibold">Asset Detail</span>
               <button type="button" data-testid="asset-drawer-close" aria-label="Close asset detail"
