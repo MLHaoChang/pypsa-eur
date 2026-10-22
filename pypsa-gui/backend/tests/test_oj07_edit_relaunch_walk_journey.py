@@ -525,10 +525,14 @@ def test_stop_waiting_withdraws_the_continuation_and_the_job_runs_on(oj_grid, cl
     assert PyPSAService.get_solver_state().get('status') == 'running'  # the solve is not cancelled
     oj_grid.open.set()
     _settle_solver()
-    time.sleep(0.5)
     assert PyPSAService.get_solver_state().get('status') == 'completed'
-    assert continuation.due(session) == []
     chat_tools.set_chat_session(session)
+    # The follower settles the step on its own thread once it has published the
+    # run (a disk write, slow on a loaded runner): wait for it, not a fixed pause.
+    deadline = time.monotonic() + 60
+    while chat_tools.get_task(task_id)['next_step']['id'] != 'walk' and time.monotonic() < deadline:
+        time.sleep(0.1)
+    assert continuation.due(session) == []
     assert chat_tools.get_task(task_id)['next_step']['id'] == 'walk'  # the plan still settled
     assert client.post(f'/api/chat/{session.session_id}/continuations/{job}/dismiss').json() == {'ok': False}
 
