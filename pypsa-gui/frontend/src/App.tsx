@@ -149,12 +149,12 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
 
-// Tabs that take the whole main area (canvas hidden) rather than opening as a
-// half-width panel beside the canvas — their charts, tables, and two-column
-// layouts need the full width.
 /** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
 const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'] }
 
+// Tabs that take the whole main area (canvas hidden) rather than opening as a
+// half-width panel beside the canvas — their charts, tables, and two-column
+// layouts need the full width.
 const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'reports', 'hubDesign', 'campusElectrical', 'campusStudy', 'campusResults', 'decision', 'profiles'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
