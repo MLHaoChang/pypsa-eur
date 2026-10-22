@@ -10,13 +10,20 @@
 import { Loader2, Play, Square } from 'lucide-react'
 import { useRunGate } from '../../../hooks/useRunGate'
 import { formatElapsed, useElapsed } from '../../../hooks/useElapsed'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
+import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { useGoalStudy } from '../useGoalStudy'
+
+export const RELIABILITY_OUT_OF_SCOPE =
+  'Outside scope: add Reliability goal & study (below) to run the study.'
 
 export function GoalStudyRun() {
   const gate = useRunGate('all')
   const {
     project, study, running, templateUnknown, refetchTemplate, vollMissing, built, run, abort, problem,
   } = useGoalStudy()
+  // The scope (W4a): with Reliability › goal & study off, the study is not run.
+  const reliabilityOn = useInScope('reliability', 'goal_study')
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
   const pipeline = study?.report?.pipeline
@@ -34,8 +41,9 @@ export function GoalStudyRun() {
         <button type="button" data-testid="hub-run-start"
           onClick={() => run.mutate()}
           disabled={running || run.isPending || built.error !== null || vollMissing || !project
-            || templateUnknown || gate.blocked}
-          title={templateUnknown ? 'The template could not be read — retry below.' : undefined}
+            || templateUnknown || gate.blocked || !reliabilityOn}
+          title={templateUnknown ? 'The template could not be read — retry below.'
+            : !reliabilityOn ? RELIABILITY_OUT_OF_SCOPE : undefined}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {running ? 'Studying…' : again ? 'Run again' : 'Run study'}
@@ -51,6 +59,9 @@ export function GoalStudyRun() {
           </>
         )}
       </div>
+      {!reliabilityOn && (
+        <ScopeGate card="reliability" option="goal_study" testId="hub-run-out-of-scope">{null}</ScopeGate>
+      )}
       {templateUnknown && (
         <p data-testid="hub-run-template-error" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
           This project's recommended settings could not be read, so the study cannot start

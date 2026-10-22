@@ -24,6 +24,7 @@ import {
 import { fmtAmount } from './valueFlows'
 import RevenueByStream from './RevenueByStream'
 import CaptureTable from './CaptureTable'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -290,8 +291,11 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
       </section>
       <Counterfactual report={report} />
       <Cashflows report={report} />
-      <RevenueByStream report={report} />
-      <CaptureTable />
+      {/* Commercial & finance owns the revenue and capture tables (W4a; #515). */}
+      <ScopeGate card="commercial" testId="ic-revenue-scope">
+        <RevenueByStream report={report} />
+        <CaptureTable />
+      </ScopeGate>
       <SectionBlock report={report} name="debt" title="Debt schedule and DSCR" testId="ic-debt" />
       <SectionBlock report={report} name="tax" title="Tax by layer" testId="ic-tax" />
       <details>

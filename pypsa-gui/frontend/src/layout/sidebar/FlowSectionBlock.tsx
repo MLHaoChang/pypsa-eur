@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FlowStateDot } from '../../components/FlowStateDot'
+import { ScopeChips } from '../../components/flowScope/ScopeChips'
 import { FLOW_STATE_WORDS, type FlowSectionId } from '../../api/flow'
 import { useProjectFlow } from '../../hooks/useProjectFlow'
 import { sectionMeta } from '../flowSections'
@@ -25,6 +26,8 @@ export function FlowSectionBlock({ id, children }: { id: FlowSectionId; children
         </span>
         {!stateless && <FlowStateDot state={state} testId={`flow-dot-${id}`} />}
       </div>
+      {/* The cards in scope it holds, under the label so it is never squeezed. */}
+      {!stateless && <ScopeChips section={id} className="flex flex-wrap gap-0.5 pl-9 pr-3 pb-0.5" />}
       {children}
     </div>
   )
