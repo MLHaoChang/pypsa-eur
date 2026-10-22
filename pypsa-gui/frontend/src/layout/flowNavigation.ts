@@ -167,17 +167,19 @@ export function openN1BranchSelector(): void {
 
 /** Show the Grid readiness scorecard ("Readiness › Grid readiness ›"): Issues
  *  scrolled to its group in Expert; in Guided the Site card, in place, with the
- *  scorecard expanded (never flips the mode). */
+ *  scorecard expanded (never flips the mode). Back returns to the view it left. */
 export function showGridReadiness(): void {
-  const ui = useUIStore.getState()
-  if (ui.uiMode === 'guided') {
-    useScorecardOpen.setState(s => ({ open: { ...s.open, 'guided:card': true } }))
-    openSectionInGuided('connection')
-    return
-  }
-  ui.requestGridReadiness()
-  ui.setActiveSection('readiness')
-  ui.setSlidePanel('issues')
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    if (ui.uiMode === 'guided') {
+      useScorecardOpen.setState(s => ({ open: { ...s.open, 'guided:card': true } }))
+      openSectionInGuided('connection')
+      return
+    }
+    ui.requestGridReadiness()
+    ui.setActiveSection('readiness')
+    ui.setSlidePanel('issues')
+  })
 }
 
 /** Show one flow item's field in Expert: its panel, or the component's own

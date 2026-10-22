@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useUIStore } from '../store/uiStore'
 import { FlowReturnButton } from './FlowReturnButton'
-import { openFlowTarget, openFlowTargetInPlace, returnToOrigin } from './flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace, returnToOrigin, showGridReadiness } from './flowNavigation'
 
 const prop = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: 'p_nom' } as const
 const issues = { section: 'readiness', panel: 'issues', component: null, entity: null, field: null } as const
@@ -83,5 +83,29 @@ describe('fix link return to origin', () => {
     expect(useUIStore.getState().flowReturn).not.toBeNull()
     act(() => useUIStore.getState().setSlidePanel('results'))
     expect(useUIStore.getState().flowReturn).toBeNull()
+  })
+})
+
+describe('Grid readiness link return to origin', () => {
+  it('Expert: from Results, shows Issues; Back reopens Results', () => {
+    reset({ uiMode: 'expert', activeSlidePanel: 'results', activeSection: 'results' })
+    render(<FlowReturnButton />)
+    act(() => showGridReadiness())
+    expect(useUIStore.getState().activeSlidePanel).toBe('issues')
+    expect(screen.getByTestId('flow-return')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+
+  it('Guided: from Results, shows the Site card in place; Back restores Results', () => {
+    reset({ uiMode: 'guided', activeSlidePanel: 'results', activeSection: 'results' })
+    render(<FlowReturnButton />)
+    act(() => showGridReadiness())
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().uiMode).toBe('guided')
   })
 })
