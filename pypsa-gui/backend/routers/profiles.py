@@ -60,6 +60,7 @@ from services.profile_gen.apply import (
     assign_profile,
 )
 from services.profile_gen.cutout_cache import CdsCredentialError, cds_preflight
+from services.profile_gen.current import SeriesUploadError
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.refusals import public_message
 from services.profile_gen.families import default_target
@@ -433,6 +434,7 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (PocBoundError, {"error_kind": "poc_bound"}),
     (CurrentChangedError, {"error_kind": "current_changed_since_refinement"}),
     (WindowSourceGapError, {"error_kind": "window_source_gap"}),
+    (SeriesUploadError, {"error_kind": "series_upload"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -1097,6 +1099,42 @@ def get_current_series(
     return describe_current(ctx, component_type, attribute, component)
 
 
+@project_router.post("/{name}/profiles/series/upload")
+async def upload_series(
+    file: UploadFile = File(...),
+    component_type: str = Form(...),
+    attribute: str = Form(...),
+    component: str = Form(...),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """A measured file for one field (the editors' "Measured file" tab) as a
+    pending artifact on the snapshot clock, like `from-current`: previewed,
+    then applied through `/profiles/apply` with the same old → new receipt.
+    A file that does not fit (its column, the model's hours, the field's
+    units) is a `series_upload` refusal saying what to change."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from services.profile_gen.current import series_from_upload
+    from services.upload_guard import read_capped
+    from services.user_timeseries import _parse_upload
+
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "upload")
+    blob = await read_capped(file)
+    frame = await run_in_threadpool(_parse_upload, blob, file.filename or "upload.csv")
+    try:
+        series, meta = series_from_upload(ctx, component_type, attribute, component, frame)
+    except ProfileApplyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="series_upload")},
+        ) from exc
+    return _pending_series_response(ctx, proj, component_type, component, series, meta)
+
+
 @project_router.post("/{name}/profiles/from-current")
 def pending_from_current(
     body: CurrentSeriesRequest,
@@ -1121,22 +1159,30 @@ def pending_from_current(
             detail={**_apply_refusal_kind(exc),
                     "message": public_message(exc, route="from_current")},
         ) from exc
-    frame = series.to_frame(body.component)
+    return _pending_series_response(ctx, proj, body.component_type, body.component,
+                                    series, meta)
+
+
+def _pending_series_response(ctx, proj, component_type: str, component: str,
+                             series: pd.Series, meta: dict) -> dict:
+    """Write a snapshot-clock series as a pending artifact and answer with
+    its stats, the apply's dry-run warnings and the preview week."""
+    frame = series.to_frame(component)
     job_id = str(uuid.uuid4())
     record = dict(meta)
     record["job_id"] = job_id
     record["project_id"] = proj.name
-    record["points"] = [body.component]
+    record["points"] = [component]
     write_pending(str(proj.directory), job_id, frame, record)
     v = series.dropna()
-    stats = {body.component: {"min": float(v.min()), "mean": float(v.mean()),
-                              "max": float(v.max())}}
+    stats = {component: {"min": float(v.min()), "mean": float(v.mean()),
+                         "max": float(v.max())}}
     if meta.get("unit") == "MW":
         hours = 24 * (366 if pd.Timestamp(year=int(meta["weather_year"]), month=1,
                                           day=1).is_leap_year else 365)
-        stats[body.component].update(peak_mw=float(v.max()),
-                                     annual_mwh=float(v.mean()) * hours)
-        if body.component_type == "loads":
+        stats[component].update(peak_mw=float(v.max()),
+                                annual_mwh=float(v.mean()) * hours)
+        if component_type == "loads":
             _preview_load_energy(ctx, frame, record, stats)  # modelled_mwh, as generated loads show
     warnings, weeks = _dry_run(ctx, frame, record)
     return {**record, "stats": stats, "warnings": warnings, "weeks": weeks}

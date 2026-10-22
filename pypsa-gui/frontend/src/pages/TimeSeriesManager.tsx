@@ -25,6 +25,7 @@ import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import SeriesEditor from '../components/series/SeriesEditor'
 import { fieldLabel } from '../components/series/SeriesKit'
+import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
 
 const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
@@ -716,7 +717,7 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel }: {
+function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
@@ -743,80 +744,96 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
   // in the per-row tooltip so the user knows which profile slot the upload
   // will land in.
   attrLabel: string
+  // Why this row's last upload was refused, shown under the row with the fix.
+  uploadError?: string | null
 }) {
   const has = hasActive !== undefined ? hasActive : meta?.has_profile === true
   const rowsShown = activeRows !== undefined ? activeRows : (meta?.has_profile ? meta.rows : null)
   const fileRef = useRef<HTMLInputElement>(null)
   return (
-    <div
-      className={`group flex items-center gap-2 px-3 py-2 transition-colors border-b border-border/40
-        ${selected ? 'bg-accent/10' : 'hover:bg-accent/5'}`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onCheck}
-        onClick={e => e.stopPropagation()}
-        className="accent-accent shrink-0 cursor-pointer"
-        title="Include in aggregate"
-      />
-      <button onClick={onClick} className="flex-1 min-w-0 flex items-center gap-2 text-left">
-        {has ? <CheckCircle2 size={13} className="shrink-0 text-success" /> : <Circle size={13} className="shrink-0 text-muted" />}
-        <div className="flex-1 min-w-0">
-          <p className={`text-xs font-medium truncate ${selected ? 'text-accent' : 'text-text'}`}>{gen.name}</p>
-          <p className="text-[10px] text-muted truncate">{gen.bus} · {gen.carrier}</p>
-        </div>
-        {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
-      </button>
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); onDownload() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Download single-generator ${fieldLabel(attrLabel)} template for '${gen.name}'`}
+    <>
+      <div
+        className={`group flex items-center gap-2 px-3 py-2 transition-colors border-b border-border/40
+          ${selected ? 'bg-accent/10' : 'hover:bg-accent/5'}`}
       >
-        <Download size={12} />
-      </button>
-      {onEdit && (
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onCheck}
+          onClick={e => e.stopPropagation()}
+          className="accent-accent shrink-0 cursor-pointer"
+          title="Include in aggregate"
+        />
+        <button onClick={onClick} className="flex-1 min-w-0 flex items-center gap-2 text-left">
+          {has ? <CheckCircle2 size={13} className="shrink-0 text-success" /> : <Circle size={13} className="shrink-0 text-muted" />}
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-medium truncate ${selected ? 'text-accent' : 'text-text'}`}>{gen.name}</p>
+            <p className="text-[10px] text-muted truncate">{gen.bus} · {gen.carrier}</p>
+          </div>
+          {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
+        </button>
         <button
           type="button"
-          onClick={e => { e.stopPropagation(); onEdit() }}
+          onClick={e => { e.stopPropagation(); onDownload() }}
           className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-          title={`Edit the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
-          aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${gen.name}`}
+          title={`Download single-generator ${fieldLabel(attrLabel)} template for '${gen.name}'`}
         >
-          <SlidersHorizontal size={12} />
+          <Download size={12} />
         </button>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onEdit() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+            title={`Edit the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
+            aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${gen.name}`}
+          >
+            <SlidersHorizontal size={12} />
+          </button>
+        )}
+        {/* A field with an editor takes its measured file there (its
+            "Measured file" tab); the row upload is the entry only where none is. */}
+        {!onEdit && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+            title={`Upload a measured ${fieldLabel(attrLabel)} file for '${gen.name}' (single-column file)`}
+          >
+            <Upload size={12} />
+          </button>
+        )}
+        {has && onDelete && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
+            title={`Delete the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0]
+            if (f) onUpload(f)
+            e.target.value = ''
+          }}
+        />
+      </div>
+      {uploadError && (
+        <p className="px-3 py-1 text-[11px] text-red-600 border-b border-border/40" data-testid={`row-upload-error-${gen.name}`}>
+          {uploadError}{' '}
+          <button type="button" className="text-accent hover:underline" onClick={onDownload}>
+            Download the template (the model&apos;s hours, a column named {gen.name}) &gt;
+          </button>
+        </p>
       )}
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload a measured ${fieldLabel(attrLabel)} file for '${gen.name}' (single-column file)`}
-      >
-        <Upload size={12} />
-      </button>
-      {has && onDelete && (
-        <button
-          type="button"
-          onClick={e => { e.stopPropagation(); onDelete() }}
-          className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
-          title={`Delete the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
-        >
-          <Trash2 size={12} />
-        </button>
-      )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="hidden"
-        onChange={e => {
-          const f = e.target.files?.[0]
-          if (f) onUpload(f)
-          e.target.value = ''
-        }}
-      />
-    </div>
+    </>
   )
 }
 
@@ -890,14 +907,18 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
           <SlidersHorizontal size={12} />
         </button>
       )}
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload a measured ${fieldLabel(attrLabel)} file for '${link.name}' (single-column file)`}
-      >
-        <Upload size={12} />
-      </button>
+      {/* A field with an editor takes its measured file there (its
+          "Measured file" tab); the row upload is the entry only where none is. */}
+      {!onEdit && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Upload a measured ${fieldLabel(attrLabel)} file for '${link.name}' (single-column file)`}
+        >
+          <Upload size={12} />
+        </button>
+      )}
       {has && onDelete && (
         <button
           type="button"
@@ -1249,6 +1270,8 @@ export default function TimeSeriesManager() {
   // file actually contained the expected column. One ref per component type
   // since the three upload mutations are distinct.
   const pendingSingleGenRef = useRef<string | null>(null)
+  // A refused row upload, shown under its row (not only as a toast).
+  const [genUploadError, setGenUploadError] = useState<{ name: string; message: string } | null>(null)
   const pendingSingleLinkRef = useRef<string | null>(null)
 
   const uploadLoadMut = useMutation({
@@ -1289,7 +1312,7 @@ export default function TimeSeriesManager() {
       const target = pendingSingleGenRef.current
       pendingSingleGenRef.current = null
       if (target && !result.matched.includes(target)) {
-        toast.error(`File did not contain a column named '${target}'.`)
+        setGenUploadError({ name: target, message: `The file has no column named '${target}'.` })
         appLog('WARN', `Per-generator upload skipped: file missing column '${target}'`)
         return
       }
@@ -1300,7 +1323,14 @@ export default function TimeSeriesManager() {
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
     },
-    onError: (e: Error) => { pendingSingleGenRef.current = null; toast.error(e.message); appLog('ERROR', `Generator profile upload failed: ${e.message}`) },
+    onError: (e: Error) => {
+      const target = pendingSingleGenRef.current
+      pendingSingleGenRef.current = null
+      const message = errorText(e)
+      if (target) setGenUploadError({ name: target, message })
+      else toast.error(message)
+      appLog('ERROR', `Generator profile upload failed: ${message}`)
+    },
   })
 
   const uploadLinkMut = useMutation({
@@ -1487,6 +1517,7 @@ export default function TimeSeriesManager() {
   }
 
   const handleSingleGenUpload = (genName: string, file: File) => {
+    setGenUploadError(null)
     pendingSingleGenRef.current = genName
     uploadGenMut.mutate({ file, attribute: effectiveAttr })
   }
@@ -1796,6 +1827,7 @@ export default function TimeSeriesManager() {
                     onEdit={rowEditor(g.name, 'generators')}
                     onDelete={() => deleteTsMut.mutate({ component: 'generators', attribute: effectiveAttr, name: g.name })}
                     attrLabel={effectiveAttr}
+                    uploadError={genUploadError?.name === g.name ? genUploadError.message : null}
                   />
                 ))}
                 {gensWithout.length > 0 && gensWithProfile.length > 0 && (
@@ -1815,6 +1847,7 @@ export default function TimeSeriesManager() {
                     onUpload={f => handleSingleGenUpload(g.name, f)}
                     onEdit={rowEditor(g.name, 'generators')}
                     attrLabel={effectiveAttr}
+                    uploadError={genUploadError?.name === g.name ? genUploadError.message : null}
                   />
                 ))}
               </>

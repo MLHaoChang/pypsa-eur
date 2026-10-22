@@ -32,7 +32,17 @@ export function openTimeSeriesFor(
   type: 'Load' | 'Generator' | 'Link', name: string,
   opts: { field?: string; openEditor?: boolean } = {},
 ): void {
-  useUIStore.getState().focusTimeSeries(type, name, opts)
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    // In place over the card: the Time Series panel in the field drawer,
+    // which reads the focus when it mounts.
+    openFlowTargetInPlace({ section: 'profiles', panel: 'timeseries', component: null,
+      entity: null, field: opts.field ?? null })
+    useUIStore.setState({ timeSeriesFocus: { type, name, ...opts } })
+    return
+  }
+  openSectionInExpert('profiles')
+  ui.focusTimeSeries(type, name, opts)
 }
 
 /** Show one flow item's field in Expert: its panel, or the component's own

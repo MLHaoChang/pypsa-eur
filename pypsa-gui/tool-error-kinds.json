@@ -963,6 +963,10 @@
       "surface": "inline",
       "why": "A series made from the component's current one was applied after that current series changed (another apply, an upload, an undo). The detail says so; the assistant refines the current series again, per call."
     },
+    "series_upload": {
+      "surface": "inline",
+      "why": "A measured file for one field does not fit it: no column named after the component, an hour of the model missing, a value that is not a number or outside the field's range (a percentage for a share). The detail says what to change; the editor shows it in place, per call."
+    },
     "window_source_gap": {
       "surface": "inline",
       "why": "A series made from a snapshot window's current series meets an hour outside that window (the snapshots changed since). The detail names the hour; the assistant refines the current series again, per call."

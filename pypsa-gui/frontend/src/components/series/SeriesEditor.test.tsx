@@ -15,7 +15,7 @@ import SeriesEditor, { type SeriesKind } from './SeriesEditor'
 const api = vi.hoisted(() => ({
   loadArchetypes: vi.fn(), generateLoad: vi.fn(), uploadLoad: vi.fn(), refine: vi.fn(),
   apply: vi.fn(), generateAvailability: vi.fn(), generateSeries: vi.fn(),
-  current: vi.fn(), fromCurrent: vi.fn(),
+  current: vi.fn(), fromCurrent: vi.fn(), uploadSeries: vi.fn(),
 }))
 vi.mock('../../api/profiles', async () => {
   const real = await vi.importActual<typeof import('../../api/profiles')>('../../api/profiles')
@@ -136,5 +136,42 @@ describe('SeriesEditor', () => {
     renderEditor('cop')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     expect((await screen.findByTestId('editor-error')).textContent).toContain('not electricity')
+  })
+
+  it("reads a measured price file into the same pending card", async () => {
+    api.uploadSeries.mockResolvedValue({
+      job_id: 'job-m', family: 'series', points: ['hp1'], provenance: 'measured', source: 'upload',
+      stats: { hp1: { min: 50, mean: 60, max: 70 } }, warnings: [],
+    })
+    renderEditor('tou', 'guided', 'links')
+    await userEvent.click(screen.getByRole('button', { name: 'Measured file' }))
+    expect(screen.queryByLabelText('Peak price')).toBeNull()
+    expect(screen.getByTestId('disabled-reason').textContent).toBe('Choose a measured file to read.')
+    const file = new File(['timestamp,hp1\n'], 'hp1.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText('Measured file'), file)
+    await userEvent.click(screen.getByRole('button', { name: /Read file/ }))
+    await waitFor(() => expect(api.uploadSeries).toHaveBeenCalledWith('Site A', file,
+      { component_type: 'links', attribute: 'marginal_cost', component: 'hp1' }))
+    const card = await screen.findByTestId('pending-card')
+    expect(card.textContent).toContain('measured')
+  })
+
+  it("says in place why a measured file does not fit, and how to fix it", async () => {
+    api.uploadSeries.mockRejectedValue({ response: { data: { detail: {
+      error_kind: 'series_upload',
+      message: "the file has no value for 100 of the model's 8760 hours (first: 2025-12-27 20:00:00): give one row per model hour (the row's template has them)",
+    } } } })
+    renderEditor('tou', 'guided', 'links')
+    await userEvent.click(screen.getByRole('button', { name: 'Measured file' }))
+    await userEvent.upload(screen.getByLabelText('Measured file'), new File(['x'], 'short.csv'))
+    await userEvent.click(screen.getByRole('button', { name: /Read file/ }))
+    expect((await screen.findByTestId('measured-file-error')).textContent)
+      .toContain("give one row per model hour (the row's template has them)")
+    expect(screen.getByRole('button', { name: /Download the template/ })).toBeTruthy()
+  })
+
+  it('offers no measured file for an inflow, which has no row template', () => {
+    renderEditor('inflow')
+    expect(screen.queryByRole('button', { name: 'Measured file' })).toBeNull()
   })
 })

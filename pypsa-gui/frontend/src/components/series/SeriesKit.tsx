@@ -8,9 +8,11 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
-import { Check, Plus, Trash2, Wand2 } from 'lucide-react'
+import { Check, Download, Plus, Trash2, Upload, Wand2 } from 'lucide-react'
 import { Btn, Tag } from '../PageKit'
 import { StatePill } from '../ResultState'
+import { networkApi } from '../../api/network'
+import { openTimeSeriesFor } from '../../layout/flowNavigation'
 import {
   errorKind, errorText, seriesApi,
   type PendingSeries, type PreviewWeek, type RefineOp, type SeriesApplyResult, type SeriesStats,
@@ -47,6 +49,94 @@ export function provenanceWord(provenance: string | null | undefined, assumed = 
  *  as a tooltip (no dead ends). */
 export function DisabledReason({ reason }: { reason: string | null }) {
   return reason ? <span className="text-[11px] text-muted" data-testid="disabled-reason">{reason}</span> : null
+}
+
+/** The editors' "Measured file" tab, the same wherever the editor is
+ *  hosted: one file in the row template's layout (the model's hours, a
+ *  column named after the component), read into a pending series that the
+ *  card previews and applies like a generated one. A file that does not fit
+ *  says why and what to change, here, with the template one click away. */
+export function MeasuredFileTab({
+  project, componentType, attribute, component, onPending,
+}: {
+  project: string
+  componentType: 'generators' | 'links'
+  attribute: string
+  component: string
+  onPending: (p: PendingSeries) => void
+}) {
+  const [file, setFile] = useState<File | null>(null)
+  const read = useMutation({
+    mutationFn: () => seriesApi.uploadSeries(project, file as File,
+      { component_type: componentType, attribute, component }),
+    onSuccess: onPending,
+  })
+  const template = async () => {
+    const blob = componentType === 'links'
+      ? await networkApi.downloadLinkTemplate(attribute, undefined, component)
+      : await networkApi.downloadGeneratorTemplate('conventional', attribute, undefined, component)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${component.replace(/\s+/g, '_')}_${fieldLabel(attribute).replace(/\s+/g, '_')}_template.xlsx`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  return (
+    <div className="mt-2 space-y-1" data-testid="measured-file-tab">
+      <p className="text-[11px] text-muted">
+        One value per model hour in the {fieldLabel(attribute)}&apos;s own units, in a column named
+        after {component} (or a single column).
+      </p>
+      <div className="flex items-center gap-2">
+        <input aria-label="Measured file" type="file" accept=".csv,.xlsx,.xls"
+          onChange={e => { setFile(e.target.files?.[0] ?? null); read.reset() }} />
+        <button type="button" className="text-[11px] text-accent hover:underline" onClick={() => void template()}>
+          <Download size={11} className="inline" /> Download the template
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
+        <Btn variant="primary" onClick={() => read.mutate()} disabled={!file || read.isPending}>
+          <Upload size={12} /> Read file
+        </Btn>
+        <DisabledReason reason={file ? null : 'Choose a measured file to read.'} />
+      </div>
+      {read.isError && (
+        <p className="text-[11px] text-red-600" data-testid="measured-file-error">
+          {errorText(read.error)}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** A field with no editor yet (a renewable's or demand response's profile):
+ *  its series' state in plain words and the one way to set it, the row
+ *  upload in Time Series. No second upload here. */
+export function SeriesStateLink({
+  project, componentType, attribute, component,
+}: {
+  project: string
+  componentType: 'generators' | 'links'
+  attribute: string
+  component: string
+}) {
+  const { data } = useQuery({
+    queryKey: ['series-current', project, componentType, attribute, component],
+    queryFn: () => seriesApi.current(project, componentType, attribute, component),
+  })
+  const state = data == null ? '…' : data.exists ? provenanceWord(data.provenance) : 'missing'
+  return (
+    <div className="flex items-center gap-2 text-[11px]" data-testid="series-state">
+      <span className="text-muted">Profile:</span>
+      <span>{state}{data?.exists ? `, ${data.rows} h` : ''}</span>
+      <button type="button" className="text-accent hover:underline"
+        onClick={() => openTimeSeriesFor(componentType === 'links' ? 'Link' : 'Generator', component,
+          { field: attribute })}>
+        Upload in Time Series &gt;
+      </button>
+    </div>
+  )
 }
 
 function sumModelled(m: Record<string, number> | null | undefined): number | null {

@@ -14,7 +14,9 @@ import { useMutation } from '@tanstack/react-query'
 import { Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import {
+  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
+} from './SeriesKit'
 
 export type SeriesKind = 'tou' | 'inflow' | 'cop'
 
@@ -59,6 +61,10 @@ function periodBody(p: Period): Record<string, unknown> {
 export default function SeriesEditor({ project, component, kind, componentType = 'generators', mode }: SeriesEditorProps) {
   const [advanced, setAdvanced] = useState(mode === 'expert')
   const [pending, setPending] = useState<PendingSeries | null>(null)
+  // Generate a series, or read a measured file (a price or a COP; an inflow
+  // has no row template to fill).
+  const [from, setFrom] = useState<'generate' | 'measured'>('generate')
+  const measurable = kind !== 'inflow'
   // tou
   const [currency, setCurrency] = useState('EUR')
   const [basis, setBasis] = useState<'real' | 'nominal'>('real')
@@ -138,145 +144,156 @@ export default function SeriesEditor({ project, component, kind, componentType =
         componentType={kind === 'inflow' ? 'storage_units' : kind === 'cop' ? 'links' : componentType}
         attribute={kind === 'inflow' ? 'inflow' : kind === 'cop' ? 'efficiency' : 'marginal_cost'}
         component={component} onPending={p => { setPending(p); setAdvanced(true) }} />
-      {kind === 'tou' && (
-        <>
-          {!advanced && (
-            <>
-              <Row label="Peak price">
-                <input aria-label="Peak price" className={`${INPUT} w-20`} value={peak} onChange={e => setPeak(e.target.value)} />
-                <span className="text-muted">{currency}/MWh, weekdays</span>
-                <input aria-label="Peak from hour" className={`${INPUT} w-12`} value={peakFrom} onChange={e => setPeakFrom(e.target.value)} />
-                <span className="text-muted">to</span>
-                <input aria-label="Peak to hour" className={`${INPUT} w-12`} value={peakTo} onChange={e => setPeakTo(e.target.value)} />
-              </Row>
-              <Row label="Off-peak price">
-                <input aria-label="Off-peak price" className={`${INPUT} w-20`} value={offPeak} onChange={e => setOffPeak(e.target.value)} />
-                <span className="text-muted">{currency}/MWh</span>
-              </Row>
-            </>
-          )}
-          <Row label="Money">
-            <input aria-label="Currency" className={`${INPUT} w-14`} value={currency} onChange={e => setCurrency(e.target.value.toUpperCase())} />
-            <Seg value={basis} onChange={setBasis} options={[{ value: 'real', label: 'Real' }, { value: 'nominal', label: 'Nominal' }]} />
-            <input aria-label="Currency year" className={`${INPUT} w-16`} value={moneyYear} onChange={e => setMoneyYear(e.target.value)} />
-          </Row>
-        </>
+      {measurable && (
+        <Seg value={from} onChange={v => { setFrom(v); setPending(null) }}
+          options={[{ value: 'generate', label: 'Generate' }, { value: 'measured', label: 'Measured file' }]} />
       )}
-
-      {kind === 'inflow' && (
+      {from === 'measured' && measurable ? (
+        <MeasuredFileTab project={project} componentType={kind === 'cop' ? 'links' : componentType}
+          attribute={kind === 'cop' ? 'efficiency' : 'marginal_cost'} component={component} onPending={setPending} />
+      ) : (
         <>
-          <Row label="Annual inflow">
-            <input aria-label="Annual inflow MWh" className={`${INPUT} w-24`} value={annual} onChange={e => setAnnual(e.target.value)} />
-            <span className="text-muted">MWh</span>
-          </Row>
-          {!byMonth && (
-            <Row label="Shape">
-              <Seg value={shape} onChange={setShape} options={SHAPES.map(s => ({ value: s.value, label: s.label }))} />
-            </Row>
-          )}
-        </>
-      )}
-
-      {kind === 'cop' && (
-        <>
-          <Row label="Heat source">
-            <Seg value={source} onChange={setSource} options={[{ value: 'air', label: 'Air' }, { value: 'ground', label: 'Ground' }]} />
-          </Row>
-          <Row label="Supply at °C">
-            <input aria-label="Supply at °C" className={`${INPUT} w-16`} value={sink} onChange={e => setSink(e.target.value)} />
-          </Row>
-          {source === 'ground' && (
-            <Row label="Ground at °C">
-              <input aria-label="Ground at °C" className={`${INPUT} w-16`} value={ground} onChange={e => setGround(e.target.value)} />
-            </Row>
-          )}
-          {source === 'air' && (
-            <>
-              <p className="text-[11px] text-muted" data-testid="air-ambient-note">
-                Outdoor air follows the project's site temperature. Leave these empty to use it, or state all three.
-              </p>
-              <Row label="Mean outdoor °C">
-                <input aria-label="Mean outdoor °C" className={`${INPUT} w-16`} value={ambMean} onChange={e => setAmbMean(e.target.value)} />
-              </Row>
-              <Row label="Seasonal swing K">
-                <input aria-label="Seasonal swing K" className={`${INPUT} w-16`} value={ambSeason} onChange={e => setAmbSeason(e.target.value)} />
-              </Row>
-              <Row label="Daily swing K">
-                <input aria-label="Daily swing K" className={`${INPUT} w-16`} value={ambDay} onChange={e => setAmbDay(e.target.value)} />
-              </Row>
-            </>
-          )}
-        </>
-      )}
-
-      <button type="button" className="block text-[11px] text-accent" onClick={() => setAdvanced(!advanced)}>
-        {advanced ? 'Hide advanced' : 'Advanced'}
-      </button>
-      {advanced && (
-        <div className="space-y-1" data-testid="series-advanced">
           {kind === 'tou' && (
             <>
-              <p className="text-[11px] text-muted">
-                Periods in order; the first match prices the hour, so the catch-all goes last.
-                Months 1–12, weekdays 0 = Monday, hours [from, to).
-              </p>
-              {periods.map((p, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-1" data-testid="tou-period">
-                  <input aria-label={`Period ${i + 1} name`} className={`${INPUT} w-20`} value={p.name} onChange={e => setPeriod(i, { name: e.target.value })} />
-                  <input aria-label={`Period ${i + 1} price`} className={`${INPUT} w-16`} placeholder="price" value={p.rate} onChange={e => setPeriod(i, { rate: e.target.value })} />
-                  <input aria-label={`Period ${i + 1} months`} className={`${INPUT} w-20`} placeholder="months" value={p.months} onChange={e => setPeriod(i, { months: e.target.value })} />
-                  <input aria-label={`Period ${i + 1} weekdays`} className={`${INPUT} w-20`} placeholder="weekdays" value={p.weekdays} onChange={e => setPeriod(i, { weekdays: e.target.value })} />
-                  <input aria-label={`Period ${i + 1} from hour`} className={`${INPUT} w-12`} placeholder="from" value={p.start} onChange={e => setPeriod(i, { start: e.target.value })} />
-                  <input aria-label={`Period ${i + 1} to hour`} className={`${INPUT} w-12`} placeholder="to" value={p.end} onChange={e => setPeriod(i, { end: e.target.value })} />
-                  {periods.length > 1 && (
-                    <button type="button" aria-label={`Remove period ${i + 1}`} className="text-muted hover:text-danger"
-                      onClick={() => setPeriods(periods.filter((_, j) => j !== i))}><Trash2 size={11} /></button>
-                  )}
-                </div>
-              ))}
-              <Btn onClick={() => setPeriods([...periods, { name: '', rate: '', months: '', weekdays: '', start: '', end: '' }])}>
-                <Plus size={12} /> Period
-              </Btn>
+              {!advanced && (
+                <>
+                  <Row label="Peak price">
+                    <input aria-label="Peak price" className={`${INPUT} w-20`} value={peak} onChange={e => setPeak(e.target.value)} />
+                    <span className="text-muted">{currency}/MWh, weekdays</span>
+                    <input aria-label="Peak from hour" className={`${INPUT} w-12`} value={peakFrom} onChange={e => setPeakFrom(e.target.value)} />
+                    <span className="text-muted">to</span>
+                    <input aria-label="Peak to hour" className={`${INPUT} w-12`} value={peakTo} onChange={e => setPeakTo(e.target.value)} />
+                  </Row>
+                  <Row label="Off-peak price">
+                    <input aria-label="Off-peak price" className={`${INPUT} w-20`} value={offPeak} onChange={e => setOffPeak(e.target.value)} />
+                    <span className="text-muted">{currency}/MWh</span>
+                  </Row>
+                </>
+              )}
+              <Row label="Money">
+                <input aria-label="Currency" className={`${INPUT} w-14`} value={currency} onChange={e => setCurrency(e.target.value.toUpperCase())} />
+                <Seg value={basis} onChange={setBasis} options={[{ value: 'real', label: 'Real' }, { value: 'nominal', label: 'Nominal' }]} />
+                <input aria-label="Currency year" className={`${INPUT} w-16`} value={moneyYear} onChange={e => setMoneyYear(e.target.value)} />
+              </Row>
             </>
           )}
+
           {kind === 'inflow' && (
             <>
-              <label className="flex items-center gap-2">
-                <input type="checkbox" checked={byMonth} onChange={e => setByMonth(e.target.checked)} />
-                Monthly shares instead of a shape
-              </label>
-              {byMonth && (
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(90px,1fr))] gap-1">
-                  {MONTHS.map((m, i) => (
-                    <label key={m} className="flex items-center gap-1">
-                      <span className="text-muted w-8">{m}</span>
-                      <input aria-label={`${m} share`} className={`${INPUT} w-14`} value={monthly[i]}
-                        onChange={e => setMonthly(monthly.map((v, j) => (j === i ? e.target.value : v)))} />
-                    </label>
-                  ))}
-                </div>
+              <Row label="Annual inflow">
+                <input aria-label="Annual inflow MWh" className={`${INPUT} w-24`} value={annual} onChange={e => setAnnual(e.target.value)} />
+                <span className="text-muted">MWh</span>
+              </Row>
+              {!byMonth && (
+                <Row label="Shape">
+                  <Seg value={shape} onChange={setShape} options={SHAPES.map(s => ({ value: s.value, label: s.label }))} />
+                </Row>
               )}
             </>
           )}
+
           {kind === 'cop' && (
             <>
-              <Row label="Carnot share">
-                <input aria-label="Carnot share" className={`${INPUT} w-16`} placeholder="0.45" value={eta} onChange={e => setEta(e.target.value)} />
+              <Row label="Heat source">
+                <Seg value={source} onChange={setSource} options={[{ value: 'air', label: 'Air' }, { value: 'ground', label: 'Ground' }]} />
               </Row>
-              <Row label="COP cap">
-                <input aria-label="COP cap" className={`${INPUT} w-16`} placeholder="7" value={copMax} onChange={e => setCopMax(e.target.value)} />
+              <Row label="Supply at °C">
+                <input aria-label="Supply at °C" className={`${INPUT} w-16`} value={sink} onChange={e => setSink(e.target.value)} />
               </Row>
+              {source === 'ground' && (
+                <Row label="Ground at °C">
+                  <input aria-label="Ground at °C" className={`${INPUT} w-16`} value={ground} onChange={e => setGround(e.target.value)} />
+                </Row>
+              )}
+              {source === 'air' && (
+                <>
+                  <p className="text-[11px] text-muted" data-testid="air-ambient-note">
+                    Outdoor air follows the project's site temperature. Leave these empty to use it, or state all three.
+                  </p>
+                  <Row label="Mean outdoor °C">
+                    <input aria-label="Mean outdoor °C" className={`${INPUT} w-16`} value={ambMean} onChange={e => setAmbMean(e.target.value)} />
+                  </Row>
+                  <Row label="Seasonal swing K">
+                    <input aria-label="Seasonal swing K" className={`${INPUT} w-16`} value={ambSeason} onChange={e => setAmbSeason(e.target.value)} />
+                  </Row>
+                  <Row label="Daily swing K">
+                    <input aria-label="Daily swing K" className={`${INPUT} w-16`} value={ambDay} onChange={e => setAmbDay(e.target.value)} />
+                  </Row>
+                </>
+              )}
             </>
           )}
-        </div>
-      )}
 
-      <div className="flex items-center gap-2">
-        <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
-          <Play size={12} /> Preview
-        </Btn>
-        <DisabledReason reason={missing} />
-      </div>
+          <button type="button" className="block text-[11px] text-accent" onClick={() => setAdvanced(!advanced)}>
+            {advanced ? 'Hide advanced' : 'Advanced'}
+          </button>
+          {advanced && (
+            <div className="space-y-1" data-testid="series-advanced">
+              {kind === 'tou' && (
+                <>
+                  <p className="text-[11px] text-muted">
+                    Periods in order; the first match prices the hour, so the catch-all goes last.
+                    Months 1–12, weekdays 0 = Monday, hours [from, to).
+                  </p>
+                  {periods.map((p, i) => (
+                    <div key={i} className="flex flex-wrap items-center gap-1" data-testid="tou-period">
+                      <input aria-label={`Period ${i + 1} name`} className={`${INPUT} w-20`} value={p.name} onChange={e => setPeriod(i, { name: e.target.value })} />
+                      <input aria-label={`Period ${i + 1} price`} className={`${INPUT} w-16`} placeholder="price" value={p.rate} onChange={e => setPeriod(i, { rate: e.target.value })} />
+                      <input aria-label={`Period ${i + 1} months`} className={`${INPUT} w-20`} placeholder="months" value={p.months} onChange={e => setPeriod(i, { months: e.target.value })} />
+                      <input aria-label={`Period ${i + 1} weekdays`} className={`${INPUT} w-20`} placeholder="weekdays" value={p.weekdays} onChange={e => setPeriod(i, { weekdays: e.target.value })} />
+                      <input aria-label={`Period ${i + 1} from hour`} className={`${INPUT} w-12`} placeholder="from" value={p.start} onChange={e => setPeriod(i, { start: e.target.value })} />
+                      <input aria-label={`Period ${i + 1} to hour`} className={`${INPUT} w-12`} placeholder="to" value={p.end} onChange={e => setPeriod(i, { end: e.target.value })} />
+                      {periods.length > 1 && (
+                        <button type="button" aria-label={`Remove period ${i + 1}`} className="text-muted hover:text-danger"
+                          onClick={() => setPeriods(periods.filter((_, j) => j !== i))}><Trash2 size={11} /></button>
+                      )}
+                    </div>
+                  ))}
+                  <Btn onClick={() => setPeriods([...periods, { name: '', rate: '', months: '', weekdays: '', start: '', end: '' }])}>
+                    <Plus size={12} /> Period
+                  </Btn>
+                </>
+              )}
+              {kind === 'inflow' && (
+                <>
+                  <label className="flex items-center gap-2">
+                    <input type="checkbox" checked={byMonth} onChange={e => setByMonth(e.target.checked)} />
+                    Monthly shares instead of a shape
+                  </label>
+                  {byMonth && (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(90px,1fr))] gap-1">
+                      {MONTHS.map((m, i) => (
+                        <label key={m} className="flex items-center gap-1">
+                          <span className="text-muted w-8">{m}</span>
+                          <input aria-label={`${m} share`} className={`${INPUT} w-14`} value={monthly[i]}
+                            onChange={e => setMonthly(monthly.map((v, j) => (j === i ? e.target.value : v)))} />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              {kind === 'cop' && (
+                <>
+                  <Row label="Carnot share">
+                    <input aria-label="Carnot share" className={`${INPUT} w-16`} placeholder="0.45" value={eta} onChange={e => setEta(e.target.value)} />
+                  </Row>
+                  <Row label="COP cap">
+                    <input aria-label="COP cap" className={`${INPUT} w-16`} placeholder="7" value={copMax} onChange={e => setCopMax(e.target.value)} />
+                  </Row>
+                </>
+              )}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2">
+            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
+              <Play size={12} /> Preview
+            </Btn>
+            <DisabledReason reason={missing} />
+          </div>
+        </>
+      )}
 
       {generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
 

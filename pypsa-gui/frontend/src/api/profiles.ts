@@ -266,6 +266,18 @@ export const seriesApi = {
       .then(r => r.data)
   },
 
+  /** A measured file for one field (the editors' "Measured file" tab):
+   *  the row template's layout, read into a pending series to preview. */
+  uploadSeries: (project: string, file: File, target: {
+    component_type: string; attribute: string; component: string
+  }) => {
+    const form = new FormData()
+    form.append('file', file)
+    for (const [k, v] of Object.entries(target)) form.append(k, v)
+    return client.post<PendingSeries>(`${projectPath(project)}/series/upload`, form)
+      .then(r => r.data)
+  },
+
   generateAvailability: (project: string, body: {
     kind: string; components: string[]; component_type: 'generators' | 'links'
     params: Record<string, unknown>; year?: number

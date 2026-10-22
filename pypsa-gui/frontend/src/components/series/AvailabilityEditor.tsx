@@ -21,7 +21,9 @@ import { useUIStore } from '../../store/uiStore'
 import {
   openFlowTarget, openFlowTargetInPlace, openSectionInExpert, openSectionInGuided,
 } from '../../layout/flowNavigation'
-import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import {
+  CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
+} from './SeriesKit'
 
 type Kind = 'maintenance' | 'must_run' | 'derating' | 'forced_outages'
 
@@ -83,6 +85,8 @@ export default function AvailabilityEditor({ project, component, componentType, 
   const [kind, setKind] = useState<Kind>('maintenance')
   const [advanced, setAdvanced] = useState(mode === 'expert')
   const [pending, setPending] = useState<PendingSeries | null>(null)
+  // Generate the kind's series, or read a measured file for its field.
+  const [from, setFrom] = useState<'generate' | 'measured'>('generate')
   // maintenance
   const [season, setSeason] = useState<'summer' | 'winter'>('summer')
   const [weeks, setWeeks] = useState('2')
@@ -156,6 +160,8 @@ export default function AvailabilityEditor({ project, component, componentType, 
           <CurrentSeriesLine project={project} componentType={componentType}
             attribute={kind === 'must_run' ? 'p_min_pu' : 'p_max_pu'} component={component}
             onPending={p => { setPending(p); setAdvanced(true) }} />
+          <Seg value={from} onChange={v => { setFrom(v); setPending(null) }}
+            options={[{ value: 'generate', label: 'Generate' }, { value: 'measured', label: 'Measured file' }]} />
         </div>
       )}
       {kind === 'forced_outages' ? (
@@ -170,6 +176,9 @@ export default function AvailabilityEditor({ project, component, componentType, 
             </button>
           </div>
         </div>
+      ) : from === 'measured' ? (
+        <MeasuredFileTab project={project} componentType={componentType}
+          attribute={kind === 'must_run' ? 'p_min_pu' : 'p_max_pu'} component={component} onPending={setPending} />
       ) : (
         <div className="mt-2 space-y-1">
           {kind === 'maintenance' && (dated ? (

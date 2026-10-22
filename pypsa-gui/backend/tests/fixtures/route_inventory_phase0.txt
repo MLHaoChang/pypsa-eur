@@ -281,6 +281,7 @@ POST    /api/projects/{name}/profiles/loads/upload                              
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
 POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
+POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get
 POST    /api/projects/{name}/reports                                               -> create_report_api_projects__name__reports_post
