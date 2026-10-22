@@ -87,6 +87,8 @@ SAFETY_PANEL_ENUM = [
     "Economics", "economics",
     # The renewable profile generator (Profile Studio) slide panel.
     "ProfileStudio", "profiles",
+    # The workspace-level Commercial library page (tariffs, contracts, series).
+    "CommercialLibrary", "library",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -1848,7 +1850,13 @@ TOOLS: list[dict[str, Any]] = [
         "without a blackout, the seamless scenario; needs an existing battery "
         "or new batteries; default false); a stage whose peak is above its "
         "energized connection is refused). Grid templates: 3bus, ieee14, belgium, "
-        "ieee39. Safety: destructive.",
+        "ieee39. The three staged examples (eh_datacenter_staged, "
+        "eh_h2_hub_staged, eh_microgrid_staged) can be built for other "
+        "planning years: params.planning {start_year, end_year, dates?} "
+        "(whole years 2025-2060, at most 3 periods; with no dates the "
+        "example's spacing is shifted to start_year and later stages are "
+        "dropped). A value the example has no figure for in an entered year "
+        "is a placeholder the project flags until it is set. Safety: destructive.",
         {
             "template_id": {"type": "string",
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
@@ -1858,8 +1866,11 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_ammonia_staged", "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
-                       "description": "eh_site only: the site's parameters "
-                                      "(omit for the industrial preset)."},
+                       "description": "eh_site: the site's parameters (omit "
+                                      "for the industrial preset). The staged "
+                                      "examples: {planning: {start_year, end_year, "
+                                      "dates?}}; the data-center ones also take "
+                                      "dc_load."},
         },
         ["template_id", "new_name"],
     ),
@@ -1899,9 +1910,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "restore_project_snapshot",
-        "Restore project from a saved snapshot. Overwrites project files + "
-        "reloads in-memory. Pre-restore auto-snapshot mitigates user error. "
-        "Safety: destructive.",
+        "Restore project from a saved snapshot. Saves unsaved edits, keeps the "
+        "current state as a 'before-restore' snapshot, then overwrites project "
+        "files + reloads in-memory. Safety: destructive.",
         {
             "name": {"type": "string"},
             "snapshot_id": {"type": "string"},

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-21",
+  "generated_at": "2026-10-22",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -2885,7 +2885,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "e0a09e1749bbfc1dcba31d51fd1a0fe017b77abc2d81db5b7217a058fb0363a5",
+      "schema_sha256": "ca48da82f598cd3ad8996b65bec04dfe94961be6da8fb4e63d35cce295e29e0f",
       "behavioral_fixture": "pending"
     },
     {
@@ -3279,7 +3279,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
+      "schema_sha256": "9d68599e2baa3edfb739918d5fbcfca3cc1296ead8ee1ad03dd73bfaa21242bf",
       "behavioral_fixture": "pending"
     },
     {
@@ -6463,7 +6463,8 @@
     "campusElectrical",
     "decision",
     "economics",
-    "profiles"
+    "profiles",
+    "library"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6526,7 +6527,9 @@
     "Economics",
     "economics",
     "ProfileStudio",
-    "profiles"
+    "profiles",
+    "CommercialLibrary",
+    "library"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

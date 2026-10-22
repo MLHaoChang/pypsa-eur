@@ -23,9 +23,9 @@ const REF = { kind: 'tariff' as const, id: 'nl', version: 2, hash: 'h2' }
 const TARIFF = { id: 'nl-tou', name: 'NL TOU', jurisdiction: 'NL', valid_from: '2030-01-01',
                  items: [{ id: 'energy', kind: 'energy', unit: 'per_kwh', periods: [{ name: 'all', rate: 0.2 }] }] }
 
-function renderBrowser() {
+function renderBrowser(onOpenInputs?: () => void) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={qc}><LibraryBrowser /></QueryClientProvider>)
+  return render(<QueryClientProvider client={qc}><LibraryBrowser onOpenInputs={onOpenInputs} /></QueryClientProvider>)
 }
 function file(name: string, body: string, type = 'application/json') {
   const f = new File([body], name, { type })
@@ -67,6 +67,18 @@ describe('LibraryBrowser', () => {
     await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledWith(
       { import_tariff_ref: REF, import_tariff: null, import_tariff_id: null }))
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('after an attach says where it went and links to the inputs, when the page gives a target', async () => {
+    api.getCommercial.mockResolvedValue({ poc_link: 'import' } as never)
+    api.saveCommercial.mockResolvedValue({} as never)
+    const open = vi.fn()
+    renderBrowser(open)
+    expect(screen.queryByRole('button', { name: 'Open Tariffs & contracts' })).toBeNull()
+    fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Attach v2 as the import tariff' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Tariffs & contracts' }))
+    expect(open).toHaveBeenCalledOnce()
   })
 
   it('asks before replacing an inline tariff, and cancel changes nothing', async () => {

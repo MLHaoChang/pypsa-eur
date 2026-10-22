@@ -243,7 +243,12 @@ def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client,
     r = client.post(f"{ROUTE}/apply", json={**pv, "digest": "never-shown"})
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
     card = client.post(f"{ROUTE}/preview", json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
-    assert any(row["field"] == "dc_ac" and row.get("confirmed") for row in card["rows"])
+    confirmed = [row for row in card["rows"] if row.get("confirmed")]
+    assert {row["field"] for row in confirmed} == {"dc_ac", "money_year"}
+    assert all(row["note"].startswith("Confirmed: ") and "unticked" not in row["note"] for row in confirmed)
+    money = [row["note"] for row in card["rows"] if row["role"] == "note" and row["field"] == "overnight_cost"]
+    assert len(money) == 1 and "annualises this cost over the 40-year lifetime" in money[0]
+    assert "Price data: 2025 EUR" in money[0] and "×" not in money[0] and "fom_cost" not in money[0]
 
 
 def test_a_stale_digest_refuses_and_writes_nothing(client, install_network):
