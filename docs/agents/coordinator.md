@@ -1,6 +1,6 @@
 # Coordinator
 
-Current coordinator session: `session_018bbGgvu8iUYPDTkRn78eJU`
+Current coordinator session: `session_01UvULFvKopViAsrtGufzSbP`
 
 Engine gatekeeper (gridspine, IC and engine reviews): `session_01MvWYuyJJCQ8vbnh4n6ygRb`
 
