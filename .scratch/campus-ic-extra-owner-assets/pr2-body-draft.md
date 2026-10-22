@@ -48,6 +48,12 @@ tab    flag words under the campus table (financeModel.ts campusLifeNotes)
 
 **Decision for the GK (point 3).** The study's `service_to` for a purchase with no successor is the study horizon's end (`campus_invest._lineage`: `min(next renewal, horizon_end)`). It is not an end of life: for a single-period project it is one year after the build. So the IC resumes at the last purchase's build year + L, not at `service_to`. Resuming at `service_to` would buy the Data Center's equipment again a year after COD. Where `service_to` < build_year + L, the pin shows the case bought exactly as an asset without a lineage at lead 1.
 
+**The point-3 reading (accepted by the GK).** No `service_to` is read for timing. A renewal's own `build_year` is its predecessor's end. The last purchase's life ends at its build_year + L, which drives both `campus_life_ends_unreplaced` and the resumed `part_lifetimes` purchases. Pins: the Data Center (single period, L 40) gets no flag and no extra purchase (`test_the_data_center_single_period_gets_no_flag_and_no_extra_purchase`); a last purchase ending inside the axis is flagged under both rules (`test_a_last_purchase_whose_life_ends_inside_the_axis_is_flagged`).
+
+**Contingency.** An existing asset's first renewal is a P5 stage, so its stage capex carries `contingency_share` like every stage. The renewals folded into it are replacements and carry none, as every IC replacement (`test_the_existing_renewal_stage_carries_contingency_and_its_renewals_none`). A capex bound moves the renewals: `scale_capex` 1.1 raises a renewal's cash by 10 % (`test_a_capex_bound_of_1_1_raises_a_renewals_cash_by_ten_percent`).
+
+**Open item.** Renewals are not shown as table rows in the campus block, which lists each lineage once. They appear in the cash flow (a `replacement_capex` line `<asset>:<part>` in the renewal's cash year) and in the replacement schedule (`source="campus_study"`). Pinned by `test_renewals_are_no_table_rows_but_cash_flow_lines`.
+
 **Data note.** For an existing asset's first renewal, the producer sends `purchase` 1 with `action` "renew", not purchase ≥ 2. The route keys on `action == "renew"` and `replaces is None`.
 
 ### Evidence

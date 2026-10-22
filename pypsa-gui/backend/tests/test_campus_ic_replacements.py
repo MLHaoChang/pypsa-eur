@@ -504,3 +504,65 @@ def test_the_c14_study_through_the_case_buys_each_campus_purchase_once(hub, rule
     assert paid == pytest.approx(listed + own, rel=1e-12)
     if rule == "fixed":
         assert all(x.source != "part_lifetimes" for x, _v in r.op.replacement_items)
+
+
+# ── coordinator follow-up (GK on the point-3 reading and point-2 choices) ────
+
+
+def test_the_data_center_single_period_gets_no_flag_and_no_extra_purchase():
+    """Flag f reads the last purchase's build_year + L, never a horizon
+    `service_to`: the Data Center's equipment (L 40, a 25-y case, service_to
+    2031 = the one-year study horizon's end) is neither flagged nor bought
+    again, exactly as an asset without a lineage."""
+    kw = dict(replacement_rule="part_lifetimes", analysis_years=25)
+    campus = _run(_case(_trf((), service_to=2031, life=40.0), **kw))
+    plain = _run(_case(_trf((), service_to=None, life=40.0), **kw))
+    assert _items(campus) == _items(plain) == []
+    assert not any(f.startswith("campus_life_ends_unreplaced") for f in campus.op.flags)
+    assert (_term(campus).start_year, _term(campus).base) == \
+        (_term(plain).start_year, _term(plain).base)
+
+
+@pytest.mark.parametrize("rule", ["fixed", "part_lifetimes"])
+def test_a_last_purchase_whose_life_ends_inside_the_axis_is_flagged(rule):
+    """The last purchase (2043) + L 12.5 = 2055.5 < 2060; its `service_to`
+    (2060, the study horizon) is not read."""
+    r = _run(_case(_trf((_renewal(2043, service_to=2060),)), replacement_rule=rule))
+    assert "campus_life_ends_unreplaced:trf" in r.op.flags
+
+
+def test_the_existing_renewal_stage_carries_contingency_and_its_renewals_none():
+    """Point 2's choice: an existing asset's first renewal is a P5 stage, paid
+    with contingency like every stage; the renewals folded into it are
+    replacements, paid without (the IC's replacement rule)."""
+    e = _trf((_renewal(2055, service_to=2060),), build_year=2043, service_to=2055,
+             existing_renewal=True)
+    r = _run(_case(e, asset_cod={"trf": date(2043, 1, 1)}, contingency_share=0.1))
+    assert r.op.stage_items[0][3] == pytest.approx(_esc(2042) * 1.1)
+    assert _items(r)[0][3] == pytest.approx(_esc(2054))
+
+
+def test_a_capex_bound_of_1_1_raises_a_renewals_cash_by_ten_percent():
+    from services.finance.case import scale_capex
+
+    base = _run(_case(_trf()))
+    up = _run(scale_capex(_case(_trf()), 1.1))
+    assert [v for *_x, v in _items(up)] == pytest.approx([1.1 * v for *_x, v in _items(base)])
+
+
+def test_renewals_are_no_table_rows_but_cash_flow_lines():
+    """Open item: the report's campus rows list each lineage once (its first
+    purchase); each renewal is in the replacement schedule and a cash flow
+    line of its own (`<asset>:<part>`)."""
+    from services.finance.report import assemble_finance_sections
+
+    case = _case(_trf())
+    r = _run(case)
+    rep = assemble_finance_sections(r, case)
+    rows = rep.sections["project"].payload["extra_assets"]
+    assert [row["name"] for row in rows] == ["trf"]
+    lines = [ln for ln in rep.cashflow_lines if ln.provenance.source_id == "trf:investment"]
+    assert [ln.year for ln in lines] == [2042, 2054]
+    assert [ln.amount for ln in lines] == pytest.approx([-_esc(2042), -_esc(2054)])
+    assert [(x.year, x.source) for x, _v in r.op.replacement_items] == \
+        [(2042, "campus_study"), (2054, "campus_study")]

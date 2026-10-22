@@ -373,7 +373,8 @@ class CampusRenewal:
     `amount` the part's whole purchase, upfront_per_unit × quantity, unescalated,
     in the case's money (the basis of `asset_finance`'s overnight cost); `name`
     the producer's entry name (`campus:<library_id>#<k>`); `service_to` the year
-    its successor starts, or the study horizon's end. The replacement schedule
+    its successor starts, or the study horizon's end, kept for the record and the
+    hash: the schedule never reads it (`replacements`). The replacement schedule
     pays it in `build_year − stage_capex_lead_years`."""
 
     part: str

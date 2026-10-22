@@ -45,9 +45,11 @@ the first, + L) ends inside the horizon, the asset is flagged
 `campus_life_ends_unreplaced:<asset>`; under `fixed` nothing more is bought,
 under `part_lifetimes` the IC's own rule resumes there: a purchase serving from
 each `end + j·L` before the horizon, paid in its first service year (half up)
-less the lead. The study's `service_to` of a purchase with no successor is its
-horizon's end, not an end of life (one year for a single-period project), so
-the lifetime, not `service_to`, says when a life ends.
+less the lead. No `service_to` is read for timing. One that ends at a
+successor is that successor's `build_year`, which the renewal itself states.
+The last purchase's (no successor) is the study horizon's end, not an end of
+life (one year for a single-period project): the flag and the resumed rule
+read that purchase's build year + L, never its `service_to`.
 
 Pure: reads the `FinanceCase` and its `Timeline`, never a network.
 """
