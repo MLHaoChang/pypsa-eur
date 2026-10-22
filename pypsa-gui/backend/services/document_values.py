@@ -243,6 +243,32 @@ def on_page(text: str, quote: str) -> int | None:
     return None
 
 
+def locate(c: dict, pages: list[str], src: dict) -> tuple[tuple | None, dict | None]:
+    """`((raw_quote, quote, page, at), None)` for a citation whose quote is on its page
+    (`pages` normalised), else `(None, gap)`."""
+    raw_quote = str(c.get("quote") or "")
+    quote = normal(raw_quote)
+    page = c.get("page")
+    if not quote or len(raw_quote) > MAX_QUOTE_CHARS:
+        return None, _gap("quote_not_found", f"Cite a quote of 1 to {MAX_QUOTE_CHARS} characters.", c)
+    if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= len(pages):
+        return None, _gap("quote_not_found", f"Page {page!r} is not in the document (pages 1 to "
+                          f"{len(pages)} are read).", c)
+    if not pages[page - 1]:
+        return None, _gap("no_text_layer", f"Page {page} has no text layer (a scan or an image); "
+                          "nothing is read from it, as there is no OCR. Type the value in.", c)
+    at = on_page(pages[page - 1], quote)
+    if at is None:
+        elsewhere = [k + 1 for k, text in enumerate(pages) if on_page(text, quote) is not None]
+        return None, _gap("quote_not_found", f"The quote is not on page {page}" + (
+            f"; it is on page {', '.join(map(str, elsewhere))}." if elsewhere else
+            " or on any other page read, word for word (whole words: a quote cannot start or end "
+            "inside a word or number).")
+            + (f" Pages {src['truncated']} are read up to {MAX_PAGE_CHARS} characters." if src["truncated"] else ""),
+            c, on_pages=elsewhere)
+    return (raw_quote, quote, page, at), None
+
+
 def _value(citation: dict, quote: str, page: str, at: int, decimal_mark: str | None,
            field: dict) -> tuple[dict | None, dict | None]:
     """`(number, None)` read from the quote at `page[at:]`, else `(None, gap)`. The number is
@@ -306,30 +332,11 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
     years: dict[int, str] = {}
     for i, c in enumerate(citations):
         c = dict(c or {})
-        raw_quote = str(c.get("quote") or "")
-        quote = normal(raw_quote)
-        page = c.get("page")
-        if not quote or len(raw_quote) > MAX_QUOTE_CHARS:
-            unmapped.append(_gap("quote_not_found", f"Cite a quote of 1 to {MAX_QUOTE_CHARS} characters.", c))
+        found, gap = locate(c, pages, src)
+        if gap:
+            unmapped.append(gap)
             continue
-        if not isinstance(page, int) or isinstance(page, bool) or not 1 <= page <= len(pages):
-            unmapped.append(_gap("quote_not_found", f"Page {page!r} is not in the document (pages 1 to "
-                                 f"{len(pages)} are read).", c))
-            continue
-        if not pages[page - 1]:
-            unmapped.append(_gap("no_text_layer", f"Page {page} has no text layer (a scan or an image); "
-                                 "nothing is read from it, as there is no OCR. Type the value in.", c))
-            continue
-        at = on_page(pages[page - 1], quote)
-        if at is None:
-            elsewhere = [k + 1 for k, text in enumerate(pages) if on_page(text, quote) is not None]
-            unmapped.append(_gap("quote_not_found", f"The quote is not on page {page}" + (
-                f"; it is on page {', '.join(map(str, elsewhere))}." if elsewhere else
-                " or on any other page read, word for word (whole words: a quote cannot start or end "
-                "inside a word or number).")
-                + (f" Pages {src['truncated']} are read up to {MAX_PAGE_CHARS} characters." if src["truncated"] else ""),
-                c, on_pages=elsewhere))
-            continue
+        raw_quote, quote, page, at = found
         field_name = str(c.get("field") or "")
         field = (fields or {}).get(field_name)
         unit = (str(c.get("unit") or "")).strip() or None

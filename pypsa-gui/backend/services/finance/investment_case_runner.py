@@ -131,7 +131,8 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
         "finance": finance_digest(finance),
         "value_flows": json_digest((commercial or {}).get("value_flows")),
         "commercial": json_digest(None if commercial is None else
-                                  {k: v for k, v in commercial.items() if k != "value_flows"}),
+                                  {k: v for k, v in commercial.items()
+                                   if k not in ("value_flows", "provenance")}),
         "dispatch": dispatch,
         "packs": dict(sorted(packs.items())),
         "owner_assets": owner_assets,

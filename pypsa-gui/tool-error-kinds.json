@@ -1090,6 +1090,10 @@
     "unsupported_document_format": {
       "surface": "inline",
       "why": "preview_document_values / apply_document_values (data-to-model slice 2) was pointed at an upload that is not a PDF. The assistant uses the import that fits the upload (a table goes to preview_equipment_mapping), per call."
+    },
+    "commercial_preflight_failed": {
+      "surface": "inline",
+      "why": "apply_commercial_document_values (data-to-model slice 2) refused values from a PDF for the import tariff or a PPA: with them the commercial preflight (or the solver-config save's binding) reports an error the stored config does not have. Nothing was written; the assistant says which check failed, per call."
     }
   }
 }

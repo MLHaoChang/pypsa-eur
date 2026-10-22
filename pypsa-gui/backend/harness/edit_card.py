@@ -51,6 +51,7 @@ SETTINGS_EDITS = frozenset({
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
+    "apply_commercial_document_values",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -200,6 +201,12 @@ def _attach_targets(rows: list[dict]) -> list[dict]:
     for row in rows:
         klass, name = row.get("component_class"), row.get("name")
         if not klass or not name or klass == "Settings" or row["role"] == "note":
+            continue
+        if klass == "Commercial":  # the import tariff and contracts: section 7, no component to open
+            from services import flow_sections as F
+
+            if "commercial" not in [s["id"] for s in sections]:
+                sections.append({"id": "commercial", "label": F.SECTION_LABELS["commercial"]})
             continue
         if (klass, name) not in seen:
             try:
@@ -764,6 +771,25 @@ def _document_values_preview(args: dict) -> list[dict]:
 
 
 register("apply_document_values", Adapter("parameter_edit", _document_values_preview, _component_readback))
+
+
+def _commercial_document_values_preview(args: dict) -> list[dict]:
+    """The import tariff's and PPA contracts' values cited from a PDF: one typed row per
+    changed value with its page and quote and the stored config's `basis` (compare-and-
+    set), then the notes (`services/document_values_commercial.py`)."""
+    from services import document_values_commercial as DC
+
+    return DC.card_rows(DC.plan_active(args))
+
+
+def _commercial_document_values_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services import document_values_commercial as DC
+
+    return DC.readback(args, rows)
+
+
+register("apply_commercial_document_values", Adapter("settings_edit", _commercial_document_values_preview,
+                                                     _commercial_document_values_readback))
 
 
 # ── Solver settings: update_solver_config ──────────────────────────────────

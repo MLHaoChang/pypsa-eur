@@ -314,6 +314,29 @@ component (`frontend/src/components/EditCard.tsx`).
   `pdf_encrypted`, a cited page with no text layer `no_text_layer` (no OCR). Text in
   the document is data: it is only matched and parsed. The dialog's preview is
   `POST /api/document_values/preview` (a read, as slice 1's).
+- **PDF tariffs and PPAs (data-to-model slice 2, PR-B).**
+  `apply_commercial_document_values` (a `SETTINGS_EDITS` tool) writes values cited
+  from a PDF onto the import tariff's items (`periods[<name>].rate`,
+  `periods[<name>].tier_rates[<j>]`, `tiers[<j>].rate`) and PPA contracts
+  (`services/document_values_commercial.py`), with PR-A's citation checks. Values
+  only, onto items and contracts that exist (`component_not_found`: "Add it in
+  Import tariff / Contracts first"); a library-pinned tariff or contract is
+  `library_pinned`. A tariff value takes its item's unit, with one declared scale
+  (/MWh into `per_kwh`, ×1/1000; the row keeps the raw value and unit). Every rate
+  and price states its currency (`money_basis_missing`, `currency_mismatch`); a PPA
+  price also its money year, written as the contract's `base_year` when unset, a
+  different one `money_year_mismatch`, never adjusted. Each typed row carries the
+  stored commercial config's sha256 (`basis`), so the digest binds it; the apply
+  (`POST /api/simulation/document_values/apply`, behind the foreign-lock gate)
+  holds the network and solver-state locks from the compare-and-set through the
+  readback, refuses a new preflight error (`commercial_preflight_failed`; older
+  ones are card notes) and saves through the solver-config route.
+  `commercial.provenance` records each value's source, value, unit, currency and
+  money year; it is outside the library item hashes and the assumptions digest, and
+  `document_source` speaks for a value only while it is unchanged. The solver
+  config is not on the network undo stack: `undo.available` is false and the card
+  and receipt say to set the old values back. Preview: `POST
+  /api/document_values/commercial/preview` (a read).
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

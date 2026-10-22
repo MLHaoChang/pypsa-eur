@@ -758,6 +758,13 @@ class CommercialConfig(BaseModel):
     # price on that purchase and (opt-in) on grid imports. Read only by the
     # finance adapter, never by the LP.
     reference_purchases: list[ReferencePurchase] = Field(default_factory=list)
+    # Where a tariff or PPA value came from, when it was read from a document (data-to-model
+    # slice 2): `"<tariff|ppa>:<entity>/<path>"` → `{source, value, unit, currency,
+    # currency_year, approved_by, approved_at}`, written by `services.
+    # document_values_commercial`. Metadata: outside the library item hashes and the
+    # investment case's assumptions digest, never read by the LP; an entry speaks for the
+    # stored value only while that value still equals its `value`.
+    provenance: dict[str, dict[str, Any]] = Field(default_factory=dict)
     co2_price: Co2Price | None = None
 
     @model_validator(mode="before")

@@ -94,6 +94,7 @@ GET     /api/chat/{session_id}/progress                                         
 POST    /api/chat/{session_id}/rewind                                              -> chat_rewind_api_chat__session_id__rewind_post
 GET     /api/dictation/config                                                      -> config_api_dictation_config_get
 POST    /api/dictation/transcribe                                                  -> transcribe_api_dictation_transcribe_post
+POST    /api/document_values/commercial/preview                                    -> preview_commercial_document_values_http_api_document_values_commercial_preview_post
 POST    /api/document_values/preview                                               -> preview_document_values_http_api_document_values_preview_post
 POST    /api/durable-conversations                                                 -> create_thread_api_durable_conversations_post
 GET     /api/durable-conversations/{thread_id}                                     -> get_thread_api_durable_conversations__thread_id__get
@@ -437,6 +438,7 @@ GET     /api/simulation/check_solvers                                           
 GET     /api/simulation/commercial/poc                                             -> get_poc_state_api_simulation_commercial_poc_get
 GET     /api/simulation/commercial/value_flows                                     -> get_value_flows_api_simulation_commercial_value_flows_get
 PUT     /api/simulation/commercial/value_flows                                     -> put_value_flows_api_simulation_commercial_value_flows_put
+POST    /api/simulation/document_values/apply                                      -> apply_commercial_document_values_api_simulation_document_values_apply_post
 GET     /api/simulation/finance                                                    -> get_finance_api_simulation_finance_get
 PUT     /api/simulation/finance                                                    -> put_finance_api_simulation_finance_put
 POST    /api/simulation/force_reset                                                -> force_reset_api_simulation_force_reset_post

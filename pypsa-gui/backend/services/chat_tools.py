@@ -1770,6 +1770,41 @@ def apply_document_values(upload_id: str, component_class: str, citations: list,
     return out
 
 
+def preview_commercial_document_values(upload_id: str, citations: list, decimal_mark: str | None = None,
+                                       currency: str | None = None, money_year: int | None = None,
+                                       confirm: list[str] | None = None) -> dict:
+    """Check values cited from an uploaded PDF (page and quote) against the import tariff
+    and PPA contracts and say what an apply would write and what stays out. Writes nothing."""
+    from services import document_values_commercial as DC
+
+    p = DC.plan_active({"upload_id": upload_id, "citations": citations, "decimal_mark": decimal_mark,
+                        "currency": currency, "money_year": money_year, "confirm": confirm})
+    return {**DC.summary(p),
+            "next": "apply_commercial_document_values with the same arguments and source_sha256 = source.sha256"}
+
+
+def apply_commercial_document_values(upload_id: str, citations: list, source_sha256: str,
+                                     decimal_mark: str | None = None, currency: str | None = None,
+                                     money_year: int | None = None, confirm: list[str] | None = None) -> dict:
+    """Write previewed PDF citations onto the import tariff and PPA contracts through the
+    solver-config write, with the digest of the card the user approved."""
+    from harness import edit_card
+    from routers.network_document_values import CommercialValuesHttp
+    from routers.network_document_values import apply_commercial_document_values as _h
+
+    if not edit_card.approved_digest():
+        from services import equipment_table as T
+
+        T._refuse("edit_preview_stale", "No approved edit card for these values; nothing was applied. "
+                  "Propose the edit again.", 409)
+    body = CommercialValuesHttp(upload_id=upload_id, citations=citations, decimal_mark=decimal_mark,
+                                currency=currency, money_year=money_year, confirm=list(confirm or []),
+                                source_sha256=source_sha256, digest=edit_card.approved_digest())
+    out = _route(_h, body)
+    out.pop("receipt", None)
+    return out
+
+
 def _urdb_rate(data, item_index: int | None = None):
     """The rate object of an uploaded URDB file: the object itself, one item
     of an OpenEI response, or a REopt scenario's `urdb_response`."""
@@ -7833,6 +7868,8 @@ DISPATCHERS: dict[str, Any] = {
     "apply_equipment_mapping": apply_equipment_mapping,
     "preview_document_values": preview_document_values,
     "apply_document_values": apply_document_values,
+    "preview_commercial_document_values": preview_commercial_document_values,
+    "apply_commercial_document_values": apply_commercial_document_values,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
