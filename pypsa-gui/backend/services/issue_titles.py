@@ -32,6 +32,9 @@ ISSUE_TITLES: dict[str, str] = {
     "load_p_set_invalid": "Load value is not a number",
     "voll_no_loads": "Value of lost load set, but there are no loads",
 
+    # Profiles
+    "profile_location_missing": "Weather profile needs a bus location",
+
     # Generators
     "gen_zero_costs": "Generators without any cost",
     "gen_control_invalid": "Generator control type not valid for power flow",

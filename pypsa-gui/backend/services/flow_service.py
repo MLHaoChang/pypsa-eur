@@ -136,6 +136,7 @@ PRESENCE_RULES: dict[str, tuple[str, str]] = {
     "presence_loads": ("loads", "c"),
     "presence_assets": ("assets", "c"),
     "presence_voll": ("scenarios", "c"),
+    "profile_location_missing": ("profiles", "c"),
 }
 
 # Bind checks owned by a card: outside the scope while that card is off. Only
@@ -195,6 +196,7 @@ class _Facts:
     finance: Any
     cfg_dict: dict = field(default_factory=dict)
     cfg_hash: str = ""
+    renewables_unplaced: list = field(default_factory=list)   # [(generator, bus)]
     copy: Any = None          # a private copy for eh_readiness, on a cache miss
     # `{money year: [(class, asset, field), ...]}` of the recorded cost fields, and
     # how many cost fields a person typed (no money year recorded) (B9).
@@ -357,6 +359,10 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
     # The RP-01 rule (NaN, out of range and 0/0 all count as missing), so the
     # flow and the profile refusal agree on what "placed" means.
     placed = sum(1 for b in n.buses.index if _bus_coord(n, b) is not None)
+    from services.profile_gen.readiness import supplied_profiles, unplaced_renewables
+    from services.pypsa_service import PyPSAService
+
+    supplied = supplied_profiles(PyPSAService.get_active_context(), [str(g) for g in n.generators.index])
     p_nom = None
     if imports:
         try:
@@ -384,7 +390,8 @@ def _gather(n, config, *, template: dict | None, cache_key: str) -> _Facts:
         carriers=[str(c) for c in n.carriers.index] if len(n.carriers) else
         sorted({str(b) for b in n.buses.get("carrier", []) if str(b)}),
         connection_links=sorted(connection), import_p_nom_mw=p_nom,
-        asset_count=assets, buses=len(n.buses), buses_placed=placed, voll=voll,
+        asset_count=assets, buses=len(n.buses), buses_placed=placed,
+        renewables_unplaced=unplaced_renewables(n, supplied), voll=voll,
         ens_cap=getattr(config, "ens_cap_permyriad", None),
         commercial=commercial, finance=getattr(config, "finance", None),
         cfg_dict=cfg_dict, cfg_hash=cfg_hash, copy=copy,
@@ -698,11 +705,21 @@ def _presence(facts: _Facts, *, islanded: bool, study_requested: bool,
     out: list[dict] = []
 
     def add(code: str, severity: str, message: str, **kw) -> None:
-        out.append(_item(code, severity, message, "flow", PRESENCE_RULES[code][0], **kw))
+        out.append(_item(code, severity, message, "flow", PRESENCE_RULES[code][0],
+                         title=ISSUE_TITLES.get(code), **kw))
 
     if facts.buses and facts.buses_placed == 0:
         add("site_location_missing", "warning",
             "The site has no location: no bus is placed.", component="Bus", fld="x")
+    elif facts.renewables_unplaced:
+        by_bus: dict[str, list[str]] = {}
+        for gen, bus in facts.renewables_unplaced:
+            by_bus.setdefault(bus, []).append(gen)
+        for bus, gens in by_bus.items():
+            shown = ", ".join(gens[:3]) + (f" and {len(gens) - 3} more" if len(gens) > 3 else "")
+            add("profile_location_missing", "warning",
+                f"Bus {bus} has no location: a weather profile for {shown} needs to "
+                "know where it is.", component="Bus", entity=bus, fld="x")
     if not islanded and not facts.connection_links:
         add("presence_connection", "error",
             "No grid connection: add the import Link (an off-grid template marks the "

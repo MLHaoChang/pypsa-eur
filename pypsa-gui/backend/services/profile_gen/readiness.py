@@ -39,16 +39,33 @@ def _stamps(series: pd.Series) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
 
 
-def _profile_state(ctx, name: str) -> tuple[str, dict | None, str | None]:
-    n = ctx.network
+def profile_kind(ctx, name: str) -> str:
+    """uploaded / generated / network_native / none, without the staleness
+    work. `ctx.user_ts` first: opening a project seeds it from the network's
+    own series, so the column test alone would call a generated one native."""
     key = (*KEY, name)
-    series = ctx.user_ts.get(key)
-    if series is None:
-        native = name in n.generators_t.p_max_pu.columns
-        return ("network_native" if native else "none"), None, None
+    if ctx.user_ts.get(key) is None:
+        return "network_native" if name in ctx.network.generators_t.p_max_pu.columns else "none"
     meta = ctx.user_ts_meta.get(key) or {}
     if not meta or str(meta.get("provenance") or "").startswith("measured"):
-        return "uploaded", None, None
+        return "uploaded"
+    return "generated"
+
+
+def supplied_profiles(ctx, names) -> set[str]:
+    """The generators among `names` whose profile the user already has
+    (uploaded or the network's own): they need no weather point."""
+    return {nm for nm in names if profile_kind(ctx, nm) in ("uploaded", "network_native")}
+
+
+def _profile_state(ctx, name: str) -> tuple[str, dict | None, str | None]:
+    kind = profile_kind(ctx, name)
+    if kind != "generated":
+        return kind, None, None
+    n = ctx.network
+    key = (*KEY, name)
+    series = ctx.user_ts[key]
+    meta = ctx.user_ts_meta.get(key) or {}
     stale = None
     snaps = pd.DatetimeIndex(
         n.snapshots.get_level_values(-1) if isinstance(n.snapshots, pd.MultiIndex) else n.snapshots)
@@ -71,6 +88,20 @@ def _bus_moved(meta: dict, name: str, now: tuple[float, float] | None) -> bool:
     if then is None or now is None:
         return False
     return abs(now[0] - then[0]) > BUS_MOVED_DEG or abs(now[1] - then[1]) > BUS_MOVED_DEG
+
+
+def unplaced_renewables(n, supplied=frozenset()) -> list[tuple[str, str]]:
+    """`(generator, bus)` for each wind/solar generator whose bus has no
+    location, by the same rule as the flow's `buses_placed`; a generator in
+    `supplied` (see `supplied_profiles`) is left out."""
+    out: list[tuple[str, str]] = []
+    for name, gen in n.generators.iterrows():
+        if technology_of(gen["carrier"]) is None or str(name) in supplied:
+            continue
+        bus = str(gen["bus"] or "")
+        if _bus_coord(n, bus) is None:
+            out.append((str(name), bus))
+    return out
 
 
 def readiness_rows(ctx) -> list[dict[str, Any]]:

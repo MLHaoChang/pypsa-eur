@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The project flow notes a wind or solar generator on a bus with no location (one note per bus, display only), so a weather profile is not requested for a site the model cannot place.
