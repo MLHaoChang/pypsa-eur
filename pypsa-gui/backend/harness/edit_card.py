@@ -47,7 +47,8 @@ VERSION = 1
 SETTINGS_EDITS = frozenset({
     "update_solver_config", "set_site_connection", "attach_tariff", "import_urdb_tariff",
     "define_participants", "put_stress_scenarios", "record_asset_health", "set_study_parameter",
-    "apply_generated_profile", "apply_default_series", "update_project_layout",
+    "apply_generated_profile", "apply_generated_profiles", "apply_default_series",
+    "update_project_layout",
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
@@ -941,6 +942,21 @@ def _defaults_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 
 register("apply_default_series", Adapter("series_edit", _defaults_preview, _defaults_readback))
+
+
+def _members_preview(args: dict) -> list[dict]:
+    from services.profile_gen import card
+
+    return card.preview_members(args)
+
+
+def _members_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.profile_gen import card
+
+    return card.readback_members(args, rows)
+
+
+register("apply_generated_profiles", Adapter("series_edit", _members_preview, _members_readback))
 
 
 # ── Any other edit: the requested arguments, no old value claimed ──────────
