@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Library, Clock, Coins, FileText, FlaskConical,
-  GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp, Wand2,
+  GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp,
 } from 'lucide-react'
 import type { FlowSectionId } from '../../api/flow'
 import { projectsApi } from '../../api/projects'
@@ -96,9 +96,6 @@ function ProfileRows({ onCloseModal }: Props) {
     <>
       <SItem icon={<BarChart2 size={15} />} label="Time Series"
         active={activeSlidePanel === 'timeseries'} onClick={() => toggle('timeseries')} />
-      <SItem icon={<Wand2 size={15} />} label="Profile Studio"
-        title="Generate wind/solar capacity-factor profiles for sites (synthetic or ERA5/atlite) and apply them onto generators' p_max_pu."
-        active={activeSlidePanel === 'profiles'} onClick={() => toggle('profiles')} />
     </>
   )
 }

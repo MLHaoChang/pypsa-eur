@@ -714,7 +714,7 @@ interface UIStore {
   setPaletteMode: (m: PaletteMode) => void
 }
 
-export const useUIStore = create<UIStore>((set) => ({
+export const useUIStore = create<UIStore>((set, get) => ({
   sidebarExpanded: storedSidebarMode() !== 'hidden',
   sidebarMode: storedSidebarMode(),
   rightPanelOpen: true,
@@ -930,8 +930,17 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSiteSizing: (m) => set({ siteSizing: m }),
-  setSlidePanel: (p) => {
+  setSlidePanel: (requested) => {
     navigationChanged()
+    // Profile Studio is Expert-only (RP-Q4). Guided has no full-screen Time
+    // Series: a request for the panel opens the section's Time Series drawer on
+    // the hub design, the same place `openTimeSeriesFor` opens in Guided.
+    if (requested === 'profiles' && get().uiMode !== 'expert') {
+      set({ activeSlidePanel: 'hubDesign', activeSection: 'profiles',
+        fieldDrawer: { section: 'profiles', panel: 'timeseries', component: null, entity: null, field: null } })
+      return
+    }
+    const p = requested
     const section = p ? PANEL_SECTION[p] : undefined
     set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })
   },

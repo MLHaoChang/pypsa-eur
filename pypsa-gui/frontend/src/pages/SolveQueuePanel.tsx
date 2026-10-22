@@ -324,6 +324,7 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
   onRequeue: (id: string) => void
   onDismiss: (id: string) => void
 }) {
+  const uiMode = useUIStore(s => s.uiMode)
   const [expanded, setExpanded] = useState(false)
   const canAbort = job.status === 'queued' || job.status === 'running'
   const canRequeue = canRequeueJob(job)
@@ -374,7 +375,7 @@ function JobRow({ job, onAbort, onRequeue, onDismiss }: {
             {job.status === 'completed' && job.kind !== 'gridspine' && job.kind !== 'campus' && job.kind !== 'profile_gen' && <span>{fmtObjective(job.objective)}{job.solve_time != null ? ` · ${job.solve_time}s` : ''}</span>}
             {job.status === 'completed' && job.kind === 'gridspine' && <span>Study finished — open Planning → dynamics for the results</span>}
             {job.status === 'completed' && job.kind === 'campus' && <span>Grid study finished — open Grid study results</span>}
-            {job.status === 'completed' && job.kind === 'profile_gen' && <span>Profile generated — open Profile Studio to apply it</span>}
+            {job.status === 'completed' && job.kind === 'profile_gen' && <span>{uiMode === 'expert' ? 'Profile generated — open Profile Studio to apply it' : 'Profile generated — the assistant can apply it for you'}</span>}
             {job.status === 'failed' && <span className="text-danger truncate" title={job.error ?? job.condition ?? ''}>{job.error ?? job.condition ?? 'Failed'}</span>}
             {job.status === 'aborted' && (
               <span>{job.condition === 'superseded' ? 'Superseded by a newer run' : 'Aborted by user'}</span>
