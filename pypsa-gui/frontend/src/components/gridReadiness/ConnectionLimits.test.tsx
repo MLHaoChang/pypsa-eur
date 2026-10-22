@@ -49,13 +49,23 @@ describe('ConnectionLimits', () => {
     expect(line).not.toMatch(/Energization: 20 MW\b(?! ·)/)
   })
 
-  it('Expert offers the route to the series; it opens the link', async () => {
+  it('Expert offers the route to the schedule; it opens the link', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
       row('energization_peak', { unit: 'MW', limit: 8, target: { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' } })] } as never)
     useUIStore.setState({ uiMode: 'expert' })
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: 'Edit the energization series' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit the energization schedule' }))
     expect(useUIStore.getState().selectedComponent).toMatchObject({ type: 'Link', name: 'import' })
+  })
+
+  it('Guided offers the same button; it opens the field drawer and stays in Guided', async () => {
+    const target = { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' }
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('energization_peak', { unit: 'MW', limit: 8, target })] } as never)
+    useUIStore.setState({ uiMode: 'guided', fieldDrawer: null })
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit the energization schedule' }))
+    expect(useUIStore.getState().fieldDrawer).toMatchObject({ component: 'Link', entity: 'import', field: 'eh_energization_mw' })
+    expect(useUIStore.getState().uiMode).toBe('guided')
   })
 
   it('a failed read says so, never an empty list', async () => {

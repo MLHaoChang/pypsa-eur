@@ -8,7 +8,7 @@ import { PageSection } from '../PageKit'
 import type { FlowTarget } from '../../api/flow'
 import type { GridReadinessRow } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
-import { openFlowTarget } from '../../layout/flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { fmt, useGridReadiness } from './GridReadinessScorecard'
 
 const SHOWN: Record<string, string> = {
@@ -23,6 +23,8 @@ const kindOf = (r: GridReadinessRow) => r.id.split(':')[0]
 export function ConnectionLimits() {
   const q = useGridReadiness()
   const expert = useUIStore(s => s.uiMode === 'expert')
+  // Same button in both modes: Expert opens the Link's properties, Guided the field drawer over the card.
+  const open = (t: FlowTarget) => (expert ? openFlowTarget(t) : openFlowTargetInPlace(t))
   const rows = (q.data?.rows ?? []).filter(r => kindOf(r) in SHOWN)
   // One line per kind. Energization has one row per period: every period is listed,
   // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
@@ -48,9 +50,9 @@ export function ConnectionLimits() {
                     <span className="tabular-nums">{figures}</span>
                     {group.some(r => r.assumed) && <span className="ml-1 text-muted">(assumed)</span>}
                     <span className="block text-muted">{lead.source}{lead.note && !staged ? `. ${lead.note}` : ''}</span>
-                    {expert && lead.target.field && (
-                      <button type="button" className="underline text-[11px]" onClick={() => openFlowTarget(lead.target as FlowTarget)}>
-                        {k === 'energization_peak' ? 'Edit the energization series' : 'Edit on the connection link'}
+                    {lead.target.field && (
+                      <button type="button" className="underline text-[11px]" onClick={() => open(lead.target as FlowTarget)}>
+                        {k === 'energization_peak' ? 'Edit the energization schedule' : 'Edit on the connection link'}
                       </button>
                     )}
                   </li>
