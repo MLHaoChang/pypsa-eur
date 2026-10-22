@@ -459,6 +459,9 @@ def test_dv14_the_finder_offers_only_lines_their_citation_would_pass(grid):
     assert p_nom == [(2, "Capacity 0.8 MW per block", None, "0.8"),
                      (1, "Nominal power 1.2 MW", None, "1.2"),
                      (1, "Charging efficiency 92.5 % at 1.5 MW", "1.5", "1.5")]
+    # A label word matches as a word: "rate" is not in "generated".
+    rated = D.find(["Power generated 2 MW"], {"r": {"label": "Rate", "units": ["MW"]}})
+    assert [c["label"] for c in rated["r"]["candidates"]] == [False]
     (eff,) = out["efficiency_store"]["candidates"]
     assert (eff["value_text"], eff["unit"], eff["label"]) == ("92.5", "%", True)
     assert out["inv_energy_overnight"] == {"candidates": [], "more": 0}

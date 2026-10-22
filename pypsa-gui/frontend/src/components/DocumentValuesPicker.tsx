@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { EditCardTable, EditReceiptLine } from './EditCard'
 import {
   documentValuesApi, type AssetCitation, type Candidates, type CommercialCitation, type CommercialTargets,
-  type DecimalMark, type DocumentApplied, type DocumentGap, type DocumentSource, type QuoteCandidate,
+  type AssetDocumentPreview, type DecimalMark, type DocumentApplied, type DocumentGap, type DocumentSource, type QuoteCandidate,
 } from '../api/documentValues'
 import type { MappableField } from '../api/equipmentTable'
 import type { EditCard } from './EditCard'
@@ -10,7 +10,7 @@ import { networkApi } from '../api/network'
 import type { FlowSectionId, FlowTarget } from '../api/flow'
 import { openFlowTarget, openSectionInExpert } from '../layout/flowNavigation'
 import { sectionMeta } from '../layout/flowSections'
-import { errorText } from './EquipmentTableImport'
+import { errorText } from '../utils/errorText'
 
 // The quote picker of "Import values from a file…" (data-to-model slice 2, owner
 // AI-567b): a PDF's values, each cited by page and quote. The server lists the
@@ -34,15 +34,7 @@ interface Row {
   cite: (c: QuoteCandidate) => Omit<AssetCitation, 'names'> | CommercialCitation
 }
 
-type Plan = {
-  changed_cells: number
-  unchanged_cells: number
-  unmapped: DocumentGap[]
-  unmapped_total: number
-  needs: { confirmation: string; text: string }[]
-  missing: string[]
-  notes: string[]
-}
+type Plan = NonNullable<AssetDocumentPreview['plan']>
 
 const select = 'border border-border rounded bg-bg px-1.5 py-1 text-[11px] focus:outline-none focus:border-accent'
 
@@ -91,21 +83,21 @@ function byPage(list: QuoteCandidate[]): [number, { c: QuoteCandidate; i: number
 const LIBRARY: FlowTarget = { section: 'commercial', panel: 'library', component: null, entity: null, field: null }
 
 /** A library-pinned tariff or contract is updated in the Commercial library. */
-function LibraryLink() {
+function LibraryLink({ onClose }: { onClose: () => void }) {
   return (
     <button type="button" data-testid="document-values-library-link" className="ml-1 text-accent hover:underline"
-      onClick={() => openFlowTarget(LIBRARY)}>
+      onClick={() => { onClose(); openFlowTarget(LIBRARY) }}>
       Update it there ›
     </button>
   )
 }
 
-function GapLine({ gap }: { gap: DocumentGap }) {
+function GapLine({ gap, onClose }: { gap: DocumentGap; onClose: () => void }) {
   return (
     <li className="text-muted">
       {gap.message}
       {gap.library && <span className="ml-1">({gap.library.id}, v{gap.library.version})</span>}
-      {gap.kind === 'library_pinned' && <LibraryLink />}
+      {gap.kind === 'library_pinned' && <LibraryLink onClose={onClose} />}
     </li>
   )
 }
@@ -175,7 +167,9 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, candidates])
 
-  const invalidate = () => { setPlan(null); setCard(null); setConfirmed(false) }
+  // A preview answers only the picks it was asked for: any change since drops its answer.
+  const asked = useRef(0)
+  const invalidate = () => { asked.current += 1; setPlan(null); setCard(null); setConfirmed(false) }
   const picked = offered.filter(r => picks[r.key] !== null && picks[r.key] !== undefined)
   const moneyPicked = picked.some(r => r.money)
   const yearPicked = picked.some(r => r.year)
@@ -196,14 +190,16 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
   })
 
   const runPreview = async (confirm = confirmed) => {
+    const ask = ++asked.current
     setBusy(true); setError(null)
     try {
       const out = commercial
         ? await documentValuesApi.previewCommercial({ upload_id: uploadId, citations: citations() as CommercialCitation[], ...money(confirm) })
         : await documentValuesApi.previewAssets({ upload_id: uploadId, component_class: componentClass,
           citations: citations() as AssetCitation[], ...money(confirm) })
+      if (ask !== asked.current) return
       setPlan((out.plan ?? null) as Plan | null); setCard(out.card ?? null)
-    } catch (e) { setPlan(null); setCard(null); setError(errorText(e, 'The preview failed.')) }
+    } catch (e) { if (ask === asked.current) { setPlan(null); setCard(null); setError(errorText(e, 'The preview failed.')) } }
     finally { setBusy(false) }
   }
 
@@ -263,7 +259,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
   const previewWhy = !source ? (error ? 'Choose a readable PDF.' : 'Reading the document…')
     : noTarget ? (target === 'tariff' ? 'Add the import tariff first, in Import tariff.' : 'Add a PPA contract first, in Contracts.')
       : pinned ? 'This one comes from the Commercial library; update it there.'
-        : mode.kind === 'assets' && names.length === 0 ? `Pick the ${componentClass} these values are for.`
+        : mode.kind === 'assets' && names.length === 0 ? 'Pick the assets these values are for.'
           : target === 'ppa' && !contract ? 'Pick the contract these values are for.'
             : offered.length === 0 ? 'No line in the document states one of these values with its unit.'
               : picked.length === 0 ? 'Tick one line for at least one field.'
@@ -282,6 +278,12 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
       {applied ? (
         <section data-testid="document-values-receipt">
           <EditReceiptLine receipt={applied.receipt} disabled={busy} onRequest={() => { void undo() }} />
+          {!applied.receipt.undo.available && (
+            <p className="mt-2 text-muted" data-testid="document-values-revert">
+              Undo does not revert this change: the commercial settings are not on the project's undo history.
+              To revert it, set the old values from the card back in this block.
+            </p>
+          )}
         </section>
       ) : (<>
         {fileSection}
@@ -298,7 +300,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
             <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted">For</h3>
             {mode.kind === 'assets' && (
               <div className="flex flex-wrap gap-x-3 gap-y-1" data-testid="document-values-assets">
-                {mode.assetNames.length === 0 && <span className="text-muted">No {componentClass} in this project yet.</span>}
+                {mode.assetNames.length === 0 && <span className="text-muted">No assets of this kind in the project yet.</span>}
                 {mode.assetNames.map(nm => (
                   <label key={nm} className="flex items-center gap-1">
                     <input type="checkbox" checked={names.includes(nm)} disabled={busy}
@@ -320,7 +322,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
             {pinned && (
               <p className="text-muted" data-testid="document-values-pinned">
                 This {target === 'tariff' ? 'tariff' : 'contract'} comes from the Commercial library; it is not edited here.
-                <LibraryLink />
+                <LibraryLink onClose={onClose} />
               </p>
             )}
           </section>
@@ -350,12 +352,9 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
               </details>
             )}
             {empty.length > 0 && (
-              <details className="text-muted" data-testid="document-values-empty">
-                <summary className="cursor-pointer">
-                  {empty.length} field{empty.length === 1 ? ' has' : 's have'} no line stating a value with its unit; {empty.length === 1 ? 'it is' : 'they are'} left as {empty.length === 1 ? 'it is' : 'they are'}.
-                </summary>
-                <p className="mt-1">{empty.map(r => r.label).join(', ')}</p>
-              </details>
+              <p className="text-muted" data-testid="document-values-empty">
+                No line in the document states {empty.length === 1 ? 'this one' : 'these'} with its unit, so {empty.length === 1 ? 'it is' : 'they are'} left as {empty.length === 1 ? 'it is' : 'they are'}: {empty.map(r => r.label).join(', ')}.
+              </p>
             )}
             {moneyPicked && (
               <div className="flex flex-wrap items-center gap-2" data-testid="document-values-money">
@@ -390,7 +389,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
             {card && <EditCardTable card={card} guided={false} />}
             {plan.unmapped.length > 0 && (
               <ul className="flex flex-col gap-0.5" data-testid="document-values-gaps">
-                {plan.unmapped.map((g, i) => <GapLine key={i} gap={g} />)}
+                {plan.unmapped.map((g, i) => <GapLine key={i} gap={g} onClose={onClose} />)}
               </ul>
             )}
             {plan.notes.map(t => <p key={t} className="text-muted">{t}</p>)}

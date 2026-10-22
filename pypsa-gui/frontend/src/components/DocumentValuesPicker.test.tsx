@@ -97,7 +97,7 @@ describe('DocumentValuesPicker, assets', () => {
     // A field with no candidate is said, and does not block the others.
     expect(screen.getByTestId('document-values-empty').textContent).toContain('Overnight cost (overnight_cost)')
 
-    expect(why()).toBe('Pick the Generator these values are for.')
+    expect(why()).toBe('Pick the assets these values are for.')
     expect(screen.getByTestId('document-values-preview-btn')).toHaveProperty('disabled', true)
     await userEvent.click(within(screen.getByTestId('document-values-assets')).getByLabelText('PV1'))
     expect(why()).toBe('Preview the changes first.')
@@ -171,14 +171,16 @@ describe('DocumentValuesPicker, section 7', () => {
     const link = within(await screen.findByTestId('document-values-gaps')).getByTestId('document-values-library-link')
     expect(link.textContent).toBe('Update it there ›')
     await userEvent.click(link)
+    expect(onClose).toHaveBeenCalledTimes(1)  // the dialog does not stay over the library page
     expect(openTarget).toHaveBeenCalledWith(expect.objectContaining({ section: 'commercial', panel: 'library' }))
 
     await userEvent.click(screen.getByTestId('document-values-apply'))
     expect(await screen.findByTestId('chat-edit-receipt')).toBeTruthy()
     expect(screen.queryByTestId('chat-edit-undo')).toBeNull()
+    expect(screen.getByTestId('document-values-revert').textContent).toContain('set the old values from the card back')
     expect(screen.queryByTestId('document-values-open-section')).toBeNull()
     await userEvent.click(screen.getByTestId('document-values-close'))
-    expect(onClose).toHaveBeenCalled()
+    expect(onClose).toHaveBeenCalledTimes(2)
   })
 
   it('says a library-pinned contract is updated in the library and blocks its preview in place', async () => {

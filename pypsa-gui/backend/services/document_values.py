@@ -318,7 +318,7 @@ _PER = r"\s?(?:/|per\s)\s?"
 # per block" is MW.
 _YEAR = r"(?:yr|year|a|annum)"
 _GOES_ON = r"(?!\s?/)(?!\s?per\s(?:year|yr|annum|a|month|mo|day|d|hour|h|[kmg]wh|[km]w|[km]va|km)\b)"
-_LABEL_WORD = re.compile(r"[A-Za-z]{4,}")
+_LABEL_WORD = re.compile(r"(?<![A-Za-z])[A-Za-z]{4,}(?![A-Za-z])")
 # The sign is the plan's check, with the field: a candidate is only offered.
 _ANY_SIGN = {"validation_schema": {"minimum": float("-inf")}}
 
@@ -364,7 +364,7 @@ def find(pages: list[str], wanted: dict[str, dict], decimal_mark: str | None = N
                     unit = next((u for u, rx in options if rx.match(line[x["end"]:])), None)
                     if unit is not None:
                         found[k].append({"page": p, "quote": line, "value_text": pick, "value": str(number["value"]),
-                                         "unit": unit, "label": any(w in lowered for w in words[k])})
+                                         "unit": unit, "label": bool(words[k] & set(_LABEL_WORD.findall(lowered)))})
     out = {}
     for k, rows in found.items():
         rows.sort(key=lambda r: not r["label"])  # stable: page order within each group

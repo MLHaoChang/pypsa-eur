@@ -9,6 +9,7 @@ import { openSectionInExpert } from '../layout/flowNavigation'
 import { sectionMeta } from '../layout/flowSections'
 import { useUIStore } from '../store/uiStore'
 import DocumentValuesPicker, { type PickerMode } from './DocumentValuesPicker'
+import { errorText } from '../utils/errorText'
 
 // "Import values from a file…" (data-to-model, owner AI-567): map an uploaded
 // CSV/XLSX, one row per existing asset, onto assets of ONE class. The user
@@ -28,14 +29,6 @@ const PDF_FILE = /\.pdf$/i
 export const TABLE_IMPORT_CLASSES: ReadonlySet<string> = new Set([
   'Line', 'Transformer', 'Load', 'Generator', 'StorageUnit', 'Store', 'Link',
 ])
-
-export function errorText(e: unknown, fallback: string): string {
-  const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
-  if (typeof detail === 'string') return detail
-  if (detail && typeof detail === 'object' && 'message' in detail) return String((detail as { message: unknown }).message)
-  if (e instanceof Error && e.message) return e.message
-  return fallback
-}
 
 const select = 'border border-border rounded bg-bg px-1.5 py-1 text-[11px] focus:outline-none focus:border-accent'
 
