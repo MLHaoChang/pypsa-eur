@@ -204,16 +204,14 @@ describe('ScopeCards states', () => {
     expect(box.disabled).toBe(true)
   })
 
-  it('a settings-driven sub-option is read-only and says where it is set', async () => {
-    const reg = registry()
-    reg.cards[1].options[2] = { id: 'n1_sclopf', label: 'N-1 security (SCLOPF)',
-      status: 'from_settings', reason: 'Set in Solver settings for now.' }
-    getFlowScope.mockResolvedValue(reg)
-    mount()
+  it('N-1 security is a live checkbox that writes into the scope (W4b)', async () => {
+    const user = mount()
     const box = await screen.findByTestId('scope-cards-option-grid-n1_sclopf') as HTMLInputElement
-    expect(box.disabled).toBe(true)
-    expect(screen.getByTestId('scope-cards-why-grid-n1_sclopf').textContent)
-      .toBe('Set in Solver settings for now.')
+    expect(box.disabled).toBe(false)
+    await user.click(box)
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.options.grid).toEqual(['load_flow', 'grid_code', 'n1_sclopf'])
   })
 
   it('collapsed (Guided) shows one summary line; Change opens the cards in place', async () => {

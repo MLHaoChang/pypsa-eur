@@ -658,17 +658,19 @@ def _check_sclopf(n, cfg) -> list[Issue]:
     # loss model. Block at preflight so the user picks one or the other.
     if getattr(cfg, "transmission_losses", False):
         out.append(_err("sclopf_with_transmission_losses", "", "",
-            "SCLOPF doesn't support `transmission_losses=True` — PyPSA's "
-            "secant-loss formulation isn't wired into the BODF-based "
-            "contingency LP. Disable one of the two for this run."))
+            "N-1 security (SCLOPF) can't run with transmission losses: the "
+            "loss model isn't wired into the contingency LP. Switch off "
+            "What the Run computes › N-1 security, or switch off transmission "
+            "losses in Solver settings."))
     # Lazy import to avoid a circular dependency at validation-service load.
     from services.solver_service import resolve_branch_outages
     outages = resolve_branch_outages(n, cfg)
     if not outages:
         out.append(_err("sclopf_no_branches", "", "",
-            "SCLOPF is enabled but no branches resolved from the selection "
-            "(all-lines / all-transformers / voltage threshold / extras). "
-            "Enable at least one source — otherwise this is just a plain LOPF."))
+            "N-1 security has no branches to check. Choose them under N-1 "
+            "Security-Constrained LOPF in Solver settings (all lines, all "
+            "transformers, a voltage threshold or a list); without them this "
+            "is just a plain LOPF."))
         return out
     if len(outages) > 200:
         out.append(_warn("sclopf_large_contingency_set", "", "",
@@ -917,9 +919,10 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
             f"rolling_overlap ({O}) must be strictly less than rolling_horizon ({H})."))
     if getattr(cfg, "sclopf", False):
         out.append(_err("rolling_with_sclopf", "", "",
-            "SCLOPF is not compatible with the rolling-horizon strategy — "
-            "LODF contingency constraints are defined against the full "
-            "snapshot index. Disable one of the two."))
+            "N-1 security (SCLOPF) can't run with the rolling-horizon "
+            "strategy: its contingency constraints are defined against the "
+            "full snapshot index. Switch off What the Run computes › N-1 "
+            "security, or use the full solve."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("rolling_with_ac_pf", "", "",
             "Load flow (AC power flow after the solve) can't run with the "

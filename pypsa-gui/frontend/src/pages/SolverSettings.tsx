@@ -15,7 +15,7 @@ import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
-import { useLoadFlowOn } from '../components/flowScope/useFlowScope'
+import { useLoadFlowOn, useN1On } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
@@ -159,7 +159,8 @@ export default function SolverSettings() {
 
   // Load flow's on/off is the scope's (W4b), written by the scope cards; the
   // draft is hydrated once, so the live value comes from the scope.
-  const loadFlowOn = useLoadFlowOn(false)
+  const loadFlowOn = useLoadFlowOn(!!cfg?.run_ac_pf_after_lopf)
+  const n1On = useN1On(!!cfg?.sclopf)
 
   // Hydrate the form from the backend once. We don't useEffect on every cfg
   // refetch because that would clobber the user's in-progress edits if a
@@ -408,11 +409,11 @@ export default function SolverSettings() {
             {/* Surface the SCLOPF / AC PF incompatibility BEFORE the user
                 clicks Run. The backend will also reject these — this is a
                 UX courtesy so they don't have to read the failure log. */}
-            {(draft.sclopf || loadFlowOn) && (
+            {(n1On || loadFlowOn) && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
                 Rolling horizon is not compatible with{' '}
-                {draft.sclopf && <code>SCLOPF</code>}
-                {draft.sclopf && loadFlowOn && ' or '}
+                {n1On && <code>SCLOPF</code>}
+                {n1On && loadFlowOn && ' or '}
                 {loadFlowOn && 'Load flow (What the Run computes › Load flow)'}
                 . Switch one off to run.
               </p>
@@ -518,7 +519,7 @@ export default function SolverSettings() {
                 (What the Run computes › Load flow). Switch one off to run.
               </p>
             )}
-            {draft.sclopf && (
+            {n1On && (
               <p className="text-[10px] text-muted bg-panel border border-border rounded px-2 py-1">
                 SCLOPF is enabled — contingency constraints are applied per
                 myopic iteration. Choose <code>Contingency scope</code> below
@@ -874,18 +875,18 @@ export default function SolverSettings() {
             optimize_security_constrained doesn't accept the kwarg and the
             LODF formulation assumes a lossless DC network. Grey out so the
             user doesn't expect a no-op to take effect. */}
-        <label className={`flex items-center justify-between p-2 border border-border rounded ${draft.sclopf ? 'opacity-50 cursor-not-allowed' : ''}`}>
+        <label className={`flex items-center justify-between p-2 border border-border rounded ${n1On ? 'opacity-50 cursor-not-allowed' : ''}`}>
           <span className="text-xs">
             Enable transmission losses
             <span className="block text-[11px] text-muted">
-              {draft.sclopf
+              {n1On
                 ? 'Disabled — SCLOPF cannot model losses (LODF assumes a lossless DC network).'
                 : 'Iterative LOPF that approximates AC line losses.'}
             </span>
           </span>
           <input
-            type="checkbox" checked={draft.transmission_losses && !draft.sclopf}
-            disabled={draft.sclopf}
+            type="checkbox" checked={draft.transmission_losses && !n1On}
+            disabled={n1On}
             onChange={e => patch({ transmission_losses: e.target.checked })}
           />
         </label>
@@ -898,7 +899,7 @@ export default function SolverSettings() {
       <StressConditionsSection project={currentProject} />
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
-      <SclopfPanel draft={draft} patch={patch} />
+      <SclopfPanel draft={draft} patch={patch} n1On={n1On} />
       </>}
 
       {tab === 'constraints' && <>
@@ -1614,11 +1615,12 @@ export function ReliabilityAssumptions({
 //      bus is ≥ threshold is auto-selected
 //   4) two explicit pick lists (extra lines, extra transformers)
 // The four selectors UNION at solve time, so the user can layer them.
-function SclopfPanel({
-  draft, patch,
+export function SclopfPanel({
+  draft, patch, n1On,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  n1On: boolean
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),        queryFn: networkApi.getLines })
@@ -1700,14 +1702,14 @@ function SclopfPanel({
         snapshot — keep the set focused for big networks.
       </p>
 
-      <label className="flex items-center gap-2 cursor-pointer mb-3">
-        <input type="checkbox" checked={draft.sclopf}
-          onChange={e => patch({ sclopf: e.target.checked })}
-          className="accent-accent" />
-        <span className="text-xs font-medium text-text">Enable SCLOPF</span>
-      </label>
+      <p data-testid="sclopf-state" className="text-xs mb-3">
+        <span className="font-semibold">{n1On ? 'On' : 'Off'}:</span>{' '}
+        {n1On ? 'N-1 security is applied in each solve.' : 'N-1 security is not applied in a solve.'}{' '}
+        Switch it under What the Run computes › N-1 security, above. Choose the
+        branches to check here.
+      </p>
 
-      <div className={`flex flex-col gap-3 ${draft.sclopf ? '' : 'opacity-50 pointer-events-none'}`}>
+      <div className="flex flex-col gap-3">
         {/* ── Coarse selectors ──────────────────────────────────── */}
         <div className="border border-border rounded">
           <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -1744,7 +1746,7 @@ function SclopfPanel({
         {/* ── Resolved-set summary ──────────────────────────────── */}
         <div className="px-3 py-2 bg-panel border border-border rounded text-[11px] text-muted">
           <span className="font-medium text-text">Resolved contingencies: {totalResolved}</span>
-          {totalResolved === 0 && draft.sclopf && (
+          {totalResolved === 0 && n1On && (
             <span className="ml-2 text-danger">— pick at least one source above (otherwise this falls back to plain LOPF).</span>
           )}
           {totalResolved > 200 && (

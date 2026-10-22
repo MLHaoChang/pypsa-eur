@@ -117,7 +117,6 @@ def test_every_not_yet_row_is_decided_by_the_matrix():
 _NOT_THE_MATRIXS = {
     ("capacity", "dispatch"): "always part of the run",
     ("grid", "grid_code"): "an advisory scorecard, not a run kind",
-    ("grid", "n1_sclopf"): "the sclopf solver setting decides",
     ("control", "presets"): "inputs only; nothing runs",
     ("reliability", "goal_study"): "the study's own start gate decides",
     ("reliability", "stress"): "inputs to the study; nothing runs on its own",
@@ -138,7 +137,7 @@ def test_every_option_is_matrix_decided_or_says_why_not():
 def test_today_the_matrix_clears_only_the_scope_owned_kinds():
     from services import run_separability as RS
     for (card, option), kind in S.MATRIX_KIND.items():
-        if (card, option) in {("capacity", "sizing"), ("grid", "load_flow")}:
+        if (card, option) in {("capacity", "sizing"), ("grid", "load_flow"), ("grid", "n1_sclopf")}:
             assert RS.runnable(kind)
             assert S.option_status(card, option, has_template=True) == (S.AVAILABLE, None)
             continue
@@ -283,32 +282,47 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
         {(i["code"], True) for i in rel_before}
 
 
-def test_n1_follows_the_solver_settings(client, tmp_projects_dir, bound_ctx):
-    """"What the Run computes" is true: N-1 security is on exactly when its
-    solver setting is, read-only in the scope (UX gate). Load flow is the
-    scope's own (W4b)."""
-    from dataclasses import replace
+def test_n1_is_the_scopes_own_option(client, tmp_projects_dir, monkeypatch):
+    """W4b: Grid › N-1 security in scope <=> sclopf. A scope PUT is the one
+    editor; every other solver_config field stays as it was."""
+    from services import run_separability as RS
 
-    from services.pypsa_service import PyPSAService
-
-    name = _create(client, "eh_h2_hub", "sclopf_mirror")
+    name = _create(client, "eh_h2_hub", "dc_n1")
+    cfg = lambda: client.get("/api/simulation/solver_config").json()   # noqa: E731
+    before = cfg()
+    assert before["sclopf"] is False
     reg = client.get(f"/api/projects/{name}/flow/scope").json()
-    assert not S.selected(reg["scope"], "grid")
     grid = next(c for c in reg["cards"] if c["id"] == "grid")
     assert {o["id"]: o["status"] for o in grid["options"]} == {
-        "load_flow": "available", "grid_code": "available", "n1_sclopf": "from_settings"}
-    with bound_ctx(client):
-        state = PyPSAService.get_solver_state()
-        state["solver_config"] = replace(state["solver_config"], sclopf=True)
-    reg = client.get(f"/api/projects/{name}/flow/scope").json()
-    assert S.selected(reg["scope"], "grid", "n1_sclopf")
-    assert next(c for c in reg["cards"] if c["id"] == "grid")["locked_reason"]
+        "load_flow": "available", "grid_code": "available", "n1_sclopf": "available"}
+    assert not grid["locked_reason"]
+    scope = reg["scope"]
+    body = {"version": 1, "groups": [*scope["groups"], "grid"],
+            "options": {**scope["options"], "grid": ["n1_sclopf"]}}
+    # Switching on is refused with its own verdict's reason (no branches chosen).
+    r = client.put(f"/api/projects/{name}/flow/scope", json=body)
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"]["error_kind"] == "flow_scope_option_blocked"
+    assert client.get("/api/simulation/solver_config").json() == before
+    # With the verdict clear it switches on and nothing else changes.
+    monkeypatch.setattr(RS, "verdicts", lambda *a, **k: {
+        "optimisation": {"ready": True, "deferred": False, "blocker": None},
+        "sclopf": {"ready": True, "deferred": False, "blocker": None}})
+    on = _put(client, name, body)
+    assert S.selected(on, "grid", "n1_sclopf")
+    after = cfg()
+    assert after["sclopf"] is True
+    assert {k: v for k, v in after.items() if k != "sclopf"} == \
+        {k: v for k, v in before.items() if k != "sclopf"}
     assert S.selected(_flow(client, name)["scope"], "grid", "n1_sclopf")
-    # A write cannot switch it off (the settings decide), nor store it.
-    off = _put(client, name, {**reg["scope"],
-                              "groups": [g for g in reg["scope"]["groups"] if g != "grid"]})
-    assert S.selected(off, "grid", "n1_sclopf")
-    assert "n1_sclopf" not in S.normalise(off, has_template=True)["options"]["grid"]
+    # A Solver-settings save is mirrored; switching the card off switches N-1 off.
+    client.put("/api/simulation/solver_config", json={"sclopf": False})
+    assert not S.selected(client.get(f"/api/projects/{name}/flow/scope").json()["scope"],
+                          "grid", "n1_sclopf")
+    client.put("/api/simulation/solver_config", json={"sclopf": True})
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    _put(client, name, {**scope, "groups": [g for g in scope["groups"] if g != "grid"]})
+    assert cfg()["sclopf"] is False
 
 
 _INTERNAL = re.compile(r"§|\bW\d|\bQ\d|\(owner")

@@ -16,16 +16,6 @@ import { useFlowScope } from './useFlowScope'
 
 const NOT_YET = 'Not yet available'
 
-/** What the scope stores: without the sub-options its solver settings decide. */
-function stored(scope: FlowScopeValue, cards: ScopeCardDef[]): FlowScopeValue {
-  const settings = new Set(cards.flatMap(c => c.options.filter(o => o.status === 'from_settings')
-    .map(o => `${c.id}.${o.id}`)))
-  const options = Object.fromEntries(Object.entries(scope.options).map(([c, os]) =>
-    [c, os.filter(o => !settings.has(`${c}.${o}`))])) as FlowScopeValue['options']
-  const groups = scope.groups.filter(g => (options[g] ?? []).length > 0)
-  return { ...scope, groups, options }
-}
-
 function sameScope(a: FlowScopeValue, b: FlowScopeValue): boolean {
   const norm = (s: FlowScopeValue) => JSON.stringify(
     [...s.groups].sort().map(g => [g, [...(s.options[g] ?? [])].sort()]))
@@ -143,7 +133,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
   }
   if (!registry || !scope) return <p className="text-[12px] text-muted">Loading the scope…</p>
   const write = (next: FlowScopeValue) => save.mutate(next)
-  const atPreset = sameScope(stored(scope, registry.cards), registry.preset)
+  const atPreset = sameScope(scope, registry.preset)
   const summary = registry.cards.filter(c => inScope(scope, c.id)).map(c => c.label).join(', ')
 
   if (!open) {
@@ -243,8 +233,8 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                           )}
                         </p>
                       )}
-                      {card.id === 'grid' && o.id === 'load_flow' && on && checked && gate.blocked && (
-                        <p data-testid={`${testId}-load-flow-blocked`} role="alert"
+                      {card.id === 'grid' && (o.id === 'load_flow' || o.id === 'n1_sclopf') && on && checked && gate.blocked && (
+                        <p data-testid={`${testId}-option-blocked-${o.id}`} role="alert"
                           className="pl-5 text-[10.5px] text-warn">
                           The Run can't start yet: {gate.reason}
                         </p>

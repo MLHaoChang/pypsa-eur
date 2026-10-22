@@ -43,16 +43,6 @@ SCOPE_VERSION: Final = 1
 AVAILABLE: Final = "available"
 REQUIRED: Final = "required"            # always on; it cannot be deselected yet
 NOT_YET: Final = "not_yet_available"
-# Read-only here: the sub-option is on exactly when its solver setting is, so
-# "What the Run computes" never says N-1 runs when it does not (UX gate on
-# W4a). W4b moves each to a scope-owned option (``OWNED``), one PR per kind;
-# until then the solver settings are its one editor.
-FROM_SETTINGS: Final = "from_settings"
-
-# (card, option) → the solver-config flag it mirrors.
-SETTING_OPTIONS: Final[dict[tuple[str, str], str]] = {
-    ("grid", "n1_sclopf"): "sclopf",
-}
 
 
 @dataclass(frozen=True)
@@ -76,7 +66,6 @@ class Card:
 _SIZING_OFF = "Always on for now: running on fixed sizes is still being built."
 _SIZING_FIXED = "Dispatch on fixed sizes from the last capacity run."
 _NOT_HERE = "It can't be run from here yet."
-_SETTINGS = "Set in Solver settings for now."
 
 CARDS: Final[tuple[Card, ...]] = (
     Card("capacity", "Capacity expansion",
@@ -125,7 +114,7 @@ AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
     ("capacity", "process_detail"): (NOT_YET, _NOT_HERE),
     ("grid", "load_flow"): (NOT_YET, _NOT_HERE),
     ("grid", "grid_code"): (AVAILABLE, None),
-    ("grid", "n1_sclopf"): (FROM_SETTINGS, _SETTINGS),
+    ("grid", "n1_sclopf"): (NOT_YET, _NOT_HERE),
     ("control", "presets"): (AVAILABLE, None),
     ("control", "island_checks"): (NOT_YET, _NOT_HERE),
     ("control", "dynamics"): (NOT_YET, _NOT_HERE),
@@ -150,6 +139,7 @@ MATRIX_KIND: Final[dict[tuple[str, str], str]] = {
     ("commercial", "investment_case"): "investment_case",
     ("capacity", "sizing"): "fixed_sizes",
     ("grid", "load_flow"): "loadflow",
+    ("grid", "n1_sclopf"): "sclopf",
 }
 
 # Reliability runs the EH study pipeline, which needs the template's pack.
@@ -172,8 +162,8 @@ def option_status(card: str, option: str, *, has_template: bool, no_load: bool =
 # ── Presets (GS-6, modular-cards §3) ────────────────────────────────────────
 #
 # What each example intends, card → sub-options. Load flow and N-1 security
-# follow the solver settings (FROM_SETTINGS), so no preset names them. A not-yet-available
-# sub-option stays here (it lights up when W0 clears it) and is dropped from
+# are the scope's own options mirroring the solver config (``OWNED``), so no
+# preset names them. A not-yet-available sub-option stays here (it lights up when W0 clears it) and is dropped from
 # the effective preset. Proposals for the template authors, aligned with the
 # research mapping (FIVE-CARD-MODULARITY §3); not domain-reviewed defaults.
 
@@ -389,6 +379,7 @@ OWNED: Final[tuple[Owned, ...]] = (
           lambda v: v == "off", fixed_sizes_transition),
     Owned("grid", "load_flow", "run_ac_pf_after_lopf", "loadflow", False,
           bool, _flag_transition),
+    Owned("grid", "n1_sclopf", "sclopf", "sclopf", False, bool, _flag_transition),
 )
 
 
@@ -403,12 +394,10 @@ def owned_wanted(scope: dict) -> dict[str, bool]:
 
 
 def apply_settings(scope: dict, settings: dict | None) -> dict:
-    """The scope with each settings-driven sub-option on exactly when its
-    solver setting is (``SETTING_OPTIONS``). A card holding one that is on is
-    on. ``settings`` None (not read, e.g. a deferred preflight): left off.
-    A sub-option the scope owns (``OWNED``) follows its config field."""
-    options = {k: [o for o in v if (k, o) not in SETTING_OPTIONS]
-               for k, v in scope["options"].items()}
+    """The scope with each sub-option it owns (``OWNED``) on exactly when its
+    config field says so; a card holding one that is on is on. ``settings``
+    None (not read, e.g. a deferred preflight): the stored scope is kept."""
+    options = {k: list(v) for k, v in scope["options"].items()}
     groups = list(scope["groups"])
     if settings is not None:
         for own in owned_active():
@@ -421,12 +410,6 @@ def apply_settings(scope: dict, settings: dict | None) -> dict:
                                  or (o == own.option and on)]
             if on and own.card not in groups:
                 groups.append(own.card)
-    for (card, option), flag in SETTING_OPTIONS.items():
-        if settings and settings.get(flag):
-            options[card] = [o for o, _ in CARD_BY_ID[card].options
-                             if o in options[card] or o == option]
-            if card not in groups:
-                groups.append(card)
     order = [c.id for c in CARDS]
     return {**scope, "groups": sorted(groups, key=order.index), "options": options}
 
@@ -477,9 +460,7 @@ def selected(scope: dict, card: str, option: str | None = None) -> bool:
 def registry(template: dict | None, settings: dict | None = None, *,
              no_load: bool = False) -> dict:
     """The cards as the scope component draws them, with this project's
-    availability, the effective preset and what the preset intends. A card
-    holding a settings-driven sub-option that is on cannot be switched off
-    here."""
+    availability, the effective preset and what the preset intends."""
     has_template = template is not None
     preset_id, preset = preset_for(template)
     cards = []
@@ -489,9 +470,6 @@ def registry(template: dict | None, settings: dict | None = None, *,
             status, reason = option_status(card.id, o, has_template=has_template, no_load=no_load)
             opts.append({"id": o, "label": label, "status": status, "reason": reason})
         locked = card.locked_reason
-        if locked is None and settings and any(
-                settings.get(flag) for (c, _o), flag in SETTING_OPTIONS.items() if c == card.id):
-            locked = "On while Solver settings switch on N-1 security."
         cards.append({"id": card.id, "label": card.label, "options": opts,
                       "locked_reason": locked, "sections": list(card.sections),
                       "chip": card.chip,
