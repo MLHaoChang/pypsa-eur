@@ -182,3 +182,24 @@ def test_a_limits_file_appearing_makes_the_checked_evidence_stale(hub, checked):
     assert calculations.scoped_source(ctx, scope)["limits_sha256"] is not None
     with pytest.raises(HTTPException):
         assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+
+
+def test_a_limits_edit_during_the_read_is_refused_by_name(hub, checked, monkeypatch):
+    from harness import calculations
+    from services.adequacy import grid_limits
+
+    ctx, path = hub
+    read = G.grid_readiness_for
+    edits = iter(range(1000))
+
+    def edited_mid_read(project):
+        card = read(project)
+        grid_limits.set_limit(path, "fault_level", source="code", note=f"edit {next(edits)}")
+        return card
+
+    monkeypatch.setattr(G, "grid_readiness_for", edited_mid_read)
+    with pytest.raises(ValueError, match="limits_changed_during_read"):
+        calculations.scoped_source(ctx, {"version": 1, "profile": R.PROFILE, "entity_id": "network"})
+    frames = ask(checked, ctx, {})
+    reasons = {s["reason"] for s in approval(frames)["receipt"]["result_slots"] if s["disposition"] != "answered"}
+    assert reasons == {"limits_changed_during_read"}
