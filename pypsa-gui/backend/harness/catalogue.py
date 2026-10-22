@@ -100,6 +100,8 @@ RESULTS_TAB_ENUM = [
     "adequacy", "fmea",
     "flows",        # site commercial UX A1 (Energy flow)
     "loadshape",    # site commercial UX A2 (Load shape)
+    "grid_code",    # W10 R2 (Grid code & connection)
+    "electrical_design",  # W10 R2 (Electrical design)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",

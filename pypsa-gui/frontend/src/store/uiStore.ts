@@ -513,6 +513,8 @@ interface UIStore {
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
   solverBlockRequest: 'economic' | 'sclopf' | null
+  /** Set by showGridReadiness: Issues scrolls to the Grid readiness group once it is mounted. */
+  gridReadinessRequest: boolean
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
   timeSeriesFocus: TimeSeriesFocus | null
@@ -663,6 +665,8 @@ interface UIStore {
   clearEconomicsTabRequest: () => void
   requestSolverBlock: (block: 'economic' | 'sclopf') => void
   clearSolverBlockRequest: () => void
+  requestGridReadiness: () => void
+  clearGridReadinessRequest: () => void
   focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
@@ -752,6 +756,7 @@ export const useUIStore = create<UIStore>((set) => ({
   resultsSectionRequest: null,
   economicsTabRequest: null,
   solverBlockRequest: null,
+  gridReadinessRequest: false,
   timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
@@ -998,6 +1003,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
   clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
+  requestGridReadiness: () => set({ gridReadinessRequest: true }),
+  clearGridReadinessRequest: () => set({ gridReadinessRequest: false }),
   focusTimeSeries: (type, name, opts) => set({
     timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),

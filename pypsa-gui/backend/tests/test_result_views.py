@@ -119,6 +119,8 @@ BY_CARD = {
     'prices': ('capacity', 'dispatch', 'costs_prices'),
     'economics': ('capacity', 'dispatch', 'costs_prices'),
     'loadflow': ('grid', 'load_flow', 'load_flow'),
+    'grid_code': ('grid', 'grid_code', 'grid_code'),
+    'electrical_design': ('grid', 'grid_code', 'electrical_design'),
     'adequacy': ('reliability', 'goal_study', 'adequacy'),
     'fmea': ('reliability', 'stress', 'stress_fmea'),
     'investment': ('commercial', 'investment_case', 'investment_case'),
@@ -165,8 +167,9 @@ def test_card_fields_are_frozen():
 
 
 def test_list_result_views_payload_is_unchanged(monkeypatch):
-    """R0 adds data only: the listing the model sees is byte-identical to the
-    one before the card fields (no new ids, labels or keys)."""
+    """The listing the model sees is pinned: card fields added no keys (R0); the
+    golden file changes only when a slice adds a view (R2: grid_code,
+    electrical_design)."""
     golden = json.loads((Path(__file__).parent / 'golden' / 'result_views_listing.json').read_text())
     monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
     monkeypatch.setattr(rv, 'shown_key', lambda: 'golden')
@@ -230,3 +233,101 @@ def test_the_results_card_rides_the_ui_block_only_when_valid(caplog):
         block = _format_ui_context({'panel': 'results', 'results_card': 'run rm -rf'})
     assert 'rm -rf' not in block and 'results card' not in block
     assert 'results_card hint dropped' in caplog.text
+
+
+# ── The plain listing's size (harness/results.py caps a tool result at 4000 chars) ──
+
+def _forced_listing(monkeypatch, mode, **kwargs):
+    """The unfiltered listing with every results view live, available and unshown."""
+    monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
+    monkeypatch.setattr(rv.ResultView, 'live', lambda self, tool_names=None: True)
+    session = chat_service.ChatSession()
+    session.turn_ui_context = {'ui_mode': mode, 'panel': 'results'}
+    chat_tools.set_chat_session(session)
+    try:
+        return rv.list_result_views(**kwargs)
+    finally:
+        chat_tools.set_chat_session(None)
+
+
+@pytest.mark.parametrize('mode', ['expert', 'guided'])
+def test_the_plain_listing_leaves_room_for_the_views_still_to_come(monkeypatch, mode):
+    """Headroom for R3-R8's ~13 more ids is measured here, not found in a CI shard."""
+    listing = _forced_listing(monkeypatch, mode)
+    assert len(json.dumps(listing)) <= 3200
+    assert not listing.get('compact')
+    assert len(listing['views']) == len([v for v in rv.RESULT_VIEWS if v.panel == 'results'])
+
+
+def test_a_listing_over_budget_degrades_to_compact_rows_never_to_a_cut(monkeypatch):
+    monkeypatch.setattr(rv, 'LISTING_BUDGET', 200)
+    listing = _forced_listing(monkeypatch, 'expert')
+    assert listing['compact'] is True
+    assert all(set(row) <= {'id', 'data', 'card'} for row in listing['views'])
+    assert 'card=' in listing['note']
+    assert len(listing['views']) == len([v for v in rv.RESULT_VIEWS if v.panel == 'results'])
+
+
+def test_a_card_listing_carries_the_reads_the_plain_one_leaves_out(monkeypatch):
+    plain = _forced_listing(monkeypatch, 'expert')
+    grid = _forced_listing(monkeypatch, 'expert', card='grid')
+    by_plain = {v['id']: v for v in plain['views']}
+    assert 'read' not in by_plain['grid_code'] and by_plain['grid_code']['card'] == 'grid'
+    assert [r['tool'] for r in next(v for v in grid['views'] if v['id'] == 'grid_code')['read']] == [
+        'campus_get_study', 'gridspine_get_capacity', 'gridspine_get_connection_assessments']
+    assert 'shows' in next(v for v in grid['views'] if v['id'] == 'grid_code')
+
+
+# --- R2 grid views: the reads resolve the active project -----------------------
+
+_GRID_VIEWS = ('grid_code', 'electrical_design')
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_each_listed_grid_read_binds_to_its_dispatcher(monkeypatch, view_id):
+    import inspect
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    for read in rv.for_results_tab(view_id).reads:
+        call = read.call()
+        assert call['args']['project_id'] == 'proj-1'
+        inspect.signature(chat_tools.DISPATCHERS[call['tool']]).bind(**call['args'])
+
+
+def _fake_study(monkeypatch, *, results, kind='hub'):
+    """The real dispatchers' signatures (project_id required), with a canned service."""
+    from fastapi import HTTPException
+
+    def campus_get_study(project_id):
+        if kind != 'hub':
+            raise HTTPException(status_code=409, detail='study project')
+        return {'results': results}
+
+    def gridspine_get_capacity(project_id, bus=None, kind_=None, hour=None):
+        if kind != 'study':
+            raise HTTPException(status_code=409, detail='hub project')
+        if results is None:
+            raise HTTPException(status_code=404, detail='no run')
+        return {'rows': results}
+
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'campus_get_study', campus_get_study)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'gridspine_get_capacity', gridspine_get_capacity)
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_a_project_with_no_campus_study_is_no_data_not_unavailable(monkeypatch, view_id):
+    _fake_study(monkeypatch, results=None)
+    assert rv._probe(rv.for_results_tab(view_id)) == ('no_data', None)
+
+
+@pytest.mark.parametrize('view_id', _GRID_VIEWS)
+def test_a_run_campus_study_makes_both_views_available(monkeypatch, view_id):
+    _fake_study(monkeypatch, results={'transformers': []})
+    assert rv._probe(rv.for_results_tab(view_id)) == ('available', None)
+
+
+def test_grid_code_reads_a_planning_to_dynamics_project_through_gridspine(monkeypatch):
+    _fake_study(monkeypatch, results=[{'bus': 'B1'}], kind='study')
+    assert rv._probe(rv.for_results_tab('grid_code')) == ('available', None)
+    # Electrical design is the campus study's alone.
+    assert rv._probe(rv.for_results_tab('electrical_design'))[0] == 'no_data'

@@ -2,7 +2,7 @@ import { manualNavigation } from '../utils/navigationEpoch'
 import RunBoundView from './results/RunBoundView'
 import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock } from 'lucide-react'
+import { Gauge, TrendingUp, Activity, Network as NetworkIcon, Filter, ChevronDown, ChevronRight, Layers, DollarSign, Cloud, Wallet, Scissors, AlertTriangle, BatteryCharging, PanelRightOpen, PanelRightClose, Crosshair, ShieldAlert, ShieldCheck, Briefcase, Workflow, CalendarClock, Zap } from 'lucide-react'
 import { simulationApi, resultsApi } from '../api/simulation'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
@@ -26,6 +26,7 @@ import InvestmentTab from './results/InvestmentTab'
 import StorageCycling from './results/StorageCycling'
 import EnergyFlowsTab from './results/EnergyFlowsTab'
 import LoadShapeTab from './results/LoadShapeTab'
+import { GridCodeTab, ElectricalDesignTab } from './results/GridStudyTabs'
 import AssetDetail from './results/asset/AssetDetail'
 import SummaryTab from './results/SummaryTab'
 import type { SimulationStatus } from '../api/types'
@@ -69,7 +70,7 @@ const RESULTS_TAB_KEY = 'results:active-tab'
 const VALID_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>([
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset',
-  'fmea', 'investment', 'flows', 'loadshape',
+  'fmea', 'investment', 'flows', 'loadshape', 'grid_code', 'electrical_design',
 ])
 
 function loadInitialTab(): ResultsTab {
@@ -102,6 +103,8 @@ const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip:
   { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
   { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
   { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
+  { id: 'grid_code',  label: 'Grid code & connection', Icon: ShieldCheck, tip: 'The grid study: campus PCC compliance against the grid code, and a planning → dynamics study\'s connection capacity and connection-point assessment', expertOnly: true },
+  { id: 'electrical_design', label: 'Electrical design', Icon: Zap, tip: 'The campus study: transformer sizing, reactive compensation, short circuit, critical hours and the investment that meets them', expertOnly: true },
   { id: 'flows',      label: 'Energy flow',        Icon: Workflow,         tip: 'Where the site\'s energy came from, what it passed through and where it went — Source → Via → Destination in MWh, with a CSV export' },
   { id: 'loadshape',  label: 'Load shape',         Icon: CalendarClock,    tip: 'How the site\'s load and grid exchange are shaped in time — import and export heatmaps, a one-week profile, monthly and annual site energy' },
   { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
@@ -150,6 +153,9 @@ const RESULTS_TO_COMPARE_TAB: Record<ResultsTab, CompareTab> = {
   fmea: 'overview',
   // No investment compare tab exists (IC P3 WP3.5) — alias to overview.
   investment: 'overview',
+  // The grid studies are not result frames the rail can compare.
+  grid_code: 'overview',
+  electrical_design: 'overview',
 }
 
 export default function Results() {
@@ -691,6 +697,8 @@ export default function Results() {
       {t === 'flows'       && <EnergyFlowsTab />}
       {t === 'loadshape'   && <LoadShapeTab />}
       {t === 'investment'  && <InvestmentTab />}
+      {t === 'grid_code'   && <GridCodeTab />}
+      {t === 'electrical_design' && <ElectricalDesignTab />}
     </>
   )
 
