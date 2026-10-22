@@ -4,7 +4,8 @@
 // its unit, where it comes from (only "assumed" leaves it to check), a note,
 // Save per line, and a reset that names what it resets to. The rows say where
 // each value is set. Energization stays read-only here; its schedule is edited
-// on the connection link. Guided and Expert get the same control, in place.
+// on the connection link. Guided and Expert get the same control: here in
+// Expert, and in Guided the field drawer a to-check item opens (App.tsx).
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { PageSection } from '../PageKit'
@@ -135,12 +136,13 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
   )
 }
 
-export function ConnectionLimits() {
+/** `only` narrows the list to some row kinds: the Guided field drawer opens the one line a to-check item points at. */
+export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const q = useGridReadiness()
   const expert = useUIStore(s => s.uiMode === 'expert')
   // Same button in both modes: Expert opens the Link's properties, Guided the field drawer over the card.
   const open = (t: FlowTarget) => (expert ? openFlowTarget(t) : openFlowTargetInPlace(t))
-  const rows = (q.data?.rows ?? []).filter(r => kindOf(r) in SHOWN && (kindOf(r) !== 'scr' || r.setting))
+  const rows = (q.data?.rows ?? []).filter(r => kindOf(r) in SHOWN && (kindOf(r) !== 'scr' || r.setting) && (!only || only.includes(kindOf(r))))
   // One line per kind. Energization has one row per period: every period is listed,
   // so a connection that grows from 20 to 60 MW is never shown as 20 MW.
   const kinds = Object.keys(SHOWN).filter(k => rows.some(r => kindOf(r) === k))

@@ -129,4 +129,15 @@ describe('ConnectionLimits', () => {
     expect(await screen.findByLabelText('Connection ramp limit value')).toHaveProperty('value', '5')
     expect(screen.queryByRole('button', { name: /^Reset/ })).toBeNull()
   })
+
+  it('`only` narrows the list to the line a Guided to-check item points at', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
+      row('ramp_rate', { setting: setting('connection_ramp') }),
+      row('oscillation', { setting: setting('oscillation') })] } as never)
+    useUIStore.setState({ currentProject: 'Demo' })
+    render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ConnectionLimits only={['oscillation']} /></QueryClientProvider>)
+    expect(await screen.findByLabelText('Oscillation band value')).toBeTruthy()
+    expect(screen.queryByLabelText('Connection ramp limit value')).toBeNull()
+  })
 })
