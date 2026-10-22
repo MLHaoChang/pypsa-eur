@@ -152,6 +152,10 @@ def test_cdv03_no_other_unit_converts(site):
     assert out["cells"][0]["value"] == 0.11
     out, _ = _preview(uid, [{**off, "unit": "EUR/Wh"}])
     assert [g["kind"] for g in out["unmapped"]] == ["unit_mismatch"]
+    # A PPA share is a fraction: a percentage is not converted.
+    share = {"target": "ppa", "entity": "ppa1", "field": "share", "page": 2, "quote": "Contract term 15 years"}
+    out, _ = _preview(uid, [{**share, "unit": "%"}])
+    assert [g["kind"] for g in out["unmapped"]] == ["unit_mismatch"]
 
 
 def test_cdv04_money_is_stated_never_assumed(site):
@@ -198,6 +202,12 @@ def test_cdv05_a_ppa_price_money_year(site):
     # A contract whose prices are in another year: refused, nothing adjusted.
     out, _ = _preview(uid, [EUR_PRICE], money_year=base + 1)
     assert [g["kind"] for g in out["unmapped"]] == ["money_year_mismatch"]
+
+    # Two prices of one contract on one card: one money year, one base_year row.
+    chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": _commercial()})
+    floor = {**EUR_PRICE, "field": "floor"}
+    out, _ = _preview(uid, [EUR_PRICE, floor], money_year=base)
+    assert [c["path"] for c in out["cells"]] == ["price", "floor", "base_year"] and out["unmapped"] == []
 
 
 def test_cdv06_compare_and_set(client, site, session_ctx):
@@ -396,5 +406,10 @@ def test_cdv13_preflight_errors_from_before_the_change_are_card_notes(site, monk
     card = edit_card.preview("apply_commercial_document_values", args)
     notes = [r["note"] for r in card["rows"] if r["role"] == "note" and r["field"] == "preflight"]
     assert notes == ["Already failing before this change (commercial.meter_bypass): an old problem"]
+    # An old finding whose text quotes the edited value is still the old finding.
+    monkeypatch.setattr(preflight, "commercial_findings", lambda n, c, **kw: [
+        *real(n, c, **kw), ("error", "commercial.meter_bypass", "Bus", "x",
+                            f"rate {c['import_tariff']['items'][0]['periods'][0]['rate']}")])
+    _, args = _preview(uid, [PEAK])
     _, result, _ = _dispatch(site, "apply_commercial_document_values", args)  # not this change's refusal
     assert result["read_back"] is True

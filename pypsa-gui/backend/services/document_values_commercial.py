@@ -366,7 +366,6 @@ def plan(commercial: dict | None, doc: dict, citations: list, *, decimal_mark: s
             notes.append(f"The project's finance inputs set no currency; recorded as {money['currency']}, as stated.")
         if money and money["money_year"] is not None:
             notes.append("Copied as stated, not adjusted for inflation.")
-            years.setdefault(money["money_year"], money["currency"])
         lineage = {"upload_id": src["upload_id"], "filename": src["filename"], "sha256": src["sha256"],
                    "page": page, "quote": raw_quote, "raw": number["text"], "raw_unit": str(c.get("unit")),
                    "scale": str(scale), "decimal_mark": decimal_mark}
@@ -375,10 +374,15 @@ def plan(commercial: dict | None, doc: dict, citations: list, *, decimal_mark: s
                                                                                    slot["where"]),
                       "value": value, "currency": money and money["currency"],
                       "money_year": money and money["money_year"], "source": lineage, "notes": notes})
-    # The PPA prices' money year: an unset `base_year` is written with it, as its own row.
+    for cell in cells:
+        if cell["money_year"] is not None:
+            years.setdefault(cell["money_year"], cell["currency"])
+    # The PPA prices' money year: an unset `base_year` is written with it, as its own row,
+    # beside a price the card changes (one `money_year` per call: every price cited for a
+    # contract is in the same year).
     extra = []
     for cell in cells:
-        if cell["target"] == "ppa" and cell["money_year"] is not None:
+        if cell["target"] == "ppa" and cell["money_year"] is not None and not _same(cell["old"], cell["value"]):
             owner = _owner(stored, "ppa", cell["entity"])
             if owner.get("base_year") is None and not any(x["entity"] == cell["entity"] for x in extra):
                 extra.append({"target": "ppa", "entity": cell["entity"], "path": "base_year", "where": ("base_year",),
@@ -415,7 +419,9 @@ def stored_commercial() -> dict | None:
 
     from services.pypsa_service import PyPSAService
 
-    config = PyPSAService.get_active_context().solver_state["solver_config"]
+    config = (PyPSAService.get_active_context().solver_state or {}).get("solver_config")
+    if config is None:
+        return None
     commercial = (asdict(config) if not isinstance(config, dict) else config).get("commercial")
     return copy.deepcopy(commercial) if isinstance(commercial, dict) else commercial
 
@@ -493,13 +499,13 @@ def card_rows(p: dict) -> list[dict]:
                      "gap": gap["kind"], **({"library": gap["library"]} if "library" in gap else {})})
     if len(p["unmapped"]) > T.MAX_LISTED_GAPS:
         rows.append(edit_card._note("Commercial", "", "", f"{len(p['unmapped']) - T.MAX_LISTED_GAPS} more citations "
-                                    "are left out; preview_commercial_document_values counts them by kind."))
+                                    "are left out."))
     rows += [edit_card._note("Commercial", "", "money_year", text) for text in p["notes"]]
-    for code, message in sorted(p.get("preflight_errors") or ()):
+    for code, _klass, _name, message in p.get("preflight_errors") or ():
         rows.append(edit_card._note("Commercial", "", "preflight", f"Already failing before this change ({code}): "
                                     f"{message[:200]}"))
-    rows.append(edit_card._note("Commercial", "", "undo", "undo_last does not revert this change (the commercial "
-                                "config is not on the network's undo stack); set the old values back to revert it."))
+    rows.append(edit_card._note("Commercial", "", "undo", "Undo does not revert this change (the commercial "
+                                "settings are not on the network's undo history); set the old values back to revert it."))
     return rows
 
 
@@ -539,7 +545,15 @@ def _where(row: dict) -> tuple:
 def _errors(n, commercial: dict) -> set[tuple[str, str]]:
     from services.commercial.preflight import commercial_findings
 
-    return {(code, message) for sev, code, _c, _n, message in commercial_findings(n, commercial) if sev == "error"}
+    return {(code, klass, name, message) for sev, code, klass, name, message in commercial_findings(n, commercial)
+            if sev == "error"}
+
+
+def _new_errors(n, before: dict, after: dict) -> list[tuple]:
+    """The error findings `after` has and `before` has not, matched by code and component:
+    an old finding whose message quotes a value this change edits is not new."""
+    old = {(code, klass, name) for code, klass, name, _m in _errors(n, before)}
+    return sorted(e for e in _errors(n, after) if e[:3] not in old)
 
 
 def provenance(p: dict, *, approved_by: str | None) -> dict:
@@ -615,11 +629,11 @@ def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
         after["provenance"] = _live(after, {**(stored.get("provenance") or {}),
                                             **provenance(p, approved_by=approved_by)})
         n = PyPSAService.get_network()
-        added = _errors(n, after) - _errors(n, stored)
+        added = _new_errors(n, stored, after)
         if added:
-            code, message = sorted(added)[0]
+            code, _klass, _name, message = added[0]
             _refuse("commercial_preflight_failed", f"With these values the commercial preflight fails ({code}): "
-                    f"{message[:300]}. Nothing is written.", findings=[c for c, _m in sorted(added)][:10])
+                    f"{message[:300]}. Nothing is written.", findings=[e[0] for e in added][:10])
         after.pop("value_flows", None)  # owned by its own route, which keeps what is stored
         try:
             # The solver-config route's own save: it binds the config (its validation and
