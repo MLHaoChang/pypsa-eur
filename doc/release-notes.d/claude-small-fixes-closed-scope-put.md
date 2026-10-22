@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Switching a run option on in What the Run computes (Load flow, N-1 security) on a project that is not open is now refused with the same reason the Run would give, instead of being stored in its saved solver settings. A running solve or study also blocks the change.
