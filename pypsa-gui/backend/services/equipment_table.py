@@ -276,24 +276,38 @@ def _cost_currency(unit: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _column_verdict(field_name: str, field: dict | None, unit: str | None, money: dict) -> tuple[dict | None, dict | None]:
-    """`(plan, None)` for a mappable column, else `(None, reason)`."""
+def _field_reason(field_name: str, field: dict | None) -> dict | None:
+    """Why a field takes no table column, or None when it can take one."""
     if field is None:
-        return None, {"kind": "unknown_field", "message": f"No field {field_name!r}. Read get_component_schema."}
+        return {"kind": "unknown_field", "message": f"No field {field_name!r}. Read get_component_schema."}
     if str(field.get("native_type") or "") == "series":
-        return None, {"kind": "time_series_not_supported_here", "message": f"{field_name} is a time series; a "
-                      "table maps one static value per asset."}
+        return {"kind": "time_series_not_supported_here", "message": f"{field_name} is a time series; a "
+                "table maps one static value per asset."}
     if field.get("derived"):
-        return None, {"kind": "derived_field", "message": f"{field_name} is derived from other fields."}
+        return {"kind": "derived_field", "message": f"{field_name} is derived from other fields."}
     if not field.get("editable"):
-        return None, {"kind": "read_only_field", "message": f"{field_name} is {field.get('editability_reason')}."}
+        return {"kind": "read_only_field", "message": f"{field_name} is {field.get('editability_reason')}."}
     kind = str(field.get("native_type") or "")
     stored = field.get("unit_storage") or field.get("native_unit") or ""
     if kind and not (kind.startswith(("float", "int")) or kind == "static or series"):
-        return None, {"kind": "unsupported_field_type", "message": f"{field_name} takes {kind}, not a number."}
+        return {"kind": "unsupported_field_type", "message": f"{field_name} takes {kind}, not a number."}
     if not kind and not stored:
-        return None, {"kind": "unsupported_field_type", "message": f"{field_name} states no numeric type."}
-    accepted = list(dict.fromkeys(u for u in (stored, field.get("unit_display")) if u))
+        return {"kind": "unsupported_field_type", "message": f"{field_name} states no numeric type."}
+    return None
+
+
+def _accepted_units(field: dict) -> list[str]:
+    stored = field.get("unit_storage") or field.get("native_unit") or ""
+    return list(dict.fromkeys(u for u in (stored, field.get("unit_display") if field.get("display_scale") else None) if u))
+
+
+def _column_verdict(field_name: str, field: dict | None, unit: str | None, money: dict) -> tuple[dict | None, dict | None]:
+    """`(plan, None)` for a mappable column, else `(None, reason)`."""
+    reason = _field_reason(field_name, field)
+    if reason:
+        return None, reason
+    stored = field.get("unit_storage") or field.get("native_unit") or ""
+    accepted = _accepted_units(field)
     if not unit:
         return None, {"kind": "unit_missing", "message": f"State the unit of {field_name}: {' or '.join(accepted)}.",
                       "accepted_units": accepted}
@@ -455,6 +469,69 @@ def plan_active(args: dict) -> dict:
                 fields=edit_card._fields(klass))
 
 
+def mappable_fields(fields: dict[str, dict]) -> list[dict]:
+    """The fields a table column can map onto, in schema order, each with the only units
+    `plan` accepts and whether it is a cost (which needs the table's currency and money
+    year): the manual-mapping form's field picker."""
+    out = []
+    for name, field in fields.items():
+        if _field_reason(name, field) is None and (units := _accepted_units(field)):
+            out.append({"field": name, "label": field.get("label", name), "units": units,
+                        "currency": _cost_currency(units[0])})
+    return out
+
+
+def summary(n, p: dict) -> dict:
+    """What `preview_equipment_mapping` and the form's preview report of a plan: the
+    changed cells, the counts and the left-out cells (the first `MAX_LISTED_GAPS`)."""
+    todo = changes(n, p)
+    require_card_size(todo)
+    gaps = p["unmapped"]
+    changed = sum(len(v) for v in todo.values())
+    return {"source": p["source"], "component_class": p["component_class"],
+            "cells": [c for c in p["cells"] if c["field"] in todo.get(c["name"], {})],
+            "changed_cells": changed, "unchanged_cells": len(p["cells"]) - changed,
+            "unmapped": gaps[:MAX_LISTED_GAPS], "unmapped_total": len(gaps),
+            "unmapped_by_kind": {k: sum(g["kind"] == k for g in gaps) for k in dict.fromkeys(g["kind"] for g in gaps)},
+            "needs": p["needs"], "missing": p["missing"], "notes": p["notes"],
+            "limits": {"rows": MAX_ROWS, "columns": MAX_COLUMNS, "card_cells": MAX_CARD_CELLS,
+                       "listed_gaps": MAX_LISTED_GAPS}}
+
+
+# Data rows the form's preview shows of the table itself; the plan reads every row.
+SAMPLE_ROWS = 5
+
+
+def preview(args: dict) -> dict:
+    """The manual-mapping form's preview, for the active project: `{table, fields?, plan?,
+    card?}`. `table` = `{source, headers, row_count, rows}` with the first `SAMPLE_ROWS`
+    rows' raw values; with `component_class`, `fields` (`mappable_fields`); with
+    `name_column` and `columns` too, `plan` (`summary`) and `card`, the edit card the
+    apply checks, None while a confirmation is missing or nothing changes. Writes nothing."""
+    from harness import edit_card
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    table = read_table(chat_tools._require_active_project(), args.get("upload_id"), args.get("sheet"))
+    head = [{"row": r["row"], "cells": {h: c["raw"] for h, c in r["cells"].items()}} for r in table["rows"][:SAMPLE_ROWS]]
+    out: dict = {"table": {"source": table["source"], "headers": table["headers"],
+                           "row_count": len(table["rows"]), "rows": head}}
+    klass = args.get("component_class")
+    if not klass:
+        return out
+    out["fields"] = mappable_fields(edit_card._fields(klass))
+    if not args.get("name_column") or not args.get("columns"):
+        return out
+    args = {**args, "source_sha256": table["source"]["sha256"]}
+    # Under the network's lock: the plan, the counts and the card read one network.
+    with PyPSAService.get_lock():
+        p = plan_active(args)
+        out["plan"] = summary(PyPSAService.get_network(), p)
+        out["card"] = None if p["missing"] or not out["plan"]["changed_cells"] else edit_card.preview(
+            "apply_equipment_mapping", args)
+    return out
+
+
 def require_confirmed(p: dict) -> None:
     if p["missing"]:
         _refuse("table_confirmation_needed", "Confirm before applying: " + " ".join(
@@ -507,8 +584,9 @@ def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
 
     Under the network's mutation lock for the whole loop (`update_component` re-enters
     it per asset), so no other write lands between assets. Before the first write the
-    live network must still hold every typed row's `old` and the plan must change
-    exactly the card's typed cells, else `edit_preview_stale` and nothing is written.
+    live network must still hold every typed row's `old`, the plan must change exactly
+    the card's typed cells, and each value written must be that row's `new`, else
+    `edit_preview_stale` and nothing is written.
     Not one transaction: a native refusal part-way stops, and the result names what was
     written and what was not (one undo reverts the written part)."""
     from harness import edit_card
@@ -527,7 +605,8 @@ def apply(p: dict, card: dict, *, approved_by: str | None) -> dict:
         def now(name, field):
             return edit_card._scalar(frame.at[name, field]) if field in frame.columns else None
 
-        if cells != set(shown) or any(not edit_card._same(now(*k), shown[k]["old"]) for k in cells):
+        if cells != set(shown) or any(not edit_card._same(now(*k), shown[k]["old"])
+                                      or not edit_card._same(todo[k[0]][k[1]], shown[k]["new"]) for k in cells):
             _refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
                     "Propose the edit again.", 409)
         written: dict[str, dict] = {}

@@ -24,7 +24,7 @@ export function openSectionInGuided(id: FlowSectionId): void {
   ui.setSlidePanel('hubDesign')
 }
 
-/** Time Series on one component (W3c's "Next: give it a time series >"):
+/** Time Series on one component (W3c's "Next: give it a time series ›"):
  *  its tab, the field's slot when given (p_set, p_max_pu, p_min_pu,
  *  marginal_cost), and that field's own editor when `openEditor` is set.
  *  Renewables and demand response have no editor; they open on their row. */
@@ -43,6 +43,13 @@ export function openTimeSeriesFor(
   }
   openSectionInExpert('profiles')
   ui.focusTimeSeries(type, name, opts)
+}
+
+/** Show the Economic assumptions block of Solver Settings (default lifetime,
+ *  CO₂ price): the section's panel, on the Dispatch tab, scrolled to the block. */
+export function openEconomicAssumptions(): void {
+  useUIStore.getState().requestSolverBlock('economic')
+  openSectionInExpert('scenarios')
 }
 
 /** Show one flow item's field in Expert: its panel, or the component's own

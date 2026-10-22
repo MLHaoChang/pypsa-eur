@@ -61,7 +61,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'decision' | 'economics' | 'profiles' | 'library'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine' | 'hubDesign' | 'reports' | 'campusElectrical' | 'campusStudy' | 'campusResults' | 'decision' | 'economics' | 'profiles' | 'library'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
@@ -508,6 +508,8 @@ interface UIStore {
   resultsSectionRequest: string | null
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
+  // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
+  solverBlockRequest: 'economic' | null
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
   timeSeriesFocus: TimeSeriesFocus | null
@@ -656,6 +658,8 @@ interface UIStore {
   clearResultsSectionRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
+  requestSolverBlock: (block: 'economic') => void
+  clearSolverBlockRequest: () => void
   focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
@@ -743,6 +747,7 @@ export const useUIStore = create<UIStore>((set) => ({
   resultsTabRequest: null,
   resultsSectionRequest: null,
   economicsTabRequest: null,
+  solverBlockRequest: null,
   timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
@@ -987,6 +992,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
   requestEconomicsTab: (tab) => set({ economicsTabRequest: tab }),
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
+  requestSolverBlock: (block) => set({ solverBlockRequest: block }),
+  clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
   focusTimeSeries: (type, name, opts) => set({
     timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),

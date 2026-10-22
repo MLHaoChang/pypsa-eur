@@ -30,6 +30,17 @@ Gatekeeper review (GO WITH CHANGES), each with its case:
   listed up to 50 with the rest counted;
 - ET-17 the route sits behind the foreign-lock gate and the undo middleware, both
   tools are lock-gated, the apply is undo-captured, and an anonymous apply is refused.
+
+The manual-mapping form (PR-2), with the gatekeeper's PR-1 fold-ins:
+
+- ET-19 the form's preview route is a read (no undo snapshot, no edit-counter bump,
+  outside the results-clearing prefix); its card is the one the apply accepts;
+- ET-20 the preview gives the class's mappable fields, and no card while a cell needs
+  a money basis or nothing would change;
+- ET-21 the in-lock check refuses a card whose `new` differs from the value written;
+- ET-22 the assistant's apply carries the digest of the card the user approved;
+- ET-23 through the real dispatch (turn loop, worker thread), the route receives the
+  digest of the card the user clicked, and the binding is gone after the turn.
 """
 from __future__ import annotations
 
@@ -462,3 +473,120 @@ def test_et18_the_card_bound_counts_changed_cells_and_long_gap_lists_are_counted
     with pytest.raises(HTTPException) as exc:
         chat_tools.preview_equipment_mapping(_csv(LINES), "Line", "name", LINE_COLUMNS)
     assert exc.value.detail["error_kind"] == "mapping_too_large"
+
+
+# ── The manual-mapping form (data-to-model PR-2) ────────────────────────────
+
+
+def test_et19_the_form_preview_is_a_read_and_its_card_is_the_one_the_apply_accepts(client, grid, session_ctx):
+    import main
+    from tests.test_chat_tools_dispatch import _bound_to
+
+    path = "/api/equipment_table/preview"
+    # Outside every write prefix: no undo snapshot, no edit-counter bump, no results cleared.
+    for prefixes in (main._UNDO_PREFIXES, main._DISPATCH_INVALIDATE_PREFIXES, main._STUDY_EDIT_PREFIXES):
+        assert not any(path.startswith(p) for p in prefixes)
+    assert client.post("/api/projects/P", params={"force": True, "rebind": True}).status_code == 200
+    with _bound_to(session_ctx(client)):
+        uid = _csv(LINES)
+    depth = client.get("/api/network/undo/info").json()["depth"]
+    with _bound_to(session_ctx(client)):
+        revision = PyPSAService.get_active_context().network_revision
+
+    table = client.post(path, json={"upload_id": uid})
+    assert table.status_code == 200, table.text
+    body = table.json()
+    assert body["table"]["headers"] == ["name", "rating", "reactance"] and body["table"]["row_count"] == 2
+    assert body["table"]["rows"][1] == {"row": 3, "cells": {"name": "L2", "rating": "450", "reactance": "7.25"}}
+    assert "fields" not in body and "card" not in body
+
+    fields = client.post(path, json={"upload_id": uid, "component_class": "Line"}).json()["fields"]
+    by = {f["field"]: f for f in fields}
+    assert by["s_nom"]["units"][0] == "MVA" and by["x"]["units"] == ["Ohm"]
+    assert "x_pu" not in by and "bus0" not in by  # derived and non-numeric fields take no column
+
+    mapped = client.post(path, json={"upload_id": uid, "component_class": "Line", "name_column": "name",
+                                     "columns": LINE_COLUMNS}).json()
+    assert mapped["plan"]["changed_cells"] == 4 and mapped["plan"]["unmapped"] == []
+    card = mapped["card"]
+    assert {(r["name"], r["field"]) for r in card["rows"] if r["role"] == "typed"} == {
+        ("L1", "s_nom"), ("L1", "x"), ("L2", "s_nom"), ("L2", "x")}
+    assert card["section"]["id"] == "connection"  # the form ends on "Open Connection & grid"
+    assert client.get("/api/network/undo/info").json()["depth"] == depth
+    with _bound_to(session_ctx(client)):
+        assert PyPSAService.get_active_context().network_revision == revision
+        assert PyPSAService.get_network().lines.at["L1", "s_nom"] == 300
+
+    r = client.post("/api/network/equipment_table/apply", json={
+        "upload_id": uid, "component_class": "Line", "name_column": "name", "columns": LINE_COLUMNS,
+        "source_sha256": mapped["table"]["source"]["sha256"], "digest": card["digest"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["receipt"]["outcome"] == "verified" and r.json()["receipt"]["digest"] == card["digest"]
+
+
+def test_et20_the_form_preview_says_what_is_missing_instead_of_a_card(client, grid, session_ctx):
+    from tests.test_chat_tools_dispatch import _bound_to
+
+    assert client.post("/api/projects/P", params={"force": True, "rebind": True}).status_code == 200
+    with _bound_to(session_ctx(client)):
+        uid = _csv("name,energy cost\nBattery,150\n", "battery.csv")
+    path = "/api/equipment_table/preview"
+    fields = {f["field"]: f for f in client.post(path, json={"upload_id": uid, "component_class": "StorageUnit"})
+              .json()["fields"]}
+    assert fields["inv_energy_overnight"]["currency"] == "EUR"
+    columns = {"energy cost": {"field": "inv_energy_overnight", "unit": "EUR/kWh"}}
+    bare = client.post(path, json={"upload_id": uid, "component_class": "StorageUnit", "name_column": "name",
+                                   "columns": columns}).json()
+    assert bare["card"] is None and bare["plan"]["unmapped"][0]["kind"] == "money_basis_missing"
+    same = client.post(path, json={"upload_id": uid, "component_class": "Line", "name_column": "name",
+                                   "columns": {"energy cost": {"field": "s_nom", "unit": "MVA"}}}).json()
+    assert same["card"] is None and same["plan"]["unmapped_by_kind"] == {"component_not_found": 1}
+
+
+def test_et21_the_in_lock_check_compares_each_written_value_with_the_card_new(grid):
+    args = {"upload_id": _csv(LINES), "component_class": "Line", "name_column": "name", "columns": LINE_COLUMNS}
+    p, card = T.plan_active(args), _card(args)
+    other = {**card, "rows": [{**r, "new": 999} if (r["name"], r.get("field")) == ("L2", "x") else r
+                              for r in card["rows"]]}
+    with pytest.raises(HTTPException) as exc:
+        T.apply(p, other, approved_by=None)
+    assert exc.value.status_code == 409 and exc.value.detail["error_kind"] == "edit_preview_stale"
+    n = PyPSAService.get_network()
+    assert n.lines.at["L1", "s_nom"] == 300 and n.lines.at["L2", "x"] == 8.0
+
+
+def test_et22_the_chat_apply_carries_the_approved_digest(grid):
+    from harness import edit_card
+
+    _, args = _args(_csv(LINES))
+    # Outside a confirmed turn there is no approved card: refused, nothing written.
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.apply_equipment_mapping(**args)
+    assert exc.value.detail["error_kind"] == "edit_preview_stale"
+    with edit_card.approved("f" * 64), pytest.raises(HTTPException) as exc:
+        chat_tools.apply_equipment_mapping(**args)
+    assert exc.value.detail["error_kind"] == "edit_preview_stale"
+    assert PyPSAService.get_network().lines.at["L1", "s_nom"] == 300
+
+    with edit_card.approved(_card({k: v for k, v in args.items() if k != "source_sha256"})["digest"]):
+        out = chat_tools.apply_equipment_mapping(**args)
+    assert out["written"] == {"L1": {"s_nom": 500, "x": 10.5}, "L2": {"s_nom": 450, "x": 7.25}}
+
+
+def test_et23_the_real_dispatch_hands_the_clicked_card_digest_to_the_route(grid, monkeypatch):
+    from harness import edit_card
+    from routers import network_equipment_table as R
+
+    seen = []
+    real = R.apply_equipment_mapping
+
+    def spy(body, user=None):
+        seen.append(body.digest)
+        return real(body, user)
+
+    monkeypatch.setattr(R, "apply_equipment_mapping", spy)
+    _, args = _args(_csv(LINES))
+    cards, result, _ = _dispatch(grid, "apply_equipment_mapping", args)
+    assert seen == [cards[0]["edit_card"]["digest"]]
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert edit_card.approved_digest() is None  # reset after the handler

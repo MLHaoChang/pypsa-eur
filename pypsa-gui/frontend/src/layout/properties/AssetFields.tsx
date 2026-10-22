@@ -11,7 +11,7 @@ import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceAp
 import { derivedStored, displayValue, isRevealed, tidy, unitLabel } from '../../utils/assetForm'
 import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
-  BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
+  BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, LifetimeInherit, NumInput, SectionHdr, TxtInput,
   type ExpandedItem, type FS, type SetFS,
 } from './cardKit'
 
@@ -302,6 +302,7 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                   <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-money-${f.key}`}>
                     In {moneyYear(f.key, provenance)}</div>
                 )}
+                {f.key === 'lifetime' && <LifetimeInherit fs={fs} set={set} />}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>

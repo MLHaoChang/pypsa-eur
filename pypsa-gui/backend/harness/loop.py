@@ -745,8 +745,8 @@ def _dispatch_tool_uses(
         # and the Authorization header with it, on every iteration. It also
         # REMOVED a bound that existed before this guard was added, where an
         # unknown name fell through to the counter and hit
-        # MAX_TOOL_CALLS_PER_TURN. The cap is the only per-turn bound there is;
-        # nothing may skip it.
+        # MAX_TOOL_CALLS_PER_TURN. The cap is the one per-turn bound every turn
+        # has (a task cap only lowers it); nothing may skip it.
         tool_call_count += 1
         if tool_call_count > harness_budget.MAX_TOOL_CALLS_PER_TURN:
             yield "tool_error", {
@@ -1770,6 +1770,14 @@ def _run_turn_body(
     _eventlog.context(session, "workflow_step", wf_block)
     if wf_block:
         ui_block = f"{ui_block}\n\n{wf_block}" if ui_block else wf_block
+    # W10 H2a — a bounded task's cap is decided once, here, after the workflow
+    # rebinding above: the model cannot lift it mid-turn (budget.task_cap).
+    session.turn_task_cap = harness_budget.task_cap(session)
+    from harness.compose import _results_card_addendum
+    card_block = _results_card_addendum(session)
+    _eventlog.context(session, "results_card", card_block)
+    if card_block:
+        ui_block = f"{ui_block}\n\n{card_block}" if ui_block else card_block
     # The session's goal (issue 17) rides the same slot, after the step.
     from harness import goals as _goals
     goal_block = _goals.addendum(session)
@@ -1923,7 +1931,11 @@ def _run_turn_body(
     # Per-profile token cap (Task 7) — resolved once for the whole turn;
     # `profile.max_output_tokens is None` means "no override", the same
     # meaning `llm_config` documents for that field.
-    max_output_tokens = profile.max_output_tokens or harness_budget.MAX_OUTPUT_TOKENS_PER_TURN
+    max_output_tokens = harness_budget.output_limit(
+        session.turn_task_cap,
+        profile.max_output_tokens or harness_budget.MAX_OUTPUT_TOKENS_PER_TURN)
+    # W10 H2a — provider calls this turn, against the task cap's rounds.
+    task_rounds = 0
 
     while True:
         if session.abort_event.is_set():
@@ -1987,6 +1999,7 @@ def _run_turn_body(
                 return
             final_blocks = stream_outcome.final_blocks
             final_usage = stream_outcome.final_usage
+            task_rounds += 1
 
         if final_usage:
             session.accrue_usage(
@@ -2133,10 +2146,32 @@ def _run_turn_body(
                 choice = session.assurance_turn.clarification_choice()
                 if choice is not None:
                     yield "choice_request", choice
+            # W10 H2a — an answer that reached the task's output cap ends like
+            # any other: the panel publishes a checked answer only on the
+            # turn_done naming its answer_id, so an error here would drop it.
+            if session.assurance_turn is not None:
                 yield "turn_done", {"usage": usage_snapshot,
                                     "answer_id": session.assurance_turn.approved["answer_id"]}
             else:
                 yield "turn_done", {"usage": usage_snapshot}
+            return
+
+        # W10 H2a — the task cap: tools only in a round that leaves one to
+        # answer, and no more than its tool calls. Over it, nothing is
+        # dispatched; every tool_use still gets its tool_result (pairing).
+        task_cap = session.turn_task_cap
+        if task_cap is not None and (
+            task_rounds >= task_cap.rounds
+            or tool_call_count + len(tool_uses) > harness_budget.tool_call_limit(task_cap)
+        ):
+            refused = [{"type": "tool_result", "tool_use_id": b.get("id"), "is_error": True,
+                        "content": "task_step_limit"} for b in tool_uses]
+            messages.append({"role": "user", "content": refused})
+            with session._lock:
+                session.append_history_message({"role": "user", "content": refused})
+            yield "error", {"error_kind": "task_step_limit",
+                            "message": harness_budget.TASK_STEP_LIMIT}
+            yield "session_done", {"reason": "task_step_limit"}
             return
 
         # M7: parallel-destructive pre-scan across THIS assistant message.
@@ -2740,7 +2775,8 @@ def _dispatch_real_tool_call(
                         return invoke(session, tool_name, args or {}, handler)
                 if edit_card is not None:
                     edit_cards.require_current(tool_name, args or {}, edit_card)
-                    out = invoke(session, tool_name, args or {}, handler)
+                    with edit_cards.approved(edit_card["digest"]):
+                        out = invoke(session, tool_name, args or {}, handler)
                     if isinstance(out, dict):
                         out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
                     return out

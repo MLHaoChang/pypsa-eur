@@ -563,6 +563,10 @@
       "surface": "banner",
       "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the only per-turn bound there is."
     },
+    "task_step_limit": {
+      "surface": "inline",
+      "why": "A bounded task (the card explanation, budget.task_cap) reached its tool-call or round limit; the over-limit tools were not run and the turn stopped with the plain message. The user asks to continue in a new turn. Inline until the card explanation's header entry (H2b) gives it copy."
+    },
     "tool_error": {
       "surface": "inline",
       "why": "The forwarder's own fallback when a tool raises something with no structured error_kind. Generic by construction — there is no copy to write, which is exactly why the specific kinds beside it exist."
@@ -1030,6 +1034,10 @@
     "task_step_waiting": {
       "surface": "inline",
       "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
+    },
+    "snapshot_manifest_unknown": {
+      "surface": "inline",
+      "why": "restore_project_snapshot: the snapshot's capture_manifest.json has a version this build does not know (taken by a newer app), so the restore is refused before anything changes. The model says so; restoring needs that newer version or a different snapshot."
     },
     "changed_during_restore": {
       "surface": "inline",

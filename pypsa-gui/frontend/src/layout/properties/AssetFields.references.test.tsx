@@ -3,11 +3,16 @@
 // comes in parts), the money year beside the unit, and the chip naming a value applied
 // from a reference.
 import { afterEach, describe, expect, it } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render as plainRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import fixture from '../../test/fixtures/assetSchema.json'
 import type { AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { AssetFieldsEdit, appliedFields } from './AssetFields'
 import type { FS } from './cardKit'
+
+// The lifetime note under a card's field reads the project default from the query cache.
+const render = (ui: ReactElement) => plainRender(<QueryClientProvider client={new QueryClient()}>{ui}</QueryClientProvider>)
 
 const schemas = fixture as Record<string, unknown>
 const GEN: Record<string, unknown> = { name: 'pv', bus: 'B1', carrier: 'solar', p_nom: 5, overnight_cost: 556_220.85,

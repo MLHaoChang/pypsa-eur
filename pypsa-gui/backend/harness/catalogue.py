@@ -81,6 +81,8 @@ SAFETY_PANEL_ENUM = [
     "Workspace", "workspace", "Settings", "settings",
     "GridSpine", "gridspine", "Reports", "reports",
     "CampusElectrical", "campusElectrical",
+    # The grid study's settings (section 8) and results (section 10).
+    "CampusStudy", "campusStudy", "CampusResults", "campusResults",
     # The guided investment study panel (frontend normalises both to 'decision').
     "DecisionStudy", "decision",
     # Economics in Expert: rates, price basis and every asset's costs.
@@ -224,8 +226,11 @@ TOOLS: list[dict[str, Any]] = [
         "already showed it, the exact read to call before opening it, and how far the browser can "
         "prove it is shown. Statuses only, never values: read a section with its listed read, then "
         "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
-        "tabs already shown in this project. Safety: read.",
-        {"exclude_shown": {"type": "boolean"}},
+        "tabs already shown in this project; card lists only that card's views. Safety: read.",
+        {"exclude_shown": {"type": "boolean"},
+         # result_views.CARDS (flow_scope's card ids); test_result_views pins it.
+         "card": {"type": "string", "enum": ["capacity", "grid", "control", "reliability",
+                                             "commercial", "handoff"]}},
         [],
     ),
     _t(
@@ -2124,7 +2129,7 @@ TOOLS: list[dict[str, Any]] = [
         "scenario picks. Use project_picker when the user wants to browse "
         "saved projects without naming one. hubDesign opens the step-by-step "
         "Energy Hub design panel (Guided mode's main view). workspace, settings, "
-        "gridspine, reports and campusElectrical open their application panels; economics opens the rates, "
+        "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
         "price basis and every asset's investment costs; "
         "adequacy and fmea select their Results tabs. Safety: read.",
         {

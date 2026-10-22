@@ -47,11 +47,12 @@
         "_service_call_"
       ],
       "input_keys": [
-        "exclude_shown"
+        "exclude_shown",
+        "card"
       ],
       "required": [],
       "safety_tier": "read",
-      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "schema_sha256": "9c914e11d02c18d953c65eab78934c415263d4c751d906ca74139b6ad0246887",
       "behavioral_fixture": "pending"
     },
     {
@@ -3346,7 +3347,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "9d68599e2baa3edfb739918d5fbcfca3cc1296ead8ee1ad03dd73bfaa21242bf",
+      "schema_sha256": "93bde255ba875a6460049fb764a44364390030a7e0b8538d53f38ae8025871c4",
       "behavioral_fixture": "pending"
     },
     {
@@ -6528,6 +6529,8 @@
     "hubDesign",
     "reports",
     "campusElectrical",
+    "campusStudy",
+    "campusResults",
     "decision",
     "economics",
     "profiles",
@@ -6589,6 +6592,10 @@
     "reports",
     "CampusElectrical",
     "campusElectrical",
+    "CampusStudy",
+    "campusStudy",
+    "CampusResults",
+    "campusResults",
     "DecisionStudy",
     "decision",
     "Economics",

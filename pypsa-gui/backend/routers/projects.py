@@ -295,10 +295,10 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     replacing any existing destination dir of the same name. No-op for
     sources that don't exist (legacy projects predate uploads/).
 
-    Used by Save-As / Save-a-Copy / create_scenario / snapshot create.
-    Snapshot restore wraps the call inside `_force_rmtree(dst / dname)`
-    first so a stale upload from a post-snapshot session is dropped
-    before the snapshot's bundle dirs are reinstated.
+    Used by Save-As / Save-a-Copy / create_scenario / snapshot create and
+    restore. A dir missing from `src` leaves `dst`'s copy in place; snapshot
+    restore removes it afterwards when the snapshot's capture manifest says
+    the dir was absent when the snapshot was taken.
 
     Errors are swallowed individually per dir so a failure copying
     one dir (e.g. an in-use file in uploads/) doesn't abort the
