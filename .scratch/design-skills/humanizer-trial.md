@@ -7,6 +7,8 @@
 
 **Recommendation: don't vendor.** On three real texts the skill removed a few dashes and bold labels and rewrote one stiff intro. It never produced a rewrite that was clearly better than a careful edit under the repo's own rules, and one rewrite had to guess at a meaning.
 
+**Owner decision (2026-10-22, DSKILL-4): don't vendor humanizer.**
+
 ## Method
 
 - Source: `blader/humanizer` @ `8c307f3` (v3.1.0, MIT), cloned into the session scratchpad, never into the repo.
