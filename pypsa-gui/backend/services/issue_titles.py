@@ -76,7 +76,7 @@ ISSUE_TITLES: dict[str, str] = {
     "myopic_no_periods": "Myopic foresight needs investment periods",
     "myopic_flat_snapshots": "Myopic foresight needs period-indexed time steps",
     "myopic_capacity_locked_after_first_period": "Myopic foresight will freeze some capacity",
-    "myopic_sclopf_cost": "Security-constrained myopic run will be large",
+    "myopic_sclopf_cost": "N-1 security with myopic foresight will be large",
     "myopic_with_ac_pf": "AC power flow is not available with myopic foresight",
 
     # Rolling horizon
@@ -84,13 +84,13 @@ ISSUE_TITLES: dict[str, str] = {
     "rolling_overlap_invalid": "Rolling-horizon overlap cannot be negative",
     "rolling_overlap_exceeds_horizon": "Rolling-horizon overlap is longer than the window",
     "rolling_horizon_exceeds_snapshots": "Rolling-horizon window is longer than the model",
-    "rolling_with_sclopf": "Security constraints are not available with a rolling horizon",
+    "rolling_with_sclopf": "N-1 security is not available with a rolling horizon",
     "rolling_with_ac_pf": "AC power flow is not available with a rolling horizon",
     "rolling_with_multi_period": "Rolling horizon cannot be combined with investment periods",
 
     # Security-constrained dispatch (SCLOPF)
-    "sclopf_with_transmission_losses": "Security constraints cannot be combined with line losses",
-    "sclopf_no_branches": "Security constraints have no lines to check",
+    "sclopf_with_transmission_losses": "N-1 security cannot be combined with line losses",
+    "sclopf_no_branches": "N-1 security has no branches to check yet",
     "sclopf_large_contingency_set": "Many contingencies: the solve will be slow",
     "sclopf_radial_subnet": "Radial network part: contingencies would island it",
     "sclopf_scope_invalid": "Security-constraint scope not recognised",

@@ -102,4 +102,8 @@ def test_checked_turn_never_runs_or_publishes_a_refused_tool(baseline, checked, 
     assert calls == []
     assert set(seen) == set(refused)
     view_reads = {r.tool for v in RESULT_VIEWS if v.live() for r in v.reads}
-    assert {seen[name] for name in view_reads} == {"capability_unsupported"}
+    # A planning-to-dynamics study's reads (Grid code & connection) are offered only to a
+    # study project, which this baseline is not; every other read reaches the guard.
+    study_reads = {n for n in view_reads if n.startswith("gridspine_")}
+    assert {seen[name] for name in view_reads - study_reads} == {"capability_unsupported"}
+    assert {seen[name] for name in study_reads} <= {"capability_unsupported", "tool_not_offered"}

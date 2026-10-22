@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Under Check answers, a checked loading answer that opens Load flow says whether the tab is showing the solve and window that were checked; otherwise it says the tab was opened, why its numbers are not the checked ones, and adds that as a limitation.

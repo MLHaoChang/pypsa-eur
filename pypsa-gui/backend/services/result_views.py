@@ -33,6 +33,7 @@ every card) have none.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Mapping
@@ -42,13 +43,29 @@ from typing import Literal, Mapping
 class Read:
     tool: str
     args: Mapping = field(default_factory=lambda: MappingProxyType({}))
+    # A project-scoped tool (campus_*, gridspine_*) takes project_id. ONE rule for the
+    # listed read and the probe: it is the active project, filled in when called.
+    project: bool = False
+    # The key that is empty (None / []) when the study has not produced this yet.
+    empty_key: str | None = None
+    # Whether the view's status probe runs this read (it runs the first read of a
+    # view with no project-scoped reads).
+    probed: bool = True
 
     def call(self) -> dict:
-        return {"tool": self.tool, "args": dict(self.args)}
+        args = dict(self.args)
+        if self.project:
+            args = {"project_id": shown_key(), **args}
+        return {"tool": self.tool, "args": args}
 
 
 def _r(tool: str, **args) -> Read:
     return Read(tool, MappingProxyType(args))
+
+
+def _rp(tool: str, empty_key: str | None = None, probed: bool = True, **args) -> Read:
+    """A read of a project-scoped tool: project_id is the active project."""
+    return Read(tool, MappingProxyType(args), project=True, empty_key=empty_key, probed=probed)
 
 
 @dataclass(frozen=True)
@@ -157,6 +174,29 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                historical_section="loadflow",
                units="%, MW (active-power proxy) or MVA, weighted hours",
                card="grid", sub_option="load_flow", card_tab="load_flow"),
+    # R2 (card-workspaces.md §3.2 C): the grid study's results. Both are mounted-view
+    # only and outside the checked scope; the campus study and the planning->dynamics
+    # study are their own runs, so a view without one says so rather than showing zero.
+    ResultView("grid_code", _RESULTS, "grid_code", "Grid code & connection",
+               "campus PCC compliance against the chosen grid code; connection capacity and "
+               "connection-point assessment of a planning-to-dynamics study", "results",
+               (_rp("campus_get_study", "results"), _rp("gridspine_get_capacity", "rows"),
+                _rp("gridspine_get_connection_assessments", probed=False)),
+               claim_limits="A steady-state screen at the selected hours, not a compliance "
+                            "certificate. Campus rows exist only after a campus study run. A "
+                            "planning-to-dynamics project's tables come from gridspine_get_capacity "
+                            "and gridspine_get_connection_assessments (study projects only).",
+               units="MW, MVA, Mvar, kV, %, pu",
+               card="grid", sub_option="grid_code", card_tab="grid_code"),
+    ResultView("electrical_design", _RESULTS, "electrical_design", "Electrical design",
+               "transformer sizing, reactive compensation, short circuit, critical hours and "
+               "the campus investment", "results",
+               (_rp("campus_get_study", "results"), _rp("campus_get_investment", probed=False),
+                _rp("campus_get_milp", probed=False)),
+               claim_limits="Proposals from the campus study at its critical hours; nothing is "
+                            "adopted into the model until the user applies it.",
+               units="MVA, Mvar, kA, EUR",
+               card="grid", sub_option="grid_code", card_tab="electrical_design"),
     ResultView("prices", _RESULTS, "prices", "Prices",
                "bus prices and what sets them", "results",
                (_r("get_results", result_kind="prices"),
@@ -279,9 +319,16 @@ def _probe(view: ResultView) -> tuple[str, str | None]:
         periods = getattr(PyPSAService.get_network(), "investment_periods", None)
         if periods is None or not len(periods):
             return "not_applicable", "single investment period"
-    read = view.reads[0]
+    if any(r.project for r in view.reads):
+        return _probe_project_reads(view, chat_tools)
+    return _probe_read(view.reads[0], chat_tools)
+
+
+def _probe_read(read: Read, chat_tools) -> tuple[str, str | None]:
+    from fastapi import HTTPException
+
     try:
-        out = chat_tools.DISPATCHERS[read.tool](**dict(read.args))
+        out = chat_tools.DISPATCHERS[read.tool](**read.call()["args"])
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, dict) else {}
         return "unavailable", str(detail.get("error_kind") or exc.status_code)[:60]
@@ -297,7 +344,22 @@ def _probe(view: ResultView) -> tuple[str, str | None]:
             return "unavailable", str(out.get("unavailable_kind") or "unavailable")[:60]
         if out.get("configured") is False:
             return "no_data", "not_configured"
+        if read.empty_key and not out.get(read.empty_key):
+            return "no_data", None
     return "available", None
+
+
+def _probe_project_reads(view: ResultView, chat_tools) -> tuple[str, str | None]:
+    """A view fed by a study: the read that fits the project kind answers. A 404 or 409
+    (no study yet, or the other kind of project) is no data, not a failure."""
+    best: tuple[str, str | None] = ("no_data", None)
+    for read in (r for r in view.reads if r.probed):
+        status, reason = _probe_read(read, chat_tools)
+        if status == "available":
+            return status, reason
+        if status == "unavailable" and reason not in ("404", "409"):
+            best = (status, reason)
+    return best
 
 
 def shown_key() -> str:
@@ -313,6 +375,11 @@ def note_shown(session, results_tab: str | None) -> None:
     shown = session.shown_results.setdefault(shown_key(), [])
     if results_tab not in shown:
         shown.append(results_tab)
+
+
+# Below harness/results.py's 4000-character tool-result cap, so the listing degrades by
+# its own rule (compact rows) and never by truncation.
+LISTING_BUDGET = 3600
 
 
 def list_result_views(exclude_shown: bool = False, card: str | None = None) -> dict:
@@ -347,18 +414,32 @@ def list_result_views(exclude_shown: bool = False, card: str | None = None) -> d
         data, reason = _probe(v)
         # A results view's id is its tab id (ui_open_panel results_tab).
         row = {"id": v.view_id, "label": v.label_for(mode) or f"{v.label} (advanced)",
-               "data": data, "shown": v.tab in shown,
-               "read": [r.call() for r in v.reads]}
+               "data": data, "shown": v.tab in shown}
+        if v.card is not None:
+            row["card"] = v.card
+        # The reads and the one-line summary come with `card=`, so the plain listing keeps
+        # inside the tool-result cap (harness/results.py, 4000 chars) as views are added.
+        # A view that belongs to no card (Summary, Asset Detail) carries them itself.
+        if card is not None or v.card is None:
+            row["read"] = [r.call() for r in v.reads]
+            if data == "available" and v.tab not in shown:
+                row["shows"] = v.shows
         if v.verification == "displayed_data":
             row["verification"] = v.verification
         if reason:
             row["reason"] = reason
-        if data == "available" and v.tab not in shown:
-            row["shows"] = v.shows
         out.append(row)
     listing = {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
                "note": ("Statuses only, no values: call a view's read before you open its tab, "
-                        "and quote numbers from that read.")}
+                        "and quote numbers from that read." if card is not None else
+                        "Statuses only, no values. Call list_result_views(card=…) for a card's "
+                        "reads, then call a view's read before you open its tab and quote "
+                        "numbers from that read.")}
+    if card is None and len(json.dumps(listing)) > LISTING_BUDGET:
+        # Degrade explicitly rather than let the tool-result cap cut the listing.
+        listing["views"] = [{"id": r["id"], "data": r["data"], **({"card": r["card"]} if "card" in r else {})}
+                            for r in out]
+        listing["compact"] = True
     if card is not None:
         listing["card"] = card
     return listing

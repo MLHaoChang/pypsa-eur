@@ -156,18 +156,28 @@ def _refuse_unavailable_on(project: AuthorizedProject, change: dict, db) -> None
     option's, and a deferred verdict (the network is busy) does not block."""
     from services import flow_scope, run_separability
 
-    if not change.get("run_ac_pf_after_lopf"):
-        return
-    v = run_separability.verdicts(project.directory, ("optimisation", "loadflow"),
-                                  cache_key=project.registry_key, db=db, org_id=_org(project))
-    lf, opt = v["loadflow"], v["optimisation"]
-    if lf["ready"] or lf["deferred"]:
-        return
-    blocker, base = lf.get("blocker") or {}, opt.get("blocker") or {}
-    if opt["ready"] or blocker.get("code") != base.get("code"):
-        raise flow_scope.ScopeError(
-            "flow_scope_option_blocked",
-            f"Load flow can't be switched on: {blocker.get('message', 'the Run would refuse it')}")
+    # Each flag's verdict sets only its own flag. One PUT may turn several on
+    # (Load flow and N-1 together); that is sound because no validate_for_run
+    # rule couples ``sclopf`` and ``run_ac_pf_after_lopf`` (each reads one of
+    # them against the strategy, losses or its own inputs), and nothing is
+    # written unless every one passes (test_two_options_on_together_...).
+    for own in flow_scope.owned_active():
+        if change.get(own.field) is not True:                # sizing's values are not flags
+            continue
+        v = run_separability.verdicts(project.directory, ("optimisation", own.kind),
+                                      cache_key=project.registry_key, db=db,
+                                      org_id=_org(project))
+        mine, opt = v[own.kind], v["optimisation"]
+        if mine["ready"] or mine["deferred"]:
+            continue
+        blocker, base = mine.get("blocker") or {}, opt.get("blocker") or {}
+        if opt["ready"] or blocker.get("code") != base.get("code"):
+            label = dict(flow_scope.CARD_BY_ID[own.card].options)[own.option]
+            raise flow_scope.ScopeError(
+                "flow_scope_option_blocked",
+                f"{label} can't be switched on: "
+                f"{blocker.get('message', 'the Run would refuse it')}",
+                blocker.get("code"))
 
 
 def _store_owned(project: AuthorizedProject, wanted: dict[str, bool], db, user) -> dict:
@@ -280,5 +290,7 @@ def put_flow_scope(body: dict,
     except flow_scope.ScopeError as exc:
         raise HTTPException(409 if exc.error_kind == "run_in_progress" else 422,
                             {"error_kind": exc.error_kind,
-                                  "message": exc.message}) from exc
+                                  "message": exc.message,
+                                  **({"blocker_code": exc.blocker_code}
+                                     if exc.blocker_code else {})}) from exc
     return {"scope": scope}

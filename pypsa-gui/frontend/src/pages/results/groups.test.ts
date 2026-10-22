@@ -6,6 +6,7 @@ import { CARD_GROUPS, RESULT_GROUPS, cardPlaceOf, groupOf, type ResultsTab } fro
 const ALL_TABS: ResultsTab[] = [
   'summary', 'overview', 'capex', 'dispatch', 'loadflow', 'prices', 'emissions',
   'economics', 'curtailment', 'lostload', 'adequacy', 'storage', 'asset', 'fmea', 'investment', 'flows', 'loadshape',
+  'grid_code', 'electrical_design',
 ]
 
 describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
@@ -23,7 +24,7 @@ describe('Results groups (UX overhaul S3, owner decisions D1a / D2a)', () => {
 
   it.each([
     ['capex', 'investment'], ['economics', 'investment'], ['prices', 'investment'], ['investment', 'investment'],
-    ['loadflow', 'grid_plan'],
+    ['loadflow', 'grid_plan'], ['grid_code', 'grid_plan'], ['electrical_design', 'grid_plan'],
     ['adequacy', 'reliability'], ['lostload', 'reliability'], ['fmea', 'reliability'],
     ['dispatch', 'operation'], ['flows', 'operation'], ['loadshape', 'operation'], ['storage', 'operation'], ['curtailment', 'operation'], ['emissions', 'operation'],
     ['summary', 'summary'], ['overview', 'summary'],
@@ -61,6 +62,6 @@ describe('Results card groups (W10 R1)', () => {
       expect({ id: m[1], ...place }).toEqual({ id: m[1], group: card, cardTab })
       seen++
     }
-    expect(seen).toBe(15)
+    expect(seen).toBe(17)
   })
 })

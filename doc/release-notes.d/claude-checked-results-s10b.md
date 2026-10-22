@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A checked answer's chart shows on its card and in the docked answer chip as a download, with the footer "Chart drawn from checked evidence · {n} series · {window}", a "Not drawn" line per refused series and a link to the same data in Results; the downloaded image carries the same footer.

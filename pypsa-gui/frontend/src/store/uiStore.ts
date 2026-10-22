@@ -9,6 +9,7 @@ import type { SizingMode } from '../site3d/sizing'
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget } from '../api/flow'
+import type { FlowReturn } from '../layout/flowNavigation'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -464,6 +465,8 @@ interface UIStore {
   // Guided: the field a section item opened in place, in a drawer over the
   // card, so the user finishes it without leaving Guided (design §3.5).
   fieldDrawer: FlowTarget | null
+  // The view the last fix link left; "Back to …" restores it (flowNavigation).
+  flowReturn: FlowReturn | null
   setFieldDrawer: (t: FlowTarget | null) => void
   activeSection: FlowSectionId | null
   setActiveSection: (s: FlowSectionId | null) => void
@@ -509,7 +512,9 @@ interface UIStore {
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
-  solverBlockRequest: 'economic' | null
+  solverBlockRequest: 'economic' | 'sclopf' | null
+  /** Set by showGridReadiness: Issues scrolls to the Grid readiness group once it is mounted. */
+  gridReadinessRequest: boolean
   /** One-shot: Time Series opens on this component's tab with it selected
    *  ("give it a time series", UX-flow #24). */
   timeSeriesFocus: TimeSeriesFocus | null
@@ -658,8 +663,10 @@ interface UIStore {
   clearResultsSectionRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
-  requestSolverBlock: (block: 'economic') => void
+  requestSolverBlock: (block: 'economic' | 'sclopf') => void
   clearSolverBlockRequest: () => void
+  requestGridReadiness: () => void
+  clearGridReadinessRequest: () => void
   focusTimeSeries: (type: string, name: string, opts?: { field?: string; openEditor?: boolean }) => void
   clearTimeSeriesFocus: () => void
   requestSettingsSection: (section: string) => void
@@ -730,6 +737,7 @@ export const useUIStore = create<UIStore>((set) => ({
   siteSizing: 'installed',
   activeSlidePanel: null,
   fieldDrawer: null,
+  flowReturn: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
   activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
@@ -748,6 +756,7 @@ export const useUIStore = create<UIStore>((set) => ({
   resultsSectionRequest: null,
   economicsTabRequest: null,
   solverBlockRequest: null,
+  gridReadinessRequest: false,
   timeSeriesFocus: null,
   runSolveRequest: 0,
   settingsSectionRequest: null,
@@ -994,6 +1003,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
   clearSolverBlockRequest: () => set({ solverBlockRequest: null }),
+  requestGridReadiness: () => set({ gridReadinessRequest: true }),
+  clearGridReadinessRequest: () => set({ gridReadinessRequest: false }),
   focusTimeSeries: (type, name, opts) => set({
     timeSeriesFocus: { type, name, ...opts }, activeSlidePanel: 'timeseries', activeSection: 'profiles',
   }),

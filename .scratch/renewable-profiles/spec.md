@@ -85,6 +85,10 @@ Each requirement is testable. The ticket files hold the acceptance tests.
 - Partial-year horizons: see RP-Q3. The recommended answer slices the
   weather year to the snapshots' month-day-hour window, with the leap-day
   rules unchanged.
+- Regular multi-hour steps (RP-03, landed): a constant whole-hour step takes
+  the mean of the hourly series over each step, for the renewable and load
+  families; irregular or non-whole-hour steps, a step over a local-clock DST
+  gap, and other families are refused by name (`step_*` error kinds).
 - Each relaxation of an apply refusal names its new rule in `apply.py`'s
   rule table and is reviewed by the gatekeeper (data write).
 

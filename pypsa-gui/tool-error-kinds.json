@@ -1111,6 +1111,22 @@
       "surface": "inline",
       "why": "apply_equipment_mapping refused because the network moved between the card the user approved and the live write (another edit, or a different digest on the HTTP apply). Nothing was written; the assistant proposes the edit again, per call."
     },
+    "step_not_whole_hours": {
+      "surface": "inline",
+      "why": "The model's snapshot step is not a whole number of hours, so a generated profile cannot be averaged onto it. The detail names the step; the assistant tells the user to use hourly or whole-hour steps."
+    },
+    "step_irregular": {
+      "surface": "inline",
+      "why": "Multi-hour snapshots whose steps differ in length. The detail names the shortest step; the assistant explains that one constant step is needed."
+    },
+    "step_over_dst_gap": {
+      "surface": "inline",
+      "why": "A multi-hour step covers the skipped spring hour of a local clock. The detail names it; the assistant offers UTC or hourly snapshots."
+    },
+    "step_aggregation_unsupported": {
+      "surface": "inline",
+      "why": "A multi-hour step with a profile that has no defined step mean (a floor or other bound), or across several investment periods. The assistant says only renewable and load profiles are averaged and offers hourly snapshots."
+    },
     "batch_refused": {
       "surface": "inline",
       "why": "apply_generated_profiles found members that cannot be applied (carrier mismatch, a point the job lacks, an unaligned series). Nothing was written; the detail names every bad member and the assistant reports them, per call."
@@ -1142,6 +1158,10 @@
     "unsupported_document_format": {
       "surface": "inline",
       "why": "preview_document_values / apply_document_values (data-to-model slice 2) was pointed at an upload that is not a PDF. The assistant uses the import that fits the upload (a table goes to preview_equipment_mapping), per call."
+    },
+    "commercial_preflight_failed": {
+      "surface": "inline",
+      "why": "apply_commercial_document_values (data-to-model slice 2) refused values from a PDF for the import tariff or a PPA: with them the commercial preflight (or the solver-config save's binding) reports an error the stored config does not have. Nothing was written; the assistant says which check failed, per call."
     }
   }
 }

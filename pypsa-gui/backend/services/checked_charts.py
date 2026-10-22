@@ -113,9 +113,29 @@ def dataset(record, requested):
                          "snapshots": len(window)}
 
 
+def readable(start, end):
+    """"1 Jan 2026, 00:00–23:00", or both dates when the window spans days."""
+    import pandas as pd
+
+    try:
+        a, b = pd.Timestamp(start), pd.Timestamp(end)
+    except (TypeError, ValueError):
+        return f"{start} to {end}"
+    day = lambda t: f"{t.day} {t:%b %Y}"  # noqa: E731
+    return f"{day(a)}, {a:%H:%M}–{b:%H:%M}" if day(a) == day(b) else f"{day(a)}, {a:%H:%M} – {day(b)}, {b:%H:%M}"
+
+
+def readable_stamp(stamp):
+    """"21 Oct 2026, 04:20 UTC" for an ISO time in UTC."""
+    import pandas as pd
+
+    t = pd.Timestamp(stamp)
+    return f"{t.day} {t:%b %Y}, {t:%H:%M} UTC"
+
+
 def caption(slots, window):
     lines = [f"Chart drawn from checked evidence · {sum(s['disposition'] == 'drawn' for s in slots)} series · "
-             f"{window['start']} to {window['end']}"]
+             f"{readable(window['start'], window['end'])}"]
     lines += [f"Not drawn: {s['series'].replace('_', ' ')} — {s['title']}" for s in slots if s["disposition"] != "drawn"]
     return lines
 
@@ -143,7 +163,7 @@ def render(ctx, record, requested):
 
     drawn_at = datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")
     # The drawing is as of this solve; an image outlives its evidence and must say when.
-    lines = caption(slots, window) + [f"Checked against the solve of {drawn_at} · evidence {record['evidence_id']}"]
+    lines = caption(slots, window) + [f"Drawn {readable_stamp(drawn_at)} from checked evidence · evidence {record['evidence_id']}"]
     png = _draw(record, data, lines)
     project, root, _owner = assistant_tools._project()
     byte_hash = hashlib.sha256(png).hexdigest()
@@ -200,10 +220,21 @@ def _draw(record, data, lines):
                     label = data["axis_labels"][name]
             axis.set_ylabel(label, fontsize=8)
             axis.legend(fontsize=8)
-        axes[-1].set_xlabel(f"Snapshot ({data['index'][0]} to {data['index'][-1]})", fontsize=8)
-        axes[-1].xaxis.get_major_locator().set_params(integer=True)
+        # Snapshot times on the axis: at most eight labelled ticks, each a real snapshot.
+        import pandas as pd
+
+        step = max(1, math.ceil(len(x) / 8))
+        ticks = x[::step]
+        try:
+            labels = [f"{pd.Timestamp(data['index'][i]).day} {pd.Timestamp(data['index'][i]):%b %H:%M}" for i in ticks]
+        except (TypeError, ValueError):
+            labels = [str(data["index"][i]) for i in ticks]
+        for axis in axes:
+            axis.set_xticks(ticks)
+        axes[-1].set_xticklabels(labels, fontsize=7)
+        axes[-1].set_xlabel("Snapshot", fontsize=8)
         scope = record["request_scope"]
-        axes[0].set_title(f"{scope['entity_id']} · {scope['profile']}", fontsize=10)
+        axes[0].set_title(f"{scope['entity_id']} · {scope['profile'].split('/')[0].replace('-', ' ')}", fontsize=10)
         figure.text(0.01, 0.01, "\n".join(lines), fontsize=7, va="bottom", ha="left")
         figure.tight_layout(rect=(0, 0.04 + 0.025 * len(lines), 1, 1))
         buffer = io.BytesIO()
@@ -211,7 +242,7 @@ def _draw(record, data, lines):
     return buffer.getvalue()
 
 
-EXPIRED_NOTE = "checked against the solve of {drawn_at}; evidence expired, not re-verified now"
+EXPIRED_NOTE = "drawn {drawn_at}; its evidence has expired, so it was not re-verified now"
 
 
 def verify(manifest):

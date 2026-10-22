@@ -867,7 +867,7 @@ def _pointer(row_label: str, it: dict) -> dict:
     title, entity = it.get("title"), it["target"].get("entity")
     text = f"{title} ({entity})" if title and entity else title or it["message"]
     return {"section": it["target"]["section"], "message": f"{row_label}: {text}",
-            "detail": it["message"], "target": it["target"]}
+            "detail": it["message"], "code": it["code"], "target": it["target"]}
 
 
 def project_flow(project_dir: pathlib.Path, *, cache_key: str, db=None,

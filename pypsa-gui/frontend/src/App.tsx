@@ -34,12 +34,14 @@ import DecisionPanel from './pages/decision/DecisionPanel'
 import ReportsPanel from './pages/ReportsPanel'
 import EconomicsPanel from './pages/economics/EconomicsPanel'
 import CommercialLibraryPage from './pages/economics/CommercialLibraryPage'
-import CampusElectricalPanel, { CampusResultsPanel, CampusStudyPanel } from './pages/CampusElectricalPanel'
+import CampusElectricalPanel, { CampusStudyPanel } from './pages/CampusElectricalPanel'
+import CampusResultsAlias from './pages/CampusResultsAlias'
 import ProfileStudioSection from './pages/ProfileStudioSection'
 import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import { FieldDrawer } from './components/FieldDrawer'
+import { FlowReturnButton } from './layout/FlowReturnButton'
 import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -181,7 +183,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'reports':    return <ReportsPanel />
     case 'campusElectrical': return <CampusElectricalPanel />
     case 'campusStudy': return <CampusStudyPanel />
-    case 'campusResults': return <CampusResultsPanel />
+    case 'campusResults': return <CampusResultsAlias />
     case 'profiles':   return <ProfileStudioSection />
     case 'settings':   return <LocalSettings />
     case 'hubDesign':  return <HubDesignPanel />
@@ -818,6 +820,7 @@ export default function App() {
           )}
         </div>
 
+        <FlowReturnButton />
         <StatusBar />
         <CommandPalette />
         <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />

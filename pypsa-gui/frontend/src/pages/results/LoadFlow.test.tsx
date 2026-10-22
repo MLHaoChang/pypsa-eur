@@ -1,6 +1,6 @@
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -155,6 +155,9 @@ function renderPage() {
   )
 }
 
+// The "AC power flow was not part of this run" pill (Run again, W10 R2) is also "Not modelled".
+const lossesPills = (els: HTMLElement[]) => els.filter(e => !e.closest('[data-testid="loadflow-run-again"]'))
+
 it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapshot', async () => {
   renderPage()
   // KPI tiles round to the R1 standard (3 s.f.), so the tile shows 424 MW.
@@ -166,8 +169,8 @@ it('renders a distinctive peak-flow KPI sourced from a single mocked line/snapsh
 it('says losses were not modelled instead of showing 0 MWh, and links to Solver settings', async () => {
   // The default fixture has `enabled: false` — transmission_losses was off.
   // One section-level state, not three identical tiles.
-  const { findAllByText, queryByText, getByRole } = renderPage()
-  expect((await findAllByText('Not modelled')).length).toBe(1)
+  const { queryAllByText, queryByText, getByRole } = renderPage()
+  await waitFor(() => expect(lossesPills(queryAllByText('Not modelled')).length).toBe(1))
   expect(queryByText('Total energy lost')).toBeNull()
   expect(document.querySelector('[data-kpi-value="0 MWh"]')).toBeNull()
   getByRole('button', { name: 'Turn on in Solver settings' }).click()
@@ -179,9 +182,9 @@ it('shows real loss figures when losses were modelled, including a computed zero
     enabled: true, total_mwh: 0, peak_mw: 0, total_demand_mwh: 100,
     loss_pct_of_demand: 0, by_branch: [],
   })
-  const { queryByText } = renderPage()
+  const { queryAllByText } = renderPage()
   await findKpiValue('0 MWh')
-  expect(queryByText('Not modelled')).toBeNull()
+  expect(lossesPills(queryAllByText('Not modelled'))).toHaveLength(0)
 })
 
 it('says branch loading does not apply when the network has no lines or transformers', async () => {
@@ -214,4 +217,17 @@ it('says line flows have not run when the network has lines but no solved flows'
   expect(queryByText('No data.')).toBeNull()
   expect(queryByText('No line flow time-series.')).toBeNull()
   expect(queryByText(/^Lines \(0\)/)).toBeNull()
+})
+
+it('Run again is the header Run, through the gate; without AC power flow it says so and links to Solver settings', async () => {
+  const before = useUIStore.getState().runSolveRequest
+  const { findByTestId, getByTestId } = renderPage()
+  const btn = await findByTestId('loadflow-run-again-btn')
+  expect(btn.textContent).toBe('Run again')
+  expect(btn.getAttribute('title')).toContain('whole solve')
+  btn.click()
+  expect(useUIStore.getState().runSolveRequest).toBe(before + 1)
+  expect(getByTestId('loadflow-run-again').textContent).toContain('AC power flow was not part of this run')
+  getByTestId('loadflow-switch-on-acpf').click()
+  expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
 })
