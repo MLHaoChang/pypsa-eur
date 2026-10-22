@@ -162,3 +162,23 @@ def test_an_edited_limit_makes_the_checked_evidence_stale(hub, checked):
     assert calculations.scoped_source(ctx, scope)["rows"] == rows
     with pytest.raises(HTTPException):
         assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+
+
+def test_a_limits_file_appearing_makes_the_checked_evidence_stale(hub, checked):
+    from fastapi import HTTPException
+
+    from harness import calculations
+    from services import assurance_records
+    from services.adequacy import grid_limits
+
+    ctx, path = hub
+    scope = {"version": 1, "profile": R.PROFILE, "project_id": ctx.project_uuid, "entity_id": "network",
+             "retain": False}
+    assert not (path / grid_limits.SIDECAR_NAME).exists()
+    assert calculations.scoped_source(ctx, scope)["limits_sha256"] is None
+    record = assurance_records.capture_scoped(assurance_records.actor_id(), scope)
+    assert assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
+    grid_limits.set_limit(path, "fault_level", source="code", note="TSO letter")
+    assert calculations.scoped_source(ctx, scope)["limits_sha256"] is not None
+    with pytest.raises(HTTPException):
+        assurance_records.evidence(assurance_records.actor_id(), record["evidence_id"])
