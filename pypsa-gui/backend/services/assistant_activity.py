@@ -39,6 +39,8 @@ def _status(native):
         'ready': 'paused', 'paused': 'paused', 'partial': 'partial',
         'waiting_for_approval': 'waiting_for_approval',
         'waiting_for_input': 'waiting_for_input', 'decision_recorded': 'decision_recorded',
+        # Plans: waiting on a run's job; paused at a card until the user continues (LC-23 COP-1).
+        'waiting_job': 'running', 'paused_at_card': 'waiting_for_input',
     }.get(native, 'unavailable')
 
 
@@ -82,9 +84,9 @@ def _tasks(root: Path, project: str, owner: str):
                 if path.stem != source_id or not isinstance(task.get('steps'), list):
                     raise ValueError('invalid checkpoint')
                 state = task['status']
-                valid_steps = {'pending', 'running', 'uncertain', 'failed', 'completed'}
+                valid_steps = {'pending', 'running', 'waiting', 'uncertain', 'failed', 'completed'}
                 if (not isinstance(task.get('title'), str)
-                        or not 1 <= len(task['steps']) <= 12
+                        or not 1 <= len(task['steps']) <= (24 if task.get('brief') else 12)
                         or any(not isinstance(step, dict) or step.get('status') not in valid_steps
                                for step in task['steps'])
                         or (state == 'completed' and any(step['status'] != 'completed' for step in task['steps']))):

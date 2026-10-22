@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): A sensitivity case's record (`sensitivity_case.json`) now travels with project bundles, copies and Saved snapshots, but not into scenario forks. Run evidence (`run_evidence/`) travels with bundles and copies; snapshots leave it alone, so restoring an older snapshot never erases later run history.

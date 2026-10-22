@@ -3,11 +3,12 @@
 // renderer replaces each card's four hand-written lists (read-out rows,
 // `startEdit` keys, save mapping, edit inputs). Derived rows (capital cost,
 // a battery's lifetime and fixed O&M) are shown read-only, never typed.
-import { Fragment, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import type { AssetFieldSpec, AssetSchema, ProvenanceEntry } from '../../api/assetSchema'
 import { ProvenanceChip } from '../../components/ProvenanceChip'
 import type { Bus, Carrier } from '../../api/types'
-import { derivedStored, displayValue, isRevealed, unitLabel } from '../../utils/assetForm'
+import { ReferenceApplyDrawer } from '../../pages/results/investment/ReferenceApplyDrawer'
+import { derivedStored, displayValue, isRevealed, tidy, unitLabel } from '../../utils/assetForm'
 import type { SeriesField } from '../../components/series/useSeriesFields'
 import {
   BusSelect, CarrierGroupSelect, ChkInput, FieldLabel, InfoTip, NumInput, SectionHdr, TxtInput,
@@ -189,6 +190,43 @@ function PartsTable({ parts, fs, set, stamps }: { parts: AssetFieldSpec[]; fs: F
   )
 }
 
+// The cost fields whose stamp carries a money year, shown beside the unit:
+// on its own line under the field ("In 2025 €"). A value is in the money year it was priced in.
+const MONEY_FIELDS: ReadonlySet<string> = new Set(['overnight_cost', 'fom_cost'])
+
+function moneyYear(key: string, stamps: Stamps): string | null {
+  const entry = MONEY_FIELDS.has(key) ? stamps?.[key] : undefined
+  return entry?.currency_year == null ? null : `${entry.currency_year} ${unitLabel(entry.currency ?? 'EUR')}`
+}
+
+/** The open form takes in what an applied reference wrote (stored → display), so a later
+ *  Save writes the applied values back unchanged instead of the form's stale ones. */
+export function appliedFields(schema: AssetSchema, written: Record<string, number>): FS {
+  const out: FS = {}
+  for (const f of schemaFields(schema)) {
+    if (f.key in written && !f.derived) out[f.key] = tidy(written[f.key] * f.scale)
+  }
+  return out
+}
+
+/** The asset-side entry to the Library's cost references: a link beside the investment
+ *  cost that opens the compare-and-apply drawer for this asset, and returns to the form. */
+function CompareReferences({ componentClass, name, money, onApplied }: {
+  componentClass: 'Generator' | 'Link'; name: string; money: string | null
+  onApplied: (written: Record<string, number>) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="col-span-2 -mt-0.5 flex gap-2 text-[9px]">
+      {money && <span className="text-muted" data-testid="asset-money-overnight_cost">In {money}</span>}
+      <button type="button" className="text-[9px] text-accent underline" data-testid="asset-compare-references"
+        onClick={() => setOpen(true)}>Compare with references</button>
+      {open && <ReferenceApplyDrawer open onClose={() => setOpen(false)} componentClass={componentClass} name={name}
+        onApplied={onApplied} />}
+    </div>
+  )
+}
+
 /**
  * The edit form's fields. `current` feeds the derived rows; `onCheck` hooks a
  * boolean's side effect (Extendable seeds the minimum); `after` places a card's
@@ -222,6 +260,9 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
   // the first of them would have been (the Investment group).
   const parts = schemaFields(schema).filter(f => f.part && !f.derived)
   const firstPart = parts[0]?.key
+  // Generators and Links can take a shipped cost reference (wind, PV, electrolysers).
+  const referenceClass = schema.component === 'Generator' || schema.component === 'Link' ? schema.component : null
+  const assetName = typeof current.name === 'string' ? current.name : null
   return (
     <>
       {schema.groups.map(g => {
@@ -254,6 +295,13 @@ export function AssetFieldsEdit({ schema, fs, set, current, carriers, buses, onC
                         ? `${f.help ?? ''} The constant the ${series[f.key].editor} editor starts from; a series set there replaces it.`.trim()
                         : f.help}
                       badge={chipOf(provenance, f.key)} />}
+                {f.key === 'overnight_cost' && referenceClass && assetName ? (
+                  <CompareReferences componentClass={referenceClass} name={assetName} money={moneyYear(f.key, provenance)}
+                    onApplied={written => set(prev => ({ ...prev, ...appliedFields(schema, written) }))} />
+                ) : MONEY_FIELDS.has(f.key) && moneyYear(f.key, provenance) && (
+                  <div className="col-span-2 -mt-0.5 text-[9px] text-muted" data-testid={`asset-money-${f.key}`}>
+                    In {moneyYear(f.key, provenance)}</div>
+                )}
                 {!f.derived && f.key !== firstPart && LABEL_ONLY_KINDS.has(f.kind) && chipRow(provenance, f.key)}
                 {f.key !== firstPart && after?.[f.key]}
               </Fragment>

@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Clock, Coins, FileText, FlaskConical,
-  GitBranch, Layers, ListChecks, Scale, Settings2, Table2, TrendingUp, Wand2,
+  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Library, Clock, Coins, FileText, FlaskConical,
+  GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp, Wand2,
 } from 'lucide-react'
 import type { FlowSectionId } from '../../api/flow'
 import { projectsApi } from '../../api/projects'
@@ -14,7 +14,7 @@ import { storedStudyRef, useDecisionStore } from '../../pages/decision/decisionS
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { countOpen } from '../../utils/flowItems'
-import AssetPaletteInline from './AssetPaletteInline'
+import AssetPaletteInline, { DEMAND_PALETTE_SECTION } from './AssetPaletteInline'
 import { SItem, usePanelToggle } from './SidebarRows'
 
 // The rows each flow section holds in the Expert sidebar (workspace-
@@ -57,6 +57,22 @@ function ConnectionRows({ onCloseModal }: Props) {
   )
 }
 
+function LoadRows({ onCloseModal }: Props) {
+  const [addOpen, setAddOpen] = useState(false)
+  return (
+    <>
+      <TableRow label="Loads" tab="Loads" onCloseModal={onCloseModal}
+        title="Every demand and its set point (the Loads table)." />
+      <SItem icon={<Plus size={15} />} label="Add demand"
+        title="Add an electrical, hydrogen or heating demand: click it, or drag it onto the canvas."
+        rightEl={<ChevronDown size={11} className="text-ink-400 shrink-0 transition-transform duration-200"
+          style={{ transform: addOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }} />}
+        onClick={() => setAddOpen(o => !o)} />
+      {addOpen && <AssetPaletteInline only={[DEMAND_PALETTE_SECTION]} />}
+    </>
+  )
+}
+
 function AssetRows({ onCloseModal }: Props) {
   const [assetsOpen, setAssetsOpen] = useState(false)
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
@@ -66,7 +82,7 @@ function AssetRows({ onCloseModal }: Props) {
         rightEl={<ChevronDown size={11} className="text-ink-400 shrink-0 transition-transform duration-200"
           style={{ transform: assetsOpen ? 'rotate(0deg)' : 'rotate(-90deg)' }} />}
         onClick={() => setAssetsOpen(o => !o)} />
-      {assetsOpen && <AssetPaletteInline />}
+      {assetsOpen && <AssetPaletteInline skip={[DEMAND_PALETTE_SECTION]} />}
       <SItem icon={<Layers size={15} />} label="Capacity Bounds"
         title="Set per-technology minimum/maximum build limits, optionally different for each investment period (vintages)."
         active={activeSlidePanel === 'capacityBounds'} onClick={() => toggle('capacityBounds')} />
@@ -91,7 +107,7 @@ function CommercialRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
     <SItem icon={<Coins size={15} />} label="Economics"
-      title="Discount rate, money year and price basis, and the overnight cost of every asset."
+      title="Discount and inflation rates, money basis, asset costs, finance inputs, tariffs, contracts and participants."
       active={activeSlidePanel === 'economics'} onClick={() => toggle('economics')} />
   )
 }
@@ -202,9 +218,7 @@ export function SectionRows({ id, onCloseModal }: { id: FlowSectionId } & Props)
       return <TableRow label="Carriers" tab="Carriers" onCloseModal={onCloseModal}
         title="The carriers the model handles and their units (the Carriers table)." />
     case 'connection': return <ConnectionRows onCloseModal={onCloseModal} />
-    case 'loads':
-      return <TableRow label="Loads" tab="Loads" onCloseModal={onCloseModal}
-        title="Every demand and its set point (the Loads table)." />
+    case 'loads': return <LoadRows onCloseModal={onCloseModal} />
     case 'assets': return <AssetRows onCloseModal={onCloseModal} />
     case 'profiles': return <ProfileRows onCloseModal={onCloseModal} />
     case 'commercial': return <CommercialRows onCloseModal={onCloseModal} />
@@ -218,8 +232,13 @@ export function SectionRows({ id, onCloseModal }: { id: FlowSectionId } & Props)
 export function ProjectUtilityRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
-    <SItem icon={<Camera size={15} />} label="Snapshots"
-      title="Saved copies of the network: restore one, or compare it with the network you have now."
-      active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+    <>
+      <SItem icon={<Camera size={15} />} label="Snapshots"
+        title="Saved copies of the network: restore one, or compare it with the network you have now."
+        active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+      <SItem icon={<Library size={15} />} label="Commercial library"
+        title="Tariffs, contracts, connection agreements and price series your organisation keeps, with the versions a project pins."
+        active={activeSlidePanel === 'library'} onClick={() => toggle('library')} />
+    </>
   )
 }

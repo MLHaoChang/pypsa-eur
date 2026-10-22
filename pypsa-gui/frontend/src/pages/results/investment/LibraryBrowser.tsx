@@ -14,6 +14,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { formatApiDetail } from '../../../api/client'
 import { pinnedVersions, replacesInline, urdbRate, type RateChoice } from './libraryModel'
+import { LibraryReferences } from './LibraryReferences'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
 const KINDS: Array<{ id: LibraryItemKind; label: string }> = [
@@ -287,7 +288,9 @@ function SeriesPanel() {
   )
 }
 
-export default function LibraryBrowser() {
+/** `onOpenInputs`: where the attached item went. The workspace-level page sets it;
+ *  where the browser sits beside its inputs it is left out. */
+export default function LibraryBrowser({ onOpenInputs }: { onOpenInputs?: () => void } = {}) {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [kind, setKind] = useState<LibraryItemKind>('tariff')
@@ -334,7 +337,11 @@ export default function LibraryBrowser() {
         ))}
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
-        {message.text}</p>}
+        {message.text}
+        {message.tone === 'ok' && onOpenInputs && (
+          <>{' '}<button type="button" className="underline" onClick={onOpenInputs}>
+            Open Tariffs &amp; contracts</button></>
+        )}</p>}
       {items.isError && <p role="alert" className="text-danger">{detailText(items.error)}</p>}
       <ul className="space-y-1" data-testid="lib-items">
         {(items.data ?? []).map(r => (
@@ -352,6 +359,7 @@ export default function LibraryBrowser() {
         <UrdbImport onDone={() => { void qc.invalidateQueries({ queryKey: nk(project, 'library', 'items', 'tariff') }) }} />
       )}
       <SeriesPanel />
+      <LibraryReferences />
       <Dialog open={confirm !== null} onClose={() => setConfirm(null)}
               title="Replace the project's import tariff?"
               panelClassName="bg-bg rounded-xl shadow-2xl w-[440px] max-w-[95vw] p-4 space-y-3">

@@ -10,6 +10,9 @@ import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
 import { useGoalStudy } from '../useGoalStudy'
+import { ScopeCards } from '../../../components/flowScope/ScopeCards'
+import { useInScope } from '../../../components/flowScope/useFlowScope'
+import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 export function GoalCard() {
   const { project, running, readiness, voll, vollMissing } = useGoalStudy()
@@ -26,10 +29,19 @@ export function GoalCard() {
     setAdvanced(true)
     useHubDesignStore.getState().setGoalAdvancedRequested(false)
   }, [advancedRequested])
+  // Section 8's scope (W4a): with Reliability › goal & study off, the goal
+  // hides and the study is not run. VOLL stays: the optimisation prices lost
+  // load with it (modular-cards §2).
+  const reliabilityOn = useInScope('reliability', 'goal_study')
   const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
 
   return (
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
+      <ScopeCards testId="hub-scope-cards" collapsed />
+      {!reliabilityOn && (
+        <ScopeGate card="reliability" option="goal_study" testId="hub-goal-out-of-scope">{null}</ScopeGate>
+      )}
+      {reliabilityOn && <>
       <label className="flex flex-col gap-1 text-[12px]">
         <span className="font-semibold text-text">
           <Term k="shortfall_hours">Allowed shortfall (hours per year)</Term>
@@ -66,12 +78,16 @@ export function GoalCard() {
           </label>
         )}
       </div>
+      </>}
 
       {/* The same editor Solver settings mounts: one editor for the stress conditions. */}
       {advanced && (
         <div data-testid="hub-goal-stress" className="flex flex-col gap-1">
           <span className="text-[12px] font-semibold text-text">Stress conditions</span>
-          <StressScenarioEditor project={project} />
+          {/* Reliability › Stress conditions & FMEA owns the editor (W4a). */}
+          <ScopeGate card="reliability" option="stress" testId="hub-goal-stress-scope">
+            <StressScenarioEditor project={project} />
+          </ScopeGate>
         </div>
       )}
 

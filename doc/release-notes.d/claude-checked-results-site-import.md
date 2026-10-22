@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the Load shape tab's grid import, peak import and export for the network, and the weighted hours at the grid connection's limit (`site-import/1`, opt-in); the heatmap, week and monthly views stay unchecked.

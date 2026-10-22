@@ -1018,6 +1018,7 @@ def run_turn(
     binding_generation: int = 0,
     ui_ack: bool = False,
     continuation_job_id: str | None = None,
+    continue_task_id: str | None = None,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1213,6 +1214,19 @@ def run_turn(
                 yield "error", {"error_kind": "continuation_unavailable",
                                 "message": "No finished job of this conversation is waiting to continue."}
                 yield "session_done", {"reason": "continuation_unavailable"}
+                return
+        if continue_task_id is not None:
+            # LC-23 COP-1: the user's Continue clears the plan's card pause.
+            # The harness writes the message; it approves nothing.
+            from services import assistant_tasks as _plans
+            try:
+                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+                    raise ValueError("a plan continue is not a user message")
+                message = _plans.continue_at_card(session, continue_task_id)
+            except (HTTPException, ValueError, OSError):
+                yield "error", {"error_kind": "plan_continue_unavailable",
+                                "message": "This plan is not paused at a card."}
+                yield "session_done", {"reason": "plan_continue_unavailable"}
                 return
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
@@ -2983,6 +2997,29 @@ def _dispatch_real_tool_call(
                 "chat: foreground solve handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
+
+    # Study copilot slice 2: a plan's queued run step (sweep, enqueue) waits on
+    # its solve-queue jobs. The turn is released at once (a queued job is never
+    # a same-turn result); one follower settles the step from native records
+    # and arms one continuation. A partial or cancelled sweep does not wait:
+    # its receipt settles uncertain in finish_step.
+    if (task_ticket is not None and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
+            and isinstance(result, dict) and result.get("status") not in ("partial", "cancelled")):
+        try:
+            from harness import continuation
+            jobs = continuation.queue_jobs(result)
+            if jobs:  # an all-reused sweep has no job: its receipt settles the step
+                assistant_tasks.track_queue_follower(task_ticket)  # before the step reads waiting
+                task_path = assistant_tasks.await_job(task_ticket, None, session.session_id, jobs=jobs)
+                if task_path:
+                    continuation.follow_queue_job(task_path, task_ticket)
+                    result = {**result, "waiting": True, "job_id": jobs[0]["job_id"],
+                              "note": "The plan waits on these queued jobs; the conversation continues when they end."}
+                else:  # the step stopped running during the call: nothing follows, nothing is promised
+                    assistant_tasks.forget_queue_follower(task_ticket)
+        except Exception as exc:  # noqa: BLE001 — the step then stays a start receipt: uncertain
+            assistant_tasks.forget_queue_follower(task_ticket)
+            logger.exception("chat: plan step could not wait on queued jobs: %s", _redact_for_log(exc))
 
     # Issue 11 — adequacy/study mesh handoff. Starters already return
     # {"status": "running"} after publish_study; mint an ad:… handle so
