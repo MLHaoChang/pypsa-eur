@@ -106,6 +106,10 @@ datas = [
     # module (collected by import), its data files are not.
     (str(BACKEND / "services" / "library" / "defaults_pack" / "versions"),
      "services/library/defaults_pack/versions"),
+    # The shipped (common) Library items (GS-EU P2d): `services/library/common.py`
+    # reads `Path(__file__).with_name("common_items")`, a data folder beside the module.
+    (str(BACKEND / "services" / "library" / "common_items"),
+     "services/library/common_items"),
     # The shipped EU cost references (GS-EU): `services/library/europe_reference.py`
     # reads `Path(__file__).with_name("reference_data")`, a data folder beside the module.
     (str(BACKEND / "services" / "library" / "reference_data"),
