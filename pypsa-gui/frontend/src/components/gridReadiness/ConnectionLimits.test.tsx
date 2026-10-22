@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { campusApi } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
@@ -7,7 +7,7 @@ import { ConnectionLimits } from './ConnectionLimits'
 
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
-  return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn() } }
+  return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
 })
 
 const row = (id: string, over: Record<string, unknown> = {}) => ({
@@ -23,6 +23,9 @@ function mount() {
 }
 afterEach(() => { cleanup(); useUIStore.setState({ uiMode: 'expert' }) })
 
+const setting = (item: string, over: Record<string, unknown> = {}) => ({
+  item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
+
 describe('ConnectionLimits', () => {
   it('lists energization, ramp and oscillation read-only with their source and assumed tag', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
@@ -34,7 +37,7 @@ describe('ConnectionLimits', () => {
     expect(screen.getByTestId('connection-limit-oscillation').textContent).toMatch(/Oscillation band/)
     expect(screen.getByTestId('connection-limit-energization_peak').textContent).toMatch(/not known/)
     expect(screen.queryByTestId('connection-limit-scr')).toBeNull()
-    expect(screen.queryByRole('textbox')).toBeNull()
+    expect(screen.queryByTestId('limit-editor-fault_level')).toBeNull()
   })
 
   it('a staged project lists every energization period, not just the first', async () => {
@@ -72,5 +75,58 @@ describe('ConnectionLimits', () => {
     vi.mocked(campusApi.gridReadiness).mockRejectedValue(new Error('x'))
     mount()
     expect(await screen.findByTestId('connection-limits-error')).toBeTruthy()
+  })
+
+  it('saves a ramp limit with its unit, source and note, and reloads the readiness read', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('ramp_rate', { setting: setting('connection_ramp') })] } as never)
+    vi.mocked(campusApi.setGridLimit).mockResolvedValue({})
+    mount()
+    const input = await screen.findByLabelText('Connection ramp limit value')
+    expect(screen.getByText('MW/min', { selector: 'span' })).toBeTruthy()
+    fireEvent.change(input, { target: { value: '12' } })
+    fireEvent.change(screen.getByLabelText('Connection ramp limit source'), { target: { value: 'code' } })
+    fireEvent.change(screen.getByLabelText('Connection ramp limit note'), { target: { value: 'TSO letter' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save connection ramp limit' }))
+    await waitFor(() => expect(campusApi.setGridLimit).toHaveBeenCalledWith('Demo', 'connection_ramp',
+      { value: 12, source: 'code', note: 'TSO letter' }))
+    await waitFor(() => expect(vi.mocked(campusApi.gridReadiness).mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('refuses an out-of-range oscillation value before sending, and shows the backend 422', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('oscillation', { setting: setting('oscillation') })] } as never)
+    mount()
+    const input = await screen.findByLabelText('Oscillation band value')
+    fireEvent.change(input, { target: { value: '150' } })
+    expect((screen.getByRole('button', { name: 'Save oscillation band' }) as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(input, { target: { value: '2' } })
+    vi.mocked(campusApi.setGridLimit).mockRejectedValue({ response: { data: { detail: { error_kind: 'x', message: 'the project is locked' } } } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save oscillation band' }))
+    expect((await screen.findByTestId('limit-error-oscillation')).textContent).toMatch(/locked/)
+  })
+
+  it('the fault level sends a source and note only, never a value', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level', { default: { value: null, source: 'assumed', origin: 'placeholder' } }) })] } as never)
+    vi.mocked(campusApi.setGridLimit).mockResolvedValue({})
+    mount()
+    fireEvent.change(await screen.findByLabelText('Fault level source source'), { target: { value: 'datasheet' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save fault level source' }))
+    await waitFor(() => expect(campusApi.setGridLimit).toHaveBeenCalledWith('Demo', 'fault_level', { source: 'datasheet', note: '' }))
+  })
+
+  it('Reset names what it resets to and deletes the limit', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('ramp_rate', { setting: setting('connection_ramp', {
+      user: { value: 9, source: 'code', note: '' },
+      default: { value: 5, source: 'code', origin: 'template' } }) })] } as never)
+    vi.mocked(campusApi.resetGridLimit).mockResolvedValue({})
+    mount()
+    fireEvent.click(await screen.findByRole('button', { name: "Reset to the template's 5 MW/min, grid code" }))
+    await waitFor(() => expect(campusApi.resetGridLimit).toHaveBeenCalledWith('Demo', 'connection_ramp'))
+  })
+
+  it('with no limit set there is no Reset, and an unset line offers the placeholder as its start', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('ramp_rate', { setting: setting('connection_ramp') })] } as never)
+    mount()
+    expect(await screen.findByLabelText('Connection ramp limit value')).toHaveProperty('value', '5')
+    expect(screen.queryByRole('button', { name: /^Reset/ })).toBeNull()
   })
 })
