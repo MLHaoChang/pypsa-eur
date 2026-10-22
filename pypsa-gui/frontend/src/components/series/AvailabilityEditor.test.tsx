@@ -102,19 +102,30 @@ describe('AvailabilityEditor', () => {
     })))
   })
 
+  it('in Guided, opens the outage rate in place over the card', async () => {
+    useUIStore.getState().setUiMode('guided')
+    renderEditor('guided')
+    await userEvent.click(screen.getByRole('button', { name: 'Forced outages' }))
+    await userEvent.click(screen.getByRole('button', { name: /outage rate and repair time/ }))
+    expect(useUIStore.getState().fieldDrawer).toEqual({ section: 'assets', panel: null,
+      component: 'Generator', entity: 'gt1', field: 'outage_rate_value' })
+  })
+
   it('shows forced outages read-only, leading to the asset\'s outage inputs', async () => {
+    useUIStore.getState().setUiMode('expert')
     useUIStore.getState().setSlidePanel('timeseries')
     renderEditor('expert')
     await userEvent.click(screen.getByRole('button', { name: 'Forced outages' }))
-    expect(screen.getByTestId('forced-outages-note').textContent).toContain('not in the dispatch')
+    expect(screen.getByTestId('forced-outages-note').textContent).toContain('an outage is never counted twice')
     expect(screen.queryByRole('button', { name: /Preview/ })).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: /outage rate and repair time/ }))
     const ui = useUIStore.getState()
     expect(ui.activeSlidePanel).toBeNull()
     expect(ui.selectedComponent).toEqual({ type: 'Generator', name: 'gt1' })
     expect(ui.propertiesEditRequest).toEqual({ type: 'Generator', name: 'gt1' })
-    await userEvent.click(screen.getByRole('button', { name: /reliability study/ }))
+    await userEvent.click(screen.getByRole('button', { name: 'Forced outages are sampled in the reliability study >' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    expect(useUIStore.getState().activeSection).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('adequacy')
     expect(api.generateAvailability).not.toHaveBeenCalled()
   })
@@ -124,7 +135,7 @@ describe('AvailabilityEditor', () => {
     api.fromCurrent.mockResolvedValue({ ...PENDING, job_id: 'job-cur', source: 'current',
       profile_annual_basis: 'window_mean' })
     renderEditor('guided')
-    expect((await screen.findByTestId('current-series')).textContent).toContain('measured upload, 168 h')
+    expect((await screen.findByTestId('current-series')).textContent).toContain('Current availability:measured, 168 h')
     await userEvent.click(screen.getByRole('button', { name: /Refine this series/ }))
     await waitFor(() => expect(api.fromCurrent).toHaveBeenCalledWith('Site A', 'generators', 'p_max_pu', 'gt1'))
     // Advanced opens with the refinement ops; a window source has no shift or smoothing.

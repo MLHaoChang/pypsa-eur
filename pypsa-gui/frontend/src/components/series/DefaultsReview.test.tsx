@@ -26,9 +26,13 @@ const ROWS = [
     skipped: 'carries a measured upload; never replaced' },
 ]
 
+const openEditor = vi.fn()
+
 function renderIt() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><DefaultsReview project="Site A" /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}>
+    <DefaultsReview project="Site A" onOpenEditor={{ families: new Set(['load']), open: openEditor }} />
+  </QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -60,14 +64,29 @@ describe('DefaultsReview', () => {
     api.applyDefaults.mockResolvedValue({ applied: 1, undo: 'one undo', results: [
       { job_id: 'j1', component: 'office', applied: false, error_kind: 'measured_series_kept',
         message: "'office' carries a measured upload now; a default never replaces it" },
-      { job_id: 'j2', component: 'misc', applied: true }] })
+      { job_id: 'j2', component: 'misc', applied: true, peak: 1.7, before: { peak: 1, mean: 1, min: 1 } }] })
     renderIt()
     await screen.findByTestId('reason-office')
     await userEvent.click(screen.getByRole('button', { name: /Apply 2 defaults/ }))
     await waitFor(() => expect(api.applyDefaults).toHaveBeenCalledWith('Site A', ['j1', 'j2']))
     const out = await screen.findByTestId('defaults-result')
-    expect(out.textContent).toContain('Applied 1. One undo reverts them all.')
-    expect(out.textContent).toContain('office: \'office\' carries a measured upload now')
+    expect(out.textContent).toContain('Applied 1. One undo (Ctrl+Z) reverts them all.')
+    expect(screen.getByTestId('defaults-applied-misc').textContent).toBe('misc: peak 1 → 1.7 MW')
+    // A row that was kept says why and leads to its own editor.
+    const kept = screen.getByTestId('defaults-failed-office')
+    expect(kept.textContent).toContain('office: \'office\' carries a measured upload now')
+    await userEvent.click(within(kept).getByRole('button', { name: 'Open its editor >' }))
+    expect(openEditor).toHaveBeenCalledWith('office', 'load')
+  })
+
+  it('leads a skipped row to its editor, and says why Apply is off', async () => {
+    api.previewDefaults.mockResolvedValue({ rows: [ROWS[2]] })
+    renderIt()
+    const skipped = await screen.findByTestId('defaults-skipped')
+    await userEvent.click(within(skipped).getByRole('button', { name: 'Open its editor >' }))
+    expect(openEditor).toHaveBeenCalledWith('metered', 'load')
+    expect(screen.getByTestId('defaults-apply-reason').textContent)
+      .toBe('Every component already has a series, or is skipped for the reason shown.')
   })
 
   it('leaves an unticked row out', async () => {

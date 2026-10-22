@@ -1220,7 +1220,7 @@ def apply_default_series(
             continue
         results.append({"job_id": job_id, "component": component, "applied": True,
                         "warnings": summary.get("warnings", []),
-                        "peak": summary.get("peak")})
+                        "peak": summary.get("peak"), "before": summary.get("before")})
     return {"results": results,
             "applied": sum(r["applied"] for r in results),
             "undo": "one undo reverts every series applied here"}

@@ -14,7 +14,17 @@ import { WarningList, WeekChart } from './SeriesKit'
 const fmt = (v: number | undefined, d = 2) =>
   v == null ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: d })
 
-export default function DefaultsReview({ project }: { project: string }) {
+/** A row's fix target: its own series editor, for the families the host
+ *  can open one for (no link where it cannot: no dead ends). */
+export interface OpenEditor {
+  families: ReadonlySet<string>
+  open: (component: string, family: string) => void
+}
+
+export default function DefaultsReview({ project, onOpenEditor }: {
+  project: string
+  onOpenEditor?: OpenEditor
+}) {
   const qc = useQueryClient()
   const [replace, setReplace] = useState(false)
   const [peakSized, setPeakSized] = useState<string[]>([])
@@ -84,7 +94,12 @@ export default function DefaultsReview({ project }: { project: string }) {
         <div className="mt-2" data-testid="defaults-skipped">
           <p className="text-muted text-[10px] uppercase">Skipped</p>
           <ul className="list-disc pl-4 text-[11px]">
-            {skipped.map(r => <li key={`${r.family}:${r.component}`}><b>{r.component}</b>: {r.skipped}</li>)}
+            {skipped.map(r => (
+              <li key={`${r.family}:${r.component}`}>
+                <b>{r.component}</b>: {r.skipped}
+                <EditorLink component={r.component} family={r.family} onOpenEditor={onOpenEditor} />
+              </li>
+            ))}
           </ul>
         </div>
       )}
@@ -93,19 +108,49 @@ export default function DefaultsReview({ project }: { project: string }) {
         <Btn variant="primary" onClick={() => apply.mutate()} disabled={!ticked.size || apply.isPending || preview.isPending}>
           <Check size={13} /> Apply {ticked.size} default{ticked.size === 1 ? '' : 's'}
         </Btn>
+        {!ticked.size && !preview.isPending && (
+          <span className="text-[11px] text-muted" data-testid="defaults-apply-reason">
+            {planned.length ? 'Tick a row to apply its default.' : 'Every component already has a series, or is skipped for the reason shown.'}
+          </span>
+        )}
         {apply.isError && <span className="text-red-600">{errorText(apply.error)}</span>}
       </div>
       {result && (
         <div className="mt-2 text-[11px]" data-testid="defaults-result">
-          <p className="text-green-700">Applied {result.applied}. One undo reverts them all.</p>
+          <p className="text-green-700">Applied {result.applied}. One undo (Ctrl+Z) reverts them all.</p>
           <ul className="list-disc pl-4">
-            {result.results.filter(x => !x.applied).map(x => (
-              <li key={x.job_id} className="text-amber-700">{x.component ?? x.job_id}: {x.message}</li>
+            {result.results.filter(x => x.applied).map(x => (
+              <li key={x.job_id} data-testid={`defaults-applied-${x.component}`}>
+                {x.component}: peak {x.before ? `${fmt(x.before.peak)} → ` : ''}{fmt(x.peak)} MW
+              </li>
             ))}
+            {result.results.filter(x => !x.applied).map(x => {
+              const row = x.component ? planned.find(r => r.component === x.component) : undefined
+              return (
+                <li key={x.job_id} className="text-amber-700" data-testid={`defaults-failed-${x.component ?? x.job_id}`}>
+                  {x.component ?? 'A default'}: {x.message}
+                  {x.component && row && (
+                    <EditorLink component={x.component} family={row.family} onOpenEditor={onOpenEditor} />
+                  )}
+                </li>
+              )
+            })}
           </ul>
         </div>
       )}
     </div>
+  )
+}
+
+function EditorLink({ component, family, onOpenEditor }: {
+  component: string; family: string; onOpenEditor?: OpenEditor
+}) {
+  if (!onOpenEditor?.families.has(family)) return null
+  return (
+    <button type="button" className="ml-1 text-accent hover:underline"
+      onClick={() => onOpenEditor.open(component, family)}>
+      Open its editor &gt;
+    </button>
   )
 }
 

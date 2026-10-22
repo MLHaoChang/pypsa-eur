@@ -24,6 +24,7 @@ import { Dialog } from '../components/Dialog'
 import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
 import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import SeriesEditor from '../components/series/SeriesEditor'
+import { fieldLabel } from '../components/series/SeriesKit'
 import DefaultsReview from '../components/series/DefaultsReview'
 
 const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
@@ -771,7 +772,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
         type="button"
         onClick={e => { e.stopPropagation(); onDownload() }}
         className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Download single-generator ${attrLabel} template for '${gen.name}'`}
+        title={`Download single-generator ${fieldLabel(attrLabel)} template for '${gen.name}'`}
       >
         <Download size={12} />
       </button>
@@ -780,8 +781,8 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
           type="button"
           onClick={e => { e.stopPropagation(); onEdit() }}
           className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-          title={`Generate the ${attrLabel} series of '${gen.name}'`}
-          aria-label={`Edit the ${attrLabel} series of ${gen.name}`}
+          title={`Edit the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
+          aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${gen.name}`}
         >
           <SlidersHorizontal size={12} />
         </button>
@@ -790,7 +791,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
         type="button"
         onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
         className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload ${attrLabel} profile for '${gen.name}' (single-column file)`}
+        title={`Upload a measured ${fieldLabel(attrLabel)} file for '${gen.name}' (single-column file)`}
       >
         <Upload size={12} />
       </button>
@@ -799,7 +800,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
           type="button"
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
-          title={`Delete ${attrLabel} profile for '${gen.name}'`}
+          title={`Delete the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
         >
           <Trash2 size={12} />
         </button>
@@ -883,8 +884,8 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
           type="button"
           onClick={e => { e.stopPropagation(); onEdit() }}
           className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-          title={`Generate the ${attrLabel} series of '${link.name}'`}
-          aria-label={`Edit the ${attrLabel} series of ${link.name}`}
+          title={`Edit the ${fieldLabel(attrLabel)} series of '${link.name}'`}
+          aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${link.name}`}
         >
           <SlidersHorizontal size={12} />
         </button>
@@ -893,7 +894,7 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
         type="button"
         onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
         className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload ${attrLabel} profile for '${link.name}' (single-column file)`}
+        title={`Upload a measured ${fieldLabel(attrLabel)} file for '${link.name}' (single-column file)`}
       >
         <Upload size={12} />
       </button>
@@ -902,7 +903,7 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
           type="button"
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
-          title={`Delete ${attrLabel} profile for '${link.name}'`}
+          title={`Delete the ${fieldLabel(attrLabel)} series of '${link.name}'`}
         >
           <Trash2 size={12} />
         </button>
@@ -1015,8 +1016,22 @@ export default function TimeSeriesManager() {
       if (cat == null) return
       setActiveTab(cat === 'renewable' || cat === 'dr' ? cat : 'conventional')
     }
+    const conventional = focus.type === 'Link' || (focus.type === 'Generator'
+      && !['renewable', 'dr'].includes((genProfiles as Record<string, GeneratorProfileMeta>)[focus.name]?.category ?? ''))
+    const slot = focus.field === 'p_min_pu' || focus.field === 'marginal_cost' ? focus.field : 'p_max_pu'
+    if (focus.field && focus.type === 'Generator' && conventional) setConvAttr(slot)
+    if (focus.field && focus.type === 'Link') setLinkAttr(slot)
     setSelectedName(focus.name)
     setSelectedNames(new Set())
+    if (focus.openEditor) {
+      if (focus.type === 'Load') setSeriesEditor({ family: 'load', component: focus.name, tab: 'archetype' })
+      else if (conventional) {
+        const componentType = focus.type === 'Link' ? 'links' : 'generators'
+        setSeriesEditor(slot === 'marginal_cost'
+          ? { family: 'price', component: focus.name, componentType }
+          : { family: 'availability', component: focus.name, componentType })
+      }
+    }
     clearFocus()
   }, [focus, genProfiles, clearFocus])
 
@@ -1280,7 +1295,7 @@ export default function TimeSeriesManager() {
       }
       const n = result.matched.length, u = result.unmatched.length
       const attrLabel = variables.attribute
-      const msg = `Generator ${attrLabel} uploaded: ${result.rows} rows for ${n} generator${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
+      const msg = `Generator ${fieldLabel(attrLabel)} uploaded: ${result.rows} rows for ${n} generator${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
@@ -1312,7 +1327,7 @@ export default function TimeSeriesManager() {
       }
       const n = result.matched.length, u = result.unmatched.length
       const attrLabel = variables.attribute
-      const msg = `Link ${attrLabel} uploaded: ${result.rows} rows for ${n} link${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
+      const msg = `Link ${fieldLabel(attrLabel)} uploaded: ${result.rows} rows for ${n} link${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
@@ -2141,7 +2156,13 @@ export default function TimeSeriesManager() {
             <button type="button" aria-label="Close" className="text-muted hover:text-text"
               onClick={() => setDefaultsOpen(false)}><X size={14} /></button>
           </div>
-          <DefaultsReview project={currentProject} />
+          <DefaultsReview project={currentProject} onOpenEditor={{
+            families: new Set(['load']),
+            open: component => {
+              setDefaultsOpen(false)
+              setSeriesEditor({ family: 'load', component, tab: 'archetype' })
+            },
+          }} />
         </Dialog>
       )}
       {seriesEditor && currentProject && (

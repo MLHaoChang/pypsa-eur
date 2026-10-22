@@ -5,6 +5,7 @@
 // never has two editors that silently override each other.
 import { useQueries } from '@tanstack/react-query'
 import { seriesApi, type CurrentSeries } from '../../api/profiles'
+import { provenanceWord } from './SeriesKit'
 
 export interface SeriesField {
   /** The series' short description when one is set; null for the constant. */
@@ -14,9 +15,9 @@ export interface SeriesField {
 }
 
 export function describeSeries(c: CurrentSeries): string {
-  if (c.provenance === 'uploaded') return 'measured upload'
-  const kind = c.kind ? String(c.kind).replace(/_/g, ' ') : c.family ?? 'generated'
-  return `${kind}${c.refinements ? ', refined' : ''}`
+  const word = provenanceWord(c.provenance)
+  const kind = word !== 'measured' && c.kind ? `, ${String(c.kind).replace(/_/g, ' ')}` : ''
+  return `${word}${kind}${c.refinements ? ', refined' : ''}`
 }
 
 export function useSeriesFields(

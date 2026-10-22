@@ -12,7 +12,7 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { Play, Upload } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 const SCALE_KEYS = new Set(['peak_mw', 'annual_mwh', 'preset'])
 const UNITS = ['kW', 'MW', 'kWh', 'MWh']
@@ -118,9 +118,13 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
               ))}
             </div>
           )}
-          <Btn variant="primary" onClick={() => generate.mutate()} disabled={!scale || busy}>
-            <Play size={12} /> Preview
-          </Btn>
+          <div className="flex items-center gap-2">
+            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!scale || busy}>
+              <Play size={12} /> Preview
+            </Btn>
+            <DisabledReason reason={scale ? null
+              : `Enter ${scaleKind === 'peak' ? 'a peak in MW' : 'the annual energy in MWh'} to preview.`} />
+          </div>
         </div>
       ) : (
         <div className="mt-2 space-y-1">
@@ -142,9 +146,12 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
             <input aria-label="Rescale to annual MWh" className={`${INPUT} w-24`} placeholder="MWh, optional"
               value={annual} onChange={e => setAnnual(e.target.value)} />
           </label>
-          <Btn variant="primary" onClick={() => upload.mutate()} disabled={!file || busy}>
-            <Upload size={12} /> Read file
-          </Btn>
+          <div className="flex items-center gap-2">
+            <Btn variant="primary" onClick={() => upload.mutate()} disabled={!file || busy}>
+              <Upload size={12} /> Read file
+            </Btn>
+            <DisabledReason reason={file ? null : 'Choose a meter file to read.'} />
+          </div>
         </div>
       )}
 
@@ -155,7 +162,7 @@ export default function LoadSeriesEditor({ project, component, mode, initialTab 
           {pending.unmatched?.length ? (
             <p className="text-[11px] text-muted mt-1">Not loads here: {pending.unmatched.join(', ')}</p>
           ) : null}
-          <PendingCard project={project} component={component} pending={pending} power />
+          <PendingCard project={project} component={component} pending={pending} power attribute="p_set" />
           {advanced && <RefinePanel project={project} pending={pending} power onRefined={setPending} />}
         </>
       )}

@@ -73,7 +73,7 @@ def test_each_row_says_what_it_guessed_and_why(client, site):
     assert "no match in the name 'misc'" in rows["misc"]["reason"]
     assert all(r["assumed"] for r in rows.values() if "job_id" in r)
     assert "hydrogen" in rows["electrolyser_feed"]["skipped"]
-    assert "static p_set is 0" in rows["spare"]["skipped"]
+    assert "its fixed load is 0 MW" in rows["spare"]["skipped"]
     assert "measured upload" in rows["metered"]["skipped"]
     assert rows["office"]["week"]["label"] == "peak week"
 

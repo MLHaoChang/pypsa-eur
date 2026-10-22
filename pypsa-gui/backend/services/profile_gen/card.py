@@ -59,6 +59,14 @@ def _artifact(args: dict) -> tuple[pd.Series, dict]:
                      dtype=float), meta
 
 
+# The target field in plain words (the card is user-facing copy).
+_OP = {"scale_peak_to": "peak target", "scale_window": "hour window",
+       "set_floor": "floor", "set_cap": "cap", "shift": "shift", "smooth": "smoothing",
+       "rescale_energy": "energy target"}
+_FIELD = {"p_set": "Load", "p_max_pu": "Availability", "p_min_pu": "Must-run floor",
+          "marginal_cost": "Price", "inflow": "Inflow", "efficiency": "COP"}
+
+
 def _stats(n, values: np.ndarray, power: bool, weighting: str) -> dict[str, float]:
     if power:
         w = n.snapshot_weightings[weighting].to_numpy(dtype=float)
@@ -100,8 +108,8 @@ def preview(args: dict) -> list[dict]:
              "min": unit}
     cls = _CLASS[ct]
     rows = [{"component_class": cls, "name": component, "field": f"{attr}.{k}",
-             "label": f"{attr} {k.replace('_mwh', '').replace('_', ' ')}"
-                      + (" (weighted, model snapshots)" if k == "load_factor" else ""),
+             "label": ("Load factor (weighted, model snapshots)" if k == "load_factor"
+                       else f"{_FIELD.get(attr, 'Series')} {k.replace('_mwh', '')}"),
              "old": round(old[k], 6), "new": round(new[k], 6), "unit": units[k], "role": "typed"}
             for k in new]
     differ = int((~np.isclose(old_v, new_v)).sum())
@@ -111,7 +119,7 @@ def preview(args: dict) -> list[dict]:
     ops = meta.get("refinements") or []
     if ops:
         rows.append(_note(cls, component, "refinements",
-                          "refined by " + ", ".join(str(o.get("op")) for o in ops)))
+                          "refined by " + ", ".join(_OP.get(str(o.get("op")), "an edit") for o in ops)))
     return rows
 
 
@@ -178,7 +186,7 @@ def preview_batch(args: dict) -> list[dict]:
             ct = (meta.get("target") or ["loads"])[0]
             sub.append(_note(_CLASS.get(ct, ""), one["component"], "default",
                              f"assumed: {default.get('reason')}; sized by its "
-                             f"{default.get('sizing')} (static p_set "
+                             f"{default.get('sizing')} (fixed load "
                              f"{default.get('static_p_set_mw')} MW)"))
         rows += sub
     return rows

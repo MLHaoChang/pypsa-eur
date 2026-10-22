@@ -61,6 +61,14 @@ describe('LoadSeriesEditor', () => {
     expect(screen.getByLabelText('shifts')).toBeTruthy()
   })
 
+  it('says in place why Preview is off and what turns it on', async () => {
+    renderEditor('guided')
+    expect(screen.getByRole('button', { name: /Preview/ })).toHaveProperty('disabled', true)
+    expect(screen.getByTestId('disabled-reason').textContent).toBe('Enter a peak in MW to preview.')
+    await userEvent.type(screen.getByLabelText('Peak MW'), '80')
+    expect(screen.queryByTestId('disabled-reason')).toBeNull()
+  })
+
   it('opens the archetype parameters in Expert', async () => {
     renderEditor('expert')
     await screen.findByRole('option', { name: 'industrial' })
@@ -100,14 +108,14 @@ describe('LoadSeriesEditor', () => {
   it('applies the pending series and says undo reverts it', async () => {
     api.generateLoad.mockResolvedValue(PENDING)
     api.apply.mockResolvedValue({ component: 'plant', component_type: 'loads', attribute: 'p_set',
-      peak: 80, mean: 40, min: 20, warnings: [] })
+      peak: 80, mean: 40, min: 20, before: { peak: 10, mean: 10, min: 10 }, warnings: [] })
     renderEditor()
     await screen.findByRole('option', { name: 'industrial' })
     await userEvent.type(screen.getByLabelText('Peak MW'), '80')
     await userEvent.click(screen.getByRole('button', { name: /Preview/ }))
     await userEvent.click(await screen.findByRole('button', { name: /Apply to plant/ }))
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith('Site A', { job_id: 'job-1', component: 'plant' }))
-    expect((await screen.findByTestId('applied')).textContent).toContain('Undo reverts it')
+    expect((await screen.findByTestId('applied')).textContent).toBe("Applied to plant's load: peak 10 → 80 MW. Undo (Ctrl+Z) reverts it.")
   })
 
   it('holds Apply when the preview says this network cannot take the series', async () => {

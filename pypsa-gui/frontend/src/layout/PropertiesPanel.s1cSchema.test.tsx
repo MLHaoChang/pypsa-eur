@@ -180,7 +180,7 @@ describe('a field a series editor also writes (UX review §6.2)', () => {
     await openEditWithSeries(<LoadCard load={LOAD} onRename={() => {}} />, [['loads', [LOAD]]],
       [[['series-current', 'Demo', 'loads', 'p_set', 'demand'], { exists: true, provenance: 'uploaded', rows: 8760 }]])
     expect(screen.getByTestId('asset-series-p_set').textContent)
-      .toBe('Demand: Time series set (measured upload). Edit it in Profile.')
+      .toBe('Demand: Time series set (measured). Edit it in Profile.')
     expect(screen.queryByLabelText(/Demand/)).toBeNull()
   })
 })

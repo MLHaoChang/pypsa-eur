@@ -1394,6 +1394,9 @@ def assign_profile(
     warnings, target, family_name = p.warnings, p.target, p.family_name
     align_meta, recorded_basis, unit_meta = p.align_meta, p.recorded_basis, p.unit_meta
     n = ctx.network
+    # What the field held before the write, for the receipt's old → new.
+    old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
+    before = {"peak": float(old.max()), "mean": float(old.mean()), "min": float(old.min())}
 
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).
@@ -1455,6 +1458,7 @@ def assign_profile(
         "mean": float(aligned.mean()),
         "min": float(aligned.min()),
         "peak": float(aligned.max()),
+        "before": before,
         **({"modelled_mwh": unit_meta["modelled_mwh"],
             "profile_annual_mwh": unit_meta["profile_annual_mwh"]}
            if target.kind == "power" else {}),

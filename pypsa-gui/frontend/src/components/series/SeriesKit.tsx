@@ -10,8 +10,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import { Check, Plus, Trash2, Wand2 } from 'lucide-react'
 import { Btn, Tag } from '../PageKit'
+import { StatePill } from '../ResultState'
 import {
-  errorText, seriesApi,
+  errorKind, errorText, seriesApi,
   type PendingSeries, type PreviewWeek, type RefineOp, type SeriesApplyResult, type SeriesStats,
 } from '../../api/profiles'
 
@@ -23,6 +24,30 @@ export type EditorMode = 'guided' | 'expert'
 
 const fmt = (v: number | undefined | null, digits = 1) =>
   v == null || Number.isNaN(v) ? '—' : v.toLocaleString(undefined, { maximumFractionDigits: digits })
+
+/** A series field in plain words, never its PyPSA attribute. */
+const FIELD_LABELS: Record<string, string> = {
+  p_set: 'load', p_max_pu: 'availability', p_min_pu: 'must-run floor',
+  marginal_cost: 'price', inflow: 'inflow', efficiency: 'COP',
+}
+export const fieldLabel = (attribute: string) => FIELD_LABELS[attribute] ?? 'series'
+
+/** Provenance in the five plain words: measured, generated, assumed, from
+ *  the network, missing. A generated series' backend record reads
+ *  "synthetic/assumed"; only a guessed default is "assumed". */
+export function provenanceWord(provenance: string | null | undefined, assumed = false): string {
+  if (provenance == null) return assumed ? 'assumed' : 'generated'
+  if (provenance === 'uploaded' || provenance.startsWith('measured')) return 'measured'
+  if (provenance === 'network') return 'from the network'
+  if (provenance === 'missing') return 'missing'
+  return assumed ? 'assumed' : 'generated'
+}
+
+/** Why a button is off, and what turns it on: shown in place, never only
+ *  as a tooltip (no dead ends). */
+export function DisabledReason({ reason }: { reason: string | null }) {
+  return reason ? <span className="text-[11px] text-muted" data-testid="disabled-reason">{reason}</span> : null
+}
 
 function sumModelled(m: Record<string, number> | null | undefined): number | null {
   if (!m) return null
@@ -50,11 +75,10 @@ export function CurrentSeriesLine({
     onSuccess: onPending,
   })
   if (!data?.exists) return null
-  const what = data.provenance === 'uploaded' ? 'measured upload'
-    : `${data.provenance ?? 'generated'}${data.kind ? `, ${String(data.kind).replace(/_/g, ' ')}` : ''}`
+  const what = `${provenanceWord(data.provenance)}${data.kind ? `, ${String(data.kind).replace(/_/g, ' ')}` : ''}`
   return (
     <div className="flex items-center gap-2 text-[11px] mb-2" data-testid="current-series">
-      <span className="text-muted">Current {attribute}:</span>
+      <span className="text-muted">Current {fieldLabel(attribute)}:</span>
       <span>{what}, {data.rows} h{data.refinements ? `, refined ×${data.refinements}` : ''}</span>
       <Btn onClick={() => take.mutate()} disabled={take.isPending}><Wand2 size={12} /> Refine this series</Btn>
       {take.isError && <span className="text-red-600" data-testid="current-error">{errorText(take.error)}</span>}
@@ -92,13 +116,15 @@ export function WarningList({ warnings, testId }: { warnings: string[]; testId?:
     <ul className="mt-1 text-[11px] text-amber-700 space-y-0.5" data-testid={testId}>
       {warnings.map(w => {
         const { code, text } = splitWarning(w)
-        const title = code ? (SERIES_WARNING_TITLES[code] ?? code.replace(/_/g, ' ')) : null
+        // An unmapped code shows its sentence alone; the code stays in the
+        // data attribute for support and search, never in the copy.
+        const title = code ? SERIES_WARNING_TITLES[code] ?? null : null
         return (
-          <li key={w}>
+          <li key={w} data-code={code ?? undefined}>
             {title ? (
               <details>
                 <summary className="cursor-pointer">{title}</summary>
-                <p className="pl-3 text-[10px]">{text} <span className="text-muted font-mono">({code})</span></p>
+                <p className="pl-3 text-[10px]">{text}</p>
               </details>
             ) : text}
           </li>
@@ -158,12 +184,14 @@ export function WeekChart({ week, unit }: { week: PreviewWeek; unit?: string }) 
 
 /** One pending artifact for one component: its numbers, warnings and Apply. */
 export function PendingCard({
-  project, component, pending, power, unit, onApplied,
+  project, component, pending, power, unit, onApplied, attribute,
 }: {
   project: string
   component: string
   pending: PendingSeries
   power: boolean
+  /** The target field, for the receipt's wording. */
+  attribute?: string
   /** The unit of a non-power series' min/mean/max (MW for an inflow). */
   unit?: string
   onApplied?: (r: SeriesApplyResult) => void
@@ -186,14 +214,20 @@ export function PendingCard({
   // The preview ran apply's own alignment; when it could not, apply refuses
   // the same way, so the button would only fail.
   const blocked = warnings.find(w => w.startsWith('not_applicable:'))
+  // Made from a series that has changed since, or against a connection
+  // that has: the shared "Out of date" pill, with the reason beside it.
+  const stale = errorKind(apply.error) === 'current_changed_since_refinement'
+    || warnings.some(w => w.startsWith('connection_changed_since_refinement:'))
+  const u = power ? ' MW' : unit ? ` ${unit}` : ''
 
   return (
     <div className="border border-border rounded p-2 mt-2" data-testid="pending-card">
       <div className="flex items-center gap-2 mb-1">
-        <Tag tone={pending.provenance?.startsWith('measured') ? 'ok' : 'neutral'}>
-          {pending.provenance ?? 'synthetic/assumed'}
+        <Tag tone={provenanceWord(pending.provenance) === 'measured' ? 'ok' : 'neutral'}>
+          {provenanceWord(pending.provenance, pending.assumed === true)}
         </Tag>
         {pending.refinements?.length ? <Tag tone="purple">refined</Tag> : null}
+        {stale && <StatePill state="stale" />}
       </div>
       {power ? (
         <dl className="grid grid-cols-3 gap-1 text-[11px]">
@@ -219,15 +253,22 @@ export function PendingCard({
       )}
       <WarningList warnings={warnings} testId="pending-warnings" />
       <div className="flex items-center gap-2 mt-2">
-        <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending || !!blocked}
-          title={blocked ? 'This network cannot take the series yet; see the warning' : undefined}>
+        <Btn variant="primary" onClick={() => apply.mutate()} disabled={apply.isPending || !!blocked}>
           <Check size={13} /> Apply to {component}
         </Btn>
+        {blocked && (
+          <span className="text-[11px] text-muted" data-testid="apply-blocked">
+            This network cannot take the series yet: see the warning above.
+          </span>
+        )}
         {apply.isError && <span className="text-[11px] text-red-600" data-testid="apply-error">{errorText(apply.error)}</span>}
       </div>
       {applied && (
         <div className="text-[11px] text-green-700 mt-1" data-testid="applied">
-          Applied to {applied.component} {applied.attribute} (peak {fmt(applied.peak, 3)}). Undo reverts it.
+          Applied to {applied.component}&apos;s {fieldLabel(applied.attribute ?? attribute ?? '')}:
+          {' '}{power ? 'peak' : 'max'} {applied.before ? `${fmt(applied.before.peak, 3)} → ` : ''}{fmt(applied.peak, 3)}{u}
+          {!power && <>, min {applied.before ? `${fmt(applied.before.min, 3)} → ` : ''}{fmt(applied.min, 3)}{u}</>}.
+          {' '}Undo (Ctrl+Z) reverts it.
           <WarningList warnings={applied.warnings ?? []} />
         </div>
       )}
@@ -274,7 +315,7 @@ function describe(op: RefineOp): string {
   const o = op as Record<string, unknown>
   switch (op.op) {
     case 'scale_peak_to':
-      return o.of ? `peak to ${Number(o.fraction) * 100} % of ${String(o.of).replace(/_/g, ' ')}`
+      return o.of ? `peak to ${Number(o.fraction) * 100} % of the ${o.of === 'connection' ? 'grid connection' : 'current peak'}`
         : `peak to ${o.mw ?? o.value}`
     case 'scale_window': {
       const [s, e] = o.hours as number[]
@@ -303,6 +344,8 @@ export function RefinePanel({
   // A series read from a snapshot window knows no hours outside it: no
   // shift or smoothing, and its energy target is the window's MWh.
   const windowSource = pending.profile_annual_basis === 'window_mean'
+  const addMissing = !d.a ? (d.kind === 'scale_window' ? 'Enter the hours and the factor to add this edit.' : 'Enter a value to add this edit.')
+    : d.kind === 'scale_window' && (!d.b || !d.c) ? 'Enter the hours and the factor to add this edit.' : null
   const kinds = (Object.keys(OP_LABELS) as OpKind[]).filter(k => (power || k !== 'rescale_energy')
     && !(windowSource && (k === 'shift' || k === 'smooth')))
 
@@ -334,9 +377,10 @@ export function RefinePanel({
           </select>
         )}
         <Btn onClick={() => { setOps([...ops, draftToOp(d, power, windowSource)]); setD({ ...d, a: '', b: '', c: '' }) }}
-          disabled={!d.a || (d.kind === 'scale_window' && (!d.b || !d.c))}>
+          disabled={!!addMissing}>
           <Plus size={12} /> Add
         </Btn>
+        {addMissing && <span className="text-[11px] text-muted" data-testid="refine-add-reason">{addMissing}</span>}
       </div>
       {ops.length > 0 && (
         <ol className="mt-1 text-[11px] list-decimal pl-5" data-testid="refine-ops">
@@ -353,6 +397,7 @@ export function RefinePanel({
         <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending}>
           <Wand2 size={12} /> Refine
         </Btn>
+        {!ops.length && <span className="text-[11px] text-muted">Add an edit above to refine.</span>}
         {refine.isError && <span className="text-[11px] text-red-600" data-testid="refine-error">{errorText(refine.error)}</span>}
       </div>
     </div>

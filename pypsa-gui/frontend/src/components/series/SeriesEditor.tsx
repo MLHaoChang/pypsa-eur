@@ -14,7 +14,7 @@ import { useMutation } from '@tanstack/react-query'
 import { Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
-import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 export type SeriesKind = 'tou' | 'inflow' | 'cop'
 
@@ -116,9 +116,13 @@ export default function SeriesEditor({ project, component, kind, componentType =
     return p
   }
 
-  const ready = kind === 'tou'
-    ? !!currency && !!moneyYear && (advanced ? periods.every(p => p.name && p.rate !== '') : !!peak && !!offPeak)
-    : kind === 'inflow' ? !!annual : !!sink
+  const missing = kind === 'tou'
+    ? (!currency || !moneyYear ? 'Enter the currency and its money year to preview.'
+      : advanced ? (periods.every(p => p.name && p.rate !== '') ? null : 'Name each period and give it a rate to preview.')
+        : peak && offPeak ? null : 'Enter the peak and off-peak prices to preview.')
+    : kind === 'inflow' ? (annual ? null : 'Enter the annual inflow to preview.')
+      : sink ? null : 'Enter the supply temperature to preview.'
+  const ready = missing == null
 
   const generate = useMutation({
     mutationFn: () => seriesApi.generateSeries(project, { kind, components: [component], params: params() }),
@@ -267,16 +271,20 @@ export default function SeriesEditor({ project, component, kind, componentType =
         </div>
       )}
 
-      <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
-        <Play size={12} /> Preview
-      </Btn>
+      <div className="flex items-center gap-2">
+        <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
+          <Play size={12} /> Preview
+        </Btn>
+        <DisabledReason reason={missing} />
+      </div>
 
       {generate.error && <p className="text-[11px] text-red-600 mt-1" data-testid="editor-error">{errorText(generate.error)}</p>}
 
       {pending && (
         <>
           <PendingCard project={project} component={component} pending={pending} power={false}
-            unit={kind === 'inflow' ? 'MW' : kind === 'tou' ? (typeof pending.unit === 'string' ? pending.unit : undefined) : undefined} />
+            unit={kind === 'inflow' ? 'MW' : kind === 'tou' ? (typeof pending.unit === 'string' ? pending.unit : undefined) : undefined}
+            attribute={kind === 'inflow' ? 'inflow' : kind === 'cop' ? 'efficiency' : 'marginal_cost'} />
           {advanced && <RefinePanel project={project} pending={pending} power={false} onRefined={setPending} />}
         </>
       )}

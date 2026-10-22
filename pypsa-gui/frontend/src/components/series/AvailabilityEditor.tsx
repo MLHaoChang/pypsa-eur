@@ -18,7 +18,10 @@ import { Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
-import { CurrentSeriesLine, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
+import {
+  openFlowTarget, openFlowTargetInPlace, openSectionInExpert, openSectionInGuided,
+} from '../../layout/flowNavigation'
+import { CurrentSeriesLine, DisabledReason, INPUT, PendingCard, RefinePanel, type EditorMode } from './SeriesKit'
 
 type Kind = 'maintenance' | 'must_run' | 'derating' | 'forced_outages'
 
@@ -41,14 +44,18 @@ interface Window { from: string; to: string; available: string }
 const pct = (s: string) => Number(s) / 100
 const num = (s: string) => (s === '' ? undefined : Number(s))
 
-/** Open the asset's edit form in Properties (leaving the Time Series panel,
- *  if this editor sits in its drawer) and bring its forced-outage rate into
- *  view, focused: the in-form scroll the outage note leads to. */
+/** Open the asset's forced-outage rate the way every flow item's field opens
+ *  (in place over the card in Guided, its Properties in Expert) and bring it
+ *  into view, focused: the in-form scroll the outage note leads to. */
 export function revealOutageInputs(type: 'Generator' | 'Link', name: string) {
   const ui = useUIStore.getState()
-  if (ui.activeSlidePanel === 'timeseries') ui.setSlidePanel(null)
-  ui.setSelectedComponent({ type, name })
-  ui.requestPropertiesEdit({ type, name })
+  const target = { section: 'assets' as const, panel: null, component: type, entity: name,
+    field: 'outage_rate_value' }
+  if (ui.uiMode === 'guided') openFlowTargetInPlace(target)
+  else {
+    openFlowTarget(target)
+    ui.requestPropertiesEdit({ type, name })
+  }
   let tries = 0
   const find = () => {
     const label = Array.from(document.querySelectorAll('label'))
@@ -91,9 +98,12 @@ export default function AvailabilityEditor({ project, component, componentType, 
   const [threshold, setThreshold] = useState('')
   const [perK, setPerK] = useState('')
 
+  // The reliability study is the Results section's adequacy tab: opened
+  // through the shared section navigation, in the mode the user is in.
   const openReliability = () => {
     const ui = useUIStore.getState()
-    ui.setSlidePanel('results')
+    if (ui.uiMode === 'guided') openSectionInGuided('results')
+    else openSectionInExpert('results')
     ui.requestResultsTab('adequacy')
   }
   const editOutageInputs = () =>
@@ -116,11 +126,15 @@ export default function AvailabilityEditor({ project, component, componentType, 
     }
   }
 
-  const ready = kind === 'maintenance'
-    ? (dated ? windows.every(w => w.from && w.to && w.available !== '') : !!weeks)
+  const missing = kind === 'maintenance'
+    ? (dated ? (windows.every(w => w.from && w.to && w.available !== '') ? null
+      : 'Give each window its dates and availability to preview.')
+      : weeks ? null : 'Enter the weeks of maintenance to preview.')
     : kind === 'must_run'
-      ? (seasonal ? !!winter && !!summer : !!share)
-      : !!floor
+      ? (seasonal ? (winter && summer ? null : 'Enter the winter and summer shares to preview.')
+        : share ? null : 'Enter the must-run share to preview.')
+      : floor ? null : 'Enter the derating floor to preview.'
+  const ready = missing == null
 
   const generate = useMutation({
     mutationFn: () => seriesApi.generateAvailability(project, {
@@ -146,14 +160,13 @@ export default function AvailabilityEditor({ project, component, componentType, 
       )}
       {kind === 'forced_outages' ? (
         <div className="mt-2 border border-border rounded p-2" data-testid="forced-outages-note">
-          <p>Sampled in the reliability study, not in the dispatch.</p>
-          <p className="text-muted text-[11px] mt-1">
+          <p className="text-muted text-[11px]">
             The dispatch keeps planned availability only, so an outage is never counted twice.
           </p>
           <div className="flex items-center gap-3 mt-1">
             <Btn onClick={editOutageInputs}><Pencil size={12} /> Edit the outage rate and repair time</Btn>
-            <button type="button" className="text-[11px] text-accent underline" onClick={openReliability}>
-              Open the reliability study
+            <button type="button" className="text-[11px] text-accent hover:underline" onClick={openReliability}>
+              Forced outages are sampled in the reliability study &gt;
             </button>
           </div>
         </div>
@@ -247,9 +260,12 @@ export default function AvailabilityEditor({ project, component, componentType, 
             </div>
           )}
 
-          <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
-            <Play size={12} /> Preview
-          </Btn>
+          <div className="flex items-center gap-2">
+            <Btn variant="primary" onClick={() => generate.mutate()} disabled={!ready || generate.isPending}>
+              <Play size={12} /> Preview
+            </Btn>
+            <DisabledReason reason={missing} />
+          </div>
         </div>
       )}
 
@@ -257,7 +273,8 @@ export default function AvailabilityEditor({ project, component, componentType, 
 
       {pending && kind !== 'forced_outages' && (
         <>
-          <PendingCard project={project} component={component} pending={pending} power={false} />
+          <PendingCard project={project} component={component} pending={pending} power={false}
+            attribute={kind === 'must_run' ? 'p_min_pu' : 'p_max_pu'} />
           {advanced && <RefinePanel project={project} pending={pending} power={false} onRefined={setPending} />}
         </>
       )}

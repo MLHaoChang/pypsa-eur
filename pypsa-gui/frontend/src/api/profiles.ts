@@ -91,6 +91,13 @@ export interface ApplyResult {
   warnings?: string[]
 }
 
+/** The `error_kind` of a typed refusal, if the error carries one. */
+export function errorKind(e: unknown): string | null {
+  const detail = ((e as AxiosError)?.response?.data as { detail?: unknown } | undefined)?.detail
+  return detail && typeof detail === 'object' && 'error_kind' in detail
+    ? String((detail as { error_kind: unknown }).error_kind) : null
+}
+
 export function errorText(e: unknown): string {
   const data = (e as AxiosError)?.response?.data as { detail?: unknown } | undefined
   const detail = data?.detail
@@ -187,7 +194,8 @@ export interface DefaultsApplyResult {
   applied: number
   undo: string
   results: Array<{ job_id: string; component: string | null; applied: boolean;
-    error_kind?: string; message?: string; warnings?: string[] }>
+    error_kind?: string; message?: string; warnings?: string[]
+    peak?: number; before?: { peak: number; mean: number; min: number } | null }>
 }
 
 export interface CurrentSeries {
@@ -214,6 +222,8 @@ export interface PendingSeries {
   qa_warnings?: Array<{ column: string; code: string; message: string }>
   refinements?: Array<Record<string, unknown>>
   weeks?: Record<string, PreviewWeek>
+  /** A guessed default (Generate defaults for all). */
+  assumed?: boolean
   [k: string]: unknown
 }
 
@@ -224,6 +234,8 @@ export interface SeriesApplyResult {
   peak: number
   mean: number
   min: number
+  /** What the field held before this apply (the receipt's old → new). */
+  before?: { peak: number; mean: number; min: number }
   profile_annual_mwh?: number
   modelled_mwh?: Record<string, number>
   warnings: string[]

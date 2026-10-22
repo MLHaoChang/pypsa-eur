@@ -95,9 +95,9 @@ def test_the_card_shows_old_and_new_and_the_receipt_verifies(client, project, bo
         assert rows["p_set.peak"]["new"] == pytest.approx(60.0)
         assert rows["p_set.energy_mwh"]["old"] == pytest.approx(87600.0)
         assert rows["p_set.load_factor"]["label"] == \
-            "p_set load factor (weighted, model snapshots)"
+            "Load factor (weighted, model snapshots)"
         notes = [r["note"] for r in card["rows"] if r["role"] == "note"]
-        assert any("refined by scale_window, scale_peak_to" in t for t in notes)
+        assert any("refined by hour window, peak target" in t for t in notes)
 
         edit_card.require_current("apply_generated_profile", args, card)
         chat_tools.DISPATCHERS["apply_generated_profile"](**args)
@@ -113,6 +113,9 @@ def test_undo_reverts_an_applied_refinement(client, project):
                           json={"job_id": refined["job_id"], "component": "plant",
                                 "time_basis": "UTC"})
     assert applied.status_code == 200, applied.text
+    # The receipt reads old → new: the static 10 MW before, 60 MW after.
+    assert applied.json()["before"]["peak"] == pytest.approx(10.0)
+    assert applied.json()["peak"] == pytest.approx(60.0)
     assert client.post("/api/network/undo").status_code == 200
     payload = client.get("/api/network/timeseries/loads/p_set").json()
     assert "plant" not in payload["columns"]

@@ -86,7 +86,7 @@ def load_defaults(ctx, replace_generated: bool) -> list[dict[str, Any]]:
             continue
         p_set = float(n.loads.at[load, "p_set"])
         if not p_set > 0:
-            rows.append({**row, "skipped": "no size: its static p_set is 0 — state a "
+            rows.append({**row, "skipped": "no size: its fixed load is 0 MW — state a "
                                            "peak or annual energy in the editor"})
             continue
         bus = n.loads.at[load, "bus"]

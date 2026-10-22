@@ -24,6 +24,17 @@ export function openSectionInGuided(id: FlowSectionId): void {
   ui.setSlidePanel('hubDesign')
 }
 
+/** Time Series on one component (W3c's "Next: give it a time series >"):
+ *  its tab, the field's slot when given (p_set, p_max_pu, p_min_pu,
+ *  marginal_cost), and that field's own editor when `openEditor` is set.
+ *  Renewables and demand response have no editor; they open on their row. */
+export function openTimeSeriesFor(
+  type: 'Load' | 'Generator' | 'Link', name: string,
+  opts: { field?: string; openEditor?: boolean } = {},
+): void {
+  useUIStore.getState().focusTimeSeries(type, name, opts)
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {

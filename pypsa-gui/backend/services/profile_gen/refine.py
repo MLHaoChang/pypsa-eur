@@ -361,8 +361,8 @@ def _run(ctx, series, meta, ops, component_type, attribute, *, replaying: bool) 
                     except InvalidRefineOpError:
                         now = None
                     if now is None or now["hash"] != op["connection"].get("hash"):
-                        where = (f"the connection is now {now['value']:g} MW "
-                                 f"({now['source']})" if now else
+                        where = (f"the grid connection {now['link']!r} is now "
+                                 f"{now['value']:g} MW" if now else
                                  "the point-of-connection link is gone")
                         warnings.append(
                             f"{CONNECTION_CHANGED_WARNING}: op {i} kept its recorded "
