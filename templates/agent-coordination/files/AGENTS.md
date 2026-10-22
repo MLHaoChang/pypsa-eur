@@ -24,6 +24,15 @@ A work session sends each question in that same form to the coordinator with `se
 - Never force-push or rewrite history; merge commits only.
 - No model identifiers in commit messages, PR titles or PR bodies.
 
+## Change discipline
+
+<!-- Paraphrased from karpathy-guidelines (forrestchang/andrej-karpathy-skills, MIT) and ponytail (DietrichGebert/ponytail, MIT); see .scratch/design-skills/skills-top10-assessment.md. -->
+
+- Change only what the task needs; leave unrelated code, comments and formatting alone.
+- Before writing new code, reuse what the codebase, the standard library or an installed dependency already has.
+- Never cut validation, error handling, security or accessibility to keep a change small.
+- End your report by naming what you skipped and any risk it leaves.
+
 ## Release notes
 
 Add a new file under `{{RELEASE_NOTES_DIR}}/`. See `{{RELEASE_NOTES_DIR}}/README.md` for the file name and format.
