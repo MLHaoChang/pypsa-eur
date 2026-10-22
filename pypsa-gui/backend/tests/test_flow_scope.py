@@ -96,6 +96,51 @@ def test_data_centre_preset_exemplifies_grid_control_and_reliability():
     assert eff["options"]["commercial"] == ["tariffs"]         # investment case: not yet
 
 
+# ── availability follows the separability matrix (W0) ───────────────────────
+
+def _matrix_row(kind, *, runnable):
+    from services.run_separability import Row
+    return Row(kind, kind, "supported" if runnable else "unsupported", runnable,
+               entry="-", inputs="-", outputs="-", locks_and_state="-",
+               implicit_steps="-", freshness="-", evidence=())
+
+
+def test_every_not_yet_row_is_decided_by_the_matrix():
+    # A static not-yet row with no matrix kind could only be flipped by editing
+    # this table; the matrix is the one place that says a kind can run.
+    for key, (status, _reason) in S.AVAILABILITY.items():
+        if status == S.NOT_YET:
+            assert key in S.MATRIX_KIND, key
+
+
+def test_today_the_matrix_clears_none_of_them():
+    from services import run_separability as RS
+    for (card, option), kind in S.MATRIX_KIND.items():
+        assert not RS.runnable(kind), kind
+        assert S.option_status(card, option, has_template=True)[0] == S.NOT_YET
+
+
+def test_a_runnable_matrix_row_makes_its_option_available(monkeypatch):
+    from services import run_separability as RS
+    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
+    assert S.option_status("control", "island_checks", has_template=True) == (S.AVAILABLE, None)
+    # only that one
+    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
+
+
+def test_a_kind_the_matrix_lacks_stays_not_yet(monkeypatch):
+    # §11.1: unknown stays non-runnable.
+    from services import run_separability as RS
+    monkeypatch.delitem(RS.MATRIX, "dynamics")
+    assert S.option_status("control", "dynamics", has_template=True)[0] == S.NOT_YET
+
+
+def test_a_cleared_option_can_be_stored(monkeypatch):
+    from services import run_separability as RS
+    monkeypatch.setitem(RS.MATRIX, "control_checks", _matrix_row("control_checks", runnable=True))
+    assert S._storable("control", "island_checks", has_template=True)
+
+
 def test_reliability_needs_a_template():
     status, reason = S.option_status("reliability", "goal_study", has_template=False)
     assert status == S.NOT_YET and "Energy Hub" in reason
