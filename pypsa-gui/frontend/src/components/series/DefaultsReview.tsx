@@ -142,6 +142,11 @@ export default function DefaultsReview({ project, onOpenEditor }: {
   )
 }
 
+// A default's family in plain words (its kind follows).
+const FAMILY_WORDS: Record<string, string> = {
+  load: 'load archetype', availability: 'availability default', series: 'series default',
+}
+
 function EditorLink({ component, family, onOpenEditor }: {
   component: string; family: string; onOpenEditor?: OpenEditor
 }) {
@@ -149,7 +154,7 @@ function EditorLink({ component, family, onOpenEditor }: {
   return (
     <button type="button" className="ml-1 text-accent hover:underline"
       onClick={() => onOpenEditor.open(component, family)}>
-      Open its editor &gt;
+      Open its editor ›
     </button>
   )
 }
@@ -168,7 +173,7 @@ function FragmentRow({ r, ticked, open, onTick, onOpen, onSizing }: {
           </button>
         </td>
         <td>
-          <span className="mr-1">{(r.kind ?? '').replace(/_/g, ' ')}</span>
+          <span className="mr-1">{FAMILY_WORDS[r.family] ?? 'default'}: {(r.kind ?? '').replace(/_/g, ' ')}</span>
           {r.assumed && <Tag tone="neutral">assumed</Tag>}
           <div className="text-[10px] text-muted" data-testid={`reason-${r.component}`}>{r.reason}</div>
           <WarningList warnings={r.warnings ?? []} />

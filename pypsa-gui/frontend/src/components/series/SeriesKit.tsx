@@ -131,7 +131,7 @@ export function SeriesStateLink({
       <button type="button" className="text-accent hover:underline"
         onClick={() => openTimeSeriesFor(componentType === 'links' ? 'Link' : 'Generator', component,
           { field: attribute })}>
-        Upload in Time Series &gt;
+        Upload in Time Series ›
       </button>
     </div>
   )

@@ -61,7 +61,7 @@ export function assetReadoutItems(schema: AssetSchema | undefined, asset: Record
     const v = f.derived ? derivedStored(f.key, asset) : asset[f.key]
     if (series?.[f.key]?.set) {
       // A series wins over the scalar in the model; show that, not the constant.
-      push(f, { label: f.label, value: `time series (${series[f.key].set})`, tip: f.help })
+      push(f, { label: f.label, value: `Time series, ${series[f.key].set}`, tip: f.help })
       continue
     }
     if (f.kind === 'bool') {

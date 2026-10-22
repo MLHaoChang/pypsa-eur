@@ -1,5 +1,5 @@
 // The deep link into Time Series (`openTimeSeriesFor`, W3c's "Next: give it a
-// time series >"): it opens the component's tab, the field's slot, and that
+// time series ›"): it opens the component's tab, the field's slot, and that
 // field's own editor when asked; a plain focus only selects the row.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen } from '@testing-library/react'
@@ -98,6 +98,6 @@ describe('openTimeSeriesFor', () => {
     await userEvent.upload(input, new File(['x'], 'pv1.csv'))
     const error = await screen.findByTestId('row-upload-error-pv1')
     expect(error.textContent).toContain('The file covers 100 rows; the model has 8760 snapshots')
-    expect(error.textContent).toContain("Download the template (the model's hours, a column named pv1) >")
+    expect(error.textContent).toContain("Download the template (the model's hours, a column named pv1) ›")
   })
 })

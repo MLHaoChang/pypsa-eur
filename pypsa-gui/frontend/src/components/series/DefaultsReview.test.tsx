@@ -75,7 +75,7 @@ describe('DefaultsReview', () => {
     // A row that was kept says why and leads to its own editor.
     const kept = screen.getByTestId('defaults-failed-office')
     expect(kept.textContent).toContain('office: \'office\' carries a measured upload now')
-    await userEvent.click(within(kept).getByRole('button', { name: 'Open its editor >' }))
+    await userEvent.click(within(kept).getByRole('button', { name: 'Open its editor ›' }))
     expect(openEditor).toHaveBeenCalledWith('office', 'load')
   })
 
@@ -83,7 +83,7 @@ describe('DefaultsReview', () => {
     api.previewDefaults.mockResolvedValue({ rows: [ROWS[2]] })
     renderIt()
     const skipped = await screen.findByTestId('defaults-skipped')
-    await userEvent.click(within(skipped).getByRole('button', { name: 'Open its editor >' }))
+    await userEvent.click(within(skipped).getByRole('button', { name: 'Open its editor ›' }))
     expect(openEditor).toHaveBeenCalledWith('metered', 'load')
     expect(screen.getByTestId('defaults-apply-reason').textContent)
       .toBe('Every component already has a series, or is skipped for the reason shown.')

@@ -209,6 +209,9 @@ export interface CurrentSeries {
   last?: string | null
   applied_at?: string | null
   refinements?: number
+  /** A storage unit's inflow only: whether one belongs to this unit
+   *  (`current.inflow_applies`). */
+  applicable?: boolean
 }
 
 export interface PendingSeries {

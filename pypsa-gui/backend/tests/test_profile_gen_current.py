@@ -175,3 +175,16 @@ def test_apply_refuses_once_the_current_series_changed():
     with pytest.raises(CurrentChangedError):
         assign_profile(_ctx(), "plant", series, meta, component_type="loads",
                        attribute="p_set", now=NOW)
+
+
+def test_an_inflow_applies_to_hydro_and_to_a_unit_that_has_one_not_to_a_battery():
+    n = _net()
+    n.add("StorageUnit", "dam", bus="site", carrier="hydro")
+    n.add("StorageUnit", "batt", bus="site", carrier="battery")
+    n.add("StorageUnit", "pond", bus="site", carrier="water")
+    ctx = _ctx()
+    assert describe_current(ctx, "storage_units", "inflow", "dam") == {"exists": False, "applicable": True}
+    assert describe_current(ctx, "storage_units", "inflow", "batt")["applicable"] is False
+    _user_ts[("storage_units", "inflow", "pond")] = pd.Series(1.0, index=n.snapshots)
+    assert describe_current(ctx, "storage_units", "inflow", "pond")["applicable"] is True
+    assert "applicable" not in describe_current(ctx, *KEY)

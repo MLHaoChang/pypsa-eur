@@ -16,6 +16,7 @@ applying it with no ops writes back the same series, bit for bit.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import numpy as np
@@ -42,13 +43,34 @@ _APPLY_RECORD = {"applied_at", "warnings", "modelled_mwh", "profile_annual_mwh",
                  "job_id", "points", "based_on", "project_id"}
 
 
+_INFLOW_CARRIER = re.compile(r"hydro|pumped|phs|reservoir|ror", re.IGNORECASE)
+
+
+def inflow_applies(ctx, component: str) -> bool:
+    """Whether a storage unit takes an inflow: a hydro, pumped-hydro or
+    reservoir carrier, or one that carries an inflow already. A battery does
+    not, so its Properties offer no inflow editor."""
+    n = ctx.network
+    if component not in n.storage_units.index:
+        return False
+    if _INFLOW_CARRIER.search(str(n.storage_units.at[component, "carrier"] or "")):
+        return True
+    if ("storage_units", "inflow", component) in ctx.user_ts:
+        return True
+    inflow = n.storage_units_t.inflow
+    return component in inflow.columns and bool((inflow[component] != 0).any())
+
+
 def describe_current(ctx, component_type: str, attribute: str, component: str) -> dict:
     """What the component carries now: none, a generated series (its family
-    and provenance) or an upload, which has no generator record."""
+    and provenance) or an upload, which has no generator record. For a
+    storage unit's inflow, also whether one applies (`inflow_applies`)."""
+    extra = ({"applicable": inflow_applies(ctx, component)}
+             if (component_type, attribute) == ("storage_units", "inflow") else {})
     key = (component_type, attribute, component)
     series = ctx.user_ts.get(key)
     if series is None:
-        return {"exists": False}
+        return {"exists": False, **extra}
     meta = ctx.user_ts_meta.get(key) or {}
     idx = series.index
     stamps = pd.DatetimeIndex(idx.get_level_values(-1) if isinstance(idx, pd.MultiIndex) else idx)
@@ -63,6 +85,7 @@ def describe_current(ctx, component_type: str, attribute: str, component: str) -
         "last": str(stamps[-1]) if len(stamps) else None,
         "applied_at": meta.get("applied_at"),
         "refinements": len(meta.get("refinements") or []),
+        **extra,
     }
 
 

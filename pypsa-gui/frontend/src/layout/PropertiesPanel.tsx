@@ -13,6 +13,7 @@ import AvailabilityEditor from '../components/series/AvailabilityEditor'
 import { generatorSeriesEditors, useSeriesFields } from '../components/series/useSeriesFields'
 import SeriesEditor from '../components/series/SeriesEditor'
 import { SeriesStateLink } from '../components/series/SeriesKit'
+import { seriesApi } from '../api/profiles'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
@@ -1898,6 +1899,13 @@ function StorageUnitPanel({ name }: { name: string }) {
   const { data: sus = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const su = (sus as StorageUnit[]).find(s => s.name === name)
   const { data: schema } = useAssetSchema('StorageUnit')
+  // An inflow belongs to a hydro-like unit or one that has one already (the
+  // server's `inflow_applies`); a battery gets no inflow editor.
+  const { data: inflow } = useQuery({
+    queryKey: ['series-current', currentProject, 'storage_units', 'inflow', name],
+    queryFn: () => seriesApi.current(currentProject as string, 'storage_units', 'inflow', name),
+    enabled: !!currentProject,
+  })
   if (!su) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
@@ -1905,7 +1913,7 @@ function StorageUnitPanel({ name }: { name: string }) {
         <Row label="Bus" value={su.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StorageUnitCard key={su.name} su={su} mode="detail" onRename={n => setSelectedComponent({ type: 'StorageUnit', name: n })} />
-      {currentProject && (
+      {currentProject && inflow?.applicable && (
         <Section title="Inflow">
           <SeriesEditor key={su.name} project={currentProject} component={su.name} kind="inflow" mode={uiMode} />
         </Section>

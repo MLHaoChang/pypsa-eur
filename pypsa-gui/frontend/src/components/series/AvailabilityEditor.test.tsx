@@ -123,7 +123,7 @@ describe('AvailabilityEditor', () => {
     expect(ui.activeSlidePanel).toBeNull()
     expect(ui.selectedComponent).toEqual({ type: 'Generator', name: 'gt1' })
     expect(ui.propertiesEditRequest).toEqual({ type: 'Generator', name: 'gt1' })
-    await userEvent.click(screen.getByRole('button', { name: 'Forced outages are sampled in the reliability study >' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Forced outages are sampled in the reliability study ›' }))
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().activeSection).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('adequacy')

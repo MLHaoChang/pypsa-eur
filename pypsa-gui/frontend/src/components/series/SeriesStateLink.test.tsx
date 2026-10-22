@@ -33,7 +33,7 @@ describe('SeriesStateLink', () => {
     useUIStore.getState().setUiMode('guided')
     renderIt()
     expect((await screen.findByText('missing')).textContent).toBe('missing')
-    await userEvent.click(screen.getByRole('button', { name: 'Upload in Time Series >' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Upload in Time Series ›' }))
     const ui = useUIStore.getState()
     expect(ui.fieldDrawer).toEqual({ section: 'profiles', panel: 'timeseries', component: null,
       entity: null, field: 'p_max_pu' })
@@ -45,7 +45,7 @@ describe('SeriesStateLink', () => {
     useUIStore.getState().setUiMode('expert')
     renderIt()
     expect(await screen.findByText('measured, 8760 h')).toBeTruthy()
-    await userEvent.click(screen.getByRole('button', { name: 'Upload in Time Series >' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Upload in Time Series ›' }))
     const ui = useUIStore.getState()
     expect(ui.activeSlidePanel).toBe('timeseries')
     expect(ui.activeSection).toBe('profiles')

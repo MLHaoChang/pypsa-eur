@@ -829,7 +829,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
         <p className="px-3 py-1 text-[11px] text-red-600 border-b border-border/40" data-testid={`row-upload-error-${gen.name}`}>
           {uploadError}{' '}
           <button type="button" className="text-accent hover:underline" onClick={onDownload}>
-            Download the template (the model&apos;s hours, a column named {gen.name}) &gt;
+            Download the template (the model&apos;s hours, a column named {gen.name}) ›
           </button>
         </p>
       )}
