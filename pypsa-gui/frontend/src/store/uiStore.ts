@@ -710,7 +710,7 @@ interface UIStore {
   setPaletteMode: (m: PaletteMode) => void
 }
 
-export const useUIStore = create<UIStore>((set) => ({
+export const useUIStore = create<UIStore>((set, get) => ({
   sidebarExpanded: storedSidebarMode() !== 'hidden',
   sidebarMode: storedSidebarMode(),
   rightPanelOpen: true,
@@ -925,8 +925,12 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSiteSizing: (m) => set({ siteSizing: m }),
-  setSlidePanel: (p) => {
+  setSlidePanel: (requested) => {
     navigationChanged()
+    // Profile Studio is Expert-only (RP-Q4): Guided reaches the same generation
+    // through Time Series' weather bar, "Generate defaults for all" and the
+    // assistant, so any request for the panel lands on Time Series there.
+    const p = requested === 'profiles' && get().uiMode !== 'expert' ? 'timeseries' : requested
     const section = p ? PANEL_SECTION[p] : undefined
     set(section ? { activeSlidePanel: p, activeSection: section } : { activeSlidePanel: p })
   },
