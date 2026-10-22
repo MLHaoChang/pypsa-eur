@@ -1,6 +1,6 @@
 # LC-01 — model, tool and parameter discovery
 
-Status: ready-for-agent
+Status: done (#408, 8119972c)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: Existing catalogue, native schemas, ACLs and owned context

@@ -4,6 +4,7 @@
 # P0: output contracts and complete coverage
 
 Status: ready-for-agent
+Progress: Assurance contracts and 133-case gate shipped; implementation-status says P0-P7 open, all-family adapters pending
 Type: task
 Blocked by: None
 

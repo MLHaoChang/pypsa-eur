@@ -1,6 +1,6 @@
 # 20 — Provider parity gaps: cache token accounting and reasoning on the OpenAI wire
 
-Status: ready-for-agent (done 2026-10-06: usage with Anthropic meaning on the OpenAI wire; W4 and per-turn usage in the parity battery)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 07 (done)
 

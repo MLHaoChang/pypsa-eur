@@ -1,6 +1,6 @@
 # 05 — `use_skill` tool, the skill catalogue block, and the `grill` skill
 
-Status: ready-for-agent (done 2026-10-05: `use_skill`, `_skills_block`, `unknown_skill`)
+Status: done (05b94b51, no own PR)
 Type: task
 Blocked by: 04
 

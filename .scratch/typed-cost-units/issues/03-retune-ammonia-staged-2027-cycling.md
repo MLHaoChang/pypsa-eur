@@ -1,6 +1,6 @@
 # Retune `eh_ammonia_staged` so the 2027 Haber-Bosch loop cycles again at honest electrolyser prices
 
-Status: ready-for-agent
+Status: done (#610, 22cd9dc2)
 Type: task
 Blocked by: none (PR #549 merged 2026-10-22)
 Found in: GS-2b (typed cost units, PR #549). Owner decision AMM-RETUNE (`docs/agents/owner-decisions.md`): the

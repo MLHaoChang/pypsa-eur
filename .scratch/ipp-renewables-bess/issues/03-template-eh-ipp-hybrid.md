@@ -1,6 +1,6 @@
 # The template `eh_ipp_hybrid`
 
-Status: needs-triage
+Status: done (#485, d0218df0)
 Type: task
 Blocked by: 01, 02, 07 (owner Q-IPP1–5 answered: all A)
 Gated: **yes** (G5: IC semantics on a generation-only site); UX for the wizard and StartCard lines

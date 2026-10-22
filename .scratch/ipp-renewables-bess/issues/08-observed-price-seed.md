@@ -1,6 +1,6 @@
 # 08: Observed price seed (GS-4): SMARD DE-LU and Energinet DK1, 2024
 
-Status: ready-for-human
+Status: done (#564, c15b4f85)
 
 **Resumed (owner PACE-2, 2026-10-21):** the pause was lifted. The PR opened after #515 and #518 merged. This ticket is built and awaits review.
 

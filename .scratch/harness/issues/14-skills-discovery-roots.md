@@ -1,6 +1,6 @@
 # 14 — User-authored skills: discovery roots and invocation policy
 
-Status: ready-for-agent (done 2026-10-13: `<app data>/skills/` root, invocation flags, `/api/chat/skills` and reload)
+Status: done (05b94b51, no own PR)
 Type: task
 Blocked by: 05 (done)
 

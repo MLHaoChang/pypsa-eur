@@ -1,6 +1,6 @@
 # 15 — `ask_user`: multi-select, a detail body, and presentation intents
 
-Status: ready-for-agent (done 2026-10-07: multi_select, detail, intent; W5 in the parity battery)
+Status: done (05b94b51, no own PR)
 Type: task
 Blocked by: 04 (done)
 

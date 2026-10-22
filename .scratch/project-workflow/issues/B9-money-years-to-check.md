@@ -1,6 +1,6 @@
 # B9. Section 5: a to-check item when asset costs mix money years
 
-Status: ready-for-agent
+Status: done (#583, 1b1aa5cc)
 Type: task
 Blocked by: GS-EU P2b merged (the helper below)
 Owner: whoever owns `services/flow_service.py` (W0 / W4a). GS-EU stays out of that file.

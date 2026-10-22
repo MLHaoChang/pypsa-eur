@@ -4,6 +4,7 @@
 # P1: authorized evidence identity and validity
 
 Status: ready-for-agent
+Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
 

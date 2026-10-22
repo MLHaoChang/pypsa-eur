@@ -1,6 +1,6 @@
 # Wholesale-indexed import price (`import_price_ref`)
 
-Status: needs-triage
+Status: done (#471, 0766c93b)
 Type: task
 Blocked by: —
 Gated: **yes** (LP binding, billing and the IC ledger)

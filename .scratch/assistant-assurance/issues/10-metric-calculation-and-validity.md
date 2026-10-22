@@ -4,6 +4,7 @@
 # Metric semantics, deterministic calculations and raw validity
 
 Status: needs-triage
+Progress: harness/calculations.py with generator, network and storage profiles shipped; other domains, NPV and validity checks pending
 Type: task
 Blocked by: reliability contract review; 01 for computed schema; 02 for raw evidence
 

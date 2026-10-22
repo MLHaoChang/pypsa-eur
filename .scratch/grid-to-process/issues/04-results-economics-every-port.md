@@ -1,6 +1,6 @@
 # Results and compare economics read every Link port; process view
 
-Status: needs-triage
+Status: done (#397, f7f92d5e)
 Type: task
 Blocked by: 02
 Gated: **yes** (economics)

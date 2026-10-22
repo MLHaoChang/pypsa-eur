@@ -1,6 +1,6 @@
 # CP-06b — bound confirmations and complete engineering previews
 
-Status: ready-for-human
+Status: done (#357, 3f45c0e7)
 Baseline: master `e7777aa2e2c086789f1c802d387410a5280dc0cc` (#356)
 
 Deliver a bounded part of CT-19/20 through the existing shared dispatch and

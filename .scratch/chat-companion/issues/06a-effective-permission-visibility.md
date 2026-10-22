@@ -1,6 +1,6 @@
 # CP-06a — current access and confirmation visibility
 
-Status: ready-for-human
+Status: done (#356, e7777aa2)
 Baseline: master `fae95896500d6d74625e94e9f3a546d2d6b405af` (#354)
 
 Deliver the read-only portion of CP-06 (CC-04/06/15, CT-19–20). An authenticated

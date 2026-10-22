@@ -3,7 +3,7 @@
 
 # LC-01A — bounded native component-schema discovery
 
-Status: ready-for-agent
+Status: done (#372, 0b33685c)
 Parent: [LC-01](01-discovery-and-scope.md)
 Starting master: `97867adecd46098cd58c120728cf1eed693ed265` (PR370).
 Branch: `claude/copilot-discovery`; worktree `/workspace/copilot-discovery`.

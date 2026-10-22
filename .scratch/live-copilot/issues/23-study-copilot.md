@@ -4,6 +4,7 @@
 # LC-23 — study copilot: goal → study brief → approved steps → Hand-off
 
 Status: design (phase 1), awaiting gatekeeper plan OK and UX placement OK
+Progress: Slices 1 (#573) and 2 (#582) merged; slice 3 plan card UI and slice 4 hand-off not on master.
 Type: task
 Baseline: master `49791da` plus #542 (LC-05 slice 3, chat-panel continuation), which merges first
 Owner decision: AI-567b (amends AI-567), `docs/agents/owner-decisions.md` (#559)

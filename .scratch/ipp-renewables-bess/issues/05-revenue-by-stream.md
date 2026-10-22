@@ -1,6 +1,6 @@
 # Revenue by stream and curtailment by cause
 
-Status: needs-triage
+Status: done (#515, f35a8f2b)
 Type: task
 Blocked by: 03; placement in 10 › Commercial needs K1/W10
 Gated: told (results reader; no engine change); UX

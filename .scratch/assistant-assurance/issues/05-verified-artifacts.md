@@ -4,6 +4,7 @@
 # P4: charts, tables, reports and delivery provenance
 
 Status: ready-for-agent
+Progress: PNG integrity and JSON/ZIP export shipped; checked chart, report, import and general-export adapters pending
 Type: task
 Blocked by: 02, 03
 

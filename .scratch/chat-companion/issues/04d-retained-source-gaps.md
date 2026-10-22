@@ -1,6 +1,6 @@
 # CP-04d — Retained checked-answer source gaps
 
-Status: ready-for-agent
+Status: done (#327, 622149df)
 Type: implementation
 Baseline: master `147426641` (includes CP-04c #319)
 

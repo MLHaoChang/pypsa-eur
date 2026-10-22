@@ -3,7 +3,7 @@
 
 # RP-01 — coordinates: generator first, refuse when missing
 
-Status: ready-for-agent
+Status: done (#398, 97d1a444)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: the profile stack landed (RP-Q1)

@@ -1,6 +1,6 @@
 # 13 — The session event log: "model-visible means logged", replay and fork
 
-Status: ready-for-agent (done 2026-10-14: part a shadow log, PR #204; part b the log is the source of truth, see Comments)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 08 (done), PR MLHaoChang/pypsa-eur#86 merged (done)
 

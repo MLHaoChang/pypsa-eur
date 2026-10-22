@@ -1,6 +1,6 @@
 # 01 — Harness package skeleton; move the protocol and the catalogue
 
-Status: ready-for-agent (done on `claude/amazing-mendel-m087zw`, 2026-10-05)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: —
 

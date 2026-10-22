@@ -3,7 +3,7 @@
 
 # RP-03 — horizon and weather year from the snapshots
 
-Status: ready-for-agent
+Status: done (#606, 6275e99d)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: gatekeeper review of the rule change (RP-Q3 = A: slice)

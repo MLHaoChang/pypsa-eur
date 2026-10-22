@@ -1,6 +1,6 @@
 # 11 — Expose the harness catalogue to external agents over MCP
 
-Status: ready-for-agent (Q8 decided 2026-10-14: option 2, `../mcp-spec.md` Part B; starts after its blockers)
+Status: done (e1adb0db, no own PR)
 Type: research
 Blocked by: 08 (done), issue 19's client core, the dispatch extraction (`../mcp-spec.md` §Build order, step 3)
 

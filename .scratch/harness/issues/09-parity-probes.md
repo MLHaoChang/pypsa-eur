@@ -1,6 +1,6 @@
 # 09 — Parity probes: same workflow, every provider
 
-Status: ready-for-agent (done 2026-10-05: `--workflow` battery; stub 3/3, live Anthropic 3/3; live OpenAI owed)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 04, 06
 

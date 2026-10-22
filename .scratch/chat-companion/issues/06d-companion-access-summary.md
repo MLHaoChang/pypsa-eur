@@ -1,6 +1,6 @@
 # CP-06d — access summary in in-page chat
 
-Status: ready-for-human
+Status: done (#361, c75ca558)
 Execution: implemented and squash merged in [PR #361](https://github.com/MLHaoChang/pypsa-eur/pull/361)
 Merge: `c75ca5584b873418f10f1bca42f868255d445b7b`
 Tested source: `bf08c89e011601f21bb37f349a9a013f1143711b`

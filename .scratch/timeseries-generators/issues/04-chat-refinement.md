@@ -1,6 +1,6 @@
 # Chat refinement of a generated series
 
-Status: needs-triage
+Status: done (#576, 7d981e14)
 Type: task
 Blocked by: 01 (the first family to refine); copilot LC-04 (the old→new card and the chat-edit path); the approved project workflow (placement)
 Gated: yes (apply path), plus the UX reviewer for the UI

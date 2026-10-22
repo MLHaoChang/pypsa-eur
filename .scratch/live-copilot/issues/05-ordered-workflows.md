@@ -1,6 +1,6 @@
 # LC-05 — bounded change, verify, run and explain workflows
 
-Status: ready-for-agent
+Status: done (#542, d6fd19b2)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-03/04, existing durable parent, native jobs and experiments

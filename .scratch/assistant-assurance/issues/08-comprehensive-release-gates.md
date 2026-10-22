@@ -4,6 +4,7 @@
 # P7: adversarial, full-family and performance release
 
 Status: ready-for-agent
+Progress: CI evaluation gate shipped; domain review, calibration, load budgets and release enablement pending
 Type: task
 Blocked by: 01–07 plus required retained-run/durable/job dependencies
 

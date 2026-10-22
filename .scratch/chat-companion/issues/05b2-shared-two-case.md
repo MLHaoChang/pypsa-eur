@@ -1,6 +1,6 @@
 # CP-05b2 — Shared two-case network admission
 
-Status: ready-for-agent
+Status: done (#354, fae95896)
 Type: implementation
 Baseline: master `b51c90645647dd1d2f0ed2f242bf00f7072b4b42` (#353).
 

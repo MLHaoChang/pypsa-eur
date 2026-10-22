@@ -3,7 +3,7 @@
 
 # RP-06 — calibration and shaping operations
 
-Status: ready-for-agent
+Status: done (#432, ef0856a1)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: the profile stack landed; gatekeeper plan acknowledged

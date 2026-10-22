@@ -4,6 +4,7 @@
 # Request scope and complete key-results answers
 
 Status: needs-triage
+Progress: harness.assurance_scope with answered or unavailable slots shipped for bounded grammar; arbitrary-language scope pending
 Type: task
 Blocked by: reliability contract review; 01 for schema freeze; 02 for evidence
 

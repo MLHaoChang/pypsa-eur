@@ -1,6 +1,6 @@
 # CP-05b1 — Compare and export two verified case receipts
 
-Status: ready-for-agent
+Status: done (#353, b51c9064)
 Type: implementation
 Baseline: master `e1adb0db95111ec9ef0f1ef8471938313a4e1cb6` (#352).
 

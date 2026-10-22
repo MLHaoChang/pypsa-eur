@@ -1,6 +1,6 @@
 # CP-04e — Explicit checked source-gap follow-ups
 
-Status: ready-for-agent
+Status: done (#333, 7076dc71)
 Type: implementation
 Baseline: master `c06248d22`, includes CP-04d #327.
 

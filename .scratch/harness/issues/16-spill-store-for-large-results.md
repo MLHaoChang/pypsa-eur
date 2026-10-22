@@ -1,6 +1,6 @@
 # 16 — Spill store: keep the whole tool result, give the model a locator
 
-Status: ready-for-agent (done 2026-10-12: harness/spill.py and read_result)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 08 (done)
 

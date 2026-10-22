@@ -3,7 +3,7 @@
 
 # Investment case refused once a campus run has bought assets (money-year mismatch)
 
-Status: ready-for-human
+Status: done (#330, 6262df57)
 Type: bug (may be by design: confirm)
 Found by: Guided smoke re-run, 2026-10-16, master dc4e4b37
 

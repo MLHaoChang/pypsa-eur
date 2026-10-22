@@ -3,7 +3,7 @@
 
 # RP-09 — batch apply as one undo step
 
-Status: ready-for-agent
+Status: done (#605, 65ba5cad)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: the profile stack landed; gatekeeper review (data write)

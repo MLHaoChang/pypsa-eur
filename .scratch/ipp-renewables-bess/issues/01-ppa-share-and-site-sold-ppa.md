@@ -1,6 +1,6 @@
 # PPA share and the PPA the site sells
 
-Status: needs-triage
+Status: done (#461, b63ca2d2)
 Type: task
 Blocked by: — (owner scope A: built first in this package)
 Gated: **yes** (contract model and settlement semantics)
