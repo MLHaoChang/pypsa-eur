@@ -658,21 +658,22 @@ def _check_sclopf(n, cfg) -> list[Issue]:
     # loss model. Block at preflight so the user picks one or the other.
     if getattr(cfg, "transmission_losses", False):
         out.append(_err("sclopf_with_transmission_losses", "", "",
-            "SCLOPF doesn't support `transmission_losses=True` — PyPSA's "
-            "secant-loss formulation isn't wired into the BODF-based "
-            "contingency LP. Disable one of the two for this run."))
+            "N-1 security can't run with transmission losses: the "
+            "loss model isn't wired into the contingency LP. Switch off "
+            "What the Run computes › N-1 security, or switch off transmission "
+            "losses in Solver settings."))
     # Lazy import to avoid a circular dependency at validation-service load.
     from services.solver_service import resolve_branch_outages
     outages = resolve_branch_outages(n, cfg)
     if not outages:
         out.append(_err("sclopf_no_branches", "", "",
-            "SCLOPF is enabled but no branches resolved from the selection "
-            "(all-lines / all-transformers / voltage threshold / extras). "
-            "Enable at least one source — otherwise this is just a plain LOPF."))
+            "N-1 security has no branches to check yet. Choose lines or "
+            "transformers to check (all of them, a voltage threshold or a "
+            "list); without them the solve runs without N-1 security."))
         return out
     if len(outages) > 200:
         out.append(_warn("sclopf_large_contingency_set", "", "",
-            f"SCLOPF will consider {len(outages)} contingencies. Each adds "
+            f"N-1 security will check {len(outages)} contingencies. Each adds "
             "constraints per snapshot — solve time grows roughly linearly. "
             "Consider raising the voltage threshold or unchecking 'include all' "
             "and listing critical branches explicitly."))
@@ -917,9 +918,10 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
             f"rolling_overlap ({O}) must be strictly less than rolling_horizon ({H})."))
     if getattr(cfg, "sclopf", False):
         out.append(_err("rolling_with_sclopf", "", "",
-            "SCLOPF is not compatible with the rolling-horizon strategy — "
-            "LODF contingency constraints are defined against the full "
-            "snapshot index. Disable one of the two."))
+            "N-1 security can't run with the rolling-horizon "
+            "strategy: its contingency constraints are defined against the "
+            "full snapshot index. Switch off What the Run computes › N-1 "
+            "security, or use the full solve."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("rolling_with_ac_pf", "", "",
             "Load flow (AC power flow after the solve) can't run with the "
@@ -1026,7 +1028,7 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
                 f"`sclopf_scope` must be 'horizon' or 'current_period', got '{scope}'."))
         else:
             out.append(_warn("myopic_sclopf_cost", "", "",
-                f"SCLOPF + myopic enabled (scope={scope}). The LP grows roughly "
+                f"N-1 security with myopic foresight (scope={scope}). The LP grows roughly "
                 f"as snapshots × contingencies × affected branches per "
                 f"iteration — keep contingency lists small for solve-time "
                 f"tractability."))
@@ -1037,12 +1039,11 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
             # so the user doesn't silently lose forward visibility.
             if scope == "current_period" and bool(getattr(cfg, "lf_aggregate_future", False)):
                 out.append(_warn("sclopf_scope_current_with_lf", "", "",
-                    "`sclopf_scope='current_period'` drops future-period "
+                    "N-1 security's 'current period' scope drops future-period "
                     "representative snapshots from each iteration's contingency "
-                    "LP, so `lf_aggregate_future=True` has no effect during "
-                    "SCLOPF iterations. Use `sclopf_scope='horizon'` to keep "
-                    "the lookahead, or accept that the SCLOPF iterations are "
-                    "pure single-period."))
+                    "LP, so limited foresight has no effect during those "
+                    "iterations. Use the 'horizon' scope to keep the "
+                    "lookahead, or accept that they are pure single-period."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("myopic_with_ac_pf", "", "",
             "Load flow (AC power flow after the solve) can't run with the "
