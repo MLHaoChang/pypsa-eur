@@ -359,6 +359,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         # Campus equipment bought as owner capex, under its own heading (IC G2 plan
         # G-10); readers use `.get` (older payloads lack the key).
         "extra_assets": _extra_assets_block(case),
+        # Which campus result fed the case and the needs it could not meet
+        # (campus-IC 02/05); only for a case with a campus study.
+        **({"campus_study": _campus_study_block(case.campus)}
+           if getattr(case, "campus", None) is not None else {}),
         "flags": list(result.flags),
         # What the island capability would have to be worth for the case to
         # break even, beside the NPV (owner decision 2026-10-15); None when
@@ -406,6 +410,8 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
         money = (f"upfront costs as passed, read as {fin.currency}; the case's currency year is "
                  "not stated, so their price year is not checked against it (the "
                  "investment-case route still checks their currency)")
+    summary = getattr(case, "campus", None)
+    tags = {name: (prov, ill) for name, prov, ill in (summary.assets if summary else ())}
     out = []
     for e in getattr(case, "extra_assets", ()) or ():
         a = assets.get(e.name)
@@ -427,8 +433,19 @@ def _extra_assets_block(case) -> list[dict[str, Any]]:
             "build_year": e.build_year, "source": e.source, "source_hash": e.source_hash,
             "money_year": money,
             "cod": cod,
+            # The campus library's cost tag (campus-IC 02): `illustrative` is true
+            # for an `assumed` cost; both None when the source did not say.
+            "provenance": tags.get(e.name, (None, None))[0],
+            "illustrative": tags.get(e.name, (None, None))[1],
         })
     return out
+
+
+def _campus_study_block(summary) -> dict[str, Any]:
+    """The campus study's summary (campus-IC 02/05): its method and its unmet
+    needs, as the route passed them (already cut; data, never interpreted)."""
+    return {"study_method": summary.study_method,
+            "unresolved": [{"need": n, "reason": r} for n, r in summary.unresolved]}
 
 
 def _terminal_block(result, case) -> dict[str, Any]:

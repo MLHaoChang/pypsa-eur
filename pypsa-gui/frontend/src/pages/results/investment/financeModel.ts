@@ -663,3 +663,83 @@ export function studyFailure(s: InvestmentCaseStudy | null | undefined): string 
   return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
     + (why && code && !why.includes(code) ? ` (${code})` : '')
 }
+
+// ── the campus equipment the case took (campus-IC issues 02 and 05) ─────
+
+export interface CampusEquipmentRow {
+  name: string; kind: string; quantity: string; overnight: number | null; buildYear: number | null
+  cod: string | null; illustrative: boolean | null
+}
+
+export interface CampusEquipment {
+  rows: CampusEquipmentRow[]
+  /** Which campus result fed the case, in words; null when the report does not say. */
+  method: string | null
+  /** How many rows the campus library tagged `assumed` (Generic defaults). */
+  illustrative: number
+  /** The report's money line (one for every row). */
+  money: string | null
+  /** The needs the campus study could not meet, one line per need and reason. */
+  unresolved: Array<{ need: string; reason: string }>
+}
+
+const CAMPUS_METHODS: Record<string, string> = {
+  milp: 'joint optimisation (MILP)',
+  least_cost: 'least cost',
+}
+
+const BASIS_UNITS: Record<string, [string, string]> = {
+  lump: ['unit', 'units'], per_km: ['km', 'km'], per_bay: ['bay', 'bays'],
+}
+
+function quantityText(q: unknown, basis: unknown): string {
+  if (typeof q !== 'number' || !Number.isFinite(q)) return NOT_ESTABLISHED
+  const [one, many] = BASIS_UNITS[String(basis)] ?? ['', '']
+  const n = Number(q.toPrecision(6))
+  return many ? `${n} ${n === 1 ? one : many}` : String(n)
+}
+
+/** The report's campus equipment and its study's summary; null when the case
+ *  took no campus asset and the study left no need unmet. */
+export function campusEquipment(report: InvestmentCaseReportPayload | null | undefined): CampusEquipment | null {
+  const p = payloadOf(report, 'project')
+  const extras = Array.isArray(p.extra_assets) ? (p.extra_assets as unknown[]).filter(isObj) : []
+  const study = isObj(p.campus_study) ? p.campus_study : {}
+  const unresolved = (Array.isArray(study.unresolved) ? study.unresolved : [])
+    .filter((u): u is Obj => isObj(u) && typeof u.need === 'string' && typeof u.reason === 'string')
+    .map(u => ({ need: u.need as string, reason: u.reason as string }))
+  if (!extras.length && !unresolved.length) return null
+  const rows = extras.map(e => ({
+    name: String(e.name ?? NOT_ESTABLISHED), kind: String(e.kind ?? NOT_ESTABLISHED).replace(/_/g, ' '),
+    quantity: quantityText(e.quantity, e.basis), overnight: established(e.overnight_cost),
+    buildYear: typeof e.build_year === 'number' ? e.build_year : null,
+    cod: typeof e.cod === 'string' ? e.cod : null,
+    illustrative: typeof e.illustrative === 'boolean' ? e.illustrative : null,
+  }))
+  const money = extras.map(e => e.money_year).find((m): m is string => typeof m === 'string') ?? null
+  return {
+    rows, money, unresolved,
+    method: typeof study.study_method === 'string' ? CAMPUS_METHODS[study.study_method] ?? null : null,
+    illustrative: rows.filter(r => r.illustrative === true).length,
+  }
+}
+
+/** The refusals that a campus study causes, with where the user fixes them. */
+export interface CampusRefusal { text: string; panel: 'campusStudy' | 'campusElectrical'; open: string }
+
+export const CAMPUS_REFUSALS: Record<string, CampusRefusal> = {
+  campus_study_stale: {
+    text: 'The campus study no longer matches the campus file, the network or the asset library.',
+    panel: 'campusStudy', open: 'Open the campus study to run it again',
+  },
+  campus_assets_money_year_mismatch: {
+    text: 'The campus asset library and the finance inputs are in different money.',
+    panel: 'campusElectrical', open: 'Open the campus electrical inputs',
+  },
+}
+
+/** The campus refusal a failed run ended in, or null. */
+export function campusRefusal(s: InvestmentCaseStudy | null | undefined): CampusRefusal | null {
+  const code = s?.status === 'refused' ? (s.error_code ?? s.code ?? null) : null
+  return code && code in CAMPUS_REFUSALS ? CAMPUS_REFUSALS[code] : null
+}

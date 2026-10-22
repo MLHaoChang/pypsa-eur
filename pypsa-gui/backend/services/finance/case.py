@@ -456,6 +456,21 @@ class ExtraOwnerAsset:
 
 
 @dataclass(frozen=True)
+class CampusSummary:
+    """What the campus study says about the extra assets it gave the case, beside
+    the money (campus-IC issues 02 and 05): which campus result fed the case
+    (`study_method`: "milp" or "least_cost"), each asset's cost provenance as
+    `(name, provenance, illustrative)` (the campus library's tag; `illustrative`
+    is true for an `assumed` cost), and the needs the same run could not meet as
+    `(need, reason)` (flagged `campus_needs_unresolved`; the case is still built).
+    Plain, already-cut strings from the route; never interpreted here."""
+
+    study_method: str | None = None
+    assets: tuple[tuple[str, str | None, bool | None], ...] = ()
+    unresolved: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class FinanceCase:
     inputs: FinanceInputs
     owner: str
@@ -484,6 +499,9 @@ class FinanceCase:
     # `assets` (after the network assets); this keeps the record (source, hash,
     # quantity) for the report and the case hash. Never in the counterfactual.
     extra_assets: tuple[ExtraOwnerAsset, ...] = ()
+    # The campus study's summary for the report (campus-IC 02/05); None without
+    # a campus study, and then left out of the case hash.
+    campus: CampusSummary | None = None
     # Each owner asset's COD (P5, staged builds): the adapter resolves it from
     # `cod_by_asset`, else the asset's first active period. Empty = every
     # asset at `cod` (the case before P5). The earliest is `cod`; an asset

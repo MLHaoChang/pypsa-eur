@@ -18,7 +18,7 @@ import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   baselineCaveats, counterfactualBasis, HEADLINE_KEYS, islandBreakeven, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, stalePartLabel, studyFailure, studyProgress, studyStale, toTable,
-  uncheckableReason, waccGate,
+  uncheckableReason, waccGate, campusEquipment, campusRefusal,
   type GateState, type Table,
 } from './financeModel'
 import { fmtAmount } from './valueFlows'
@@ -207,6 +207,66 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
   )
 }
 
+/** The campus equipment the case took as owner capex (campus-IC 02), which
+ *  campus result it came from, and the needs that study could not meet (05). */
+function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload }) {
+  const c = campusEquipment(report)
+  if (!c) return null
+  return (
+    <section className="space-y-1" data-testid="ic-campus">
+      <h3 className="text-[11px] font-semibold">Campus electrical equipment</h3>
+      <p data-testid="ic-campus-method">
+        {c.method ? `From the campus study's ${c.method} result.`
+          : 'The report does not say which campus result this came from.'}
+        {c.rows.length > 0 && ' Bought as owner capex, beside the network assets.'}</p>
+      {c.rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="text-[11px] w-full" data-testid="ic-campus-assets">
+            {c.money && <caption className="text-left text-muted">{c.money}</caption>}
+            <thead><tr>
+              <th scope="col" className="text-left">Item</th>
+              <th scope="col" className="text-left">Kind</th>
+              <th scope="col" className="text-right">Quantity</th>
+              <th scope="col" className="text-right">Overnight cost</th>
+              <th scope="col" className="text-right">Build year</th>
+              <th scope="col" className="text-left">COD</th>
+            </tr></thead>
+            <tbody>{c.rows.map(r => (
+              <tr key={r.name} data-testid={`ic-campus-asset-${r.name}`}>
+                <td className="text-left">{r.name}
+                  {r.illustrative && <span className="text-muted"> (generic default)</span>}</td>
+                <td className="text-left">{r.kind}</td>
+                <td className="text-right">{r.quantity}</td>
+                <td className="text-right" data-established={r.overnight !== null}>
+                  {r.overnight === null ? NOT_ESTABLISHED : fmtAmount(r.overnight)}</td>
+                <td className="text-right">{r.buildYear ?? NOT_ESTABLISHED}</td>
+                <td className="text-left text-muted">{r.cod ?? NOT_ESTABLISHED}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {c.illustrative > 0 && (
+        <p className="text-warn" data-testid="ic-campus-illustrative">
+          Generic default: {c.illustrative === c.rows.length ? 'the campus costs are'
+            : `${c.illustrative} of ${c.rows.length} campus costs are`} illustrative, assumed in the
+          {' '}campus asset library, not quotes.</p>
+      )}
+      {c.unresolved.length > 0 && (
+        <div role="note" className="text-warn" data-testid="ic-campus-unresolved">
+          <p>The campus study could not meet {c.unresolved.length === 1 ? '1 need' : `${c.unresolved.length} needs`}:
+            {' '}the campus is not compliant with the grid code without {c.unresolved.length === 1 ? 'it' : 'them'}.
+            {' '}The case does not include what meeting {c.unresolved.length === 1 ? 'it' : 'them'} would cost.</p>
+          <ul className="pl-3 list-disc">
+            {c.unresolved.slice(0, 20).map((u, i) => <li key={i}>{u.need}: {u.reason}</li>)}
+            {c.unresolved.length > 20 && <li>+{c.unresolved.length - 20} more</li>}
+          </ul>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
   const lines = report.cashflow_lines
   const projectPayload = sectionOf(report, 'project')?.payload as Record<string, unknown> | undefined
@@ -290,6 +350,7 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
         <Headlines report={report} />
       </section>
       <Counterfactual report={report} />
+      <CampusEquipmentBlock report={report} />
       <Cashflows report={report} />
       {/* Commercial & finance owns the revenue and capture tables (W4a; #515). */}
       <ScopeGate card="commercial" testId="ic-revenue-scope">
@@ -301,7 +362,8 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
       <details>
         <summary className="text-[11px]">More from the project section</summary>
         <SectionBlock report={report} name="project" title="Project" testId="ic-project"
-                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement', 'revenue_streams'])} />
+                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement', 'revenue_streams',
+                                     'extra_assets', 'campus_study'])} />
       </details>
       {(report.case_id || report.assumptions_hash) && (
         <p className="text-[10px] text-muted">
@@ -358,6 +420,8 @@ export default function InvestmentCaseView() {
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
   const failure = studyFailure(s)
+  const campusBlock = campusRefusal(s)
+  const setSlidePanel = useUIStore(st => st.setSlidePanel)
 
   return (
     <div className="space-y-3 text-[11px]" data-testid="investment-case">
@@ -382,6 +446,11 @@ export default function InvestmentCaseView() {
             Stopped: the run was aborted; the report below, if any, is from an earlier run.</span>
         )}
         {failure && <span className="text-danger" data-testid="ic-error">{failure}</span>}
+        {campusBlock && (
+          <span data-testid="ic-campus-refusal">{campusBlock.text}{' '}
+            <button type="button" className="underline" onClick={() => setSlidePanel(campusBlock.panel)}>
+              {campusBlock.open}</button></span>
+        )}
         {blocked && <span className="text-warn" data-testid="ic-blocked">Blocked: {blocked}</span>}
       </div>
       {stale && (
