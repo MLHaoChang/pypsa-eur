@@ -41,8 +41,22 @@ export function sortProjectsByRecency(projects: readonly ProjectInfo[]): Project
   })
 }
 
+// Every scenario under a root, at any depth: a scenario of a scenario counts
+// too. Walks the parent links once; a cycle in the data cannot loop.
 export function countScenarios(projects: readonly ProjectInfo[], rootName: string): number {
-  return projects.filter(project => project.parent_project === rootName).length
+  const seen = new Set<string>([rootName])
+  let frontier = [rootName]
+  while (frontier.length > 0) {
+    const next: string[] = []
+    for (const project of projects) {
+      if (project.parent_project && frontier.includes(project.parent_project) && !seen.has(project.name)) {
+        seen.add(project.name)
+        next.push(project.name)
+      }
+    }
+    frontier = next
+  }
+  return seen.size - 1
 }
 
 // Badge text for a root's scenario children — `null` when there are none, so

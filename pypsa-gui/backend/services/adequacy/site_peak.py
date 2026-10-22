@@ -39,6 +39,11 @@ each period reports its binding hour (least headroom), where
 
 ``firm`` is a list of contributions, one entry per source of firm MW, at the
 binding hour.
+
+A period whose load or energization is a placeholder (an example built for
+entered planning years it has no figure for, E1: ``unset_periods``) is
+unknown: its ``headroom_mw`` is None and ``unset`` names the inputs, so
+neither the 422 nor the scorecard reads the placeholder as a number.
 """
 from __future__ import annotations
 
@@ -283,14 +288,30 @@ def period_year(label: str) -> int | None:
     return int(label) if str(label).isdigit() else None
 
 
-def peak_check(n, island: dict | None) -> list[dict]:
+#: The growth inputs the check rests on (``eh_template.json`` ``growth_inputs`` kinds).
+PEAK_INPUTS = ("it_mw", "energized_mw")
+
+
+def unset_periods(meta: dict | None) -> dict[str, list[str]]:
+    """``{period: [kind, ...]}`` of the growth inputs the template metadata
+    marks not set (``growth_inputs`` rows with ``set`` false); {} when it
+    has none (every value is the example's own)."""
+    out: dict[str, list[str]] = {}
+    for g in (meta or {}).get("growth_inputs") or []:
+        if isinstance(g, dict) and g.get("set") is False and g.get("kind") in PEAK_INPUTS:
+            out.setdefault(str(g.get("year")), []).append(str(g["kind"]))
+    return out
+
+
+def peak_check(n, island: dict | None, *, unset: dict[str, list[str]] | None = None) -> list[dict]:
     """One row per period, evaluated hour by hour (gatekeeper review of #435):
     cap(t) = Σ_l E_l(t) × efficiency_l + firm gensets + the batteries' discharge(t),
     headroom = min_t(cap(t) − load(t)),
     reported at the binding snapshot (the hour of least headroom):
     ``{period, binding_snapshot, load_mw, energized_mw, efficiency, delivered_mw,
     cap_mw, headroom_mw, peak_mw, energized_max_mw, firm: [{source, mw, rule}],
-    firm_mw, import_links, scheduled}``. ``load_mw``/``cap_mw``/``energized_mw``
+    firm_mw, import_links, scheduled, unset}``. A period in ``unset``
+    (``unset_periods``) has ``headroom_mw`` None: unknown. ``load_mw``/``cap_mw``/``energized_mw``
     are at the binding hour; ``peak_mw`` is the period's highest load and
     ``energized_max_mw`` its highest energized import. An empty list when the
     network has no import Link (an island-only site has no connection to check)."""
@@ -329,17 +350,19 @@ def peak_check(n, island: dict | None) -> list[dict]:
         j = int(np.argmin(cap - load[idx]))
         t = idx[j]
         e_t = float(total_e[t])
+        missing = list((unset or {}).get(label, []))
         firm = [{"source": "gensets", "mw": firm_mw, "rule": rule},
                 {"source": "ride-through batteries", "mw": float(shave[j]), "rule": bess_rule}]
         out.append({"period": label, "binding_snapshot": str(snaps[t]), "load_mw": float(load[t]),
                     "energized_mw": e_t,
                     "efficiency": float(delivered[t]) / e_t if e_t > 0 else min(eff.values()),
                     "delivered_mw": float(delivered[t]), "cap_mw": float(cap[j]),
-                    "headroom_mw": float(cap[j] - load[t]), "peak_mw": float(load[idx].max()),
+                    "headroom_mw": None if missing else float(cap[j] - load[t]),
+                    "peak_mw": float(load[idx].max()),
                     "energized_max_mw": float(total_e[idx].max()), "firm": firm,
                     "firm_mw": firm_mw + float(shave[j]), "import_links": list(links),
                     "not_electric": not_electric,
-                    "scheduled": bool(scheduled)})
+                    "scheduled": bool(scheduled), "unset": missing})
     return out
 
 

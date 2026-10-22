@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant's `get_project_flow` description now lists the item `title` and the blocker's `detail`, and the "sizing off on the nameplate" check title says "extendable asset's nameplate".
