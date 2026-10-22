@@ -13,8 +13,9 @@ mapping a full year uses:
   stand for the year is flagged;
 * per-unit series and prices record the window with no energy check;
 * an hour the source does not have (Feb 29, a DST-gap hour on a local
-  clock), an off-the-hour or sub-hourly window, and a window that repeats a
-  calendar hour are refused, never filled.
+  clock), an off-the-hour or sub-hourly window, a window coarser than hourly
+  (3-hourly, daily), and a window that repeats a calendar hour are refused,
+  never filled.
 """
 from __future__ import annotations
 
@@ -204,6 +205,16 @@ def test_a_sub_hourly_window_is_refused():
     _net(pd.date_range("2023-06-05T00:00", periods=336, freq="30min"))
     with pytest.raises(UnsupportedSnapshotsError, match="sub-hourly"):
         _apply_load(_daily())
+
+
+@pytest.mark.parametrize("freq, periods", [("3h", 56), ("6h", 28), ("D", 7)])
+def test_a_coarser_than_hourly_window_is_refused(freq, periods):
+    """The label hour must not stand for the whole step. A daily axis is
+    midnight, so a solar shape would be written as zero and counted ×24."""
+    _net(pd.date_range("2023-06-05", periods=periods, freq=freq))
+    with pytest.raises(UnsupportedSnapshotsError, match="non-hourly"):
+        _apply_load(_daily())
+    assert LOAD not in _user_ts
 
 
 def test_a_window_that_repeats_a_calendar_hour_is_refused():
