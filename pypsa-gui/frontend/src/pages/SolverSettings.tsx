@@ -894,7 +894,7 @@ export default function SolverSettings() {
             <span className="block text-[11px] text-muted">
               {n1On
                 ? 'Disabled — N-1 security cannot model losses (it assumes a lossless DC network).'
-                : 'Iterative LOPF that approximates AC line losses.'}
+                : 'Iterative solve that approximates AC line losses.'}
             </span>
           </span>
           <input
@@ -1768,7 +1768,7 @@ export function SclopfPanel({
         <div className="px-3 py-2 bg-panel border border-border rounded text-[11px] text-muted">
           <span className="font-medium text-text">Resolved contingencies: {totalResolved}</span>
           {totalResolved === 0 && n1On && (
-            <span className="ml-2 text-danger">— pick at least one source above (otherwise this falls back to plain LOPF).</span>
+            <span className="ml-2 text-danger">— pick at least one source above (otherwise the solve runs without N-1 security).</span>
           )}
           {totalResolved > 200 && (
             <span className="ml-2 text-warn">— large set, the LP may be slow.</span>

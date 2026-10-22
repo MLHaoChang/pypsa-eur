@@ -669,7 +669,7 @@ def _check_sclopf(n, cfg) -> list[Issue]:
         out.append(_err("sclopf_no_branches", "", "",
             "N-1 security has no branches to check yet. Choose lines or "
             "transformers to check (all of them, a voltage threshold or a "
-            "list); without them this is just a plain LOPF."))
+            "list); without them the solve runs without N-1 security."))
         return out
     if len(outages) > 200:
         out.append(_warn("sclopf_large_contingency_set", "", "",
