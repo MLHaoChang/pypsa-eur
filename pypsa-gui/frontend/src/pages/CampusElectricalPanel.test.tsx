@@ -192,16 +192,15 @@ describe('CampusElectricalPanel', () => {
     }))
   })
 
-  it('reads the island report again after a run, which writes the island-hours results (I9b)', async () => {
+  it('leaves the island report to Results › Control: the panel no longer reads it, a run only marks it out of date (I9b, W10 R3)', async () => {
     api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
     api.run.mockResolvedValue(sized())
     api.island.mockResolvedValue({ config: null, study: null })
     api.islandReport.mockResolvedValue({ caveat: '', tables: [], missing: [] })
     renderPanel()
-    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(1))
     await userEvent.click(await screen.findByRole('button', { name: 'Run study' }))
     await waitFor(() => expect(api.run).toHaveBeenCalledTimes(1))
-    await waitFor(() => expect(api.islandReport).toHaveBeenCalledTimes(2))
+    expect(api.islandReport).not.toHaveBeenCalled()
   })
 
   it('buys assets from the library by default, and sends the setting when it is switched off', async () => {
