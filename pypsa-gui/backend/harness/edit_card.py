@@ -279,6 +279,22 @@ def receipt(card: dict, args: dict) -> dict:
     return out
 
 
+def reread(tool_name: str, args: dict, earlier: dict) -> dict | None:
+    """A fresh native read-back of an earlier receipt's rows (LC-23 SC-12):
+    the receipt, now verified, when every stored row reads back as its new
+    value; None when a row differs or the tool has no native adapter."""
+    adapter = ADAPTERS.get(tool_name)
+    rows = [{k: v for k, v in row.items() if k != "readback"} for row in earlier.get("rows") or []]
+    if adapter is None or not rows:
+        return None
+    values = adapter.readback(args or {}, rows)
+    rows = [{**row, "readback": _scalar(value)} for row, value in zip(rows, values)]
+    if len(rows) != len(earlier["rows"]) or not all(
+            _same(row["readback"], row["new"]) for row in rows if row["role"] not in ("at_solve", "note")):
+        return None
+    return {**earlier, "outcome": "verified", "rows": rows}
+
+
 # ── Components: update_component / bulk_update_components ──────────────────
 
 
@@ -614,6 +630,9 @@ register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _com
 # ── Library references: apply_library_reference ───────────────────────────
 
 
+_RATE_WORDS = {"component": "this asset's own", "project setting": "the project's", "default": "the default"}
+
+
 def _library_reference_preview(args: dict) -> list[dict]:
     """The native update's rows for the fields a shipped reference writes, each with
     the reference (source cell, money year) and the pack value beside it, plus one
@@ -621,6 +640,7 @@ def _library_reference_preview(args: dict) -> list[dict]:
     still missing a confirmation refuses before any card (`reference_confirmation_needed`)."""
     from services import chat_tools
     from services.library import reference_apply as A
+    from services.pypsa_service import PyPSAService
 
     p = A.plan_active(args)
     A.require_confirmed(p)
@@ -632,7 +652,18 @@ def _library_reference_preview(args: dict) -> list[dict]:
         if row["role"] == "typed" and row["name"] == name and row["field"] in beside:
             row.update({k: beside[row["field"]][k] for k in ("reference", "pack", "differs")})
     for need in p["needs"]:
-        rows.append({**_note(klass, name, need["confirmation"], need["text"]), "confirmed": True})
+        said = need.get("disclosure") or need["text"].replace(f" {A.LEFT_UNCONFIRMED}", "")
+        rows.append({**_note(klass, name, need["confirmation"], f"Confirmed: {said}"), "confirmed": True})
+    # One plain annualisation line in this card's money words, in place of the generic
+    # formula note (which names the pack's price-data year, not the reference's).
+    rows = [r for r in rows if not (r["role"] == "note" and r["field"] == "overnight_cost")]
+    frame = PyPSAService.get_network().components[klass].static
+    rate, rate_source = _rate(frame, name)
+    read_as = f", read as {p['base_year']} money" if p.get("base_year") not in (None, p["currency_year"]) else ""
+    rows.append(_note(klass, name, "overnight_cost",
+                      f"The optimisation annualises this cost over the {p['attrs']['lifetime']:g}-year lifetime "
+                      f"at {_RATE_WORDS.get(rate_source, 'a')} {rate * 100:g} % discount rate. Price data: "
+                      f"{p['currency_year']} {p['currency']}{read_as}."))
     rows += [_note(klass, name, "projection_year", text) for text in p["notes"]]
     rows.append(_note(klass, name, "licence", f"{p['attribution']} Licence {p['licence']}."))
     return rows

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-21",
+  "generated_at": "2026-10-22",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -2885,7 +2885,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "e0a09e1749bbfc1dcba31d51fd1a0fe017b77abc2d81db5b7217a058fb0363a5",
+      "schema_sha256": "ca48da82f598cd3ad8996b65bec04dfe94961be6da8fb4e63d35cce295e29e0f",
       "behavioral_fixture": "pending"
     },
     {
@@ -3279,7 +3279,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "18bbd36d44651d1ec4d68ceb1a456c81e3b7143e3b2e478828e544164e815741",
+      "schema_sha256": "93bde255ba875a6460049fb764a44364390030a7e0b8538d53f38ae8025871c4",
       "behavioral_fixture": "pending"
     },
     {
@@ -6070,7 +6070,8 @@
       "input_keys": [
         "title",
         "request_id",
-        "steps"
+        "steps",
+        "brief"
       ],
       "required": [
         "title",
@@ -6078,7 +6079,7 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
     {
@@ -6464,7 +6465,8 @@
     "campusResults",
     "decision",
     "economics",
-    "profiles"
+    "profiles",
+    "library"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6531,7 +6533,9 @@
     "Economics",
     "economics",
     "ProfileStudio",
-    "profiles"
+    "profiles",
+    "CommercialLibrary",
+    "library"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

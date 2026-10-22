@@ -89,6 +89,8 @@ SAFETY_PANEL_ENUM = [
     "Economics", "economics",
     # The renewable profile generator (Profile Studio) slide panel.
     "ProfileStudio", "profiles",
+    # The workspace-level Commercial library page (tariffs, contracts, series).
+    "CommercialLibrary", "library",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -1850,7 +1852,13 @@ TOOLS: list[dict[str, Any]] = [
         "without a blackout, the seamless scenario; needs an existing battery "
         "or new batteries; default false); a stage whose peak is above its "
         "energized connection is refused). Grid templates: 3bus, ieee14, belgium, "
-        "ieee39. Safety: destructive.",
+        "ieee39. The three staged examples (eh_datacenter_staged, "
+        "eh_h2_hub_staged, eh_microgrid_staged) can be built for other "
+        "planning years: params.planning {start_year, end_year, dates?} "
+        "(whole years 2025-2060, at most 3 periods; with no dates the "
+        "example's spacing is shifted to start_year and later stages are "
+        "dropped). A value the example has no figure for in an entered year "
+        "is a placeholder the project flags until it is set. Safety: destructive.",
         {
             "template_id": {"type": "string",
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
@@ -1860,8 +1868,11 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_ammonia_staged", "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
-                       "description": "eh_site only: the site's parameters "
-                                      "(omit for the industrial preset)."},
+                       "description": "eh_site: the site's parameters (omit "
+                                      "for the industrial preset). The staged "
+                                      "examples: {planning: {start_year, end_year, "
+                                      "dates?}}; the data-center ones also take "
+                                      "dc_load."},
         },
         ["template_id", "new_name"],
     ),
@@ -1901,9 +1912,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "restore_project_snapshot",
-        "Restore project from a saved snapshot. Overwrites project files + "
-        "reloads in-memory. Pre-restore auto-snapshot mitigates user error. "
-        "Safety: destructive.",
+        "Restore project from a saved snapshot. Saves unsaved edits, keeps the "
+        "current state as a 'before-restore' snapshot, then overwrites project "
+        "files + reloads in-memory. Safety: destructive.",
         {
             "name": {"type": "string"},
             "snapshot_id": {"type": "string"},
@@ -3964,11 +3975,11 @@ TOOLS.extend([
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
-    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools (1–24 with a study brief). Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Optional brief (decision study goal the user approved on a plan-review Choice card): objective, cards in scope, case names, and phases that split the steps in order, one card each; it grants nothing, the plan pauses before each new card until the user continues, and inputs changed outside the plan stop its next effect. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 24, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}, "brief": {"type": "object", "additionalProperties": False, "properties": {"objective": {"type": "string", "maxLength": 240}, "cards": {"type": "array", "maxItems": 6, "items": {"type": "string", "enum": ["capacity", "grid", "control", "reliability", "commercial", "hand-off"]}}, "cases": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"name": {"type": "string", "maxLength": 60}, "experiment": {"type": "string", "maxLength": 64}}, "required": ["name"]}}, "phases": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "properties": {"card": {"type": "string"}, "steps": {"type": "array", "minItems": 1, "items": {"type": "string"}}}, "required": ["card", "steps"]}}}, "required": ["objective", "cards", "phases"]}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
-    _t("resolve_task_step", "After verifying an uncertain step's actual effects, explicitly mark completed with a compact verified result or authorize retry. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("resolve_task_step", "After inspecting a failed or uncertain step, mark it completed or authorize retry. Completed resolves only from native evidence (the call's own late receipt, its job's published run, or a fresh edit read-back); a supplied result is ignored, and without evidence the step stays to review. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
     _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),

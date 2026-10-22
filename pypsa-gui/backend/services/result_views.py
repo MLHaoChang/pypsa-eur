@@ -144,6 +144,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "results", (_r("get_load_shape"),),
                guided_label="Load shape",
                requires_tools=("get_load_shape",),
+               checked_profiles=("site-import/1",),
                claim_limits="Energy carriers only; a group the network does not model, or the run "
                             "cannot establish, is named, not shown as zero.",
                units="MW, MWh",

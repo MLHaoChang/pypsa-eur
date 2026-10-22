@@ -122,6 +122,9 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # The project flow's acknowledged warnings (B1).
                  # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
                  "flow_acks.json",
+                 # The project's scope: the work cards the Run computes (W4a).
+                 # `test_flow_scope` pins it equal to flow_scope.SCOPE_FILE.
+                 "flow_scope.json",
                  # The user's own grid-readiness limits (DC 03 slice 6):
                  # services/adequacy/grid_limits.py owns it; the walk in
                  # `test_bundle_sidecars` pins it to its SIDECAR_NAME.

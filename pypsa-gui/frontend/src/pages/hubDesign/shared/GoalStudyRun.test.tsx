@@ -11,7 +11,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { buildEhStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
-import { GoalStudyRun } from './GoalStudyRun'
+import { GoalStudyRun, RELIABILITY_OUT_OF_SCOPE } from './GoalStudyRun'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -26,7 +26,15 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The scope (W4a): unread by default, so Run shows; one test reads a scope with Reliability off.
+const getFlowScope = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+})
+
 beforeEach(() => {
+  getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
     step: 'goal', archetype: 'weak_flexible' })
@@ -96,6 +104,24 @@ describe('GoalStudyRun run', () => {
     await waitFor(() => expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(true))
   })
 
+  it('with Reliability off, Run is disabled and Add puts it back in place (W4a)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    mount()
+    expect((await screen.findByTestId('hub-run-out-of-scope-add')).textContent)
+      .toBe('Add Reliability goal & study')
+    const run = screen.getByTestId('hub-run-start') as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(run.title).toBe(RELIABILITY_OUT_OF_SCOPE)
+  })
 })
 
 describe('GoalStudyRun study states (from the study record, N2)', () => {

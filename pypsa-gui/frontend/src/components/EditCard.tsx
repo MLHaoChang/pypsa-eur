@@ -6,6 +6,7 @@
  */
 import { FLOW_STATE_WORDS, type FlowSectionState, type FlowTarget } from '../api/flow'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
+import { componentLabel } from '../utils/componentLabels'
 
 type Scalar = string | number | boolean | null
 
@@ -80,22 +81,36 @@ export function editReceiptOf(value: unknown): EditReceipt | null {
 
 function show(value: Scalar | undefined, known = true): string {
   if (!known) return 'Not read'
-  if (value === null || value === undefined) return 'Empty'
+  if (value === null || value === undefined) return 'not set'
+  // The backend sends a non-finite number as its string ("inf"): an unbounded value.
+  if (value === 'inf' || value === '-inf' || value === Infinity || value === -Infinity) return 'no limit'
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
-/** "Connection & grid > L2" (the edit's flow section), or "Line > L2" when the
- * project has no flow; a bulk edit lists its names: "Connection & grid > L1, L2". */
+/** A value in its display unit, rounded for reading (the stored value stays in the small line). */
+function showDisplay(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'not set'
+  return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })
+}
+
+/** "Generator 'pv'": the class in the user's words and the component's name. */
+function assetWords(componentClass: string, name: string): string {
+  return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
+}
+
+/** "Connection & grid › Line 'L2'" (the edit's flow section), or "Line 'L2'" when the
+ * project has no flow; a bulk edit lists its names: "Connection & grid › Line 'L1', Line 'L2'". */
 export function editCardHeader(card: EditCard): string {
   const byKey = new Map<string, string[]>()
   for (const r of card.rows) {
     if (r.role !== 'typed' || !r.component_class) continue
-    const key = card.section && r.target?.section === card.section.id ? card.section.label : r.component_class
+    const key = card.section && r.target?.section === card.section.id ? card.section.label : ''
     const names = byKey.get(key) ?? []
-    if (!names.includes(r.name)) names.push(r.name)
+    const words = assetWords(r.component_class, r.name)
+    if (!names.includes(words)) names.push(words)
     byKey.set(key, names)
   }
-  return [...byKey].map(([key, names]) => `${key} > ${names.join(', ')}`).join('; ')
+  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
 }
 
 /** Show the field where it lives, without leaving the chat: the component's own
@@ -113,7 +128,7 @@ function showInProperties(target: FlowTarget) {
 }
 
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
-  const asset = (r: EditCardRow) => [r.component_class, r.name].filter(Boolean).join(' ') || '—'
+  const asset = (r: EditCardRow) => (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
   const header = editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
@@ -160,12 +175,14 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
-                <td className="p-1 border-b border-border break-words">{value(r.old, r.old_known !== false)}</td>
-                <td className="p-1 border-b border-border break-words font-medium">{value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {exists ? '' : r.unit || 'No unit'}
+                  {r.display && r.old_known !== false && typeof r.old === 'number' ? showDisplay(r.display.old) : value(r.old, r.old_known !== false)}</td>
+                <td className="p-1 border-b border-border break-words font-medium">
+                  {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
+                <td className="p-1 border-b border-border break-words">
+                  {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
                   {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
-                    {show(r.display.new)} {r.display.unit} = {show(r.new)} {r.unit} stored
+                    stored as {show(r.new)} {r.unit}
                   </span>}
                 </td>
               </tr>
