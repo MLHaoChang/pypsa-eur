@@ -55,6 +55,8 @@ function _normalizePanelId(raw: string): string {
     Economics: 'economics', economics: 'economics',
     // The renewable profile generator (Profile Studio).
     ProfileStudio: 'profiles', profiles: 'profiles',
+    // The Commercial library page.
+    CommercialLibrary: 'library', library: 'library',
   }
   return aliases[key] ?? key
 }

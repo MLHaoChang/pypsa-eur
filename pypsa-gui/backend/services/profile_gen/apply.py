@@ -40,6 +40,7 @@ user entry (see tests/test_profile_gen_apply.py).
 from __future__ import annotations
 
 import datetime as _dt
+from types import SimpleNamespace
 from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
@@ -126,15 +127,29 @@ TIME_BASIS_ASSUMED_WARNING = (
 )
 
 
-def _commercial_timezone(ctx) -> str | None:
+def commercial_config(ctx) -> dict[str, Any]:
+    """The project's commercial configuration (point-of-connection links,
+    timezone) as a plain dict, whether stored as a dict or a model; {} when
+    unset."""
     state = getattr(ctx, "solver_state", None) or {}
     cfg = state.get("solver_config") if isinstance(state, Mapping) else None
     commercial = getattr(cfg, "commercial", None)
     if commercial is None:
-        return None
-    tz = (commercial.get("timezone") if isinstance(commercial, Mapping)
-          else getattr(commercial, "timezone", None))
+        return {}
+    if isinstance(commercial, Mapping):
+        return dict(commercial)
+    dump = getattr(commercial, "model_dump", None)
+    return dict(dump()) if callable(dump) else dict(vars(commercial))
+
+
+def commercial_timezone(ctx) -> str | None:
+    """The project's commercial timezone: what its naive snapshots' clock is
+    (`resolve_time_basis`)."""
+    tz = commercial_config(ctx).get("timezone")
     return str(tz) if tz else None
+
+
+_commercial_timezone = commercial_timezone
 
 
 def resolve_time_basis(stated: str | None,
@@ -637,11 +652,17 @@ class TargetSpec:
     noun: str     # error wording, e.g. "generator"
     # The snapshot weighting a power series' energy is counted with.
     weighting: str = "generators"
+    # A per-unit bound's range: a link's p_min_pu may reach -1 (reverse flow).
+    lo: float = 0.0
+    hi: float = 1.0
 
 
 TARGETS: dict[tuple[str, str], TargetSpec] = {
     ("generators", "p_max_pu"): TargetSpec("per_unit", "Generator", "generator"),
     ("generators", "p_min_pu"): TargetSpec("per_unit", "Generator", "generator"),
+    # Link bounds act on p0, the bus0 flow.
+    ("links", "p_max_pu"): TargetSpec("per_unit", "Link", "link"),
+    ("links", "p_min_pu"): TargetSpec("per_unit", "Link", "link", lo=-1.0),
     ("loads", "p_set"): TargetSpec("power", "Load", "load"),
     ("storage_units", "inflow"): TargetSpec("power", "StorageUnit", "storage unit",
                                             weighting="stores"),
@@ -661,6 +682,9 @@ BOUND_FORCES_OFF_WARNING = "bound_forces_off"
 MUST_RUN_SINK_WARNING = "must_run_exceeds_sink"
 MIN_STABLE_WARNING = "min_stable_not_must_run"
 REPLACES_SERIES_WARNING = "replaces_existing_series"
+# The storage calculator's own refusal code, so the two read as one reason.
+INFLOW_TOOL_WARNING = "unsupported_storage_inflow"
+MONEY_UNVERIFIED_WARNING = "money_basis_unverified"
 
 # How close a normalised shape's peak/mean must be to 1.
 _NORM_RTOL = 1e-3
@@ -712,7 +736,27 @@ def _scale_power(series: pd.Series, meta: Mapping[str, Any]) -> tuple[float, dic
     return scale, extra
 
 
-def _money(meta: Mapping[str, Any]) -> dict:
+def _project_money(ctx) -> dict[str, Any]:
+    """The money fields the project's finance inputs actually set: any of
+    ``currency``, ``price_basis`` and ``currency_year``, each present only
+    when the finance block states it (an unset field is never filled from
+    `FinanceInputs`' defaults — gatekeeper B4 amendment, review of #554)."""
+    state = getattr(ctx, "solver_state", None) or {}
+    cfg = state.get("solver_config") if isinstance(state, Mapping) else None
+    raw = getattr(cfg, "finance", None)
+    raw = raw if isinstance(raw, Mapping) else {}
+    out: dict[str, Any] = {}
+    if raw.get("currency"):
+        out["currency"] = str(raw["currency"])
+    if raw.get("price_basis"):
+        out["price_basis"] = str(raw["price_basis"]).strip().lower()
+    if raw.get("currency_year") is not None:
+        out["currency_year"] = int(raw["currency_year"])
+    return out
+
+
+def _money(meta: Mapping[str, Any], project: Mapping[str, Any],
+           ) -> tuple[dict, list[str]]:
     """A price series' unit and money basis, in the money-year convention's
     words ("real basis, 2020 EUR")."""
     unit = str(meta.get("unit") or "")
@@ -739,8 +783,34 @@ def _money(meta: Mapping[str, Any]) -> dict:
         raise InvalidSeriesUnitError(
             f"a price series must state its currency_year (the year of its "
             f"price data), got {year!r}") from None
-    return {"unit": unit, "price_basis": basis, "currency_year": year,
-            "money": f"{basis} basis, {year} {cur}"}
+    record = {"unit": unit, "price_basis": basis, "currency_year": year,
+              "money": f"{basis} basis, {year} {cur}"}
+    # Field by field: a currency, basis or year the project SETS and that
+    # differs refuses; an unset one is accepted, unverified, naming both.
+    p_cur = project.get("currency")
+    p_basis = project.get("price_basis")
+    p_year = project.get("currency_year")
+    if p_cur is not None and cur != p_cur:
+        raise InvalidSeriesUnitError(
+            f"the series is in {cur} but the project counts in {p_cur}; no "
+            "exchange rate is applied, so convert it first")
+    project_words = (f"{p_basis or 'basis unset'}"
+                     f"{' basis' if p_basis else ''}, "
+                     f"{p_year if p_year is not None else 'year unstated'} "
+                     f"{p_cur or '(currency unset)'}")
+    if (p_basis is not None and basis != p_basis) or (p_year is not None and year != p_year):
+        raise InvalidSeriesUnitError(
+            f"the series is {basis} basis, {year} {cur} but the project's money "
+            f"is {project_words}; restate the series on the project's basis")
+    if None in (p_cur, p_basis, p_year):
+        # Nothing set contradicts it, but not everything could be checked
+        # (no finance inputs, or a partial block).
+        return record, [
+            f"{MONEY_UNVERIFIED_WARNING}: the series is {basis} basis, {year} "
+            f"{cur}; the project's money is "
+            f"{project_words if project else 'not set'}, so the basis could not be "
+            "fully checked"]
+    return record, []
 
 
 def _current_bound(n, component_type: str, component: str, attribute: str):
@@ -873,30 +943,72 @@ def _bus_sink_mw(n, bus: str, exclude: str) -> np.ndarray:
     return total
 
 
-def _floor_warnings(n, component: str, vals: np.ndarray) -> tuple[str, list[str]]:
-    """The meaning of a generator p_min_pu, and its warnings: on a committable
+def _floor_warnings(n, component_type: str, component: str,
+                    vals: np.ndarray) -> tuple[str, list[str]]:
+    """The meaning of a p_min_pu floor, and its warnings: on a committable
     unit a floor is a minimum stable level when committed, not a must-run;
-    on any other unit, a floor above what its bus can absorb forces spill
-    or makes the dispatch and ENS solves infeasible."""
-    gens = n.generators
-    if "committable" in gens.columns and bool(gens.at[component, "committable"]):
+    on any other, a floor whose output exceeds what the receiving bus can
+    absorb forces spill or makes the dispatch and ENS solves infeasible. A
+    generator feeds its bus; a link feeds bus1 (and bus2/bus3) with p0 x
+    efficiency."""
+    table = getattr(n, component_type)
+    if "committable" in table.columns and bool(table.at[component, "committable"]):
         return "min stable level when committed", [
             f"{MIN_STABLE_WARNING}: {component!r} is committable, so this "
             "floor holds only while it is committed; it does not force it on"]
-    floor = vals * float(_capacity(gens.loc[[component]])[0])
-    sink = _bus_sink_mw(n, str(gens.at[component, "bus"]), component)
-    over = np.flatnonzero(floor > sink + 1e-9)
-    if not over.size:
-        return "must-run floor", []
-    i = int(over[0])
-    return "must-run floor", [
-        f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor of "
-        f"{floor[i]:.0f} MW exceeds the {sink[i]:.0f} MW its bus can absorb "
-        f"(loads, storage charging, links, less other floors; includes line "
-        f"export capacity (s_nom·s_max_pu, dense), whose far end must absorb "
-        f"it) at {n.snapshots[i]} ({over.size} snapshots); the dispatch and "
-        "ENS solves must spill or go infeasible. The sink is an upper bound: "
-        "no warning does not prove the solve can take the floor"]
+    floor = np.clip(vals, 0.0, None) * float(_capacity(table.loc[[component]])[0])
+    if component_type == "generators":
+        outputs = [(str(table.at[component, "bus"]), floor)]
+    else:
+        outputs = []
+        for k, eff in (("1", "efficiency"), ("2", "efficiency2"), ("3", "efficiency3")):
+            bus = str(table.at[component, f"bus{k}"]) if f"bus{k}" in table.columns else ""
+            if bus and bus in n.buses.index:
+                e = _dense(n, "Link", eff, [component])[:, 0] if eff in table.columns else 1.0
+                outputs.append((bus, floor * np.clip(e, 0.0, None)))
+    for bus, out in outputs:
+        sink = _bus_sink_mw(n, bus, component)
+        over = np.flatnonzero(out > sink + 1e-9)
+        if over.size:
+            i = int(over[0])
+            return "must-run floor", [
+                f"{MUST_RUN_SINK_WARNING}: {component!r}'s must-run floor puts "
+                f"{out[i]:.0f} MW onto bus {bus!r}, which can absorb {sink[i]:.0f} MW "
+                f"(loads, storage charging, links, less other floors; includes "
+                f"line export capacity (s_nom·s_max_pu, dense), whose far end "
+                f"must absorb it) at {n.snapshots[i]} ({over.size} snapshots); "
+                "the dispatch and ENS solves must spill or go infeasible. The "
+                "sink is an upper bound: no warning does not prove the solve can "
+                "take the floor"]
+    return "must-run floor", []
+
+
+def _two_way_companion(ctx, component: str, vals: np.ndarray, index,
+                       ) -> pd.Series | None:
+    """A two-way link's reverse bound under an availability series: its
+    static p_min_pu scaled by the same availability, so a shutdown closes
+    both directions. A link whose reverse bound is already a series of its
+    own (an upload, another profile) is refused rather than overwritten: the
+    replace-or-refuse rule, and a companion built on a companion would
+    compound."""
+    n = ctx.network
+    key = ("links", "p_min_pu", component)
+    previous = ctx.user_ts_meta.get(key) or {}
+    has_own = (component in n.links_t.p_min_pu.columns
+               and not previous.get("companion_of"))
+    static = float(n.links.at[component, "p_min_pu"])
+    if has_own:
+        own = n.links_t.p_min_pu[component].reindex(index).to_numpy(dtype=float)
+        if (own < 0).any():
+            raise ProfileBoundConflictError(
+                f"{component!r} is a two-way link whose reverse bound (p_min_pu) "
+                "is a series of its own; an availability series would replace it. "
+                "Remove that series first, or set both bounds yourself")
+        return None
+    if static >= 0:
+        return None
+    return pd.Series(np.where(vals < 1.0, static * vals, static), index=index,
+                     name=component)
 
 
 def _modelled_mwh(n, aligned: pd.Series, weighting: str) -> dict[str, float]:
@@ -975,7 +1087,7 @@ def _profile_zone(ctx, meta: Mapping[str, Any], time_basis: str | None) -> str |
     commercial timezone unset the snapshots are the site clock, and a
     profile drawn on a stated zone (``params.timezone``) says what that clock
     is — so it lands back on that zone's wall clock, converted once."""
-    if time_basis is not None or _commercial_timezone(ctx):
+    if time_basis is not None or commercial_timezone(ctx):
         return time_basis
     params = meta.get("params")
     zone = params.get("timezone") if isinstance(params, Mapping) else None
@@ -996,7 +1108,7 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
             f"{component_type}/{attribute} is not a power target; it has no energy")
     scale, _ = _scale_power(series, meta)
     basis, _recorded, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
+        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     aligned, align_meta = _align_to_snapshots(
         series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
@@ -1012,7 +1124,7 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
 # ---------------------------------------------------------------------------
 
 
-def assign_profile(
+def prepare_profile(
     ctx,
     component: str,
     series: pd.Series,
@@ -1022,8 +1134,13 @@ def assign_profile(
     attribute: str = "p_max_pu",
     now: _dt.datetime | str | None = None,
     time_basis: str | None = None,
-) -> dict:
-    """Apply a generated profile to ``component``'s ``attribute``.
+) -> SimpleNamespace:
+    """Everything `assign_profile` decides before it writes — target and
+    family checks, alignment, values, warnings, the meta it would store —
+    with NOTHING written. The edit card previews exactly this.
+
+    (assign_profile's contract, which this shares:)
+    Apply a generated profile to ``component``'s ``attribute``.
 
     The target ``(component_type, attribute)`` must be in `TARGETS`, and the
     meta's ``family`` (renewable when absent) must allow it. The defaults are
@@ -1069,14 +1186,18 @@ def assign_profile(
 
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     unit_meta: dict[str, Any] = {}
+    money_warnings: list[str] = []
     scale = 1.0
     if target.kind == "power":
         scale, unit_meta = _scale_power(series, meta)
     elif target.kind == "price":
-        unit_meta = _money(meta)
+        unit_meta, money_warnings = _money(meta, _project_money(ctx))
+        if component_type == "links":
+            unit_meta["per"] = "MWh of p0 (bus0 flow)"
 
     time_basis, recorded_basis, warnings = resolve_time_basis(
-        _profile_zone(ctx, meta, time_basis), _commercial_timezone(ctx))
+        _profile_zone(ctx, meta, time_basis), commercial_timezone(ctx))
+    warnings = [*warnings, *money_warnings]
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
     )
@@ -1091,10 +1212,10 @@ def assign_profile(
         )
     clipped = False
     if target.kind == "per_unit":
-        # Clipped into [0, 1] defensively; a clip is recorded in meta.
-        clipped = bool(((vals < 0.0) | (vals > 1.0)).any())
+        # Clipped into the bound's range defensively; a clip is recorded.
+        clipped = bool(((vals < target.lo) | (vals > target.hi)).any())
         if clipped:
-            vals = np.clip(vals, 0.0, 1.0)
+            vals = np.clip(vals, target.lo, target.hi)
         warnings = [*warnings, *_check_bound_pair(n, component_type, component,
                                                   attribute, vals)]
     elif target.kind == "power":
@@ -1114,6 +1235,13 @@ def assign_profile(
             )
     aligned = pd.Series(vals, index=aligned.index, name=aligned.name)
 
+    if (component_type, attribute) == ("storage_units", "inflow"):
+        # The network solve takes inflow (PyPSA spills what the unit cannot
+        # store); only the assistant's storage calculator refuses it.
+        warnings = [*warnings, (
+            f"{INFLOW_TOOL_WARNING}: the assistant's storage calculator does "
+            "not model inflow; the network solve does (PyPSA spills what the "
+            "unit cannot store)")]
     if target.kind == "power":
         energy, energy_warnings = _energy_record(
             n, series, aligned, scale, target, int(align_meta["weather_year"]),
@@ -1133,9 +1261,13 @@ def assign_profile(
                                                   _kind_of(meta))
     warnings = [*warnings, *replace_warnings]
     meaning = None
-    if (component_type, attribute) == ("generators", "p_min_pu"):
-        meaning, floor_warnings = _floor_warnings(n, component, vals)
+    if attribute == "p_min_pu" and component_type in ("generators", "links") \
+            and (vals > 0).any():
+        meaning, floor_warnings = _floor_warnings(n, component_type, component, vals)
         warnings = [*warnings, *floor_warnings]
+    companion = None
+    if (component_type, attribute) == ("links", "p_max_pu") and family_name == "availability":
+        companion = _two_way_companion(ctx, component, vals, aligned.index)
     full_meta: dict[str, Any] = {
         **dict(meta),
         **unit_meta,
@@ -1167,12 +1299,51 @@ def assign_profile(
         if meaning.startswith("min stable") and full_meta.get("kind") == "must_run":
             full_meta["kind"] = "min_stable_level"
 
+    return SimpleNamespace(
+        key=key, aligned=aligned, full_meta=full_meta, companion=companion,
+        warnings=warnings, target=target, family_name=family_name,
+        align_meta=align_meta, recorded_basis=recorded_basis, unit_meta=unit_meta,
+        component=component, component_type=component_type, attribute=attribute,
+        meta=meta)
+
+
+def assign_profile(
+    ctx,
+    component: str,
+    series: pd.Series,
+    meta: Mapping[str, Any],
+    *,
+    component_type: str = "generators",
+    attribute: str = "p_max_pu",
+    now: _dt.datetime | str | None = None,
+    time_basis: str | None = None,
+) -> dict:
+    """Apply a generated profile to ``component``'s ``attribute``: what
+    `prepare_profile` decides, written (store, network, dispatch freshness,
+    changelog). See `prepare_profile` for the contract."""
+    p = prepare_profile(ctx, component, series, meta, component_type=component_type,
+                        attribute=attribute, now=now, time_basis=time_basis)
+    key, aligned, full_meta, companion = p.key, p.aligned, p.full_meta, p.companion
+    warnings, target, family_name = p.warnings, p.target, p.family_name
+    align_meta, recorded_basis, unit_meta = p.align_meta, p.recorded_basis, p.unit_meta
+    n = ctx.network
+
     # Store write under the store lock, network write under the PyPSA lock —
     # the same two-lock dance as the upload path (`_apply_profile_upload`).
     # Overwrite semantics: regeneration replaces the same key.
     with _user_ts_lock:
         ctx.user_ts[key] = aligned
         ctx.user_ts_meta[key] = full_meta
+        if companion is not None:
+            ckey = ("links", "p_min_pu", component)
+            ctx.user_ts[ckey] = companion
+            companion_meta = {k: v for k, v in full_meta.items()
+                              if k not in ("replaced_series", "target", "meaning")}
+            ctx.user_ts_meta[ckey] = {
+                **companion_meta, "target": ["links", "p_min_pu"],
+                "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
+                "companion_of": "p_max_pu",
+                "meaning": "reverse bound scaled by the same availability"}
     with PyPSAService.get_lock():
         _reapply_user_ts_to_network(n, store=ctx.user_ts)
         # A new profile invalidates solved dispatch exactly like a topology
@@ -1195,6 +1366,8 @@ def assign_profile(
         desc += ", Feb 29 dropped"
     if align_meta.get("window"):
         desc += ", sliced to the snapshot window"
+    if meta.get("refinements"):
+        desc += ", refined by " + ", ".join(str(r.get("op")) for r in meta["refinements"])
     change_log_service.log("timeseries", target.display, component, desc)
 
     return {
@@ -1213,6 +1386,7 @@ def assign_profile(
         "warnings": warnings,
         "dispatch_cleared": bool(dispatch_cleared),
         "mean": float(aligned.mean()),
+        "min": float(aligned.min()),
         "peak": float(aligned.max()),
         **({"modelled_mwh": unit_meta["modelled_mwh"],
             "profile_annual_mwh": unit_meta["profile_annual_mwh"]}

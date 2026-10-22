@@ -1,4 +1,12 @@
 import { EditReceiptLine, editReceiptOf } from './EditCard'
+import { formatElapsed, useElapsed } from '../hooks/useElapsed'
+
+/** LC-12: where a plan's waiting job stands in this view. */
+export type ContinuationLine =
+  | { state: 'waiting'; onStop: () => void }
+  | { state: 'held'; onContinueNow: () => void }
+  | { state: 'continued' | 'stopped' }
+  | { state: 'elsewhere'; project: string }
 
 /** Read task/artifact metadata from the existing tool_result stream. */
 function object(value: unknown): Record<string, unknown> | null {
@@ -6,8 +14,30 @@ function object(value: unknown): Record<string, unknown> | null {
     ? value as Record<string, unknown> : null
 }
 
-export default function AssistantResultCard({ result, disabled, onRequest }: {
+/** The waiting task's line: elapsed time and a way out, or why it is held. */
+function WaitingLine({ line }: { line: ContinuationLine }) {
+  const elapsed = useElapsed(line.state === 'waiting')
+  if (line.state === 'waiting') return <div data-testid="task-continuation-line">
+    Waiting for the solve to finish · {formatElapsed(elapsed)}{' '}
+    <button type="button" className="text-muted hover:text-text" onClick={line.onStop}
+      title="The solve runs on; the conversation will not continue by itself">Stop waiting</button>
+  </div>
+  if (line.state === 'held') return <div data-testid="task-continuation-line">
+    The solve finished · I&apos;ll continue when you&apos;re ready{' '}
+    <button type="button" className="text-accent" onClick={line.onContinueNow}>Continue now</button>
+  </div>
+  if (line.state === 'elsewhere') return <div data-testid="task-continuation-line">
+    This plan&apos;s solve is in {line.project}: open it to continue
+  </div>
+  return <div data-testid="task-continuation-line" className="text-muted">
+    {line.state === 'continued' ? 'The solve finished · continued below' : 'Not waiting for this solve; it runs on'}
+  </div>
+}
+
+export default function AssistantResultCard({ result, disabled, onRequest, continuation }: {
   result: unknown; disabled: boolean; onRequest: (text: string) => void
+  /** LC-12: set while this card's plan waits on its job. */
+  continuation?: ContinuationLine
 }) {
   const data = object(result)
   if (!data) return null
@@ -30,15 +60,16 @@ export default function AssistantResultCard({ result, disabled, onRequest }: {
       <div className="font-medium">{String(task?.title ?? 'Task')}</div>
       <div>{status} · {Number(task?.completed_steps ?? 0)} / {Number(task?.total_steps ?? 0)} steps</div>
       {next && <div>Next: {String(next.tool ?? '')} ({String(next.status ?? '')})</div>}
+      {status === 'waiting_job' && continuation && <WaitingLine line={continuation} />}
       {status === 'needs_review' && <p>Verify the previous action before retrying. Its effects may already exist.</p>}
       <div className="mt-1 flex gap-2">
         {status !== 'completed' && status !== 'cancelled' && <>
-          <button type="button" disabled={disabled} className="text-accent disabled:opacity-40"
+          {status !== 'waiting_job' && <button type="button" disabled={disabled} className="text-accent disabled:opacity-40"
             onClick={() => onRequest(status === 'needs_review'
               ? `Use get_task with task_id ${taskId}. Inspect the uncertain step's effects and explain what needs verification before reconciliation.`
               : `Use resume_task with task_id ${taskId}, then execute the next offered tool call. Preserve all confirmations and stop if a job is still pending.`)}>
             {status === 'needs_review' ? 'Review task' : 'Resume task'}
-          </button>
+          </button>}
           <button type="button" disabled={disabled} className="text-muted disabled:opacity-40"
             onClick={() => onRequest(`Use cancel_task with task_id ${taskId}. Stop future steps; leave running jobs alone.`)}>Cancel task</button>
         </>}

@@ -243,7 +243,12 @@ def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client,
     r = client.post(f"{ROUTE}/apply", json={**pv, "digest": "never-shown"})
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
     card = client.post(f"{ROUTE}/preview", json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
-    assert any(row["field"] == "dc_ac" and row.get("confirmed") for row in card["rows"])
+    confirmed = [row for row in card["rows"] if row.get("confirmed")]
+    assert {row["field"] for row in confirmed} == {"dc_ac", "money_year"}
+    assert all(row["note"].startswith("Confirmed: ") and "unticked" not in row["note"] for row in confirmed)
+    money = [row["note"] for row in card["rows"] if row["role"] == "note" and row["field"] == "overnight_cost"]
+    assert len(money) == 1 and "annualises this cost over the 40-year lifetime" in money[0]
+    assert "Price data: 2025 EUR" in money[0] and "×" not in money[0] and "fom_cost" not in money[0]
 
 
 def test_a_stale_digest_refuses_and_writes_nothing(client, install_network):
@@ -306,6 +311,11 @@ def test_money_years_in_use_lists_each_recorded_cost_year():
     assert sorted(years) == [2020, 2025]
     assert ("Generator", "pv", "overnight_cost") in years[2025]
     assert ("Generator", "wind", "overnight_cost") in years[2020]
+    # A cost typed over the applied reference is not that reference's year (B9).
+    from services.asset_schema import provenance
+    provenance.mark_customised(n, "Generator", "pv", ["overnight_cost"])
+    assert ("Generator", "pv", "overnight_cost") not in A.money_years_in_use(n).get(2025, [])
+    assert A.hand_typed_cost_fields(n) == [("Generator", "pv", "overnight_cost")]
 
 
 def test_the_http_apply_needs_the_digest_of_a_card_the_user_saw(client, install_network):

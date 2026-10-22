@@ -281,7 +281,17 @@ def _island_breakeven(result, case) -> dict[str, Any] | None:
                                      for k, v in got.items()}
 
 
+def _lcoe_inputs_block(result, case) -> dict[str, Any] | None:
+    got = getattr(result, "lcoe_inputs", None) or {}
+    if not got:
+        return None
+    return {"energy_mwh": _series(got["energy_mwh"]), "value": _series(got["value"]),
+            "inflation": _num(case.inputs.inflation)}
+
+
 def _project_payload(result, case) -> dict[str, Any]:
+    from services.finance.revenue_streams import revenue_by_stream
+
     m, fin = result.metrics, case.inputs
     cash = result.cash
     return {
@@ -314,6 +324,10 @@ def _project_payload(result, case) -> dict[str, Any]:
         "lcos_nominal_per_mwh": _num(m.get("lcos_nominal_per_mwh")),
         "lcos_real_per_mwh": _num(m.get("lcos_real_per_mwh")),
         "lcos": _lcos_block(result),
+        # The LCOE's per-year generation and value and the inflation its real
+        # figure uses (checked-results S8b); readers use `.get` (reports stored
+        # before this lack the key: their LCOE cannot be rebuilt until re-run).
+        "lcoe_inputs": _lcoe_inputs_block(result, case),
         "solved_ppa_price": _num(m.get("solved_ppa_price")),
         "solve_ppa_status": m.get("solve_ppa_status"),
         # A price that zeroes the NPV but not at the case's own IRR (several
@@ -331,6 +345,9 @@ def _project_payload(result, case) -> dict[str, Any]:
                        for ln in getattr(result.incentives, "lines", []) or []],
         "counterfactual": _counterfactual_block(result, case),
         "lines_not_established": _lines_not_established(result),
+        # The owner's operating cash by stream per year, a financial PPA as its two legs
+        # (IPP ticket 05, G6); None when the operating cash is not established.
+        "revenue_streams": revenue_by_stream(result.op),
         # The discount rates the returns above use (the chat's cash attribution
         # discounts at the report's own cost of equity).
         "cost_of_equity": _num(fin.cost_of_equity),

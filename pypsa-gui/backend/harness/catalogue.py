@@ -89,6 +89,8 @@ SAFETY_PANEL_ENUM = [
     "Economics", "economics",
     # The renewable profile generator (Profile Studio) slide panel.
     "ProfileStudio", "profiles",
+    # The workspace-level Commercial library page (tariffs, contracts, series).
+    "CommercialLibrary", "library",
 ]
 RESULTS_TAB_ENUM = [
     "summary",      # M3: the answer-first tab Results opens on after a solve
@@ -224,8 +226,11 @@ TOOLS: list[dict[str, Any]] = [
         "already showed it, the exact read to call before opening it, and how far the browser can "
         "prove it is shown. Statuses only, never values: read a section with its listed read, then "
         "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
-        "tabs already shown in this project. Safety: read.",
-        {"exclude_shown": {"type": "boolean"}},
+        "tabs already shown in this project; card lists only that card's views. Safety: read.",
+        {"exclude_shown": {"type": "boolean"},
+         # result_views.CARDS (flow_scope's card ids); test_result_views pins it.
+         "card": {"type": "string", "enum": ["capacity", "grid", "control", "reliability",
+                                             "commercial", "handoff"]}},
         [],
     ),
     _t(
@@ -1581,16 +1586,74 @@ TOOLS: list[dict[str, Any]] = [
         "refused (their weather profile). Apply warns when it replaces an "
         "existing series, when a must-run floor exceeds what the bus can "
         "absorb, and that a floor on a committable unit is a min stable "
-        "level; relay those. `project_id` is the project NAME and must be "
-        "the open project. Safety: execution.",
+        "level; relay those. With component_type \"links\" the same kinds "
+        "act on process links (bounds on p0): a shutdown on a two-way link "
+        "closes both directions; a floor on a two-way or point-of-connection "
+        "link is refused. `generators` then names the links. "
+        "`project_id` is the project NAME and must be the open project. "
+        "Safety: execution.",
         {"project_id": {"type": "string"},
          "kind": {"type": "string",
                   "enum": ["maintenance", "must_run", "derating",
                            "forced_outages"]},
          "generators": {"type": "array", "items": {"type": "string"}},
+         "component_type": {"type": "string", "enum": ["generators", "links"]},
          "params": {"type": "object"},
          "year": {"type": "integer"}},
         ["project_id", "kind", "generators"],
+    ),
+    _t(
+        "refine_generated_profile",
+        "Refine a PENDING generated profile by deterministic ops into a new "
+        "pending profile (nothing changes until apply_generated_profile, "
+        "whose card shows old → new). Emit ops, never numbers for the series. "
+        "ops, in order: scale_peak_to {mw | value | fraction + of: "
+        "current_peak|connection} (the peak the model sees; connection is "
+        "the point-of-connection link, read server-side); scale_window "
+        "{hours: [start, end), weekdays?, months?, factor} on the site's "
+        "clock (refused if the project has no timezone); set_floor / set_cap "
+        "{value}; shift {hours}; smooth {window_h}; rescale_energy {mwh} "
+        "(loads and inflow). Put a peak or energy target LAST: a later op "
+        "that moves it is warned earlier_target_broken; relay warnings and "
+        "offer to reorder. The answer gives per-op stats (peak, energy, load "
+        "factor, hours touched and clipped) and the new job_id. "
+        "`project_id` is the project NAME and must be the open project. "
+        "Safety: execution.",
+        {"project_id": {"type": "string"},
+         "job_id": {"type": "string"},
+         "ops": {"type": "array", "items": {"type": "object"}}},
+        ["project_id", "job_id", "ops"],
+    ),
+    _t(
+        "generate_series_profile",
+        "Generate another model series into the pending store (nothing "
+        "changes until apply_generated_profile writes it to the target it "
+        "states). Kinds: tou → marginal_cost of generators (or links with "
+        "params.component_type \"links\", per MWh of p0): params.periods "
+        "are tariff periods {name, rate, months, weekdays, start_hour, "
+        "end_hour}, first match wins, every hour priced, plus currency, "
+        "price_basis and currency_year: a currency, basis or year the "
+        "project's finance inputs set and that differs is refused; one they "
+        "leave unset is accepted with a money_basis_unverified warning; "
+        "inflow → storage-unit inflow: annual_mwh with shape "
+        "snowmelt|rain_fed|flat or 12 monthly shares; cop → link efficiency "
+        "of a heat pump whose bus0 is electricity: source air|ground, "
+        "sink_c, source_c (ground), eta, cop_max; an air source takes the "
+        "project's data-centre ambient, or ambient_annual_mean_c, "
+        "ambient_seasonal_amplitude_k and ambient_diurnal_amplitude_k "
+        "stated, else it is refused (cop_ambient_unknown); hours whose "
+        "COP falls below 1 are raised to 1 and warned. market is refused until "
+        "market price bundles exist; part_load is refused (it depends on "
+        "the dispatch). A price on a point-of-connection link is refused: "
+        "set the tariff. `project_id` is the project NAME and must be the "
+        "open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "kind": {"type": "string",
+                  "enum": ["tou", "inflow", "cop", "market", "part_load"]},
+         "components": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "kind", "components"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -1814,7 +1877,13 @@ TOOLS: list[dict[str, Any]] = [
         "without a blackout, the seamless scenario; needs an existing battery "
         "or new batteries; default false); a stage whose peak is above its "
         "energized connection is refused). Grid templates: 3bus, ieee14, belgium, "
-        "ieee39. Safety: destructive.",
+        "ieee39. The three staged examples (eh_datacenter_staged, "
+        "eh_h2_hub_staged, eh_microgrid_staged) can be built for other "
+        "planning years: params.planning {start_year, end_year, dates?} "
+        "(whole years 2025-2060, at most 3 periods; with no dates the "
+        "example's spacing is shifted to start_year and later stages are "
+        "dropped). A value the example has no figure for in an entered year "
+        "is a placeholder the project flags until it is set. Safety: destructive.",
         {
             "template_id": {"type": "string",
                             "enum": ["3bus", "ieee14", "belgium", "ieee39",
@@ -1824,8 +1893,11 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_ammonia_staged", "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
-                       "description": "eh_site only: the site's parameters "
-                                      "(omit for the industrial preset)."},
+                       "description": "eh_site: the site's parameters (omit "
+                                      "for the industrial preset). The staged "
+                                      "examples: {planning: {start_year, end_year, "
+                                      "dates?}}; the data-center ones also take "
+                                      "dc_load."},
         },
         ["template_id", "new_name"],
     ),
@@ -1865,9 +1937,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "restore_project_snapshot",
-        "Restore project from a saved snapshot. Overwrites project files + "
-        "reloads in-memory. Pre-restore auto-snapshot mitigates user error. "
-        "Safety: destructive.",
+        "Restore project from a saved snapshot. Saves unsaved edits, keeps the "
+        "current state as a 'before-restore' snapshot, then overwrites project "
+        "files + reloads in-memory. Safety: destructive.",
         {
             "name": {"type": "string"},
             "snapshot_id": {"type": "string"},
@@ -3163,6 +3235,11 @@ TOOLS: list[dict[str, Any]] = [
         "smoothing), reactive range, frequency support and the profile's "
         "dynamic requirements (always unknown: an EMT study is needed), grid "
         "former, island ride-through per scenario, LOLE against the goal. "
+        "With an AI-training load and a committed battery/UPS, the ramp, "
+        "oscillation and voltage-change rows also carry after_battery {value, "
+        "verdict, units, note}: the value after the battery/UPS smooths, judged "
+        "by the same limit; the row's own verdict stays before mitigation, so "
+        "give both. "
         "unknown means an input is missing, never a pass; say which. Say which "
         "limits are assumed. It never blocks a run. 422 for an unknown "
         "profile. Safety: read.",
@@ -3626,6 +3703,67 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["component_class", "name", "technology", "projection_year"],
     ),
+    # ── Equipment tables (2) — data-to-model slice 1 (AI-567) ─────────────
+    _t(
+        "preview_equipment_mapping",
+        "Map an uploaded CSV/XLSX equipment table (one row per asset) onto assets "
+        "of ONE class: `name_column` holds each asset's name, matched exactly and "
+        "case-sensitively after trimming spaces, `columns` maps "
+        "a header to {field, unit} (fields from get_component_schema; the unit is "
+        "the field's stored or display unit, nothing else is converted). Cost "
+        "fields need `currency` and `money_year`. The server reads the file "
+        "(at most 500 rows, 40 columns; formulas are never evaluated), checks "
+        "every cell and returns {source (upload_id, sha256, sheet), cells (each "
+        "CHANGED cell: asset, field, value, unit, source cell), changed_cells, "
+        "unchanged_cells, unmapped (the first 50, each with its kind and reason), "
+        "unmapped_total, unmapped_by_kind, needs, missing}. More than 200 changed "
+        "cells refuses (mapping_too_large). Time-series fields are left out "
+        "(time_series_not_supported_here); static-or-series fields are written as "
+        "static. Writes nothing. Show the user the "
+        "unmapped cells; never guess a field, unit or asset for them. Safety: read.",
+        {
+            "upload_id": {"type": "string"},
+            "sheet": {"type": "string"},
+            "component_class": {"type": "string"},
+            "name_column": {"type": "string"},
+            "columns": {"type": "object", "additionalProperties": {
+                "type": "object", "properties": {"field": {"type": "string"}, "unit": {"type": "string"}},
+                "required": ["field", "unit"]}},
+            "currency": {"type": "string"},
+            "money_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string", "enum": ["money_year"]}},
+        },
+        ["upload_id", "component_class", "name_column", "columns"],
+    ),
+    _t(
+        "apply_equipment_mapping",
+        "Write a previewed equipment-table mapping onto its assets. Same arguments "
+        "as preview_equipment_mapping plus `source_sha256` (the preview's "
+        "source.sha256; different bytes refuse with source_changed). The user sees "
+        "one old→new card listing every changed cell with its file, sheet and cell; "
+        "at most 200 changed cells per card (mapping_too_large). Unmapped cells are not "
+        "written. Refusals: nothing_to_change (every value already set), "
+        "table_confirmation_needed with `missing` (money_year: the table's money "
+        "year is not the investment case's base year; the value is copied "
+        "unadjusted): ask the user, then call again with confirm=[...] naming only "
+        "what they confirmed. Never confirm on the user's behalf. Not one "
+        "transaction: a refusal part-way returns partial=true with `written`, "
+        "`failed` and `not_attempted`; offer undo_last. Returns {written, unmapped, "
+        "notes, receipt}. Safety: write.",
+        {**{
+            "upload_id": {"type": "string"},
+            "sheet": {"type": "string"},
+            "component_class": {"type": "string"},
+            "name_column": {"type": "string"},
+            "columns": {"type": "object", "additionalProperties": {
+                "type": "object", "properties": {"field": {"type": "string"}, "unit": {"type": "string"}},
+                "required": ["field", "unit"]}},
+            "currency": {"type": "string"},
+            "money_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string", "enum": ["money_year"]}},
+        }, "source_sha256": {"type": "string"}},
+        ["upload_id", "component_class", "name_column", "columns", "source_sha256"],
+    ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
         "set_site_connection",
@@ -3862,11 +4000,11 @@ TOOLS.extend([
     _t("get_loadflow_summary", "Summarise the CURRENT load-flow results of the active project: lines and transformers ranked by peak utilisation = flow / (rating * s_max_pu), computed by software from the same results the Load flow tab reads. Per branch (default 5, max 25, trimmed to a bounded payload): both-terminal peak flow, rating (optimized s_nom_opt or configured s_nom), s_max_pu range, peak/mean utilisation, weighted hours at/over the limit. Returns the exact source, snapshot window, freshness, solve state, ranking convention, skipped branches (missing or zero rating, no flow data) and missing_evidence. LOPF results are an ACTIVE-POWER PROXY, not an AC apparent-power assessment; source='ac_pf' uses apparent power where reactive flows exist and excludes unconverged snapshots. Never proof of full AC thermal compliance (no N-1, no voltage limits). Unsolved, stale, running, infeasible or failed results return status unavailable with a typed unavailable_kind; never invent values. window_from/window_to are inclusive snapshot indexes for follow-ups. run_id: the newest completed run whose inputs are still current answers as the current results (run.is_current true); any other run answers from the load flow captured when it finished (scope historical, run.is_current false; the Load flow tab still shows the current results), or unavailable for a run without a captured section. Safety: read.", {"source": {"type": "string", "enum": ["lopf", "ac_pf"]}, "limit": {"type": "integer", "minimum": 1, "maximum": 25}, "window_from": {"type": "integer", "minimum": 0}, "window_to": {"type": "integer", "minimum": 0}, "run_id": {"type": "string", "maxLength": 64}}, []),
     _t("list_tasks", "List up to 20 most recently updated durable tasks owned by you in the active project. Use a returned ID to resume in a new chat or provider. Safety: read.", {"limit": {"type": "integer", "minimum": 1, "maximum": 20}}, []),
     _t("find_capabilities", "Find relevant supported tools for a goal. Returns required inputs, safety and current project/toolset eligibility. With overview=true (no goal) answers \"what can you do here?\": the core-feature families (projects, results, checks, edits, sensitivities, studies, reports), each available or not for this project, role, mode and personal rule, with the reason, an example sentence and its offered tools. Cached catalogue search grants no authority. Safety: read.", {"goal": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 8}, "overview": {"type": "boolean"}}, []),
-    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools. Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 12, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}}, ["title", "steps", "request_id"]),
+    _t("start_task", "Persist a project/user-scoped plan of 1–12 ordinary tools (1–24 with a study brief). Create/activate the project first; rebinding and task-control tools cannot be steps. Each step has unique id, tool, args. Whole-value $earlier_step.path references resolve saved results. Stable request_id deduplicates identical plans. Optional brief (decision study goal the user approved on a plan-review Choice card): objective, cards in scope, case names, and phases that split the steps in order, one card each; it grants nothing, the plan pauses before each new card until the user continues, and inputs changed outside the plan stop its next effect. Returns task_id, status, next_step. Execute next_step via an ordinary offered call; this tool runs no hidden actions. Safety: write.", {"title": {"type": "string", "maxLength": 120}, "request_id": {"type": "string", "maxLength": 64}, "steps": {"type": "array", "minItems": 1, "maxItems": 24, "items": {"type": "object", "additionalProperties": False, "properties": {"id": {"type": "string"}, "tool": {"type": "string"}, "args": {"type": "object"}}, "required": ["id", "tool", "args"]}}, "brief": {"type": "object", "additionalProperties": False, "properties": {"objective": {"type": "string", "maxLength": 240}, "cards": {"type": "array", "maxItems": 6, "items": {"type": "string", "enum": ["capacity", "grid", "control", "reliability", "commercial", "hand-off"]}}, "cases": {"type": "array", "maxItems": 8, "items": {"type": "object", "additionalProperties": False, "properties": {"name": {"type": "string", "maxLength": 60}, "experiment": {"type": "string", "maxLength": 64}}, "required": ["name"]}}, "phases": {"type": "array", "minItems": 1, "items": {"type": "object", "additionalProperties": False, "properties": {"card": {"type": "string"}, "steps": {"type": "array", "minItems": 1, "items": {"type": "string"}}}, "required": ["card", "steps"]}}}, "required": ["objective", "cards", "phases"]}}, ["title", "steps", "request_id"]),
     _t("get_task", "Read a durable task in the active project owned by the caller. Returns completed steps and the next exact call; no completed step is replayed. Safety: read.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("resume_task", "Attach a durable task to this chat and return next_step. Execute it as an ordinary offered tool call; all normal gates apply. Interrupted writes become uncertain and require explicit review. No implicit tool execution or job polling. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
     _t("cancel_task", "Stop future task steps; retain its checkpoint. Does not abort a running queue job or solver. Use solve_queue_abort separately for a job. Safety: write.", {"task_id": {"type": "string"}}, ["task_id"]),
-    _t("resolve_task_step", "After verifying an uncertain step's actual effects, explicitly mark completed with a compact verified result or authorize retry. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
+    _t("resolve_task_step", "After inspecting a failed or uncertain step, mark it completed or authorize retry. Completed resolves only from native evidence (the call's own late receipt, its job's published run, or a fresh edit read-back); a supplied result is ignored, and without evidence the step stays to review. Refuses a still-running originating session. Normal destructive confirmation required. Safety: destructive.", {"task_id": {"type": "string"}, "outcome": {"type": "string", "enum": ["completed", "retry"]}, "result": {"type": "object"}}, ["task_id", "outcome"]),
     _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
@@ -3875,7 +4013,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4115,7 +4253,7 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (9)
+    # profile generator (11)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
@@ -4126,6 +4264,9 @@ TOOL_ROUTES: dict[str, list] = {
     "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
     "generate_availability_profile": [
         ("POST", "/api/projects/{name}/profiles/availability/generate")],
+    "generate_series_profile": [
+        ("POST", "/api/projects/{name}/profiles/series/generate")],
+    "refine_generated_profile": [("POST", "/api/projects/{name}/profiles/refine")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
@@ -4193,6 +4334,7 @@ TOOL_ROUTES: dict[str, list] = {
     "list_uploads": [("GET", "/api/projects/{name}/uploads")],
     "read_upload_meta": [("GET", "/api/projects/{name}/uploads/{file_id}/meta")],
     "read_excel_sheet": _SERVICE_CALL,
+    "preview_equipment_mapping": _SERVICE_CALL,
     "apply_demand_from_excel": _SERVICE_CALL,
     "delete_upload": [("DELETE", "/api/projects/{name}/uploads/{file_id}")],
     # uploads — vision (Phase C dependency stub)
@@ -4310,6 +4452,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
                               ("GET", "/api/library/references/{technology}/{year}")],
     "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
+    "apply_equipment_mapping": [("POST", "/api/network/equipment_table/apply")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),

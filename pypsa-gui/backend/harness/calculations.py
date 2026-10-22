@@ -13,8 +13,11 @@ from harness import capacity_calculations as capacity
 from harness import carrier_calculations as carrier
 from harness import curtailment_calculations as curtailment
 from harness import emissions_calculations as emissions
+from harness import energy_balance_calculations as balance
+from harness import investment_calculations as investment
 from harness import lost_load_calculations as lost_load
 from harness import price_calculations as price
+from harness import site_import_calculations as site_import
 from harness import storage_cycles_calculations as cycles
 from harness import storage_calculations as storage
 from harness import storage_costs
@@ -79,7 +82,7 @@ DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRIC
                **carrier.METRICS, **branch.METRICS, **branch.NETWORK_METRICS,
                **lost_load.METRICS, **price.METRICS, **emissions.GENERATOR_METRICS,
                **emissions.NETWORK_METRICS, **curtailment.METRICS, **capacity.METRICS,
-               **cycles.METRICS}
+               **cycles.METRICS, **balance.METRICS, **site_import.METRICS, **investment.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -98,12 +101,16 @@ PROFILES = {
     curtailment.PROFILE: tuple(curtailment.METRICS),
     capacity.PROFILE: tuple(capacity.METRICS),
     cycles.PROFILE: tuple(cycles.METRICS),
+    balance.PROFILE: tuple(balance.METRICS),
+    site_import.PROFILE: tuple(site_import.METRICS),
+    investment.PROFILE: tuple(investment.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
 OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE, price.PROFILE,
                              *emissions.PROFILES, curtailment.PROFILE, capacity.PROFILE,
-                             cycles.PROFILE})
+                             cycles.PROFILE, balance.PROFILE, site_import.PROFILE,
+                             investment.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -322,7 +329,7 @@ def _window(raw, scope):
     }
 
 
-def scoped_source(ctx, scope, owner=None):
+def scoped_source(ctx, scope, owner=None, investment_state=None):
     """Capture complete raw populations under the existing project lock."""
     if scope["profile"] == carrier.PROFILE:
         return carrier.source(ctx, scope["entity_id"])
@@ -338,6 +345,12 @@ def scoped_source(ctx, scope, owner=None):
         return capacity.source(ctx, scope["entity_id"], scope.get("component_class"))
     if scope["profile"] == cycles.PROFILE:
         return cycles.source(ctx, scope["entity_id"], scope.get("component_class"))
+    if scope["profile"] == balance.PROFILE:
+        return balance.source(ctx, scope["entity_id"])
+    if scope["profile"] == site_import.PROFILE:
+        return site_import.source(ctx, scope["entity_id"])
+    if scope["profile"] == investment.PROFILE:
+        return investment.source(ctx, scope["entity_id"], investment_state)
     if scope["profile"] in branch.PROFILES:
         return branch.source(ctx, scope["entity_id"], scope["profile"] == branch.NETWORK_PROFILE,
                              scope.get("component_class"))
@@ -528,6 +541,12 @@ def scoped_calculate(raw, scope):
         return capacity.calculate(raw, scope)
     if scope["profile"] == cycles.PROFILE:
         return cycles.calculate(raw, scope)
+    if scope["profile"] == balance.PROFILE:
+        return balance.calculate(raw, scope)
+    if scope["profile"] == site_import.PROFILE:
+        return site_import.calculate(raw, scope)
+    if scope["profile"] == investment.PROFILE:
+        return investment.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -692,6 +711,12 @@ def disclosure(scope):
         return capacity.DISCLOSURE
     if scope["profile"] == cycles.PROFILE:
         return cycles.DISCLOSURE
+    if scope["profile"] == balance.PROFILE:
+        return balance.DISCLOSURE
+    if scope["profile"] == site_import.PROFILE:
+        return site_import.DISCLOSURE
+    if scope["profile"] == investment.PROFILE:
+        return investment.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:

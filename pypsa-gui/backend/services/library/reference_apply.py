@@ -40,6 +40,8 @@ from services.library import europe_reference as R
 from services.library import reference_catalogue as C
 
 CONFIRMATIONS = ("dc_ac", "grid_connection", "money_year")
+# One closing line for every confirmation, in the card, the drawer and the assistant's refusal.
+LEFT_UNCONFIRMED = "Left unticked, nothing is applied."
 
 # Which class a capacity basis prices: output on a Generator, electrical input on a Link.
 _TARGET_CLASS = {"output_electric": "Generator", "output_electric_ac": "Generator",
@@ -94,20 +96,42 @@ def money_disclosure(price_year: int, currency: str, read_as: int) -> str:
 COST_FIELDS = ("overnight_cost", "fom_cost", "inv_power_overnight", "inv_energy_overnight")
 
 
-def money_years_in_use(n) -> dict[int, list[tuple[str, str, str]]]:
-    """`{money year: [(class, asset, field), ...]}` over every recorded cost field of the
-    network. More than one key means the asset costs mix money years. Read-only; a field
-    without a recorded money year is left out (unknown is not a year)."""
+def _hand_typed(entry: dict) -> bool:
+    """A person typed this value: customised with no approval. An applied reference
+    is customised too, but `stamp` records its approval; `mark_customised` drops it."""
+    return entry.get("status") == "customised" and not entry.get("approved_at")
+
+
+def _cost_entries(n):
+    """`(class, asset, field, entry)` for every recorded cost field of the network."""
     meta = getattr(n, "meta", None)
     root = meta.get("asset_params", {}) if isinstance(meta, dict) else {}
-    years: dict[int, list[tuple[str, str, str]]] = {}
     for klass, assets in root.items():
         for name, fields in assets.items():
             for field in COST_FIELDS:
-                year = (fields.get(field) or {}).get("currency_year")
-                if isinstance(year, int):
-                    years.setdefault(year, []).append((klass, name, field))
+                entry = fields.get(field)
+                if isinstance(entry, dict):
+                    yield klass, name, field, entry
+
+
+def money_years_in_use(n) -> dict[int, list[tuple[str, str, str]]]:
+    """`{money year: [(class, asset, field), ...]}` over every recorded cost field of the
+    network. More than one key means the asset costs mix money years. Read-only; a field
+    without a recorded money year is left out (unknown is not a year), and so is one a
+    person typed (`_hand_typed`): `mark_customised` keeps the overridden source's keys,
+    so its `currency_year` is the replaced value's, not the typed one's."""
+    years: dict[int, list[tuple[str, str, str]]] = {}
+    for klass, name, field, entry in _cost_entries(n):
+        year = entry.get("currency_year")
+        if not _hand_typed(entry) and isinstance(year, int):
+            years.setdefault(year, []).append((klass, name, field))
     return {year: sorted(years[year]) for year in sorted(years)}
+
+
+def hand_typed_cost_fields(n) -> list[tuple[str, str, str]]:
+    """The cost fields a person typed (`_hand_typed`): their money year is not recorded."""
+    return sorted((klass, name, field) for klass, name, field, entry in _cost_entries(n)
+                  if _hand_typed(entry))
 
 
 def case_base_year(n, config) -> int | None:
@@ -171,14 +195,14 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     needs: list[dict] = []
     if ref.capacity_basis_code == "output_electric_ac":
         needs.append({"confirmation": "dc_ac", "text":
-                      "This PV cost is per MW of AC output. This generator's capacity basis is not declared; "
-                      "if its p_nom is DC module capacity, the cost per MW is overstated by the DC/AC ratio. "
-                      "Unconfirmed, nothing is applied."})
+                      "This PV cost is per MW of AC output. This generator's capacity isn't marked as AC or DC; "
+                      "if it is the DC module rating, the cost per MW is overstated by the DC/AC ratio. "
+                      f"{LEFT_UNCONFIRMED}"})
     why = _connection_priced(n, commercial) if ref.includes_grid_connection is True else None
     if why:
         needs.append({"confirmation": "grid_connection", "text":
                       f"This reference's investment already includes grid connection, and {why}: the connection "
-                      "would be counted twice. Unconfirmed, nothing is applied."})
+                      f"would be counted twice. {LEFT_UNCONFIRMED}"})
     pack_year = pack_overnight.currency_year if pack_overnight is not None else None
     read_as = base_year if base_year is not None else pack_year
     no_money_year = read_as is None
@@ -189,7 +213,7 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                       "read_as_year": read_as, "read_as_source": against,
                       "disclosure": money_disclosure(ref.currency_year, ref.currency, read_as),
                       "text": f"{money_disclosure(ref.currency_year, ref.currency, read_as)} "
-                              f"Compared with {against}. Unconfirmed, nothing is applied."})
+                              f"Compared with {against}. {LEFT_UNCONFIRMED}"})
 
     period = _asset_period(n, frame, name)
     notes = []

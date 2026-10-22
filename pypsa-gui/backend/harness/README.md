@@ -42,7 +42,7 @@ harness/
   attention.py    bounded owned question/confirmation observations and versioned read-only inspection; no restored approval or answer authority
   owned_snapshots.py private atomic bounded snapshot storage shared by job and decision observations; schemas remain separate
   compose.py      the system prompt for a turn, the live network line, and the per-turn ui-context / Guided / workflow-step blocks
-  budget.py       the per-turn / per-session / daily caps, the retry schedule, the per-tool timeout, the budget gate
+  budget.py       the per-turn / per-session / daily caps, the task caps that lower them for a bounded task (the card explanation), the retry schedule, the per-tool timeout, the budget gate
   stub.py         the scripted stub loop behind StreamRequest.script
   session.py      ChatSession, PendingConfirmation, the session registry with its TTL and cap
   confirm.py      the confirmation gate: tiers, the Guided write rule, auto-approve, parallel-destructive
@@ -271,6 +271,28 @@ component (`frontend/src/components/EditCard.tsx`).
   the card outside the digest (`section_state`); the receipt adds `section`
   with the state after the write and whether it `changed`. The browser's
   "Show in Properties" selects the component in place; the chat stays open.
+- **Equipment tables (data-to-model slice 1).** `apply_equipment_mapping`
+  writes a mapped CSV/XLSX table onto assets of one class
+  (`services/equipment_table.py`). Each typed row also carries `source`
+  (upload id, filename, full sha256, sheet, row, column, cell, raw value and
+  unit) and, for a cost, `money`; left-out cells ride as `note` rows with
+  `gap`. The digest binds each row's source cell but not its `raw` text.
+  Changed table bytes refuse (`source_changed`); an XLSX zip bomb or DOCTYPE
+  refuses before parsing (`table_unsafe`); time-series fields stay out
+  (`time_series_not_supported_here`). The live write holds the mutation lock
+  across the loop and writes exactly the card's typed cells, refusing
+  (`edit_preview_stale`) before the first write if any `old` moved. It loops
+  the native update per asset, so a native refusal part-way returns `partial`
+  with `written`, `failed` and `not_attempted`; one undo snapshot (the turn's,
+  or the HTTP middleware's) reverts the whole table. Provenance source:
+  `upload:<id>#<sha16> <sheet>!<cell>`. The in-lock check also compares each
+  value written with its row's `new`. The route always compares the approved
+  digest: the turn loop binds the shown card's digest
+  (`edit_card.approved`) around the handler, and the tool passes it on. The
+  Expert manual-mapping form (asset table › "Import rows from a table…")
+  previews through `POST /api/equipment_table/preview`, a read outside
+  `/api/network` (no undo snapshot, no results cleared), and applies through
+  the same route with the card's digest.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -330,7 +352,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 234 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 264 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -367,6 +389,18 @@ change, and says when it was built to its bound; `storage-cycles/1` divides wind
 discharge (store weights) by energy capacity, sharing the StorageUnit profile's
 per-snapshot bounds helper; cyclic units are checked against their bounds only.
 `tests/test_profile_registry.py` keeps every metric name to one module.
+`energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
+unserved, storage change and the unsplit remainder of export, losses and conversion),
+gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own
+attribution and stay withheld. `site-import/1` (opt-in) gives the Load shape tab's
+grid import, peak import and export as that tab measures them, and the weighted hours at
+the grid_import Link's p_nom_opt x p_max_pu; the tab's heatmap, week and monthly views stay
+unchecked. `investment-case/1` (opt-in) rebuilds the post-tax equity and project NPV and IRR
+from the stored report's cash rows at the rates it records, with the engine's timing; an IRR
+only for one sign change, and every figure must match the report's headline. The report's own
+staleness key is read outside the network lock before and after the read. The LCOE (its
+energy and value series are not retained), payback, cover ratios and the solved PPA stay
+withheld.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
@@ -670,7 +704,7 @@ Guided write confirmation still applies. See the
 [prerequisite contract](../../../.scratch/live-voice/experiment-prerequisites.md).
 
 `start_task(title, steps, request_id)` persists an owner/project-scoped plan
-with 1–12 ordinary calls. Create/activate/import a project first: rebinding
+with 1–12 ordinary calls (1–24 with a study brief, below). Create/activate/import a project first: rebinding
 and task-control tools cannot be steps. `list_tasks`, `get_task` and
 `resume_task` discover and recover plans across chat sessions and providers.
 `resume_task` returns the next exact call; it does not execute hidden actions.
@@ -683,7 +717,8 @@ IDs. Task views stay within the ordinary result budget.
 A denied confirmation leaves a step pending. An interrupted effectful call
 requires review; native exports count as effectful despite their legacy read
 tier. `resolve_task_step` requires ordinary destructive confirmation to
-record verified completion or an explicit retry. Reconciliation refuses a
+record verified completion or an explicit retry; completion comes from native
+evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
 still-running originating session or detached timeout worker. `cancel_task`
 stops future task steps and retains checkpoints; it never aborts a queued job.
 Tasks live in the authorized project directory, are atomically replaced,
@@ -774,7 +809,16 @@ checked fields) claims one, at most once per job, and runs an ordinary turn
 whose user message the harness writes: `job <id> finished: <status> (plan:
 <title>)`. None is due after `cancel_task` or a user abort, and none for
 another session or project. The continuation approves nothing: every card in
-that turn still needs its click. `get_task` names the plan's verified edits in
+that turn still needs its click. `POST /api/chat/{session_id}/continuations/
+{job_id}/dismiss` ("Stop waiting") withdraws it; the job runs on.
+
+The chat panel (`hooks/usePlanContinuation.ts`) checks the listing every 3 s
+while a task card waits on a job, and every 15 s otherwise, so a reopened chat
+still gets it. It sends at most once per job and holds a due continuation while
+a turn streams, the composer has text, or a card or Choice waits for an answer;
+the card then offers "Continue now". The transcript shows a muted marker ("The
+solve finished · continuing"), never a user bubble and never the job id, also
+when the history is replayed. `get_task` names the plan's verified edits in
 `changes`, and the OpenAI tool selection favours every tool the plan still
 has to run.
 
@@ -789,6 +833,91 @@ is Check answers' own guard (`calculations.solve_matches_inputs`), so the reads
 never disagree with it, also after an AC power flow. `get_results` adds a
 `freshness_note`: stale when the inputs changed, not current when the guard
 fails for another reason.
+
+### Study brief (LC-23)
+
+Owner decisions AI-567b and COP-1; design in
+`.scratch/live-copilot/issues/23-study-copilot.md`. The user states a goal,
+the model drafts a decision study brief and shows it on a plan-review Choice
+card; on approval it calls `start_task(..., brief=)`. The brief is the plan's
+label, not a second system: `objective` (≤ 240 chars), `cards` (≤ 6 of
+`assistant_tasks.CARDS`), `cases` (≤ 8 names) and `phases`, which split the
+step ids in step order, one declared card each (`invalid_brief` otherwise).
+A plan with a brief admits 1–24 steps and 32 000 chars (plain plans keep
+12 and 16 000); the excluded tools are unchanged. Such a task file is
+version 2; version-1 files are read and saved as they are. Approving the
+brief grants nothing: every write or run step keeps its own card.
+
+- **View.** `get_task` condenses a brief to its objective, cards, case names,
+  the current phase (`phase`, `phases` counts) and that phase's steps. Every
+  step names its server-derived `limit` (`args_chars`, `result_chars` = the
+  model-facing result cap, `wait`); resolved arguments over the limit are
+  refused before dispatch (`task_reference_too_large`).
+- **Card pause (COP-1).** When a step completes and the next step belongs to
+  another card, the task is `paused_at_card` (`paused_at_card` names the
+  card). `admit`/`begin_step` refuse the next step (`task_paused_at_card`),
+  and `resume_task` refuses too (`task_pause_needs_user`). Only the user's
+  "Continue to <card>" clears it: `/stream` with `continue_task_id` (no
+  message, attachments or checked fields) calls
+  `assistant_tasks.continue_at_card`, and the harness writes the turn's
+  message. A refused continue is `plan_continue_unavailable`. Reads inside a
+  card run without stopping.
+- **Freshness (SC-11).** The task keeps the input fingerprint
+  (`workflow_tools._network_input_fingerprint`) the brief was approved on;
+  each completed effectful step replaces it with the inputs after it. When
+  the current inputs differ (an edit by the user or an off-plan call), the
+  view says `brief_stale: "inputs_changed_outside_plan"` and the next
+  effectful step is refused (`task_brief_stale`); the model drafts a new
+  brief for the user to review. A reconcile never advances the chain, so a
+  reconciled effectful step leaves the brief stale (fail closed). An edit
+  that lands during a plan step's own call is taken into the chain with that
+  step; the window is one call long.
+- **Reconciliation (SC-12, all plans).** `resolve_task_step(completed)`
+  ignores `result`. The step resolves from its late worker receipt (a timed
+  out call whose worker went on to succeed, recorded by `register_worker`),
+  its job's published run (`run_evidence`, status, job id, objective and
+  fingerprint, no `inputs_changed_before_publish`), or a fresh read-back of
+  its edit receipt (`edit_card.reread`). Without one it is
+  `task_resolution_unverifiable` and the step stays to review; `retry`
+  stays the explicit way on. `resume_task` settles a waiting job this
+  process never registered as uncertain first.
+- **Queued run steps (slice 2, all plans).** `run_sensitivity_sweep` and
+  `solve_queue_enqueue` steps wait on their solve-queue jobs
+  (`assistant_tasks.QUEUE_WAIT_TOOLS`). `harness/loop.py` hands the jobs
+  (`continuation.queue_jobs`) to `await_job` and releases the turn at once;
+  one follower per step (`continuation.follow_queue_job`, its own thread with
+  the caller's identity, a fixed poll and a 6 h cap) settles it from native
+  records only (`continuation.queue_outcome`). A job is evidence when its
+  `q-<id>` manifest is completed with its job id, kind `solve_queue`, an
+  objective and intact sections, and the child's saved network carries the
+  solve's input fingerprints unchanged (`workflow_tools.solve_freshness`,
+  the stamp `_record_solve_inputs` wrote under the solve lock; the
+  experiment refresh uses the same check). All jobs evidenced: completed.
+  None completed (each failed or aborted): failed. A mix, drift or the cap:
+  uncertain, since a retry would re-enqueue what landed. A cancelled plan
+  stops the follower quietly. After a restart a waiting queued step has no
+  follower and settles uncertain (SC-09); nothing is re-enqueued. Queue
+  steps write no parent inputs, so they never advance the SC-11 chain;
+  `_gate_brief` still runs before every effectful step after one settles.
+  The evidence read takes the network lock the refresh takes; a busy lock is
+  retried at the next poll, never judged. A receipt that started a job never
+  completes the step by itself; a sweep whose every case was reused from a
+  solved child (no job) completes from its receipt.
+  A queued step that ends a card's phase pauses the plan; the continuation
+  turn cannot pass `paused_at_card`.
+- **What a brief can run (SC-10).** `start_task` refuses
+  `brief_cases_not_runnable` unless the brief's cases and every
+  `start_experiment` and `run_sensitivity_sweep` step fit `experiment_execution.runnable` (1 or 2
+  network cases), the rule `advance_experiment` applies. Under a brief
+  `wait_for_job` is no step (`invalid_task_tool`): run steps wait by
+  themselves. A `refresh_experiment` step completes only on a `completed`
+  case; a case still running is `failed` with "Case not finished; retry
+  after it completes", an unavailable one names its native `last_error`.
+- **Correction (SC-14, LC-19).** Under a brief, a failed or uncertain next
+  step carries `next_step.correction`: the triage reads to draft a fix from
+  (`get_simulation_log_history`, `diagnose_network`, `validate_network`) for
+  a run step, the read-back for an edit. It runs nothing. A failed effectful
+  step is refused (`task_step_needs_retry`) until `resolve_task_step(retry)`.
 
 ## Recorded runs, load flow, and experiment plans
 

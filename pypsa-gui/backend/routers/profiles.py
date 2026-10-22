@@ -64,7 +64,23 @@ from services.profile_gen.availability import (
     ForcedOutagesNotWrittenError,
     InvalidAvailabilityParamsError,
     MaintenanceYearError,
+    PocBoundError,
+    TwoWayFloorError,
     UnknownAvailabilityKindError,
+)
+from services.profile_gen.refine import (
+    InvalidRefineOpError,
+    RefineReplayError,
+    WindowClockUnknownError,
+)
+from services.profile_gen.series import (
+    CopAmbientUnknownError,
+    CopBusError,
+    InvalidSeriesParamsError,
+    MarketBundlesUnavailableError,
+    PartLoadNotASeriesError,
+    PocTariffError,
+    UnknownSeriesKindError,
 )
 from services.profile_gen.load_upload import (
     UploadCoverageError,
@@ -146,17 +162,43 @@ class LoadGenerateRequest(BaseModel):
     year: int | None = None
     # Archetypes are hourly shapes; the field stays for the shared engine call.
     resolution: Literal["hourly"] = "hourly"
+    # A previous artifact's `refinements`, replayed onto the new series
+    # (`profile_gen/refine.replay`).
+    refinements: list[dict[str, Any]] | None = None
 
 
 class AvailabilityGenerateRequest(BaseModel):
     # An availability kind (`services/profile_gen/availability.py`) for the
-    # named generators of the open network; one column per generator.
+    # named generators (or, with component_type "links", links) of the open
+    # network; one column per component. `components` names either kind;
+    # `generators` is kept for the generator case.
     kind: str
-    generators: list[str] = Field(min_length=1)
+    generators: list[str] | None = None
+    components: list[str] | None = None
+    component_type: Literal["generators", "links"] = "generators"
     params: dict[str, Any] | None = None
     # The source year. Unset: the network's (first period's) year, so dated
     # maintenance windows land where the user means them.
     year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
+
+
+class SeriesGenerateRequest(BaseModel):
+    # A series kind (`services/profile_gen/series.py`) for named components;
+    # the kind decides their type (tou: params.component_type, default
+    # generators; inflow: storage units; cop: links).
+    kind: str
+    components: list[str] = Field(min_length=1)
+    params: dict[str, Any] | None = None
+    year: int | None = None
+    refinements: list[dict[str, Any]] | None = None
+
+
+class RefineRequest(BaseModel):
+    # A pending artifact to refine by deterministic ops
+    # (services/profile_gen/refine.py); the result is a new pending artifact.
+    job_id: str
+    ops: list[dict[str, Any]] = Field(min_length=1)
 
 
 class ShapeRequest(BaseModel):
@@ -359,6 +401,11 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (FamilyTargetMismatchError, {"error_kind": "family_target_mismatch"}),
     (InvalidSeriesUnitError, {"error_kind": "invalid_series_unit"}),
     (DcLoadOwnedError, {"error_kind": "dc_load_owned"}),
+    (PocTariffError, {"error_kind": "poc_tariff"}),
+    (CopBusError, {"error_kind": "cop_bus"}),
+    (CopAmbientUnknownError, {"error_kind": "cop_ambient_unknown"}),
+    (TwoWayFloorError, {"error_kind": "two_way_floor"}),
+    (PocBoundError, {"error_kind": "poc_bound"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -374,6 +421,13 @@ _GENERATE_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (UnknownAvailabilityKindError, {"error_kind": "unknown_availability_kind"}),
     (InvalidAvailabilityParamsError, {"error_kind": "invalid_availability_params"}),
     (MaintenanceYearError, {"error_kind": "maintenance_year"}),
+    (PartLoadNotASeriesError, {"error_kind": "part_load_not_a_series"}),
+    (UnknownSeriesKindError, {"error_kind": "unknown_series_kind"}),
+    (MarketBundlesUnavailableError, {"error_kind": "market_bundles_unavailable"}),
+    (InvalidSeriesParamsError, {"error_kind": "invalid_series_params"}),
+    (InvalidRefineOpError, {"error_kind": "invalid_refine_op"}),
+    (WindowClockUnknownError, {"error_kind": "window_clock_unknown"}),
+    (RefineReplayError, {"error_kind": "refine_replay"}),
 )
 
 
@@ -547,6 +601,42 @@ def generate_profiles(
     return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
+def _refine_frame(ctx, frame: pd.DataFrame, meta: dict, ops: list, *, replaying: bool):
+    """Refine (or replay a recorded list over) every column of an artifact;
+    one meta (the ops are the same for every column), stats per column, and
+    the warnings."""
+    from services.profile_gen import refine
+    from services.profile_gen.families import default_target
+
+    ct, attr = default_target(meta, None, None)
+    run = refine.replay if replaying else refine.refine_series
+    cols, stats, warnings, new_meta = {}, {}, [], meta
+    for col in frame.columns:
+        out = run(ctx, frame[col], meta, ops, component_type=ct, attribute=attr)
+        cols[col], stats[col], new_meta = out.series, out.stats, out.meta
+        warnings += [w for w in out.warnings if w not in warnings]
+    return pd.DataFrame(cols, index=frame.index), new_meta, stats, warnings
+
+
+def _replay_refinements(ctx, result, refinements):
+    """A regenerated series replays the refinements it is given."""
+    if not refinements:
+        return result
+    from types import SimpleNamespace
+
+    try:
+        frame, meta, _stats, warnings = _refine_frame(ctx, result.series, dict(result.meta),
+                                                      refinements, replaying=True)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine_replay")},
+        ) from exc
+    meta["replay_warnings"] = warnings
+    return SimpleNamespace(series=frame, meta=meta)
+
+
 def _foreground_ctx(proj: AuthorizedProject, verb: str):
     """The active context, refused (409) unless it holds this project."""
     from services.pypsa_service import PyPSAService
@@ -622,9 +712,9 @@ def generate_load_profiles(
     # commercial timezone set, its snapshots are UTC (`resolve_time_basis`),
     # so the archetype maps on that zone unless the caller names one.
     if "timezone" not in params:
-        from services.profile_gen.apply import _commercial_timezone
+        from services.profile_gen.apply import commercial_timezone
 
-        tz = _commercial_timezone(ctx)
+        tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
     try:
@@ -639,6 +729,7 @@ def generate_load_profiles(
                     "message": public_message(exc, route="load_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -646,7 +737,7 @@ def generate_load_profiles(
     record["points"] = list(result.series.columns)
     write_pending(str(proj.directory), job_id, result.series, record)
 
-    stats = _load_stats(result.series, float(record["scale_mw"]),
+    stats = _load_stats(result.series, float(record.get("scale_mw") or 1.0),
                         int(record["weather_year"]))
     warnings = _preview_load_energy(ctx, result.series, record, stats)
     return {**record, "stats": stats, "warnings": warnings}
@@ -670,7 +761,7 @@ async def upload_load_profiles(
     the project's commercial timezone."""
     from fastapi.concurrency import run_in_threadpool
 
-    from services.profile_gen.apply import _commercial_timezone
+    from services.profile_gen.apply import commercial_timezone
     from services.upload_guard import read_capped
 
     _check_lock(proj, db, user)
@@ -680,7 +771,7 @@ async def upload_load_profiles(
         # A large export is seconds of pandas: off the event loop.
         up = await run_in_threadpool(
             read_load_upload, blob, file.filename or "upload.csv", unit=unit,
-            timezone=timezone, default_timezone=_commercial_timezone(ctx),
+            timezone=timezone, default_timezone=commercial_timezone(ctx),
             year=year, annual_mwh=annual_mwh, only=set(ctx.network.loads.index),
         )
     except ProfileGenError as exc:
@@ -719,18 +810,32 @@ def generate_availability_profiles(
     archetypes; nothing touches the network here."""
     _check_lock(proj, db, user)
     ctx = _foreground_ctx(proj, "generate")
-    gens = ctx.network.generators
-    missing = [g for g in body.generators if g not in gens.index]
-    if missing:
+    names = body.components or body.generators or []
+    if not names:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": "name the components (or generators) to generate for"})
+    table = getattr(ctx.network, body.component_type)
+    missing = [g for g in names if g not in table.index]
+    if missing and body.component_type == "generators":
         raise HTTPException(
             status_code=422,
             detail={"error_kind": "unknown_generator",
                     "message": f"no generator named {', '.join(map(repr, missing))} "
                                f"on the open network"},
         )
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": f"no {body.component_type[:-1]} named "
+                               f"{', '.join(map(repr, missing))} on the open network"},
+        )
     from services.profile_gen.families import is_weather_carrier
 
-    weather = [g for g in body.generators if is_weather_carrier(gens.at[g, "carrier"])]
+    weather = ([g for g in names if is_weather_carrier(table.at[g, "carrier"])]
+               if body.component_type == "generators" else [])
     if weather:
         raise HTTPException(
             status_code=422,
@@ -743,16 +848,17 @@ def generate_availability_profiles(
              else pd.DatetimeIndex(snaps)[0])
     params = dict(body.params or {})
     if "timezone" not in params:
-        from services.profile_gen.apply import _commercial_timezone
+        from services.profile_gen.apply import commercial_timezone
 
-        tz = _commercial_timezone(ctx)
+        tz = commercial_timezone(ctx)
         if tz:
             params["timezone"] = tz
     try:
         result = engine.generate_profile(
-            body.generators, body.kind, params=params,
+            names, body.kind, params=params,
             year=body.year or int(first.year), family="availability",
         )
+        result.meta["target"] = [body.component_type, result.meta["target"][1]]
         # A dated window that apply would refuse is refused before anything
         # reaches the pending store.
         from services.profile_gen.availability import check_dated_windows
@@ -765,6 +871,7 @@ def generate_availability_profiles(
                     "message": public_message(exc, route="availability_generate")},
         ) from exc
 
+    result = _replay_refinements(ctx, result, body.refinements)
     job_id = str(uuid.uuid4())
     record = dict(result.meta)
     record["job_id"] = job_id
@@ -782,6 +889,146 @@ def generate_availability_profiles(
         else:
             stats[col]["hours_floored"] = int((v > 1e-9).sum())
     return {**record, "stats": stats}
+
+
+_SERIES_TYPES = {"inflow": "storage_units", "cop": "links"}
+
+
+#: The component tables a series may target (`series` family targets).
+_SERIES_COMPONENT_TABLES = ("generators", "links", "storage_units")
+
+
+@project_router.post("/{name}/profiles/series/generate")
+def generate_series_profiles(
+    body: SeriesGenerateRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Generate another model series (a time-of-use price, hydro inflow, a
+    heat-pump COP) for named components into the pending store;
+    `/profiles/apply` writes it to the target it states. Synchronous."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "generate")
+    params = dict(body.params or {})
+    ctype = _SERIES_TYPES.get(body.kind) or str(params.get("component_type") or "generators")
+    if ctype not in _SERIES_COMPONENT_TABLES:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "invalid_series_params",
+                    "message": f"a series goes on {', '.join(_SERIES_COMPONENT_TABLES)}, "
+                               f"not {ctype!r}"},
+        )
+    table = getattr(ctx.network, ctype)
+    missing = [c for c in body.components if table is None or c not in table.index]
+    if missing and body.kind in ("tou", *_SERIES_TYPES):
+        raise HTTPException(
+            status_code=422,
+            detail={"error_kind": "unknown_component",
+                    "message": f"no {ctype} named {', '.join(map(repr, missing))} "
+                               "on the open network"},
+        )
+    if body.kind == "tou" and ctype == "links":
+        # A price on a point-of-connection link is refused before anything
+        # reaches the pending store, as apply would refuse it.
+        from services.profile_gen import series as series_mod
+
+        try:
+            for comp in body.components:
+                series_mod.guard(ctx, "links", comp,
+                                 {"kind": "tou", "target": ["links", "marginal_cost"]})
+        except ProfileGenError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={**_apply_refusal_kind(exc),
+                        "message": public_message(exc, route="series_generate")},
+            ) from exc
+    if "timezone" not in params and body.kind in ("tou", "cop"):
+        from services.profile_gen.apply import commercial_timezone
+
+        tz = commercial_timezone(ctx)
+        if tz:
+            params["timezone"] = tz
+    # An air-source COP draws the project's own ambient (its data-centre
+    # load spec) unless the ambient is stated; with neither it is refused.
+    from services.dc_load_profile import AMBIENT_FIELDS, read_ambient
+
+    ambient_from_spec = (
+        body.kind == "cop" and params.get("source", "air") == "air"
+        and not any(k in params for k in AMBIENT_FIELDS)
+        and read_ambient(proj.directory))
+    if ambient_from_spec:
+        params.update(ambient_from_spec)
+    snaps = ctx.network.snapshots
+    first = (snaps.get_level_values(-1)[0] if isinstance(snaps, pd.MultiIndex)
+             else pd.DatetimeIndex(snaps)[0])
+    try:
+        result = engine.generate_profile(
+            body.components, body.kind, params=params,
+            year=body.year or int(first.year), family="series",
+        )
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="series_generate")},
+        ) from exc
+
+    result = _replay_refinements(ctx, result, body.refinements)
+    job_id = str(uuid.uuid4())
+    record = dict(result.meta)
+    if ambient_from_spec:
+        record["ambient_from"] = "dc_load_profile"
+    record["job_id"] = job_id
+    record["project_id"] = proj.name
+    record["points"] = list(result.series.columns)
+    write_pending(str(proj.directory), job_id, result.series, record)
+    scale = float(record.get("scale_mw") or 1.0)
+    stats = {}
+    for col in result.series.columns:
+        v = result.series[col] * scale
+        stats[col] = {"min": float(v.min()), "mean": float(v.mean()), "max": float(v.max())}
+        if body.kind == "inflow":
+            stats[col]["annual_mwh"] = float(v.sum())
+    return {**record, "stats": stats}
+
+
+@project_router.post("/{name}/profiles/refine")
+def refine_profile(
+    body: RefineRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Refine a pending artifact by deterministic ops into a NEW pending
+    artifact (its meta records the ops, `based_on` and the user-refined
+    provenance); `/profiles/apply` writes it, behind the old → new card in
+    chat. Nothing touches the network here."""
+    _check_lock(proj, db, user)
+    ctx = _foreground_ctx(proj, "refine")
+    nc, meta = _pending_artifact(proj, body.job_id)
+    with xr.open_dataset(nc) as ds:
+        frame = ds.to_dataframe()
+    frame.index = pd.DatetimeIndex(frame.index)
+    frame = frame[[c for c in meta.get("points", frame.columns) if c in frame.columns]]
+    try:
+        new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
+                                                       replaying=False)
+    except ProfileGenError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={**_apply_refusal_kind(exc),
+                    "message": public_message(exc, route="refine",
+                                              job_id=body.job_id)},
+        ) from exc
+    job_id = str(uuid.uuid4())
+    record = {k: v for k, v in new_meta.items() if k != "replay_warnings"}
+    record["job_id"] = job_id
+    record["based_on"] = body.job_id
+    record["project_id"] = proj.name
+    record["points"] = list(new.columns)
+    write_pending(str(proj.directory), job_id, new, record)
+    return {**record, "stats": stats, "warnings": warnings}
 
 
 @project_router.get("/{name}/profiles/pending")

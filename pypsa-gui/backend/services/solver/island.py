@@ -584,6 +584,9 @@ def island_study(n, island, *, scenarios=None, solve=None, tol=1e-6) -> dict:
         variants[sc] = {"status": "ok", "condition": cond, "objective": float(c.objective),
                         "binding": binding_rows(c, tol),
                         "facts": getattr(c, "_island_facts", None)}
+        # Ticket 08: the tiers set the order only where the sidecar gives no explicit blocks.
+        if "pickup_blocks" not in one["requirements"]["values"]:
+            variants[sc]["pickup_sequence"] = pickup_sequence(c)
 
     def obj(name):
         v = variants.get(name)
@@ -1050,6 +1053,51 @@ def _pcc_links(n) -> dict:
             "export": [str(x) for x in n.links.index[role.isin(_EXPORT_ROLES)]]}
 
 
+#: The pickup order by criticality tier (grid-to-process ticket 08): untiered Loads come last; an untiered process
+#: unit is picked up as ``process_critical`` (as ``process_loss`` costs it), flagged ``tier_unset``.
+_TIER_ORDER = {"safety": 0, "process_critical": 1, "process_flexible": 2, "deferrable": 3}
+
+
+def _island_process_units(n) -> list[str]:
+    """The process units the island picks up: Links with ``eh_process`` whose supply bus is site-side (not a PCC
+    import Link's grid bus), the island's own scope (it drafts every Load of the network)."""
+    from services.solver.process_uc import process_mask
+
+    grid = {str(n.links.at[lk, "bus0"]) for lk in _pcc_links(n)["import"]}
+    return [str(u) for u in n.links.index[process_mask(n.links)] if str(n.links.at[u, "bus0"]) not in grid]
+
+
+def pickup_sequence(n, period=None) -> list[dict]:
+    """The island's pickup sequence when the sidecar has no ``pickup_blocks`` (ticket 08): every Load and every
+    island process unit, a block each, ordered by criticality tier (safety, process_critical, process_flexible,
+    deferrable, then the untiered Loads), within a tier largest first, then by name. A process unit with no (or an
+    unknown) tier sits with ``process_critical``, flagged ``tier_unset``. A Load's block is its largest
+    ``p_set`` in the period; a process unit's its largest SOLVED draw ``p0`` (None before a solve), never its p_nom.
+    E2 steps on the largest block, so the order is reported, not optimised."""
+    from models.process_unit import CRITICALITY_TIERS
+    from services.adequacy.process_loss import TIER_UNSET
+
+    sns = n.snapshots if period is None else n.snapshots[n.snapshots.get_level_values(0) == period]
+    out = []
+    for ld in n.loads.index:
+        out.append({"name": str(ld), "kind": "load", "tier": None, "basis": "p_set_max",
+                    "block_mw": float(_dense(n, "Load", "p_set", sns, [ld])[ld].max()) if len(sns) else 0.0})
+    tiers = n.links["criticality_tier"] if "criticality_tier" in n.links.columns else None
+    p0 = n.links_t.p0
+    for u in _island_process_units(n):
+        tier = str(tiers.get(u, "") or "").strip() if tiers is not None else ""
+        solved = u in p0.columns and len(sns) and p0[u].reindex(sns).notna().all()
+        block = {"name": u, "kind": "process_unit", "tier": tier or None,
+                 "basis": "solved_p0_max" if solved else "not_solved",
+                 "block_mw": float(p0[u].reindex(sns).max()) if solved else None}
+        if tier not in CRITICALITY_TIERS:
+            block["flag"] = TIER_UNSET
+        out.append(block)
+    order = {"load": 4, "process_unit": _TIER_ORDER["process_critical"]}
+    return sorted(out, key=lambda b: (_TIER_ORDER.get(b["tier"] or "", order[b["kind"]]),
+                                      -(b["block_mw"] if b["block_mw"] is not None else -math.inf), b["name"]))
+
+
 def _genset_out(n, g):
     """(component, output-per-p_nom factor): a Link genset's p_nom is on its
     fuel side, so its electrical output is efficiency·p."""
@@ -1398,8 +1446,9 @@ def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period,
 
     * E2, the largest load step: ``max(pickup_blocks)`` when given, else the
       hour's largest draw of any unit (frequency.py:1277): the largest load,
-      a constant ``p_set`` per hour, or a GFM battery's charging, a variable
-      (a row each); up headroom ≥ it;
+      a constant ``p_set`` per hour, or a GFM battery's charging or an island
+      process unit's draw ``p0`` (ticket 08), a variable (a row each); up
+      headroom ≥ it. ``pickup_sequence`` reports the order by criticality tier;
     * E3, a unit trips: I6 trips the largest |P| of its sources (every model
       but ups/none, frequency.py:1284–1286); a row per source covers
       whichever that is: the headroom without it ≥ p_u up, and for storage
@@ -1442,6 +1491,10 @@ def _event_rows(n, m, sns_p, coord, tag, *, units, gfm, gensets, active, period,
         for s in gfm:
             _row(m, headroom_up(), p_store(_Lin(sns_p), s, -1.0), f"Island-e2-up-{s}{tag}", coord,
                  facts=facts)
+        # ... and so does a process unit's draw (ticket 08): its p0 is a decision here, a row each.
+        for u in active(_island_process_units(n), lambda _: "Link", period):
+            _row(m, headroom_up(), _Lin(sns_p).var(m.variables["Link-p"].sel(snapshot=sns_p, name=u), 1.0),
+                 f"Island-e2-up-{u}{tag}", coord, facts=facts)
     # E3. Left out, as they cannot bind: a PV unit's own trip when E5's row
     # (every PV unit lost, none below 0) is built, and a unit that cannot run
     # (p_nom 0, not extendable).
