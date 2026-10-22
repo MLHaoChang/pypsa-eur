@@ -350,21 +350,28 @@ def find(pages: list[str], wanted: dict[str, dict], decimal_mark: str | None = N
     for p, raw in enumerate(pages, start=1):
         text = normal(raw)
         for line in dict.fromkeys(normal(x) for x in (raw or "").splitlines()):
-            at = on_page(text, line) if line and len(line) <= MAX_QUOTE_CHARS else None
-            if at is None:
+            if not line or len(line) > MAX_QUOTE_CHARS:
                 continue
             nums = numbers(line, decimal_mark)
-            lowered = line.lower()
+            at: int | None = -1  # where the line is on the page: looked up once a unit matches
             for x in nums:
+                # The unit first (cheap); the page lookup and the number's own check only then.
+                hits = [(k, unit) for k, options in units.items()
+                        if (unit := next((u for u, rx in options if rx.match(line[x["end"]:])), None)) is not None]
+                if not hits:
+                    continue
+                if at == -1:
+                    at = on_page(text, line)
+                if at is None:
+                    break
                 pick = x["text"] if len(nums) > 1 else None
                 number, gap = _value({"value_text": pick}, line, text, at, decimal_mark, _ANY_SIGN)
                 if gap:
                     continue
-                for k, options in units.items():
-                    unit = next((u for u, rx in options if rx.match(line[x["end"]:])), None)
-                    if unit is not None:
-                        found[k].append({"page": p, "quote": line, "value_text": pick, "value": str(number["value"]),
-                                         "unit": unit, "label": bool(words[k] & set(_LABEL_WORD.findall(lowered)))})
+                named = set(_LABEL_WORD.findall(line.lower()))
+                for k, unit in hits:
+                    found[k].append({"page": p, "quote": line, "value_text": pick, "value": str(number["value"]),
+                                     "unit": unit, "label": bool(words[k] & named)})
     out = {}
     for k, rows in found.items():
         rows.sort(key=lambda r: not r["label"])  # stable: page order within each group
