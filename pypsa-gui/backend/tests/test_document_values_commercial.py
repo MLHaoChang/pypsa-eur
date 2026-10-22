@@ -20,7 +20,9 @@ section 7 adds:
 - CDV-08 a change the commercial preflight rejects writes nothing;
 - CDV-09 undo: the receipt says `undo_last` does not revert it, and the tool is not on
   the network's undo stack; the write is behind the foreign-lock gate;
-- CDV-10 the preview route is a read, and its card is the one the apply accepts.
+- CDV-10 the preview route is a read, and its card is the one the apply accepts;
+- CDV-15 the HTTP apply writes under the signed-in user's authority (outside a chat
+  turn there is no acting user to fall back on).
 """
 from __future__ import annotations
 
@@ -413,3 +415,26 @@ def test_cdv13_preflight_errors_from_before_the_change_are_card_notes(site, monk
     _, args = _preview(uid, [PEAK])
     _, result, _ = _dispatch(site, "apply_commercial_document_values", args)  # not this change's refusal
     assert result["read_back"] is True
+
+
+def test_cdv15_the_http_apply_writes_as_the_signed_in_user(client, site, session_ctx):
+    from tests.test_chat_tools_dispatch import _bound_to
+
+    assert client.post("/api/projects/P", params={"force": True, "rebind": True}).status_code == 200
+    with _bound_to(session_ctx(client)):
+        chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": _commercial()})
+        _finance(currency="EUR")
+        uid = _pdf()
+        sha = D.read_pages("P", uid)["source"]["sha256"]
+    # A plain HTTP request: no chat turn has bound an acting user (the test thread keeps
+    # the one `_bound_to` set, which is how this went unseen).
+    chat_tools.set_acting_user(None)
+    body = {"upload_id": uid, "citations": [PEAK]}
+    card = client.post("/api/document_values/commercial/preview", json=body).json()["card"]
+    r = client.post("/api/simulation/document_values/apply", json={**body, "source_sha256": sha,
+                                                                   "digest": card["digest"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["receipt"]["outcome"] == "verified"
+    assert chat_tools.acting_user_id() is None  # restored
+    with _bound_to(session_ctx(client)):
+        assert _stored()["import_tariff"]["items"][0]["periods"][0]["rate"] == 0.0725

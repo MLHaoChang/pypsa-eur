@@ -158,6 +158,7 @@ def apply_commercial_document_values(body: CommercialValuesHttp, user: User = De
     """The apply: the card the user approved must still be current, and the stored
     commercial config still the one it was read from (compare-and-set)."""
     from harness import edit_card
+    from services import chat_tools
     from services import document_values_commercial as DC
     from services import equipment_table as T
 
@@ -168,5 +169,12 @@ def apply_commercial_document_values(body: CommercialValuesHttp, user: User = De
                   "Propose the edit again.", 409)
     p = DC.plan_active(args)
     T.require_confirmed(p)
-    out = DC.apply(p, card, approved_by=getattr(user, "email", None))
+    # The save goes through the solver-config handler as the signed-in user: outside a
+    # chat turn nothing else has bound one (`no_acting_user`).
+    previous = chat_tools.acting_user_id()
+    chat_tools.set_acting_user(str(user.id))
+    try:
+        out = DC.apply(p, card, approved_by=getattr(user, "email", None))
+    finally:
+        chat_tools.set_acting_user(previous)
     return {**out, "receipt": edit_card.receipt(card, args)}
