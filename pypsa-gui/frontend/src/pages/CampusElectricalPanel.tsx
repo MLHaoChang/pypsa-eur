@@ -36,8 +36,11 @@ import {
 } from '../api/campusElectrical'
 import { solveQueueApi } from '../api/solveQueue'
 import { useUIStore } from '../store/uiStore'
+import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
+import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
@@ -48,9 +51,6 @@ import { elapsed, failureLine, stageLabel, stepText, useTick } from './campusRun
 export const CAMPUS_KEY = (name: string) => ['campusElectrical', 'state', name] as const
 /** How often the state is re-read while a run goes on without an answer. */
 export const CAMPUS_RUN_POLL_MS = 1500
-
-/** A run whose request got no answer: what was asked, and why. */
-interface LostRun { settings: CampusSettings; why: string }
 
 function sameSettings(a: CampusSettings | null, b: CampusSettings): boolean {
   if (a == null) return false
@@ -87,12 +87,35 @@ function where(period: number | null | undefined, hour: number | null | undefine
   return [`${period}`, hour == null ? null : `h${hour}`, kase || null].filter(Boolean).join(' · ')
 }
 
-export default function CampusElectricalPanel() {
+/** Which part of the study a panel shows: its inputs (section 3), its settings,
+ *  run and island (section 8), or its results (section 10). */
+type CampusPart = 'inputs' | 'study' | 'results'
+const PART_TITLE: Record<CampusPart, string> = {
+  inputs: 'Grid connection', study: 'Grid study', results: 'Grid study results',
+}
+
+/** The one link to the next part: 3 → 8 → 10. */
+function NextPart({ part }: { part: CampusPart }) {
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  if (part === 'results') return null
+  const next = part === 'inputs'
+    ? { panel: 'campusStudy' as const, label: 'Next: study settings and run' }
+    : { panel: 'campusResults' as const, label: 'Next: results' }
+  return (
+    <div className="flex justify-end">
+      <Btn onClick={() => setSlidePanel(next.panel)}>
+        <span data-testid={`campus-next-${part}`}>{next.label}</span>
+      </Btn>
+    </div>
+  )
+}
+
+function CampusPanel({ part }: { part: CampusPart }) {
   const currentProject = useUIStore(s => s.currentProject)
   if (!currentProject) {
     return (
       <PageBody>
-        <PageSection title="Campus electrical">
+        <PageSection title={PART_TITLE[part]}>
           <p className="text-[12px] text-muted">
             Open a solved hub project to take it to its electrical design.
           </p>
@@ -100,13 +123,28 @@ export default function CampusElectricalPanel() {
       </PageBody>
     )
   }
-  return <CampusView name={currentProject} />
+  return <CampusView name={currentProject} part={part} />
 }
 
-function CampusView({ name }: { name: string }) {
+export default function CampusElectricalPanel() { return <CampusPanel part="inputs" /> }
+export function CampusStudyPanel() { return <CampusPanel part="study" /> }
+export function CampusResultsPanel() { return <CampusPanel part="results" /> }
+
+function CampusView({ name, part }: { name: string; part: CampusPart }) {
   const qc = useQueryClient()
-  const [lost, setLost] = useState<LostRun | null>(null)
-  const [outcome, setOutcome] = useState<string | null>(null)
+  // The site connection is the project's, not the campus study's: it shows even when the campus read fails
+  // or the project is not a hub, because Economics and Investment send the user here to set it.
+  const lead = part === 'inputs' ? (
+    <PageSection title="Site connection" hint="The point of connection the bill and the investment case read">
+      <SiteConnectionEditor />
+    </PageSection>
+  ) : null
+  const notice = useCampusRunNotice(s => s.notices[name])
+  const setNotice = useCampusRunNotice(s => s.set)
+  const lost: LostRun | null = notice?.lost ?? null
+  const outcome: string | null = notice?.outcome ?? null
+  const setLost = (l: LostRun | null) => setNotice(name, { lost: l })
+  const setOutcome = (o: string | null) => setNotice(name, { outcome: o })
   const state = useQuery({
     queryKey: CAMPUS_KEY(name), queryFn: () => campusApi.state(name), retry: false,
     refetchInterval: q => (lost != null || q.state.data?.run_in_progress || isActiveRun(q.state.data?.run_job)
@@ -139,7 +177,8 @@ function CampusView({ name }: { name: string }) {
   if (state.isError && isOtherKind(state.error)) {
     return (
       <PageBody>
-        <PageSection title="Campus electrical">
+        {lead}
+        <PageSection title={PART_TITLE[part]}>
           <p className="text-[12px] text-muted">
             The campus electrical study is for capacity-expansion (hub) projects. {errorText(state.error)}
           </p>
@@ -150,7 +189,8 @@ function CampusView({ name }: { name: string }) {
   if (!state.data) {
     return (
       <PageBody>
-        <PageSection title="Campus electrical">
+        {lead}
+        <PageSection title={PART_TITLE[part]}>
           <p className="text-[12px] text-muted">{state.isError ? errorText(state.error) : 'Loading…'}</p>
         </PageSection>
       </PageBody>
@@ -170,27 +210,51 @@ function CampusView({ name }: { name: string }) {
 
   return (
     <PageBody>
-      <div data-testid="campus-intro">
-        <PageSection title="Campus electrical" hint="From the solved hub to its electrical design">
-          <p className="text-[12px] text-muted">
-            A steady-state AC load-flow study at the hub's critical hours. It sizes the transformers and the
-            reactive compensation, checks short circuit against the switchgear, and checks the PCC against
-            the chosen grid code. It is not a dynamic study, and not a compliance certificate.
-          </p>
-        </PageSection>
-      </div>
-      <CampusFileSection name={name} state={state.data} onChange={refresh} />
-      <CampusGridCodeSection
-        name={name}
-        onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
-      />
-      <CampusLibrarySection name={name} onChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })} />
-      {state.data.campus_yaml && (
-        <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
-                    onRunStart={onRunStart} onRunLost={onRunLost} />
+      {part === 'inputs' && (
+        <div data-testid="campus-intro">
+          <PageSection title={PART_TITLE[part]} hint="From the solved hub to its electrical design">
+            <p className="text-[12px] text-muted">
+              A steady-state AC load-flow study at the hub's critical hours. It sizes the transformers and the
+              reactive compensation, checks short circuit against the switchgear, and checks the PCC against
+              the chosen grid code. It is not a dynamic study, and not a compliance certificate.
+            </p>
+          </PageSection>
+        </div>
       )}
-      {state.data.results && <ResultsSection state={state.data} pending={pending} />}
-      <CampusIslandSection name={name} />
+      {part === 'inputs' && (<>
+        {lead}
+        <CampusFileSection name={name} state={state.data} onChange={refresh} />
+        <GridConnectionSection name={name} state={state.data} />
+        <ConnectionLimits />
+        <CampusGridCodeSection
+          name={name}
+          onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}
+        />
+        <CampusLibrarySection name={name} onChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })} />
+      </>)}
+      {part === 'study' && (<>
+        {state.data.campus_yaml ? (
+          <RunSection name={name} state={state.data} onChange={refresh} lost={lost} outcome={outcome} pending={pending}
+                      onRunStart={onRunStart} onRunLost={onRunLost} />
+        ) : (
+          <PageSection title="Study settings">
+            <p className="text-[12px] text-muted">
+              Draft the campus file in the grid connection first; the study runs on it.
+            </p>
+          </PageSection>
+        )}
+        <CampusIslandSection name={name} />
+      </>)}
+      {part === 'results' && (state.data.results
+        ? <ResultsSection state={state.data} pending={pending} />
+        : (
+          <PageSection title="Results">
+            <p className="text-[12px] text-muted" data-testid="campus-no-results">
+              No grid study results yet. Run the study from its settings.
+            </p>
+          </PageSection>
+        ))}
+      <NextPart part={part} />
     </PageBody>
   )
 }
@@ -265,6 +329,50 @@ function CampusFileSection({ name, state, onChange }: {
   )
 }
 
+/** The grid connection of the study (section 3): the grid code the PCC is held to,
+ *  the connection-agreement power factor, and who owns the PCC switchgear and
+ *  moves its taps. The study settings in section 8 read the same draft. */
+function GridConnectionSection({ name, state }: { name: string; state: CampusState }) {
+  const { draft, patch } = useCampusDraft(name, state.settings ?? DEFAULT_SETTINGS)
+  // The grid-codes listing says which published profiles still carry
+  // unconfirmed limits; the picker names them so a run is never held to one unawares.
+  const codes = useQuery({ queryKey: GRID_CODES_KEY(name), queryFn: () => campusApi.gridCodes(name), retry: false })
+  const unconfirmed = new Set((codes.data?.published ?? []).filter(p => p.unconfirmed.length > 0).map(p => p.id))
+  return (
+    <PageSection title="Grid code and PCC" hint="Applies to the next run">
+      <div className="flex flex-wrap items-end gap-3">
+        <Field label="Grid code">
+          <select aria-label="Grid code" className={`${INPUT} w-[320px]`} value={draft.profile}
+                  onChange={e => patch({ profile: e.target.value })}>
+            {Object.entries(state.profiles).map(([key, title]) => (
+              <option key={key} value={key}>{unconfirmed.has(key) ? `${title} (unconfirmed limits)` : title}</option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Connection-agreement power factor" hint="empty: the grid code's widest range">
+          <input aria-label="Connection-agreement power factor" className={`${INPUT} w-[90px]`} inputMode="decimal" value={draft.pf}
+                 placeholder="code" onChange={e => patch({ pf: e.target.value })} />
+        </Field>
+        <Field label="PCC switchgear owned by the grid operator (not costed)" row>
+          <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={draft.byOperator}
+                 disabled={!draft.invest} onChange={e => patch({ byOperator: e.target.checked })} />
+        </Field>
+        <Field label="PCC transformer taps held by the grid operator (at the campus file's position)" row>
+          <input type="checkbox" aria-label="PCC transformer taps held by the grid operator (at the campus file's position)"
+                 checked={draft.tapsByOperator} disabled={!draft.invest}
+                 onChange={e => patch({ tapsByOperator: e.target.checked })} />
+        </Field>
+      </div>
+      {!draft.invest && (
+        <p className="text-[11.5px] text-muted mt-2">
+          Who owns the PCC switchgear and moves its taps only matters when the study buys assets from the
+          library; that is set in the study settings.
+        </p>
+      )}
+    </PageSection>
+  )
+}
+
 function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart, onRunLost }: {
   name: string; state: CampusState; onChange: (d?: CampusState) => unknown
   /** The run whose request got no answer, while the panel waits for the backend. */
@@ -276,27 +384,11 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
   onRunStart: () => void
   onRunLost: (settings: CampusSettings, why: string) => void
 }) {
-  const initial = state.settings ?? DEFAULT_SETTINGS
-  const [k, setK] = useState(String(initial.k))
-  const [pf, setPf] = useState(initial.pf == null ? '' : String(initial.pf))
-  const [profile, setProfile] = useState(initial.profile)
-  const [margin, setMargin] = useState(String(Math.round(initial.margin * 100)))
-  const [n1, setN1] = useState(initial.n_minus_1)
-  // A run saved before these settings existed has neither: the defaults.
-  const [invest, setInvest] = useState(initial.invest ?? DEFAULT_SETTINGS.invest)
-  const [byOperator, setByOperator] = useState(initial.pcc_switchgear_by_operator ?? DEFAULT_SETTINGS.pcc_switchgear_by_operator)
-  const [tapsByOperator, setTapsByOperator] = useState(
-    (initial.pcc_tap_control ?? DEFAULT_SETTINGS.pcc_tap_control) === 'grid_operator')
+  const { draft, patch } = useCampusDraft(name, state.settings ?? DEFAULT_SETTINGS)
+  const { k, margin, n1, invest } = draft
   const [refusal, setRefusal] = useState<string | null>(null)
-  // The grid-codes listing says which published profiles still carry
-  // unconfirmed limits; the picker names them so a run is never held to one unawares.
-  const codes = useQuery({ queryKey: GRID_CODES_KEY(name), queryFn: () => campusApi.gridCodes(name), retry: false })
-  const unconfirmed = new Set((codes.data?.published ?? []).filter(p => p.unconfirmed.length > 0).map(p => p.id))
-
-  const settings = (): CampusSettings => ({
-    k: Number(k), pf: pf.trim() === '' ? null : Number(pf), profile, margin: Number(margin) / 100, n_minus_1: n1,
-    invest, pcc_switchgear_by_operator: byOperator, pcc_tap_control: tapsByOperator ? 'grid_operator' : 'campus',
-  })
+  // The grid connection (profile, power factor, PCC ownership) is edited in section 3.
+  const settings = (): CampusSettings => settingsFromDraft(draft)
   const run = useMutation({
     mutationFn: (s: CampusSettings) => campusApi.run(name, s),
     onMutate: () => { setRefusal(null); onRunStart() },
@@ -328,37 +420,17 @@ function RunSection({ name, state, onChange, lost, outcome, pending, onRunStart,
     <PageSection title="Study settings" hint="Applies to the next run">
       <div className="flex flex-wrap items-end gap-3">
         <Field label="Hours per criterion">
-          <input aria-label="Hours per criterion" className={`${INPUT} w-[70px]`} inputMode="numeric" value={k} onChange={e => setK(e.target.value)} />
-        </Field>
-        <Field label="Connection-agreement power factor" hint="empty: the grid code's widest range">
-          <input aria-label="Connection-agreement power factor" className={`${INPUT} w-[90px]`} inputMode="decimal" value={pf} placeholder="code"
-                 onChange={e => setPf(e.target.value)} />
-        </Field>
-        <Field label="Grid code">
-          <select aria-label="Grid code" className={`${INPUT} w-[320px]`} value={profile}
-                  onChange={e => setProfile(e.target.value)}>
-            {Object.entries(state.profiles).map(([key, title]) => (
-              <option key={key} value={key}>{unconfirmed.has(key) ? `${title} (unconfirmed limits)` : title}</option>
-            ))}
-          </select>
+          <input aria-label="Hours per criterion" className={`${INPUT} w-[70px]`} inputMode="numeric" value={k} onChange={e => patch({ k: e.target.value })} />
         </Field>
         <Field label="Design margin (%)">
-          <input aria-label="Design margin (%)" className={`${INPUT} w-[70px]`} inputMode="numeric" value={margin} onChange={e => setMargin(e.target.value)} />
+          <input aria-label="Design margin (%)" className={`${INPUT} w-[70px]`} inputMode="numeric" value={margin} onChange={e => patch({ margin: e.target.value })} />
         </Field>
         <Field label="Transformer N-1" row>
-          <input type="checkbox" aria-label="Transformer N-1" checked={n1} onChange={e => setN1(e.target.checked)} />
+          <input type="checkbox" aria-label="Transformer N-1" checked={n1} onChange={e => patch({ n1: e.target.checked })} />
         </Field>
         <Field label="Buy assets from the library (least cost, AC-checked)" row>
           <input type="checkbox" aria-label="Buy assets from the library (least cost, AC-checked)" checked={invest}
-                 onChange={e => setInvest(e.target.checked)} />
-        </Field>
-        <Field label="PCC switchgear owned by the grid operator (not costed)" row>
-          <input type="checkbox" aria-label="PCC switchgear owned by the grid operator (not costed)" checked={byOperator}
-                 disabled={!invest} onChange={e => setByOperator(e.target.checked)} />
-        </Field>
-        <Field label="PCC transformer taps held by the grid operator (at the campus file's position)" row>
-          <input type="checkbox" aria-label="PCC transformer taps held by the grid operator (at the campus file's position)"
-                 checked={tapsByOperator} disabled={!invest} onChange={e => setTapsByOperator(e.target.checked)} />
+                 onChange={e => patch({ invest: e.target.checked })} />
         </Field>
         <Btn variant="primary" onClick={() => run.mutate(settings())} disabled={busy}>
           <Play size={13} /> {run.isPending ? 'Queueing…' : isActiveRun(job) ? 'Running…' : 'Run study'}

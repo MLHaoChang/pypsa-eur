@@ -46,7 +46,7 @@ export default function CampusLibrarySection({ name, onChanged }: {
   return (
     <div data-testid="asset-library">
       <PageSection
-        title="Library"
+        title="Equipment library"
         hint="What the investment step may buy, and what it costs"
         right={data && (
           <span data-testid="library-badge">
@@ -61,7 +61,7 @@ export default function CampusLibrarySection({ name, onChanged }: {
         {library.isError && <p className="text-[12px] text-danger mb-2">{errorText(library.error)}</p>}
         {refusal && <p className="text-[12px] text-danger mb-2">{refusal}</p>}
         <textarea
-          aria-label="Asset library"
+          aria-label="Equipment library"
           className={`${INPUT} w-full font-mono text-[11.5px] h-[260px]`}
           spellCheck={false}
           value={text}

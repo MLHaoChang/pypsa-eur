@@ -229,6 +229,25 @@ def meta_block(spec: DataCentreLoadSpec, timezone: str | None) -> dict:
             "envelope": dynamic_envelope(spec), "ledger": ledger(spec, timezone)}
 
 
+AMBIENT_FIELDS = ("ambient_annual_mean_c", "ambient_seasonal_amplitude_k",
+                  "ambient_diurnal_amplitude_k")
+
+
+def read_ambient(project_dir) -> dict | None:
+    """The ambient fields of a project's stored data-centre spec (the ones
+    `ambient_c` draws), or None (no opt-in, no file)."""
+    path = pathlib.Path(project_dir) / "eh_template.json"
+    try:
+        meta = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    block = meta.get(META_KEY) if isinstance(meta, dict) else None
+    spec = block.get("spec") if isinstance(block, dict) else None
+    if not isinstance(spec, dict) or not all(k in spec for k in AMBIENT_FIELDS):
+        return None
+    return {k: float(spec[k]) for k in AMBIENT_FIELDS}
+
+
 def read_envelope(project_dir) -> dict | None:
     """A project's stored dynamic envelope, or None (no opt-in, no file)."""
     path = pathlib.Path(project_dir) / "eh_template.json"

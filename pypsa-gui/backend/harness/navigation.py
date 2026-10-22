@@ -27,6 +27,8 @@ PANELS = frozenset(
         "gridspine",
         "reports",
         "campusElectrical",
+        "campusStudy",
+        "campusResults",
     }
 )
 

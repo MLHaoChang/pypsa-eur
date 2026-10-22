@@ -166,7 +166,7 @@ _HUB_TOUR = [
     ("hub-site-readiness", "hub-rail-step-site", False),
     ("hub-site-type", "hub-rail-step-site", False),
     ("hub-goal-lole", "hub-rail-step-goal", False),
-    ("hub-goal-run", "hub-rail-step-goal", False),
+    ("hub-run-start", "hub-rail-section-readiness", False),
     ("hub-results-verdict", "hub-rail-step-results", True),
     ("hub-improve-list", "hub-rail-step-improve", True),
     # optional + after_run (P24-FE gate B2): Improve is blocked until a

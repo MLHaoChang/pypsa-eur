@@ -39,6 +39,7 @@ from services.adequacy.slack import (
     voll_slack_name,
 )
 from services.pypsa_service import PyPSAService
+from services.solver import lost_production as _lost_production
 from services.solver.periodized_costs import fill_periodized_cost_defaults
 from services.solver.vintage_store import _frozen_vintage_store
 from services.vintage_service import apply_vintage_bounds
@@ -1099,6 +1100,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             n.remove("Generator", nm)
                         PyPSAService.unmark_transient("Generator", nm)
                 undo_actions.append(("call", _capture_and_remove_slacks))
+
+        # 5b') Lost-production slacks (grid-to-process ticket 08): one per product bus with a
+        #    lost_production_value and no hand-built shortfall, priced at that value (never VoLL).
+        #    Same transient lifecycle as the VOLL slacks; captured into captured["lost_production"].
+        _lost_production.apply(n, phase, undo_actions, captured)
 
         # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
         #    per bus. Independent of VOLL (a resource, not a failure valve).

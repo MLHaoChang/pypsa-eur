@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): N-1 security (SCLOPF) is a scope-owned option: switch it on or off under What the Run computes › N-1 security. The Solver settings panel now shows its state read-only, and its branch selectors are always editable.

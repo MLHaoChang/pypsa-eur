@@ -6,7 +6,7 @@ import {
 import {
   Download, Upload, FileSpreadsheet, CheckCircle2, Circle, AlertCircle,
   BarChart3, Layers, Zap, Flame, Atom, Gauge, ArrowDownToLine, ChevronDown,
-  Coins, Trash2,
+  Coins, Trash2, SlidersHorizontal, X,
 } from 'lucide-react'
 import { networkApi } from '../api/network'
 import type {
@@ -19,7 +19,18 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { safeMax, safeMin } from '../utils/numeric'
 import toast from 'react-hot-toast'
-import { PageHeader } from '../components/PageKit'
+import { Btn, PageHeader } from '../components/PageKit'
+import { Dialog } from '../components/Dialog'
+import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
+import AvailabilityEditor from '../components/series/AvailabilityEditor'
+import SeriesEditor from '../components/series/SeriesEditor'
+import { fieldLabel, sentence } from '../components/series/SeriesKit'
+import { errorText } from '../api/profiles'
+import DefaultsReview from '../components/series/DefaultsReview'
+import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
+import { profilesApi, type ReadinessRow } from '../api/profiles'
+
+const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -627,7 +638,7 @@ function AggregateChart({ component, attribute, names, unit, label, scaleByName 
 // ── List items ─────────────────────────────────────────────────────────────────
 
 function LoadItem({
-  load, meta, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete,
+  load, meta, selected, checked, onClick, onCheck, onDownload, onEdit, onDelete,
 }: {
   load: Load
   meta: LoadProfileMeta | undefined
@@ -636,14 +647,16 @@ function LoadItem({
   onClick: () => void
   onCheck: () => void
   onDownload: () => void
-  onUpload: (f: File) => void
+  // Opens the load's series editor (archetype or measured upload) in the
+  // drawer — the one editor for a load's p_set, the same component the
+  // Properties panel mounts.
+  onEdit: (tab: 'archetype' | 'upload') => void
   // Optional — only rendered when this component has an uploaded profile.
   // Clicking drops the (loads, p_set, <name>) entry from _user_ts via the
   // generic timeseries delete endpoint.
   onDelete?: () => void
 }) {
   const has = meta?.has_profile === true
-  const fileRef = useRef<HTMLInputElement>(null)
 
   return (
     <div
@@ -676,9 +689,19 @@ function LoadItem({
       </button>
       <button
         type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+        onClick={e => { e.stopPropagation(); onEdit('archetype') }}
         className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload profile for '${load.name}' (single-column file)`}
+        title={`Edit the profile of '${load.name}' (archetype or upload)`}
+        aria-label={`Edit the profile of ${load.name}`}
+      >
+        <SlidersHorizontal size={12} />
+      </button>
+      <button
+        type="button"
+        onClick={e => { e.stopPropagation(); onEdit('upload') }}
+        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+        title={`Upload a measured profile for '${load.name}'`}
+        aria-label={`Upload a measured profile for ${load.name}`}
       >
         <Upload size={12} />
       </button>
@@ -692,24 +715,15 @@ function LoadItem({
           <Trash2 size={12} />
         </button>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="hidden"
-        onChange={e => {
-          const f = e.target.files?.[0]
-          if (f) onUpload(f)
-          e.target.value = ''
-        }}
-      />
     </div>
   )
 }
 
-function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, attrLabel }: {
+function GenItem({ gen, meta, readiness, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
+  // The readiness row (RP-02) for a wind/solar generator on the Renewables tab.
+  readiness?: ReadinessRow
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
   // (p_max_pu / p_min_pu / marginal_cost). Drives the row's check icon, the
   // rows-badge, and whether the trash button is shown. Defaults to the
@@ -723,6 +737,9 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
   onCheck: () => void
   onDownload: () => void
   onUpload: (f: File) => void
+  // Opens the availability editor (TS-02) for this generator; set only where
+  // the active slot is p_max_pu / p_min_pu on the Conventional tab.
+  onEdit?: () => void
   // Drops the (generators, <attrLabel>, <gen.name>) profile from _user_ts.
   // Rendered only when the generator has an uploaded profile for the
   // currently-active attribute.
@@ -731,73 +748,101 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
   // in the per-row tooltip so the user knows which profile slot the upload
   // will land in.
   attrLabel: string
+  // Why this row's last upload was refused, shown under the row with the fix.
+  uploadError?: string | null
 }) {
   const has = hasActive !== undefined ? hasActive : meta?.has_profile === true
   const rowsShown = activeRows !== undefined ? activeRows : (meta?.has_profile ? meta.rows : null)
   const fileRef = useRef<HTMLInputElement>(null)
   return (
-    <div
-      className={`group flex items-center gap-2 px-3 py-2 transition-colors border-b border-border/40
-        ${selected ? 'bg-accent/10' : 'hover:bg-accent/5'}`}
-    >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onCheck}
-        onClick={e => e.stopPropagation()}
-        className="accent-accent shrink-0 cursor-pointer"
-        title="Include in aggregate"
-      />
-      <button onClick={onClick} className="flex-1 min-w-0 flex items-center gap-2 text-left">
-        {has ? <CheckCircle2 size={13} className="shrink-0 text-success" /> : <Circle size={13} className="shrink-0 text-muted" />}
-        <div className="flex-1 min-w-0">
-          <p className={`text-xs font-medium truncate ${selected ? 'text-accent' : 'text-text'}`}>{gen.name}</p>
-          <p className="text-[10px] text-muted truncate">{gen.bus} · {gen.carrier}</p>
-        </div>
-        {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
-      </button>
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); onDownload() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Download single-generator ${attrLabel} template for '${gen.name}'`}
+    <>
+      <div
+        className={`group flex items-center gap-2 px-3 py-2 transition-colors border-b border-border/40
+          ${selected ? 'bg-accent/10' : 'hover:bg-accent/5'}`}
       >
-        <Download size={12} />
-      </button>
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload ${attrLabel} profile for '${gen.name}' (single-column file)`}
-      >
-        <Upload size={12} />
-      </button>
-      {has && onDelete && (
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onCheck}
+          onClick={e => e.stopPropagation()}
+          className="accent-accent shrink-0 cursor-pointer"
+          title="Include in aggregate"
+        />
+        <button onClick={onClick} className="flex-1 min-w-0 flex items-center gap-2 text-left">
+          {has ? <CheckCircle2 size={13} className="shrink-0 text-success" /> : <Circle size={13} className="shrink-0 text-muted" />}
+          <div className="flex-1 min-w-0">
+            <p className={`text-xs font-medium truncate ${selected ? 'text-accent' : 'text-text'}`}>{gen.name}</p>
+            <p className="text-[10px] text-muted truncate">{gen.bus} · {gen.carrier}</p>
+            {readiness && <ReadinessBadge row={readiness} />}
+          </div>
+          {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
+        </button>
         <button
           type="button"
-          onClick={e => { e.stopPropagation(); onDelete() }}
-          className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
-          title={`Delete ${attrLabel} profile for '${gen.name}'`}
+          onClick={e => { e.stopPropagation(); onDownload() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Download single-generator ${fieldLabel(attrLabel)} template for '${gen.name}'`}
         >
-          <Trash2 size={12} />
+          <Download size={12} />
         </button>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onEdit() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+            title={`Edit the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
+            aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${gen.name}`}
+          >
+            <SlidersHorizontal size={12} />
+          </button>
+        )}
+        {/* A field with an editor takes its measured file there (its
+            "Measured file" tab); the row upload is the entry only where none is. */}
+        {!onEdit && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+            title={`Upload a measured ${fieldLabel(attrLabel)} file for '${gen.name}' (single-column file)`}
+          >
+            <Upload size={12} />
+          </button>
+        )}
+        {has && onDelete && (
+          <button
+            type="button"
+            onClick={e => { e.stopPropagation(); onDelete() }}
+            className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
+            title={`Delete the ${fieldLabel(attrLabel)} series of '${gen.name}'`}
+          >
+            <Trash2 size={12} />
+          </button>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".xlsx,.xls,.csv"
+          className="hidden"
+          onChange={e => {
+            const f = e.target.files?.[0]
+            if (f) onUpload(f)
+            e.target.value = ''
+          }}
+        />
+      </div>
+      {uploadError && (
+        <p className="px-3 py-1 text-[11px] text-red-600 border-b border-border/40" data-testid={`row-upload-error-${gen.name}`}>
+          {uploadError}{' '}
+          <button type="button" className="text-accent hover:underline" onClick={onDownload}>
+            Download the template (the model&apos;s hours, a column named {gen.name}) ›
+          </button>
+        </p>
       )}
-      <input
-        ref={fileRef}
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        className="hidden"
-        onChange={e => {
-          const f = e.target.files?.[0]
-          if (f) onUpload(f)
-          e.target.value = ''
-        }}
-      />
-    </div>
+    </>
   )
 }
 
-function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, attrLabel }: {
+function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel }: {
   link: Link
   meta: LinkProfileMeta | undefined
   // Whether the link has a profile for the CURRENTLY-active attribute (the
@@ -812,6 +857,8 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
   onCheck: () => void
   onDownload: () => void
   onUpload: (f: File) => void
+  // Opens the availability editor (TS-02) for this link (p_max_pu / p_min_pu).
+  onEdit?: () => void
   // Drops the (links, <attrLabel>, <link.name>) profile from _user_ts.
   // Rendered only when hasActive is true.
   onDelete?: () => void
@@ -854,20 +901,35 @@ function LinkItem({ link, meta, hasActive, activeRows, selected, checked, onClic
       >
         <Download size={12} />
       </button>
-      <button
-        type="button"
-        onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
-        className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
-        title={`Upload ${attrLabel} profile for '${link.name}' (single-column file)`}
-      >
-        <Upload size={12} />
-      </button>
+      {onEdit && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onEdit() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Edit the ${fieldLabel(attrLabel)} series of '${link.name}'`}
+          aria-label={`Edit the ${fieldLabel(attrLabel)} series of ${link.name}`}
+        >
+          <SlidersHorizontal size={12} />
+        </button>
+      )}
+      {/* A field with an editor takes its measured file there (its
+          "Measured file" tab); the row upload is the entry only where none is. */}
+      {!onEdit && (
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); fileRef.current?.click() }}
+          className="opacity-40 group-hover:opacity-100 hover:text-accent transition-all p-0.5 shrink-0"
+          title={`Upload a measured ${fieldLabel(attrLabel)} file for '${link.name}' (single-column file)`}
+        >
+          <Upload size={12} />
+        </button>
+      )}
       {has && onDelete && (
         <button
           type="button"
           onClick={e => { e.stopPropagation(); onDelete() }}
           className="opacity-40 group-hover:opacity-100 hover:text-danger transition-all p-0.5 shrink-0"
-          title={`Delete ${attrLabel} profile for '${link.name}'`}
+          title={`Delete the ${fieldLabel(attrLabel)} series of '${link.name}'`}
         >
           <Trash2 size={12} />
         </button>
@@ -894,6 +956,17 @@ export default function TimeSeriesManager() {
   const currentProject = useUIStore(s => s.currentProject)
   const [activeTab, setActiveTab] = useState<TabId>('loads')
   const [selectedName, setSelectedName] = useState<string | null>(null)
+  const uiMode = useUIStore(s => s.uiMode)
+  // "Generate defaults for all": the review list over every family's default.
+  const [defaultsOpen, setDefaultsOpen] = useState(false)
+  // The series editor drawer: one host for every family's editor, the same
+  // editor each Properties panel mounts (TS-01, UX review 2026-10-20).
+  const [seriesEditor, setSeriesEditor] = useState<
+    | { family: 'load'; component: string; tab: 'archetype' | 'upload' }
+    | { family: 'availability'; component: string; componentType: 'generators' | 'links' }
+    | { family: 'price'; component: string; componentType: 'generators' | 'links' }
+    | null
+  >(null)
 
   // Section sub-tab (only used on Loads).
   const [loadSection, setLoadSection] = useState<LoadSection>('electricity')
@@ -920,6 +993,15 @@ export default function TimeSeriesManager() {
     : activeTab === 'dr'         ? drAttr
     : activeTab === 'links'      ? linkAttr
     : tabCfg.attribute
+  // The slots the availability editor writes (TS-02); marginal cost is not one.
+  const availabilitySlot = effectiveAttr === 'p_max_pu' || effectiveAttr === 'p_min_pu'
+  // A row's editor for the active slot: availability, or a price series
+  // (TS-03) on marginal cost. Demand response and renewables have none.
+  const rowEditor = (component: string, componentType: 'generators' | 'links') =>
+    (componentType === 'generators' && activeTab !== 'conventional') ? undefined
+      : availabilitySlot ? () => setSeriesEditor({ family: 'availability', component, componentType })
+      : effectiveAttr === 'marginal_cost' ? () => setSeriesEditor({ family: 'price', component, componentType })
+      : undefined
   const convAttrCfg = CONV_ATTRS.find(a => a.id === convAttr)!
   // Config block for the currently-active sub-toggle. Drives the chart's
   // unit suffix + "Must-run/Availability/…" copy in the upload pane. Returns
@@ -941,10 +1023,52 @@ export default function TimeSeriesManager() {
     queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
   })
+  const { data: readinessRows = [] } = useQuery({
+    queryKey: nk(currentProject, 'profile_readiness'),
+    queryFn: () => profilesApi.readiness(currentProject!),
+    enabled: !!currentProject && activeTab === 'renewable',
+  })
+  const readinessOf = (name: string) => readinessRows.find(r => r.generator === name)
   const { data: linkProfiles = {} as Record<string, LinkProfileMeta> } = useQuery({
     queryKey: nk(currentProject, 'link_profiles'),
     queryFn: networkApi.getLinkProfiles,
   })
+
+  // An asset was just added (or a profile applied): open its tab with it
+  // selected once the profile classes are read.
+  const focus = useUIStore(s => s.timeSeriesFocus)
+  const clearFocus = useUIStore(s => s.clearTimeSeriesFocus)
+  useEffect(() => {
+    if (!focus) return
+    if (focus.type === 'Load') setActiveTab('loads')
+    else if (focus.type === 'Link') setActiveTab('links')
+    else if (focus.type === 'Generator') {
+      const cat = (genProfiles as Record<string, GeneratorProfileMeta>)[focus.name]?.category
+      // The class is read with the profiles; wait for it rather than guess.
+      if (cat == null) return
+      setActiveTab(cat === 'renewable' || cat === 'dr' ? cat : 'conventional')
+    }
+    const conventional = focus.type === 'Link' || (focus.type === 'Generator'
+      && !['renewable', 'dr'].includes((genProfiles as Record<string, GeneratorProfileMeta>)[focus.name]?.category ?? ''))
+    // The slot the field lives in; a field with no slot here (a COP is in
+    // Properties only) opens the row and no editor.
+    const slot = !focus.field ? 'p_max_pu'
+      : (['p_max_pu', 'p_min_pu', 'marginal_cost'] as const).find(a => a === focus.field) ?? null
+    if (slot && focus.type === 'Generator' && conventional) setConvAttr(slot)
+    if (slot && focus.type === 'Link') setLinkAttr(slot)
+    setSelectedName(focus.name)
+    setSelectedNames(new Set())
+    if (focus.openEditor && (focus.type === 'Load' || slot)) {
+      if (focus.type === 'Load') setSeriesEditor({ family: 'load', component: focus.name, tab: 'archetype' })
+      else if (conventional) {
+        const componentType = focus.type === 'Link' ? 'links' : 'generators'
+        setSeriesEditor(slot === 'marginal_cost'
+          ? { family: 'price', component: focus.name, componentType }
+          : { family: 'availability', component: focus.name, componentType })
+      }
+    }
+    clearFocus()
+  }, [focus, genProfiles, clearFocus])
 
   const handleTabChange = (tab: TabId) => {
     setActiveTab(tab)
@@ -1159,8 +1283,9 @@ export default function TimeSeriesManager() {
   // Set by per-row upload handlers so the global onSuccess can verify the
   // file actually contained the expected column. One ref per component type
   // since the three upload mutations are distinct.
-  const pendingSingleLoadRef = useRef<string | null>(null)
   const pendingSingleGenRef = useRef<string | null>(null)
+  // A refused row upload, shown under its row (not only as a toast).
+  const [genUploadError, setGenUploadError] = useState<{ name: string; message: string } | null>(null)
   const pendingSingleLinkRef = useRef<string | null>(null)
 
   const uploadLoadMut = useMutation({
@@ -1173,21 +1298,13 @@ export default function TimeSeriesManager() {
       // range — without this they keep showing the stale pre-upload count and
       // the user (wrongly) thinks the solve will run on the old horizon.
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'snapshots') })
-      const target = pendingSingleLoadRef.current
-      pendingSingleLoadRef.current = null
-      if (target && !result.matched.includes(target)) {
-        // Single-load upload that didn't actually contain the expected column.
-        toast.error(`File did not contain a column named '${target}'.`)
-        appLog('WARN', `Per-load upload skipped: file missing column '${target}'`)
-        return
-      }
       const n = result.matched.length, u = result.unmatched.length
       const msg = `Load profile uploaded: ${result.rows} rows for ${n} load${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
     },
-    onError: (e: Error) => { pendingSingleLoadRef.current = null; toast.error(e.message); appLog('ERROR', `Load profile upload failed: ${e.message}`) },
+    onError: (e: Error) => { toast.error(e.message); appLog('ERROR', `Load profile upload failed: ${e.message}`) },
   })
 
   const uploadGenMut = useMutation({
@@ -1209,18 +1326,25 @@ export default function TimeSeriesManager() {
       const target = pendingSingleGenRef.current
       pendingSingleGenRef.current = null
       if (target && !result.matched.includes(target)) {
-        toast.error(`File did not contain a column named '${target}'.`)
+        setGenUploadError({ name: target, message: `The file has no column named '${target}'.` })
         appLog('WARN', `Per-generator upload skipped: file missing column '${target}'`)
         return
       }
       const n = result.matched.length, u = result.unmatched.length
       const attrLabel = variables.attribute
-      const msg = `Generator ${attrLabel} uploaded: ${result.rows} rows for ${n} generator${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
+      const msg = `Generator ${fieldLabel(attrLabel)} uploaded: ${result.rows} rows for ${n} generator${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
     },
-    onError: (e: Error) => { pendingSingleGenRef.current = null; toast.error(e.message); appLog('ERROR', `Generator profile upload failed: ${e.message}`) },
+    onError: (e: Error) => {
+      const target = pendingSingleGenRef.current
+      pendingSingleGenRef.current = null
+      const message = sentence(errorText(e))
+      if (target) setGenUploadError({ name: target, message })
+      else toast.error(message)
+      appLog('ERROR', `Generator profile upload failed: ${message}`)
+    },
   })
 
   const uploadLinkMut = useMutation({
@@ -1247,7 +1371,7 @@ export default function TimeSeriesManager() {
       }
       const n = result.matched.length, u = result.unmatched.length
       const attrLabel = variables.attribute
-      const msg = `Link ${attrLabel} uploaded: ${result.rows} rows for ${n} link${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
+      const msg = `Link ${fieldLabel(attrLabel)} uploaded: ${result.rows} rows for ${n} link${n !== 1 ? 's' : ''}${u ? ` (${u} unmatched ignored)` : ''} — model horizon: ${result.snapshot_count} snapshots`
       toast.success(msg); appLog('INFO', msg)
       if (u > 0) appLog('WARN', `Unmatched columns: ${result.unmatched.join(', ')}`)
       if (result.matched.length > 0 && !selectedName) setSelectedName(result.matched[0])
@@ -1380,15 +1504,6 @@ export default function TimeSeriesManager() {
     }
   }
 
-  const handleSingleLoadUpload = (loadName: string, file: File) => {
-    // The backend endpoint matches columns by name; a single-column file with
-    // the load's name as the column header is the "individual" upload path.
-    // We DON'T pass an onSuccess override here — that would replace the global
-    // success handler and skip cache invalidation.
-    pendingSingleLoadRef.current = loadName
-    uploadLoadMut.mutate(file)
-  }
-
   // Per-generator: download a single-column template using the active
   // attribute (p_max_pu for renewable/DR/availability; p_min_pu for must-run).
   // The backend derives the row shape from the generator's own carrier, so a
@@ -1416,6 +1531,7 @@ export default function TimeSeriesManager() {
   }
 
   const handleSingleGenUpload = (genName: string, file: File) => {
+    setGenUploadError(null)
     pendingSingleGenRef.current = genName
     uploadGenMut.mutate({ file, attribute: effectiveAttr })
   }
@@ -1474,6 +1590,9 @@ export default function TimeSeriesManager() {
         eyebrow="TIME · TIME SERIES"
         title="Time series library"
         subtitle="Hourly profiles attached to network components, organized by category."
+        actions={currentProject ? (
+          <Btn onClick={() => setDefaultsOpen(true)}>Generate defaults for all</Btn>
+        ) : undefined}
       />
 
       {/* ── Tab bar ────────────────────────────────────────────────────── */}
@@ -1491,6 +1610,13 @@ export default function TimeSeriesManager() {
             <span className="text-[9px] font-normal opacity-70">{tab.subtitle}</span>
           </button>
         ))}
+        {activeTab === 'renewable' && (
+          <button type="button" data-testid="ts-open-profile-studio"
+            onClick={() => useUIStore.getState().setSlidePanel('profiles')}
+            className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
+            Generate with Profile Studio →
+          </button>
+        )}
       </div>
 
       {/* ── Toolbar: load section sub-tabs (loads only) + conventional sub-attribute toggle + view-mode toggle ── */}
@@ -1643,7 +1769,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onUpload={f => handleSingleLoadUpload(l.name, f)}
+                    onEdit={tab => setSeriesEditor({ family: 'load', component: l.name, tab })}
                     onDelete={() => deleteTsMut.mutate({ component: 'loads', attribute: 'p_set', name: l.name })}
                   />
                 ))}
@@ -1659,7 +1785,7 @@ export default function TimeSeriesManager() {
                     onClick={() => setSelectedName(l.name)}
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLoadTemplate(l.name)}
-                    onUpload={f => handleSingleLoadUpload(l.name, f)}
+                    onEdit={tab => setSeriesEditor({ family: 'load', component: l.name, tab })}
                   />
                 ))}
               </>
@@ -1675,6 +1801,7 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLinkTemplate(l.name)}
                     onUpload={f => handleSingleLinkUpload(l.name, f)}
+                    onEdit={rowEditor(l.name, 'links')}
                     onDelete={() => deleteTsMut.mutate({ component: 'links', attribute: effectiveAttr, name: l.name })}
                     attrLabel={effectiveAttr}
                   />
@@ -1694,14 +1821,17 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(l.name)}
                     onDownload={() => handleDownloadSingleLinkTemplate(l.name)}
                     onUpload={f => handleSingleLinkUpload(l.name, f)}
+                    onEdit={rowEditor(l.name, 'links')}
                     attrLabel={effectiveAttr}
                   />
                 ))}
               </>
             ) : (
               <>
+                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
+                    readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}
@@ -1710,8 +1840,10 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(g.name)}
                     onDownload={() => handleDownloadSingleGenTemplate(g.name)}
                     onUpload={f => handleSingleGenUpload(g.name, f)}
+                    onEdit={rowEditor(g.name, 'generators')}
                     onDelete={() => deleteTsMut.mutate({ component: 'generators', attribute: effectiveAttr, name: g.name })}
                     attrLabel={effectiveAttr}
+                    uploadError={genUploadError?.name === g.name ? genUploadError.message : null}
                   />
                 ))}
                 {gensWithout.length > 0 && gensWithProfile.length > 0 && (
@@ -1721,6 +1853,7 @@ export default function TimeSeriesManager() {
                 )}
                 {gensWithout.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
+                    readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}
@@ -1729,7 +1862,9 @@ export default function TimeSeriesManager() {
                     onCheck={() => toggleCheck(g.name)}
                     onDownload={() => handleDownloadSingleGenTemplate(g.name)}
                     onUpload={f => handleSingleGenUpload(g.name, f)}
+                    onEdit={rowEditor(g.name, 'generators')}
                     attrLabel={effectiveAttr}
+                    uploadError={genUploadError?.name === g.name ? genUploadError.message : null}
                   />
                 ))}
               </>
@@ -2059,6 +2194,69 @@ export default function TimeSeriesManager() {
         </div>
 
       </div>
+      {defaultsOpen && currentProject && (
+        <Dialog
+          open
+          onClose={() => setDefaultsOpen(false)}
+          title="Generate defaults for all"
+          panelClassName="bg-bg rounded-xl shadow-2xl w-[760px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold">Generate defaults for all</h2>
+            <button type="button" aria-label="Close" className="text-muted hover:text-text"
+              onClick={() => setDefaultsOpen(false)}><X size={14} /></button>
+          </div>
+          <DefaultsReview project={currentProject} onOpenEditor={{
+            families: new Set(['load']),
+            open: component => {
+              setDefaultsOpen(false)
+              setSeriesEditor({ family: 'load', component, tab: 'archetype' })
+            },
+          }} />
+        </Dialog>
+      )}
+      {seriesEditor && currentProject && (
+        <Dialog
+          open
+          onClose={() => setSeriesEditor(null)}
+          title={`${EDITOR_TITLE[seriesEditor.family]} of ${seriesEditor.component}`}
+          panelClassName="bg-bg rounded-xl shadow-2xl w-[560px] max-w-[95vw] max-h-[90vh] overflow-auto p-4"
+        >
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold">
+              {EDITOR_TITLE[seriesEditor.family]} of {seriesEditor.component}
+            </h2>
+            <button type="button" aria-label="Close" className="text-muted hover:text-text"
+              onClick={() => setSeriesEditor(null)}><X size={14} /></button>
+          </div>
+          {seriesEditor.family === 'load' ? (
+            <LoadSeriesEditor
+              key={`${seriesEditor.component}:${seriesEditor.tab}`}
+              project={currentProject}
+              component={seriesEditor.component}
+              mode={uiMode}
+              initialTab={seriesEditor.tab}
+            />
+          ) : seriesEditor.family === 'price' ? (
+            <SeriesEditor
+              key={`price:${seriesEditor.componentType}:${seriesEditor.component}`}
+              project={currentProject}
+              component={seriesEditor.component}
+              kind="tou"
+              componentType={seriesEditor.componentType}
+              mode={uiMode}
+            />
+          ) : (
+            <AvailabilityEditor
+              key={`${seriesEditor.componentType}:${seriesEditor.component}`}
+              project={currentProject}
+              component={seriesEditor.component}
+              componentType={seriesEditor.componentType}
+              mode={uiMode}
+            />
+          )}
+        </Dialog>
+      )}
     </div>
   )
 }

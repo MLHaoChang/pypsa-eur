@@ -305,6 +305,8 @@ def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None
     try:
         return I.put_item(db, org, kind.value, _item_name(name), body.payload, body.meta,
                           created_by=user.id)
+    except I.LibraryItemCommonReadonly as exc:
+        raise HTTPException(409, {"code": "library_item_common_readonly", "message": str(exc)}) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

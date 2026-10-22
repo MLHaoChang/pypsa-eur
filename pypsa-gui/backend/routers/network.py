@@ -195,6 +195,27 @@ from routers.network_profiles import router as _profiles_router
 
 router.include_router(_profiles_router)
 
+# Apply a shipped Library cost reference to one asset (GS-EU P2b): an edit-card write.
+from routers.network_library_reference import (  # noqa: E402,F401
+    apply_library_reference,
+    preview_library_reference,
+)
+from routers.network_library_reference import router as _library_reference_router
+
+router.include_router(_library_reference_router)
+
+# Apply a mapped equipment table to several assets (data-to-model slice 1): an edit-card write.
+from routers.network_equipment_table import apply_equipment_mapping  # noqa: E402,F401
+from routers.network_equipment_table import router as _equipment_table_router
+
+router.include_router(_equipment_table_router)
+
+# Apply values cited from a PDF datasheet to assets (data-to-model slice 2): an edit-card write.
+from routers.network_document_values import apply_document_values  # noqa: E402,F401
+from routers.network_document_values import router as _document_values_router
+
+router.include_router(_document_values_router)
+
 
 # `df_to_json` (static-DataFrame → NaN-safe row dicts) now lives in
 # `services/serialization.py` — the single JSON-boundary scrub home. Imported

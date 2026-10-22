@@ -236,7 +236,9 @@ def test_the_h2_hub_plans_electrolysis_for_the_growing_offtake(reset_backend, mo
     assert bought[2030] == pytest.approx(51_041.0, rel=0.05)
     assert bought[2035] == pytest.approx(112_361.0, rel=0.05)
     r = run_case(case)
-    assert r.metrics["project_pre_tax_npv"] == pytest.approx(14.6e6, rel=0.01)
+    # Re-measured 2026-10-21 (GS-2b): the electrolysers cost the row's price per MW of electrical
+    # input, not x0.68; the demo NPV was +14.6 M EUR, is -2.65 M (same tolerance).
+    assert r.metrics["project_pre_tax_npv"] == pytest.approx(-2_645_035.0, rel=0.01)
 
 
 @pytest.mark.live_solve

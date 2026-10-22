@@ -15,6 +15,7 @@ PANELS = (
     'timeseries', 'simparams', 'horizon', 'results', 'snapshots', 'issues',
     'overview', 'scenarios', 'compare', 'capacityBounds', 'solveQueue',
     'workspace', 'settings', 'gridspine', 'hubDesign', 'reports', 'campusElectrical',
+    'campusStudy', 'campusResults',
 )
 
 

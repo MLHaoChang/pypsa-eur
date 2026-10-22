@@ -33,7 +33,10 @@ BACKEND = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND / "project_templates"))
 import eh_templates as TPL  # noqa: E402
 
-TEMPLATES = sorted(TPL.BUILDERS)
+# The adequacy setup applies to a site with load: a generation-only template
+# (the IPP plant) has no critical bus and nothing to import for.
+TEMPLATES = sorted(t for t in TPL.BUILDERS
+                   if not TPL.TEMPLATE_META.get(t, {}).get("generation_only"))
 
 
 def _strip(n: pypsa.Network) -> pypsa.Network:

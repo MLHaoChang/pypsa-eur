@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Connection & grid lets you set and reset your own connection ramp limit, oscillation band and fault-level source in place (Guided and Expert): a value with its unit, where it comes from, a note, Save per line, and a reset that names the template value or placeholder it returns to. An "assumed" source stays a to-check item.

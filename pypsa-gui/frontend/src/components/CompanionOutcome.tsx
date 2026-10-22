@@ -85,10 +85,12 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
       {body && <div className="sr-only" data-testid="companion-answer-text"><ChatMarkdown>{body}</ChatMarkdown></div>}
     </section>
   }
+  // Opened on a full-screen tab it may sit over page content: capped, scrolls inside (UX, #446).
   return <section data-testid="companion-outcome" data-no-panel-close
     data-answer-id={answer?.answer_id} data-answer-sha256={answer?.receipt.content_sha256}
     aria-label="Assistant answer"
-    className="w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-border bg-bg-2 p-3 shadow-lg text-xs text-text">
+    className={`w-80 max-w-[calc(100vw-3rem)] rounded-xl border border-border bg-bg-2 p-3 shadow-lg text-xs text-text ${
+      docked ? 'max-h-[60vh] overflow-y-auto' : ''}`}>
     <p className="font-medium" role="status">{label}</p>
     {answer ? <p className="mt-1 break-words text-[10px] text-muted">
       Project: {answer.project_id} · {answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded answer'}

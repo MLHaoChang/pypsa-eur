@@ -1,0 +1,10 @@
+key,source_file,locator,value,unit
+solar-utility.investment.overnight,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 16 (Solar PV with Single-Axis Tracking, 150 MWAC), Capital Cost",1502,USD/kW
+solar-utility.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 16 (Solar PV with Single-Axis Tracking, 150 MWAC), Fixed O&M Cost",20.23,USD/kW-year
+solar-utility.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 16 (Solar PV with Single-Axis Tracking, 150 MWAC), Capital Cost",1502,USD/kW
+onwind.investment.overnight,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 13 (Onshore Wind - Large Plant Footprint: Great Plains Region, 200 MW), Capital Cost",1489,USD/kW
+onwind.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 13 (Onshore Wind - Large Plant Footprint: Great Plains Region, 200 MW), Fixed O&M Cost",33.06,USD/kW-year
+onwind.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 13 (Onshore Wind - Large Plant Footprint: Great Plains Region, 200 MW), Capital Cost",1489,USD/kW
+gas-genset.investment.overnight,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 4 (CTs - Simple Cycle, 1 x H-Class, 419 MW), Capital Cost",836,USD/kW
+gas-genset.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 4 (CTs - Simple Cycle, 1 x H-Class, 419 MW), Fixed O&M Cost",6.87,USD/kW-year
+gas-genset.investment.fom_share,capital_cost_AEO2025.pdf,"Table 1-2 Cost & Performance Summary Table, Case 4 (CTs - Simple Cycle, 1 x H-Class, 419 MW), Capital Cost",836,USD/kW

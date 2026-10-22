@@ -8,6 +8,12 @@ import {
 } from 'lucide-react'
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
+import LoadSeriesEditor from '../components/series/LoadSeriesEditor'
+import AvailabilityEditor from '../components/series/AvailabilityEditor'
+import { generatorSeriesEditors, useSeriesFields } from '../components/series/useSeriesFields'
+import SeriesEditor from '../components/series/SeriesEditor'
+import { SeriesStateLink } from '../components/series/SeriesKit'
+import { seriesApi } from '../api/profiles'
 import { useUIStore } from '../store/uiStore'
 import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
@@ -56,7 +62,6 @@ import {
   ehBusPayload,
   ehLinkPayload,
   useGlobalDiscountRate,
-  useGlobalDefaultLifetime,
   useBuildYearOptions,
   defaultLifetime,
   TxtInput,
@@ -126,7 +131,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   const [form, setForm] = useState<FS>({})
 
   const currentProject = useUIStore(s => s.currentProject)
-  const { data: genProfiles = {} } = useQuery({
+  const { data: genProfiles = {}, isSuccess: profilesRead } = useQuery({
     queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
     staleTime: 30_000,
@@ -136,13 +141,14 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1b: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost; the annualised capital cost is
   // derived (overnight × annuity + fixed O&M) and shown read-only.
   const { data: schema } = useAssetSchema('Generator')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Generator', gen.name)
+  const editors = generatorSeriesEditors(profilesRead ? genMeta?.category ?? 'other' : undefined)
+  const series = useSeriesFields(currentProject, 'generators', gen.name, editors?.fields ?? {})
   const specs = schemaFields(schema)
   const asset = gen as unknown as Record<string, unknown>
   // Curtailment cost prices spilled wind and solar; a thermal unit has none to spill.
@@ -183,9 +189,9 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    // Pre-fill lifetime from solver-config global when blank/inf — matches
-    // user expectation that "all assets default to the global lifetime".
-    base.lifetime = defaultLifetime(gen.lifetime, globalLt)
+    // A blank/inf lifetime stays blank: the asset inherits the project default
+    // (the field says so; see LifetimeInherit).
+    base.lifetime = defaultLifetime(gen.lifetime)
     if (!base.control) base.control = 'PQ'
     setForm(seedExtras(gen, base, loadExtras(editScope('Generator'))))
     setOpen(true)
@@ -201,7 +207,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, gen.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, hidden, provenance, series)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -273,7 +279,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} hidden={hidden} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -322,6 +328,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('StorageUnit')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
+  const series = useSeriesFields(currentProject, 'storage_units', su.name, { inflow: 'Inflow' })
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
 
@@ -368,7 +375,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, su.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
   // A unit priced the old way (one overnight cost, no parts) still has that
   // cost; the card says so, since its parts are what the form types now.
   const legacyOvernight = su.overnight_cost != null && Number.isFinite(su.overnight_cost)
@@ -430,7 +437,7 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       {schema ? (
         <AssetFieldsEdit
           schema={schema} fs={form} set={setForm} current={asset}
-          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance}
+          carriers={carriers as Carrier[]} buses={buses as Bus[]} provenance={provenance} series={series}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
             p_nom_max: (
@@ -479,7 +486,6 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses, staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kWh; the annualised capital
   // cost is derived and shown read-only.
@@ -520,7 +526,7 @@ export function StoreCard({ store, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(store.lifetime, globalLt)
+    base.lifetime = defaultLifetime(store.lifetime)
     setForm(seedExtras(store, base, loadExtras(editScope('Store'))))
     setOpen(true)
   }
@@ -646,6 +652,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('Load')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Load', load.name)
+  const series = useSeriesFields(currentProject, 'loads', load.name, { p_set: 'Profile' })
   const specs = schemaFields(schema)
   const asset = load as unknown as Record<string, unknown>
 
@@ -685,7 +692,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editRequest, mode, load.name])
 
-  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance)
+  const items: ExpandedItem[] = assetReadoutItems(schema, asset, undefined, provenance, series)
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
   if (!open && mode === 'detail') {
@@ -746,7 +753,7 @@ export function LoadCard({ load, onRename, mode = 'card', title }: {
     <EditShell title={load.name} onSave={() => saveMut.mutate()} onCancel={() => setOpen(false)} saving={saveMut.isPending}>
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
         />
       ) : <p className="col-span-2 text-[10px] text-muted">Loading fields…</p>}
@@ -836,13 +843,16 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const { data: carriers = [] } = useQuery({ queryKey: nk(currentProject, 'carriers'), queryFn: networkApi.getCarriers, staleTime: 60_000 })
   const { data: buses = [] }    = useQuery({ queryKey: nk(currentProject, 'buses'),    queryFn: networkApi.getBuses,    staleTime: 30_000 })
-  const globalLt = useGlobalDefaultLifetime()
   // S1c: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per kW of input; the annualised
   // capital cost is derived and shown read-only.
   const { data: schema } = useAssetSchema('Link')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('Link', link.name)
+  const series = useSeriesFields(currentProject, 'links', link.name, {
+    p_max_pu: 'Availability', p_min_pu: 'Availability', marginal_cost: 'Price series',
+    ...(/heat.?pump/i.test(`${link.carrier} ${link.name}`) ? { efficiency: 'COP' } : {}),
+  })
   const specs = schemaFields(schema)
   const asset = link as unknown as Record<string, unknown>
 
@@ -881,7 +891,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(link.lifetime, globalLt)
+    base.lifetime = defaultLifetime(link.lifetime)
     setForm(seedExtras(link, { ...base, eh_role: link.eh_role ?? '' }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
@@ -908,7 +918,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
   const items: ExpandedItem[] = [
     { label: 'From bus', value: link.bus0, tip: fieldHelp(schema, 'bus0') },
     { label: 'To bus', value: link.bus1, tip: fieldHelp(schema, 'bus1') },
-    ...assetReadoutItems(schema, asset, undefined, provenance),
+    ...assetReadoutItems(schema, asset, undefined, provenance, series),
   ]
   const visibleItems = items.filter(i => i.value != null && i.value !== '' && i.value !== false)
 
@@ -999,7 +1009,7 @@ export function LinkCard({ link, onRename, mode = 'card', title }: {
       )}
       {schema ? (
         <AssetFieldsEdit
-          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance}
+          schema={schema} fs={form} set={setForm} current={asset} provenance={provenance} series={series}
           carriers={carriers as Carrier[]} buses={buses as Bus[]}
           onCheck={{ p_nom_extendable: autofillNomMin('p_nom', 'p_nom_min') }}
           after={{
@@ -1476,10 +1486,6 @@ export function LinePanel({ name }: { name: string }) {
   const [editing, setEditing] = useState(false)
   const [vintageOpen, setVintageOpen] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
-  // Solver-config global default_lifetime used to pre-fill the lifetime
-  // input when the asset's own lifetime is blank/inf — same behaviour as
-  // generators / storage / stores / links.
-  const globalLt = useGlobalDefaultLifetime()
   // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed per MVA and km; the backend derives the annualised
   // capital cost and fixed O&M from it times the length. The topology stays
@@ -1536,7 +1542,7 @@ export function LinePanel({ name }: { name: string }) {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(line.lifetime, globalLt)
+    base.lifetime = defaultLifetime(line.lifetime)
     const km = (v: number | null | undefined) => { const p = perKm(v); return p === null ? '' : String(p) }
     setForm(seedExtras(line, { ...base, r_per_km: km(line.r), x_per_km: km(line.x), b_per_km: km(line.b) },
       loadExtras(editScope('Line'))))
@@ -1677,9 +1683,6 @@ export function TransformerPanel({ name }: { name: string }) {
   const [editing, setEditing] = useState(false)
   const [vintageOpen, setVintageOpen] = useState(false)
   const [form, setForm] = useState<Record<string, string>>({})
-  // Solver-config global default_lifetime — used to pre-fill the lifetime
-  // input when the transformer's own lifetime is blank/inf.
-  const globalLt = useGlobalDefaultLifetime()
   // S1c-2: the fields come from the asset schema (services/asset_schema/fields.py).
   // Investment is typed as the overnight cost per MVA; the annualised capital
   // cost is derived and shown read-only. The windings stay read-only here.
@@ -1719,7 +1722,7 @@ export function TransformerPanel({ name }: { name: string }) {
 
   const startEdit = () => {
     const base = seedForm(specs, asset)
-    base.lifetime = defaultLifetime(tr.lifetime, globalLt)
+    base.lifetime = defaultLifetime(tr.lifetime)
     setForm(seedExtras(tr, base, loadExtras(editScope('Transformer'))))
     setEditing(true)
   }
@@ -1805,6 +1808,7 @@ const TRANSFORMER_VOLTAGES: ReadonlySet<string> = new Set(['v_nom_0', 'v_nom_1']
 function LinkPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: links = [] } = useQuery({ queryKey: nk(currentProject, 'links'), queryFn: networkApi.getLinks })
   const link = (links as Link[]).find((l: Link) => l.name === name)
   const { data: schema } = useAssetSchema('Link')
@@ -1816,6 +1820,21 @@ function LinkPanel({ name }: { name: string }) {
         <Row label="To bus"   value={link.bus1} tip={fieldHelp(schema, 'bus1')} />
       </Section>
       <LinkCard key={link.name} link={link} mode="detail" onRename={n => setSelectedComponent({ type: 'Link', name: n })} />
+      {currentProject && (
+        <Section title="Availability">
+          <AvailabilityEditor key={link.name} project={currentProject} component={link.name} componentType="links" mode={uiMode} />
+        </Section>
+      )}
+      {currentProject && /heat.?pump/i.test(`${link.carrier} ${link.name}`) && (
+        <Section title="COP">
+          <SeriesEditor key={link.name} project={currentProject} component={link.name} kind="cop" mode={uiMode} />
+        </Section>
+      )}
+      {currentProject && (
+        <Section title="Price series">
+          <SeriesEditor key={link.name} project={currentProject} component={link.name} kind="tou" componentType="links" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1824,9 +1843,17 @@ function LinkPanel({ name }: { name: string }) {
 function GeneratorPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: generators = [] } = useQuery({ queryKey: nk(currentProject, 'generators'), queryFn: networkApi.getGenerators })
   const gen = (generators as Generator[]).find(g => g.name === name)
   const { data: schema } = useAssetSchema('Generator')
+  const { data: genProfiles = {}, isSuccess: profilesRead } = useQuery({
+    queryKey: nk(currentProject, 'generator_profiles'),
+    queryFn: networkApi.getGeneratorProfiles,
+    staleTime: 30_000,
+  })
+  const editors = generatorSeriesEditors(profilesRead
+    ? (genProfiles as Record<string, GeneratorProfileMeta>)[name]?.category ?? 'other' : undefined)
   if (!gen) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
@@ -1834,6 +1861,22 @@ function GeneratorPanel({ name }: { name: string }) {
         <Row label="Bus" value={gen.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <GeneratorCard key={gen.name} gen={gen} mode="detail" onRename={n => setSelectedComponent({ type: 'Generator', name: n })} />
+      {currentProject && editors && !editors.availability && (
+        <Section title="Profile">
+          <SeriesStateLink project={currentProject} componentType="generators" attribute="p_max_pu" component={gen.name} />
+        </Section>
+      )}
+      {currentProject && editors?.availability && (
+        <Section title="Availability">
+          {/* The same editor the Time Series drawer mounts (TS-02). */}
+          <AvailabilityEditor key={gen.name} project={currentProject} component={gen.name} componentType="generators" mode={uiMode} />
+        </Section>
+      )}
+      {currentProject && editors?.price && (
+        <Section title="Price series">
+          <SeriesEditor key={gen.name} project={currentProject} component={gen.name} kind="tou" componentType="generators" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1841,9 +1884,17 @@ function GeneratorPanel({ name }: { name: string }) {
 function StorageUnitPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: sus = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
   const su = (sus as StorageUnit[]).find(s => s.name === name)
   const { data: schema } = useAssetSchema('StorageUnit')
+  // An inflow belongs to a hydro-like unit or one that has one already (the
+  // server's `inflow_applies`); a battery gets no inflow editor.
+  const { data: inflow } = useQuery({
+    queryKey: ['series-current', currentProject, 'storage_units', 'inflow', name],
+    queryFn: () => seriesApi.current(currentProject as string, 'storage_units', 'inflow', name),
+    enabled: !!currentProject,
+  })
   if (!su) return <p className="p-3 text-xs text-muted">Loading…</p>
   return (
     <div className="p-3">
@@ -1851,6 +1902,11 @@ function StorageUnitPanel({ name }: { name: string }) {
         <Row label="Bus" value={su.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <StorageUnitCard key={su.name} su={su} mode="detail" onRename={n => setSelectedComponent({ type: 'StorageUnit', name: n })} />
+      {currentProject && inflow?.applicable && (
+        <Section title="Inflow">
+          <SeriesEditor key={su.name} project={currentProject} component={su.name} kind="inflow" mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }
@@ -1879,6 +1935,7 @@ function StorePanel({ name }: { name: string }) {
 function LoadPanel({ name }: { name: string }) {
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const uiMode = useUIStore(s => s.uiMode)
   const { data: loads = [] } = useQuery({ queryKey: nk(currentProject, 'loads'), queryFn: networkApi.getLoads })
   const load = (loads as Load[]).find(l => l.name === name)
   const { data: schema } = useAssetSchema('Load')
@@ -1889,6 +1946,13 @@ function LoadPanel({ name }: { name: string }) {
         <Row label="Bus" value={load.bus} tip={fieldHelp(schema, 'bus')} />
       </Section>
       <LoadCard key={load.name} load={load} mode="detail" onRename={n => setSelectedComponent({ type: 'Load', name: n })} />
+      {currentProject && (
+        <Section title="Profile">
+          {/* The load's series editor: the same component the Time Series
+              drawer mounts, so a load's p_set has one editor (TS-01). */}
+          <LoadSeriesEditor key={load.name} project={currentProject} component={load.name} mode={uiMode} />
+        </Section>
+      )}
     </div>
   )
 }

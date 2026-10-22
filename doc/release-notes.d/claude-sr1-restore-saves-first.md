@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Restoring a Saved snapshot no longer loses unsaved edits. Unsaved changes are saved first, so the "before-restore" snapshot holds the state the restore replaces, as the restore panel and the assistant's restore tool promise.

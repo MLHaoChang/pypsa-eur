@@ -27,6 +27,7 @@ import numpy as np
 import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
+from services.issue_titles import issue_title
 
 # Severity literal kept narrow on purpose — anything beyond error/warning
 # pushes UX complexity onto every callsite for marginal value.
@@ -42,7 +43,9 @@ class Issue:
     message: str            # human-readable, complete sentence
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        # The title is server copy (``issue_titles``): the Issues list and the
+        # Run's blocker read the same words.
+        return {**asdict(self), "title": issue_title(self.code)}
 
 
 # ── tiny helpers ─────────────────────────────────────────────────────────────
@@ -391,8 +394,11 @@ def _check_extendable_bounds(
     df: pd.DataFrame, comp: str, prefix: str, capital_cost_required: bool,
 ) -> list[Issue]:
     """
-    *_extendable assets need finite *_nom_min / *_nom_max with min < max,
-    and a positive capital_cost (otherwise the solver picks max_nom for free).
+    *_extendable assets need finite *_nom_min / *_nom_max with min < max, or
+    min == max > 0: an explicit forced size (built exactly at p_nom_min =
+    p_nom_max; it still carries capex, which the investment case counts — IPP
+    ticket 03), and a positive capital_cost (otherwise the solver picks max_nom
+    for free). Equal bounds of 0 can never build and are refused.
     `prefix` is 'p_nom' / 's_nom' / 'e_nom'.
     """
     out: list[Issue] = []
@@ -410,9 +416,12 @@ def _check_extendable_bounds(
         # Extendable: bounds must be finite and ordered
         lo = df.at[name, min_col] if min_col in df.columns else 0
         hi = df.at[name, max_col] if max_col in df.columns else float("inf")
-        if not (_is_finite_nonneg(lo) and _is_finite(hi) and float(hi) > float(lo)):
+        if not (_is_finite_nonneg(lo) and _is_finite(hi) and float(hi) > 0
+                and float(hi) >= float(lo)):
             out.append(_err(f"{comp.lower()}_{prefix}_bounds", comp, str(name),
-                f"extendable: need finite {min_col} < {max_col} (got {_pretty(lo)} / {_pretty(hi)})."))
+                f"extendable: need finite {min_col} < {max_col}, or {min_col} = {max_col} > 0 "
+                f"(an explicit forced size, built exactly at that size) "
+                f"(got {_pretty(lo)} / {_pretty(hi)})."))
         if capital_cost_required and "capital_cost" in df.columns:
             cc = df.at[name, "capital_cost"]
             # Accept overnight_cost > 0 as a substitute: solver_service's
@@ -649,21 +658,22 @@ def _check_sclopf(n, cfg) -> list[Issue]:
     # loss model. Block at preflight so the user picks one or the other.
     if getattr(cfg, "transmission_losses", False):
         out.append(_err("sclopf_with_transmission_losses", "", "",
-            "SCLOPF doesn't support `transmission_losses=True` — PyPSA's "
-            "secant-loss formulation isn't wired into the BODF-based "
-            "contingency LP. Disable one of the two for this run."))
+            "N-1 security can't run with transmission losses: the "
+            "loss model isn't wired into the contingency LP. Switch off "
+            "What the Run computes › N-1 security, or switch off transmission "
+            "losses in Solver settings."))
     # Lazy import to avoid a circular dependency at validation-service load.
     from services.solver_service import resolve_branch_outages
     outages = resolve_branch_outages(n, cfg)
     if not outages:
         out.append(_err("sclopf_no_branches", "", "",
-            "SCLOPF is enabled but no branches resolved from the selection "
-            "(all-lines / all-transformers / voltage threshold / extras). "
-            "Enable at least one source — otherwise this is just a plain LOPF."))
+            "N-1 security has no branches to check yet. Choose lines or "
+            "transformers to check (all of them, a voltage threshold or a "
+            "list); without them the solve runs without N-1 security."))
         return out
     if len(outages) > 200:
         out.append(_warn("sclopf_large_contingency_set", "", "",
-            f"SCLOPF will consider {len(outages)} contingencies. Each adds "
+            f"N-1 security will check {len(outages)} contingencies. Each adds "
             "constraints per snapshot — solve time grows roughly linearly. "
             "Consider raising the voltage threshold or unchecking 'include all' "
             "and listing critical branches explicitly."))
@@ -908,15 +918,16 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
             f"rolling_overlap ({O}) must be strictly less than rolling_horizon ({H})."))
     if getattr(cfg, "sclopf", False):
         out.append(_err("rolling_with_sclopf", "", "",
-            "SCLOPF is not compatible with the rolling-horizon strategy — "
-            "LODF contingency constraints are defined against the full "
-            "snapshot index. Disable one of the two."))
+            "N-1 security can't run with the rolling-horizon "
+            "strategy: its contingency constraints are defined against the "
+            "full snapshot index. Switch off What the Run computes › N-1 "
+            "security, or use the full solve."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("rolling_with_ac_pf", "", "",
-            "Auto-chained AC PF is not yet supported with the rolling-horizon "
-            "strategy — the dispatch fix needs a per-window slack story. "
-            "Disable `run_ac_pf_after_lopf` or use the standalone Stage 2 "
-            "trigger after the rolling solve completes."))
+            "Load flow (AC power flow after the solve) can't run with the "
+            "rolling-horizon strategy yet: the dispatch fix needs a per-window "
+            "slack story. Switch off What the Run computes › Load flow, or use "
+            "the full solve."))
     total = len(n.snapshots) if hasattr(n, "snapshots") else 0
     if H > total and total > 0:
         out.append(_warn("rolling_horizon_exceeds_snapshots", "", "",
@@ -1017,7 +1028,7 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
                 f"`sclopf_scope` must be 'horizon' or 'current_period', got '{scope}'."))
         else:
             out.append(_warn("myopic_sclopf_cost", "", "",
-                f"SCLOPF + myopic enabled (scope={scope}). The LP grows roughly "
+                f"N-1 security with myopic foresight (scope={scope}). The LP grows roughly "
                 f"as snapshots × contingencies × affected branches per "
                 f"iteration — keep contingency lists small for solve-time "
                 f"tractability."))
@@ -1028,18 +1039,17 @@ def _check_myopic_foresight(n, cfg) -> list[Issue]:
             # so the user doesn't silently lose forward visibility.
             if scope == "current_period" and bool(getattr(cfg, "lf_aggregate_future", False)):
                 out.append(_warn("sclopf_scope_current_with_lf", "", "",
-                    "`sclopf_scope='current_period'` drops future-period "
+                    "N-1 security's 'current period' scope drops future-period "
                     "representative snapshots from each iteration's contingency "
-                    "LP, so `lf_aggregate_future=True` has no effect during "
-                    "SCLOPF iterations. Use `sclopf_scope='horizon'` to keep "
-                    "the lookahead, or accept that the SCLOPF iterations are "
-                    "pure single-period."))
+                    "LP, so limited foresight has no effect during those "
+                    "iterations. Use the 'horizon' scope to keep the "
+                    "lookahead, or accept that they are pure single-period."))
     if getattr(cfg, "run_ac_pf_after_lopf", False):
         out.append(_err("myopic_with_ac_pf", "", "",
-            "Auto-chained AC PF is not yet supported with the myopic-foresight "
-            "solve strategy — the dispatch fix needs a per-period story. "
-            "Disable `run_ac_pf_after_lopf` or use the standalone Stage 2 "
-            "trigger after the myopic solve completes."))
+            "Load flow (AC power flow after the solve) can't run with the "
+            "myopic-foresight strategy yet: the dispatch fix needs a "
+            "per-period story. Switch off What the Run computes › Load flow, "
+            "or use the full solve."))
     out.extend(_check_myopic_capacity_lock(n, network_periods or cfg_periods))
     return out
 
@@ -1167,9 +1177,10 @@ def _check_stage2_ac_pf(n, cfg) -> list[Issue]:
     # Multi-investment-period + AC PF: incompatible
     if getattr(cfg, "multi_investment_periods", False):
         out.append(_err("stage2_multi_period", "", "",
-            "Stage 2 (AC Power Flow) does not support multi-investment-period "
-            "snapshots — PyPSA's `n.pf()` accepts a flat snapshot index only. "
-            "Disable `run_ac_pf_after_lopf` or `multi_investment_periods`."))
+            "Load flow (AC power flow after the solve) doesn't support "
+            "multi-investment-period snapshots: PyPSA's power flow takes a "
+            "flat snapshot index only. Switch off What the Run computes › "
+            "Load flow, or use a single investment period."))
 
     # Zero-impedance lines: singular Y-bus
     if not n.lines.empty:
@@ -1740,6 +1751,33 @@ def _check_unweighted_start_costs(n) -> list[Issue]:
             for comp, name, attr, value in weighted_start_cost_units(n)]
 
 
+def _check_safety_tier_off_critical_bus(n) -> list[Issue]:
+    """A `safety`-tier process unit draws from a bus the design keeps on the critical supply (the `eh_critical`
+    bus, grid-to-process ticket 08): the tier prices its stop at VoLL, the bus is what the island keeps fed. The
+    two stay separate fields, so a unit off that bus is a warning, not a refusal."""
+    links = n.links
+    if links.empty or "criticality_tier" not in links.columns:
+        return []
+    from services.adequacy.eh_columns import _as_bool
+
+    crit = {b for b in n.buses.index if _as_bool(n.buses.at[b, "eh_critical"])} \
+        if "eh_critical" in n.buses.columns else set()
+    safety = links.index[links["criticality_tier"].astype(str).str.strip() == "safety"]
+    return [_warn("safety_tier_off_critical_bus", "Link", str(name),
+                  f"Criticality tier 'safety' but its supply bus {links.at[name, 'bus0']!r} is not a critical "
+                  "bus (eh_critical): its stop is priced at VoLL, yet the island would not keep it fed. Put "
+                  "it on the critical bus, or choose another tier.")
+            for name in safety if str(links.at[name, "bus0"]) not in crit]
+
+
+def _check_lost_production_value(n) -> list[Issue]:
+    """A bus's `lost_production_value` at or below its buy-in's highest dense marginal cost (a grey purchase carries
+    its CO2 in a series): the solve-time shortfall slack would let the LP buy by shedding (ticket 08)."""
+    from services.solver.lost_production import refusals
+
+    return [_err("lost_production_value_below_buy_in", "Bus", bus, why) for bus, why in refusals(n)]
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1764,6 +1802,8 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_storage_cyclic_initial(n)
     out += _check_p_max_pu_bounds(n)
     out += _check_unweighted_start_costs(n)
+    out += _check_safety_tier_off_critical_bus(n)
+    out += _check_lost_production_value(n)
 
     # Generators
     out += _check_extendable_bounds(n.generators, "Generator", "p_nom", True)
@@ -2486,6 +2526,13 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_import_energy_cap(n, solver_config)
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
+
+    # Capacity › sizing off (F1): the source and the modes and strategies it
+    # excludes. Any mode, so a power-flow run with the option set is refused.
+    from services.solver import fixed_sizes as _fixed_sizes
+
+    issues += [Issue(severity=sev, code=code, component_class="", name=name, message=msg)
+               for sev, code, name, msg in _fixed_sizes.issues(n, solver_config)]
 
     mode = solver_config.mode
     if mode == "pf":
