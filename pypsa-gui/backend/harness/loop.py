@@ -1018,6 +1018,7 @@ def run_turn(
     binding_generation: int = 0,
     ui_ack: bool = False,
     continuation_job_id: str | None = None,
+    continue_task_id: str | None = None,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1213,6 +1214,19 @@ def run_turn(
                 yield "error", {"error_kind": "continuation_unavailable",
                                 "message": "No finished job of this conversation is waiting to continue."}
                 yield "session_done", {"reason": "continuation_unavailable"}
+                return
+        if continue_task_id is not None:
+            # LC-23 COP-1: the user's Continue clears the plan's card pause.
+            # The harness writes the message; it approves nothing.
+            from services import assistant_tasks as _plans
+            try:
+                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+                    raise ValueError("a plan continue is not a user message")
+                message = _plans.continue_at_card(session, continue_task_id)
+            except (HTTPException, ValueError, OSError):
+                yield "error", {"error_kind": "plan_continue_unavailable",
+                                "message": "This plan is not paused at a card."}
+                yield "session_done", {"reason": "plan_continue_unavailable"}
                 return
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())

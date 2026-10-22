@@ -104,6 +104,9 @@ class StreamRequest(BaseModel):
     # LC-12: continue this conversation after a plan's job ended (one listed by
     # GET /{session_id}/continuations). The server writes the message; once per job.
     continuation_job_id: str | None = Field(default=None, min_length=1, max_length=64)
+    # LC-23 COP-1: the user's "Continue to <card>" on the plan card. Only this
+    # request clears a plan's card pause; the server writes the message.
+    continue_task_id: str | None = Field(default=None, min_length=36, max_length=36)
 
 
 class ConfirmRequest(BaseModel):
@@ -1522,10 +1525,11 @@ async def chat_stream(
                 or body.generation is not None or body.input_mode not in (None, 'text')
                 or body.message != FOLLOWUP_MESSAGE):
             raise HTTPException(422, {'error_kind': 'invalid_source_gap_followup'})
-    if body.continuation_job_id is not None and (
+    if (body.continuation_job_id is not None or body.continue_task_id is not None) and (
             body.message or body.attachment_file_ids or body.script or body.source_gap_ref is not None
             or body.checked_scope is not None or body.checked_operation is not None
-            or body.utterance_id is not None or body.generation is not None):
+            or body.utterance_id is not None or body.generation is not None
+            or (body.continuation_job_id is not None and body.continue_task_id is not None)):
         raise HTTPException(422, {"error_kind": "invalid_continuation"})
     if body.checked_scope is not None:
         from harness.assurance_scope import validate
@@ -1790,6 +1794,7 @@ async def chat_stream(
                     binding_generation=body.binding_generation,
                     ui_ack=body.ui_ack,
                     continuation_job_id=body.continuation_job_id,
+                    continue_task_id=body.continue_task_id,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
