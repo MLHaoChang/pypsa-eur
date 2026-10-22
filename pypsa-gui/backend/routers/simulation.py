@@ -1437,8 +1437,8 @@ def ac_pf_refusal(n) -> tuple[str, str] | None:
     # `ac_pf_results` (`cleared_result_state`), which lifts this.
     if PyPSAService.get_solver_state().get("ac_pf_results") is not None:
         return ("ac_pf_already_run",
-                "AC power flow already ran on this solve; its results replaced the "
-                "LOPF values. Re-run LOPF first.")
+                "AC power flow already ran on this solve, and its values replaced the "
+                "optimisation's. Run the solve again first.")
     return None
 
 
