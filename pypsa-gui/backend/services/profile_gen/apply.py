@@ -22,6 +22,14 @@ reindexing:
     weeks, a month) → the weather year sliced to it by month-day-hour, the
     window recorded as ``window: {first, last, hours, runs}``; an hour the
     source does not have (Feb 29, a DST-gap hour) is refused, never filled;
+  * a constant whole-hour step k > 1 (3-hourly, …) → each snapshot takes the
+    MEAN of the hourly weather series over its own k hours, aligned by the
+    rules above (renewable and load families only; weightings play no part);
+    meta ``step_hours``. Refused by name: a step that is not whole hours
+    (``step_not_whole_hours``), steps of unequal length (``step_irregular``),
+    a step over the skipped spring hour of a local clock
+    (``step_over_dst_gap``), another family or several investment periods
+    (``step_aggregation_unsupported``);
   * sub-hourly / off-the-hour snapshots, or a window that repeats a
     calendar hour → typed refusal naming the supported shapes;
   * MultiIndex (multi-investment-period) snapshots → tile the weather year
