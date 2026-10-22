@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 279,
+  "tool_count": 285,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2272,6 +2272,27 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "get_profile_readiness",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/readiness"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "generate_renewable_profile",
       "toolsets": [
         "network"
@@ -2328,6 +2349,74 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "9c10de8b5841842b12f915e39dabefeeb4b00b349267f1076755589499c3e279",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_generated_profiles",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/apply-batch"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_id",
+        "components",
+        "all_from_job",
+        "time_basis"
+      ],
+      "required": [
+        "project_id",
+        "job_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "ef4cf4b77c3da8c40dbfb3647c402998ad13176f27e00d0e31777a7575ffb9f6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/preview"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "replace_generated",
+        "peak_sized"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "d2bffa1352e1c4f15d71f9e93afa5f173b66aba0eb08e0d07084622bbad1e62a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_default_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/defaults/apply"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_ids"
+      ],
+      "required": [
+        "project_id",
+        "job_ids"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "4269f1d7d6b12df848df53620eeb7843392056062a9e9e4cd45573e6572dd0cc",
       "behavioral_fixture": "pending"
     },
     {
@@ -5305,6 +5394,59 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_document_values",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "citations"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "fe307619891fdb555f3f48c4ff2bf60efb91021de3d320b94bc3d9f982254fa1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_document_values",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/document_values/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "decimal_mark",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "citations",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "46573de48a4a62e0bb4c508693111f48a010a18e99117287a02f243d95c0a841",
       "behavioral_fixture": "pending"
     },
     {

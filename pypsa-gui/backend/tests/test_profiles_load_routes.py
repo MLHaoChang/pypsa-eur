@@ -465,6 +465,101 @@ def test_a_price_on_the_poc_link_is_refused_at_generation(client, heat_project,
     assert resp.json()["detail"]["error_kind"] == "poc_tariff"
 
 
+# ---------------------------------------------------------------------------
+# apply's dry run at generation: the editor holds Apply before a refusal
+# ---------------------------------------------------------------------------
+
+
+def test_availability_shows_what_apply_would_warn_before_apply(client, plant_project):
+    # The bus's loads take 2 MW; a 50 % floor on the 10 MW plant forces 5 MW.
+    body = _avail(client, plant_project, kind="must_run", params={"share": 0.5}).json()
+    assert any(w.startswith("must_run_exceeds_sink") for w in body["warnings"]), body["warnings"]
+    assert not any(w.startswith("not_applicable") for w in body["warnings"])
+
+
+def test_a_series_apply_would_refuse_says_so_at_generation(client, install_network):
+    n = _load_network()
+    n.set_snapshots(pd.date_range("2025-06-02T00:30", periods=168, freq="h"))  # off the hour
+    n.add("Bus", "H", carrier="heat")
+    n.add("Link", "hp", bus0="B1", bus1="H", p_nom=5.0)
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Week Site",
+                       params={"force": True, "rebind": True}).status_code == 200
+    for resp in (
+        _series(client, "Week Site", kind="cop", components=["hp"],
+                params={"source": "ground", "source_c": 5.0, "sink_c": 35.0}),
+        _avail(client, "Week Site", kind="must_run", params={"share": 0.1}, year=2025),
+    ):
+        assert resp.status_code == 200, resp.text
+        warnings = resp.json()["warnings"]
+        assert any(w.startswith("not_applicable:") and "not on the hour" in w
+                   for w in warnings), warnings
+        assert resp.json()["weeks"] == {}
+
+
+def test_a_load_preview_carries_its_peak_week_as_apply_would_write_it(client, load_project):
+    body = _generate(client, load_project).json()
+    week = body["weeks"]["plant"]
+    assert week["label"] == "peak week"
+    stamps = pd.DatetimeIndex(week["snapshots"])
+    # One calendar week from Monday 00:00, cut where the snapshots end (the
+    # year's first week starts on Wednesday 1 January 2025).
+    assert len(stamps) <= 168 and stamps[0].hour == 0
+    assert stamps[0].weekday() == 0 or stamps[0] == pd.Timestamp("2025-01-01")
+    assert (stamps[-1] - stamps[0]) < pd.Timedelta(days=7)
+    assert max(week["new"]) == pytest.approx(body["stats"]["plant"]["peak_mw"], rel=1e-3)
+    assert week["current"] is None          # a static p_set has no series to show
+
+
+def test_an_outage_preview_shows_its_lowest_week_beside_the_current_series(
+    client, plant_project, session_ctx,
+):
+    first = _avail(client, plant_project, kind="derating", params={"floor": 0.8}).json()
+    client.post(f"/api/projects/{plant_project}/profiles/apply",
+                json={"job_id": first["job_id"], "component": "chp", "time_basis": "UTC"})
+    body = _avail(client, plant_project).json()       # maintenance 07-03 – 07-16
+    week = body["weeks"]["chp"]
+    assert week["label"] == "lowest week"
+    assert min(week["new"]) == 0.0
+    assert week["snapshots"][0] == "2025-06-30T00:00:00"   # the Monday before 07-03
+    assert week["current"] is not None and len(week["current"]) == len(week["new"])
+    assert any(w.startswith("replaces_existing_series") for w in body["warnings"])
+
+
+def test_the_current_series_refines_and_applies_through_the_routes(client, load_project,
+                                                                   session_ctx):
+    gen = _generate(client, load_project).json()
+    client.post(f"/api/projects/{load_project}/profiles/apply",
+                json={"job_id": gen["job_id"], "component": "plant", "time_basis": "UTC"})
+    cur = client.get(f"/api/projects/{load_project}/profiles/current",
+                     params={"component_type": "loads", "attribute": "p_set",
+                             "component": "plant"}).json()
+    assert cur["exists"] and cur["family"] == "load" and cur["rows"] == 8760
+    body = client.post(f"/api/projects/{load_project}/profiles/from-current",
+                       json={"component_type": "loads", "attribute": "p_set",
+                             "component": "plant"})
+    assert body.status_code == 200, body.text
+    pending = body.json()
+    assert pending["source"] == "current" and pending["weeks"]["plant"]["label"] == "peak week"
+    refined = client.post(f"/api/projects/{load_project}/profiles/refine",
+                          json={"job_id": pending["job_id"],
+                                "ops": [{"op": "scale_peak_to", "mw": 2.0}]}).json()
+    applied = client.post(f"/api/projects/{load_project}/profiles/apply",
+                          json={"job_id": refined["job_id"], "component": "plant"})
+    assert applied.status_code == 200, applied.text
+    assert float(session_ctx(client).network.loads_t.p_set["plant"].max()) == pytest.approx(2.0)
+
+
+def test_from_current_without_a_series_is_a_typed_refusal(client, load_project):
+    resp = client.post(f"/api/projects/{load_project}/profiles/from-current",
+                       json={"component_type": "loads", "attribute": "p_set",
+                             "component": "office"})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error_kind"] == "no_current_series"
+
+
 def test_series_refusals_say_their_sentence_and_nothing_foreign(
     client, heat_project, monkeypatch, bound_ctx,
 ):

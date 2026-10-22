@@ -40,6 +40,8 @@ import { openPanel } from './results/openPanel'
 import { settingsFromDraft, useCampusDraft, useCampusRunNotice, type LostRun } from '../store/campusSettingsDraft'
 import { isNotSolvedRefusal, NotSolvedRefusal } from './results/NotSolved'
 import { Btn, Field, PageBody, PageSection, Tag } from '../components/PageKit'
+import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
+import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
@@ -131,6 +133,13 @@ export function CampusResultsPanel() { return <CampusPanel part="results" /> }
 
 function CampusView({ name, part }: { name: string; part: CampusPart }) {
   const qc = useQueryClient()
+  // The site connection is the project's, not the campus study's: it shows even when the campus read fails
+  // or the project is not a hub, because Economics and Investment send the user here to set it.
+  const lead = part === 'inputs' ? (
+    <PageSection title="Site connection" hint="The point of connection the bill and the investment case read">
+      <SiteConnectionEditor />
+    </PageSection>
+  ) : null
   const notice = useCampusRunNotice(s => s.notices[name])
   const setNotice = useCampusRunNotice(s => s.set)
   const lost: LostRun | null = notice?.lost ?? null
@@ -169,6 +178,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
   if (state.isError && isOtherKind(state.error)) {
     return (
       <PageBody>
+        {lead}
         <PageSection title={PART_TITLE[part]}>
           <p className="text-[12px] text-muted">
             The campus electrical study is for capacity-expansion (hub) projects. {errorText(state.error)}
@@ -180,6 +190,7 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
   if (!state.data) {
     return (
       <PageBody>
+        {lead}
         <PageSection title={PART_TITLE[part]}>
           <p className="text-[12px] text-muted">{state.isError ? errorText(state.error) : 'Loading…'}</p>
         </PageSection>
@@ -212,8 +223,10 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
         </div>
       )}
       {part === 'inputs' && (<>
+        {lead}
         <CampusFileSection name={name} state={state.data} onChange={refresh} />
         <GridConnectionSection name={name} state={state.data} />
+        <ConnectionLimits />
         <CampusGridCodeSection
           name={name}
           onProfilesChanged={() => qc.invalidateQueries({ queryKey: CAMPUS_KEY(name) })}

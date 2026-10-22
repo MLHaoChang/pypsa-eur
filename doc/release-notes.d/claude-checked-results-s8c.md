@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the investment case's nominal and real LCOE, rebuilt by the engine's definition from the per-year generation and value the report retains (`investment-lcoe/1`, opt-in); zero discounted generation is refused, and reports stored before the series were retained read as not retained until re-run.

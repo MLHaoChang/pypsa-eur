@@ -64,19 +64,19 @@
     },
     {
       "item": "Haber-Bosch capex, FOM, lifetime",
-      "note": "technology-data v0.14.0 costs_2030.csv, pack 2026-10-20 (haber-bosch). The loop is a fixed-size, sunk unit in this template, so the solve does not charge it; the rows are there for the investment case",
+      "note": "technology-data v0.14.0 costs_2030.csv, pack 2026-10-22 (haber-bosch). The loop is a fixed-size, sunk unit in this template, so the solve does not charge it; the rows are there for the investment case",
       "source": "sourced",
       "value": "1842.99 EUR/kW_NH3, 3 %/year, 30 years"
     },
     {
       "item": "NH3 tank",
-      "note": "technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack 2026-10-20 (nh3-tank); extendable, one row built in 2027",
+      "note": "technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack 2026-10-22 (nh3-tank); extendable, one row built in 2027",
       "source": "sourced",
       "value": "211.83 EUR/MWh_NH3, 2 %/year, 20 years"
     },
     {
       "item": "H2 tank",
-      "note": "technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack 2026-10-20 (h2-tank); extendable from 0 (the hub's 2000 MWh tank is replaced), one row built in 2027",
+      "note": "technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack 2026-10-22 (h2-tank); extendable from 0 (the hub's 2000 MWh tank is replaced), one row built in 2027",
       "source": "sourced",
       "value": "60.05 EUR/kWh_H2, 1.11 %/year, 30 years"
     },
@@ -124,7 +124,7 @@
     },
     {
       "item": "unit commitment in planning",
-      "note": "the relaxation understates restarts, so the binary operational check runs after the plan and reports its per-period gap",
+      "note": "the relaxation understates restarts, so the binary operational check runs after the plan and reports its per-period gap. Measured on this plan (electrolysis priced per MW of electrical input, RE fleet 1.75x, GS-2b ticket 03, 2026-10-22): in 2027 the loop is on 101 of 168 h (stops of 32 h and 8 h, runs of 31 h and 25 h), no grey NH3 is bought and the binary check equals the linearised one (0.39 M EUR); gaps 2027 / 2030 / 2035: 0.0 % / 2.57 % / 0.008 % (0.0 M / 3.43 M / 0.43 M EUR)",
       "source": "assumed",
       "value": "linearised (process_uc auto), then one binary check per period"
     },
@@ -159,7 +159,13 @@
       "value": "as the staged H2 hub"
     },
     {
-      "item": "wind, PV, prices, process load",
+      "item": "wind and PV (existing fleet)",
+      "note": "sized so the 2027 loop cycles at the honest electrolyser price: 2027 delivers 10.8 MW_NH3, below the loop's 13.8 MW minimum load, so it must run and stop, and that pays only when electricity is cheap (below about 66 EUR/MWh; else the whole 94,280 MWh of grey NH3 is bought, 41 M EUR). Measured: 1.5x keeps the loop off for the week (grey NH3 bought), 1.75x cycles. Sunk and priced at 0 (no capital or fixed cost), so only the free energy changes. The H2 hub keeps 120 MW / 80 MW",
+      "source": "synthetic",
+      "value": "1.75x the H2 hub's: wind 210 MW, PV 140 MW"
+    },
+    {
+      "item": "prices, process load",
       "note": "eh_templates.build_eh_h2_hub",
       "source": "synthetic",
       "value": "as the H2 hub"

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Time Series › Renewables shows each wind/solar generator's readiness (no coordinates, ready, generated with its weather year, out of date) and a banner naming generators without a location.

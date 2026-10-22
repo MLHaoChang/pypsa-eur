@@ -246,7 +246,7 @@ class Turn:
                 from harness import (
                     branch_calculations, carrier_calculations, curtailment_calculations,
                     capacity_calculations, emissions_calculations, energy_balance_calculations,
-                    lost_load_calculations, site_import_calculations, investment_calculations,
+                    lost_load_calculations, site_import_calculations, investment_calculations, copt_calculations,
                     price_calculations, storage_cycles_calculations,
                 )
 
@@ -255,7 +255,7 @@ class Turn:
                             | emissions_calculations.REFUSALS | curtailment_calculations.REFUSALS
                             | capacity_calculations.REFUSALS | storage_cycles_calculations.REFUSALS
                             | energy_balance_calculations.REFUSALS | site_import_calculations.REFUSALS
-                            | investment_calculations.REFUSALS)
+                            | investment_calculations.REFUSALS | copt_calculations.REFUSALS)
                 named = isinstance(exc, ValueError) and exc.args and exc.args[0] in refusals
                 self.request_scope["reason"] = (
                     exc.args[0] if named else "unsupported_or_unavailable_source"
@@ -437,6 +437,8 @@ class Turn:
             assurance_metrics.balance.PROFILE: "Network",
             assurance_metrics.site_import.PROFILE: "Network",
             assurance_metrics.investment.PROFILE: "Network",
+            assurance_metrics.investment.LCOE_PROFILE: "Network",
+            assurance_metrics.copt_screen.PROFILE: "Network",
             assurance_metrics.curtailment.PROFILE:
                 "Network" if self.request_scope["entity_id"] == "network" else "Generator",
         }.get(profile)
@@ -474,7 +476,9 @@ class Turn:
             lines.extend(assurance_metrics.balance.notes(record["raw"], self.request_scope, _label))
         if profile == assurance_metrics.site_import.PROFILE:
             lines.extend(assurance_metrics.site_import.notes(record["raw"]))
-        if profile == assurance_metrics.investment.PROFILE:
+        if profile == assurance_metrics.copt_screen.PROFILE:
+            lines.extend(assurance_metrics.copt_screen.notes(record["raw"]))
+        if profile in assurance_metrics.investment.PROFILES:
             lines.extend(assurance_metrics.investment.notes(record["raw"], _label))
         for slot in record["slots"]:
             definition = assurance_metrics.definition(slot["metric"], self.request_scope["profile"])
@@ -881,6 +885,13 @@ class Turn:
             records.authorize(self.owner, self.project_id)
             if self.session.abort_event.is_set():
                 raise HTTPException(409, {"error_kind": "assurance_context_changed"})
+            if self.request_scope is not None and self.request_scope.get("chart"):
+                # A checked chart is drawn from this answer's evidence only (S10),
+                # after the last evidence check and just before the durable commit.
+                from services import checked_charts
+
+                receipt["chart"] = checked_charts.for_answer(
+                    ctx, self.request_scope, None if draft_failed else self.request_evidence)
             records.save(record, answer_id)
         self.approved = record
         return [{"type": "text", "text": text}]

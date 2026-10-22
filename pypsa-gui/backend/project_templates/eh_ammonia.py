@@ -29,7 +29,7 @@ HORIZON_END = 2045
 DISCOUNT_RATE = 0.07
 
 #: The defaults-pack version that carries the ammonia rows (``haber-bosch``, ``nh3-tank``, ``h2-tank``).
-AMMONIA_PACK_VERSION = "2026-10-20"
+AMMONIA_PACK_VERSION = "2026-10-22"
 
 # ── The numbers, each with its ledger row below ────────────────────────────
 #: NH3 energy content (MWh LHV per t): config.default.yaml:1015 (``MWh_NH3_per_tNH3``).
@@ -56,6 +56,11 @@ LOST_EUR_PER_MWH = LOST_EUR_PER_T / MWH_PER_T
 #: Grey NH3 CO2 intensity (t CO2 per t NH3, demo): in the plan it prices `__buy_nh3` (marginal cost) and the case's
 #: reference purchase (GREY_NH3) carries it too; ticket 06 must not count it twice.
 GREY_CO2_T_PER_T = 2.0
+
+#: The sunk wind and PV fleet is this multiple of the H2 hub's (120 MW wind, 80 MW PV): at the honest electrolyser price
+#: the 2027 delivery (10.8 MW_NH3) is below the loop's minimum load, and the loop only cycles (rather than staying off and
+#: buying all the grey NH3) when electricity is cheap enough. Synthetic; the H2 hub keeps its own fleet.
+RE_FLEET_SCALE = 1.75
 
 #: Existing hub assets: the fuel cell and the H2 offtake are gone, the H2 tank is a candidate now, and the
 #: Haber-Bosch loop is the client's flowsheet, in service from the first period.
@@ -117,6 +122,7 @@ def _set_columns(n) -> None:
 def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     n = T.BUILDERS["eh_h2_hub_staged"]()
     snaps = n.snapshots
+    n.generators.loc[["wind_farm", "solar_park"], "p_nom"] *= RE_FLEET_SCALE
     # The fuel cell and the offtake go; the H2 tank is re-added as a candidate below.
     n.remove("Link", "fuel_cell")
     n.remove("Load", "h2_offtake")
@@ -271,7 +277,11 @@ def _ledger(T) -> list[dict]:
          "value": "linearised (process_uc auto), then one binary check per period",
          "source": "assumed",
          "note": "the relaxation understates restarts, so the binary operational check runs after "
-                 "the plan and reports its per-period gap"},
+                 "the plan and reports its per-period gap. Measured on this plan (electrolysis priced "
+                 "per MW of electrical input, RE fleet 1.75x, GS-2b ticket 03, 2026-10-22): in 2027 the "
+                 "loop is on 101 of 168 h (stops of 32 h and 8 h, runs of 31 h and 25 h), no grey NH3 is "
+                 "bought and the binary check equals the linearised one (0.39 M EUR); gaps 2027 / 2030 / "
+                 "2035: 0.0 % / 2.57 % / 0.008 % (0.0 M / 3.43 M / 0.43 M EUR)"},
         {"item": "grey NH3 buy-in (__buy_nh3)", "value": f"{BUY_EUR_PER_MWH:g} EUR/MWh_NH3 "
                                                          f"(about {BUY_EUR_PER_MWH * MWH_PER_T:.0f} EUR/t)",
          "source": "sourced",
@@ -290,7 +300,16 @@ def _ledger(T) -> list[dict]:
          "source": "synthetic", "note": "stated by the case, as the grey-H2 intensity is"},
         {"item": "CO2 price, tariff, finance", "value": "as the staged H2 hub", "source": "synthetic",
          "note": "eh_staged_hubs.py (CO2_PRICE, SYNTHETIC_TARIFF, _h2_finance)"},
-        {"item": "wind, PV, prices, process load", "value": "as the H2 hub", "source": "synthetic",
+        {"item": "wind and PV (existing fleet)",
+         "value": f"{RE_FLEET_SCALE:g}x the H2 hub's: wind {120 * RE_FLEET_SCALE:g} MW, PV {80 * RE_FLEET_SCALE:g} MW",
+         "source": "synthetic",
+         "note": "sized so the 2027 loop cycles at the honest electrolyser price: 2027 delivers 10.8 MW_NH3, "
+                 "below the loop's 13.8 MW minimum load, so it must run and stop, and that pays only when "
+                 "electricity is cheap (below about 66 EUR/MWh; else the whole 94,280 MWh of grey NH3 is "
+                 "bought, 41 M EUR). Measured: 1.5x keeps the loop off for the week (grey NH3 bought), 1.75x "
+                 "cycles. Sunk and priced at 0 (no capital or fixed cost), so only the free energy "
+                 "changes. The H2 hub keeps 120 MW / 80 MW"},
+    {"item": "prices, process load", "value": "as the H2 hub", "source": "synthetic",
          "note": "eh_templates.build_eh_h2_hub"},
         {"item": "dropped from the H2 hub", "value": "fuel cell, H2 offtake", "source": "assumed",
          "note": "the H2 now goes to ammonia; process_load stays a fixed Load"},

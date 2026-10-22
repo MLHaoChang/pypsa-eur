@@ -71,7 +71,7 @@ export function useGridReadiness(enabled = true) {
   })
 }
 
-function fmt(v: GridReadinessRow['limit'] | GridReadinessRow['project_value'], unit: string | null): string {
+export function fmt(v: GridReadinessRow['limit'] | GridReadinessRow['project_value'], unit: string | null): string {
   if (v == null) return 'not known'
   if (typeof v === 'number') return `${Number(v.toPrecision(4))}${unit ? ` ${unit}` : ''}`
   if (typeof v === 'string') return v

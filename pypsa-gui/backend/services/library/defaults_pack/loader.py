@@ -52,7 +52,7 @@ from typing import Any, Callable, Literal, Mapping, Sequence
 import numpy as np
 import pandas as pd
 import yaml
-from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, ValidationError,
+from pydantic import (BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, ValidationError,
                       field_validator)
 
 from models.commercial import Tariff
@@ -67,6 +67,8 @@ __all__ = [
     "available_versions", "canonical_payload", "derive", "load_defaults_pack", "parse_pack_dir",
     "parse_pack_stamp",
     "version_dir",
+    "CAPACITY_BASES", "LEGACY_VERSIONS", "CapacityBasisCode", "GridConnection",
+    "LegacyPackVersion", "typed_successor",
 ]
 
 PACK_ID = "generic_defaults"
@@ -116,6 +118,17 @@ class MissingRegionalRow(DefaultsPackLookupError):
         super().__init__(f"region {region!r} ({currency}) has no row {key!r}; the EU row is in "
                          "another currency and is not substituted", ())
         self.key, self.region, self.currency = key, region, currency
+
+
+class LegacyPackVersion(DefaultsPackLookupError):
+    """A pre-typed version (no `capacity_basis`): it loads for provenance, but a price needs the
+    typed fields, so pricing from it is refused and names the typed successor."""
+
+    def __init__(self, version: str, successor: str | None):
+        super().__init__(f"defaults pack {version} is a legacy version without typed cost units "
+                         f"(capacity_basis, includes_grid_connection, money_year); price from "
+                         f"{successor or 'a typed version'}", ())
+        self.version, self.successor = version, successor
 
 
 class UnknownTechnology(DefaultsPackLookupError):
@@ -212,6 +225,25 @@ _BASIS_UNIT = {"per_MW": "EUR/MW", "per_MWh": "EUR/MWh", "per_km": "EUR/km",
 _BASIS_PER = {b: u.split("/", 1)[1] for b, u in _BASIS_UNIT.items()}
 Basis = Literal["per_MW", "per_MWh", "per_km", "lump", "per_bay"]
 
+# Typed cost units (GS-2b; one vocabulary with GS-EU's `CapacityBasisCode`, which a test keeps in
+# step). `capacity_basis` says what a row's capacity measures, apart from `basis` (the unit).
+CapacityBasisCode = Literal[
+    "output_electric", "output_electric_ac", "output_electric_dc", "input_electric",
+    "output_product", "storage_energy", "not_applicable",
+]
+CAPACITY_BASES: tuple[str, ...] = CapacityBasisCode.__args__
+GridConnection = StrictBool | Literal["unknown"]
+#: Which capacity bases a `basis` (the row's unit) allows.
+_BASIS_CAPACITY = {"per_MW": tuple(b for b in CAPACITY_BASES
+                                   if b not in ("storage_energy", "not_applicable")),
+                   "per_MWh": ("storage_energy",), "per_km": ("not_applicable",),
+                   "lump": ("not_applicable",), "per_bay": ("not_applicable",)}
+#: Versions that shipped before typed cost units. Their files are never edited; they load for
+#: provenance and pricing from them is refused (`LegacyPackVersion`). Pinned by a test.
+LEGACY_VERSIONS = frozenset({
+    "2026-10-05", "2026-10-07", "2026-10-13", "2026-10-20",
+    "2026-10-21+ca_federal", "2026-10-21+uk", "2026-10-21+us_federal"})
+
 
 # ── models ──────────────────────────────────────────────────────────────────
 
@@ -241,6 +273,8 @@ class PackValue(BaseModel):
     technology: str | None = None
     part: str | None = None
     basis: Basis | None = None
+    capacity_basis: CapacityBasisCode | None = None      # None only on a legacy version
+    includes_grid_connection: GridConnection | None = None
     source_technology: str | None = None
     parameter: str
     value: float | None
@@ -261,6 +295,11 @@ class PackValue(BaseModel):
     derived: Derived | None = None
     note: str | None = None
     status: Literal["ok", "not_available"] = "ok"
+
+    @property
+    def money_year(self) -> int | None:
+        """The year of the row's money (`currency_year` on a legacy file's column)."""
+        return self.currency_year
 
 
 class CostPart(BaseModel):
@@ -451,6 +490,8 @@ class DefaultsPack(BaseModel):
     finance: FinanceDefaults
     tariffs: dict[str, PackTariff]
     load_profiles: dict[str, LoadProfile]
+    #: False on a `LEGACY_VERSIONS` pack: it has no typed cost units and cannot price.
+    typed: bool = True
     # The tariff payloads exactly as the file holds them (JSON text: immutable), so
     # `pack_tariff` copies from the pristine parse, never from the mutable model tree.
     _tariff_json: tuple[tuple[str, str], ...] = PrivateAttr(default=())
@@ -761,6 +802,12 @@ _VALUE_COLUMNS = (
     "currency", "currency_year", "price_basis", "source", "source_year", "source_url",
     "projection_year", "domain", "illustrative", "derived_inputs", "formula_id", "note",
 )
+#: A typed version's header: `money_year` replaces `currency_year`, and the two typed fields
+#: follow `basis`. A typed file carrying `currency_year` is refused; the alias reads a legacy file.
+_TYPED_COLUMNS = tuple(
+    col for name in _VALUE_COLUMNS
+    for col in (("basis", "capacity_basis", "includes_grid_connection") if name == "basis"
+                else ("money_year",) if name == "currency_year" else (name,)))
 _PART_PARAMETERS = ("overnight", "lifetime", "fom_share", "efficiency")
 _DOMAIN_RE = re.compile(r"([\[(])\s*(-?inf|-?[0-9.]+)\s*,\s*(-?inf|-?[0-9.]+)\s*([\])])")
 
@@ -814,17 +861,59 @@ def _check_value(v: PackValue, where: str) -> None:
         raise DefaultsPackError(f"{where}: {v.key} range low > high")
 
 
-def _parse_values(path: Path) -> list[PackValue]:
+def _grid_connection(text: str, where: str) -> bool | Literal["unknown"]:
+    t = (text or "").strip()
+    if t not in ("true", "false", "unknown"):
+        raise DefaultsPackError(f"{where}: includes_grid_connection must be true, false or "
+                                f"\"unknown\", got {text!r}")
+    return "unknown" if t == "unknown" else t == "true"
+
+
+def _check_typed(v: PackValue, where: str) -> None:
+    if v.capacity_basis is None:
+        raise DefaultsPackError(f"{where}: {v.key} has no capacity_basis (one of "
+                                f"{list(CAPACITY_BASES)})")
+    allowed = _BASIS_CAPACITY.get(v.basis or "", ("not_applicable",))
+    if v.capacity_basis not in allowed:
+        raise DefaultsPackError(f"{where}: {v.key} has basis {v.basis!r}, which allows "
+                                f"capacity_basis {list(allowed)}, not {v.capacity_basis!r}")
+    if v.currency is not None and v.currency_year is None:
+        raise DefaultsPackError(f"{where}: {v.key} has a currency but no money_year")
+
+
+def _check_typed_consistency(values: Sequence[PackValue], name: str) -> None:
+    """Every row of one (technology, part) states the same capacity basis and grid-connection
+    fact: its overnight, share, life and efficiency rows measure the same capacity."""
+    seen: dict[tuple, tuple] = {}
+    for v in values:
+        if not v.technology:
+            continue
+        got = (v.capacity_basis, v.includes_grid_connection)
+        want = seen.setdefault((v.technology, v.part), got)
+        if got != want:
+            raise DefaultsPackError(f"{name}: {v.key} is {got} but {v.technology}.{v.part} rows "
+                                    f"elsewhere are {want}")
+
+
+def _parse_values(path: Path, *, typed: bool = False) -> list[PackValue]:
+    """`typed`: the version carries typed cost units (every version but `LEGACY_VERSIONS`):
+    its header is `_TYPED_COLUMNS` and each row needs `capacity_basis` and
+    `includes_grid_connection` (and a money row its `currency` and `money_year`)."""
+    columns = _TYPED_COLUMNS if typed else _VALUE_COLUMNS
     with path.open(encoding="utf-8", newline="") as fh:
         reader = csv.DictReader(fh)
-        if tuple(reader.fieldnames or ()) != _VALUE_COLUMNS:
+        if tuple(reader.fieldnames or ()) != columns:
             raise DefaultsPackError(f"{path.name}: header {reader.fieldnames} != "
-                                    f"{list(_VALUE_COLUMNS)}")
+                                    f"{list(columns)}")
         raw_rows = list(reader)
     out: list[PackValue] = []
     for line, raw in enumerate(raw_rows, start=2):
         where = f"{path.name} line {line}"
-        r = {k: (raw[k] or "").strip() for k in _VALUE_COLUMNS}
+        r = {k: (raw[k] or "").strip() for k in columns}
+        if typed:
+            r["currency_year"] = r.pop("money_year")
+        else:
+            r["capacity_basis"] = r["includes_grid_connection"] = ""
         conv = (r["original_unit"], r["unit"])
         if conv not in UNIT_CONVERSIONS:
             raise DefaultsPackError(f"{where}: no conversion {conv[0]!r} -> {conv[1]!r} "
@@ -852,6 +941,9 @@ def _parse_values(path: Path) -> list[PackValue]:
             v = PackValue(
                 key=r["key"], label=r["label"], technology=r["technology"] or None,
                 part=r["part"] or None, basis=r["basis"] or None,
+                capacity_basis=r["capacity_basis"] or None,
+                includes_grid_connection=(_grid_connection(r["includes_grid_connection"], where)
+                                          if typed else None),
                 source_technology=r["source_technology"] or None, parameter=r["parameter"],
                 value=None if original is None else original * factor, unit=r["unit"],
                 original_value=original, original_unit=r["original_unit"],
@@ -876,8 +968,12 @@ def _parse_values(path: Path) -> list[PackValue]:
             if v.currency != _money_currency(v.unit):
                 raise DefaultsPackError(f"{where}: {v.key} has currency {v.currency} but unit "
                                         f"{v.unit}")
+        if typed:
+            _check_typed(v, where)
         _check_value(v, where)
         out.append(v)
+    if typed:
+        _check_typed_consistency(out, path.name)
     by_key = {v.key: v for v in out}
     if len(by_key) != len(out):
         raise DefaultsPackError(f"{path.name}: duplicate keys")
@@ -1117,7 +1213,8 @@ def parse_pack_dir(directory: Path) -> DefaultsPack:
     if not _VERSION_RE.fullmatch(version):
         raise DefaultsPackError(f"manifest version {version!r} is not YYYY-MM-DD")
     files = manifest.get("files") or {}
-    values = _parse_values(directory / files.get("values", "values.csv"))
+    typed = version not in LEGACY_VERSIONS
+    values = _parse_values(directory / files.get("values", "values.csv"), typed=typed)
     finance = _parse_finance(directory / files.get("finance", "finance.yaml"),
                              {v.key for v in values})
     tariffs = _parse_tariffs(directory / files.get("tariffs", "tariffs.json"))
@@ -1142,7 +1239,7 @@ def parse_pack_dir(directory: Path) -> DefaultsPack:
                         title=str(manifest.get("title") or ""),
                         seeded_from=manifest.get("seeded_from") or {}, hash=digest,
                         cost_values=values, finance=finance, tariffs=tariffs,
-                        load_profiles=profiles)
+                        load_profiles=profiles, typed=typed)
     pack._tariff_json = pristine
     return pack
 
@@ -1213,7 +1310,12 @@ def parse_regional_dir(directory: Path) -> DefaultsPack:
         raise DefaultsPackError(f"{where}: base_hash {manifest['base_hash']} is not the hash "
                                 f"{base.hash} of base version {base.version}")
     files = manifest.get("files") or {}
-    overlay = _parse_values(directory / files.get("values", "values.csv"))
+    typed = where not in LEGACY_VERSIONS
+    if typed != base.typed:
+        raise DefaultsPackError(f"{where}: a {'typed' if typed else 'legacy'} regional version "
+                                f"cannot sit on the {'typed' if base.typed else 'legacy'} base "
+                                f"{base.version}")
+    overlay = _parse_values(directory / files.get("values", "values.csv"), typed=typed)
     base_rows = {v.key: v for v in base.cost_values}
     for v in overlay:
         ref = base_rows.get(v.key)
@@ -1225,10 +1327,10 @@ def parse_regional_dir(directory: Path) -> DefaultsPack:
         if _dimension(v.unit) != _dimension(ref.unit):
             raise DefaultsPackError(f"{where}: {v.key} has dimension {_dimension(v.unit)!r}, "
                                     f"the EU row has {_dimension(ref.unit)!r}")
-        if (v.technology, v.part, v.basis, v.parameter) != \
-                (ref.technology, ref.part, ref.basis, ref.parameter):
-            raise DefaultsPackError(f"{where}: {v.key} names another technology, part, basis "
-                                    "or parameter than the EU row")
+        if (v.technology, v.part, v.basis, v.parameter, v.capacity_basis) != \
+                (ref.technology, ref.part, ref.basis, ref.parameter, ref.capacity_basis):
+            raise DefaultsPackError(f"{where}: {v.key} names another technology, part, basis, "
+                                    "capacity basis or parameter than the EU row")
         if v.source.split(":", 1)[0] not in sources:
             raise DefaultsPackError(f"{where}: {v.key} cites {v.source!r}, which is not a "
                                     "manifest source (`<source_id>: <table>`)")
@@ -1261,7 +1363,7 @@ def parse_regional_dir(directory: Path) -> DefaultsPack:
         seeded_from={"region": m["region"], "currency": currency,
                      "base_version": base.version, "sources": list(manifest["sources"])},
         hash=digest, cost_values=merged, finance=base.finance, tariffs={},
-        load_profiles=base.load_profiles)
+        load_profiles=base.load_profiles, typed=typed)
     pack._region = info
     return pack
 
@@ -1338,3 +1440,14 @@ def load_defaults_pack(version: str | None = None, *, region: str | None = None)
             raise UnknownPackVersion("no defaults pack version is vendored", ())
         version = versions[-1]
     return _cached(version).model_copy(deep=True)
+
+
+def typed_successor(version: str, region: str | None = None) -> str | None:
+    """The newest typed version that replaces a legacy `version` (of `region`'s packs, else the
+    EU's), or None when there is none."""
+    if region is not None:
+        dates = [m["date"] for m in _region_dirs() if m["region"] == region
+                 and f"{m['date']}+{region}" not in LEGACY_VERSIONS]
+        return dates[-1] if dates else None
+    typed = [v for v in available_versions() if v not in LEGACY_VERSIONS]
+    return typed[-1] if typed else None

@@ -41,6 +41,7 @@ import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import { FieldDrawer } from './components/FieldDrawer'
+import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -148,6 +149,9 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
   hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
+
+/** The flow items whose Guided drawer shows a grid-readiness limit line: item field → row kind. */
+const LIMIT_FIELDS: Record<string, string[]> = { connection_ramp: ['ramp_rate'], oscillation: ['oscillation'], eh_sk_mva: ['scr'] }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
@@ -801,7 +805,14 @@ export default function App() {
           <AssistantDock />
           {uiMode === 'guided' && (
             <FieldDrawer>
-              {t => t.component && t.entity
+              {t => LIMIT_FIELDS[t.field ?? '']
+                // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
+                // limit opens its line; the fault level keeps its value on the bus, so its source line sits under it.
+                ? (<>
+                    {t.field === 'eh_sk_mva' && <PropertiesPanel />}
+                    <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
+                  </>)
+                : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}
             </FieldDrawer>

@@ -661,6 +661,9 @@ _WRITE_ARGS = {
     # An equipment table onto assets (data-to-model slice 1); no such upload, refused first.
     "apply_equipment_mapping": lambda n: (("no-such-file", "Line", "name", {"r": {"field": "s_nom", "unit": "MVA"}},
                                            "0" * 64), {}),
+    # Values cited from a PDF onto assets (data-to-model slice 2); no such upload, refused first.
+    "apply_document_values": lambda n: (("no-such-file", "Generator", [{"names": ["G1"], "field": "p_nom", "page": 1,
+                                                                          "quote": "1 MW", "unit": "MW"}], "0" * 64), {}),
 }
 
 # Tools whose effect needs something to act on first (outside the sweep).

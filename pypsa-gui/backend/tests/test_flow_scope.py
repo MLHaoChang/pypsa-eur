@@ -96,59 +96,93 @@ def test_data_centre_preset_exemplifies_grid_control_and_reliability():
     assert eff["options"]["commercial"] == ["tariffs"]         # investment case: not yet
 
 
-def test_reliability_needs_a_template():
-    status, reason = S.option_status("reliability", "goal_study", has_template=False)
-    assert status == S.NOT_YET and "Energy Hub" in reason
+# ── availability follows the separability matrix (W0) ───────────────────────
+
+def _matrix_row(kind, *, runnable):
+    from services.run_separability import Row
+    return Row(kind, kind, "supported" if runnable else "unsupported", runnable,
+               entry="-", inputs="-", outputs="-", locks_and_state="-",
+               implicit_steps="-", freshness="-", evidence=())
 
 
-# ── the strict check ────────────────────────────────────────────────────────
-
-def _scope(**options) -> dict:
-    base = S.effective_preset(S.BLANK_PRESET, has_template=True)
-    for card, opts in options.items():
-        base["options"][card] = list(opts)
-        if opts and card not in base["groups"]:
-            base["groups"].append(card)
-    return base
+def test_every_not_yet_row_is_decided_by_the_matrix():
+    # A static not-yet row with no matrix kind could only be flipped by editing
+    # this table; the matrix is the one place that says a kind can run.
+    for key, (status, _reason) in S.AVAILABILITY.items():
+        if status == S.NOT_YET:
+            assert key in S.MATRIX_KIND, key
 
 
-@pytest.mark.parametrize("raw, kind", [
-    ({"version": 2, "groups": [], "options": {}}, "flow_scope_invalid"),
-    ({"version": 1, "groups": "capacity", "options": {}}, "flow_scope_invalid"),
-    ({**_scope(), "groups": ["capacity", "handoff", "nope"]}, "flow_scope_unknown"),
-    (_scope(grid=["load_flow", "magic"]), "flow_scope_unknown"),
-    (_scope(control=["dynamics"]), "flow_scope_unavailable"),
-    (_scope(capacity=["sizing"]), "flow_scope_required"),
-    ({**_scope(), "groups": ["capacity"]}, "flow_scope_required"),
-])
-def test_the_strict_check_refuses_with_a_typed_kind(raw, kind):
-    with pytest.raises(S.ScopeError) as exc:
-        S.validate(raw, has_template=True)
-    assert exc.value.error_kind == kind
+# Why each row the matrix does not decide is not its to decide.
+_NOT_THE_MATRIXS = {
+    ("capacity", "dispatch"): "always part of the run",
+    ("grid", "grid_code"): "an advisory scorecard, not a run kind",
+    ("grid", "n1_sclopf"): "the sclopf solver setting decides",
+    ("control", "presets"): "inputs only; nothing runs",
+    ("reliability", "goal_study"): "the study's own start gate decides",
+    ("reliability", "stress"): "inputs to the study; nothing runs on its own",
+    ("reliability", "outage_screening"): "inputs to the study; nothing runs on its own",
+    ("commercial", "tariffs"): "terms the optimisation reads",
+    ("commercial", "contracts"): "terms the optimisation reads",
+    ("handoff", "reports"): "a read of results, not a run kind",
+    ("handoff", "exports"): "a read of results, not a run kind",
+    ("handoff", "specialist_packet"): "a read of results, not a run kind",
+}
 
 
-def test_a_stored_scope_is_read_leniently(tmp_path):
-    (tmp_path / S.SCOPE_FILE).write_text(json.dumps({
-        "version": 1, "groups": ["grid", "nope"],
-        "options": {"grid": ["grid_code", "n1_sclopf", "magic"], "control": ["dynamics"]}}))
-    scope = S.read_scope(tmp_path, {"id": "eh_datacenter"})
-    assert scope["source"] == "project"
-    assert scope["groups"] == ["capacity", "grid", "handoff"]
-    # N-1 security is never stored: its solver setting decides it.
-    assert scope["options"]["grid"] == ["grid_code"]
-    assert scope["options"]["control"] == []
-    assert scope["options"]["capacity"] == ["sizing", "dispatch"]
+def test_every_option_is_matrix_decided_or_says_why_not():
+    assert not set(_NOT_THE_MATRIXS) & set(S.MATRIX_KIND)
+    assert set(_NOT_THE_MATRIXS) | set(S.MATRIX_KIND) == set(S.AVAILABILITY)
 
 
-def test_a_card_switched_off_keeps_its_sub_options(tmp_path):
-    tpl = {"id": "eh_datacenter"}
-    scope = S.read_scope(tmp_path, tpl)
-    off = {**scope, "groups": [g for g in scope["groups"] if g != "grid"]}
-    stored = S.write_scope(tmp_path, off, tpl)
-    assert not S.selected(stored, "grid")
-    assert stored["options"]["grid"] == ["grid_code"]
-    on = S.write_scope(tmp_path, {**stored, "groups": [*stored["groups"], "grid"]}, tpl)
-    assert S.selected(on, "grid", "grid_code")
+def test_today_the_matrix_clears_only_the_scope_owned_kinds():
+    from services import run_separability as RS
+    for (card, option), kind in S.MATRIX_KIND.items():
+        if (card, option) in {("capacity", "sizing"), ("grid", "load_flow")}:
+            assert RS.runnable(kind)
+            assert S.option_status(card, option, has_template=True) == (S.AVAILABLE, None)
+            continue
+        assert not RS.runnable(kind), kind
+        assert S.option_status(card, option, has_template=True)[0] == S.NOT_YET
+
+
+# ── Asset sizing is scope-owned (W4b): sizing in scope ⇔ fixed_sizes == "off" ─
+
+def _cap(options):
+    return {"version": 1, "groups": ["capacity", "handoff"],
+            "options": {"capacity": options, "handoff": ["reports"]}}
+
+
+@pytest.mark.parametrize("fixed, sizing", [("off", True), ("capacity_run", False),
+                                           ("nameplate", False)])
+def test_the_scope_reads_sizing_from_the_fixed_sizes_setting(tmp_path, fixed, sizing):
+    scope = S.read_scope(tmp_path, {"id": "eh_datacenter"}, {"fixed_sizes": fixed})
+    assert ("sizing" in scope["options"]["capacity"]) is sizing
+    assert "dispatch" in scope["options"]["capacity"]
+
+
+def test_the_transition_leaves_a_chosen_source_and_flips_off():
+    assert S.fixed_sizes_transition(False, "off") == "capacity_run"
+    assert S.fixed_sizes_transition(False, "nameplate") is None
+    assert S.fixed_sizes_transition(False, "capacity_run") is None
+    assert S.fixed_sizes_transition(True, "nameplate") == "off"
+    assert S.fixed_sizes_transition(True, "off") is None
+
+
+def test_write_scope_hands_the_store_the_transition_and_reads_its_answer(tmp_path):
+    calls = []
+
+    def store(wanted):
+        calls.append(wanted["fixed_sizes"])
+        return {"fixed_sizes": "capacity_run" if not wanted["fixed_sizes"] else "off"}
+
+    out = S.write_scope(tmp_path, _cap(["dispatch"]), {"id": "eh_datacenter"},
+                        {"fixed_sizes": "off"}, store_owned=store)
+    assert "sizing" not in out["options"]["capacity"]
+    out = S.write_scope(tmp_path, _cap(["sizing", "dispatch"]), {"id": "eh_datacenter"},
+                        {"fixed_sizes": "capacity_run"}, store_owned=store)
+    assert calls == [False, True]
+    assert "sizing" in out["options"]["capacity"]
 
 
 def test_the_scope_sidecar_travels_with_the_project():
@@ -249,9 +283,10 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
         {(i["code"], True) for i in rel_before}
 
 
-def test_load_flow_and_n1_follow_the_solver_settings(client, tmp_projects_dir, bound_ctx):
-    """"What the Run computes" is true: load flow and N-1 security are on
-    exactly when their solver settings are, read-only in the scope (UX gate)."""
+def test_n1_follows_the_solver_settings(client, tmp_projects_dir, bound_ctx):
+    """"What the Run computes" is true: N-1 security is on exactly when its
+    solver setting is, read-only in the scope (UX gate). Load flow is the
+    scope's own (W4b)."""
     from dataclasses import replace
 
     from services.pypsa_service import PyPSAService
@@ -261,13 +296,12 @@ def test_load_flow_and_n1_follow_the_solver_settings(client, tmp_projects_dir, b
     assert not S.selected(reg["scope"], "grid")
     grid = next(c for c in reg["cards"] if c["id"] == "grid")
     assert {o["id"]: o["status"] for o in grid["options"]} == {
-        "load_flow": "from_settings", "grid_code": "available", "n1_sclopf": "from_settings"}
+        "load_flow": "available", "grid_code": "available", "n1_sclopf": "from_settings"}
     with bound_ctx(client):
         state = PyPSAService.get_solver_state()
         state["solver_config"] = replace(state["solver_config"], sclopf=True)
     reg = client.get(f"/api/projects/{name}/flow/scope").json()
     assert S.selected(reg["scope"], "grid", "n1_sclopf")
-    assert not S.selected(reg["scope"], "grid", "load_flow")
     assert next(c for c in reg["cards"] if c["id"] == "grid")["locked_reason"]
     assert S.selected(_flow(client, name)["scope"], "grid", "n1_sclopf")
     # A write cannot switch it off (the settings decide), nor store it.
@@ -554,3 +588,116 @@ def test_the_registry_names_each_cards_sections_and_chip():
         "grid": "Grid", "control": "Control", "reliability": "Reliability",
         "commercial": "Commercial"}
     assert by_id["commercial"]["sections"] == ["commercial"]
+
+
+def test_a_scope_put_changes_only_fixed_sizes_and_the_checkbox_mirrors_it(client, tmp_projects_dir):
+    """W4b: sizing out of scope sets fixed_sizes and no other solver_config
+    field; a source named in Solver settings is not clobbered; sizing back in
+    sets it off; the scope reads what the config says."""
+    name = _create(client, "eh_datacenter", "dc_sizing")
+    cfg = lambda: client.get("/api/simulation/solver_config").json()   # noqa: E731
+    before = cfg()
+    assert before["fixed_sizes"] == "off"
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    assert "sizing" in scope["options"]["capacity"]
+    opts = {**scope["options"], "capacity": ["dispatch"]}
+    off = _put(client, name, {**scope, "options": opts})
+    assert "sizing" not in off["options"]["capacity"]
+    after = cfg()
+    assert after["fixed_sizes"] == "capacity_run"
+    assert {k: v for k, v in after.items() if k != "fixed_sizes"} == \
+        {k: v for k, v in before.items() if k != "fixed_sizes"}
+    # A source chosen in Solver settings stays when sizing stays out of scope.
+    assert client.put("/api/simulation/solver_config", json={"fixed_sizes": "nameplate"}).status_code == 200
+    _put(client, name, {**scope, "options": opts})
+    assert cfg()["fixed_sizes"] == "nameplate"
+    assert "sizing" not in client.get(f"/api/projects/{name}/flow/scope").json()["scope"]["options"]["capacity"]
+    # Sizing back in sets off.
+    on = _put(client, name, {**scope, "options": {**opts, "capacity": ["sizing", "dispatch"]}})
+    assert "sizing" in on["options"]["capacity"]
+    assert cfg()["fixed_sizes"] == "off"
+
+
+def test_a_stale_snapshot_never_overwrites_a_source_chosen_meanwhile(client, tmp_projects_dir, monkeypatch):
+    """The live value decides: the snapshot says "off", a Solver-settings save
+    has set nameplate since, and a scope PUT without sizing leaves nameplate."""
+    from routers import flow as flow_router
+
+    name = _create(client, "eh_datacenter", "dc_race")
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    real = flow_router._solver_settings
+
+    def stale(project):
+        snap = dict(real(project) or {})
+        client.put("/api/simulation/solver_config", json={"fixed_sizes": "nameplate"})
+        return {**snap, "fixed_sizes": "off"}
+
+    monkeypatch.setattr(flow_router, "_solver_settings", stale)
+    _put(client, name, {**scope, "options": {**scope["options"], "capacity": ["dispatch"]}})
+    assert client.get("/api/simulation/solver_config").json()["fixed_sizes"] == "nameplate"
+
+
+def test_a_closed_project_without_a_saved_config_refuses_by_name(tmp_path, monkeypatch):
+    from routers import flow as flow_router
+    import services.network_lengths as nl
+
+    project = type("P", (), {"directory": tmp_path})()
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    with pytest.raises(S.ScopeError) as exc:
+        flow_router._store_owned(project, {"fixed_sizes": False}, None, None)
+    assert exc.value.error_kind == "solver_config_unavailable"
+    assert flow_router._store_owned(project, {"fixed_sizes": True, "run_ac_pf_after_lopf": False},
+                                    None, None) == {"fixed_sizes": "off",
+                                                    "run_ac_pf_after_lopf": False}
+
+
+def test_a_scope_put_refuses_by_name_while_a_calculation_runs(client, tmp_projects_dir, monkeypatch):
+    import routers.simulation as sim
+
+    name = _create(client, "eh_h2_hub", "dc_lf_busy")
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    before = client.get("/api/simulation/solver_config").json()
+    monkeypatch.setattr(sim, "_solver_in_flight", lambda: True)
+    r = client.put(f"/api/projects/{name}/flow/scope", json={
+        "version": 1, "groups": [*scope["groups"], "grid"],
+        "options": {**scope["options"], "grid": ["load_flow"]}})
+    assert r.status_code == 409, r.text
+    # Refused by name: the app's solver-in-flight gate, or the store's own.
+    assert "solver_in_flight" in r.text or "run_in_progress" in r.text, r.text
+    assert client.get("/api/simulation/solver_config").json() == before
+    assert not (tmp_projects_dir / name / S.SCOPE_FILE).exists()
+
+
+def test_load_flow_is_refused_on_with_its_verdicts_reason_and_off_is_always_allowed(
+        client, tmp_projects_dir, monkeypatch):
+    from services import run_separability as RS
+
+    name = _create(client, "eh_h2_hub", "dc_lf_verdict")
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    blocked = {"ready": False, "deferred": False,
+               "blocker": {"code": "ac_pf_with_myopic", "message": "not with the myopic strategy"}}
+    monkeypatch.setattr(RS, "verdicts", lambda *a, **k: {
+        "optimisation": {"ready": True, "deferred": False, "blocker": None}, "loadflow": blocked})
+    body = {"version": 1, "groups": [*scope["groups"], "grid"],
+            "options": {**scope["options"], "grid": ["load_flow"]}}
+    before = client.get("/api/simulation/solver_config").json()
+    r = client.put(f"/api/projects/{name}/flow/scope", json=body)
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_kind"] == "flow_scope_option_blocked"
+    assert "myopic" in r.json()["detail"]["message"]
+    assert client.get("/api/simulation/solver_config").json() == before
+    # Off is never refused.
+    client.put("/api/simulation/solver_config", json={"run_ac_pf_after_lopf": True})
+    assert client.put(f"/api/projects/{name}/flow/scope", json={
+        **body, "groups": [g for g in body["groups"] if g != "grid"]}).status_code == 200
+    assert client.get("/api/simulation/solver_config").json()["run_ac_pf_after_lopf"] is False
+
+
+def test_the_stores_own_guard_refuses_while_a_calculation_runs(tmp_path, monkeypatch):
+    from routers import flow as flow_router
+    import routers.simulation as sim
+
+    monkeypatch.setattr(sim, "_solver_in_flight", lambda: True)
+    with pytest.raises(S.ScopeError) as exc:
+        flow_router._refuse_while_running()
+    assert exc.value.error_kind == "run_in_progress"

@@ -21,6 +21,38 @@ two faces" §3 rule 4). The pack holds:
 The loader is `loader.py`: `from services.library.defaults_pack.loader import load_defaults_pack`. The package `__init__` re-exports nothing. The flat export price helper is
 `services/library/export_series.py`.
 
+## Typed cost units (GS-2b)
+
+From version 2026-10-22 (EU) and 2026-10-22+<region> every `values.csv` row carries three typed
+columns after `basis`/before `source_technology` (`money_year` replaces `currency_year`):
+
+| Column | Values | Meaning |
+|---|---|---|
+| `capacity_basis` | `output_electric`, `output_electric_ac`, `output_electric_dc`, `input_electric`, `output_product`, `storage_energy`, `not_applicable` | What the row's capacity measures (the vocabulary of GS-EU's `CapacityBasisCode`; a test keeps them equal). `basis` stays the unit (`per_MW`, `per_MWh`, ...) and must agree: `per_MWh` means `storage_energy`; `lump`, `per_km`, `per_bay` mean `not_applicable`. |
+| `includes_grid_connection` | `true`, `false`, `unknown` | Whether the overnight cost already includes the grid connection (the project prices that separately). Never empty. |
+| `money_year` | year | The money year of a money row (with `currency`). |
+
+The loader refuses a typed row without them, rows of one technology part that disagree, a
+`capacity_basis` that does not fit the row's `basis`, a regional row whose `capacity_basis` differs
+from the EU row's, and a typed file with a `currency_year` column. EU DEA rows are `unknown` (the
+technology-data v0.14.0 text does not state it per row); campus equipment is `false`.
+
+**Legacy versions.** `LEGACY_VERSIONS` (2026-10-05, -07, -13, -20 and the three 2026-10-21
+regional versions) shipped before the typed units and are never edited. They load for provenance
+(`pack.typed` is False, `capacity_basis` None); `price_from_pack` on them raises `LegacyPackVersion`,
+which names the typed successor. A test pins the set: a new version must be typed.
+
+**Pricing.** `pricing.SCALING_RULES` is the one table, component x capacity basis, to a scale or a
+refusal (`CapacityBasisMismatch`, nothing written). A Link's `p_nom` is its `bus0` flow: an
+`output_electric*` row is scaled by the efficiency of the electricity bus it delivers to, an
+`input_electric` row is not (and needs an electricity `bus0`), an `output_product` row by the
+efficiency of the product's bus (`PRODUCT_CARRIER`). A Generator or StorageUnit takes
+`output_electric*` at 1; a Store takes `storage_energy` at 1; everything else is refused. The
+return value carries `scale`, `currency`, `money_year`, `capacity_basis`,
+`includes_grid_connection` and `connection_fee_review` (true unless the row says `false`); the asset
+provenance of `overnight_cost` carries the last three. `commercial.grid_connection_double_count`
+warns on a row that includes the connection when the project also charges a capacity fee.
+
 ## Spec decision 20
 
 IC spec decision 20 says "no external data curated in-tree". **This pack amends that decision
@@ -141,7 +173,7 @@ are:
 | share/year | share/year (a campus `opex_frac`) | ×1 |
 | USD/kW, CAD/kW, GBP/kW | USD/MW, CAD/MW, GBP/MW (regional packs) | ×1000 |
 
-Each row carries its own money year in `currency` and `currency_year`: 2020 for the catalogue rows
+Each row carries its own money year in `currency` and `money_year` (`currency_year` in the legacy versions): 2020 for the catalogue rows
 (technology-data v0.14.0), 2026 for the campus equipment rows (the campus library's `price_year`).
 The finance defaults and the seed tariffs are in 2020 EUR. No row is converted with a price index,
 so a caller that mixes rows of both years converts them itself.

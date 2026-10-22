@@ -339,7 +339,6 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
     missing, source}`. Reads `n`; writes nothing. `fields` is the class's field schema
     (`edit_card._fields`)."""
     from harness import edit_card
-    from services.library import reference_apply as R
 
     money = dict(money or {})
     if name_column not in table["headers"]:
@@ -429,23 +428,34 @@ def plan(n, table: dict, component_class: str, name_column: str, columns: dict, 
                           "unit": p["stored_unit"], "currency": p["currency"], "money_year": p["money_year"],
                           "source": lineage})
 
+    years: dict[int, str] = {}
+    for p in plans.values():
+        if p["money_year"] is not None:
+            years.setdefault(p["money_year"], p["currency"])
+    needs, notes = money_needs(years, base_year)
+    return {"component_class": component_class, "source": src, "name_column": name_column,
+            "targets": targets, "cells": cells, "unmapped": unmapped, "needs": needs,
+            "missing": [x["confirmation"] for x in needs if x["confirmation"] not in set(confirm or ())],
+            "notes": notes}
+
+
+def money_needs(years: dict[int, str], base_year: int | None, *, said: str = "the table states") -> tuple[list, list]:
+    """The `money_year` confirmations and notes for the money years (year → currency) a
+    plan's costs are in: a year other than the investment case's base year needs one."""
+    from services.library import reference_apply as R
+
     needs = []
-    years = sorted({p["money_year"] for p in plans.values() if p["money_year"] is not None})
-    for year in years:
+    for year in sorted(years):
         if base_year is not None and base_year != year:
-            currency = next(p["currency"] for p in plans.values() if p["money_year"] == year)
-            text = R.money_disclosure(year, currency, base_year)
+            text = R.money_disclosure(year, years[year], base_year)
             needs.append({"confirmation": "money_year", "reference_year": year, "read_as_year": base_year,
                           "disclosure": text, "text": f"{text} Compared with the investment case's base year "
                           f"({base_year}). Unconfirmed, nothing is applied."})
     notes = []
     if years and base_year is None:
-        notes.append(f"No investment case to compare money years with: costs are {', '.join(map(str, years))} "
-                     "money, as the table states.")
-    return {"component_class": component_class, "source": src, "name_column": name_column,
-            "targets": targets, "cells": cells, "unmapped": unmapped, "needs": needs,
-            "missing": [x["confirmation"] for x in needs if x["confirmation"] not in set(confirm or ())],
-            "notes": notes}
+        notes.append(f"No investment case to compare money years with: costs are {', '.join(map(str, sorted(years)))} "
+                     f"money, as {said}.")
+    return needs, notes
 
 
 def plan_active(args: dict) -> dict:
@@ -560,7 +570,10 @@ def changes(n, p: dict) -> dict[str, dict]:
 
 
 def source_id(lineage: dict) -> str:
-    """A written field's provenance source: `upload:<id>#<sha16> <sheet>!<cell>`."""
+    """A written field's provenance source: `upload:<id>#<sha16> <sheet>!<cell>`, or for a
+    PDF citation (data-to-model slice 2) `pdf:<id>#<sha16> p<page> "<raw quote>"`."""
+    if "page" in lineage:
+        return f'pdf:{lineage["upload_id"]}#{lineage["sha256"][:16]} p{lineage["page"]} "{lineage["quote"]}"'
     return f"upload:{lineage['upload_id']}#{lineage['sha256'][:16]} {lineage['sheet']}!{lineage['cell']}"
 
 

@@ -17,7 +17,7 @@ import { CompletenessChips, type CompletenessRow } from '../../components/Comple
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
 import InvestmentCaseView from './investment/InvestmentCaseView'
-import SiteConnectionSection from './investment/SiteConnectionSection'
+import { SiteConnectionNeeded, SiteConnectionSummary } from '../economics/SiteConnectionLink'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -156,7 +156,7 @@ export default function InvestmentTab() {
           : (flows.data.reason ?? 'No participants are set for this project.')
 
   // A result that says there is no (valid) commercial config is not a dead end:
-  // the Site connection form is shown in its place.
+  // a line points at the one editor, in Connection & grid.
   const rootMissing = [billing.error, flows.error].some(e => e instanceof NoCommercialConfigError)
     || (commercial.isSuccess && !commercial.data?.poc_link)
 
@@ -167,9 +167,7 @@ export default function InvestmentTab() {
           Island: no grid in operation; compared with the island as it stands today. The tie
           {' '}{poc.data?.poc_link} is open, so there is no connection, tariff or export to set.
         </p>
-      ) : (commercial.isSuccess || rootMissing) && (
-        <SiteConnectionSection config={commercial.data} needed={rootMissing} />
-      )}
+      ) : rootMissing ? <SiteConnectionNeeded /> : commercial.isSuccess && <SiteConnectionSummary />}
       <CompletenessChips rows={completeness(billing.data, flows.data,
                                             billing.isError ? billing.error : undefined)}
                          testId="ic-completeness"

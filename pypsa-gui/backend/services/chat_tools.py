@@ -1733,6 +1733,43 @@ def apply_equipment_mapping(upload_id: str, component_class: str, name_column: s
     return out
 
 
+def preview_document_values(upload_id: str, component_class: str, citations: list, decimal_mark: str | None = None,
+                            currency: str | None = None, money_year: int | None = None,
+                            confirm: list[str] | None = None) -> dict:
+    """Check values cited from an uploaded PDF (page and quote) against assets of one
+    class and say what an apply would write and what stays out. Writes nothing."""
+    from services import document_values as D
+
+    p = D.plan_active({"upload_id": upload_id, "component_class": component_class, "citations": citations,
+                       "decimal_mark": decimal_mark, "currency": currency, "money_year": money_year,
+                       "confirm": confirm})
+    return {**D.summary(PyPSAService.get_network(), p),
+            "next": "apply_document_values with the same arguments and source_sha256 = source.sha256"}
+
+
+def apply_document_values(upload_id: str, component_class: str, citations: list, source_sha256: str,
+                          decimal_mark: str | None = None, currency: str | None = None,
+                          money_year: int | None = None, confirm: list[str] | None = None) -> dict:
+    """Write previewed PDF citations onto their assets through the network route, with the
+    digest of the card the user approved (the turn loop binds it)."""
+    from harness import edit_card
+    from routers.network_document_values import DocumentValuesHttp
+    from routers.network_document_values import apply_document_values as _h
+
+    if not edit_card.approved_digest():
+        from services import equipment_table as T
+
+        T._refuse("edit_preview_stale", "No approved edit card for these values; nothing was applied. "
+                  "Propose the edit again.", 409)
+    body = DocumentValuesHttp(upload_id=upload_id, component_class=component_class, citations=citations,
+                              decimal_mark=decimal_mark, currency=currency, money_year=money_year,
+                              confirm=list(confirm or []), source_sha256=source_sha256,
+                              digest=edit_card.approved_digest())
+    out = _route(_h, body)
+    out.pop("receipt", None)
+    return out
+
+
 def _urdb_rate(data, item_index: int | None = None):
     """The rate object of an uploaded URDB file: the object itself, one item
     of an OpenEI response, or a REopt scenario's `urdb_response`."""
@@ -3575,6 +3612,11 @@ def list_pending_profiles(project_id: str) -> dict:
     return _profile_route(_h, proj=_authorized_project(project_id))
 
 
+def get_profile_readiness(project_id: str) -> dict:
+    from routers.profiles import profile_readiness as _h
+    return _profile_route(_h, proj=_authorized_project(project_id))
+
+
 def generate_renewable_profile(project_id: str, points: list | None = None,
                                technology: str = "",
                                preset: str | None = None,
@@ -3604,6 +3646,37 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     body = ApplyRequest(job_id=job_id, component=component, point_id=point_id,
                         time_basis=time_basis, component_type=component_type,
                         attribute=attribute)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def apply_generated_profiles(project_id: str, job_id: str,
+                             components: list | None = None,
+                             all_from_job: bool = False,
+                             time_basis: str | None = None) -> dict:
+    from routers.profiles import (
+        BatchApplyRequest, BatchMember, apply_profile_batch as _h,
+    )
+    body = BatchApplyRequest(
+        job_id=job_id, members=[BatchMember(component=str(c)) for c in components or []],
+        all_from_job=bool(all_from_job), time_basis=time_basis)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+# Generate defaults for all (TS UI, plan D): one review list over every
+# family's default; apply-all writes the chosen rows under one undo step.
+
+
+def preview_default_series(project_id: str, replace_generated: bool = False,
+                           peak_sized: list | None = None) -> dict:
+    from routers.profiles import DefaultsPreviewRequest, preview_default_series as _h
+    body = DefaultsPreviewRequest(replace_generated=replace_generated,
+                                  peak_sized=list(peak_sized or []))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def apply_default_series(project_id: str, job_ids: list) -> dict:
+    from routers.profiles import DefaultsApplyRequest, apply_default_series as _h
+    body = DefaultsApplyRequest(job_ids=list(job_ids))
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7738,8 +7811,12 @@ DISPATCHERS: dict[str, Any] = {
     "get_profile_parameters": get_profile_parameters,
     "preview_renewable_profile": preview_renewable_profile,
     "list_pending_profiles": list_pending_profiles,
+    "get_profile_readiness": get_profile_readiness,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
+    "apply_generated_profiles": apply_generated_profiles,
+    "preview_default_series": preview_default_series,
+    "apply_default_series": apply_default_series,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,
@@ -7794,6 +7871,8 @@ DISPATCHERS: dict[str, Any] = {
     "apply_library_reference": apply_library_reference,
     "preview_equipment_mapping": preview_equipment_mapping,
     "apply_equipment_mapping": apply_equipment_mapping,
+    "preview_document_values": preview_document_values,
+    "apply_document_values": apply_document_values,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c
