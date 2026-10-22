@@ -180,4 +180,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
   - Fix: reviewers post verdicts as PR comments; premerge.sh reads them and says whether an OK is current, carries through a clean base merge or is stale; a PR whose plan went to review opens after the plan verdicts arrive.
   - Lives in: steward "Merge gate" and "Gatekeeper checkpoints", premerge.sh "reviewer verdicts".
 - **Two parties watched the same CI.** Fix: the PR's session drives CI and reports `premerge ok`; the coordinator runs premerge once at merge; `scripts/coord/ciwait.sh` is for PRs with no session.
-
+- **`ciwait.sh` called a running macOS job "runner-less", and the coordinator cancelled it.** The check keyed on `started_at` age, which a running job also has, and a normal macOS run lasts over 30 minutes.
+  - Fix: `MACOS` fires only for a job that is still `queued`, or in progress with no runner (`runner_id` 0, premerge's own test), and over 30 minutes old.
+  - Lives in: `scripts/coord/ciwait.sh`.

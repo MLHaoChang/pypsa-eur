@@ -16,8 +16,11 @@
 #                                  or neutral (a cancelled "Integration (macos)"
 #                                  is ignored)
 #   READY <pr> <sha>               at least one run, and none pending
-#   MACOS <pr> <sha>               only "Integration (macos)" is pending, and it
-#                                  has been queued for over 30 minutes
+#   MACOS <pr> <sha>               only "Integration (macos)" is pending, it is
+#                                  still "queued" (or has no runner assigned, as
+#                                  premerge tests it) and is over 30 minutes old.
+#                                  A macOS job that is running is not runner-less,
+#                                  however long it has run (about an hour is normal).
 #   TIMEOUT                        nothing hit within the limit
 # A head with no check run yet is not ready.
 #
@@ -40,7 +43,7 @@ while ((SECONDS < deadline)); do
     sha=$(git ls-remote "$remote" "refs/pull/$pr/head" | cut -f1)
     [[ -n $sha ]] || continue
     runs=$(gh api "repos/$repo/commits/$sha/check-runs?per_page=100" \
-      --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, (.started_at // .created_at // "")] | @tsv') || continue
+      --jq '.check_runs[] | [.status, (.conclusion // "-"), .name, (.started_at // ""), .id] | @tsv') || continue
     [[ -n $runs ]] || continue  # no runs yet: not ready
     fail=$(awk -F'\t' '$1 == "completed" && $2 != "success" && $2 != "skipped" && $2 != "neutral" \
       && !($2 == "cancelled" && $3 == "Integration (macos)") { print $3, $2; exit }' <<<"$runs")
@@ -48,9 +51,12 @@ while ((SECONDS < deadline)); do
     pending=$(awk -F'\t' '$1 != "completed" { print $3 }' <<<"$runs")
     if [[ -z $pending ]]; then echo "READY $pr $sha"; exit 0; fi
     if [[ $pending == "Integration (macos)" ]]; then
-      queued=$(awk -F'\t' '$3 == "Integration (macos)" { print $4; exit }' <<<"$runs")
-      if [[ -n $queued ]] && (($(date +%s) - $(date -d "$queued" +%s) > 1800)); then
-        echo "MACOS $pr $sha"; exit 0
+      IFS=$'\t' read -r mstatus since mid < <(awk -F'\t' '$3 == "Integration (macos)" { print $1 "\t" $4 "\t" $5; exit }' <<<"$runs")
+      if [[ -n $since ]] && (($(date +%s) - $(date -d "$since" +%s) > 1800)); then
+        if [[ $mstatus == queued ]] ||
+          [[ $(gh api "repos/$repo/actions/jobs/$mid" --jq '.runner_id // 0' 2>/dev/null) == 0 ]]; then
+          echo "MACOS $pr $sha"; exit 0
+        fi
       fi
     fi
   done
