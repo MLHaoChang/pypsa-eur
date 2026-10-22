@@ -53,7 +53,7 @@
     },
     "invalid_result_views": {
       "surface": "inline",
-      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false, or a card that is not a card id). The per-call detail says which; the assistant retries with a valid value. There is no conversation-wide recovery action."
+      "why": "list_result_views refused a malformed request (exclude_shown that is not true or false). The per-call detail says which; the assistant retries with a valid flag. There is no conversation-wide recovery action."
     },
     "schema_field_too_large": {
       "surface": "inline",
@@ -561,7 +561,7 @@
     },
     "tool_call_cap_exceeded": {
       "surface": "banner",
-      "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the one per-turn bound every turn has; a bounded task's task_step_limit only lowers it."
+      "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the only per-turn bound there is."
     },
     "task_step_limit": {
       "surface": "inline",
