@@ -181,7 +181,8 @@ def _observe(record, ledger):
             exact = wt._network_input_fingerprint(saved, exact=True)
             from services.dispatch_status import dispatch_status
             if (exact != expected["exact_input_fingerprint"]
-                    or saved.network.meta.get("assistant_solve_exact_input_fingerprint") != exact
+                    # The same check a queued plan step settles on (continuation._queue_run).
+                    or wt.solve_freshness(saved)["inputs_changed_since_solve"] is not False
                     or dispatch_status(saved.network) != "fresh" or wt._active_job(child)):
                 data.update(status="unavailable", last_error="experiment_case_input_drift")
                 return data
@@ -263,8 +264,8 @@ def advance_experiment(experiment_id: str) -> dict:
             if record["domain"] == "network" and len(record["cases"]) == 2:
                 from harness.experiment_two_case import advance
                 return advance(root, record, session)
-            if record["domain"] != "network" or len(record["cases"]) != 1:
-                ex._refuse("experiment_adapter_unavailable", "This adapter advances one or two network cases only.")
+            if not runnable(record["domain"], len(record["cases"])) or len(record["cases"]) != 1:
+                ex._refuse("experiment_adapter_unavailable", RUNNABLE_RULE)
             if record.get("version") != 2 or ex._public_preflight(record).get("status") != "validated":
                 ex._refuse("experiment_preflight_required", "Prepare the unchanged current network before advancing.")
             ledger = _read(root, record)
@@ -284,6 +285,15 @@ def advance_experiment(experiment_id: str) -> dict:
             session.experiment_id = experiment_id
             session.experiment_project_id = record["project_id"]
             return _view(record, _observe(record, ledger), root=root, ledger=ledger)
+
+
+RUNNABLE_RULE = "This adapter advances one or two network cases only."
+
+
+def runnable(domain, count) -> bool:
+    """The execution admission rule: 1 or 2 network cases per experiment.
+    `advance_experiment` and a study brief's `start_task` both ask it."""
+    return domain == "network" and count in (1, 2)
 
 
 def refresh_experiment(experiment_id: str) -> dict:

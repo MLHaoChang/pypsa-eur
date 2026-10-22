@@ -66,7 +66,7 @@ def _v(pack, key):
 
 
 def test_the_templates_name_the_pack_they_are_priced_from(eh, pack):
-    assert eh.TEMPLATE_PACK_VERSION == "2026-10-13"
+    assert eh.TEMPLATE_PACK_VERSION == "2026-10-22"
     assert pack.version == eh.TEMPLATE_PACK_VERSION
 
 

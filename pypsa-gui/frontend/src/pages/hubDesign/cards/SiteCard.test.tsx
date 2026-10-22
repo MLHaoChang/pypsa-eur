@@ -15,6 +15,8 @@ import { siteFixText } from '../delegate'
 import { DC_TEMPLATE, MG_TEMPLATE, SITE_TEMPLATE, readiness } from '../testFixtures'
 import { SiteCard } from './SiteCard'
 import { nk } from '../../../utils/queryKeys'
+import { campusApi, type GridReadiness } from '../../../api/campusElectrical'
+import { useScorecardOpen } from '../../../components/gridReadiness/GridReadinessScorecard'
 
 vi.mock('../../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/simulation')>()
@@ -28,7 +30,15 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   }
 })
 
+vi.mock('../../../api/campusElectrical', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/campusElectrical')>()
+  return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn() } }
+})
+
 beforeEach(() => {
+  // No scorecard unless a test gives one: the rows above stay as they were.
+  vi.mocked(campusApi.gridReadiness).mockRejectedValue(new Error('no network'))
+  useScorecardOpen.setState({ open: {} })
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
@@ -274,5 +284,50 @@ describe('SiteCard labels', () => {
     await screen.findByTestId('hub-site-grid')
     expect(text('hub-site-grid')).toMatch(/Connection point:/)
     expect(screen.getAllByText('Grid connection')).toHaveLength(1)
+  })
+})
+
+// DC grid readiness 02, PR B (UX review): the scorecard in Guided, collapsed
+// under the Site rows, in plain words, with no jump out of Guided.
+const SCORECARD: GridReadiness = {
+  schema: 1, profile: { id: 'eu_rfg_dcc_ce', title: 'EU RfG and DCC', error: null },
+  template_id: 'eh_datacenter', envelope: false, basis: 'advisory',
+  summary: { pass: 1, warn: 0, fail: 0, unknown: 1, assumed: 2, red_flags: 0 },
+  rows: [
+    { id: 'scr', requirement: 'Short-circuit ratio at the PoC', limit: 3, unit: 'SCR', source: 'rule',
+      project_value: 8.3, verdict: 'pass', assumed: true, note: 'min SCR at grid', section: 'connection',
+      target: { section: 'connection', panel: null, component: 'Bus', entity: 'grid', field: 'eh_sk_mva' } },
+    { id: 'ramp_rate', requirement: 'Load ramp rate at the PoC', limit: 4, unit: 'MW/min', source: 'assumed',
+      project_value: null, verdict: 'unknown', assumed: true, note: 'no AI-training load envelope',
+      section: 'connection',
+      target: { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: 'connection_ramp' } },
+  ],
+}
+
+describe('SiteCard grid readiness', () => {
+  it('a collapsed plain-words summary that opens to the scorecard, with Ask and no jump', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue(SCORECARD)
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ ...DC_TEMPLATE, ledger: [
+      { item: 'fault_level', label: 'Fault level at the PoC', value: 250, unit: 'MVA', source: 'assumed',
+        field: 'eh_sk_mva', entity: 'grid', component: 'Bus', section: 'connection', panel: null }] })
+    const user = mount()
+    const toggle = await screen.findByTestId('hub-site-grid-readiness-toggle')
+    expect(toggle.textContent).toBe('Grid readiness: 0 things to look at, 1 not yet known')
+    expect(screen.queryByTestId('grid-readiness-scorecard')).toBeNull()
+    await user.click(toggle)
+    expect(screen.getByTestId('grid-readiness-scorecard')).toBeTruthy()
+    expect(screen.queryByTestId('gr-jump-scr')).toBeNull()
+    expect(screen.getByTestId('gr-ask-scr')).toBeTruthy()
+    await user.click(screen.getByTestId('gr-more-scr'))
+    expect(screen.getByTestId('gr-editable-scr').textContent)
+      .toBe('Editable in Expert: Connection & grid › grid › Fault level at the PoC')
+  })
+
+  it('is paused while the study runs, like the Site rows', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue(SCORECARD)
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running' })
+    mount()
+    await screen.findByTestId('hub-site-paused')
+    expect(screen.queryByTestId('hub-site-grid-readiness')).toBeNull()
   })
 })

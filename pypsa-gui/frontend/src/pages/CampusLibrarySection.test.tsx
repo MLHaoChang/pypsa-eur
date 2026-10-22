@@ -10,7 +10,7 @@ import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { CampusState } from '../api/campusElectrical'
-import CampusElectricalPanel from './CampusElectricalPanel'
+import CampusElectricalPanel from './campusTestParts'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))
 vi.mock('../store/uiStore', () => ({
@@ -50,7 +50,7 @@ afterEach(() => cleanup())
 describe('asset library: the editor', () => {
   it('shows the library and says it is the default one', async () => {
     renderPanel()
-    const editor = (await screen.findByLabelText('Asset library')) as HTMLTextAreaElement
+    const editor = (await screen.findByLabelText('Equipment library')) as HTMLTextAreaElement
     await waitFor(() => expect(editor.value).toBe(LIB))
     expect(screen.getByTestId('library-badge').textContent).toBe('default library')
     expect(api.library).toHaveBeenCalledWith('Hub A')
@@ -72,7 +72,7 @@ describe('asset library: the editor', () => {
   it('saves the edited text, becomes the project library and refreshes the study state', async () => {
     api.saveLibrary.mockImplementation(async (_p: string, yaml: string) => ({ yaml, is_default: false }))
     renderPanel()
-    const editor = (await screen.findByLabelText('Asset library')) as HTMLTextAreaElement
+    const editor = (await screen.findByLabelText('Equipment library')) as HTMLTextAreaElement
     await waitFor(() => expect(editor.value).toBe(LIB))
     const save = screen.getByRole('button', { name: 'Save library' })
     expect((save as HTMLButtonElement).disabled).toBe(true)               // nothing to save yet
@@ -87,7 +87,7 @@ describe('asset library: the editor', () => {
   it('shows the 422 inline, names the field, and keeps the edit', async () => {
     api.saveLibrary.mockRejectedValue(refuse(422, "transformers[TR_1].capex_eur must be positive, got -5"))
     renderPanel()
-    const editor = (await screen.findByLabelText('Asset library')) as HTMLTextAreaElement
+    const editor = (await screen.findByLabelText('Equipment library')) as HTMLTextAreaElement
     await waitFor(() => expect(editor.value).toBe(LIB))
     await userEvent.type(editor, '# bad')
     await userEvent.click(screen.getByRole('button', { name: 'Save library' }))
@@ -100,7 +100,7 @@ describe('asset library: the editor', () => {
     api.saveLibrary.mockRejectedValueOnce(refuse(422, 'asset library: missing cables'))
     api.saveLibrary.mockImplementation(async (_p: string, yaml: string) => ({ yaml, is_default: false }))
     renderPanel()
-    const editor = (await screen.findByLabelText('Asset library')) as HTMLTextAreaElement
+    const editor = (await screen.findByLabelText('Equipment library')) as HTMLTextAreaElement
     await waitFor(() => expect(editor.value).toBe(LIB))
     await userEvent.type(editor, '#')
     await userEvent.click(screen.getByRole('button', { name: 'Save library' }))
@@ -113,7 +113,7 @@ describe('asset library: the editor', () => {
 describe('asset library: reset', () => {
   it('is offered only for a project copy', async () => {
     renderPanel()
-    await screen.findByLabelText('Asset library')
+    await screen.findByLabelText('Equipment library')
     expect((screen.getByRole('button', { name: 'Reset to default' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -136,7 +136,7 @@ describe('asset library: reset', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Reset to default' }))
     await waitFor(() => expect(api.resetLibrary).toHaveBeenCalledWith('Hub A'))
     await waitFor(() => expect(screen.getByTestId('library-badge').textContent).toBe('default library'))
-    expect((screen.getByLabelText('Asset library') as HTMLTextAreaElement).value).toBe(LIB)
+    expect((screen.getByLabelText('Equipment library') as HTMLTextAreaElement).value).toBe(LIB)
     confirm.mockRestore()
   })
 

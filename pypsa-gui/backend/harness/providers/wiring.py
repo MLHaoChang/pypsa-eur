@@ -327,10 +327,12 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
     recent = set(recent[-8:])
     from services import assistant_tasks, chat_tools
     session = chat_tools.chat_session()
-    task_tool = None
+    task_tools = set()
     if getattr(session, "task_id", None):
         try:
-            task_tool = assistant_tasks.get_task(session.task_id).get("next_step", {}).get("tool")
+            # Every step the plan still has to run, so a continuation turn can finish it.
+            task_tools = {step["tool"] for step in assistant_tasks.get_task(session.task_id).get("steps", [])
+                          if step.get("status") != "completed"}
         except Exception:
             pass  # Ordinary dispatch rechecks authority; selection cannot grant it.
     def rank(pair):
@@ -338,7 +340,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         name = tool["name"]
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
-        return (int(name in _HARNESS_TOOL_NAMES), int(name == task_tool), int(explicit), int(name in recent),
+        return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(explicit), int(name in recent),
                 4 * len(words & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]

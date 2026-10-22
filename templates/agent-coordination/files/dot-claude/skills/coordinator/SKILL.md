@@ -62,10 +62,11 @@ Done when every package is running, queued with a named reason, or merged.
 2. **Sessions.** Save the `list_sessions` output to a file, then run `python3 scripts/coord/sessions.py <file>`.
    - A session waiting on an `AskUserQuestion` in its own window: fetch the question and bring it to the owner as options.
    - Check [Rotation](#rotation)'s trigger.
+   - A session flagged `ROTATE` (over 300k context): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
    - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state log lists as pending.
    Done when each one is merged or has a named blocker in the log.
-4. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in {{TZ_LABEL}}. Ask every question as `AskUserQuestion` options, per `AGENTS.md`.
+4. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in {{TZ_LABEL}}. Ask every question as `AskUserQuestion` options, per `AGENTS.md`, and write the same question and options in the turn's final reply text, so a worker restart cannot lose it.
 
 Log each event in the state log as `- HH:MMZ ...` ([Time](#time)); `board.py` logs its own edits.
 
@@ -97,6 +98,10 @@ Done when the routine fires into the new session, every live session has the new
 ## Deciding or asking
 
 Decide yourself when the answer follows from a rule or an earlier owner decision, then tell the owner what you decided and why. Ask the owner when the answer changes scope, cost, what users see, or a rule. Escalate a disagreement between a session and the gatekeeper only when the gatekeeper holds its position.
+
+Every `AskUserQuestion` is also written in the turn's final reply text, in the same options form: a worker restart drops a pending question, and the text survives it.
+
+Append every owner decision to `docs/agents/owner-decisions.md`, in the PR that lands the next coordination change or as its own tiny docs PR. Briefs cite the row.
 
 Report only what has happened. Tell the owner a message went out after `send_message` returns, not before.
 
@@ -135,8 +140,9 @@ Merge one PR at a time:
 4. Tell each dependent session the state log lists for this PR, then go on to the next PR. Each premerge run measures against the new `{{BASE_BRANCH}}`, so run it again after every merge.
 
 **A blocked PR:**
-- **Code overlap or a conflict.** Ask the PR's session to merge `{{BASE_BRANCH}}` in as a merge commit, then wait for CI on the new head.
+- **Code overlap or a conflict.** Ask the PR's session to merge `{{BASE_BRANCH}}` in as a merge commit, then wait for CI on the new head. Where `overlap_tests_script` is set, premerge waives a code overlap whose files all have tests that pass on a clean trial merge; only the rest blocks.
 - **The head moved** while the PR was green, because a session pushed. The new head is now the head, so wait for its CI and, where needed, a fresh gatekeeper OK. History stays as pushed. Ask sessions for merges, never for resets or force-pushes.
+- **A runner-less job.** When a platform job (for example `Integration (macos)`) has been queued for over 30 minutes with no runner and every other check is green, cancel that workflow run. Then rerun premerge: it waives a job cancelled before it got a runner, and the PR merges under that waiver.
 - **Known environment failures.** <List failures that also happen on `{{BASE_BRANCH}}` in cloud containers and so don't block a merge.>
 
 ## Dashboard
@@ -159,7 +165,8 @@ Each refresh is three calls, made at most once per owner report:
 - Read check runs through `premerge.sh`, which prints only the runs that block, never through one-off check-run reads per PR.
 - Start a long command with the tool's own background option. A `&` inside a background command detaches it, and its completion notice never arrives.
 - `list_sessions` output is large. Save it and summarize it with `sessions.py`; use `get_session` for a single session.
-- `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call.
+- `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call. Read a session's events only that way, from a saved file.
+- Read a PR's file list with `git diff --stat origin/{{BASE_BRANCH}}...<head>`; `pull_request_read get_files` returns hundreds of thousands of characters on a large PR (684k on #491).
 
 ## Retro
 

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Campus electrical splits across the flow: the campus file, grid code, connection power factor and PCC ownership stay under Connection & grid ("Grid connection"); the study settings, run and island requirements move to Scenarios & optimisation ("Grid study"); the study's results move to Results ("Grid study results"). Each panel links to the next.

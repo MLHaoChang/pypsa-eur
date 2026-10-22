@@ -13,7 +13,7 @@ import { render, screen, cleanup, within, waitFor } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { CampusMilp, CampusState, CampusResults, CostBasis, InvestmentRow, MilpResults, TapRow } from '../api/campusElectrical'
-import CampusElectricalPanel from './CampusElectricalPanel'
+import CampusElectricalPanel from './campusTestParts'
 import { formatEur } from './CampusInvestmentSection'
 
 const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null }))

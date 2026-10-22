@@ -1,14 +1,19 @@
-// The Guided-mode hub design (guided-mode spec §5): a progress rail and one
-// step card at a time — Start, Site, Goal, Results, Improve. The state machine
-// (§5.4) is derived from the study record and the review; the step shown is
-// the store's, moved by the user or by a study finishing (§5.6).
+// The Guided-mode project flow (guided-mode spec §5, project-workflow design
+// §3.4): a rail of the ten flow sections and one section at a time. Sections 1,
+// 3, 8 and 10 keep their bespoke cards (Start, Site, Goal, Results/Improve);
+// the others show the generic section card. Every section lists its open items.
+// The study state machine (§5.4) is derived from the study record and the
+// review; the position is the store's step and the shared `activeSection`,
+// moved by the user or by a study finishing (§5.6).
 import { useEffect, useRef, type ComponentType } from 'react'
 import { GuideButton } from '../../components/GuidedTour'
 import { useNetworkRevisionInvalidation } from '../../hooks/useNetworkRevisionInvalidation'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { useUIStore } from '../../store/uiStore'
 import { effectiveStep, flowState, initialStep, studyHasResults } from './flow'
-import { useHubDesignStore, type HubStep } from './hubDesignStore'
+import { SECTION_STEP, STEP_SECTION, useHubDesignStore, type HubStep } from './hubDesignStore'
+import { GenericSectionCard, SectionView } from './SectionView'
+import type { FlowSectionId } from '../../api/flow'
 import { StepRail } from './StepRail'
 import { AssistantSetupCard } from './shared/AssistantSetupCard'
 import { GoalCard } from './cards/GoalCard'
@@ -72,6 +77,8 @@ export default function HubDesignPanel() {
       loleTarget: str(po.target_lole_h),
       ensCap: str(po.ens_cap_permyriad),
     })
+    // A project opened mid-study shows the study where it runs: section 9.
+    if (flow === 'running') useUIStore.getState().setActiveSection('readiness')
     resetWhileFailed.current = failed ? project : null
   }
   useEffect(() => {
@@ -93,7 +100,7 @@ export default function HubDesignPanel() {
   }
 
   // Auto-advance (§5.6): running → done opens Results unless the user moved
-  // the rail since; any → running opens Goal. Every transition re-arms it.
+  // the rail since; any → running opens Readiness → run, where the Run is. Every transition re-arms it.
   const prevStatus = useRef<string | null | undefined>(undefined)
   useEffect(() => { prevStatus.current = undefined }, [project])
   useEffect(() => {
@@ -104,23 +111,42 @@ export default function HubDesignPanel() {
     if (prev === 'running' && status === 'done') {
       if (!s.userMovedRail) s.setStep('results')
     } else if (status === 'running') {
-      s.setStep('goal')
+      // The Run is in section 9 now (design §3.3): show its progress there.
+      useUIStore.getState().setActiveSection('readiness')
     }
     s.clearUserMoved()
   }, [status])
 
   const shown = effectiveStep(flow, ready && storeProject === project ? step : initialStep(flow, isTemplate),
     isTemplate)
-  const Card = CARDS[shown]
+  // One position in both modes: `activeSection` wins when it was set (a rail
+  // pick, an Expert panel, the switch); otherwise the step's own section.
+  const activeSection = useUIStore(s => s.activeSection)
+  const section: FlowSectionId = activeSection ?? STEP_SECTION[shown]
+  const bespoke: HubStep | undefined = section === 'results'
+    ? (shown === 'improve' ? 'improve' : 'results') : SECTION_STEP[section]
+  const cardStep = bespoke ? effectiveStep(flow, bespoke, isTemplate) : null
+  const Card = cardStep ? CARDS[cardStep] : null
+  const viewSection: FlowSectionId = cardStep ? STEP_SECTION[cardStep] : section
+  const pickSection = (id: FlowSectionId) => {
+    const user = useUIStore.getState().guidedTourHolds === 0
+    const toStep = SECTION_STEP[id]
+    if (toStep) setStep(toStep, { user })
+    else {
+      useUIStore.getState().setActiveSection(id)
+      if (user) useHubDesignStore.setState({ userMovedRail: true })
+    }
+  }
 
   return (
     <div data-testid="hub-design-panel" className="h-full overflow-y-auto">
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <StepRail flow={flow} step={shown} isTemplate={isTemplate}
-            // A tour's reveal clicks are not the user moving the rail: they
-            // must not suppress the jump to Results (P24-FE gate B2).
-            onPick={s => setStep(s, { user: useUIStore.getState().guidedTourHolds === 0 })} />
+          {/* A tour's reveal clicks are not the user moving the rail: they
+              must not suppress the jump to Results (P24-FE gate B2). */}
+          <StepRail flow={flow} section={viewSection} improveShown={cardStep === 'improve'}
+            onPick={pickSection}
+            onPickImprove={() => setStep('improve', { user: useUIStore.getState().guidedTourHolds === 0 })} />
           <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
         </div>
         <AssistantSetupCard />
@@ -135,7 +161,11 @@ export default function HubDesignPanel() {
             </button>
           </div>
         )}
-        {settled ? <Card /> : (
+        {settled ? (
+          <SectionView id={viewSection} onNext={pickSection}>
+            {Card ? <Card /> : <GenericSectionCard id={viewSection} />}
+          </SectionView>
+        ) : (
           <p className="text-[12px] text-muted">Loading the project…</p>
         )}
         {/* The Site map card (UX IA-6 / M7, plan 3 S5): under the step, only when a site exists. */}

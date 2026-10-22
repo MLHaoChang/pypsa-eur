@@ -4,6 +4,9 @@
  * contract is `harness/edit_card.py`; any edit kind that registers an adapter
  * there arrives in this one shape, so this component is the only renderer.
  */
+import { FLOW_STATE_WORDS, type FlowSectionState, type FlowTarget } from '../api/flow'
+import { useUIStore, type SlidePanel } from '../store/uiStore'
+import { componentLabel } from '../utils/componentLabels'
 
 type Scalar = string | number | boolean | null
 
@@ -20,6 +23,12 @@ export interface EditCardRow {
   note?: string
   display?: { old: number | null; new: number; unit: string }
   readback?: Scalar
+  /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
+  target?: FlowTarget
+  /** The table cell the value came from (apply_equipment_mapping). */
+  source?: { filename?: string; sheet: string; cell: string; raw: Scalar; raw_unit: string; formula?: boolean }
+  /** A cost's stated money basis. */
+  money?: { currency: string; money_year: number }
 }
 
 export interface EditCard {
@@ -30,6 +39,8 @@ export interface EditCard {
   says: string
   complete: boolean
   digest: string
+  /** The flow section the edit lands in ("Connection & grid"). */
+  section?: { id: string; label: string }
 }
 
 export interface EditReceipt {
@@ -40,6 +51,8 @@ export interface EditReceipt {
   says: string
   results_stale: boolean
   undo: { tool: string; available: boolean }
+  /** The section's flow state after the write; `changed` against the card. */
+  section?: { id: string; label: string; state: string; changed: boolean }
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -68,25 +81,54 @@ export function editReceiptOf(value: unknown): EditReceipt | null {
 
 function show(value: Scalar | undefined, known = true): string {
   if (!known) return 'Not read'
-  if (value === null || value === undefined) return 'Empty'
+  if (value === null || value === undefined) return 'not set'
+  // The backend sends a non-finite number as its string ("inf"): an unbounded value.
+  if (value === 'inf' || value === '-inf' || value === Infinity || value === -Infinity) return 'no limit'
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
-/** "Line > L2", or "Line > L1, L2" for a bulk edit: the plain header of PR-1 (the
- * flow-section header arrives with FlowTarget, after B1's flow-ledger-targets). */
+/** A value in its display unit, rounded for reading (the stored value stays in the small line). */
+function showDisplay(value: number | null | undefined): string {
+  if (value === null || value === undefined) return 'not set'
+  return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })
+}
+
+/** "Generator 'pv'": the class in the user's words and the component's name. */
+function assetWords(componentClass: string, name: string): string {
+  return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
+}
+
+/** "Connection & grid › Line 'L2'" (the edit's flow section), or "Line 'L2'" when the
+ * project has no flow; a bulk edit lists its names: "Connection & grid › Line 'L1', Line 'L2'". */
 export function editCardHeader(card: EditCard): string {
-  const byClass = new Map<string, string[]>()
+  const byKey = new Map<string, string[]>()
   for (const r of card.rows) {
     if (r.role !== 'typed' || !r.component_class) continue
-    const names = byClass.get(r.component_class) ?? []
-    if (!names.includes(r.name)) names.push(r.name)
-    byClass.set(r.component_class, names)
+    const key = card.section && r.target?.section === card.section.id ? card.section.label : ''
+    const names = byKey.get(key) ?? []
+    const words = assetWords(r.component_class, r.name)
+    if (!names.includes(words)) names.push(words)
+    byKey.set(key, names)
   }
-  return [...byClass].map(([klass, names]) => `${klass} > ${names.join(', ')}`).join('; ')
+  return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
+}
+
+/** Show the field where it lives, without leaving the chat: the component's own
+ * Properties (`panel` null) or the section's panel. */
+function showInProperties(target: FlowTarget) {
+  const ui = useUIStore.getState()
+  if (target.panel) {
+    ui.setSlidePanel(target.panel as SlidePanel)
+    return
+  }
+  if (!target.component || !target.entity) return
+  ui.setSelectedComponent({ type: target.component, name: target.entity })
+  ui.openRightPanel()
+  ui.setHighlightedComponent({ type: target.component, name: target.entity })
 }
 
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
-  const asset = (r: EditCardRow) => [r.component_class, r.name].filter(Boolean).join(' ') || '—'
+  const asset = (r: EditCardRow) => (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
   const header = editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
@@ -114,17 +156,33 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                 <td className="p-1 border-b border-border break-words">{asset(r)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? (r.new ? 'Created by this change' : 'Removed by this change') : guided ? r.label : r.field}
+                  {r.role === 'typed' && r.target && (r.target.panel || r.target.component) && (
+                    <button type="button" className="block text-[10px] text-accent underline"
+                      data-testid="chat-edit-show" onClick={() => showInProperties(r.target!)}>
+                      {r.target.panel ? 'Show in its panel' : 'Show in Properties'}
+                    </button>
+                  )}
+                  {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source">
+                    {[r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell]
+                      .filter(Boolean).join(' \u203a ')}{' '}
+                    ({[show(r.source.raw), r.source.raw_unit].filter(Boolean).join(' ')}{r.source.formula ? ', saved formula value' : ''})
+                  </span>}
+                  {r.money && <span className="block text-[10px] text-muted" data-testid="chat-edit-money">
+                    {r.money.currency}, {r.money.money_year} money, not adjusted for inflation
+                  </span>}
                   {follows && <span className="block text-[10px]">
                     {r.role === 'derived' ? 'Follows from the change, read-only'
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
-                <td className="p-1 border-b border-border break-words">{value(r.old, r.old_known !== false)}</td>
-                <td className="p-1 border-b border-border break-words font-medium">{value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {exists ? '' : r.unit || 'No unit'}
+                  {r.display && r.old_known !== false && typeof r.old === 'number' ? showDisplay(r.display.old) : value(r.old, r.old_known !== false)}</td>
+                <td className="p-1 border-b border-border break-words font-medium">
+                  {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
+                <td className="p-1 border-b border-border break-words">
+                  {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
                   {r.display && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
-                    {show(r.display.new)} {r.display.unit} = {show(r.new)} {r.unit} stored
+                    stored as {show(r.new)} {r.unit}
                   </span>}
                 </td>
               </tr>
@@ -149,6 +207,9 @@ export function EditReceiptLine({ receipt, disabled, onRequest }: {
         {verified ? `${receipt.says}. Read back from the project.`
           : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
+      {receipt.section?.changed && <div data-testid="chat-edit-section">
+        {receipt.section.label}: {FLOW_STATE_WORDS[receipt.section.state as FlowSectionState] ?? receipt.section.state}.
+      </div>}
       {receipt.results_stale && <div className="text-muted" data-testid="chat-edit-stale">
         Results are now stale: they were computed before this change.
       </div>}

@@ -61,7 +61,8 @@ VARIANT_SEPARATOR = "-var-"
 OWNER_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id",
               "owner_variant_id", "throwaway")
 # What a fork's copy walk leaves behind (plan S4 M1, review v2 BC-4).
-SKIPPED = frozenset({"studies", "results_state.pkl"})
+# `sensitivity_case.json` is a case's own record (SR-1, F10): a fork is not that case.
+SKIPPED = frozenset({"studies", "results_state.pkl", "sensitivity_case.json"})
 _OPTION_RE = re.compile(r"^[a-z0-9][a-z0-9_]{0,31}$")
 
 

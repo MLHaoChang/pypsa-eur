@@ -26,6 +26,15 @@ optimisation when it is fresh with a choice of its own, else least cost; owner
 decision 2026-10-12), and the needs that run could not meet (owner decision
 2026-10-13): ``{assets, source_hash, stale, study_method, unresolved}``. Read only.
 
+``GET /{name}/grid-readiness?profile=`` (DC grid readiness 02) is the
+advisory grid-readiness scorecard (``services/adequacy/grid_readiness.py``).
+``PUT /{name}/grid-readiness/limits/{item}`` sets the user's own limit (DC 03
+slice 6, ``services/adequacy/grid_limits.py``): ``{value, source, note}`` for
+``connection_ramp`` and ``oscillation``, ``{source, note}`` for
+``fault_level``; 422 with an ``error_kind`` for a refused one. ``DELETE`` the
+same path resets it to the template's value or the placeholder. Both check the
+edit lock; neither writes ``eh_template.json``.
+
 The project's own grid codes (plan C10) are under ``/{name}/grid-codes``,
 wrapping ``services/campus_grid_code_service.py``:
 
@@ -228,6 +237,76 @@ def cancel_milp(
     """Ask the running job to stop; it keeps the best point found so far."""
     _check_lock(proj, db, user)
     return ce.cancel_milp_job(_row(proj, db))
+
+
+# ── the grid-readiness scorecard (DC grid readiness 02) ─────────────────────
+
+@router.get("/{name}/grid-readiness")
+async def get_grid_readiness(profile: str | None = None, proj: AuthorizedProject = ProjectAccessDep,
+                             db: DBSession = Depends(get_db)):
+    """The project's grid-readiness scorecard against grid-code ``profile``
+    (default: the campus study's last-run profile, else ``eu_rfg_dcc_ce``):
+    rows ``{id, requirement, limit, unit, source, project_value, verdict,
+    assumed, note, section, target}``. Advisory and read only; it reads the
+    saved network, so it parses a netCDF off the event loop. 422 for an
+    unknown profile."""
+    from services.adequacy.grid_readiness import grid_readiness_for
+
+    return await run_in_threadpool(grid_readiness_for, _row(proj, db), profile)
+
+
+class LimitBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    value: float | None = None
+    #: Optional here so a missing source is the service's 422 with its error_kind.
+    source: str | None = None
+    note: str = ""
+
+
+def _limit_error(exc: Exception) -> HTTPException:
+    return HTTPException(status_code=422, detail={"error_kind": exc.kind, "message": exc.message})
+
+
+@router.put("/{name}/grid-readiness/limits/{item}")
+def put_grid_readiness_limit(
+    item: str,
+    body: LimitBody,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Set the user's own grid-readiness limit ``item``; returns the stored
+    entry ``{value, source, note, set_by, set_at, default}``."""
+    from services import project_registry
+    from services.adequacy import grid_limits
+
+    _check_lock(proj, db, user)
+    try:
+        return grid_limits.set_limit(project_registry.project_dir(_row(proj, db)), item,
+                                     value=body.value, source=body.source, note=body.note,
+                                     set_by=getattr(user, "email", None))
+    except grid_limits.LimitError as exc:
+        raise _limit_error(exc) from exc
+
+
+@router.delete("/{name}/grid-readiness/limits/{item}")
+def delete_grid_readiness_limit(
+    item: str,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Reset ``item`` to the template's value or the generic placeholder."""
+    from services import project_registry
+    from services.adequacy import grid_limits
+
+    _check_lock(proj, db, user)
+    try:
+        cleared = grid_limits.clear_limit(project_registry.project_dir(_row(proj, db)), item)
+    except grid_limits.LimitError as exc:
+        raise _limit_error(exc) from exc
+    return {"item": item, "cleared": cleared}
 
 
 # ── the island sidecar and study (campus island plan, I9a) ──────────────────

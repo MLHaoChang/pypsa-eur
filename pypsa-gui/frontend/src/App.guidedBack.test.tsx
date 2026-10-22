@@ -31,10 +31,10 @@ describe('Guided way back from the grid checks', () => {
     expect(useHubDesignStore.getState().step).toBe('results')
   })
 
-  it('Expert keeps the STUDIES crumb and has no Back control', () => {
+  it('Expert keeps the section crumb and has no Back control', () => {
     useUIStore.setState({ uiMode: 'expert' })
     renderTab('campusElectrical')
-    expect(screen.getByText('STUDIES')).toBeTruthy()
+    expect(screen.getByText('CONNECTION & GRID')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /Back to Results/ })).toBeNull()
   })
 
