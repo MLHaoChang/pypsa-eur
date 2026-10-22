@@ -1330,6 +1330,15 @@ def list_pending_profiles(
     return {"pending": records, "jobs": live, "keep": KEEP_PENDING}
 
 
+@project_router.get("/{name}/profiles/readiness")
+def profile_readiness(proj: AuthorizedProject = ProjectAccessDep):
+    """One row per wind/solar generator: its coordinate state, the profile it
+    carries now and whether a generated one is stale (RP-02, read-only)."""
+    from services.profile_gen.readiness import readiness_rows
+
+    return {"generators": readiness_rows(_foreground_ctx(proj, "read readiness"))}
+
+
 @project_router.post("/{name}/profiles/apply")
 def apply_profile(
     body: ApplyRequest,

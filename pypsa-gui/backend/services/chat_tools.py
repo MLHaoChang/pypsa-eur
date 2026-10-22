@@ -3575,6 +3575,11 @@ def list_pending_profiles(project_id: str) -> dict:
     return _profile_route(_h, proj=_authorized_project(project_id))
 
 
+def get_profile_readiness(project_id: str) -> dict:
+    from routers.profiles import profile_readiness as _h
+    return _profile_route(_h, proj=_authorized_project(project_id))
+
+
 def generate_renewable_profile(project_id: str, points: list | None = None,
                                technology: str = "",
                                preset: str | None = None,
@@ -7756,6 +7761,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_profile_parameters": get_profile_parameters,
     "preview_renewable_profile": preview_renewable_profile,
     "list_pending_profiles": list_pending_profiles,
+    "get_profile_readiness": get_profile_readiness,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
     "preview_default_series": preview_default_series,
