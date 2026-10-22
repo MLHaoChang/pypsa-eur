@@ -26,6 +26,8 @@ A work session sends each question in that same form to the coordinator with `se
 
 ## Change discipline
 
+<!-- Paraphrased from karpathy-guidelines (forrestchang/andrej-karpathy-skills, MIT) and ponytail (DietrichGebert/ponytail, MIT); see .scratch/design-skills/skills-top10-assessment.md. -->
+
 - Change only what the task needs; leave unrelated code, comments and formatting alone.
 - Before writing new code, reuse what the codebase, the standard library or an installed dependency already has.
 - Never cut validation, error handling, security or accessibility to keep a change small.
