@@ -27,6 +27,8 @@ import SeriesEditor from '../components/series/SeriesEditor'
 import { fieldLabel, sentence } from '../components/series/SeriesKit'
 import { errorText } from '../api/profiles'
 import DefaultsReview from '../components/series/DefaultsReview'
+import { MissingCoordinatesBanner, ReadinessBadge } from '../components/series/RenewableReadiness'
+import { profilesApi, type ReadinessRow } from '../api/profiles'
 
 const EDITOR_TITLE = { load: 'Profile', availability: 'Availability', price: 'Price' } as const
 
@@ -717,9 +719,11 @@ function LoadItem({
   )
 }
 
-function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
+function GenItem({ gen, meta, readiness, hasActive, activeRows, selected, checked, onClick, onCheck, onDownload, onUpload, onDelete, onEdit, attrLabel, uploadError }: {
   gen: Generator
   meta: GeneratorProfileMeta | undefined
+  // The readiness row (RP-02) for a wind/solar generator on the Renewables tab.
+  readiness?: ReadinessRow
   // Whether the generator has a profile for the CURRENTLY-ACTIVE sub-attribute
   // (p_max_pu / p_min_pu / marginal_cost). Drives the row's check icon, the
   // rows-badge, and whether the trash button is shown. Defaults to the
@@ -769,6 +773,7 @@ function GenItem({ gen, meta, hasActive, activeRows, selected, checked, onClick,
           <div className="flex-1 min-w-0">
             <p className={`text-xs font-medium truncate ${selected ? 'text-accent' : 'text-text'}`}>{gen.name}</p>
             <p className="text-[10px] text-muted truncate">{gen.bus} · {gen.carrier}</p>
+            {readiness && <ReadinessBadge row={readiness} />}
           </div>
           {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
         </button>
@@ -1018,6 +1023,12 @@ export default function TimeSeriesManager() {
     queryKey: nk(currentProject, 'generator_profiles'),
     queryFn: networkApi.getGeneratorProfiles,
   })
+  const { data: readinessRows = [] } = useQuery({
+    queryKey: nk(currentProject, 'profile_readiness'),
+    queryFn: () => profilesApi.readiness(currentProject!),
+    enabled: !!currentProject && activeTab === 'renewable',
+  })
+  const readinessOf = (name: string) => readinessRows.find(r => r.generator === name)
   const { data: linkProfiles = {} as Record<string, LinkProfileMeta> } = useQuery({
     queryKey: nk(currentProject, 'link_profiles'),
     queryFn: networkApi.getLinkProfiles,
@@ -1817,8 +1828,10 @@ export default function TimeSeriesManager() {
               </>
             ) : (
               <>
+                {activeTab === 'renewable' && <MissingCoordinatesBanner rows={readinessRows} />}
                 {gensWithProfile.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
+                    readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}
@@ -1840,6 +1853,7 @@ export default function TimeSeriesManager() {
                 )}
                 {gensWithout.map(g => (
                   <GenItem key={g.name} gen={g} meta={gProfiles[g.name]}
+                    readiness={activeTab === 'renewable' ? readinessOf(g.name) : undefined}
                     hasActive={genHasProfileForActive(g.name)}
                     activeRows={genActiveRows(g.name)}
                     selected={selectedName === g.name}
