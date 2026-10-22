@@ -21,6 +21,8 @@ export interface PanelChrome {
   onClose: () => void
   /** A PageHeader calls this on mount (true) and unmount (false). */
   claimHeader: (claimed: boolean) => void
+  /** The "Next: <section>" step of the section this panel belongs to. */
+  next?: ReactNode
 }
 export const PanelChromeContext = createContext<PanelChrome | null>(null)
 
@@ -64,6 +66,7 @@ export function PageHeader({
           )}
         </div>
         {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+        {chrome.next}
         <button
           type="button"
           onClick={chrome.onClose}

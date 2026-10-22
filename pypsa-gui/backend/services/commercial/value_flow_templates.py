@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from models.commercial import CommercialConfig, ValueFlowConfig
-from models.process_unit import product_roles
+from models.process_unit import bus_values, product_roles
 from services.commercial import participants as P
 from services.commercial.lp_bindings import same_party
 
@@ -358,11 +358,11 @@ def _energy_hub(commercial: CommercialConfig, site: _Site) -> TemplateResult:
 
 
 TEMPLATES: dict[str, Template] = {t.name: t for t in (
-    Template("single_owner", "3", _single_owner),
-    Template("btm_ppa", "4", _btm_ppa),
-    Template("landlord_tenant", "3", _landlord_tenant),
-    Template("dso_developer", "3", _dso_developer),
-    Template("energy_hub", "3", _energy_hub),
+    Template("single_owner", "4", _single_owner),
+    Template("btm_ppa", "5", _btm_ppa),
+    Template("landlord_tenant", "4", _landlord_tenant),
+    Template("dso_developer", "4", _dso_developer),
+    Template("energy_hub", "4", _energy_hub),
 )}
 
 
@@ -393,7 +393,7 @@ def build(name: str, n, commercial: CommercialConfig, *, dsr_buses=()) -> Templa
         raise TemplateRefused("template_unknown",
                               f"unknown template {name!r}; one of {sorted(TEMPLATES)}")
     result = tpl.builder(commercial, _site(n, commercial, dsr_buses))
-    shortfall = any(r == "shortfall" for r in product_roles(n).values())
+    shortfall = any(r == "shortfall" for r in product_roles(n).values()) or bool(bus_values(n))
     cfg = _with_parties(result.config, commercial, result.draft_contracts,
                         (P.SHORTFALL_PAYEE,) if shortfall else ())
     cfg = cfg.model_copy(update={"template": name, "template_version": f"{name}@{tpl.version}",

@@ -104,7 +104,9 @@ def _view(task):
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
     if step and state != "cancelled":
         out["next_step"] = {"id": step["id"], "tool": step["tool"], "status": step["status"]}
-        if step["status"] != "uncertain":
+        if step["status"] == "waiting":
+            out["next_step"]["job_id"] = step["job"]["job_id"]
+        elif step["status"] != "uncertain":
             try:
                 resolved = _resolve(step["args"], task["steps"])
                 if len(json.dumps(resolved, default=str)) > 1800:
@@ -114,7 +116,13 @@ def _view(task):
                 out["next_step"]["blocked"] = exc.detail
         if step.get("error"):
             out["next_step"]["error"] = step["error"]
-    out["note"] = "Execute next_step as an ordinary offered tool call. Cancel stops future steps, not running jobs."
+    changes = [s["result"]["_edit_receipt"]["says"] for s in task["steps"] if s["status"] == "completed"
+               and isinstance(s.get("result"), dict) and isinstance(s["result"].get("_edit_receipt"), dict)
+               and isinstance(s["result"]["_edit_receipt"].get("says"), str)]
+    if changes:
+        out["changes"] = changes
+    out["note"] = ("Wait for the job; the conversation continues when it ends." if state == "waiting_job" else
+                   "Execute next_step as an ordinary offered tool call. Cancel stops future steps, not running jobs.")
     while len(json.dumps(out, default=str)) > 3800 and out["steps"]:
         out["steps"].pop()
         out["step_details_truncated"] = True
@@ -213,6 +221,9 @@ def cancel_task(task_id: str) -> dict:
         path, task = _read(task_id)
         if task["status"] != "completed":
             task["status"] = "cancelled"
+            for step in task["steps"]:
+                if step.get("job", {}).get("continuation") in ("armed", "due"):
+                    step["job"]["continuation"] = "withdrawn"  # never after a cancel
             _save(path, task)
         session = chat_tools.chat_session()
         if session and getattr(session, "task_id", None) == task_id:
@@ -245,6 +256,186 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
         return _view(task)
 
 
+def admit(session, tool, args):
+    """Before any card: a bound plan's later steps never run out of order, and
+    a step waiting on its job never runs twice. Other calls pass untouched."""
+    task_id = getattr(session, "task_id", None)
+    if not task_id or tool in _CONTROLS:
+        return
+    with _LOCK:
+        try:
+            _, task = _read(task_id)
+        except HTTPException:
+            return  # begin_step detaches a task this project cannot read
+        if task["status"] in ("cancelled", "completed"):
+            return
+        step = _next(task)
+        for later in task["steps"]:
+            if later["status"] == "completed" or later["tool"] != tool:
+                continue
+            try:
+                expected = _resolve(later["args"], task["steps"])
+            except HTTPException:
+                continue  # its arguments still wait on an earlier result
+            if not _same_args(tool, expected, args):
+                continue
+            if later is step and step["status"] == "waiting":
+                raise HTTPException(409, {"error_kind": "task_step_waiting", "message":
+                                          f"Step {step['id']} is waiting on job {step['job']['job_id']}; "
+                                          "the conversation continues when it ends."})
+            if later is not step:
+                raise HTTPException(409, {"error_kind": "task_step_out_of_order", "message":
+                                          f"Step {later['id']} ({tool}) cannot start before step {step['id']} "
+                                          f"({step['tool']}) completes; it is {step['status']}."})
+            return
+
+
+def await_job(ticket, job_id, session_id):
+    """A run step whose solve is still running waits on its job, durably.
+
+    The turn is released; `settle_job` records the outcome when the job ends,
+    and the conversation continues once (`claim_continuation`)."""
+    if ticket is None:
+        return None
+    with _LOCK:
+        path, task = _read(ticket[0])
+        step = next(s for s in task["steps"] if s["id"] == ticket[1])
+        if step.get("attempt_id") != ticket[2] or step["status"] != "running":
+            return None
+        step["status"] = "waiting"
+        step["job"] = {"job_id": job_id, "session_id": session_id, "continuation": "armed"}
+        if task["status"] != "cancelled":
+            task["status"] = "waiting_job"
+        _save(path, task)
+        return path
+
+
+def settle_job(path, ticket, job_id, native_status, step_status, result=None):
+    """Record a waiting step's job outcome (`harness/continuation.py` decides it
+    from the job's own record). Runs on the job's follower thread, so it reads
+    the task file it was given, not the request's project. Takes only the
+    task lock, never the network lock."""
+    with _LOCK:
+        try:
+            task = json.loads(Path(path).read_text())
+        except (OSError, ValueError):
+            return None
+        step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
+        if (task.get("task_id") != ticket[0] or step is None or step.get("attempt_id") != ticket[2]
+                or step["status"] != "waiting" or step["job"]["job_id"] != job_id):
+            return None
+        _settle(task, step, native_status, step_status, result)
+        _save(Path(path), task)
+        return _view(task)
+
+
+def _settle(task, step, native_status, step_status, result):
+    step["status"] = step_status
+    if step_status == "completed":
+        step["result"] = {"job_id": step["job"]["job_id"], "final_status": "completed", **(result or {})}
+        step.pop("error", None)
+    elif step_status == "failed":
+        step["error"] = f"The solve ended {native_status}; inspect its log before retrying."
+    else:
+        step["error"] = "The job's outcome cannot be verified; inspect the solver before retrying."
+    step["job"]["outcome"] = native_status
+    cancelled = task["status"] == "cancelled"
+    stopped = cancelled or native_status == "aborted" or step["job"]["continuation"] == "withdrawn"
+    step["job"]["continuation"] = "withdrawn" if stopped else "due"
+    if not cancelled:
+        task["status"] = ("completed" if not _next(task) else
+                          "needs_review" if step_status == "uncertain" else "ready")
+
+
+def continued_in_turn(path, ticket):
+    """The job settled while its turn still held it: that turn goes on with
+    the plan, so no separate continuation follows."""
+    with _LOCK:
+        task = json.loads(Path(path).read_text())
+        step = next((s for s in task["steps"] if s["id"] == ticket[1]), None)
+        if step is not None and step.get("attempt_id") == ticket[2] and \
+                (step.get("job") or {}).get("continuation") == "due":
+            step["job"]["continuation"] = "delivered"
+            _save(Path(path), task)
+
+
+def _owned_tasks():
+    root, project, owner = _authority()
+    for path in (root / "assistant_tasks").glob("*.json"):
+        try:
+            task = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        if task.get("owner_id") == owner and task.get("project_id") == project:
+            yield path, task
+
+
+def _reconcile_lost(path, task):
+    """A waiting job this process never registered was lost with a restart."""
+    from harness import job_adapters
+    changed = False
+    for step in task["steps"]:
+        if step["status"] == "waiting" and not job_adapters.is_registered(step["job"]["job_id"]):
+            _settle(task, step, "unknown", "uncertain", None)  # lost with the process
+            changed = True
+    if changed:
+        _save(path, task)
+
+
+def due_continuations(session):
+    """Finished jobs this conversation's plans started, not yet continued."""
+    out = []
+    with _LOCK:
+        for path, task in _owned_tasks():
+            _reconcile_lost(path, task)
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                if job.get("continuation") == "due" and job.get("session_id") == session.session_id:
+                    out.append({"job_id": job["job_id"], "status": job["outcome"], "task_id": task["task_id"],
+                                "message": _continuation_message(task, job)})
+    return out
+
+
+def _continuation_message(task, job):
+    # The plan's title carries the request's words, so the turn is offered the
+    # tools its remaining steps need (the 128-tool selection reads the message).
+    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']})"
+
+
+def dismiss_continuation(session, job_id):
+    """"Stop waiting": this conversation will not continue for the job. The
+    job itself runs on; nothing is cancelled."""
+    with _LOCK:
+        for path, task in _owned_tasks():
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                if job.get("job_id") == job_id and job.get("session_id") == session.session_id \
+                        and job.get("continuation") in ("armed", "due"):
+                    job["continuation"] = "withdrawn"
+                    _save(path, task)
+                    return True
+    return False
+
+
+def claim_continuation(session, job_id):
+    """At most once per job: mark it delivered and rebind the plan. Grants nothing."""
+    with _LOCK:
+        for path, task in _owned_tasks():
+            _reconcile_lost(path, task)
+            for step in task["steps"]:
+                job = step.get("job") or {}
+                if job.get("job_id") != job_id:
+                    continue
+                if job.get("continuation") != "due" or job.get("session_id") != session.session_id \
+                        or task["status"] == "cancelled":
+                    break
+                job["continuation"] = "delivered"
+                _save(path, task)
+                session.task_id = task["task_id"]
+                return _continuation_message(task, job)
+    _refuse("continuation_unavailable", "No finished job of this conversation is waiting to continue.")
+
+
 def begin_step(session, tool, args):
     """Called only after the ordinary offered-tool and confirmation gates."""
     task_id = getattr(session, "task_id", None)
@@ -269,6 +460,8 @@ def begin_step(session, tool, args):
                 if done["status"] == "completed" and done["tool"] == tool and _same_args(tool, _resolve(done["args"], task["steps"]), args):
                     _refuse("task_step_already_completed", "This task step already completed; resume the next step.")
             return None
+        if step["status"] == "waiting":
+            _refuse("task_step_waiting", "This step is waiting on its job; it never runs twice.")
         if step["status"] in ("running", "uncertain"):
             _refuse("task_step_uncertain", "Verify the previous effect and explicitly reconcile this step before repeating it.")
         step["status"], step["session_id"] = "running", session.session_id
@@ -286,6 +479,9 @@ def finish_step(ticket, result=None, error=None):
         step = next(s for s in task["steps"] if s["id"] == ticket[1])
         if step.get("attempt_id") != ticket[2]:
             return None
+        if step.get("job"):
+            return _view(task)  # waiting on its job, or already settled by it
+        receipt = result.get("_edit_receipt") if isinstance(result, dict) else None
         if error:
             step["status"] = "failed" if _retryable_read(step["tool"]) else "uncertain"
             step["error"] = str(error)[:300]
@@ -302,6 +498,10 @@ def finish_step(ticket, result=None, error=None):
         ):
             step["status"] = "uncertain"
             step["error"] = "Solver start is not completion; inspect its outcome before advancing or retrying."
+        elif receipt is not None and (not isinstance(receipt, dict) or receipt.get("outcome") != "verified"):
+            # An edit counts only when its native read-back equals the card.
+            step["status"] = "uncertain"
+            step["error"] = "The edit's read-back did not match its card; inspect it before going on."
         else:
             step["status"] = "completed"
             # Retain references without replaying these bytes in every prompt.

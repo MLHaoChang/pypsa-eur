@@ -27,7 +27,7 @@ import { createPortal } from 'react-dom'
  *   * Confirmation card countdown timer is tracked via a ref so a re-render
  *     never leaks a setInterval.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { acknowledgeMountedView, type NavigationAcknowledgement } from '../utils/verifiedNavigation'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
 import { CheckedChart } from './CheckedChart'
@@ -68,7 +68,9 @@ import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { plainWords } from '../pages/hubDesign/plainWords'
-import { getWorkflowMenu, postChatGoal, postChatRewind, type ChoiceRequestFrame, type GoalState, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
+import { getWorkflowMenu, postChatGoal, postChatRewind, type ChoiceRequestFrame, type GoalState, type PlanContinuation, type WorkflowContext, type WorkflowMenu, type WorkflowState } from '../api/chat'
+import { CONTINUATION_MESSAGE, continuationMarker, usePlanContinuation } from '../hooks/usePlanContinuation'
+import type { ContinuationLine } from './AssistantResultCard'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
@@ -1544,7 +1546,11 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       const seeded: typeof messages = []
       let counter = 0
       for (const t of turns) {
-        if (t.user) {
+        const resumed = t.user ? CONTINUATION_MESSAGE.exec(t.user) : null
+        if (resumed) {
+          seeded.push({ id: `replay-u-${counter++}`, role: 'system', content: continuationMarker(resumed[2]),
+            ts: Math.round((t.ts || 0) * 1000) })
+        } else if (t.user) {
           seeded.push({
             id: `replay-u-${counter++}`,
             role: 'user',
@@ -2260,6 +2266,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           // Checked artifacts/task projections are not implemented in this pilot.
           tool_result: assuranceRef.current.strict ? undefined : d.result,
           tool_use_id: d.tool_use_id, tool_name: d.tool_name,
+          origin_project: streamProjectRef.current,
         })
         // Issue 11 — foreground solve handoff: subscribe to the detached
         // progress ring so PHASE/VALIDATION lines keep arriving after the
@@ -2582,13 +2589,16 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       generation?: number
       requiresChecked?: boolean
       gapFollowup?: SourceGapDraft
+      /** LC-12: the harness writes this turn's message; the transcript shows a marker. */
+      continuation?: PlanContinuation
     }) => {
     if (opts?.gapFollowup && (useUIStore.getState().currentProject !== opts.gapFollowup.projectName
       || useChatStore.getState().newChatSeq !== opts.gapFollowup.chatSequence
       || useChatStore.getState().sourceGapDraft !== opts.gapFollowup
       || useChatStore.getState().streaming || useChatStore.getState().pending != null
       || useChatStore.getState().requestQueue.length > 0)) return
-    const requestedChecks = opts?.requiresChecked === true || optedIntoChecks || requiredChecks
+    const requestedChecks = !opts?.continuation
+      && (opts?.requiresChecked === true || optedIntoChecks || requiredChecks)
     if (requestedChecks && !checksAvailable) {
       setError({ error_kind: 'assurance_unavailable',
         message: 'Answer checks are unavailable. Retry availability, or explicitly turn off checking for a new message.' })
@@ -2612,8 +2622,10 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     // `input_mode` — always yields false, and the bug is invisible: the
     // request still carries the right mode, because that expression is
     // evaluated before the reset too. Only the SPOKEN answer goes missing.
-    voiceTurnRef.current = opts?.fromCard ? false : dictatedRef.current
-    appendMessage({
+    voiceTurnRef.current = opts?.fromCard || opts?.continuation ? false : dictatedRef.current
+    // Nobody typed a continuation: a muted marker, never a user bubble.
+    if (opts?.continuation) appendMessage({ role: 'system', content: continuationMarker(opts.continuation.status) })
+    else appendMessage({
       role: 'user', content: text,
       origin_project: streamProjectRef.current,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
@@ -2621,8 +2633,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
       ...(requestedChecks ? { requiresChecked: true } : {}),
     })
     // A typed turn is nobody's card request: a denial in it drops nothing.
-    if (!opts?.fromCard || opts.gapFollowup) useChatStore.getState().setActiveRequest(null)
-    if (!opts?.fromCard) {
+    if ((!opts?.fromCard || opts.gapFollowup) && !opts?.continuation) useChatStore.getState().setActiveRequest(null)
+    if (!opts?.fromCard && !opts?.continuation) {
       setInput('')
       dictatedRef.current = false
     }
@@ -2638,7 +2650,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
-        message: text,
+        ...(opts?.continuation ? { continuation_job_id: opts.continuation.job_id } : { message: text }),
         ...(requestedChecks ? { assurance: { version: 1, mode: 'strict' } as const } : {}),
         ...(opts?.gapFollowup ? { checked_scope: opts.gapFollowup.checked_scope,
           source_gap_ref: opts.gapFollowup.source_gap_ref } : {}),
@@ -2766,6 +2778,36 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
   // Reveal/return belongs to this exact card, never a replacement or project.
   const [choiceInputFor, setChoiceInputFor] = useState<typeof choice>(null)
   const choiceInputOpen = choice != null && choiceInputFor === choice
+  // LC-12: a plan's job ended → the conversation continues once, held while
+  // the user is typing, a turn streams, or a card waits for an answer.
+  const waitingJobs = useMemo(() => {
+    const latest = new Map<string, { status: string; job?: string }>()
+    for (const m of messages) {
+      const task = (m.tool_result as { _task?: { task_id?: string; status?: string; next_step?: { job_id?: string } } } | undefined)?._task
+      if (task?.task_id && task.status) latest.set(task.task_id, { status: task.status, job: task.next_step?.job_id })
+    }
+    return [...latest.values()].filter((t) => t.status === 'waiting_job' && t.job).map((t) => t.job as string)
+  }, [messages])
+  const sendContinuation = useCallback((item: PlanContinuation) => {
+    dispatchSend('', [], { continuation: item })
+  }, [dispatchSend])
+  const planContinuation = usePlanContinuation({
+    sessionId: sessionId ?? null,
+    watching: waitingJobs.length > 0,
+    hold: streaming || input.trim() !== '' || pendingCard != null || choice != null || pendingSendText != null
+      || notReady || Boolean(mismatchLine),
+    onContinue: sendContinuation,
+  })
+  const continuationLine = (result: unknown, project: string | null | undefined): ContinuationLine | undefined => {
+    const job = (result as { _task?: { status?: string; next_step?: { job_id?: string } } } | undefined)?._task
+    if (job?.status !== 'waiting_job' || !job.next_step?.job_id) return undefined
+    const jobId = job.next_step.job_id
+    const handled = planContinuation.handled.get(jobId)
+    if (handled) return { state: handled }
+    if (planContinuation.due?.job_id === jobId) return { state: 'held', onContinueNow: planContinuation.continueNow }
+    if (project != null && project !== currentProject) return { state: 'elsewhere', project }
+    return { state: 'waiting', onStop: () => planContinuation.stopWaiting(jobId) }
+  }
   const revealChoiceInput = () => {
     if (!choice || choice.allow_free_text === false) return
     setChoiceInputFor(choice)
@@ -3506,6 +3548,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
             {m.role === 'tool' && m.tool_use_id && (
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
+                  continuation={continuationLine(m.tool_result, m.origin_project)}
                   onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
               </>

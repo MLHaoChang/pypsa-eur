@@ -9,7 +9,9 @@ through what it writes into the project, its ledger rows (``eh_template.json``
 ``ledger``, items ``connection_ramp``, ``oscillation``, ``import_efficiency``,
 ``fault_level``, ``lole_goal``), its island sidecar and the opt-in AI-training
 envelope (DC 01, ``dc_load_profile.read_envelope``). A project with no ledger
-row for a limit gets the generic placeholder below, marked assumed.
+row for a limit gets the generic placeholder below, marked assumed. The user's
+own limit (``grid_limits``, the bundled ``grid_readiness_limits.json``) comes
+before either, and the row's source says whose value it is.
 
 **Advisory.** It reads files and a network copy, solves nothing, and feeds
 neither ``validate_for_run`` nor the flow's ``run_ready`` (project workflow
@@ -18,7 +20,10 @@ refusal.
 
 Each row: ``{id, requirement, limit, unit, source, project_value, verdict,
 assumed, note, section, target}``, ``verdict`` one of pass|warn|fail|unknown
-and ``target`` the flow's ``{section, panel, component, entity, field}``.
+and ``target`` the flow's ``{section, panel, component, entity, field}``. The
+ramp, oscillation and SCR rows also carry ``setting`` ``{item, user, default}``:
+the user's own limit (``grid_limits``) or None, and the value a reset returns
+to (the template's ledger row, else the placeholder).
 
 Rules (gatekeeper review of 02):
 
@@ -26,7 +31,8 @@ Rules (gatekeeper review of 02):
 * a requirement only a dynamic study can show (the profile's
   ``dynamic_requirements``) is always ``unknown``, "dynamic (EMT) study needed";
 * ``assumed`` is true unless the limit's own tag is ``code`` (an extracted,
-  unconfirmed limit counts as assumed), or an input it rests on is assumed
+  unconfirmed limit counts as assumed) or the user set it with a source other
+  than ``assumed``, or an input it rests on is assumed
   (an assumed fault level makes the SCR and voltage-change rows assumed);
 * the envelope is IT-side at the PoC before any UPS/BESS smoothing, so the
   ramp, oscillation and voltage-change verdicts read "before mitigation".
@@ -95,6 +101,9 @@ RULE_SCR = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
 RULE_RAMP = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
 RULE_RVC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
+#: The oscillation row's after-mitigation value only (the before verdict also
+#: reads the band of concern, which is not a scalar): in band, ≤ the limit.
+RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
 
 
 def _judge(value: float, limit: float, rule: dict) -> str:
@@ -143,6 +152,8 @@ class _Inputs:
         self.meta = meta if isinstance(meta, dict) else {}
         self.ledger = {r["item"]: r for r in self.meta.get("ledger") or []
                        if isinstance(r, dict) and isinstance(r.get("item"), str)}
+        from services.adequacy.grid_limits import load_limits
+        self.user_limits = load_limits(self.dir)
         dc = self.meta.get("dc_load") if isinstance(self.meta.get("dc_load"), dict) else {}
         self.envelope = dc.get("envelope") if isinstance(dc.get("envelope"), dict) else None
         self.dc_spec = dc.get("spec") if isinstance(dc.get("spec"), dict) else None
@@ -164,6 +175,22 @@ class _Inputs:
                               if self.links else None)
 
     def marking(self, item):
+        """The limit's row: the user's own (``origin: user``) first, then the
+        template's ledger row, else None (the caller's placeholder). The
+        fault level's value lives on the bus, so the user's row for it keeps
+        the ledger's value and entity and takes only the source and note."""
+        row = self.template_marking(item)
+        user = self.user_limits.get(item)
+        if user is None:
+            return row
+        out = {**(self.ledger.get(item) or {}), "item": item, "source": user["source"],
+               "note": user.get("note") or "", "origin": "user"}
+        if user.get("value") is not None:
+            out["value"] = user["value"]
+        return out
+
+    def template_marking(self, item):
+        """The template's ledger row for ``item`` when it carries a value, else None."""
         row = self.ledger.get(item)
         return row if row is not None and _num(row.get("value")) is not None else None
 
@@ -178,8 +205,13 @@ def _profile_title(inp: "_Inputs") -> str:
 
 
 def _marking_assumed(row: dict | None) -> bool:
-    """A marking is assumed unless it is there and tagged ``code``."""
-    return row is None or str(row.get("source")) != "code"
+    """A marking is assumed unless it is there and tagged ``code``, or the
+    user set it from a source other than ``assumed``."""
+    if row is None:
+        return True
+    if row.get("origin") == "user":
+        return str(row.get("source")) == "assumed"
+    return str(row.get("source")) != "code"
 
 
 def _envelope_assumed(inp: _Inputs) -> bool:
@@ -191,8 +223,11 @@ def _marking_source(row: dict) -> tuple[str, bool]:
     note = row.get("note") or ""
     if note.lower().startswith("assumed: "):
         note = note[len("assumed: "):]
-    lead = "Template assumption" if src == "assumed" else f"Template value ({src})"
-    return (f"{lead}: {note}" if note else lead, src != "code")
+    if row.get("origin") == "user":
+        lead = "Your assumption" if src == "assumed" else f"Your value ({src})"
+    else:
+        lead = "Template assumption" if src == "assumed" else f"Template value ({src})"
+    return (f"{lead}: {note}" if note else lead, _marking_assumed(row))
 
 
 # ── rows ───────────────────────────────────────────────────────────────────
@@ -249,18 +284,19 @@ def _in_hour_uplift_mw(inp: _Inputs, period: str) -> float | None:
 
 
 def _peak_rows(inp: _Inputs) -> list[dict]:
-    from services.adequacy.site_peak import describe, peak_check
+    from services.adequacy.site_peak import describe, peak_check, unset_periods
 
     loss = inp.marking("import_efficiency")
     target = _target("connection", "Link", inp.link, "eh_energization_mw")
-    req = "Load within the energized import (after its efficiency) plus firm gensets, hour by hour"
+    req = ("Load within the energized import (after its efficiency) plus firm gensets and batteries, "
+           "hour by hour")
     if inp.n is None or not inp.links:
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
                      note="No grid connection is tagged on this project" if inp.n is not None
                      else "The project has no saved network",
                      section="connection", target=target)]
-    checked = peak_check(inp.n, inp.island_raw)
+    checked = peak_check(inp.n, inp.island_raw, unset=unset_periods(inp.meta))
     if all(r["energized_max_mw"] <= 0 for r in checked):
         return [_row("energization_peak", req, limit=None, unit="MW", source="the network",
                      project_value=None, verdict="unknown", assumed=True,
@@ -269,6 +305,19 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                      section="connection", target=target)]
     rows = []
     for r in checked:
+        if r["unset"]:
+            # A placeholder growth value (E1): the example's same-stage figure,
+            # so the period's verdict is not established.
+            rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
+                             limit=None, unit="MW", source="the template's growth inputs",
+                             project_value=None, verdict="unknown", assumed=True,
+                             note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the "
+                                   "period takes the example's same-stage value, a placeholder "
+                                   "that is not a value to check against, so the period stays unknown "
+                                   "(setting a placeholder is follow-up "
+                                   "E1-set-growth-placeholders)"),
+                             section="connection", target=target))
+            continue
         uplift = _in_hour_uplift_mw(inp, r["period"])
         if r["headroom_mw"] < -1e-9:
             verdict = "fail"
@@ -287,14 +336,16 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                  "energization schedule" if r["scheduled"] else "no energization schedule: the connection's capacity",
                  f"import efficiency from {loss_src}",
                  "fixed loads only (a flexible conversion unit is a decision, not counted)"]
+        if r.get("not_electric"):
+            notes.append("not electric load: " + ", ".join(r["not_electric"]))
         if uplift is not None:
             notes.append(f"the in-hour AI-training step is about {uplift:.3g} MW above the hourly "
                          "mean, so headroom below that is a warning")
         rows.append(_row(f"energization_peak:{r['period']}", f"{req} ({r['period']})",
                          limit=round(r["cap_mw"], 4), unit="MW",
                          source=("The energization schedule (a template assumption) and the island "
-                                 "requirements' genset N+k" if r["scheduled"]
-                                 else "The connection's capacity and the island requirements' genset N+k"),
+                                 "requirements' genset N+k and ride-through" if r["scheduled"]
+                                 else "The connection's capacity and the island requirements' genset N+k and ride-through"),
                          project_value=round(r["load_mw"], 4), verdict=verdict,
                          assumed=_marking_assumed(loss) or bool(inp.meta.get("energization")),
                          note="; ".join(notes), section="connection", target=target))
@@ -302,7 +353,8 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
 
 
 def _limit_from(inp: _Inputs, item: str, generic: float | None, generic_note: str):
-    """(value, source text, assumed) from the ledger row, else the generic placeholder."""
+    """(value, source text, assumed) from the user's limit, else the ledger
+    row, else the generic placeholder."""
     row = inp.marking(item)
     if row is not None:
         src, assumed = _marking_source(row)
@@ -312,9 +364,29 @@ def _limit_from(inp: _Inputs, item: str, generic: float | None, generic_note: st
     return generic, f"assumed (generic placeholder): {generic_note}", True
 
 
+def _setting(inp: _Inputs, item: str, generic: float | None) -> dict:
+    """What the panel's inline field edits (DC 03 slice 6): the user's own
+    limit (or None) and the value a reset returns to, the template's ledger
+    row or the generic placeholder."""
+    row = inp.template_marking(item)
+    if row is not None:
+        default = {"value": float(row["value"]), "source": str(row.get("source") or "assumed"),
+                   "origin": "template"}
+    else:
+        default = {"value": generic, "source": "assumed", "origin": "placeholder"}
+    user = inp.user_limits.get(item)
+    # Who set it stays in the sidecar: the scorecard also reaches the copilot.
+    shown = {k: v for k, v in user.items() if k != "set_by"} if user is not None else None
+    return {"item": item, "user": shown, "default": default}
+
+
+def _generic_ramp(inp: _Inputs) -> float | None:
+    """The placeholder ramp limit: a share of the connection per minute."""
+    return GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw if inp.connection_mw else None
+
+
 def _ramp_row(inp: _Inputs) -> dict:
-    generic = (GENERIC_RAMP_SHARE_PER_MIN * inp.connection_mw
-               if inp.connection_mw else None)
+    generic = _generic_ramp(inp)
     limit, source, assumed = _limit_from(
         inp, "connection_ramp", generic,
         f"{GENERIC_RAMP_SHARE_PER_MIN:.0%} of the connection capacity per minute")
@@ -633,6 +705,95 @@ def _lole_row(inp: _Inputs) -> dict:
                 section="scenarios", target=target)
 
 
+# ── after mitigation (DC 03) ───────────────────────────────────────────────
+
+
+_AFTER_IDS = ("ramp_rate", "oscillation", "rapid_voltage_change")
+
+
+def _after_battery(inp: _Inputs, rows: list[dict]) -> None:
+    """Add ``after_battery: {value, verdict, rule, units, note}`` to the
+    ramp, oscillation and voltage-change rows: the value the point of
+    connection sees once the site's battery/UPS has done its smoothing duty
+    (``services.adequacy.smoothing``), judged by the row's own limit under a
+    declared rule. The row's own verdict stays before mitigation. Nothing is
+    added without an AI-training envelope, an island sidecar or a committed
+    battery/UPS; "not known yet" where the row itself has no value."""
+    from services.adequacy.smoothing import after_mitigation, smoothing_screen
+
+    by_id = {r["id"]: r for r in rows if r["id"] in _AFTER_IDS}
+    ramp, osc = by_id.get("ramp_rate"), by_id.get("oscillation")
+    if inp.envelope is None or inp.n is None or inp.island_raw is None or ramp is None:
+        return
+    screen = smoothing_screen(inp.n, inp.island_raw, inp.envelope,
+                              ramp_limit_mw_per_min=ramp["limit"],
+                              oscillation_limit_pct=(osc or {}).get("limit"),
+                              connection_mw=inp.connection_mw, band_hz=OSCILLATION_BAND_HZ)
+    screened = [(ph, after_mitigation(ph)) for ph in (screen or {}).get("phases", [])]
+    screened = [(ph, after) for ph, after in screened if after is not None]
+    if not screened:
+        return
+    units = sorted({u for ph, _ in screened for u in ph["units"]})
+    # Each unit with its kind, assumed latency or walk-in, and where it is (DC 03).
+    detail = list({x["unit"]: {**x, "target": _target("assets", "StorageUnit", x["unit"])}
+                   for ph, _ in screened for x in ph.get("latency", [])}.values())
+    before = ramp["project_value"]
+    limit = ramp["limit"]
+
+    def values(ph, after):
+        """(ramp after, oscillation after, voltage change after, words) of one phase."""
+        s = after["step_mw"]
+        frac = after["residual_step_mw"] / s if s > 0 else 0.0
+        a_res, period = after["residual_amplitude_mw"], after["period_s"]
+        osc_slope = mw_per_s_to_mw_per_min(2.0 * math.pi * a_res / period) if period > 0 else 0.0
+        # The batteries' share at the limit, the UPSs' at their walk-in rate,
+        # the uncovered part at the envelope's rate (conservative); the residual
+        # oscillation's slope 2π·A/T stands on its own.
+        shaped = ((min(limit, before) if after["covered_battery_mw"] > 0 else 0.0)
+                  + after["ups_ramp_mw_per_min"] + frac * before) if before is not None else None
+        r = None if before is None else min(before, max(shaped, osc_slope))
+        hz = 1.0 / period if period > 0 else math.inf
+        o = (2.0 * a_res / inp.connection_mw * 100.0
+             if inp.connection_mw and OSCILLATION_BAND_HZ[0] <= hz <= OSCILLATION_BAND_HZ[1] else None)
+        v = after["residual_step_mw"] / sk * 100.0 if sk else None
+        parts = [f"{ph['cod'][:4] if ph.get('cod') else 'the phase'}: of the {s:.3g} MW step, batteries "
+                 f"hold {after['covered_battery_mw']:.3g} MW to the {limit:g} MW/min limit"]
+        if after["covered_ups_mw"] > 0:
+            parts.append(f"the UPS walks {after['covered_ups_mw']:.3g} MW in over {after['ups_walk_in_s']:g} s "
+                         f"({after['ups_ramp_mw_per_min']:.3g} MW/min)")
+        parts.append(f"the uncovered part ({after['residual_step_mw']:.3g} MW) is counted at the envelope's "
+                     f"rate, conservatively, and a {a_res:.3g} MW oscillation remains")
+        return r, o, v, "; ".join(parts) + f"; {ph['verdict']} by the smoothing screen: {ph['note']}"
+
+    sk = _poc_sk_mva(inp.n)
+    per_phase = [values(ph, after) for ph, after in screened]
+
+    def worst(i):
+        """The worst after value over the screened phases for result ``i``, and its words."""
+        got = [(x[i], x[3]) for x in per_phase if x[i] is not None]
+        return max(got, key=lambda t: t[0]) if got else (None, None)
+
+    def attach(row, i, rule):
+        if row is None:
+            return
+        value, how = worst(i)
+        if row["project_value"] is None or row["limit"] is None or value is None:
+            if row is osc and value is None and row["project_value"] is not None:
+                return                     # outside the band of concern: nothing to smooth
+            row["after_battery"] = {"value": None, "verdict": "unknown", "rule": dict(rule), "units": units,
+                                    "unit_detail": detail, "note": "not known yet: the row itself has no value"}
+            return
+        v = round(value, 4)
+        row["after_battery"] = {"value": v, "verdict": _judge(v, row["limit"], rule), "rule": dict(rule),
+                                "units": units, "unit_detail": detail, "note": how}
+
+    attach(ramp, 0, RULE_RAMP)
+    attach(osc, 1, RULE_OSC)
+    rvc = by_id.get("rapid_voltage_change")
+    if rvc is not None and rvc.get("rule") and sk:
+        attach(rvc, 2, RULE_RVC)
+
+
 # ── the scorecard ──────────────────────────────────────────────────────────
 
 
@@ -661,12 +822,22 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
             _rvc_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
             _lole_row(inp)]
+    _after_battery(inp, rows)
+    settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
+                "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
+                "scr": ("fault_level", None)}
+    for r in rows:
+        if r["id"] in settings:
+            r["setting"] = _setting(inp, *settings[r["id"]])
     counts = {v: sum(r["verdict"] == v for r in rows) for v in VERDICTS}
+    after = sum(r["verdict"] in ("fail", "warn") and (r.get("after_battery") or {}).get("verdict") == "pass"
+                for r in rows)
     return {"schema": SCHEMA, "profile": {"id": profile_id, "title": (profile or {}).get("title"),
                                           "error": error},
             "template_id": inp.meta.get("id"), "envelope": inp.envelope is not None,
             "rows": rows, "summary": {**counts, "assumed": sum(r["assumed"] for r in rows),
-                                      "red_flags": counts["fail"] + counts["warn"]},
+                                      "red_flags": counts["fail"] + counts["warn"],
+                                      "pass_after_mitigation": after},
             "basis": ("advisory screening of the saved network and its sidecars; never blocks Run. "
                       "A fail is a red flag to take to the network operator; unknown means an "
                       "input is missing, never a pass")}

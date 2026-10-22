@@ -100,7 +100,37 @@ def _per_asset(frame_or_series, periods) -> dict[tuple[str, str], dict[str, floa
 is_fuel_supply = P.is_fuel_supply
 
 
-def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
+def _shortfall_costs(n, sides, lost_load) -> tuple[list[P.AssetCost], dict[str, float]]:
+    """The product shortfalls (`process_products.shortfalls`, ticket 08) as `product_shortfall` AssetCosts, opex
+    per period = Σ objective weight × dispatch × the price the LP gave it (`n.statistics.opex`'s basis); None when
+    the dispatch is not known. Also what the captured (removed) slacks cost per period: the LP paid it, and
+    `cost_breakdown` (computed after the slack is gone) does not see it."""
+    from services.process_products import shortfalls
+
+    w = n.snapshot_weightings.objective
+    out, removed = [], {}
+    for s in shortfalls(n, lost_load):
+        if s.flag == "role_from_name":
+            continue        # ownership reads the column alone: a name-only "shortfall" stays an ordinary asset
+        flags = [P.PRODUCT_SLACK_FLAGS["shortfall"], *([s.flag] if s.flag else [])]
+        side = "site" if s.bus in sides.site else "grid" if s.bus in sides.grid else "unclassified"
+        opex: dict = {}
+        for p in _periods(n):
+            k = _key(p)
+            if s.p is None:
+                opex[k] = None
+                continue
+            m = _period_mask(n, p)
+            opex[k] = float((w.to_numpy()[m] * s.p.to_numpy(dtype=float)[m].clip(min=0.0)
+                             * s.cost.to_numpy(dtype=float)[m]).sum())
+            if s.source == "capture":
+                removed[k] = removed.get(k, 0.0) + opex[k]
+        out.append(P.AssetCost(component="Generator", name=s.name, side=side, flags=flags,
+                               capex={}, fom={}, opex=opex))
+    return out, removed
+
+
+def _asset_costs(n, cfg, parsed, sides, shortfall_costs=()) -> list[P.AssetCost]:
     from services.solver_service import with_periodized_cost_defaults
 
     periods = [_key(p) for p in _periods(n)]
@@ -111,14 +141,17 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         fom = _per_asset(n.statistics.fom(groupby=False, round=0), periods)
         opex = _per_asset(n.statistics.opex(groupby=False, round=0), periods)
     roles = product_roles(n)
-    out = []
+    shortfall = {a.name for a in shortfall_costs}
+    out = list(shortfall_costs)
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
+        if comp == "Generator" and name in shortfall:
+            continue                            # read through the accessor (ticket 08), above
         side, flags = P.asset_side(n, comp, name, sides)
         if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
             flags = [*flags, "fuel_supply_generator"]
-        if comp == "Generator" and name in roles:
-            flags = [*flags, P.PRODUCT_SLACK_FLAGS[roles[name]]]
+        if comp == "Generator" and roles.get(name) == "buy_in":
+            flags = [*flags, P.PRODUCT_SLACK_FLAGS["buy_in"]]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))
@@ -455,6 +488,11 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
     from services.results.cost_breakdown import compute_cost_breakdown
 
     cb = compute_cost_breakdown(n, cfg)
+    shortfall_costs, removed = _shortfall_costs(n, sides, lost_load)
+    cb_total = _cost_breakdown_total(n, cb)
+    for k, v in removed.items():
+        if cb_total.get(k) is not None:
+            cb_total[k] += v
     return P.LedgerInputs(
         periods=periods, site_party=parsed.site_party, bill_items=items, bill=per_item,
         bill_flags=bill_flags, retailer=retailer, settlement=settlement,
@@ -463,8 +501,8 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
             agreement is not None
             and agreement.curtailment_compensation_eur_per_mwh is not None),
         export_revenue=export_revenue, export_split=split, import_cost=_import_cost(n, parsed),
-        assets=_asset_costs(n, cfg, parsed, sides),
-        cost_breakdown_total=_cost_breakdown_total(n, cb),
+        assets=_asset_costs(n, cfg, parsed, sides, shortfall_costs),
+        cost_breakdown_total=cb_total,
         lp_commercial=_lp_commercial(n, commercial),
         disclosures=_disclosures(n, cfg, lost_load),
         input_flags=sorted(set(input_flags)), unsettled_contracts=unsettled,

@@ -1500,12 +1500,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "apply_generated_profile",
-        "Write one PENDING generated profile onto a generator's p_max_pu "
-        "(undoable; the confirmation card authorises the write). The point "
-        "feeding the component defaults to the component's own name. Refuses "
-        "(422) when the component is gone, its carrier is not wind/solar, or "
-        "the artifact holds no column for it; warns when the bus moved since "
-        "generation. `time_basis` says what the snapshots mean: \"UTC\" "
+        "Write one PENDING generated profile onto its target (undoable; the "
+        "confirmation card authorises the write): a renewable profile onto a "
+        "generator's p_max_pu, a load profile (generate_load_profile) onto a "
+        "load's p_set; `component_type`/`attribute` name another target "
+        "only when the user asks. The point feeding the component defaults "
+        "to the component's own name. Refuses (422) when the component is "
+        "gone, a renewable profile meets a non-wind/solar carrier, the "
+        "profile's family may not write that target, or the artifact holds "
+        "no column for it; warns when the bus moved since generation. A load "
+        "answer carries profile_annual_mwh and modelled_mwh; relay an "
+        "energy_mismatch warning. `time_basis` says what the snapshots mean: \"UTC\" "
         "or the IANA zone whose wall clock they are (e.g. "
         "\"Europe/Berlin\"; the series is shifted by that zone's offset). "
         "Leave it unset unless the user said; then the answer's `warnings` "
@@ -1517,8 +1522,109 @@ TOOLS: list[dict[str, Any]] = [
          "job_id": {"type": "string"},
          "component": {"type": "string"},
          "point_id": {"type": "string"},
-         "time_basis": {"type": "string"}},
+         "time_basis": {"type": "string"},
+         "component_type": {"type": "string"},
+         "attribute": {"type": "string"}},
         ["project_id", "job_id", "component"],
+    ),
+    _t(
+        "list_load_profile_archetypes",
+        "List the load-profile archetypes (industrial, commercial, "
+        "residential, ev_charging, heat, data_centre, library) with every "
+        "parameter and its default, and the named presets (e.g. "
+        "commercial_office, industrial_three_shift). Every archetype is a "
+        "stated, assumed shape, never a measurement. Safety: read.",
+        {},
+    ),
+    _t(
+        "generate_load_profile",
+        "Generate a load archetype for named loads of the open project into "
+        "the pending store (one column per load; nothing on the network "
+        "changes until apply_generated_profile). `params` must state exactly "
+        "one of peak_mw or annual_mwh; other keys are the archetype's (see "
+        "list_load_profile_archetypes) and a misspelt one is refused. Shapes "
+        "are hourly; working hours follow the project's commercial timezone "
+        "unless params.timezone says otherwise. The answer gives each load's "
+        "peak MW, its source-year annual MWh, the MWh this model's snapshots "
+        "will see (modelled_mwh: a sampled template sees less), any "
+        "warnings to relay (energy_mismatch, an assumed UTC clock), and the "
+        "job_id to apply. On a project made "
+        "with a data-centre dc_load spec, that spec owns the DC load: apply "
+        "refuses a data_centre profile there. `project_id` is the project "
+        "NAME and must be the open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "archetype": {"type": "string",
+                       "enum": ["industrial", "commercial", "residential",
+                                "ev_charging", "heat", "data_centre",
+                                "library"]},
+         "loads": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "archetype", "loads"],
+    ),
+    _t(
+        "generate_availability_profile",
+        "Generate a generator availability bound into the pending store "
+        "(nothing changes until apply_generated_profile, which writes it to "
+        "the bound it states). Kinds: maintenance → p_max_pu "
+        "(params.windows [{from, to, available}] with MM-DD ends repeating "
+        "every period, or YYYY-MM-DD in the network's year; or params.rule "
+        "{weeks, season: summer|winter}); must_run → p_min_pu (params.share, "
+        "or winter_share + summer_share, or monthly: 12 shares); derating → "
+        "p_max_pu (threshold_c, per_k, floor) from the assumed ambient; the "
+        "default threshold, 15 °C, is a gas turbine's ISO rating condition, "
+        "so set another equipment's own rating temperature. "
+        "forced_outages is refused: the reliability study samples outages "
+        "from each asset's rate and repair time. Wind/solar generators are "
+        "refused (their weather profile). Apply warns when it replaces an "
+        "existing series, when a must-run floor exceeds what the bus can "
+        "absorb, and that a floor on a committable unit is a min stable "
+        "level; relay those. With component_type \"links\" the same kinds "
+        "act on process links (bounds on p0): a shutdown on a two-way link "
+        "closes both directions; a floor on a two-way or point-of-connection "
+        "link is refused. `generators` then names the links. "
+        "`project_id` is the project NAME and must be the open project. "
+        "Safety: execution.",
+        {"project_id": {"type": "string"},
+         "kind": {"type": "string",
+                  "enum": ["maintenance", "must_run", "derating",
+                           "forced_outages"]},
+         "generators": {"type": "array", "items": {"type": "string"}},
+         "component_type": {"type": "string", "enum": ["generators", "links"]},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "kind", "generators"],
+    ),
+    _t(
+        "generate_series_profile",
+        "Generate another model series into the pending store (nothing "
+        "changes until apply_generated_profile writes it to the target it "
+        "states). Kinds: tou → marginal_cost of generators (or links with "
+        "params.component_type \"links\", per MWh of p0): params.periods "
+        "are tariff periods {name, rate, months, weekdays, start_hour, "
+        "end_hour}, first match wins, every hour priced, plus currency, "
+        "price_basis and currency_year: a currency, basis or year the "
+        "project's finance inputs set and that differs is refused; one they "
+        "leave unset is accepted with a money_basis_unverified warning; "
+        "inflow → storage-unit inflow: annual_mwh with shape "
+        "snowmelt|rain_fed|flat or 12 monthly shares; cop → link efficiency "
+        "of a heat pump whose bus0 is electricity: source air|ground, "
+        "sink_c, source_c (ground), eta, cop_max; an air source takes the "
+        "project's data-centre ambient, or ambient_annual_mean_c, "
+        "ambient_seasonal_amplitude_k and ambient_diurnal_amplitude_k "
+        "stated, else it is refused (cop_ambient_unknown); hours whose "
+        "COP falls below 1 are raised to 1 and warned. market is refused until "
+        "market price bundles exist; part_load is refused (it depends on "
+        "the dispatch). A price on a point-of-connection link is refused: "
+        "set the tariff. `project_id` is the project NAME and must be the "
+        "open project. Safety: execution.",
+        {"project_id": {"type": "string"},
+         "kind": {"type": "string",
+                  "enum": ["tou", "inflow", "cop", "market", "part_load"]},
+         "components": {"type": "array", "items": {"type": "string"}},
+         "params": {"type": "object"},
+         "year": {"type": "integer"}},
+        ["project_id", "kind", "components"],
     ),
 
     # ── Project management (21) ────────────────────────────────────────────
@@ -1730,7 +1836,9 @@ TOOLS: list[dict[str, Any]] = [
         "eh_h2_hub (strong_grid), "
         "eh_microgrid (off_grid), eh_h2_hub_staged and eh_microgrid_staged "
         "(those two planned over 2027/2030/2035, multi-period), eh_ammonia_staged "
-        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_site (a generic site that is not a data "
+        "(the H2 hub making ammonia for a contracted delivery, with a Haber-Bosch loop; multi-period), eh_ipp_hybrid "
+        "(a wind and PV IPP with a battery candidate behind a 70 MW export limit; one hourly 2030 year, "
+        "illustrative day-ahead prices, financial PPAs), eh_site (a generic site that is not a data "
         "center, parametrized by `params`: site_type industrial | commercial | "
         "hospital | campus | other fills every value from a preset; override "
         "stages [{year, peak_mw}], connection_mw, energization [{year, mw}], "
@@ -1747,7 +1855,7 @@ TOOLS: list[dict[str, Any]] = [
                                      "eh_datacenter", "eh_datacenter_staged",
                                      "eh_h2_hub", "eh_microgrid", "eh_site",
                                      "eh_h2_hub_staged", "eh_microgrid_staged",
-                                     "eh_ammonia_staged"]},
+                                     "eh_ammonia_staged", "eh_ipp_hybrid"]},
             "new_name": {"type": "string"},
             "params": {"type": "object",
                        "description": "eh_site only: the site's parameters "
@@ -3089,6 +3197,11 @@ TOOLS: list[dict[str, Any]] = [
         "smoothing), reactive range, frequency support and the profile's "
         "dynamic requirements (always unknown: an EMT study is needed), grid "
         "former, island ride-through per scenario, LOLE against the goal. "
+        "With an AI-training load and a committed battery/UPS, the ramp, "
+        "oscillation and voltage-change rows also carry after_battery {value, "
+        "verdict, units, note}: the value after the battery/UPS smooths, judged "
+        "by the same limit; the row's own verdict stays before mitigation, so "
+        "give both. "
         "unknown means an input is missing, never a pass; say which. Say which "
         "limits are assumed. It never blocks a run. 422 for an unknown "
         "profile. Safety: read.",
@@ -3487,6 +3600,71 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── Library references (3) — the shipped common cost references ───────
+    _t(
+        "list_library_references",
+        "List the shipped (common) technology cost references: published "
+        "benchmarks such as the Danish Energy Agency's August 2026 catalogue "
+        "for onshore wind, utility and commercial rooftop PV and 100 MW AEC/PEM "
+        "electrolysers, one row per technology and projection year. Each row "
+        "has its money year (currency_year), capacity_basis_code "
+        "(output_electric, output_electric_ac, input_electric), "
+        "includes_grid_connection (true, false or 'unknown'), licence and "
+        "attribution. They are opt-in references, never the project's "
+        "defaults. Paged: {items, total_count, offset, returned, has_more}. "
+        "Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "get_library_reference",
+        "Read one shipped cost reference (technology and projection_year from "
+        "list_library_references) with its source cells, and a comparison: "
+        "each parameter beside the defaults-pack value it would otherwise be, "
+        "both with their own source and money year, and differs=true where "
+        "value, unit, currency, money year or projection year differ. Nothing "
+        "is converted or written. With component and asset, the pack is the "
+        "one that asset's overnight cost was priced from; otherwise the "
+        "latest generic pack. `pack` names which. Report both values with "
+        "their money years; never present the reference as the default. "
+        "Safety: read.",
+        {
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "component": {"type": "string"},
+            "asset": {"type": "string"},
+        },
+        ["technology", "projection_year"],
+    ),
+    _t(
+        "apply_library_reference",
+        "Apply one shipped cost reference (list_library_references) to ONE asset: "
+        "a Generator for wind/PV (output-priced), a Link for an electrolyser "
+        "(priced per MW of electrical INPUT, never scaled by efficiency). Writes "
+        "overnight_cost, lifetime, fom_cost (overnight x the reference's FOM "
+        "share) and, on a Link, efficiency; capital_cost and discount_rate stay. "
+        "The user sees an old→new card with the reference and the default it "
+        "replaces, each with its source and money year. Nothing is converted. "
+        "Refusals: reference_target_unsupported (wrong class or a StorageUnit), "
+        "currency_mismatch (the asset's pack is not EUR), and "
+        "reference_confirmation_needed with `missing`: ask the user about each "
+        "item's text, then call again with confirm=[...] naming only what they "
+        "confirmed (dc_ac: AC-priced PV on a generator whose capacity basis is "
+        "not declared; grid_connection: the reference includes grid connection "
+        "and the project already prices its connection; money_year: the value "
+        "is copied in its own money year, not adjusted). Never confirm on the "
+        "user's behalf. Returns {written, source, currency_year, licence, "
+        "attribution, notes, receipt}. Safety: write.",
+        {
+            "component_class": {"type": "string", "enum": ["Generator", "Link"]},
+            "name": {"type": "string"},
+            "technology": {"type": "string"},
+            "projection_year": {"type": "integer"},
+            "confirm": {"type": "array", "items": {"type": "string",
+                        "enum": ["dc_ac", "grid_connection", "money_year"]}},
+        },
+        ["component_class", "name", "technology", "projection_year"],
+    ),
     # ── Site connection (1) — IC U1 follow-up, item b ─────────────────────
     _t(
         "set_site_connection",
@@ -3736,7 +3914,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -3976,13 +4154,19 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
-    # profile generator (6)
+    # profile generator (10)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
+    "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
+    "generate_load_profile": [("POST", "/api/projects/{name}/profiles/loads/generate")],
+    "generate_availability_profile": [
+        ("POST", "/api/projects/{name}/profiles/availability/generate")],
+    "generate_series_profile": [
+        ("POST", "/api/projects/{name}/profiles/series/generate")],
     # project_mgmt (21)
     "list_projects": [("GET", "/api/projects/")],
     "load_project": [("GET", "/api/projects/{name}")],
@@ -4162,6 +4346,11 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    # Library references (3): two reads (the asset's pack from its provenance) and the apply.
+    "list_library_references": [("GET", "/api/library/references")],
+    "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
+                              ("GET", "/api/library/references/{technology}/{year}")],
+    "apply_library_reference": [("POST", "/api/network/library_reference/apply")],
     "set_site_connection": [("GET", "/api/simulation/solver_config"),
                             ("PUT", "/api/simulation/solver_config")],
     "define_participants": [("POST", "/api/simulation/value_flows/template"),

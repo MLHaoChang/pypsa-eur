@@ -121,7 +121,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  "library_refs.json",
                  # The project flow's acknowledged warnings (B1).
                  # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
-                 "flow_acks.json")
+                 "flow_acks.json",
+                 # The user's own grid-readiness limits (DC 03 slice 6):
+                 # services/adequacy/grid_limits.py owns it; the walk in
+                 # `test_bundle_sidecars` pins it to its SIDECAR_NAME.
+                 "grid_readiness_limits.json")
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the
@@ -1444,6 +1448,8 @@ _TEMPLATE_DEFAULT_NAMES = {
     "eh_microgrid_staged": "Island Microgrid (staged growth)",
     # Grid-to-process ticket 05 (project_templates/eh_ammonia.py).
     "eh_ammonia_staged": "Green Ammonia Hub (staged growth)",
+    # IPP renewables + BESS ticket 03 (project_templates/eh_ipp.py).
+    "eh_ipp_hybrid": "Renewables IPP with battery",
 }
 
 # Sidecars a template directory may carry beside network.nc (P19): the EH
@@ -1452,7 +1458,9 @@ _TEMPLATE_DEFAULT_NAMES = {
 _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "solver_config.json",
                       # The island sidecar (plan 2026-10-07 campus island, I1).
-                      "island_config.json")
+                      "island_config.json",
+                      # Pre-built sensitivity cases, data only until S5 (IPP ticket 04).
+                      "cases.json")
 
 
 def _eh_templates_module():
@@ -1483,6 +1491,37 @@ def _eh_template_builder(template_key: str):
 # The data-center templates that take an opt-in AI-training load profile
 # (DC grid readiness 01): a body ``{"dc_load": {...}}``. No body, no change.
 _DC_LOAD_TEMPLATES = ("eh_datacenter", "eh_datacenter_staged")
+
+
+def _template_params(template_key: str) -> set[str]:
+    """The create-body keys a template takes: ``dc_load`` on the data
+    centers (DC 01), ``planning`` on the staged examples built for entered
+    years (E1). Empty for every other template."""
+    keys = {"dc_load"} if template_key in _DC_LOAD_TEMPLATES else set()
+    mod = _eh_templates_module() if template_key.startswith("eh_") else None
+    if mod is not None and template_key in getattr(mod, "NATIVE_PLANNING", {}):
+        keys.add("planning")
+    return keys
+
+
+def _planned_network(mod, template_key: str, planning, load_spec):
+    """The template built for ``planning``, refused as ``planning_invalid``
+    (422) when it does not build or fails the template rules a shipped
+    template must pass (``_build.py``): nothing is created then."""
+    from services.process_template_rules import refusals
+
+    try:
+        n = mod.BUILDERS[template_key](load_spec=load_spec, planning=planning)
+        refused = refusals(n, mod.solver_config(template_key, planning))
+    except ValueError as exc:
+        refused = [str(exc)]
+    if refused:
+        raise HTTPException(422, {"error_kind": "planning_invalid",
+                                  "code": "planning_invalid", "field": "planning",
+                                  "message": "planning: the example does not build for "
+                                             f"{list(planning.years)} → {planning.end_year}: "
+                                             + "; ".join(refused)})
+    return n
 
 
 def _eh_site_module():
@@ -1608,6 +1647,7 @@ def create_from_template(
     # connection, say) leaves nothing behind. Other templates take none.
     site = None
     dc = None
+    planned = None
     if template_key == "eh_site":
         site_mod = _eh_site_module()
         try:
@@ -1618,23 +1658,42 @@ def create_from_template(
                                       "message": str(exc)})
         site_net = site_mod.build_eh_site(site_p)
         site = (site_mod, site_p, site_net, site_mod.solver_config(site_p, site_net))
-    elif template_key in _DC_LOAD_TEMPLATES and params is not None:
-        # Checked, and the network built, before the project row exists too.
+    elif params is not None and _template_params(template_key):
+        # Checked, and the network built, before the project row exists too:
+        # the opt-in AI-training load (DC 01) and the planning years (E1).
         from services.dc_load_profile import DcLoadError
 
-        extra = sorted(set(params) - {"dc_load"})
+        allowed = _template_params(template_key)
+        extra = sorted(set(params) - allowed)
         if extra:
-            raise HTTPException(422, {"code": "template_params_invalid", "field": extra[0],
-                                      "message": f"{extra[0]}: unknown parameter "
-                                                 "(this template takes only dc_load)"})
-        dc_mod = _eh_templates_module()
-        try:
-            dc_spec = dc_mod.dc_load_spec(template_key, params.get("dc_load"))
-        except DcLoadError as exc:
-            raise HTTPException(422, {"code": "dc_load_invalid", "field": exc.field,
-                                      "message": str(exc)})
-        dc_net = dc_mod.BUILDERS[template_key](load_spec=dc_spec)
-        dc = (dc_net, dc_mod.dc_load_meta(template_key, dc_spec))
+            raise HTTPException(422, {"error_kind": "template_params_invalid",
+                                      "code": "template_params_invalid", "field": extra[0],
+                                      "message": f"{extra[0]}: unknown parameter (this template "
+                                                 f"takes only {', '.join(sorted(allowed))})"})
+        tpl_mod = _eh_templates_module()
+        planning = None
+        if "planning" in params:
+            try:
+                planning = tpl_mod.planning_spec(template_key, params["planning"])
+            except tpl_mod.PlanningError as exc:
+                raise HTTPException(422, {"error_kind": "planning_invalid",
+                                          "code": "planning_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
+        dc_spec = None
+        if "dc_load" in params:
+            try:
+                dc_spec = tpl_mod.dc_load_spec(template_key, params.get("dc_load"),
+                                               planning=planning)
+            except DcLoadError as exc:
+                raise HTTPException(422, {"error_kind": "dc_load_invalid",
+                                          "code": "dc_load_invalid", "field": exc.field,
+                                          "message": str(exc)}) from exc
+        if planning is None:
+            built_net = tpl_mod.BUILDERS[template_key](load_spec=dc_spec)
+        else:
+            built_net = _planned_network(tpl_mod, template_key, planning, dc_spec)
+            planned = (tpl_mod, planning, dc_spec)
+        dc = (built_net, tpl_mod.dc_load_meta(template_key, dc_spec) if dc_spec else None)
     elif params is not None:
         raise HTTPException(422, f"Template '{template_key}' takes no parameters.")
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
@@ -1679,20 +1738,27 @@ def create_from_template(
     if site is not None:
         site[0].write_sidecars(dest, site[1], site[2], site[3],
                                entered=site[0].entered_fields(params))
+    elif planned is not None:
+        # Built for the entered years: the sidecars are written for them,
+        # never copied from the example's.
+        planned[0].write_sidecars(dest, template_key, planned[1], load_spec=planned[2])
     else:
         for sidecar in _TEMPLATE_SIDECARS:
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
         if template_series:
+            from services.library import bundle_pins
             from services.library import template_series as TS
 
             cfg_path = dest / "solver_config.json"
-            cfg = json.loads(cfg_path.read_text()) if cfg_path.is_file() else {}
-            atomic_write_text(cfg_path, json.dumps(
-                TS.apply_refs(cfg, template_series, series_refs), indent=2, sort_keys=True)
-                + "\n")
-    if dc is not None:
+            cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
+                                template_series, series_refs)
+            atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+            # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
+            # reads `library_ref_stale` on the first open.
+            bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
+    if dc is not None and dc[1] is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
         meta_path = dest / "eh_template.json"
@@ -1774,6 +1840,13 @@ def create_from_template(
     # reported, never stored unbound. After the metadata, so the project is
     # complete whatever the bind does (#283 review).
     solver_config_issues = _bind_template_solver_config(user, dest / "solver_config.json")
+    if template_series:
+        # The bind materialised the minted series on the network (its price frames): write
+        # them into network.nc, as a save would, so a reopen before the first save prices
+        # the same dispatch (IPP ticket 02).
+        with PyPSAService.get_lock(), PyPSAService.get_netcdf_io_lock():
+            _atomic_write_with(dest / "network.nc",
+                               lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
     # Persist the pointer, mirroring activate_project. Written AFTER the swap
     # succeeds so a failed create does not leave the session pointing at a

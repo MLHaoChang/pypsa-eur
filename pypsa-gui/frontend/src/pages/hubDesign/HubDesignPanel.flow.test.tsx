@@ -8,6 +8,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi, simulationApi } from '../../api/simulation'
+import * as flowApi from '../../api/flow'
 import { guidesApi } from '../../components/GuidedTour'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -30,11 +31,35 @@ vi.mock('../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The rail's marks come from /flow now, not from the study (design §3.4): the
+// project section is complete, the connection has something to check, the
+// scenarios section is still to do.
+vi.mock('../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/flow')>()
+  return { ...actual, getProjectFlow: vi.fn() }
+})
+const STATES: Record<string, string | null> = {
+  project: 'complete', carriers: 'complete', connection: 'warning', loads: 'complete',
+  assets: 'complete', profiles: 'complete', commercial: 'not_needed', scenarios: 'incomplete',
+  readiness: null, results: null,
+}
+function flowPayload(): flowApi.ProjectFlow {
+  return {
+    sections: flowApi.FLOW_SECTIONS.map(section => ({
+      section, label: section, state: STATES[section], required: true, items: [], summary: null,
+    })),
+    run_ready: true, run_blocker: null, run_request: { optimisation: true, study: true },
+    verdicts: { optimisation: { ready: true, blocker: null }, study: null },
+    notes: [], deferred: false, deferred_reason: null,
+  } as unknown as flowApi.ProjectFlow
+}
+
 const RUNNING = { status: 'running', archetype: 'weak_flexible' as const }
 const DONE = { status: 'done', archetype: 'weak_flexible' as const, report: REPORT }
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo' })
+  useUIStore.setState({ currentProject: 'Demo', activeSection: null, fieldDrawer: null, uiMode: 'guided' })
+  vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flowPayload())
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL })
   vi.spyOn(guidesApi, 'getGuide').mockRejectedValue(new Error('offline'))
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
@@ -52,6 +77,7 @@ function mount() {
   render(<QueryClientProvider client={client}><HubDesignPanel /></QueryClientProvider>)
   return userEvent.setup()
 }
+const readinessRail = () => screen.getByTestId('hub-rail-section-readiness')
 const rail = (s: string) => screen.getByTestId(`hub-rail-step-${s}`)
 const railStates = () => Object.fromEntries(['start', 'site', 'goal', 'results', 'improve']
   .map(s => [s, rail(s).getAttribute('data-state')]))
@@ -86,29 +112,27 @@ describe('flowState → rail and card (§5.4)', () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
     mount()
     await screen.findByTestId('hub-card-start')
-    expect(railStates()).toMatchObject({ start: 'current', site: 'todo', results: 'todo' })
+    expect(railStates()).toMatchObject({ start: 'current', site: 'warning', results: 'todo' })
   })
 
-  it('failed without a report is no_study; Goal shows the error and Run again', async () => {
+  it('failed without a report is no_study; Readiness → run shows the error and Run again', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'failed', error: 'boom', report: null })
     // the route answers 204 for a failed study (N2): the review is not asked
     const user = mount()
     await screen.findByTestId('hub-card-site')
     expect(railStates()).toMatchObject({ results: 'todo', improve: 'blocked' })
-    await user.click(rail('goal'))
-    expect((await screen.findByTestId('hub-goal-error')).textContent).toContain('boom')
-    expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
+    await user.click(readinessRail())
+    expect((await screen.findByTestId('hub-run-error')).textContent).toContain('boom')
+    expect(screen.getByTestId('hub-run-start').textContent).toBe('Run again')
     expect(resultsApi.getEhReview).not.toHaveBeenCalled()
   })
 
-  it('running: opens on Goal with a spinner; Improve blocked, Results says it is running', async () => {
+  it('running: opens on Readiness → run with a spinner; Improve blocked, Results says it is running', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
     const user = mount()
-    await screen.findByTestId('hub-card-goal')
-    expect(railStates()).toEqual({ start: 'done', site: 'done', goal: 'current',
-      results: 'todo', improve: 'blocked' })
+    await screen.findByTestId('hub-run-running')
+    expect(railStates()).toMatchObject({ start: 'done', site: 'warning', results: 'todo', improve: 'blocked' })
     expect(screen.getByTestId('hub-rail-spinner')).toBeTruthy()
-    expect(screen.getByTestId('hub-goal-running')).toBeTruthy()
     await user.click(rail('results'))
     expect((await screen.findByTestId('hub-card-results')).textContent).toContain('The study is running')
   })
@@ -118,7 +142,8 @@ describe('flowState → rail and card (§5.4)', () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
     mount()
     await screen.findByTestId('hub-card-results')
-    expect(railStates()).toEqual({ start: 'done', site: 'done', goal: 'done',
+    // Marks follow /flow (inputs), not the study: the study does not tick them.
+    expect(railStates()).toEqual({ start: 'done', site: 'warning', goal: 'todo',
       results: 'current', improve: 'todo' })
     await screen.findByTestId('hub-results-verdict')
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
@@ -145,7 +170,7 @@ describe('auto-advance (§5.6)', () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
     mount()
-    await screen.findByTestId('hub-card-goal')
+    await screen.findByTestId('hub-run-running')
     setStudy(DONE)
     await screen.findByTestId('hub-card-results')
     expect(useHubDesignStore.getState().step).toBe('results')
@@ -155,7 +180,7 @@ describe('auto-advance (§5.6)', () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
     const user = mount()
-    await screen.findByTestId('hub-card-goal')
+    await screen.findByTestId('hub-run-running')
     await user.click(rail('site'))
     expect(useHubDesignStore.getState().userMovedRail).toBe(true)
     setStudy(DONE)
@@ -164,15 +189,15 @@ describe('auto-advance (§5.6)', () => {
     expect(screen.getByTestId('hub-card-site')).toBeTruthy()
   })
 
-  it('done → running moves the rail to Goal', async () => {
+  it('done → running moves the rail to Readiness → run, where the Run is', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE)
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
     const user = mount()
     await screen.findByTestId('hub-card-results')
     await user.click(rail('improve'))
     setStudy(RUNNING)
-    await screen.findByTestId('hub-card-goal')
-    expect(useHubDesignStore.getState().step).toBe('goal')
+    await screen.findByTestId('hub-run-running')
+    expect(useUIStore.getState().activeSection).toBe('readiness')
   })
 
   it('a new project resets the store and derives its own step', async () => {
@@ -229,12 +254,12 @@ describe('hub_design tour before any study (gate B2)', () => {
         .getAttribute('data-step-target')).not.toBe(target))
     }
     expect(seen).toEqual(['hub-rail', 'hub-start-templates', 'hub-site-readiness',
-      'hub-site-type', 'hub-goal-lole', 'hub-goal-run'])
+      'hub-site-type', 'hub-goal-lole', 'hub-run-start'])
     expect(screen.queryByTestId('guide-tour')).toBeNull()
     // the tour's reveal clicks did not count as the user moving the rail
     expect(useHubDesignStore.getState().userMovedRail).toBe(false)
     setStudy(RUNNING)
-    await screen.findByTestId('hub-card-goal')
+    await screen.findByTestId('hub-run-running')
     setStudy(DONE)
     await screen.findByTestId('hub-card-results')
     rect.mockRestore()
@@ -283,16 +308,16 @@ describe('a failed first read (re-gate B4)', () => {
 
   // P30 (B8): the line names what failed — the first of study state,
   // template, readiness — and Goal's Run waits for the template.
-  it('template 500 → the line names the template, hub-goal-run disabled', async () => {
+  it('template 500 → the line names the template, hub-run-start disabled', async () => {
     vi.mocked(resultsApi.getEhTemplate).mockRejectedValue(boom())
     const user = mount()
     const line = await screen.findByTestId('hub-load-error')
     expect(line.textContent).toMatch(
       /^This project's template could not be read from the server, so the steps below may be incomplete\./)
-    await user.click(rail('goal'))
-    const run = await screen.findByTestId('hub-goal-run') as HTMLButtonElement
+    await user.click(readinessRail())
+    const run = await screen.findByTestId('hub-run-start') as HTMLButtonElement
     expect(run.disabled).toBe(true)
-    expect(run.title).toBe('The template could not be read — retry above.')
+    expect(run.title).toBe('The template could not be read — retry below.')
   })
 
   it('study 500 → the line names the study state', async () => {
@@ -376,5 +401,143 @@ describe('HubDesignPanel in Expert never watches the edit counter (P33b, D-4)', 
     await screen.findByTestId('hub-card-results')
     await new Promise(r => setTimeout(r, 30))
     expect(networkApi.undoInfo).not.toHaveBeenCalled()
+  })
+})
+
+describe('the rail is the ten flow sections', () => {
+  const ids = ['project', 'carriers', 'connection', 'loads', 'assets', 'profiles', 'commercial',
+    'scenarios', 'readiness', 'results']
+
+  it('lists them in flow order with the state /flow gives each', async () => {
+    mount()
+    await screen.findByTestId('hub-card-site')
+    const buttons = Array.from(screen.getByTestId('hub-rail').querySelectorAll('button'))
+      .filter(b => b.getAttribute('data-testid') !== 'hub-rail-step-improve')
+    expect(buttons).toHaveLength(10)
+    expect(buttons.map(b => b.textContent?.replace(/^\d+/, ''))).toEqual([
+      'Project & site', 'Carriers & processes', 'Connection & grid', 'Loads & demand', 'Assets & sizing',
+      'Time series & profiles', 'Commercial & parties', 'Scenarios & optimisation', 'Readiness → run',
+      'Results → reports'])
+    expect(ids).toHaveLength(10)
+  })
+
+  it('a section without a bespoke card shows the generic card and its open items, with a way to Expert', async () => {
+    const payload = flowPayload()
+    const loads = payload.sections.find(x => x.section === 'loads')!
+    loads.state = 'incomplete'
+    loads.items = [{
+      code: 'no_load', severity: 'error', message: 'Add a demand', source: 'validation', blocking: false,
+      acknowledged: false,
+      target: { section: 'loads', panel: null, component: 'Load', entity: 'dc_it', field: 'p_set' },
+    }]
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-rail-section-loads'))
+    expect(await screen.findByTestId('hub-card-loads')).toBeTruthy()
+    expect(useUIStore.getState().activeSection).toBe('loads')
+    const item = await screen.findByTestId('section-item')
+    expect(item.textContent).toContain('Add a demand')
+    expect(item.textContent).toContain("Loads & demand › Load 'dc_it'")
+    expect(item.textContent).not.toContain('p_set')
+    // The primary action opens the field here, in Guided (design §3.5).
+    await user.click(screen.getByTestId('section-item-open'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.entity).toBe('dc_it')
+    expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Load', name: 'dc_it' })
+    // The secondary link takes the section to Expert and closes the drawer.
+    await user.click(screen.getByTestId('section-item-expert'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().fieldDrawer).toBeNull()
+    expect(useUIStore.getState().activeSection).toBe('loads')
+  })
+
+  it('moving the step moves the shared section, and a bespoke section keeps its card', async () => {
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(rail('goal'))
+    expect(await screen.findByTestId('hub-card-goal')).toBeTruthy()
+    expect(useUIStore.getState().activeSection).toBe('scenarios')
+  })
+})
+
+describe('one set of marks and one count (design §3.2)', () => {
+  const item = (severity: string, extra: Record<string, unknown> = {}) => ({
+    code: `c_${severity}_${Math.random()}`, severity, message: `${severity} item`, source: 'validation',
+    blocking: false, acknowledged: false, target: { section: 'loads', panel: null, component: null, entity: null, field: null },
+    ...extra,
+  })
+
+  it('the rail pill carries the dot and the open counts in its label; incomplete and unknown differ', async () => {
+    const payload = flowPayload()
+    const loads = payload.sections.find(x => x.section === 'loads')!
+    loads.state = 'incomplete'
+    loads.items = [item('error'), item('error'), item('warning'), item('info'),
+      item('error', { acknowledged: true }), item('error', { in_scope: false })] as never
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
+    mount()
+    await screen.findByTestId('hub-card-site')
+    const pill = await vi.waitFor(() => {
+      const b = screen.getByTestId('hub-rail-section-loads')
+      expect(b.getAttribute('aria-label')).toBe('Loads & demand: 2 to do · 1 to check')
+      return b
+    })
+    expect(pill.querySelector('[data-state="incomplete"]')).toBeTruthy()
+    // Sections 9 and 10 stay without a dot.
+    expect(screen.getByTestId('hub-rail-step-results').querySelector('[data-state]')).toBeNull()
+  })
+
+  it('a flow that cannot be read shows "?" in every pill with a state, never a tick', async () => {
+    vi.mocked(flowApi.getProjectFlow).mockRejectedValue(new Error('x'))
+    mount()
+    await screen.findByTestId('hub-card-site')
+    await vi.waitFor(() => expect(screen.getByTestId('hub-rail-section-loads')
+      .querySelector('[data-state="unknown"]')).toBeTruthy())
+    expect(screen.getByTestId('hub-rail-section-loads').getAttribute('aria-label')).toBe('Loads & demand: not known yet')
+  })
+
+  it('the section list counts only open items and keeps info as a muted line', async () => {
+    const payload = flowPayload()
+    const loads = payload.sections.find(x => x.section === 'loads')!
+    loads.items = [item('error'), item('info'), item('error', { in_scope: false })] as never
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(payload)
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-rail-section-loads'))
+    expect(await screen.findAllByTestId('section-item')).toHaveLength(1)
+    expect(screen.getByTestId('section-infos').textContent).toContain('info item')
+  })
+})
+
+describe('the readiness card (section 9)', () => {
+  const target = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: null }
+  async function openReadiness(over: Record<string, unknown>) {
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({ ...flowPayload(), ...over } as never)
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-rail-section-readiness'))
+    return user
+  }
+
+  it('says it is checking while the flow is deferred, never "Ready to run"', async () => {
+    await openReadiness({ deferred: true, run_ready: false })
+    expect(await screen.findByTestId('readiness-checking')).toBeTruthy()
+    expect(screen.queryByTestId('readiness-ready')).toBeNull()
+  })
+
+  it('a blocker opens its field here first, Expert second', async () => {
+    const blocker = { section: 'connection', message: 'Connection & grid: no import connection', target }
+    const user = await openReadiness({
+      run_ready: false, run_blocker: blocker,
+      verdicts: { optimisation: { ready: false, blocker }, study: null },
+    })
+    expect((await screen.findByTestId('readiness-blocked')).textContent).toContain('no import connection')
+    await user.click(screen.getByTestId('readiness-open'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.entity).toBe('grid_import')
+    // The secondary link takes the same field to Expert.
+    useUIStore.setState({ fieldDrawer: null, activeSection: 'readiness' })
+    await user.click(await screen.findByTestId('readiness-open-expert'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
   })
 })

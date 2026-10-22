@@ -8,11 +8,15 @@ import { useSimulationStore } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { parseSuggestedCo2Value } from '../utils/carrierZeroCo2'
-import { issueTitle } from '../utils/issueTitles'
 import type { Carrier, ValidationIssue } from '../api/types'
 import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/PageKit'
 import { componentOfKey, usePlacementFindings } from '../site3d/placementFindingsStore'
 import type { FindingKind, PlacementFinding } from '../site3d/placementCheck'
+import { RunFromReadiness } from '../components/RunFromReadiness'
+import { FlowStateDot } from '../components/FlowStateDot'
+import { FLOW_SECTIONS, type FlowSectionId } from '../api/flow'
+import { useProjectFlow } from '../hooks/useProjectFlow'
+import { sectionForComponent, sectionMeta } from '../layout/flowSections'
 import { useTopologyFindings } from './useTopologyFindings'
 import { TOPOLOGY_FINDING_TITLES, type TopologyFinding } from '../utils/topologyCheck'
 import { GridReadinessScorecard, useGridReadiness } from '../components/gridReadiness/GridReadinessScorecard'
@@ -33,7 +37,6 @@ export default function IssuesPanel() {
   const setSelectedComponent = useUIStore(s => s.setSelectedComponent)
   const setHighlightedComponent = useUIStore(s => s.setHighlightedComponent)
   const openRightPanel = useUIStore(s => s.openRightPanel)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const currentProject = useUIStore(s => s.currentProject)
   // Last-solve failure card (from the SSE `done` payload via simulationStore).
   // Shown as a prominent banner above the live preflight findings — preflight
@@ -103,21 +106,38 @@ export default function IssuesPanel() {
   // shared queries and sidecar stores — no map needs to be open.
   const topologyFindings = useTopologyFindings(currentProject)
 
-  // Jump straight to the offending asset's edit form. The Issues view is
-  // itself a slide panel, and PropertiesPanel only mounts when no slide panel
-  // is active (App.tsx) — so `setSlidePanel(null)` is what actually reveals
-  // the editor. Without it the component is "selected" but stays invisible
-  // behind the still-open Issues panel.
   // The grid-readiness scorecard (DC 02): shown only when the project has a
   // saved network to read; a failed read leaves the panel as it was.
   const { data: gridReadiness } = useGridReadiness()
 
+  // Open the offending asset's edit form beside this list (J9). Issues stays
+  // open, App.tsx mounts the Properties panel next to it for the selected
+  // component, and the finding clears here as soon as the write lands (the
+  // writes invalidate the preflight and the flow).
   const jumpTo = (type: string, name: string) => {
     setSelectedComponent({ type, name })
     setHighlightedComponent({ type, name })
     openRightPanel()
-    setSlidePanel(null)
   }
+
+  // The findings by flow section, in flow order. A finding is filed where the
+  // flow files the same check (code + entity); one the flow does not list is
+  // filed by its component class, else under "Other checks" so none is lost.
+  const { flow } = useProjectFlow()
+  const bySection = useMemo(() => {
+    const filed = new Map<string, FlowSectionId>()
+    for (const sec of flow?.sections ?? []) {
+      for (const it of sec.items) filed.set(`${it.code}|${it.target.entity ?? ''}`, sec.section)
+    }
+    const groups = new Map<FlowSectionId | 'other', ValidationIssue[]>()
+    for (const issue of [...grouped.errors, ...grouped.warnings]) {
+      const key = filed.get(`${issue.code}|${issue.name ?? ''}`)
+        ?? sectionForComponent(issue.component_class) ?? 'other'
+      groups.set(key, [...(groups.get(key) ?? []), issue])
+    }
+    const order: Array<FlowSectionId | 'other'> = [...FLOW_SECTIONS, 'other']
+    return order.filter(k => groups.has(k)).map(k => ({ key: k, issues: groups.get(k) as ValidationIssue[] }))
+  }, [flow, grouped])
 
   return (
     <div className="flex flex-col h-full">
@@ -181,10 +201,14 @@ export default function IssuesPanel() {
           count={total}
           hint="Live preflight — the same gate Run LOPF uses"
           right={
-            <Btn onClick={revalidate} disabled={isRevalidating || isFetching}>
-              <RefreshCw size={11} className={isRevalidating || isFetching ? 'animate-spin' : ''} />
-              Revalidate
-            </Btn>
+            <div className="flex items-center gap-2">
+              {/* Warnings do not block the run: the Run is here too, not only in the all-clear. */}
+              {!allOk && data && data.errors === 0 && <RunFromReadiness testId="issues-run-with-warnings" />}
+              <Btn onClick={revalidate} disabled={isRevalidating || isFetching}>
+                <RefreshCw size={11} className={isRevalidating || isFetching ? 'animate-spin' : ''} />
+                Revalidate
+              </Btn>
+            </div>
           }
           bodyClassName=""
         >
@@ -245,27 +269,21 @@ export default function IssuesPanel() {
               <span className="text-xs text-muted max-w-sm">
                 The model is ready to run. The solver may still hit numerical issues during the actual solve.
               </span>
+              <RunFromReadiness testId="issues-run" />
             </div>
           ) : !data ? (
             <div className="px-4 py-10 text-center text-[11.5px] text-muted">Loading validation…</div>
           ) : (
             <div className="flex flex-col">
-              {grouped.errors.length > 0 && (
-                <>
-                  <GroupHeader label="Errors" count={grouped.errors.length} severity="error" />
-                  {grouped.errors.map((issue, i) => (
-                    <IssueRow key={`err-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} carriers={carriers} />
+              {bySection.map(g => (
+                <div key={g.key} data-testid={`issues-section-${g.key}`}>
+                  <SectionGroupHeader id={g.key} count={g.issues.length} />
+                  {g.issues.map((issue, i) => (
+                    <IssueRow key={`${issue.severity}-${i}-${issue.code}-${issue.name}`} issue={issue}
+                      onJumpTo={jumpTo} carriers={carriers} />
                   ))}
-                </>
-              )}
-              {grouped.warnings.length > 0 && (
-                <>
-                  <GroupHeader label="Warnings" count={grouped.warnings.length} severity="warning" />
-                  {grouped.warnings.map((issue, i) => (
-                    <IssueRow key={`warn-${i}-${issue.code}-${issue.name}`} issue={issue} onJumpTo={jumpTo} carriers={carriers} />
-                  ))}
-                </>
-              )}
+                </div>
+              ))}
             </div>
           )}
         </PageSection>
@@ -388,13 +406,18 @@ function TopologyFindingRow({ finding, onJumpTo }: { finding: TopologyFinding; o
   )
 }
 
-function GroupHeader({ label, count, severity }: {
-  label: string; count: number; severity: 'error' | 'warning'
-}) {
-  const color = severity === 'error' ? 'text-danger' : 'text-warn'
+// One flow section's header over its findings: the number, the name and the
+// state dot the sidebar and the Guided rail show for it.
+function SectionGroupHeader({ id, count }: { id: FlowSectionId | 'other'; count: number }) {
+  const { section } = useProjectFlow()
+  const label = id === 'other' ? 'Other checks' : sectionMeta(id).label
   return (
-    <div className={`flex items-center gap-1.5 px-4 pt-3 pb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] ${color}`}>
+    <div className="flex items-center gap-1.5 px-4 pt-3 pb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-ink-600">
+      {id !== 'other' && <span className="font-mono text-ink-400">{sectionMeta(id).number}</span>}
       {label} <span className="text-muted font-mono">({count})</span>
+      {id !== 'other' && id !== 'readiness' && id !== 'results' && (
+        <FlowStateDot state={section(id)?.state ?? null} />
+      )}
     </div>
   )
 }
@@ -446,7 +469,7 @@ function IssueRow({ issue, onJumpTo, carriers }: {
       <div className="flex-1 min-w-0">
         <div className="flex items-baseline gap-2 mb-0.5 min-w-0">
           <span className="text-[12px] font-semibold text-text" data-testid="issue-title">
-            {issueTitle(issue.code)}
+            {issue.title}
           </span>
           {issue.component_class && issue.name && (
             <span className="text-[10px] text-muted truncate">

@@ -134,3 +134,33 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-21: a macOS job sat queued with no runner, and the waiver only fires once the job is cancelled.** The PR waited on GitHub's own runner timeout with every other check green.
   - Fix: after 30 minutes queued with no runner and everything else green, the coordinator cancels that workflow run and reruns premerge, which then waives it.
   - Lives in: `.claude/skills/coordinator/SKILL.md`, "Merging" → "A blocked PR".
+
+## 21 Oct 2026: README and append-only manifest overlaps
+
+- **A clean overlap in `pypsa-gui/backend/harness/README.md` counted as code.** Every PR that added a section to the harness contract had to merge master and rerun ~2 h of CI, and could lose the race again to the next README PR (#479 merged master twice).
+  - Fix: `docs_only_re` covers `pypsa-gui/backend/harness/README.md`. A real git conflict still blocks, in its own check.
+  - Lives in: `scripts/coord/premerge.sh`, `docs_only_re`.
+- **Two PRs each adding an error kind to `pypsa-gui/tool-error-kinds.json` counted as a code overlap.**
+  - Fix: overlap only in that manifest is waived when neither side removes a line since the merge-base, the trial merge is clean and `tests/test_tool_error_kind_manifest.py` passes on it; premerge prints a `waived` line. A removed or edited line still blocks. The template has the same mechanism as `append_only_overlap_re` with `append_only_test_cmd` (empty by default).
+  - Lives in: `scripts/coord/premerge.sh`, `kinds_overlap_re` (template: `append_only_overlap_re`).
+
+## 21 Oct 2026: retro "code quality and implementation efficiency"
+
+- **Seven Opus work sessions ran at 400–760k tokens of context and cost $55–124 each.** Every tool call re-reads the whole context.
+  - Fix: a work session rotates past 300k context, or when a package's PR merges and more slices remain: it writes its hand-off note and asks the coordinator for a fresh session. `sessions.py` prints each session's used tokens and flags those over 300k as `ROTATE`; the sweep acts on the flag.
+  - Lives in: steward "Rotation", `scripts/coord/sessions.py`, coordinator "Sweep".
+- **Owner decisions reached sessions as relayed messages, and a session could not check one.**
+  - Fix: `docs/agents/owner-decisions.md` holds one row per decision; the coordinator appends, briefs cite the row, and `AGENTS.md` points to it.
+  - Lives in: `docs/agents/owner-decisions.md`, coordinator "Deciding or asking", `docs/agents/session-brief.md`.
+- **A pending `AskUserQuestion` was lost when a worker restarted (7 times across two coordinators).**
+  - Fix: every `AskUserQuestion` is also written in the turn's final reply text, in the same options form.
+  - Lives in: coordinator "Sweep" step 4 and "Deciding or asking".
+- **A PR sat with zero checks (#442): its base had been retargeted after the push, so no CI ran on the head.** Premerge said only "none yet".
+  - Fix: when the head commit is older than 10 minutes, premerge also says to merge the base in, as a real merge commit, to trigger CI.
+  - Lives in: `scripts/coord/premerge.sh`, "checks".
+- **Clean code overlaps that the tests cover still cost a master merge and a ~2 h CI cycle.**
+  - Fix: a code overlap is waived when the trial merge is clean, the semantic check passes and the tests that exercise each overlapping file pass. A file with no test, a conflict or a failing test still blocks, and premerge says why. The live script maps files to tests in `scripts/coord/overlap_tests.py`; the template has `overlap_tests_script` (empty by default).
+  - Lives in: `scripts/coord/premerge.sh`, `scripts/coord/overlap_tests.py` (template: `overlap_tests_script`, `overlap_test_cmd`).
+- **Two reads cost hundreds of thousands of characters: `pull_request_read get_files` on #491 (684k) and raw `list_events`.**
+  - Fix: read a PR's file list with `git diff --stat <base>...<head>`, and a session's events only from a saved file through `events.py`.
+  - Lives in: coordinator "Tool hygiene".

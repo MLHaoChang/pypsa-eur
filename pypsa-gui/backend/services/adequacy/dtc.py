@@ -449,6 +449,16 @@ def run_dtc_stress(
                     "noncritical_unserved_mwh": _bus_unserved_mwh(
                         nn, noncritical, sink=sink),
                 })
+            if status in ("ok", "optimal"):
+                # Grid-to-process ticket 08b: the stress re-solve's own lost
+                # production per product (the LP curtails the process units
+                # there), never a feed-forward on top of it. Only when the
+                # network has a product shortfall.
+                from services.adequacy.process_loss import lost_production_summary
+
+                lost = lost_production_summary(nn, sink.get("last_lost_load"))
+                if lost:
+                    row["lost_production"] = lost
             contingencies.append(row)
         finally:
             try:

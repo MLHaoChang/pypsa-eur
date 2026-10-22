@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The shipped European technology cost references (DEA, CC BY 4.0) are listed in the Library as common references, over `/api/library/references` and through two read-only assistant tools. Each reference is shown beside the defaults-pack value the asset would otherwise be priced from, both with their own source and money year; nothing is converted or written.

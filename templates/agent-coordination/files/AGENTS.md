@@ -13,6 +13,8 @@ The owner sets direction and makes decisions. Sessions work as one of three role
 
 Ask every question as an interactive choice (the `AskUserQuestion` tool). Give 2–4 concrete answers, each with its consequence. Put your recommended answer first, mark it "(Recommended)" and give the reason in its description. The owner picks one or types their own.
 
+Decisions the owner has made are in `docs/agents/owner-decisions.md`.
+
 A work session sends each question in that same form to the coordinator with `send_message`. The coordinator bundles the questions for the owner.
 
 ## Credentials

@@ -290,6 +290,8 @@ def _lcoe_inputs_block(result, case) -> dict[str, Any] | None:
 
 
 def _project_payload(result, case) -> dict[str, Any]:
+    from services.finance.revenue_streams import revenue_by_stream
+
     m, fin = result.metrics, case.inputs
     cash = result.cash
     return {
@@ -343,6 +345,9 @@ def _project_payload(result, case) -> dict[str, Any]:
                        for ln in getattr(result.incentives, "lines", []) or []],
         "counterfactual": _counterfactual_block(result, case),
         "lines_not_established": _lines_not_established(result),
+        # The owner's operating cash by stream per year, a financial PPA as its two legs
+        # (IPP ticket 05, G6); None when the operating cash is not established.
+        "revenue_streams": revenue_by_stream(result.op),
         # The discount rates the returns above use (the chat's cash attribution
         # discounts at the report's own cost of equity).
         "cost_of_equity": _num(fin.cost_of_equity),
