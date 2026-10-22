@@ -95,6 +95,8 @@ CLAUDE.md
 !.claude/hooks/session-start.sh
 !.claude/hooks/block-dangerous-git.sh
 !.claude/hooks/test-block-dangerous-git.sh
+!.claude/hooks/context-guard.sh
+!.claude/hooks/test-context-guard.sh
 # ...and the vendored agent skills (see .claude/skills/MATTPOCOCK-SKILLS.md)
 !.claude/skills/
 !.claude/CLAUDE.md

@@ -64,7 +64,7 @@ These stay in this folder and are not copied:
   - `scripts/coord/premerge.sh`: `docs_only_re`, `semantic_re` and `semantic_cmd`. Point `semantic_cmd` at the interpreter the hook builds. To waive code overlaps that tests cover, write a script that maps a file to its tests and set `overlap_tests_script` and `overlap_test_cmd` (the contract is in the script's comments; this repo's `scripts/coord/overlap_tests.py` is an example).
   - `.claude/skills/coordinator/SKILL.md`: the model table and the known environment failures.
   - `AGENTS.md`: "Project notes".
-  - `.gitignore`: if it ignores `.claude/hooks/*`, add exceptions for `block-dangerous-git.sh` and `test-block-dangerous-git.sh`, or the guardrail files are never committed.
+  - `.gitignore`: if it ignores `.claude/hooks/*`, add exceptions for `block-dangerous-git.sh`, `context-guard.sh` and their `test-*.sh` files, or the guardrail files are never committed.
 
 | Placeholder | Example | Used in |
 |---|---|---|
