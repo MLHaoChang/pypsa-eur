@@ -14,6 +14,8 @@ import { GFM_KEY } from '../CampusIslandGfmSection'
 import { chapterTiles, dispatchSolved, FROM_STUDY_HINT, type ChapterInputs, type ChapterOpen } from './chapters'
 import { useHubDesignStore } from './hubDesignStore'
 import RunGridChecks from './RunGridChecks'
+import { useInScope } from '../../components/flowScope/useFlowScope'
+import { AddToScope } from '../../components/flowScope/ScopeCards'
 
 const OPEN_LABEL = (o: ChapterOpen) =>
   'step' in o ? 'Go to Goal' : o.panel === 'campusElectrical' ? 'Open the grid checks' : 'Open the detail'
@@ -59,6 +61,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
     operation: { status: status.data ?? null, gfm: gfm.data ?? null },
   })
 
+  // The grid checks are Grid › Grid code & electrical design's (W4a).
+  const gridInScope = useInScope('grid', 'grid_code')
+
   const open = (o: ChapterOpen) => {
     if ('step' in o) { setStep(o.step, { user: true }); return }
     const ui = useUIStore.getState()
@@ -87,7 +92,9 @@ export function ChaptersSection({ reliability }: { reliability: ChapterInputs['r
               </p>
             )}
             {t.id === 'grid_plan' && project && ['not_run', 'stale', 'unavailable'].includes(t.state) && (
-              <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
+              gridInScope
+                ? <RunGridChecks project={project} again={t.state !== 'not_run'} disabled={t.state === 'running'} />
+                : <AddToScope card="grid" option="grid_code" testId="hub-run-grid-checks-out-of-scope" />
             )}
             <button type="button" data-testid={`hub-chapter-${t.id}-open`} onClick={() => open(t.open)}
               className="self-start text-[11.5px] text-accent hover:underline">

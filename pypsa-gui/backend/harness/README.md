@@ -345,7 +345,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 244 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 254 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -385,7 +385,10 @@ per-snapshot bounds helper; cyclic units are checked against their bounds only.
 `energy-balance/1` (opt-in) gives the Energy flow tab's totals (generation, served,
 unserved, storage change and the unsplit remainder of export, losses and conversion),
 gated by a per-bus balance; the tab's Source -> Via -> Destination rows are its own
-attribution and stay withheld.
+attribution and stay withheld. `site-import/1` (opt-in) gives the Load shape tab's
+grid import, peak import and export as that tab measures them, and the weighted hours at
+the grid_import Link's p_nom_opt x p_max_pu; the tab's heatmap, week and monthly views stay
+unchecked.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,

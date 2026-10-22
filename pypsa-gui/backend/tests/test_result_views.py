@@ -83,8 +83,8 @@ def test_a_results_view_id_is_its_tab():
 
 # ── R0: the registry by card (card-workspaces.md §3, §8) ─────────────────────
 # Data only: each results view names its card, the card's sub-option and the
-# card's results tab. The ids are flow_scope's (W4a); whichever of W4a and R0
-# merges second checks them against flow_scope.CARDS and AVAILABILITY.
+# card's results tab. The ids are flow_scope's (W4a); the tests below check them
+# against flow_scope.CARDS and AVAILABILITY.
 
 CARD_IDS = ('capacity', 'grid', 'control', 'reliability', 'commercial', 'handoff')
 CARD_TABS = {
@@ -140,6 +140,19 @@ def test_card_fields_use_the_card_ids():
             continue
         assert v.sub_option in SUB_OPTIONS[v.card], v.view_id
         assert v.card_tab in CARD_TABS[v.card], v.view_id
+
+
+def test_card_ids_are_flow_scopes():
+    from services import flow_scope
+    assert rv.CARDS == tuple(c.id for c in flow_scope.CARDS)
+
+
+def test_every_views_card_and_sub_option_is_a_scope_option():
+    from services import flow_scope
+    for v in rv.RESULT_VIEWS:
+        if v.card is None:
+            continue
+        assert (v.card, v.sub_option) in flow_scope.AVAILABILITY, v.view_id
 
 
 def test_views_outside_results_have_no_card():

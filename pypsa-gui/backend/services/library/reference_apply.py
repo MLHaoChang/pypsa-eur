@@ -40,6 +40,8 @@ from services.library import europe_reference as R
 from services.library import reference_catalogue as C
 
 CONFIRMATIONS = ("dc_ac", "grid_connection", "money_year")
+# One closing line for every confirmation, in the card, the drawer and the assistant's refusal.
+LEFT_UNCONFIRMED = "Left unticked, nothing is applied."
 
 # Which class a capacity basis prices: output on a Generator, electrical input on a Link.
 _TARGET_CLASS = {"output_electric": "Generator", "output_electric_ac": "Generator",
@@ -171,14 +173,14 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
     needs: list[dict] = []
     if ref.capacity_basis_code == "output_electric_ac":
         needs.append({"confirmation": "dc_ac", "text":
-                      "This PV cost is per MW of AC output. This generator's capacity basis is not declared; "
-                      "if its p_nom is DC module capacity, the cost per MW is overstated by the DC/AC ratio. "
-                      "Unconfirmed, nothing is applied."})
+                      "This PV cost is per MW of AC output. This generator's capacity isn't marked as AC or DC; "
+                      "if it is the DC module rating, the cost per MW is overstated by the DC/AC ratio. "
+                      f"{LEFT_UNCONFIRMED}"})
     why = _connection_priced(n, commercial) if ref.includes_grid_connection is True else None
     if why:
         needs.append({"confirmation": "grid_connection", "text":
                       f"This reference's investment already includes grid connection, and {why}: the connection "
-                      "would be counted twice. Unconfirmed, nothing is applied."})
+                      f"would be counted twice. {LEFT_UNCONFIRMED}"})
     pack_year = pack_overnight.currency_year if pack_overnight is not None else None
     read_as = base_year if base_year is not None else pack_year
     no_money_year = read_as is None
@@ -189,7 +191,7 @@ def plan(n, commercial: Mapping[str, Any] | None, component_class: str, name: st
                       "read_as_year": read_as, "read_as_source": against,
                       "disclosure": money_disclosure(ref.currency_year, ref.currency, read_as),
                       "text": f"{money_disclosure(ref.currency_year, ref.currency, read_as)} "
-                              f"Compared with {against}. Unconfirmed, nothing is applied."})
+                              f"Compared with {against}. {LEFT_UNCONFIRMED}"})
 
     period = _asset_period(n, frame, name)
     notes = []
