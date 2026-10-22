@@ -32,22 +32,22 @@ CAVEAT = ("Screening, not a certificate: a steady-state hub LP, converter-aware 
           "current and aggregate-frequency screening of the site's island capability.")
 
 _INPUTS_MODEL = "island sidecar (island_config.json): the study's inputs"
-_RANKING_MODEL = "campus ranking (I3b) on the hub dispatch at the campus run's hours"
+_RANKING_MODEL = "campus ranking on the hub dispatch at the campus run's hours"
 #: The report's groups, in the plan's order (I9).
 GROUPS = ("inputs", "study", "hours", "static", "frequency")
-STATIC_MISSING = "island steady state and short circuit at the island hours (I4, I5, I5b)"
-FREQ_MISSING = "island frequency check at the island hours (I6)"
+STATIC_MISSING = "island steady state and short circuit at the island hours"
+FREQ_MISSING = "island frequency check at the island hours"
 _STATIC_TITLES = {
-    "flow": "Island load flow at the island hours (I4)",
-    "flow_units": "Units in the island load flow (I4)",
-    "flow_bus": "Bus voltages in the island (I4)",
-    "flow_branch": "Branch loading in the island (I4)",
-    "sc": "Fault levels as the island forms and once steady (I5)",
-    "relays": "Relay sensitivity in the island (I5)",
-    "relays_imax": "Relay current at each grid-forming current limit (I5, Q8)",
-    "unbalanced": "Unbalanced fault levels (I5b)",
-    "earth": "Earth reference, island against grid-connected (I5b)",
-    "earth_relays": "Earth-fault relay sensitivity (I5b)",
+    "flow": "Island load flow at the island hours",
+    "flow_units": "Units in the island load flow",
+    "flow_bus": "Bus voltages in the island",
+    "flow_branch": "Branch loading in the island",
+    "sc": "Fault levels as the island forms and once steady",
+    "relays": "Relay sensitivity in the island",
+    "relays_imax": "Relay current at each grid-forming current limit",
+    "unbalanced": "Unbalanced fault levels",
+    "earth": "Earth reference, island against grid-connected",
+    "earth_relays": "Earth-fault relay sensitivity",
 }
 _FREQ_TITLES = {
     "e1_hourly": "E1 at every hour of the seamless scenario: failing rows",

@@ -44,7 +44,7 @@ const REPORT: IslandReport = {
     { id: 'costs', group: 'study', title: 'Cost of island capability', model: 'hub LP, plain LOPF (HiGHS)', caveat: CAVEAT,
       columns: ['scenario', 'status', 'objective', 'cost of island capability'],
       rows: [['ups_bridged', 'ok', 39810000, 2270000]], assumed_rows: [] },
-    { id: 'static_flow', group: 'static', title: 'Island load flow at the island hours (I4)',
+    { id: 'static_flow', group: 'static', title: 'Island load flow at the island hours',
       model: 'steady-state island load flow (pandapower)', caveat: CAVEAT,
       columns: ['period', 'hour', 'viable', 'assumed'],
       rows: [[0, 3, true, 'g.droop_pct'], [0, 5, false, null]], assumed_rows: [0] },
@@ -98,7 +98,7 @@ describe('island section: the report', () => {
     await screen.findByTestId('island-table-freq_events')
     const heads = screen.getAllByTestId('island-group').map(h => h.textContent)
     expect(heads).toEqual([
-      'Inputs', 'Island study (I2)', 'Island steady state and short circuit (I4, I5, I5b)', 'Island frequency (I6)',
+      'Inputs', 'Island study', 'Island steady state and short circuit', 'Island frequency',
     ])
     expect(within(screen.getByTestId('island-table-static_flow')).getByTestId('island-model').textContent)
       .toContain('pandapower')
@@ -116,6 +116,25 @@ describe('island section: the report', () => {
     const box = table.querySelector('[data-testid="island-table-scroll"]') as HTMLElement
     expect(box.className).toMatch(/overflow-auto/)
     expect(box.className).toMatch(/max-h-/)
+  })
+
+  it('heads columns and names requirement fields in plain words, never as raw ids', async () => {
+    renderReport()
+    const heads = (id: string) => [...screen.getByTestId(`island-table-${id}`).querySelectorAll('th')].map(h => h.textContent)
+    await screen.findByTestId('island-table-requirements')
+    expect(heads('requirements')).toEqual(['Setting', 'Value', 'Source', ''])
+    expect(heads('costs')).toContain('Cost of island capability')
+    expect(heads('static_flow')).toEqual(['Period', 'Hour', 'Viable', 'Assumed inputs', ''])
+    const first = screen.getByTestId('island-table-requirements').querySelector('tbody tr td')
+    expect(first?.textContent).toBe('UPS bridge (s)')
+    expect(screen.getByTestId('island-report').textContent).not.toMatch(/bridge_s|\(I\d/)
+  })
+
+  it('leaves out a table without rows and says so once', async () => {
+    renderReport({ ...REPORT, tables: [...REPORT.tables, { ...REPORT.tables[3], id: 'freq_ups', title: 'UPS ride-through', rows: [] }] })
+    await screen.findByTestId('island-table-freq_events')
+    expect(screen.queryByTestId('island-table-freq_ups')).toBeNull()
+    expect(screen.getByTestId('island-empty').textContent).toBe('Nothing to report for this run: ups ride-through.')
   })
 
   it('says what is missing', async () => {

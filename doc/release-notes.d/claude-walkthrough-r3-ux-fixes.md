@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The grid-forming edit card names the unit alone and shows the value rounded, the stale Grid-forming tab shows "Out of date" once, and the island report uses plain column and setting names, leaves out empty tables and drops internal plan tags.

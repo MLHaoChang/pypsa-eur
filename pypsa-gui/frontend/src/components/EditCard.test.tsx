@@ -81,6 +81,19 @@ it('a note row states the rule without inventing values', () => {
   expect(screen.getByTestId('chat-edit-row-note').textContent).not.toContain('Empty')
 })
 
+it('a Settings row names the unit alone and shows the rounded value without a stored-as line', () => {
+  const pending = useChatStore.getState().pending!
+  const gfm = { component_class: 'Settings', name: 'BESS_NEW', field: 'tau_f_s', label: 'Frequency filter time τ_f',
+    old: 0.1, new: 0.526130756579, unit: 's', role: 'typed', display: { old: 0.1, new: 0.526, unit: 's' } }
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [gfm] } } })
+  render(<ConfirmationCard />)
+  const row = screen.getAllByTestId('chat-edit-row-typed')[0]
+  expect(row.textContent).toContain('BESS_NEW')
+  expect(row.textContent).not.toMatch(/Settings|0\.5261/)
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe('BESS_NEW')
+  expect(screen.queryByTestId('chat-edit-display')).toBeNull()
+})
+
 it('a component the change creates reads as created, not as true/false', () => {
   const pending = useChatStore.getState().pending!
   const created = { component_class: 'Carrier', name: 'AC', field: 'exists', label: 'exists', old: false, new: true,

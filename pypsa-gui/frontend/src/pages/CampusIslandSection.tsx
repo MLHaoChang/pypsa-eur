@@ -42,10 +42,66 @@ type Tagged = { value: number; source: IslandSource }
 
 const GROUP_TITLES: Record<IslandGroup, string> = {
   inputs: 'Inputs',
-  study: 'Island study (I2)',
-  hours: 'Island critical hours (I3b)',
-  static: 'Island steady state and short circuit (I4, I5, I5b)',
-  frequency: 'Island frequency (I6)',
+  study: 'Island study',
+  hours: 'Island critical hours',
+  static: 'Island steady state and short circuit',
+  frequency: 'Island frequency',
+}
+
+/** Column headers in the user's words. The report's columns are the engine's contract
+ *  (kept as they are in the data); a column not listed reads as its name with spaces. */
+const COLUMN_WORDS: Record<string, string> = {
+  field: 'Setting', value: 'Value', source: 'Source', unit: 'Unit', kind: 'Kind', scenario: 'Scenario',
+  status: 'Status', objective: 'Objective', period: 'Period', hour: 'Hour', event: 'Event', case: 'Case',
+  viable: 'Viable', reason: 'Reason', assumed: 'Assumed inputs', ok: 'Passes', verdict: 'Verdict', detail: 'Detail',
+  df_hz: 'Frequency shift (Hz)', delta_p_ac_mw: 'Power step (MW)', sync_df_hz: 'Sync frequency gap (Hz)',
+  sync_dv_pu: 'Sync voltage gap (pu)', gate_ok: 'Gate passes', gate_problems: 'Gate problems',
+  unit_id: 'Unit', control: 'Control mode', role: 'Role', p0_mw: 'Power before (MW)', p_mw: 'Power (MW)',
+  q_mvar: 'Reactive power (MVAr)', k_mw_per_hz: 'Droop gain (MW/Hz)', saturated: 'At current limit',
+  loading_pct: 'Loading (%)', bus: 'Bus', vm_pu: 'Voltage (pu)', in_band: 'In band', branch: 'Branch',
+  ikss_max_ka: 'Max fault current (kA)', ikss_min_ka: 'Min fault current (kA)',
+  ikss_min_n1_ka: 'Min fault current, one out (kA)', largest_out: 'Largest unit out', method_min: 'Min-current method',
+  relay: 'Relay', fault_bus: 'Fault bus', timing: 'Timing', relay_ka: 'Relay current (kA)',
+  initial_ka: 'Initial current (kA)', fault_total_ka: 'Total fault current (kA)', bypass_ka: 'Bypass current (kA)',
+  pickup_ka: 'Pickup (kA)', s: 'Margin', grid_ikss_max_ka: 'Grid max fault current (kA)',
+  grid_to_island: 'Grid-to-island ratio', relay_n1_ka: 'Relay current, one out (kA)', i_max_pu: 'Current limit (pu)',
+  ik1_max_ka: '1-phase max (kA)', ik2_max_ka: '2-phase max (kA)', ik3_max_ka: '3-phase max (kA)',
+  ik1_min_ka: '1-phase min (kA)', ik2_min_ka: '2-phase min (kA)', ik3_min_ka: '3-phase min (kA)',
+  earth_path: 'Earth path', earth_assumed: 'Earth assumed', ic_e_ka: 'Earth current (kA)', note: 'Note',
+  method: 'Method', earthed_grid: 'Earthed, grid', earthed_island: 'Earthed, island',
+  lost_on_islanding: 'Lost on islanding', island_assumed: 'Island assumed', finding: 'Finding',
+  i_pickup_e_ka: 'Earth pickup (kA)', relay_e_ka: 'Relay earth current (kA)', fault_e_ka: 'Fault earth current (kA)',
+  grid_e_ka: 'Grid earth current (kA)', sensitivity: 'Sensitivity', direction: 'Direction', dp_source: 'Step source',
+  ups_drops: 'UPS drops', dp_mw: 'Power step (MW)', rocof0_hz_per_s: 'Initial rate of change (Hz/s)',
+  rocof_window_hz_per_s: 'Rate of change over window (Hz/s)', nadir_hz: 'Lowest frequency (Hz)',
+  t_nadir_s: 'Time to lowest (s)', df_qss_hz: 'Settled shift (Hz)', t_return_s: 'Time to return (s)',
+  collapse_s: 'Collapse time (s)', trip_s: 'Trip time (s)', binding: 'Limiting check', worst: 'Worst case', emt: 'EMT check',
+  block: 'Block', t_block_s: 'Block time (s)', i4_viable: 'Island load flow viable', i4_reason: 'Reason',
+  dp_ac_mw: 'AC power step (MW)', import_lossless_mw: 'Import, lossless (MW)', losses_mw: 'Losses (MW)',
+  e_mwh: 'Energy (MWh)', it_mw: 'IT load (MW)', autonomy_s: 'Autonomy (s)', needed_s: 'Needed (s)',
+  pickup_complete: 'Pickup complete', ready_s: 'Ready after (s)', dropped: 'Dropped', energy_mwh: 'Energy used (MWh)',
+  join_s: 'Joins after (s)', until_s: 'Holds until (s)', import_mw: 'Import (MW)', feasible: 'Feasible',
+  ramp_s: 'Ramp time (s)', shortfall_mw: 'Shortfall (MW)', ups: 'UPS', drops: 'Drops', first_drop_s: 'First drop (s)',
+  t_online_s: 'Back online (s)', autonomy_ok: 'Autonomy enough',
+}
+const columnWords = (c: string) => COLUMN_WORDS[c] ?? (c.charAt(0).toUpperCase() + c.slice(1)).replace(/_/g, ' ')
+
+/** The island requirement fields in words ("bridge_s" → "UPS bridge (s)"); a field not listed
+ *  reads as its name with spaces. A dotted field is a frequency limit of a named mode. */
+const FIELD_WORDS: Record<string, string> = {
+  sustained_h: 'Sustained ride-through (h)', bridge_s: 'UPS bridge (s)', fuel_autonomy_h: 'Fuel autonomy (h)',
+  genset_redundancy_n: 'Genset redundancy (N+k)', gfm_margin: 'Grid-forming margin',
+  i_max_sensitivity_pu: 'Current limits tried (pu)', relay_sensitivity: 'Relay sensitivity',
+  rocof_window_ms: 'Rate-of-change window (ms)', scenarios: 'Scenarios', linearised_uc: 'Linearised unit commitment',
+  ride_through_storage: 'Ride-through storage', pickup_blocks: 'Pickup blocks',
+  f_max_hz: 'Highest frequency (Hz)', f_min_hz: 'Lowest frequency (Hz)', qss_band_hz: 'Settled band (Hz)',
+  rocof_hz_per_s: 'Rate of change (Hz/s)', rocof_hz_per_s_max: 'Rate of change (Hz/s)',
+}
+const fieldWords = (f: string) => {
+  const [head, ...rest] = f.split('.')
+  if (!rest.length) return FIELD_WORDS[f] ?? f.replace(/_/g, ' ')
+  const field = rest.join('.')
+  return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`
 }
 
 /** A cell longer than this stays on one line, its full text on hover. */
@@ -72,13 +128,13 @@ function ReportTable({ table }: { table: IslandTable }) {
       <div className="max-h-[420px] overflow-auto border border-border rounded" data-testid="island-table-scroll">
         <table className="text-[12px] whitespace-nowrap">
           <thead className="sticky top-0 bg-bg-2 z-10">
-            <tr>{table.columns.map(c => <th key={c} className="text-left font-medium px-2">{c}</th>)}<th /></tr>
+            <tr>{table.columns.map(c => <th key={c} className="text-left font-medium px-2">{columnWords(c)}</th>)}<th /></tr>
           </thead>
           <tbody>
             {table.rows.map((row, i) => (
               <tr key={i} data-assumed={assumed.has(i) ? 'yes' : 'no'}>
                 {row.map((v, j) => {
-                  const text = cell(v)
+                  const text = table.id === 'requirements' && j === 0 && typeof v === 'string' ? fieldWords(v) : cell(v)
                   return text.length > LONG
                     ? <td key={j} className="px-2 max-w-[320px] truncate" title={text}>{text}</td>
                     : <td key={j} className="px-2">{text}</td>
@@ -234,6 +290,9 @@ export default function CampusIslandSection({ name }: { name: string }) {
 
 export function IslandReportView({ report }: { report: IslandReport | undefined }) {
   if (!report) return null
+  // A table with no rows says nothing a header can; they are named in one line instead.
+  const tables = report.tables.filter(t => t.rows.length > 0)
+  const empty = report.tables.filter(t => t.rows.length === 0)
   return (
     <div className="mt-4" data-testid="island-report">
       {report.missing.length > 0 && (
@@ -241,9 +300,14 @@ export function IslandReportView({ report }: { report: IslandReport | undefined 
           Not yet available: {report.missing.join(', ')}.
         </p>
       )}
-      {report.tables.map((t, i) => (
+      {empty.length > 0 && (
+        <p className="text-[12px] text-muted mb-2" data-testid="island-empty">
+          Nothing to report for this run: {empty.map(t => t.title.toLowerCase()).join('; ')}.
+        </p>
+      )}
+      {tables.map((t, i) => (
         <div key={t.id}>
-          {t.group !== report.tables[i - 1]?.group && (
+          {t.group !== tables[i - 1]?.group && (
             <h3 className="text-[13px] font-semibold mt-3 mb-1" data-testid="island-group">
               {GROUP_TITLES[t.group] ?? t.group}
             </h3>
