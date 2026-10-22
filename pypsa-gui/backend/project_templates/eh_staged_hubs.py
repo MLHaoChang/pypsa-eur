@@ -244,7 +244,7 @@ def _tariff(planning=None) -> dict:
 
 
 #: The staged H2 hub's island-rows ledger row, measured on the staged plan
-#: with the rows on (2026-10-15, live solves); the sidecar and unit-data rows
+#: with the rows on (2026-10-15, re-measured 2026-10-21 at the GS-2b electrolysis price; live solves); the sidecar and unit-data rows
 #: are shared with the single-year hub (``eh_templates.H2_ISLAND_LEDGER``).
 H2_ISLAND_NOTE = ("Island rows are off: the plan is not sized to island; the island checks "
                   "report what islanding would need.")
@@ -252,10 +252,11 @@ H2_ISLAND_ROWS = {
     "item": "island rows", "value": "off (island_constraints false)",
     "source": "assumed",
     "note": "the plan is not sized to island; turn them on to plan for islanding. Measured on "
-            "this plan: at 1 h sustained they add about 33 MW of battery in 2027, hold the grid "
-            "import to about 3 MW and take the demo NPV from +14.6 M to -2.1 M EUR; at 4 h "
-            "the NPV is -32 M EUR; at 24 h no plan meets them (owner: island data on, rows "
-            "off, the user opts in)"}
+            "this plan (electrolysis priced per MW of electrical input, GS-2b, 2026-10-21): at 1 h "
+            "sustained they add about 43 MW of battery in 2027, hold the grid import to about "
+            "3 MW and take the demo NPV from -2.6 M to -30.5 M EUR; at 4 h the NPV is -51.9 M "
+            "EUR; at 24 h no plan meets them (owner: island data on, rows off, the user opts "
+            "in)"}
 
 
 def _h2_commercial_and_finance(T, planning=None) -> dict:

@@ -246,10 +246,24 @@ def _runs(u: np.ndarray, value: float) -> list[int]:
     return out
 
 
+#: What the staged electrolysers cost before GS-2b (the row's 1,886,002 EUR/MW x the 0.68 efficiency),
+#: written out by asset name so a later pack change cannot move this test by accident.
+_PRE_GS2B_ELECTROLYSER = {"overnight_cost": 1_282_481.292, "fom_cost": 51_299.25168}
+
+
+def _electrolysis_at_the_pre_gs2b_price(n):
+    """Electrolysis at the pre-GS-2b price so the 2027 loop is built and cycles. At the row's own
+    price per MW of electrical input no 2027 electrolyser is built and the loop never runs in the
+    2027 week, so the restart-time rule needs this cheaper plan to be exercised."""
+    for name in ("electrolyser_new_2027", "electrolyser_new_2030", "electrolyser_new_2035"):
+        for col, value in _PRE_GS2B_ELECTROLYSER.items():
+            n.links.at[name, col] = value
+
+
 @pytest.mark.live_solve
 def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
     # 2027 delivers 50 t/d, below the 64 t/d minimum load: the loop has to cycle.
-    n, _, _ = _plan("base")
+    n, _, _ = _plan("cheap_electrolysis", edit=_electrolysis_at_the_pre_gs2b_price)
     models, payload = _windows(n)
     assert payload["status"] == "ok", payload["message"]
     m, sns, _ = models[2027]["bin"]
@@ -261,6 +275,22 @@ def test_in_the_binary_window_every_stop_lasts_the_restart_time(reset_backend):
     assert stops, "the 2027 window should stop the loop at least once"
     assert min(stops) >= 8
     assert all(r >= 24 for r in _runs(u, 1.0))
+
+
+@pytest.mark.live_solve
+def test_at_the_honest_electrolysis_price_the_2027_loop_stays_off(reset_backend):
+    """Pins what the template now does (GS-2b, measured 2026-10-21): no 2027 electrolyser is built and
+    the loop is off all 168 h of the 2027 binary window, which costs 41.2 M EUR against 6.9 M
+    linearised. A change to either shows here; restoring the 2027 cycling story is a template ticket."""
+    n, _, _ = _plan("base")
+    assert float(n.links.at["electrolyser_new_2027", "p_nom_opt"]) == pytest.approx(0.0, abs=1e-6)
+    models, payload = _windows(n)
+    assert payload["status"] == "ok", payload["message"]
+    m, sns, bin_cost = models[2027]["bin"]
+    u = m.links_t.status["haber_bosch"].loc[sns].round().to_numpy()
+    assert len(u) == 168 and u.sum() == 0.0
+    assert bin_cost == pytest.approx(41_211_788.66, rel=0.01)
+    assert models[2027]["lin"][2] == pytest.approx(6_855_981.19, rel=0.01)
 
 
 @pytest.mark.live_solve
