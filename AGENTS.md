@@ -6,6 +6,8 @@ Ask every question as an interactive choice (the `AskUserQuestion` tool): 2–4 
 
 Decisions the owner has made are in `docs/agents/owner-decisions.md`.
 
+Work handed to outside coding apps is listed in `docs/agents/outsourced.md`; check it before starting a task whose files it may touch.
+
 A coordinated session (one commissioned through the coordinator session, whose id is in `docs/agents/coordinator.md`) sends each question in that same form to the coordinator with `send_message`; the coordinator bundles them for the owner.
 
 ## Release notes

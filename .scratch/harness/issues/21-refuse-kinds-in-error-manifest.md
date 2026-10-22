@@ -3,39 +3,35 @@
 
 # 21 — Error-kind manifest: derive `_refuse("<kind>", ...)` kinds
 
-Status: needs-triage
+Status: ready-for-agent
+Outsourced: Codex (2026-10-22) — branch outsource/refuse-kinds-manifest
 Type: task
-Source: gatekeeper review of #573 (LC-23 slice 1), 2026-10-21
+Baseline: master `514c8feede1177b520a4dde74a4dffaf12cf696a`
+Source: gatekeeper review of #573 (LC-23 slice 1), 2026-10-21; PR #567 assessment ("typed error manifest"); brief `.scratch/harness/outsource/C-refuse-kinds-manifest.md`
 
 ## Problem
 
-`tests/test_tool_error_kind_manifest.py` derives the backend's error kinds
-from `error_kind` dict literals and `tool_error` yield sites. Services that
-refuse through a helper, `_refuse(kind, message)` (for example
-`services/assistant_tasks.py`), build the dict from a variable, so their kinds
-are invisible to the scan. They can still reach a `tool_error` frame through
-tool dispatch, but `pypsa-gui/tool-error-kinds.json` cannot list them: an
-entry the scan cannot derive fails as stale.
-
-Missing today from `assistant_tasks.py` alone: `invalid_task`,
-`invalid_task_tool`, `invalid_task_args`, `invalid_task_reference`,
-`task_not_found`, `task_step_uncertain`, `task_step_running`,
-`task_step_already_completed`, `task_resolution_not_needed`,
-`invalid_brief`, `brief_inputs_unreadable`, `task_pause_needs_user`,
-`task_paused_at_card`, `task_not_paused`, `task_brief_stale`,
-`task_resolution_unverifiable`, `task_reference_too_large`, and others.
-Study copilot slice 2 adds `brief_cases_not_runnable` and
-`task_step_needs_retry` (both `assistant_tasks.py`).
+`tests/test_tool_error_kind_manifest.py` derives error kinds from
+`"error_kind": <literal>` dicts and `tool_error` yields. The modules that refuse
+through `_refuse(kind, message)` build the dict from a variable, so their 57
+kinds are invisible to the scan and missing from `pypsa-gui/tool-error-kinds.json`:
+`services/assistant_tasks.py` (27), `services/experiments.py` (19) and
+`services/run_evidence.py` (11). They can still reach a `tool_error` frame.
 
 ## Scope
 
-1. Teach the derivation to read the first positional string literal of calls
-   to a module-level `_refuse` helper.
-2. Classify every newly derived kind in `tool-error-kinds.json` (`inline`
-   unless the panel must show a banner).
-3. Keep the derived set a superset; no kind is listed that the scan cannot see.
+1. The derivation reads the first string-literal argument of bare `_refuse(...)`
+   calls in an explicit module list (the three above).
+2. A guard test fails if a listed module's `_refuse` stops putting `kind` under
+   `error_kind`, or if a call passes a non-literal kind.
+3. Classify all 57 kinds as `inline`, each with a `why`. No frontend change.
+4. Out of scope (follow-ups): the other `_refuse` modules (`workflow_tools`,
+   `edit_card`, `job_adapters`, …) and `workflow._refuse(...)` attribute calls.
 
 ## Done when
 
-The manifest test passes with the `_refuse` kinds of `assistant_tasks.py`,
-`experiments.py` and `run_evidence.py` classified.
+The manifest test passes with these kinds classified; the frontend
+`ChatPanel.manifest.test.tsx` passes unchanged; the diff touches only the test,
+the JSON and a release-note fragment.
+
+## Comments
