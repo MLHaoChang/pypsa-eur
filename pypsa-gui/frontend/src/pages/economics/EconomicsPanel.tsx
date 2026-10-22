@@ -36,7 +36,7 @@ function SiteConnection() {
   return <SiteConnectionSection config={config.data} needed={!config.data?.poc_link} />
 }
 
-function Block({ title, children }: { title: string; children: React.ReactNode }) {
+export function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="space-y-2">
       <h3 className="text-[10px] font-semibold uppercase tracking-wide text-muted">{title}</h3>
