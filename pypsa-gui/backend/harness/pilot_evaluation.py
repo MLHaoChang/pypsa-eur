@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/10"
+SUITE_VERSION = "checked-pilot-evaluation/11"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -96,6 +96,12 @@ INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr
 # The same report retains value 0, 125 and generation 0, 10 MWh: (125/1.25 - 20) / (10/1.25)
 # = 80 / 8 = 10 USD/MWh nominal; at 25 % inflation the real rate is 0: 80 / 10 = 8 USD/MWh.
 LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
+# COPT fleet {60 MW q 0.5, 40 MW q 0.25}: available 100/60/40/0 MW with 0.375/0.125/0.375/0.125.
+# Residuals 70 and 100 MW at weight 2: LOLP 0.625 both hours, LOLE 2.5 h; EUE 21.25 + 40 = 61.25
+# per unit weight, 122.5 MWh.
+COPT = {"screening_lole": (2.5, "h"), "screening_eue": (122.5, "MWh"), "screening_lolp_max": (0.625, "probability")}
+# Computed on demand from the current network: nothing to go stale.
+ON_DEMAND = {"copt-screening/1"}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -130,6 +136,7 @@ ADDED = {
     "site-import/1": ("network", "Show the grid import for", SITE, "grid_import_energy"),
     "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
     "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
+    "copt-screening/1": ("network", "Show the COPT screening for", COPT, "screening_lole"),
 }
 # Profiles whose scope names the component's class.
 SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
@@ -179,6 +186,9 @@ LABELS = {
     "equity_npv": "Equity NPV (post tax, at the cost of equity)", "project_npv": "Project NPV (post tax, at the WACC)",
     "equity_irr": "Equity IRR (post tax)", "project_irr": "Project IRR (post tax)",
     "lcoe_nominal": "LCOE, nominal (engine definition)", "lcoe_real": "LCOE, real (engine definition)",
+    "screening_lole": "Screening LOLE over the modelled horizon (COPT)",
+    "screening_eue": "Screening EUE over the modelled horizon (COPT)",
+    "screening_lolp_max": "Highest hourly loss-of-load probability (COPT)",
 }
 
 
@@ -230,7 +240,7 @@ def catalogue():
         cases.append(Case(profile + ":golden", profile, "golden", question, expected))
         for fault in ("value", "unit", "formula", "source", "omit", "narrative"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, metrics))
-        for fault in ("missing", "stale"):
+        for fault in ("missing",) if profile in ON_DEMAND else ("missing", "stale"):
             cases.append(Case(profile + ":" + fault, profile, fault, question, {}, (target,)))
         cases.append(Case(profile + ":unsupported", profile, "unsupported", question, expected, ("adequacy_certificate",)))
         if cost:

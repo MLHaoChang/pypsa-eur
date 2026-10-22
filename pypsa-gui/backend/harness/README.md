@@ -352,7 +352,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 274 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 283 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -402,6 +402,9 @@ staleness key is read outside the network lock before and after the read.
 `investment-lcoe/1` (opt-in) rebuilds the engine's nominal and real LCOE from the per-year
 generation and value the report retains (reports stored before that read
 `lcoe_inputs_not_retained`); payback, cover ratios and the solved PPA stay withheld.
+`copt-screening/1` (opt-in) reconvolves the COPT's two-state fleet in plain numpy on the
+1 MW grid (strict LOLP, the engine's 1e-12 snap, generator weights, horizon totals) against a
+residual it recomputes; profiled, period-varying, folded or off-grid fleets are refused.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
