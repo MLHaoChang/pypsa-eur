@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/9"
+SUITE_VERSION = "checked-pilot-evaluation/10"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -93,6 +93,9 @@ SITE = {"grid_import_energy": (15, "MWh"), "peak_grid_import": (6, "MW"), "expor
 # both at 25 %: NPVs -100 + 150/1.25 = 20 and -100 + 175/1.25 = 40 USD; IRRs 0.5 and 0.75.
 INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "fraction/year"),
               "project_irr": (0.75, "fraction/year")}
+# The same report retains value 0, 125 and generation 0, 10 MWh: (125/1.25 - 20) / (10/1.25)
+# = 80 / 8 = 10 USD/MWh nominal; at 25 % inflation the real rate is 0: 80 / 10 = 8 USD/MWh.
+LCOE = {"lcoe_nominal": (10, "USD/MWh"), "lcoe_real": (8, "USD/MWh")}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -126,6 +129,7 @@ ADDED = {
     "energy-balance/1": ("network", "Show the energy balance for", BALANCE, "generation_energy"),
     "site-import/1": ("network", "Show the grid import for", SITE, "grid_import_energy"),
     "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
+    "investment-lcoe/1": ("network", "Show the LCOE for", LCOE, "lcoe_nominal"),
 }
 # Profiles whose scope names the component's class.
 SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
@@ -174,6 +178,7 @@ LABELS = {
     "export_energy": "Export to the grid", "hours_at_import_limit": "Weighted hours at the import limit",
     "equity_npv": "Equity NPV (post tax, at the cost of equity)", "project_npv": "Project NPV (post tax, at the WACC)",
     "equity_irr": "Equity IRR (post tax)", "project_irr": "Project IRR (post tax)",
+    "lcoe_nominal": "LCOE, nominal (engine definition)", "lcoe_real": "LCOE, real (engine definition)",
 }
 
 
