@@ -181,5 +181,5 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
   - Lives in: steward "Merge gate" and "Gatekeeper checkpoints", premerge.sh "reviewer verdicts".
 - **Two parties watched the same CI.** Fix: the PR's session drives CI and reports `premerge ok`; the coordinator runs premerge once at merge; `scripts/coord/ciwait.sh` is for PRs with no session.
 - **`ciwait.sh` called a running macOS job "runner-less", and the coordinator cancelled it.** The check keyed on `started_at` age, which a running job also has, and a normal macOS run lasts over 30 minutes.
-  - Fix: `MACOS` fires only for a job that is still `queued`, or in progress with no runner (`runner_id` 0, premerge's own test), and over 30 minutes old.
+  - Fix: `MACOS` fires only when the job's `runner_id` is 0 (premerge's own test; a queued job has none) and it is over 30 minutes old. The check run's `status` is not used: it can read `queued` while the job is already running.
   - Lives in: `scripts/coord/ciwait.sh`.

@@ -16,11 +16,13 @@
 #                                  or neutral (a cancelled "Integration (macos)"
 #                                  is ignored)
 #   READY <pr> <sha>               at least one run, and none pending
-#   MACOS <pr> <sha>               only "Integration (macos)" is pending, it is
-#                                  still "queued" (or has no runner assigned, as
-#                                  premerge tests it) and is over 30 minutes old.
-#                                  A macOS job that is running is not runner-less,
-#                                  however long it has run (about an hour is normal).
+#   MACOS <pr> <sha>               only "Integration (macos)" is pending, its job
+#                                  has no runner assigned (runner_id 0, as premerge
+#                                  tests it; a queued job has none) and it is over
+#                                  30 minutes old. A job with a runner is running,
+#                                  however long it takes (about an hour is normal).
+#                                  The check run's own status can lag the job, so
+#                                  only the job's runner_id decides.
 #   TIMEOUT                        nothing hit within the limit
 # A head with no check run yet is not ready.
 #
@@ -51,10 +53,9 @@ while ((SECONDS < deadline)); do
     pending=$(awk -F'\t' '$1 != "completed" { print $3 }' <<<"$runs")
     if [[ -z $pending ]]; then echo "READY $pr $sha"; exit 0; fi
     if [[ $pending == "Integration (macos)" ]]; then
-      IFS=$'\t' read -r mstatus since mid < <(awk -F'\t' '$3 == "Integration (macos)" { print $1 "\t" $4 "\t" $5; exit }' <<<"$runs")
+      IFS=$'\t' read -r since mid < <(awk -F'\t' '$3 == "Integration (macos)" { print $4 "\t" $5; exit }' <<<"$runs")
       if [[ -n $since ]] && (($(date +%s) - $(date -d "$since" +%s) > 1800)); then
-        if [[ $mstatus == queued ]] ||
-          [[ $(gh api "repos/$repo/actions/jobs/$mid" --jq '.runner_id // 0' 2>/dev/null) == 0 ]]; then
+        if [[ $(gh api "repos/$repo/actions/jobs/$mid" --jq '.runner_id // 0' 2>/dev/null) == 0 ]]; then
           echo "MACOS $pr $sha"; exit 0
         fi
       fi
