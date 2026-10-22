@@ -29,3 +29,20 @@ def test_the_stored_inputs_rebuild_the_reported_lcoe(name):
     if payload["price_basis"] == "nominal" and inputs["inflation"] is not None:
         assert rebuild(payload, real=True) == pytest.approx(payload["lcoe_real_per_mwh"], rel=1e-12)
 
+
+
+def test_a_real_lcoe_with_no_discounted_generation_is_not_established():
+    """Storage-dominated: net energy turns negative from 2034. Discounted at the cost
+    of equity it is still positive; at the real rate it is not, so the real LCOE
+    has no denominator and must not flip sign or divide by zero."""
+    import dataclasses
+
+    from services.finance.engine import run_case
+    from tests.test_finance_engine import LAYER, _case
+
+    base = _case()
+    charging = dataclasses.replace(base.templates[0], first_year=2034, energy_mwh={"pv": -2.5})
+    result = run_case(dataclasses.replace(base, templates=(base.templates[0], charging)), layers=LAYER)
+    assert result.metrics["lcoe_nominal_per_mwh"] is not None
+    assert result.metrics["lcoe_real_per_mwh"] is None
+    assert "lcoe_real_not_established:no_discounted_generation" in result.flags
