@@ -181,6 +181,28 @@ def test_dv03_the_number_is_read_from_the_quote_and_only_when_it_reads_one_way(g
     assert kind("Minimum -5 MW") == "negative_not_allowed"
 
 
+def test_dv03b_a_minus_sign_or_an_ellipsis_between_two_numbers_is_a_range(grid):
+    """U+2212 and an ellipsis ("…", NFKC "...") separate a range too (gatekeeper review of
+    #591). Neither is in the test PDF's WinAnsi font, so the page is given as text."""
+    from harness import edit_card
+
+    pages = ["Power 10\u221212 MW. Power 10\u202612 MW. Power 10...12 MW. Minimum \u22125 MW. Power 12 MW"]
+    doc = {"source": {"upload_id": "u", "filename": "f.pdf", "sha256": "0" * 64, "pages": 1, "truncated": []},
+           "pages": pages}
+
+    def kind(quote, value_text=None):
+        cite = {"names": ["PV1"], "field": "p_nom", "page": 1, "quote": quote, "unit": "MW",
+                **({"value_text": value_text} if value_text else {})}
+        p = D.plan(PyPSAService.get_network(), doc, "Generator", [cite], fields=edit_card._fields("Generator"))
+        return p["unmapped"][0]["kind"] if p["unmapped"] else p["cells"][0]["value"]
+
+    for quote in ("Power 10\u221212 MW", "Power 10\u202612 MW", "Power 10...12 MW"):
+        assert kind(quote, "12") == "ambiguous_value", quote
+        assert kind(quote, "10") == "ambiguous_value", quote
+    assert kind("Minimum \u22125 MW") == "negative_not_allowed"  # a sign, not a range
+    assert kind("Power 12 MW") == 12
+
+
 def test_dv04_units_come_from_the_schema_and_an_unstated_unit_is_a_card_note(grid):
     from harness import edit_card
 

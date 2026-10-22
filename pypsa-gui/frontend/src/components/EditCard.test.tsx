@@ -165,6 +165,15 @@ it('a PDF-sourced row names its file, page and quote, a long quote clipped with 
   expect(second.getAttribute('title')).toBe(long)
 })
 
+it('a PDF-sourced row with no quote names its page alone', () => {
+  const pending = useChatStore.getState().pending!
+  const bare = { ...typed, source: { filename: 'datasheet.pdf', page: 4, quote: '', raw: '2 500', raw_unit: 'kW' } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_document_values',
+    edit_card: { ...card, tool: 'apply_document_values', rows: [bare] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('datasheet.pdf \u203a p. 4 (2 500 kW)')
+})
+
 it('a unitless table cell shows its raw value without a stray space', () => {
   const pending = useChatStore.getState().pending!
   const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'D2', raw: '3', raw_unit: '' } }
