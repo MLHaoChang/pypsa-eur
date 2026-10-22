@@ -113,6 +113,30 @@ def test_every_not_yet_row_is_decided_by_the_matrix():
             assert key in S.MATRIX_KIND, key
 
 
+# Why each row the matrix does not decide is not its to decide.
+_NOT_THE_MATRIXS = {
+    ("capacity", "sizing"): "always part of the run (sizing off is W4b's fixed-sizes option)",
+    ("capacity", "dispatch"): "always part of the run",
+    ("grid", "load_flow"): "the run_ac_pf_after_lopf solver setting decides",
+    ("grid", "grid_code"): "an advisory scorecard, not a run kind",
+    ("grid", "n1_sclopf"): "the sclopf solver setting decides",
+    ("control", "presets"): "inputs only; nothing runs",
+    ("reliability", "goal_study"): "the study's own start gate decides",
+    ("reliability", "stress"): "inputs to the study; nothing runs on its own",
+    ("reliability", "outage_screening"): "inputs to the study; nothing runs on its own",
+    ("commercial", "tariffs"): "terms the optimisation reads",
+    ("commercial", "contracts"): "terms the optimisation reads",
+    ("handoff", "reports"): "a read of results, not a run kind",
+    ("handoff", "exports"): "a read of results, not a run kind",
+    ("handoff", "specialist_packet"): "a read of results, not a run kind",
+}
+
+
+def test_every_option_is_matrix_decided_or_says_why_not():
+    assert not set(_NOT_THE_MATRIXS) & set(S.MATRIX_KIND)
+    assert set(_NOT_THE_MATRIXS) | set(S.MATRIX_KIND) == set(S.AVAILABILITY)
+
+
 def test_today_the_matrix_clears_none_of_them():
     from services import run_separability as RS
     for (card, option), kind in S.MATRIX_KIND.items():
