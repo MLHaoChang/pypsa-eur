@@ -47,11 +47,12 @@
         "_service_call_"
       ],
       "input_keys": [
-        "exclude_shown"
+        "exclude_shown",
+        "card"
       ],
       "required": [],
       "safety_tier": "read",
-      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "schema_sha256": "9c914e11d02c18d953c65eab78934c415263d4c751d906ca74139b6ad0246887",
       "behavioral_fixture": "pending"
     },
     {

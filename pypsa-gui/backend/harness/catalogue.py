@@ -224,8 +224,11 @@ TOOLS: list[dict[str, Any]] = [
         "already showed it, the exact read to call before opening it, and how far the browser can "
         "prove it is shown. Statuses only, never values: read a section with its listed read, then "
         "open it with ui_open_panel, and quote numbers from that read. exclude_shown=true leaves out "
-        "tabs already shown in this project. Safety: read.",
-        {"exclude_shown": {"type": "boolean"}},
+        "tabs already shown in this project; card lists only that card's views. Safety: read.",
+        {"exclude_shown": {"type": "boolean"},
+         # result_views.CARDS (flow_scope's card ids); test_result_views pins it.
+         "card": {"type": "string", "enum": ["capacity", "grid", "control", "reliability",
+                                             "commercial", "handoff"]}},
         [],
     ),
     _t(
