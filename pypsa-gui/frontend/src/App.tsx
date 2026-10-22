@@ -41,6 +41,7 @@ import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import { FieldDrawer } from './components/FieldDrawer'
+import { FlowReturnButton } from './layout/FlowReturnButton'
 import { ConnectionLimits } from './components/gridReadiness/ConnectionLimits'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -819,6 +820,7 @@ export default function App() {
           )}
         </div>
 
+        <FlowReturnButton />
         <StatusBar />
         <CommandPalette />
         <ShortcutsHelp open={showShortcuts} onClose={() => setShowShortcuts(false)} />

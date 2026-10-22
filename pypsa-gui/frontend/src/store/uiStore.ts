@@ -9,6 +9,7 @@ import type { SizingMode } from '../site3d/sizing'
 // definition, shared with the rail's own width arithmetic: this store and
 // Results.tsx enforcing the same number independently is how they can drift.
 import type { FlowSectionId, FlowTarget } from '../api/flow'
+import type { FlowReturn } from '../layout/flowNavigation'
 import { PANEL_SECTION, SECTION_OPEN, sectionForComponent } from '../layout/flowSections'
 import { RAIL_MIN_W } from '../pages/results/railWidth'
 import { appLog } from './simulationStore'
@@ -464,6 +465,8 @@ interface UIStore {
   // Guided: the field a section item opened in place, in a drawer over the
   // card, so the user finishes it without leaving Guided (design §3.5).
   fieldDrawer: FlowTarget | null
+  // The view the last fix link left; "Back to …" restores it (flowNavigation).
+  flowReturn: FlowReturn | null
   setFieldDrawer: (t: FlowTarget | null) => void
   activeSection: FlowSectionId | null
   setActiveSection: (s: FlowSectionId | null) => void
@@ -734,6 +737,7 @@ export const useUIStore = create<UIStore>((set) => ({
   siteSizing: 'installed',
   activeSlidePanel: null,
   fieldDrawer: null,
+  flowReturn: null,
   setFieldDrawer: (fieldDrawer) => set({ fieldDrawer }),
   activeSection: readActiveSection(storedCurrentProject()),
   setActiveSection: (activeSection) => set({ activeSection }),
