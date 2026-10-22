@@ -3,6 +3,8 @@
 
 # Handoff: next high-value AI capabilities
 
+**Active source reassessment — independent design GO:** [13 — current master and next build](13-MASTER-REASSESSMENT-4b57.md), [active JSON](active-master-plan.json) and [14 — current review](14-ACTIVE-PLAN-REVIEW.md) supersede earlier delivered-status/priority claims for snapshot`4b57cb3ccf310b151e53f4344015e642db0ca0cb`. PDF asset/commercial writes, COPT, checked charts, display joins and scope switches now ship. HS-01a remains the first missing bounded build; earlier880GO and test counts retain their original source.
+
 **Independent verdict: GO for implementation-spec readiness**, frozen on master`880496ef679af1efc51a6dd3d62f9e41a75f2937`. [Final separate-agent review](12-INDEPENDENT-REVIEW.md) binds seven normative file hashes and records all four blockers resolved. The53 acceptance cases remain planned; runtime/domain/CI/merge approval is separate. Next residual unit is HS-01 in its existing owning package, under normal gates.
 
 **Latest review:** [current-master reconciliation and residual scope](11-CURRENT-MASTER-AND-REVIEW.md). Master now contains LC-23 S1/S2 and other foundations. Use the amended 08/09/10 specs and 53-case plan; preserve shipped work. The independent verdict is separate from runtime/CI/merge approval.

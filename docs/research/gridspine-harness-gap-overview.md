@@ -3,6 +3,8 @@
 
 # Making the GridSpine harness more capable
 
+**Latest master review:** [active implementation scope](../../.scratch/high-value-ai-study/13-MASTER-REASSESSMENT-4b57.md) and [independent GO](../../.scratch/high-value-ai-study/14-ACTIVE-PLAN-REVIEW.md), frozen at`4b57cb3ccf310b151e53f4344015e642db0ca0cb`. PDF asset/tariff/PPA writes, COPT screening, checked charts and scope switches already ship. Next residual build: HS-01a native discovery/schema paging. Current selected regressions:443 passed, one existing empty-parameter skip; the53newharnessjourneys remain planned.
+
 **Latest review:** [current-master reconciliation and residual scope](../../.scratch/high-value-ai-study/11-CURRENT-MASTER-AND-REVIEW.md). Master now contains LC-23 S1/S2 and other foundations. Use the amended 08/09/10 specs and 53-case plan; preserve shipped work. The independent verdict is separate from runtime/CI/merge approval.
 
 **Implementation specs are now included:** [functional behavior](../../.scratch/high-value-ai-study/08-HARNESS-IMPLEMENTATION-SPEC.md), [data/state contracts](../../.scratch/high-value-ai-study/09-HARNESS-DATA-AND-STATE-CONTRACTS.md), [code delivery and test matrix](../../.scratch/high-value-ai-study/10-HARNESS-DELIVERY-AND-TESTS.md). They define seven delivery units in existing packages and 53 planned acceptance cases, using the merged LC-23 design on master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. Runtime implementation is not part of this PR.
