@@ -204,16 +204,46 @@ describe('ScopeCards states', () => {
     expect(box.disabled).toBe(true)
   })
 
-  it('a settings-driven sub-option is read-only and says where it is set', async () => {
-    const reg = registry()
-    reg.cards[1].options[2] = { id: 'n1_sclopf', label: 'N-1 security (SCLOPF)',
-      status: 'from_settings', reason: 'Set in Solver settings for now.' }
-    getFlowScope.mockResolvedValue(reg)
-    mount()
+  it('N-1 security is a live checkbox that writes into the scope (W4b)', async () => {
+    const user = mount()
     const box = await screen.findByTestId('scope-cards-option-grid-n1_sclopf') as HTMLInputElement
-    expect(box.disabled).toBe(true)
-    expect(screen.getByTestId('scope-cards-why-grid-n1_sclopf').textContent)
-      .toBe('Set in Solver settings for now.')
+    expect(box.disabled).toBe(false)
+    await user.click(box)
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.options.grid).toEqual(['load_flow', 'grid_code', 'n1_sclopf'])
+  })
+
+  it('an empty branch set is refused beside the N-1 row, and "Choose them" opens the selector', async () => {
+    const user = mount()
+    const box = await screen.findByTestId('scope-cards-option-grid-n1_sclopf')
+    putFlowScope.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      error_kind: 'flow_scope_option_blocked', blocker_code: 'sclopf_no_branches',
+      message: 'N-1 security can\'t be switched on: N-1 security has no branches to check yet.' } } } })
+    await user.click(box)
+    const why = await screen.findByTestId('scope-cards-option-blocked-n1_sclopf')
+    expect(why.textContent).toMatch(/^N-1 security has no branches to check yet\. Choose them ›$/)
+    expect(why.textContent).not.toMatch(/LOPF|SCLOPF/)
+    expect(screen.queryByTestId('scope-cards-save-error')).toBeNull()
+    // Expert: the Network tab's selector is requested, the mode is kept.
+    useUIStore.setState({ uiMode: 'expert' })
+    await user.click(screen.getByTestId('scope-cards-choose-branches'))
+    expect(useUIStore.getState().solverBlockRequest).toBe('sclopf')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+  })
+
+  it('in Guided "Choose them" opens the selector in place and never flips to Expert', async () => {
+    useUIStore.setState({ uiMode: 'guided', fieldDrawer: null })
+    const user = mount()
+    putFlowScope.mockRejectedValueOnce({ response: { status: 422, data: { detail: {
+      error_kind: 'flow_scope_option_blocked', blocker_code: 'sclopf_no_branches',
+      message: 'x' } } } })
+    await user.click(await screen.findByTestId('scope-cards-option-grid-n1_sclopf'))
+    await user.click(await screen.findByTestId('scope-cards-choose-branches'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.panel).toBe('simparams')
+    expect(useUIStore.getState().solverBlockRequest).toBe('sclopf')
   })
 
   it('collapsed (Guided) shows one summary line; Change opens the cards in place', async () => {

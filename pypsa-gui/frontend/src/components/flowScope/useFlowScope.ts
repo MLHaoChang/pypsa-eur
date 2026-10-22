@@ -38,10 +38,14 @@ export function useInScope(card: ScopeCardId, option?: string): boolean {
   return !isSuccess || inScope(scope, card, option)
 }
 
-/** Whether Grid › Load flow is on, live: the scope is what the scope cards
- *  write (W4b), so a reader beside them never shows a hydrated copy of the
- *  solver config. `fallback` is used until the scope is read. */
-export function useLoadFlowOn(fallback: boolean): boolean {
+/** Whether a sub-option the scope owns (Load flow, N-1 security; W4b) is on,
+ *  live: the scope is what the scope cards write, so a reader beside them
+ *  never shows a hydrated copy of the solver config. `fallback` is used until
+ *  the scope is read. */
+export function useScopeOptionOn(card: ScopeCardId, option: string, fallback: boolean): boolean {
   const { scope } = useFlowScope()
-  return scope ? inScope(scope, 'grid', 'load_flow') : fallback
+  return scope ? inScope(scope, card, option) : fallback
 }
+
+export const useLoadFlowOn = (fallback: boolean) => useScopeOptionOn('grid', 'load_flow', fallback)
+export const useN1On = (fallback: boolean) => useScopeOptionOn('grid', 'n1_sclopf', fallback)

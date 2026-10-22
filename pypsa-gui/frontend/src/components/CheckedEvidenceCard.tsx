@@ -1,4 +1,5 @@
 import type { AnswerReceipt } from '../utils/answerAssurance'
+import { readableProfile } from '../utils/readableTime'
 
 export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answerId: string; receipt: AnswerReceipt; sourceLabel?: string }) {
   const scope = receipt.request_scope
@@ -6,7 +7,7 @@ export function CheckedEvidenceCard({ answerId, receipt, sourceLabel }: { answer
   return <details className="mt-2 text-[11px] border border-border rounded p-2" data-testid="checked-evidence-card">
     <summary className="cursor-pointer">{clarifying ? 'Clarification needed' : receipt.request_complete === true ? 'Requested results checked' : 'Checked evidence and limitations'}</summary>
     <div className="mt-2 space-y-1">
-      {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {scope.profile}</p>}
+      {scope && <p>{sourceLabel ?? (scope.retain ? 'Retained run' : 'Current run')} · {scope.entity_id} · {readableProfile(scope.profile)}</p>}
       {scope?.start && <p>{scope.start} to {scope.end}</p>}
       {scope?.cost_basis && <p>Cost basis: {scope.cost_basis.currency}, price year {scope.cost_basis.price_year};
         {' '}annual fixed cost fraction {scope.cost_basis.annual_fixed_cost_fraction}</p>}

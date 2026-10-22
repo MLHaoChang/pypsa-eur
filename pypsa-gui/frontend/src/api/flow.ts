@@ -83,6 +83,8 @@ export interface FlowRunBlocker {
   message: string
   /** The item's own message, the detail to fix from (unchanged by the title). */
   detail?: string
+  /** The validation code behind it ("sclopf_no_branches"). */
+  code?: string
   target: FlowTarget
 }
 export type FlowNote = FlowRunBlocker
@@ -158,9 +160,8 @@ export interface FlowScope extends FlowScopeValue {
 }
 
 /** `available`; `required`: on and locked; `not_yet_available`: shown, never
- *  selectable; `from_settings`: read-only, on exactly when its solver setting
- *  is (load flow, N-1 security) until W4b makes it a run kind. */
-export type ScopeOptionStatus = 'available' | 'required' | 'not_yet_available' | 'from_settings'
+ *  selectable. */
+export type ScopeOptionStatus = 'available' | 'required' | 'not_yet_available'
 
 export interface ScopeCardDef {
   id: ScopeCardId
