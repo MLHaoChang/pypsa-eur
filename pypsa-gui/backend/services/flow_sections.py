@@ -136,6 +136,10 @@ CODE_SECTION: Final[dict[str, str]] = {
     "unknown_mode": "scenarios",
     "co2_price_no_fossil": "scenarios",
     "voll_no_loads": "scenarios",
+    # Grid-to-process ticket 08 (design §5 table): the lost-production value lives
+    # in 8 beside VoLL; the criticality tier on the demand, in 4.
+    "lost_production_value_below_buy_in": "scenarios",
+    "safety_tier_off_critical_bus": "loads",
     "ens_cap_generous": "scenarios",
     "ens_cap_unsupported_strategy": "scenarios",
     "ens_cap_without_voll": "scenarios",
@@ -153,6 +157,14 @@ CODE_SECTION: Final[dict[str, str]] = {
     "rolling_with_ac_pf": "scenarios",
     "rolling_with_multi_period": "scenarios",
     "rolling_with_sclopf": "scenarios",
+    "fixed_sizes_no_capacity_run": "scenarios",
+    "fixed_sizes_source_changed": "scenarios",
+    "fixed_sizes_with_myopic": "scenarios",
+    "fixed_sizes_with_rolling": "scenarios",
+    "fixed_sizes_pf_mode": "scenarios",
+    "fixed_sizes_nameplate_empty": "scenarios",
+    "fixed_sizes_zero_nameplate": "scenarios",
+    "fixed_sizes_unknown": "scenarios",
     "myopic_capacity_locked_after_first_period": "scenarios",
     "myopic_flat_snapshots": "scenarios",
     "myopic_no_periods": "scenarios",
@@ -234,8 +246,23 @@ def file_issue(code: str, component_class: str, name: str,
     section = section_for_code(code)
     if section is not None and section != BY_COMPONENT:
         return section
+    return _class_section(component_class, name, connection_links) or "readiness"
+
+
+def _class_section(component_class: str, name: str,
+                   connection_links: frozenset[str]) -> str | None:
+    """The class rule ``file_issue`` and ``section_for`` share: import/export
+    Links are the connection, other classes by ``COMPONENT_SECTION``."""
     if component_class == "Link" and name in connection_links:
         return "connection"
-    if component_class in COMPONENT_SECTION:
-        return COMPONENT_SECTION[component_class]
-    return "readiness"
+    return COMPONENT_SECTION.get(component_class)
+
+
+def section_for(component_class: str, entity: str,
+                connection_links: frozenset[str] = frozenset()) -> dict:
+    """``{id, label, panel}``: the section a component lives in, by the class
+    rule the flow files issues with. An unknown class is the project's
+    (Project & site): an edit to it is a project setting, where an issue with
+    no class files to ``readiness`` so it still shows."""
+    section = _class_section(component_class, entity, connection_links) or "project"
+    return {"id": section, "label": SECTION_LABELS[section], "panel": SECTION_PANEL[section]}

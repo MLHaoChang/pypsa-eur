@@ -128,3 +128,20 @@ path = [
 ]
 SPDX-FileCopyrightText = "Wikipedia contributors"
 SPDX-License-Identifier = "CC-BY-SA-4.0"
+# Observed day-ahead prices shipped with the IPP example (fetched once, see
+# pypsa-gui/backend/project_templates/fetch_ipp_market_series.py); data changed: re-dated.
+[[annotations]]
+path = [
+    "pypsa-gui/backend/project_templates/eh_ipp_hybrid/sources/smard_de_lu_2024.csv",
+    "pypsa-gui/backend/project_templates/eh_ipp_hybrid/price_series/smard_2024.csv",
+]
+SPDX-FileCopyrightText = "Bundesnetzagentur | SMARD.de"
+SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = [
+    "pypsa-gui/backend/project_templates/eh_ipp_hybrid/sources/energinet_dk1_2024.csv",
+    "pypsa-gui/backend/project_templates/eh_ipp_hybrid/price_series/dk1_2024.csv",
+]
+SPDX-FileCopyrightText = "Energinet (www.energidataservice.dk)"
+SPDX-License-Identifier = "CC-BY-4.0"

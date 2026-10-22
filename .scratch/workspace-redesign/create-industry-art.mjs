@@ -84,4 +84,22 @@ for(const [x,z] of [[305,300],[352,300]])s+=tank(x,z,24,42);
 for(let i=0;i<3;i++){s+=tank(233,120+i*48,12,100-i*12);s+=line([[233,120+i*48,101-i*12],[265,120+i*48,101-i*12],[265,170,30]],'#adc2d4',3);}
 s+=line([[215,155,25],[272,155,25],[272,70,25],[310,70,25]],'#bf9adf',4)+line([[195,190,20],[272,190,20],[272,300,20],[305,300,20]],'#e8828d',4)+truck(180,249);
 await writeFile(path.join(directory,'ammonia.svg'),s+'<rect width="960" height="600" fill="transparent" filter="url(#grain)"/></svg>');
-process.stdout.write('Created five original industrial SVG dioramas.\n');
+// IPP renewables + BESS (ticket 06, spec §8.4): wind on the left, a PV field, a battery row by the
+// substation, and the export line in the accent red leaving the plot to a pylon.
+function pylon(x,z,h=70){let s=ellipse(x+6,z+6,0,14,4,'#031323','opacity=".3"');
+ s+=line([[x-6,z-6,0],[x,z,h],[x+6,z+6,0]],'#b4c6d4',1.6)+line([[x-6,z+6,0],[x,z,h],[x+6,z-6,0]],'#8ea6b8',1.2);
+ for(const k of [.35,.65,.88])s+=line([[x-12*(1-k),z,h*k],[x+12*(1-k),z,h*k]],'#c9d8e3',1.4);return s;}
+s=start('Renewables IPP with battery — original illustrative scene')+base('#5a7468');
+s+=road(0,300,400,26)+road(250,0,24,300);
+for(const [x,z,h] of [[30,330,112],[40,250,104],[55,170,98],[70,90,92]])s+=turbine(x,z,h);
+s+=solar(110,120,10,3);
+// The substation: a low control house, two transformers and a short gantry the line leaves from.
+s+=box(292,92,26,22,12,'#a6b5c3','#5d7088','#3a4d66')+batteries(292,130,4);
+for(const x of [296,312])s+=box(x,70,10,12,9,'#b9c7d3','#6b8199','#3f5570');
+s+=line([[300,64,0],[300,64,22]],'#c9d8e3',1.6)+line([[322,64,0],[322,64,22]],'#c9d8e3',1.6)+line([[300,64,22],[322,64,22]],'#c9d8e3',1.6);
+s+=line([[322,64,22],[360,52,40],[396,40,52]],'#ff7f72',2.2,'opacity=".9"')+pylon(396,40,52);
+for(let i=20;i<240;i+=34)s+=tree(i,392,8);
+for(let i=40;i<300;i+=36)s+=tree(392,i+40,8);
+s+=line([[8,8,4],[394,8,4],[394,394,4]],'#b4cad3',.9,'opacity=".6"');
+await writeFile(path.join(directory,'ipp.svg'),s+'<rect width="960" height="600" fill="transparent" filter="url(#grain)"/></svg>');
+process.stdout.write('Created six original industrial SVG dioramas.\n');

@@ -735,7 +735,7 @@ async function phaseP23(browser) {
   }
   async function assertGuidedChrome() {
     check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-guided is pressed')
-    check(await byId('sidebar-assistant').isVisible(), 'sidebar: Assistant shown')
+    check((await byId('sidebar-assistant').count()) === 0, 'sidebar: no Assistant button (the companion is the one entry)')
     check(await byId('sidebar-hub-design').isVisible(), 'sidebar: Hub design shown')
     check(await byId('sidebar-section-project').isVisible(), 'sidebar: PROJECT shown')
     for (const id of ['sidebar-section-data', 'sidebar-section-simulation', 'sidebar-mode-switcher']) {

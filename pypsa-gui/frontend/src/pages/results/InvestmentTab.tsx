@@ -4,37 +4,28 @@
 // WP3.7c), and the P4 finance case (Finance inputs WP4.7a, Investment case
 // WP4.7b). A result the server does not establish is shown as such — never as
 // a zero (ADR-0001).
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   commercialApi, NoCommercialConfigError, SolverInFlightError, type BillingPayload,
   type ValueFlowsPayload,
 } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
+import { openSectionInExpert, openSectionInGuided } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
-import ParticipantsDesigner from './investment/ParticipantsDesigner'
-import TariffSection from './investment/TariffSection'
-import LibraryBrowser from './investment/LibraryBrowser'
-import ContractsEditor from './investment/ContractsEditor'
-import FinanceInputsEditor from './investment/FinanceInputsEditor'
 import InvestmentCaseView from './investment/InvestmentCaseView'
 import SiteConnectionSection from './investment/SiteConnectionSection'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
   { id: 'bill', label: 'Bill' },
-  { id: 'library', label: 'Library' },
-  { id: 'tariff', label: 'Tariff' },
-  { id: 'contracts', label: 'Contracts' },
-  { id: 'finance', label: 'Finance inputs' },
   { id: 'case', label: 'Investment case' },
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
-// The sections that edit inputs: Expert → Economics edits the same ones (E3).
-const INPUT_SECTIONS: ReadonlySet<SectionId> = new Set(['tariff', 'library', 'contracts', 'finance'])
+const isSection = (v: string | null): v is SectionId => SECTIONS.some(s => s.id === v)
 
 export { fmtAmount }
 
@@ -125,10 +116,22 @@ export default function InvestmentTab() {
   const poc = useQuery({ queryKey: nk(project, 'commercial', 'poc'),
                          queryFn: () => commercialApi.getPocState() })
   const island = poc.data?.open === true
-  const [section, setSection] = useState<SectionId>('participants')
-  const [designing, setDesigning] = useState(false)
+  // A section asked for with the tab (`requestResultsTab('investment', 'case')`)
+  // opens once, then the user's choice holds.
+  const sectionRequest = useUIStore(s => s.resultsSectionRequest)
+  const clearSectionRequest = useUIStore(s => s.clearResultsSectionRequest)
+  const [section, setSection] = useState<SectionId>(
+    () => (isSection(sectionRequest) ? sectionRequest : 'participants'))
+  useEffect(() => {
+    if (!sectionRequest) return
+    if (isSection(sectionRequest)) setSection(sectionRequest)
+    clearSectionRequest()
+  }, [sectionRequest, clearSectionRequest])
   const expert = useUIStore(s => s.uiMode === 'expert')
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const openCommercial = () => {
+    if (expert) openSectionInExpert('commercial')
+    else openSectionInGuided('commercial')
+  }
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -185,13 +188,6 @@ export default function InvestmentTab() {
       </div>
       <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
            tabIndex={0}>
-        {expert && INPUT_SECTIONS.has(section) && (
-          <p className="text-[11px] text-muted pb-2" data-testid="ic-edit-in-economics">
-            These inputs are also under Expert → Economics.{' '}
-            <button type="button" className="underline"
-                    onClick={() => setSlidePanel('economics')}>Open Economics</button>
-          </p>
-        )}
         {section === 'bill' && (
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}
@@ -202,20 +198,14 @@ export default function InvestmentTab() {
                 {participantsText}
               </p>
             )}
-            <button type="button" className="text-[11px] underline" aria-expanded={designing}
-                    onClick={() => setDesigning(d => !d)}>
-              {designing ? 'Close the participants designer' : 'Define participants'}
-            </button>
-            {designing && <ParticipantsDesigner />}
+            <p className="text-[11px] text-muted" data-testid="ic-edit-in-economics">
+              The tariff, contracts, finance inputs and participants are set in Commercial &amp; parties.{' '}
+              <button type="button" className="underline" onClick={openCommercial}>
+                Open Commercial &amp; parties
+              </button>
+            </p>
           </div>
         )}
-        {section === 'tariff' && (island
-          ? <p className="text-[11px] text-muted py-2" data-testid="ic-tariff-island">
-              No tariff: the island buys no grid power.</p>
-          : <TariffSection />)}
-        {section === 'library' && <LibraryBrowser />}
-        {section === 'contracts' && <ContractsEditor />}
-        {section === 'finance' && <FinanceInputsEditor />}
         {section === 'case' && <InvestmentCaseView />}
       </div>
     </div>

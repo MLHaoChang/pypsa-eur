@@ -1,0 +1,3 @@
+* Feat(pypsa-gui): The investment case shows revenue by stream per year (PPA sales, market sales, CfD top-up or payback, grid imports, operation and maintenance, other, with the operating cash and replacements), a financial PPA split into what the developer sells (PPA price × contracted share × generation) and the market rest; and each plant's capture price and rate and the battery's charge and discharge prices.
+
+* Feat(pypsa-gui): Curtailment is split by cause per plant (the export limit, a negative export price, both, or other), from the price the dispatch was solved with, in Operation › Curtailment, linked both ways with the revenue table. A project made from the Renewables IPP example opens its Results on the investment case.

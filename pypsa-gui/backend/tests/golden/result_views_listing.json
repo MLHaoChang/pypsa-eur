@@ -1,0 +1,1088 @@
+{
+ "expert": {
+  "status": "ok",
+  "mode": "expert",
+  "shown": [
+   "loadflow"
+  ],
+  "on_screen": "loadflow",
+  "views": [
+   {
+    "id": "summary",
+    "label": "Summary",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "statistics"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     }
+    ],
+    "shows": "headline system cost and generation by carrier"
+   },
+   {
+    "id": "overview",
+    "label": "Overview",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_vintage_results",
+      "args": {}
+     }
+    ],
+    "shows": "the mix and build per investment period"
+   },
+   {
+    "id": "capex",
+    "label": "Capacity Expansion",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "economics_by_carrier"
+      }
+     }
+    ],
+    "shows": "sized assets and their capital cost"
+   },
+   {
+    "id": "dispatch",
+    "label": "Dispatch",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "generators"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage_dispatch"
+      }
+     }
+    ],
+    "shows": "hourly generation and storage operation"
+   },
+   {
+    "id": "flows",
+    "label": "Energy flow",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_energy_flows",
+      "args": {}
+     }
+    ],
+    "shows": "where the site's energy came from, what it passed through and where it went"
+   },
+   {
+    "id": "loadshape",
+    "label": "Load shape",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_load_shape",
+      "args": {}
+     }
+    ],
+    "shows": "how import, export and the site's own generation are shaped by weekday, hour, week, month and year"
+   },
+   {
+    "id": "loadflow",
+    "label": "Load Flow",
+    "data": "available",
+    "shown": true,
+    "read": [
+     {
+      "tool": "get_loadflow_summary",
+      "args": {}
+     }
+    ],
+    "verification": "displayed_data"
+   },
+   {
+    "id": "prices",
+    "label": "Prices",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "prices"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "price_drivers"
+      }
+     }
+    ],
+    "shows": "bus prices and what sets them"
+   },
+   {
+    "id": "economics",
+    "label": "Economics",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "asset_economics"
+      }
+     }
+    ],
+    "shows": "per-asset revenue, cost and LCOE"
+   },
+   {
+    "id": "emissions",
+    "label": "Emissions",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "emissions"
+      }
+     }
+    ],
+    "shows": "CO2 totals and any cap's shadow price"
+   },
+   {
+    "id": "curtailment",
+    "label": "Curtailment",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "curtailment"
+      }
+     }
+    ],
+    "shows": "renewable energy available but not used"
+   },
+   {
+    "id": "lostload",
+    "label": "Lost load",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "lost_load"
+      }
+     }
+    ],
+    "shows": "demand that could not be served"
+   },
+   {
+    "id": "adequacy",
+    "label": "Adequacy",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "adequacy"
+      }
+     }
+    ],
+    "shows": "loss-of-load expectation against the reliability target"
+   },
+   {
+    "id": "storage",
+    "label": "Storage cycling",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage"
+      }
+     }
+    ],
+    "shows": "storage cycles and state of charge"
+   },
+   {
+    "id": "fmea",
+    "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "fmea_modes"
+      }
+     }
+    ],
+    "shows": "failure modes ranked by their effect on supply"
+   },
+   {
+    "id": "investment",
+    "label": "Investment case",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_investment_case",
+      "args": {}
+     }
+    ],
+    "shows": "the investment case verdict and its cash flows"
+   },
+   {
+    "id": "asset",
+    "label": "Asset Detail",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_asset_results",
+      "args": {}
+     }
+    ],
+    "shows": "one asset's time series and KPIs"
+   }
+  ],
+  "note": "Statuses only, no values: call a view's read before you open its tab, and quote numbers from that read."
+ },
+ "expert_exclude_shown": {
+  "status": "ok",
+  "mode": "expert",
+  "shown": [
+   "loadflow"
+  ],
+  "on_screen": "loadflow",
+  "views": [
+   {
+    "id": "summary",
+    "label": "Summary",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "statistics"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     }
+    ],
+    "shows": "headline system cost and generation by carrier"
+   },
+   {
+    "id": "overview",
+    "label": "Overview",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_vintage_results",
+      "args": {}
+     }
+    ],
+    "shows": "the mix and build per investment period"
+   },
+   {
+    "id": "capex",
+    "label": "Capacity Expansion",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "economics_by_carrier"
+      }
+     }
+    ],
+    "shows": "sized assets and their capital cost"
+   },
+   {
+    "id": "dispatch",
+    "label": "Dispatch",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "generators"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage_dispatch"
+      }
+     }
+    ],
+    "shows": "hourly generation and storage operation"
+   },
+   {
+    "id": "flows",
+    "label": "Energy flow",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_energy_flows",
+      "args": {}
+     }
+    ],
+    "shows": "where the site's energy came from, what it passed through and where it went"
+   },
+   {
+    "id": "loadshape",
+    "label": "Load shape",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_load_shape",
+      "args": {}
+     }
+    ],
+    "shows": "how import, export and the site's own generation are shaped by weekday, hour, week, month and year"
+   },
+   {
+    "id": "prices",
+    "label": "Prices",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "prices"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "price_drivers"
+      }
+     }
+    ],
+    "shows": "bus prices and what sets them"
+   },
+   {
+    "id": "economics",
+    "label": "Economics",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "asset_economics"
+      }
+     }
+    ],
+    "shows": "per-asset revenue, cost and LCOE"
+   },
+   {
+    "id": "emissions",
+    "label": "Emissions",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "emissions"
+      }
+     }
+    ],
+    "shows": "CO2 totals and any cap's shadow price"
+   },
+   {
+    "id": "curtailment",
+    "label": "Curtailment",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "curtailment"
+      }
+     }
+    ],
+    "shows": "renewable energy available but not used"
+   },
+   {
+    "id": "lostload",
+    "label": "Lost load",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "lost_load"
+      }
+     }
+    ],
+    "shows": "demand that could not be served"
+   },
+   {
+    "id": "adequacy",
+    "label": "Adequacy",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "adequacy"
+      }
+     }
+    ],
+    "shows": "loss-of-load expectation against the reliability target"
+   },
+   {
+    "id": "storage",
+    "label": "Storage cycling",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage"
+      }
+     }
+    ],
+    "shows": "storage cycles and state of charge"
+   },
+   {
+    "id": "fmea",
+    "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "fmea_modes"
+      }
+     }
+    ],
+    "shows": "failure modes ranked by their effect on supply"
+   },
+   {
+    "id": "investment",
+    "label": "Investment case",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_investment_case",
+      "args": {}
+     }
+    ],
+    "shows": "the investment case verdict and its cash flows"
+   },
+   {
+    "id": "asset",
+    "label": "Asset Detail",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_asset_results",
+      "args": {}
+     }
+    ],
+    "shows": "one asset's time series and KPIs"
+   }
+  ],
+  "note": "Statuses only, no values: call a view's read before you open its tab, and quote numbers from that read."
+ },
+ "guided": {
+  "status": "ok",
+  "mode": "guided",
+  "shown": [
+   "loadflow"
+  ],
+  "on_screen": "loadflow",
+  "views": [
+   {
+    "id": "summary",
+    "label": "Summary",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "statistics"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     }
+    ],
+    "shows": "headline system cost and generation by carrier"
+   },
+   {
+    "id": "flows",
+    "label": "Energy flow",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_energy_flows",
+      "args": {}
+     }
+    ],
+    "shows": "where the site's energy came from, what it passed through and where it went"
+   },
+   {
+    "id": "loadshape",
+    "label": "Load shape",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_load_shape",
+      "args": {}
+     }
+    ],
+    "shows": "how import, export and the site's own generation are shaped by weekday, hour, week, month and year"
+   },
+   {
+    "id": "adequacy",
+    "label": "Adequacy",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "adequacy"
+      }
+     }
+    ],
+    "shows": "loss-of-load expectation against the reliability target"
+   },
+   {
+    "id": "fmea",
+    "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "fmea_modes"
+      }
+     }
+    ],
+    "shows": "failure modes ranked by their effect on supply"
+   },
+   {
+    "id": "overview",
+    "label": "Overview (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_vintage_results",
+      "args": {}
+     }
+    ],
+    "shows": "the mix and build per investment period"
+   },
+   {
+    "id": "capex",
+    "label": "Capacity Expansion (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "economics_by_carrier"
+      }
+     }
+    ],
+    "shows": "sized assets and their capital cost"
+   },
+   {
+    "id": "dispatch",
+    "label": "Dispatch (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "generators"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage_dispatch"
+      }
+     }
+    ],
+    "shows": "hourly generation and storage operation"
+   },
+   {
+    "id": "loadflow",
+    "label": "Load Flow (advanced)",
+    "data": "available",
+    "shown": true,
+    "read": [
+     {
+      "tool": "get_loadflow_summary",
+      "args": {}
+     }
+    ],
+    "verification": "displayed_data"
+   },
+   {
+    "id": "prices",
+    "label": "Prices (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "prices"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "price_drivers"
+      }
+     }
+    ],
+    "shows": "bus prices and what sets them"
+   },
+   {
+    "id": "economics",
+    "label": "Economics (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "asset_economics"
+      }
+     }
+    ],
+    "shows": "per-asset revenue, cost and LCOE"
+   },
+   {
+    "id": "emissions",
+    "label": "Emissions (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "emissions"
+      }
+     }
+    ],
+    "shows": "CO2 totals and any cap's shadow price"
+   },
+   {
+    "id": "curtailment",
+    "label": "Curtailment (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "curtailment"
+      }
+     }
+    ],
+    "shows": "renewable energy available but not used"
+   },
+   {
+    "id": "lostload",
+    "label": "Lost load (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "lost_load"
+      }
+     }
+    ],
+    "shows": "demand that could not be served"
+   },
+   {
+    "id": "storage",
+    "label": "Storage cycling (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage"
+      }
+     }
+    ],
+    "shows": "storage cycles and state of charge"
+   },
+   {
+    "id": "investment",
+    "label": "Investment case (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_investment_case",
+      "args": {}
+     }
+    ],
+    "shows": "the investment case verdict and its cash flows"
+   },
+   {
+    "id": "asset",
+    "label": "Asset Detail (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_asset_results",
+      "args": {}
+     }
+    ],
+    "shows": "one asset's time series and KPIs"
+   }
+  ],
+  "note": "Statuses only, no values: call a view's read before you open its tab, and quote numbers from that read."
+ },
+ "guided_exclude_shown": {
+  "status": "ok",
+  "mode": "guided",
+  "shown": [
+   "loadflow"
+  ],
+  "on_screen": "loadflow",
+  "views": [
+   {
+    "id": "summary",
+    "label": "Summary",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "statistics"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     }
+    ],
+    "shows": "headline system cost and generation by carrier"
+   },
+   {
+    "id": "flows",
+    "label": "Energy flow",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_energy_flows",
+      "args": {}
+     }
+    ],
+    "shows": "where the site's energy came from, what it passed through and where it went"
+   },
+   {
+    "id": "loadshape",
+    "label": "Load shape",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_load_shape",
+      "args": {}
+     }
+    ],
+    "shows": "how import, export and the site's own generation are shaped by weekday, hour, week, month and year"
+   },
+   {
+    "id": "adequacy",
+    "label": "Adequacy",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "adequacy"
+      }
+     }
+    ],
+    "shows": "loss-of-load expectation against the reliability target"
+   },
+   {
+    "id": "fmea",
+    "label": "FMEA",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_adequacy_results",
+      "args": {
+       "kind": "fmea_modes"
+      }
+     }
+    ],
+    "shows": "failure modes ranked by their effect on supply"
+   },
+   {
+    "id": "overview",
+    "label": "Overview (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_vintage_results",
+      "args": {}
+     }
+    ],
+    "shows": "the mix and build per investment period"
+   },
+   {
+    "id": "capex",
+    "label": "Capacity Expansion (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "cost_breakdown"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "economics_by_carrier"
+      }
+     }
+    ],
+    "shows": "sized assets and their capital cost"
+   },
+   {
+    "id": "dispatch",
+    "label": "Dispatch (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "generators"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage_dispatch"
+      }
+     }
+    ],
+    "shows": "hourly generation and storage operation"
+   },
+   {
+    "id": "prices",
+    "label": "Prices (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "prices"
+      }
+     },
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "price_drivers"
+      }
+     }
+    ],
+    "shows": "bus prices and what sets them"
+   },
+   {
+    "id": "economics",
+    "label": "Economics (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "asset_economics"
+      }
+     }
+    ],
+    "shows": "per-asset revenue, cost and LCOE"
+   },
+   {
+    "id": "emissions",
+    "label": "Emissions (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "emissions"
+      }
+     }
+    ],
+    "shows": "CO2 totals and any cap's shadow price"
+   },
+   {
+    "id": "curtailment",
+    "label": "Curtailment (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "curtailment"
+      }
+     }
+    ],
+    "shows": "renewable energy available but not used"
+   },
+   {
+    "id": "lostload",
+    "label": "Lost load (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "lost_load"
+      }
+     }
+    ],
+    "shows": "demand that could not be served"
+   },
+   {
+    "id": "storage",
+    "label": "Storage cycling (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_results",
+      "args": {
+       "result_kind": "storage"
+      }
+     }
+    ],
+    "shows": "storage cycles and state of charge"
+   },
+   {
+    "id": "investment",
+    "label": "Investment case (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_investment_case",
+      "args": {}
+     }
+    ],
+    "shows": "the investment case verdict and its cash flows"
+   },
+   {
+    "id": "asset",
+    "label": "Asset Detail (advanced)",
+    "data": "available",
+    "shown": false,
+    "read": [
+     {
+      "tool": "get_asset_results",
+      "args": {}
+     }
+    ],
+    "shows": "one asset's time series and KPIs"
+   }
+  ],
+  "note": "Statuses only, no values: call a view's read before you open its tab, and quote numbers from that read."
+ }
+}

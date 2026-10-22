@@ -942,7 +942,18 @@ export interface EhTemplateMeta {
   projected_load?: { year: number; peak_mw?: number; it_mw?: number; pue?: number; note?: string }[]
   energization?: { year: number; available_import_mw: number; connection_mw: number;
     source?: string; note?: string }[]
-  ledger?: { item: string; value: string; source: string; note?: string }[]
+  /** Template assumptions. The grid-readiness rows (DC 02) are numbers with
+   *  a unit, a label and the flow target of the field they belong to. */
+  ledger?: {
+    item: string; value: string | number; source: string; note?: string
+    label?: string; unit?: string; section?: string; panel?: string | null
+    component?: string | null; entity?: string | null; field?: string | null
+  }[]
+  /** The Results tab a project made from this template opens on (IPP
+   *  ticket 05); a `ResultsTab` id. */
+  initial_results_tab?: string | null
+  /** A section within that tab (the Investment tab's 'case', …). */
+  initial_results_section?: string | null
 }
 
 /** Read-only preflight from GET /results/eh_readiness (P14). */
@@ -1239,6 +1250,33 @@ export interface ReserveMarginPayload {
   derating_bases: Record<string, number>
 }
 
+/** One plant's curtailment split by cause (IPP ticket 05), in MWh. */
+export interface CurtailmentCauses {
+  export_limit: number
+  negative_price: number
+  both: number
+  other: number
+}
+
+export interface CurtailmentByCausePlant {
+  total_mwh: number
+  available_mwh: number
+  /** Absent when the split is not established. */
+  by_cause_mwh?: CurtailmentCauses
+  by_period?: Record<string, CurtailmentCauses>
+}
+
+export type CurtailmentNotEstablishedReason =
+  | 'export_link_missing' | 'export_price_missing'
+  | 'no_commercial_solve_record' | 'export_price_changed_since_solve'
+
+/** GET /results/curtailment/by_cause (204 → null before a solve). */
+export type CurtailmentByCausePayload =
+  | { status: 'ok'; export_link: string; export_capacity_mw: number | null
+      negative_price_hours: number; plants: Record<string, CurtailmentByCausePlant> }
+  | { status: 'not_established'; reason: CurtailmentNotEstablishedReason | (string & {})
+      plants: Record<string, CurtailmentByCausePlant> }
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -1425,6 +1463,10 @@ export const resultsApi = {
   // an arrow (`() => resultsApi.getCurtailment()`); calling with no
   // arguments still produces a byte-identical request to before.
   getCurtailment: (range?: TSRange) => client.get('/results/curtailment', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
+  // The horizon's curtailment per plant, split by export limit / negative
+  // price / both / other (IPP ticket 05); not windowed.
+  getCurtailmentByCause: () => client.get<CurtailmentByCausePayload>('/results/curtailment/by_cause')
+    .then(r => (r.status === 204 ? null : r.data)),
   // Per-carrier economic roll-up on the LIVE in-memory network. Powers the
   // per-carrier KPI strips in the Results / Dispatch tab. Shape mirrors
   // `CarrierEconomics` in Compare View (revenue_meur, opex_meur split into

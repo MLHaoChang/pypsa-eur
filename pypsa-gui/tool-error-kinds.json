@@ -255,6 +255,22 @@
       "surface": "inline",
       "why": "An investment-case tool got an argument out of range (an empty owner, a page < 1, a target IRR or year outside the SolvePpa bounds). The model corrects the argument and retries, like invalid_tool_args."
     },
+    "currency_mismatch": {
+      "surface": "inline",
+      "why": "A value in one currency would replace a value priced in another (an EUR Library reference on an asset priced from a non-EUR regional pack). Nothing is converted; the model explains and leaves the value as it is."
+    },
+    "reference_target_unsupported": {
+      "surface": "inline",
+      "why": "apply_library_reference named a class the reference does not price (wind/PV apply to a Generator, an electrolyser to a Link; a StorageUnit is not supported). The model names the right asset or explains."
+    },
+    "reference_confirmation_needed": {
+      "surface": "inline",
+      "why": "apply_library_reference needs the user's explicit confirmation (`missing`: dc_ac, grid_connection or money_year, each with its text). The model asks the user and calls again with confirm naming only what they confirmed."
+    },
+    "library_reference_unknown": {
+      "surface": "inline",
+      "why": "get_library_reference named a technology/projection year the shipped references do not hold, or passed component without asset. The model re-reads list_library_references and retries; a route code surfaced by the Library references route."
+    },
     "library_ref_stale": {
       "surface": "inline",
       "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
@@ -835,6 +851,98 @@
       "surface": "inline",
       "why": "A profile apply's unit does not fit its target (a price not in currency/MWh, a per-unit shape whose peak or mean is not 1, a missing scale or price basis). The detail says which; the assistant fixes the parameters and retries, per call."
     },
+    "dc_load_owned": {
+      "surface": "inline",
+      "why": "A profile apply would overwrite the data-centre load a project's dc_load spec owns (a data-centre archetype, or a profile on the template's it_load/cooling split). The detail says to change the dc_load spec instead; the assistant points there, per call."
+    },
+    "unknown_load": {
+      "surface": "inline",
+      "why": "Load-profile generation named a load that is not on the open network, or a measured load upload has no column naming one. The detail lists the loads; the assistant asks which one, per call."
+    },
+    "project_not_open": {
+      "surface": "inline",
+      "why": "A profile was generated or uploaded for a project that is not the open one (the foreground holds another). The detail names both; the assistant opens the project first or asks, per call."
+    },
+    "unknown_archetype": {
+      "surface": "inline",
+      "why": "Load-profile generation named an archetype or preset that does not exist. The detail lists the available ones; the assistant picks one, per call."
+    },
+    "invalid_archetype_params": {
+      "surface": "inline",
+      "why": "A load archetype's parameters are missing, unknown or out of range (no peak_mw or annual_mwh, a misspelt key, a bad timezone or holiday). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
+    "load_upload_format": {
+      "surface": "inline",
+      "why": "A measured load upload is not a readable timestamp + numeric load table (unreadable timestamps, a non-number, a negative reading, repeated wall-clock hours, a step coarser than an hour). The detail names the column or row; the user fixes the file, per call."
+    },
+    "load_upload_unit": {
+      "surface": "inline",
+      "why": "A measured load upload names no unit, an unknown one, or a header unit that disagrees with the stated one. The detail names the column; the assistant asks for the unit, per call."
+    },
+    "load_upload_coverage": {
+      "surface": "inline",
+      "why": "A measured load upload does not cover one full calendar year, covers several without one named, or holds a gap longer than a week. The detail says which; the assistant asks for the year or a complete file, per call."
+    },
+    "carrier_mismatch": {
+      "surface": "inline",
+      "why": "Availability generation named a wind or solar generator, whose weather profile the series would overwrite. The detail names them; the assistant picks another generator, per call."
+    },
+    "forced_outages_not_written": {
+      "surface": "inline",
+      "why": "Availability generation asked for forced outages, which the reliability study samples from each asset's own outage rate and repair time and are never written into the dispatch. The detail says so; the assistant points the user to the reliability study, per call."
+    },
+    "unknown_availability_kind": {
+      "surface": "inline",
+      "why": "Availability generation named a kind that does not exist. The detail lists maintenance, must_run and derating; the assistant picks one, per call."
+    },
+    "invalid_availability_params": {
+      "surface": "inline",
+      "why": "An availability kind's parameters are missing, unknown or out of range (a malformed window, a share outside [0, 1], a bad rule). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
+    "maintenance_year": {
+      "surface": "inline",
+      "why": "A dated maintenance window does not fall in the year it would apply to, or the network is multi-period. The detail says so; the assistant uses MM-DD windows or the network's year, per call."
+    },
+    "unknown_component": {
+      "surface": "inline",
+      "why": "Profile generation named a component (link, storage unit, generator) that is not on the open network. The detail names it; the assistant asks which one, per call."
+    },
+    "poc_tariff": {
+      "surface": "inline",
+      "why": "A price series was aimed at a point-of-connection link, whose energy price the tariff in the commercial configuration sets. The detail says so; the assistant points to the tariff, per call."
+    },
+    "cop_ambient_unknown": {
+      "surface": "inline",
+      "why": "An air-source heat-pump COP was asked for on a project with no data-centre load spec and no ambient stated, so there is no site temperature to draw it from (never a default). The detail names both remedies; the assistant asks for the site's ambient or uses a ground source, per call."
+    },
+    "cop_bus": {
+      "surface": "inline",
+      "why": "A heat-pump COP was aimed at a link whose bus0 is not electricity, so it would scale the wrong input. The detail names the bus; the assistant picks the right link, per call."
+    },
+    "two_way_floor": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a two-way link, where it would forbid reverse flow. The detail says so; the assistant picks another link or a shutdown instead, per call."
+    },
+    "poc_bound": {
+      "surface": "inline",
+      "why": "A must-run floor was aimed at a point-of-connection link, which is the grid connection, not a process. The detail says so; the assistant picks the process link, per call."
+    },
+    "part_load_not_a_series": {
+      "surface": "inline",
+      "why": "A part-load efficiency curve was asked for as a series; it depends on the dispatch, which the linear model cannot take as a time series. The detail says so; the assistant explains, per call."
+    },
+    "unknown_series_kind": {
+      "surface": "inline",
+      "why": "Series generation named a kind that does not exist. The detail lists the kinds (tou, inflow, cop, and market and part_load, which are refused with their reasons); the assistant picks one, per call."
+    },
+    "market_bundles_unavailable": {
+      "surface": "inline",
+      "why": "A market price series was asked for, but market price bundles (package C2) are not available yet. The detail suggests a time-of-use price or an upload; the assistant offers those, per call."
+    },
+    "invalid_series_params": {
+      "surface": "inline",
+      "why": "A series kind's parameters are missing, unknown or out of range (an unpriced hour, a malformed period, a bad COP temperature). The detail names the parameter; the assistant fixes it and retries, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
@@ -858,6 +966,98 @@
     "malformed_job_id": {
       "surface": "inline",
       "why": "A pending-profile job id that would escape the project's pending folder. Only a mistyped or forged id reaches this; the assistant lists the pending profiles and uses one of their ids."
+    },
+    "unknown_grid_code_profile": {
+      "surface": "inline",
+      "why": "campus_grid_readiness was asked for a grid-code profile that is neither shipped nor published in the project. The detail lists the known ones; the assistant picks one of them or asks the user. There is no conversation-wide recovery action."
+    },
+    "continuation_unavailable": {
+      "surface": "inline",
+      "why": "LC-12: a continuation turn named a job with no continuation due to this session (none finished, already continued, the plan was cancelled, the job was aborted, or another session or project). The turn does not start and nothing runs; the panel simply stops offering it."
+    },
+    "plan_continue_unavailable": {
+      "surface": "inline",
+      "why": "LC-23 COP-1: the user's Continue on the plan card named a plan that is not paused at a card (already continued, cancelled, or another project), or the request also carried a message. The turn does not start and nothing runs; the plan card stops offering Continue."
+    },
+    "invalid_continuation": {
+      "surface": "inline",
+      "why": "LC-12: /stream carried continuation_job_id together with typed words, attachments, a script or checked fields. A continuation is written by the harness, never by the user; the request is refused before any turn."
+    },
+    "task_step_out_of_order": {
+      "surface": "inline",
+      "why": "LC-05: a plan step was called before an earlier step completed (for example the run after a refused edit). Refused before any card or job; the detail names the step it waits on, and the assistant says which earlier step failed and why."
+    },
+    "task_step_waiting": {
+      "surface": "inline",
+      "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
+    },
+    "changed_during_restore": {
+      "surface": "inline",
+      "why": "restore_project_snapshot: an edit landed between the pre-restore save and the restore's lock, so nothing was restored (it would be in neither the before-restore snapshot nor the restored state). The model says so and offers to retry within the turn."
+    },
+    "dc_load_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template on a data center with a dc_load the template refuses (a phase off the investment periods, a peak above the energized import plus firm gensets; DC-01). The detail names the field; the model corrects the argument and retries, like invalid_tool_args. Nothing is created."
+    },
+    "planning_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template on a staged example with a planning entry it refuses (a year out of range, dates not increasing, start equal to end, or a build that fails the template rules; E1). The detail names the field; the model corrects the years and retries. Nothing is created."
+    },
+    "template_params_invalid": {
+      "surface": "inline",
+      "why": "create_project_from_template with a body key the template does not take (planning on a template without staged years, dc_load off a data center). The detail names the key; the model drops it and retries. Nothing is created."
+    },
+    "table_too_large": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) refused a table over 500 data rows, 40 columns or 200 characters in a cell instead of truncating it. `limits` names the bound; the assistant asks the user to split the file, per call."
+    },
+    "table_unsafe": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) refused an XLSX before parsing it: it inflates past 100 MiB or 100x compression, or an XML part declares a DOCTYPE or entity. The assistant says the workbook cannot be read and asks for a plain re-save or a CSV, per call."
+    },
+    "unreadable_table": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) could not read the upload as a table (not UTF-8 CSV, not an XLSX zip, empty sheet). The detail says which; the assistant asks for a readable file, per call."
+    },
+    "sheet_not_found": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) was given a sheet the workbook does not have. The detail lists `sheets`; the assistant retries with one of them or asks the user which, per call."
+    },
+    "source_changed": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) found the upload's bytes differ from the previewed sha256 (or from the upload's own recorded digest). Nothing was written; the assistant previews the table again, per call."
+    },
+    "unsupported_table_format": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) was pointed at an upload that is not a CSV or XLSX. The assistant asks for a table file or uses the import that fits the upload, per call."
+    },
+    "duplicate_header": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) refused a table with two columns under one header, since a mapping names columns by header. The detail names the header; the assistant asks the user to rename one, per call."
+    },
+    "column_not_found": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) was given a name_column or mapped column the table does not have. The detail lists the headers; the assistant retries with an exact header, per call."
+    },
+    "empty_mapping": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) was called with no column mapped onto a field. The assistant maps at least one column (fields from get_component_schema) and calls again, per call."
+    },
+    "mapping_too_large": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) would show more than 200 changed cells on one card. `limits` names the bound; the assistant maps fewer rows or columns per apply, per call."
+    },
+    "table_confirmation_needed": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) needs a confirmation the user has not given (`missing`, e.g. money_year when the table's money year differs from the investment case's). The assistant asks the user, then calls again with confirm=[...], per call."
+    },
+    "nothing_to_change": {
+      "surface": "inline",
+      "why": "preview_equipment_mapping / apply_equipment_mapping (data-to-model slice 1) found every mapped value already equal to the network's (a repeat apply). Nothing was written and no card was shown; the assistant tells the user, per call."
+    },
+    "edit_preview_stale": {
+      "surface": "inline",
+      "why": "apply_equipment_mapping refused because the network moved between the card the user approved and the live write (another edit, or a different digest on the HTTP apply). Nothing was written; the assistant proposes the edit again, per call."
     }
   }
 }

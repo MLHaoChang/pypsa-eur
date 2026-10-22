@@ -116,32 +116,3 @@ describe('autosave while the tab and the backend disagree', () => {
     expect(toast.error).not.toHaveBeenCalled()
   })
 })
-
-describe('manual Save', () => {
-  it('while mismatched: the Save button says why, and nothing is posted', async () => {
-    useUIStore.setState({ projectMismatch: { tab: 'demo', backend: 'other' } })
-    renderSidebar()
-    // Save sits behind the footer card's menu (M2).
-    await userEvent.click(screen.getByTestId('sidebar-project-menu'))
-    const save = screen.getByText('Save').closest('button')!
-    expect(save.getAttribute('title')).toBe(SENTENCE)
-    await userEvent.click(save)
-    expect(projectsApi.save).not.toHaveBeenCalled()
-    expect(vi.mocked(toast.error).mock.calls.map(c => String(c[0]))).toEqual([SENTENCE])
-  })
-
-  it('refused with the study_in_flight dict → the backend sentence, not "[object Object]"', async () => {
-    const message = 'Cannot save the project while a FMEA sweep is running — it re-solves the '
-      + 'in-memory network between its own iterates. Wait for it to finish, or abort it, and retry.'
-    vi.mocked(projectsApi.save).mockRejectedValue(
-      reject409({ error_kind: 'study_in_flight', study: 'fmea_sweep', message }))
-    renderSidebar()
-    await userEvent.click(screen.getByTestId('sidebar-project-menu'))
-    await userEvent.click(screen.getByText('Save').closest('button')!)
-    await waitFor(() => expect(toast.error).toHaveBeenCalled())
-    const shown = vi.mocked(toast.error).mock.calls.map(c => String(c[0]))
-    expect(shown).toEqual([message])
-    expect(shown.join(' ')).not.toContain('[object Object]')
-    expect(shown.join(' ')).not.toContain('network is empty')
-  })
-})

@@ -1,0 +1,76 @@
+{
+  "payload": {
+    "id": "nl-tennet-2026-ehs",
+    "name": "TenneT 2026 transport tariff, EHS (220/380 kV), direct connection",
+    "jurisdiction": "NL",
+    "dso_or_retailer": "TenneT TSO B.V.",
+    "valid_from": "2026-01-01",
+    "valid_to": "2026-12-31",
+    "items": [
+      {
+        "id": "vastrecht",
+        "kind": "fixed",
+        "unit": "per_month",
+        "periods": [
+          {
+            "name": "all",
+            "rate": 1039.9133333333332
+          }
+        ]
+      },
+      {
+        "id": "kw_contracted",
+        "kind": "capacity",
+        "unit": "per_kw_year",
+        "periods": [
+          {
+            "name": "all",
+            "rate": 49.28
+          }
+        ]
+      }
+    ],
+    "unsupported_fields": [
+      "kw_max_gewogen_per_maand (TenneT weighted monthly peak; Tarievencode elektriciteit 2026 art. 3.9 lid 5 and annex 5) is not modelled"
+    ]
+  },
+  "meta": {
+    "source": "Autoriteit Consument en Markt (ACM), Tarievenbesluit TenneT 2026",
+    "provider": "TenneT TSO B.V. (tariffs fixed by ACM)",
+    "description": "TenneT's maximum 2026 transport tariff for consumers directly connected to the EHS (220/380 kV) grid, in euro at 2026 price level (prijspeil 2026).",
+    "scope": "common",
+    "licence": "ACM re-use statement: government works may be copied and published unless marked as protected (none marked); owner clearance EU-C09 for the common library, 2026-10-21. The ACM logo is not used.",
+    "attribution": "Autoriteit Consument en Markt (ACM), Tarievenbesluit TenneT 2026, ACM/UIT/662819, 18 November 2025.",
+    "source_url": "https://www.acm.nl/system/files/documents/tarievenbesluit-tennet-2026-acm.pdf",
+    "source_sha256": "63f978cf5281998c68771ae66349be491653751ab43c4edb12c6c04dd20a64f2",
+    "source_cells": {
+      "vastrecht_per_year": {
+        "location": "dictum para 149, table 2 (Vastgestelde tarieven), row 'EHS tarieven 2026', Vastrecht",
+        "value": 12478.96,
+        "unit": "EUR per connection per year (prijspeil 2026)",
+        "cross_check": "rekenmodule-tarievenbesluit-tennet-2026.xlsx (sha256 5e490437f77111ad81cd89e2d75ec40452a2e76cbac5515359b6fd7ab5de1db8) '5. Tarieven en RV 2026'!L17"
+      },
+      "kw_contracted_per_year": {
+        "location": "dictum para 149, table 2 (Vastgestelde tarieven), row 'EHS tarieven 2026', kW gecontracteerd per jaar",
+        "value": 49.28,
+        "unit": "EUR per kW contracted per year",
+        "cross_check": "'5. Tarieven en RV 2026'!M17"
+      },
+      "kw_max_gewogen_per_maand": {
+        "location": "dictum para 149, table 2 (Vastgestelde tarieven), row 'EHS tarieven 2026', kW max gewogen per maand",
+        "value": 6.17,
+        "unit": "EUR per weighted peak kW per month (not modelled)",
+        "cross_check": "'5. Tarieven en RV 2026'!N17"
+      }
+    },
+    "notes": [
+      "Applies to a consumer connected directly to TenneT's grid at this voltage level only; a DSO customer already pays TenneT's costs inside the DSO tariff, so never add this tariff to a DSO bill.",
+      "The vastrecht is set per connection per year (TenneT's own tariff sheet: 'Vastrecht per jaar'); it is stored as per_month = annual / 12 at full precision. The engine prorates a per_month charge by the hours covered in each month over that month's hours, so a full year bills the annual figure.",
+      "kW gecontracteerd is billed on the contracted transport capacity for take-off for the calendar year (art. 3.9 lid 7); this app takes it from the connection (point-of-connection Link) capacity, and without one the charge is not established, never billed on a measured peak.",
+      "kW max gewogen per maand is not modelled: each quarter-hour value is multiplied by a weighting factor by month, hour and working day or weekend (Tarievencode elektriciteit 2026 art. 3.9 lid 5, annex 5) and the highest weighted value counts; the bill names it and has no total.",
+      "The low-usage product (at most 600 operating hours a year: 0.5 x contracted kW and a weekly weighted peak, art. 3.9 lid 2) is not modelled.",
+      "Amounts exclude VAT and energy tax, and exclude system-service and connection-service charges.",
+      "Valid 2026-01-01 to 2026-12-31, in euro (EUR) at 2026 price level. A project modelled outside 2026 gets the engine's existing warning commercial.tariff_out_of_validity; nothing is refused or rescaled."
+    ]
+  }
+}

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The site peak check (the data-centre create-time refusal and the grid-readiness scorecard's peak row) now lets committed ride-through batteries shave the hours the import and firm gensets fall short, from their energy above the island study's outage reserve only, walked hour by hour (DC 03).

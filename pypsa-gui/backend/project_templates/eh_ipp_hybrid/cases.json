@@ -1,0 +1,186 @@
+{
+ "version": 1,
+ "template": "eh_ipp_hybrid",
+ "note": "Declared changes, data only: nothing lists or applies them until the sensitivities slice (S5) turns them into ordinary, editable cases.",
+ "base": "pay-as-produced PPAs at 70 %, da_base, a 70 MW export limit, the pack's battery cost",
+ "cases": [
+  {
+   "id": "low_price",
+   "label": "Low price level",
+   "answers": "merchant risk",
+   "reason": "the export, the import (G7) and both PPA references follow one price series, so they move together",
+   "changes": [
+    {
+     "path": "commercial.export_price_ref.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_low"
+    },
+    {
+     "path": "commercial.import_price_ref.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_low"
+    },
+    {
+     "path": "commercial.contracts.ppa_wind.reference_price.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_low"
+    },
+    {
+     "path": "commercial.contracts.ppa_pv.reference_price.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_low"
+    }
+   ]
+  },
+  {
+   "id": "cannibalised",
+   "label": "Cannibalised shape",
+   "answers": "shape risk, battery value",
+   "reason": "the export, the import (G7) and both PPA references follow one price series, so they move together",
+   "changes": [
+    {
+     "path": "commercial.export_price_ref.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_cannibalised"
+    },
+    {
+     "path": "commercial.import_price_ref.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_cannibalised"
+    },
+    {
+     "path": "commercial.contracts.ppa_wind.reference_price.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_cannibalised"
+    },
+    {
+     "path": "commercial.contracts.ppa_pv.reference_price.id",
+     "value_type": "string",
+     "old": "ipp_da_base",
+     "new": "ipp_da_cannibalised"
+    }
+   ]
+  },
+  {
+   "id": "ppa_price_minus_10",
+   "label": "PPA price −10 %",
+   "answers": "PPA negotiation",
+   "reason": "the same term on both PPAs (wind and PV), as one negotiation",
+   "changes": [
+    {
+     "path": "commercial.contracts.ppa_wind.price",
+     "value_type": "number",
+     "old": 65.0,
+     "new": 58.5
+    },
+    {
+     "path": "commercial.contracts.ppa_pv.price",
+     "value_type": "number",
+     "old": 50.0,
+     "new": 45.0
+    }
+   ]
+  },
+  {
+   "id": "merchant_heavy",
+   "label": "Merchant-heavy",
+   "answers": "PPA share vs merchant",
+   "reason": "the same term on both PPAs (wind and PV), as one negotiation",
+   "changes": [
+    {
+     "path": "commercial.contracts.ppa_wind.share",
+     "value_type": "number",
+     "old": 0.7,
+     "new": 0.3
+    },
+    {
+     "path": "commercial.contracts.ppa_pv.share",
+     "value_type": "number",
+     "old": 0.7,
+     "new": 0.3
+    }
+   ]
+  },
+  {
+   "id": "longer_ppa",
+   "label": "Longer PPA",
+   "answers": "PPA tenor",
+   "reason": "the same term on both PPAs (wind and PV), as one negotiation. It replaces spec §7's baseload case: a baseload form has no financial settlement (owner Q-IPP6 = A)",
+   "changes": [
+    {
+     "path": "commercial.contracts.ppa_wind.tenor_years",
+     "value_type": "number",
+     "old": 10,
+     "new": 15
+    },
+    {
+     "path": "commercial.contracts.ppa_pv.tenor_years",
+     "value_type": "number",
+     "old": 10,
+     "new": 15
+    }
+   ]
+  },
+  {
+   "id": "cheap_battery",
+   "label": "Cheap battery",
+   "answers": "battery size",
+   "reason": "both upfront parts × 0.7, so the power/energy split is kept; the fixed O&M is a share of the power part and moves with it. Applied through the asset form, which re-derives capital_cost from the parts",
+   "changes": [
+    {
+     "path": "StorageUnit.bess.inv_power_overnight",
+     "value_type": "number",
+     "old": 213927.9,
+     "new": 149749.53
+    },
+    {
+     "path": "StorageUnit.bess.inv_energy_overnight",
+     "value_type": "number",
+     "old": 189861.0,
+     "new": 132902.7
+    }
+   ]
+  },
+  {
+   "id": "tight_connection",
+   "label": "Tight connection",
+   "answers": "connection limit, battery size",
+   "reason": "the export Link's size is the binding limit (no connection agreement is set)",
+   "changes": [
+    {
+     "path": "Link.grid_export.p_nom",
+     "value_type": "number",
+     "old": 70.0,
+     "new": 55.0
+    }
+   ]
+  },
+  {
+   "id": "faster_degradation",
+   "label": "Faster degradation",
+   "answers": "lifetime revenue",
+   "reason": "both plants age faster together",
+   "changes": [
+    {
+     "path": "finance.degradation_by_asset.pv_plant",
+     "value_type": "number",
+     "old": 0.005,
+     "new": 0.01
+    },
+    {
+     "path": "finance.degradation_by_asset.wind_farm",
+     "value_type": "number",
+     "old": 0.003,
+     "new": 0.008
+    }
+   ]
+  }
+ ]
+}

@@ -1017,6 +1017,8 @@ def run_turn(
     source_gap_ref: dict | None = None,
     binding_generation: int = 0,
     ui_ack: bool = False,
+    continuation_job_id: str | None = None,
+    continue_task_id: str | None = None,
     _held_lease: str | None = None,
     _held_generation: int | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
@@ -1200,6 +1202,32 @@ def run_turn(
         # return, error return, GeneratorExit on client disconnect) without
         # re-indenting the 480-line body. #19 + #20 share this single finally.
         from harness import assurance
+        if continuation_job_id is not None:
+            # LC-12: the harness writes this turn's message; claiming it is
+            # once per job. It approves nothing.
+            from harness import continuation
+            try:
+                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+                    raise ValueError("a continuation is not a user message")
+                message = continuation.claim(session, continuation_job_id)
+            except (HTTPException, ValueError, OSError):
+                yield "error", {"error_kind": "continuation_unavailable",
+                                "message": "No finished job of this conversation is waiting to continue."}
+                yield "session_done", {"reason": "continuation_unavailable"}
+                return
+        if continue_task_id is not None:
+            # LC-23 COP-1: the user's Continue clears the plan's card pause.
+            # The harness writes the message; it approves nothing.
+            from services import assistant_tasks as _plans
+            try:
+                if message or attachment_file_ids or strict_assurance or source_gap_ref is not None:
+                    raise ValueError("a plan continue is not a user message")
+                message = _plans.continue_at_card(session, continue_task_id)
+            except (HTTPException, ValueError, OSError):
+                yield "error", {"error_kind": "plan_continue_unavailable",
+                                "message": "This plan is not paused at a card."}
+                yield "session_done", {"reason": "plan_continue_unavailable"}
+                return
         if strict_assurance or assurance.strict_configured():
             session.assurance_turn = assurance.Turn(session, PyPSAService.get_active_context())
             from harness.navigation import begin_turn
@@ -2363,6 +2391,13 @@ def _tool_tier(session: ChatSession, tool_name: str) -> str:
     return mcp_client.tier_for(session, tool_name) or _safety_tier_for(tool_name)
 
 
+def _publish_hook(ctx, run_token):
+    if run_token is None:
+        return None
+    from services import run_evidence
+    return lambda: run_evidence.publish_foreground_run(run_token, ctx)
+
+
 def _dispatch_real_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -2534,6 +2569,17 @@ def _dispatch_real_tool_call(
         tool_results_collector.append({'type': 'tool_result', 'tool_use_id': tool_use_id,
                                        'is_error': True, 'content': _error_result_content(detail, exc, kind)})
         return
+    try:
+        from services import assistant_tasks
+        assistant_tasks.admit(session, tool_name, args or {})
+    except Exception as exc:
+        detail = getattr(exc, "detail", None)
+        kind = detail.get("error_kind", "task_admission_failed") if isinstance(detail, dict) else "task_admission_failed"
+        yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                             "error_kind": kind, "message": _redact_for_log(detail or exc)}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                       "is_error": True, "content": _error_result_content(detail, exc, kind)})
+        return
     if tool_name == "apply_project_changes":
         try:
             from services.assistant_tools import preview_confirmation
@@ -2598,6 +2644,13 @@ def _dispatch_real_tool_call(
             effect_fresh = reserve(session.assurance_turn, args)
         from services import assistant_tasks
         task_ticket = assistant_tasks.begin_step(session, tool_name, args or {})
+        prior_worker = None
+        if task_ticket is not None and tool_name in ("run_simulation", "run_ac_pf_stage"):
+            # The worker before this call: a job bound to it is no new solve.
+            from services.pypsa_service import PyPSAService
+            solver_ctx = turn_ctx or PyPSAService.get_active_context()
+            with solver_ctx.solver_state_lock:
+                prior_worker = solver_ctx.solver_state.get("thread")
         yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
         # Chat edits reach the same handlers as HTTP, but call them DIRECTLY —
         # so `undo_snapshot_middleware` never runs and, before this, NOTHING
@@ -2870,36 +2923,12 @@ def _dispatch_real_tool_call(
             from harness.solver_bridge import start_detached_solver_monitor
             from harness import job_adapters as ja
             active_ctx = turn_ctx or PyPSAService.get_active_context()
-            if task_ticket is not None:
-                # Sequential task steps cannot advance from a start receipt.
-                # Preserve their outcome wait, bounded by the shared deadline;
-                # ordinary foreground solves still release the turn immediately.
-                deadline = time.monotonic() + harness_budget.PER_TOOL_TIMEOUT_SECONDS
-
-                def _task_solver_done():
-                    with active_ctx.solver_state_lock:
-                        terminal = active_ctx.solver_state.get("status") != "running"
-                    return terminal or time.monotonic() >= deadline
-
-                for progress in solver_log_bridge(
-                    session, active_ctx, poll_interval=0.1,
-                    is_solver_done=_task_solver_done,
-                ):
-                    yield "tool_progress", {
-                        "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
-                    }
-                with active_ctx.solver_state_lock:
-                    result = {
-                        **(result if isinstance(result, dict) else {"result": result}),
-                        "final_status": active_ctx.solver_state.get("status"),
-                        "objective": active_ctx.solver_state.get("objective"),
-                        "solve_time": active_ctx.solver_state.get("solve_time"),
-                    }
             with active_ctx.solver_state_lock:
                 kind = active_ctx.solver_state.get("kind")
                 status = active_ctx.solver_state.get("status")
             base = result if isinstance(result, dict) else {"result": result}
             job_id = None
+            plan_settled = False
             if status == "running":
                 from services import chat_tools as _ct
                 owner = getattr(session, "owner_user_id", None) or _ct.acting_user_id()
@@ -2915,22 +2944,52 @@ def _dispatch_real_tool_call(
                 run_token = _run_evidence.start_foreground_run(
                     active_ctx, job_id=job_id, tool_name=tool_name, kind=kind,
                 )
+                # LC-12: a plan's run step waits on its job durably and the
+                # turn is released; the job's end settles the step and arms
+                # one continuation of this conversation.
+                try:
+                    task_path = assistant_tasks.await_job(task_ticket, job_id, session.session_id)
+                except Exception:  # noqa: BLE001 — the step then stays a start receipt: uncertain
+                    logger.exception("chat: plan step could not wait on job %s", job_id)
+                    task_path = None
                 start_detached_solver_monitor(
                     session, active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
-                    on_terminal=(
-                        (lambda: _run_evidence.publish_foreground_run(run_token, active_ctx))
-                        if run_token else None
-                    ),
+                    on_terminal=None if task_path else _publish_hook(active_ctx, run_token),
                 )
+                if task_path:
+                    from harness import continuation
+                    # The turn's pinned context can be an older copy of the live
+                    # one (same solver state, but a network an earlier step
+                    # replaced); the solve ran on the live network, so its
+                    # record is read there.
+                    live_ctx = PyPSAService.get_active_context()
+                    solve_ctx = live_ctx if live_ctx.solver_state is active_ctx.solver_state else active_ctx
+                    settled = continuation.follow_job(active_ctx, run_token, task_path, task_ticket, job_id,
+                                                      prior_worker=prior_worker, solve_ctx=solve_ctx)
+                    # A quick solve settles within the grace and the plan goes
+                    # on in this turn; a long one releases the turn.
+                    deadline = time.monotonic() + continuation.GRACE_SECONDS
+                    for progress in solver_log_bridge(
+                        session, active_ctx, poll_interval=0.1,
+                        is_solver_done=lambda: settled.is_set() or time.monotonic() >= deadline,
+                    ):
+                        yield "tool_progress", {
+                            "tool_use_id": tool_use_id, "tool_name": tool_name, **progress,
+                        }
+                    if settled.is_set():
+                        # This turn goes on with the plan: the step carries the
+                        # job's outcome and no separate continuation follows.
+                        assistant_tasks.continued_in_turn(task_path, task_ticket)
+                        plan_settled = True
             result = {
                 **base,
                 "status": base.get("status") or "started",
-                "running": status == "running",
+                "running": status == "running" and not plan_settled,
                 "kind": kind,
                 "monitor": "get_simulation_status",
-                "detached_progress": task_ticket is None or status == "running",
+                "detached_progress": task_ticket is None or (status == "running" and not plan_settled),
                 **({"job_id": job_id} if job_id else {}),
             }
         except Exception as exc:  # noqa: BLE001 — enrich is best-effort
@@ -2938,6 +2997,29 @@ def _dispatch_real_tool_call(
                 "chat: foreground solve handoff enrich for %s failed: %s",
                 tool_name, _redact_for_log(exc),
             )
+
+    # Study copilot slice 2: a plan's queued run step (sweep, enqueue) waits on
+    # its solve-queue jobs. The turn is released at once (a queued job is never
+    # a same-turn result); one follower settles the step from native records
+    # and arms one continuation. A partial or cancelled sweep does not wait:
+    # its receipt settles uncertain in finish_step.
+    if (task_ticket is not None and tool_name in assistant_tasks.QUEUE_WAIT_TOOLS
+            and isinstance(result, dict) and result.get("status") not in ("partial", "cancelled")):
+        try:
+            from harness import continuation
+            jobs = continuation.queue_jobs(result)
+            if jobs:  # an all-reused sweep has no job: its receipt settles the step
+                assistant_tasks.track_queue_follower(task_ticket)  # before the step reads waiting
+                task_path = assistant_tasks.await_job(task_ticket, None, session.session_id, jobs=jobs)
+                if task_path:
+                    continuation.follow_queue_job(task_path, task_ticket)
+                    result = {**result, "waiting": True, "job_id": jobs[0]["job_id"],
+                              "note": "The plan waits on these queued jobs; the conversation continues when they end."}
+                else:  # the step stopped running during the call: nothing follows, nothing is promised
+                    assistant_tasks.forget_queue_follower(task_ticket)
+        except Exception as exc:  # noqa: BLE001 — the step then stays a start receipt: uncertain
+            assistant_tasks.forget_queue_follower(task_ticket)
+            logger.exception("chat: plan step could not wait on queued jobs: %s", _redact_for_log(exc))
 
     # Issue 11 — adequacy/study mesh handoff. Starters already return
     # {"status": "running"} after publish_study; mint an ad:… handle so
