@@ -1870,15 +1870,22 @@ function SclopfPanel({
 }
 
 // Stage 2 — post-solve AC Power Flow panel. Controls the auto-chain toggle,
-// the slack-bus override and the Newton-Raphson tolerance. The run itself is the
-// header Run (Results › Load flow offers "Run again" through it). Mirrors SclopfPanel's
+// the slack-bus override, the Newton-Raphson tolerance, and the standalone
+// "Run AC Power Flow on current solution" trigger. Mirrors SclopfPanel's
 // layout (single-card section with subdued sub-options when the master
 // toggle is off) so the Solver Settings page reads consistently across
 // tabs.
 //
-// Trigger semantics: the auto-chain checkbox flips `run_ac_pf_after_lopf`; on the
-// next Run the backend chains Stage 2 inside the same worker.
-export function Stage2Panel({
+// Trigger semantics:
+//   • Auto-chain checkbox flips `run_ac_pf_after_lopf`. On the next "Run
+//     Optimization" the backend chains Stage 2 inside the same worker.
+//   • Standalone button calls POST /api/simulation/run_ac_pf, which is a
+//     separate worker thread. Requires that LOPF has solved and dispatch
+//     is populated. Disabled when no solved network is loaded.
+//   • On successful standalone trigger the resultSource auto-flips to
+//     'ac_pf' (per the design Q: "auto-flip to AC PF view"). The user can
+//     flip back via the LOPF/AC PF toggle in LoadFlow / TopologyCanvas.
+function Stage2Panel({
   draft, patch,
 }: {
   draft: SolverConfig
@@ -1886,6 +1893,81 @@ export function Stage2Panel({
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
+  const { data: simStatus } = useQuery({
+    // Use the SAME key as every other status consumer (App, AppHeader,
+    // SnapshotPicker, Results, OverviewPanel). The previous 'simulation_status'
+    // was a separate cache entry, so a standalone AC-PF trigger from here
+    // refreshed only this panel and left the picker/overlay status stale.
+    queryKey: nk(currentProject, 'simulationStatus'),
+    queryFn: simulationApi.getStatus,
+    refetchInterval: 2000,
+  })
+  const setResultSource = useUIStore(s => s.setResultSource)
+  const qc = useQueryClient()
+
+  // Treat "completed/optimal" as "has a solved network we can fix dispatch
+  // from". An idle network that was loaded from a project save also counts —
+  // /api/simulation/run_ac_pf will 400 if the network isn't actually solved.
+  const isRunning = simStatus?.running === true
+  const canRunAcPf = !isRunning
+
+  // Refresh result queries when a standalone AC-PF run finishes. The success
+  // handler flips resultSource→'ac_pf' (which refetches the ac_pf-keyed
+  // queries), but the lopf-keyed result queries wouldn't refetch if the user
+  // flips back to 'lopf'. Watch the running→idle edge and invalidate ['results']
+  // (+ status) so every view reflects the post-AC-PF state. prevRunningRef
+  // starts false so a fresh mount with no run in flight never fires.
+  const prevRunningRef = useRef(false)
+  useEffect(() => {
+    if (prevRunningRef.current && !isRunning) {
+      const proj = useUIStore.getState().currentProject
+      qc.invalidateQueries({ queryKey: nk(proj, 'results') })
+      qc.invalidateQueries({ queryKey: nk(proj, 'simulationStatus') })
+    }
+    prevRunningRef.current = isRunning
+  }, [isRunning, qc])
+
+  const runAcPf = useMutation({
+    mutationFn: () => simulationApi.runAcPf(),
+    onSuccess: () => {
+      toast.success('Stage 2: AC Power Flow started — see the Log tab for progress.')
+      // Auto-flip the result-source toggle to AC PF so the LoadFlow tab and
+      // the canvas overlay show the new view as soon as it finishes.
+      setResultSource('ac_pf')
+      // Invalidate the simulation status query so the polling cycle picks up
+      // the new "running" state immediately rather than waiting 2s.
+      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'simulationStatus') })
+    },
+    onError: (e: unknown) => {
+      const code = (e as { response?: { status?: number } })?.response?.status
+      if (code === 409) {
+        toast(
+          (t) => (
+            <div className="flex items-center gap-3">
+              <span>Previous simulation still running.</span>
+              <button
+                className="px-2 py-0.5 rounded bg-accent text-white text-xs hover:opacity-90"
+                onClick={async () => {
+                  toast.dismiss(t.id)
+                  try {
+                    await simulationApi.forceReset()
+                    runAcPf.mutate()
+                  } catch { /* ignore */ }
+                }}
+              >
+                Force restart
+              </button>
+            </div>
+          ),
+          { duration: 10000 },
+        )
+        return
+      }
+      const msg = e instanceof Error ? e.message : 'Stage 2 start failed'
+      toast.error(`AC PF: ${msg}`)
+    },
+  })
+
   // Slack-bus options. Empty value ⇒ backend auto-picks (largest gen).
   const busOptions = useMemo(
     () => (buses as Array<{ name: string }>).map(b => b.name).sort(),
@@ -1907,7 +1989,8 @@ export function Stage2Panel({
         <span className="text-xs">
           Auto-run AC PF after optimisation
           <span className="block text-[11px] text-muted">
-            Chains Stage 2 in the same "Run" click.
+            Chains Stage 2 in the same "Run" click. Leave off to trigger
+            Stage 2 manually below.
           </span>
         </span>
         <input
@@ -1956,9 +2039,20 @@ export function Stage2Panel({
         </div>
       </div>
 
-      <p className="text-[10px] text-muted">
-        With this on, AC power flow runs after every solve (the header Run).
-      </p>
+      <div className="border-t border-border pt-3">
+        <button
+          onClick={() => runAcPf.mutate()}
+          disabled={!canRunAcPf || runAcPf.isPending}
+          className="w-full py-2 bg-accent text-white rounded text-xs font-semibold hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {runAcPf.isPending ? 'Starting Stage 2…' : 'Run AC Power Flow on current solution'}
+        </button>
+        <p className="text-[10px] text-muted mt-1.5">
+          Standalone trigger — requires that a LOPF has solved at least once
+          since the network was loaded.
+          {isRunning && ' Disabled while a solve is in progress.'}
+        </p>
+      </div>
     </section>
   )
 }
