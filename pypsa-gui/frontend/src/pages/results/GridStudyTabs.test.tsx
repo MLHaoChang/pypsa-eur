@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
+import { useScorecardOpen } from '../../components/gridReadiness/GridReadinessScorecard'
 import type { CampusState } from '../../api/campusElectrical'
 
 const api = vi.hoisted(() => ({
@@ -47,7 +48,7 @@ function mount(el: React.ReactNode) {
 }
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Hub A', activeSlidePanel: null } as never)
+  useUIStore.setState({ currentProject: 'Hub A', activeSlidePanel: null, uiMode: 'expert', fieldDrawer: null } as never)
   Object.values(api).forEach(f => f.mockReset())
   api.gsStatus.mockRejectedValue(notStudy())
 })
@@ -77,6 +78,36 @@ describe('Grid code & connection', () => {
     mount(<GridCodeTab />)
     fireEvent.click(await screen.findByTestId('grid-code-scorecard-link'))
     expect(useUIStore.getState().activeSlidePanel).toBe('issues')
+  })
+
+  it('in Guided, opens the Run-the-grid-checks link in place without flipping the mode', async () => {
+    useUIStore.setState({ uiMode: 'guided' } as never)
+    api.campusState.mockResolvedValue(hubState(false))
+    mount(<GridCodeTab />)
+    fireEvent.click(await screen.findByText('Run the grid checks in Grid study ›'))
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().fieldDrawer?.panel).toBe('campusStudy')
+  })
+
+  it('in Expert, the scorecard link opens Issues and asks to scroll to the group', async () => {
+    useUIStore.setState({ uiMode: 'expert', gridReadinessRequest: false } as never)
+    api.campusState.mockResolvedValue(hubState(false))
+    mount(<GridCodeTab />)
+    fireEvent.click(await screen.findByTestId('grid-code-scorecard-link'))
+    expect(useUIStore.getState().gridReadinessRequest).toBe(true)
+  })
+
+  it('in Guided, the scorecard link opens the Site card with the scorecard expanded, in place', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: null } as never)
+    useScorecardOpen.setState({ open: {} })
+    api.campusState.mockResolvedValue(hubState(false))
+    mount(<GridCodeTab />)
+    fireEvent.click(await screen.findByTestId('grid-code-scorecard-link'))
+    const ui = useUIStore.getState()
+    expect(ui.uiMode).toBe('guided')
+    expect(ui.activeSlidePanel).toBe('hubDesign')
+    expect(ui.activeSection).toBe('connection')
+    expect(useScorecardOpen.getState().open['guided:card']).toBe(true)
   })
 
   it('reads a planning → dynamics project through its capacity and assessment tables, without their actions', async () => {

@@ -6,6 +6,7 @@ import { gridspineApi, isNotAStudy } from '../../api/gridspine'
 import { errorText } from '../../api/campusElectrical'
 import { useUIStore } from '../../store/uiStore'
 import { openPanel } from './openPanel'
+import { showGridReadiness } from '../../layout/flowNavigation'
 import { Btn, PageSection } from '../../components/PageKit'
 import { useFlowScope } from '../../components/flowScope/useFlowScope'
 import { inScope } from '../../api/flow'
@@ -70,7 +71,6 @@ function StudyConnection({ name }: { name: string }) {
 
 export function GridCodeTab() {
   const name = useUIStore(s => s.currentProject)
-  const setSlidePanel = useUIStore(s => s.setSlidePanel)
   // Which kind of project this is decides which study the tab reads.
   const kind = useStudyKind(name)
   if (!name) return <NoProject />
@@ -80,7 +80,7 @@ export function GridCodeTab() {
         <p className="text-[11px] text-muted">
           Grid-code verdicts, with the before / after-battery values, are in the scorecard.{' '}
           <button type="button" data-testid="grid-code-scorecard-link" className="text-accent hover:underline"
-            onClick={() => setSlidePanel('issues')}>Readiness › Grid readiness ›</button>
+            onClick={showGridReadiness}>Readiness › Grid readiness ›</button>
         </p>
       </PageSection>
       {kind.pending ? <Loading />

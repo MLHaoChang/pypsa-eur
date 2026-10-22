@@ -4,6 +4,7 @@
 // query keys so the cache is shared, and a link into its tab. Absent is never
 // shown as zero: a quantity the solve did not model says so, and a standard
 // that was not set is not shown as met.
+import { showGridReadiness } from '../../layout/flowNavigation'
 import type { ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight } from 'lucide-react'
@@ -164,7 +165,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
               + (readiness.summary.red_flags > 0 ? ` · ${readiness.summary.red_flags} red ${readiness.summary.red_flags === 1 ? 'flag' : 'flags'}` : '')
             : null,
         }}
-        openScorecard={() => setSlidePanel('issues')}
+        openScorecard={showGridReadiness}
         openReports={() => setSlidePanel('reports')}
       />
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, AlertCircle, CheckCircle2, RefreshCw, ArrowRight, XCircle, X, Lightbulb, Wrench, Info } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -110,6 +110,13 @@ export default function IssuesPanel() {
   // The grid-readiness scorecard (DC 02): shown only when the project has a
   // saved network to read; a failed read leaves the panel as it was.
   const { data: gridReadiness } = useGridReadiness()
+  // "Readiness › Grid readiness ›" asks for the group: scroll to it once mounted.
+  const gridRequest = useUIStore(s => s.gridReadinessRequest)
+  useEffect(() => {
+    if (!gridRequest || !gridReadiness) return
+    document.querySelector('[data-testid="grid-readiness-group"]')?.scrollIntoView({ block: 'start' })
+    useUIStore.getState().clearGridReadinessRequest()
+  }, [gridRequest, gridReadiness])
 
   // Open the offending asset's edit form beside this list (J9). Issues stays
   // open, App.tsx mounts the Properties panel next to it for the selected

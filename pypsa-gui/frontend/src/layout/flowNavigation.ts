@@ -1,6 +1,7 @@
 import type { FlowTarget, FlowSectionId } from '../api/flow'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
 import { SECTION_OPEN } from './flowSections'
+import { useScorecardOpen } from '../components/gridReadiness/GridReadinessScorecard'
 
 // Showing a section or one flow item's field: the Guided cards, the Run's
 // reason, and Issues all go through here.
@@ -63,6 +64,21 @@ export function openN1BranchSelector(): void {
     return
   }
   openSectionInExpert('scenarios')
+}
+
+/** Show the Grid readiness scorecard ("Readiness › Grid readiness ›"): Issues
+ *  scrolled to its group in Expert; in Guided the Site card, in place, with the
+ *  scorecard expanded (never flips the mode). */
+export function showGridReadiness(): void {
+  const ui = useUIStore.getState()
+  if (ui.uiMode === 'guided') {
+    useScorecardOpen.setState(s => ({ open: { ...s.open, 'guided:card': true } }))
+    openSectionInGuided('connection')
+    return
+  }
+  ui.requestGridReadiness()
+  ui.setActiveSection('readiness')
+  ui.setSlidePanel('issues')
 }
 
 /** Show one flow item's field in Expert: its panel, or the component's own
