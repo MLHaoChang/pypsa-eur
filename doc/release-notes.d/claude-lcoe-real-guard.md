@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The investment case's real LCOE is not established, and is flagged `lcoe_real_not_established:no_discounted_generation`, when the generation discounted at the real rate is zero or negative (a storage-dominated investment); it used to divide by zero or flip sign.

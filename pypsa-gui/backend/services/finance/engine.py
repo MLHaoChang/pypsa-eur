@@ -395,7 +395,13 @@ def run_case(case: FinanceCase, pack: JurisdictionPack | None = None, *,
                 flags_m.append("lcoe_real_not_established:inflation_missing")
             else:
                 rr = (1.0 + r) / (1.0 + fin.inflation) - 1.0
-                lcoe_r = num / float(np.sum(e_tot / (1.0 + rr) ** k))
+                de_r = float(np.sum(e_tot / (1.0 + rr) ** k))
+                # The nominal path's guard: net-negative years (a storage-dominated
+                # investment) can leave the real denominator at or below zero.
+                if de_r > 0:
+                    lcoe_r = num / de_r
+                else:
+                    flags_m.append("lcoe_real_not_established:no_discounted_generation")
         if case.counterfactual:
             flags_m.append("lcoe_on_incremental_value")
     m["lcoe_nominal_per_mwh"], m["lcoe_real_per_mwh"] = lcoe, lcoe_r

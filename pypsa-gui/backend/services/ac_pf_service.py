@@ -88,6 +88,19 @@ def _snapshot_result_state(n) -> dict:
     return out
 
 
+def _restore_result_state(n, snapshot: dict) -> None:
+    """Put the LP result tables of `snapshot` back into `n`. A PF that raised
+    midway may have overwritten some of them; the network must keep the LP
+    values so a retry snapshots the true LP baseline."""
+    import copy
+    for key, df in snapshot.items():
+        accessor_name, attr = key.split(".", 1)
+        try:
+            setattr(getattr(n, accessor_name), attr, copy.deepcopy(df))
+        except Exception:
+            pass
+
+
 def _pick_ac_pf_slack_bus(n, cfg: SolverConfig) -> str:
     """
     Resolve the slack bus for the AC PF.
@@ -402,6 +415,7 @@ def run_ac_pf_stage(
             # zero-impedance lines, missing slack) does. Surface and re-raise so
             # the caller's `[PHASE] Failed` branch picks it up.
             phase(f"Stage 2: AC PF errored before completion: {exc}")
+            _restore_result_state(network, lopf_snapshot)
             raise
     finally:
         # Revert *_t.p_set so autosave writes a clean network. PyPSA's PF has

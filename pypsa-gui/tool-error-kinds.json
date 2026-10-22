@@ -499,6 +499,10 @@
       "surface": "inline",
       "why": "Recorded on a published run-evidence manifest when an adequacy/study worker ends failed; get_run_evidence surfaces the typed error field."
     },
+    "ac_pf_already_run": {
+      "surface": "inline",
+      "why": "run_ac_pf_stage was refused: AC power flow already ran on this solve and its results replaced the LOPF values, so a second run would take them as the LP baseline. The model tells the user to re-run the LOPF first."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
@@ -1106,6 +1110,26 @@
     "edit_preview_stale": {
       "surface": "inline",
       "why": "apply_equipment_mapping refused because the network moved between the card the user approved and the live write (another edit, or a different digest on the HTTP apply). Nothing was written; the assistant proposes the edit again, per call."
+    },
+    "batch_refused": {
+      "surface": "inline",
+      "why": "apply_generated_profiles found members that cannot be applied (carrier mismatch, a point the job lacks, an unaligned series). Nothing was written; the detail names every bad member and the assistant reports them, per call."
+    },
+    "duplicate_member": {
+      "surface": "inline",
+      "why": "apply_generated_profiles listed one component twice. It appears in the batch_refused member list; the assistant drops the repeat and retries."
+    },
+    "no_members": {
+      "surface": "inline",
+      "why": "apply_generated_profiles had no members: none named, or all_from_job found no point named after a wind/solar generator. The detail lists the job's points; the assistant names the components or says nothing fits."
+    },
+    "batch_partially_applied": {
+      "surface": "inline",
+      "why": "A write failed midway through apply_generated_profiles. The detail names what was and was not applied; the assistant says so and that one Undo reverts the whole batch."
+    },
+    "ambiguous_members": {
+      "surface": "inline",
+      "why": "apply_generated_profiles was given both named components and all_from_job. Nothing was written; the assistant picks one and retries."
     },
     "pdf_unreadable": {
       "surface": "inline",
