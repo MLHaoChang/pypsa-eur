@@ -411,6 +411,11 @@ def dispatch(session, monkeypatch, tool, args):
     return frames, results
 
 
+def tool_result(results):
+    content = results[-1]['content']
+    return json.loads(content.removeprefix('<untrusted_data>').removesuffix('</untrusted_data>'))
+
+
 def wait_until(predicate, seconds=60):
     import time
     deadline = time.monotonic() + seconds
@@ -431,10 +436,12 @@ def test_loop_queued_step_waits_settles_and_continues_once_pausing_at_the_next_c
     task = chat_tools.start_task(title='Sweep then check', request_id='q-loop', steps=steps,
                                  brief={'objective': 'Price sensitivity, then a grid check.', 'cards': ['capacity', 'grid'],
                                         'phases': [{'card': 'capacity', 'steps': ['sweep']}, {'card': 'grid', 'steps': ['check']}]})
-    frames, _ = dispatch(session, monkeypatch, 'run_sensitivity_sweep', args)
+    frames, results = dispatch(session, monkeypatch, 'run_sensitivity_sweep', args)
     assert not [p for e, p in frames if e == 'tool_error'], frames
     step = stored(root, task['task_id'])['steps'][0]
     assert step['status'] == 'waiting' and step['job']['kind'] == 'queue'
+    said = tool_result(results)
+    assert said['waiting'] is True and said['job_id'] == step['job']['job_id']
     assert wait_until(lambda: stored(root, task['task_id'])['steps'][0]['status'] != 'waiting')
     record = stored(root, task['task_id'])
     assert record['steps'][0]['status'] == 'completed' and record['status'] == 'paused_at_card'
@@ -444,6 +451,37 @@ def test_loop_queued_step_waits_settles_and_continues_once_pausing_at_the_next_c
     assert continuation.due(session) == []
     refused('task_paused_at_card', tasks.admit, session, 'validate_network', {})
     refused('task_paused_at_card', tasks.begin_step, session, 'validate_network', {})
+
+
+def test_loop_queued_step_of_a_plan_cancelled_mid_call_promises_no_wait(session, baseline, monkeypatch):
+    """GK, LC-24: when await_job finds the step no longer running (the plan was Stopped mid-call),
+    nothing follows it, so the result promises no wait."""
+    from harness import continuation
+    _, project_id, _ = baseline
+    args = {'baseline_project_id': project_id, 'cases': [sweep_case()]}
+    steps = [{'id': 'sweep', 'tool': 'run_sensitivity_sweep', 'args': args}]
+    chat_tools.start_task(title='Sweep', request_id='q-stopped', steps=steps, brief=brief(steps))
+    monkeypatch.setattr(tasks, 'await_job', lambda *a, **kw: None)  # the step stopped running during the call
+    frames, results = dispatch(session, monkeypatch, 'run_sensitivity_sweep', args)
+    assert not [p for e, p in frames if e == 'tool_error'], frames
+    said = tool_result(results)
+    assert 'waiting' not in said and 'plan waits' not in said.get('note', '')
+    assert continuation.due(session) == []
+
+
+def test_loop_all_reused_sweep_step_neither_waits_nor_logs_a_failure(session, baseline, monkeypatch, caplog):
+    """GK: a sweep with no job has nothing to wait on; it completes from its receipt."""
+    _, project_id, root = baseline
+    first = chat_tools.run_sensitivity_sweep(project_id, [sweep_case()])
+    assert chat_tools.wait_for_job(first['cases'][0]['job']['id'], 25)['completed']
+    args = {'baseline_project_id': project_id, 'cases': [sweep_case()]}
+    steps = [{'id': 'sweep', 'tool': 'run_sensitivity_sweep', 'args': args}]
+    task = chat_tools.start_task(title='Reuse', request_id='q-reuse-loop', steps=steps, brief=brief(steps))
+    frames, results = dispatch(session, monkeypatch, 'run_sensitivity_sweep', args)
+    assert not [p for e, p in frames if e == 'tool_error'], frames
+    assert 'waiting' not in tool_result(results)
+    assert 'could not wait on queued jobs' not in caplog.text
+    assert stored(root, task['task_id'])['steps'][0]['status'] == 'completed'
 
 
 def test_sc09_queued_step_lost_with_a_restart_is_uncertain_and_never_requeued(session, baseline):
