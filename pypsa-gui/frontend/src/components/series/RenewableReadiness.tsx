@@ -6,6 +6,8 @@ import type { ReadinessRow } from '../../api/profiles'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 
+const SOURCE_LABEL: Record<string, string> = { synthetic: 'Synthetic', atlite: 'ERA5' }
+
 const STALE_WORDS: Record<NonNullable<ReadinessRow['stale_reason']>, string> = {
   horizon_changed: 'the model’s hours changed',
   bus_moved: 'the bus moved',
@@ -13,16 +15,16 @@ const STALE_WORDS: Record<NonNullable<ReadinessRow['stale_reason']>, string> = {
 
 export function readinessBadge(row: ReadinessRow): { text: string; tone: 'ok' | 'warn' | 'muted' } {
   if (row.coord_source === 'missing' && row.profile !== 'uploaded' && row.profile !== 'network_native') {
-    return { text: 'No coordinates', tone: 'warn' }
+    return { text: 'No location', tone: 'warn' }
   }
   switch (row.profile) {
     case 'uploaded': return { text: 'Measured file', tone: 'ok' }
     case 'network_native': return { text: 'From the network', tone: 'ok' }
     case 'generated': {
       const year = row.provenance?.weather_year
-      const base = `${row.provenance?.source ?? 'Generated'}${year != null ? ` › ${year}` : ''}`
+      const base = `${SOURCE_LABEL[row.provenance?.source ?? ''] ?? row.provenance?.source ?? 'Generated'}${year != null ? ` · ${year}` : ''}`
       return row.stale_reason
-        ? { text: `${base} › out of date: ${STALE_WORDS[row.stale_reason]}`, tone: 'warn' }
+        ? { text: `${base} · out of date: ${STALE_WORDS[row.stale_reason]}`, tone: 'warn' }
         : { text: base, tone: 'ok' }
     }
     default: return { text: 'Ready to generate', tone: 'muted' }
@@ -52,8 +54,7 @@ export function MissingCoordinatesBanner({ rows }: { rows: ReadinessRow[] }) {
     <div data-testid="missing-coordinates-banner"
       className="px-3 py-2 border-b border-border/40 bg-amber-500/10 text-[11px]">
       <p className="font-medium text-text">
-        {missing.length === 1 ? 'One generator has' : `${missing.length} generators have`} no location
-        {' '}› a weather profile needs where it is.
+        {missing.length === 1 ? 'One generator has' : `${missing.length} generators have`} no location: a weather profile needs to know where it is.
       </p>
       <ul className="mt-1 space-y-0.5">
         {missing.map(r => (

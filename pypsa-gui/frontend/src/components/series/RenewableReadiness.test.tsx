@@ -15,13 +15,13 @@ beforeEach(() => useUIStore.setState({ uiMode: 'guided', fieldDrawer: null }))
 
 describe('readinessBadge', () => {
   it('says what is missing or where the profile came from', () => {
-    expect(readinessBadge(row({ coord_source: 'missing', lon: null, lat: null })).text).toBe('No coordinates')
+    expect(readinessBadge(row({ coord_source: 'missing', lon: null, lat: null })).text).toBe('No location')
     expect(readinessBadge(row({})).text).toBe('Ready to generate')
-    expect(readinessBadge(row({ profile: 'generated', provenance: { source: 'ERA5', weather_year: 2013 } })).text)
-      .toBe('ERA5 › 2013')
+    expect(readinessBadge(row({ profile: 'generated', provenance: { source: 'atlite', weather_year: 2013 } })).text)
+      .toBe('ERA5 · 2013')
     expect(readinessBadge(row({ profile: 'generated', stale_reason: 'bus_moved',
-      provenance: { source: 'ERA5', weather_year: 2013 } })).text)
-      .toBe('ERA5 › 2013 › out of date: the bus moved')
+      provenance: { source: 'atlite', weather_year: 2013 } })).text)
+      .toBe('ERA5 · 2013 · out of date: the bus moved')
   })
 })
 
