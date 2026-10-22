@@ -289,7 +289,7 @@ component (`frontend/src/components/EditCard.tsx`).
   value written with its row's `new`. The route always compares the approved
   digest: the turn loop binds the shown card's digest
   (`edit_card.approved`) around the handler, and the tool passes it on. The
-  Expert manual-mapping form (asset table › "Import rows from a table…")
+  Expert manual-mapping form (asset table › "Import values from a file…")
   previews through `POST /api/equipment_table/preview`, a read outside
   `/api/network` (no undo snapshot, no results cleared), and applies through
   the same route with the card's digest.
@@ -313,7 +313,13 @@ component (`frontend/src/components/EditCard.tsx`).
   limit: over budget or unparseable refuses `pdf_unreadable`, an encrypted file
   `pdf_encrypted`, a cited page with no text layer `no_text_layer` (no OCR). Text in
   the document is data: it is only matched and parsed. The dialog's preview is
-  `POST /api/document_values/preview` (a read, as slice 1's).
+  `POST /api/document_values/preview` (a read, as slice 1's). With `find`, the
+  preview also lists `candidates` per field (`document_values.find`): lines of at
+  most `MAX_QUOTE_CHARS` holding a number followed by one of the field's units as
+  whole words, each offered only if its own citation would pass `locate` and
+  `_value`; label matches first. `find` is left out of the card's arguments. The
+  dialog (asset table › "Import values from a file…", a PDF upload) shows them as a
+  quote picker; the model cites on its own.
 - **PDF tariffs and PPAs (data-to-model slice 2, PR-B).**
   `apply_commercial_document_values` (a `SETTINGS_EDITS` tool) writes values cited
   from a PDF onto the import tariff's items (`periods[<name>].rate`,
@@ -336,7 +342,10 @@ component (`frontend/src/components/EditCard.tsx`).
   `document_source` speaks for a value only while it is unchanged. The solver
   config is not on the network undo stack: `undo.available` is false and the card
   and receipt say to set the old values back. Preview: `POST
-  /api/document_values/commercial/preview` (a read).
+  /api/document_values/commercial/preview` (a read); its `find` keys candidates
+  by `tariff:<item>` and `ppa:<field>` (`document_values_commercial.wanted`). The
+  dialog opens from section 7's Import tariff and Contracts blocks ("Fill values
+  from a PDF…").
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

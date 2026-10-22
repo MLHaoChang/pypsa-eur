@@ -309,6 +309,7 @@ function AssetTable({
 }: AssetTableProps) {
   const qc = useQueryClient()
   const [tableImportOpen, setTableImportOpen] = useState(false)
+  const assetNames = useMemo(() => data.map(r => String(r.name)), [data])
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
@@ -1075,14 +1076,14 @@ function AssetTable({
             onClick={() => setTableImportOpen(true)}
             data-testid="asset-table-import"
             className="flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1 border border-border rounded text-muted hover:text-text hover:border-text/40"
-            title="Set field values on these assets from an uploaded CSV or XLSX table, one row per asset"
+            title="Set field values on these assets from an uploaded CSV or XLSX table (one row per asset) or a PDF datasheet (each value with its page and quote)"
           >
             <FileSpreadsheet size={11} />
-            Import rows from a table…
+            Import values from a file…
           </button>
         )}
         {tableImportOpen && (
-          <EquipmentTableImport componentClass={componentClass} assetsLabel={tab.toLowerCase()} onClose={() => setTableImportOpen(false)}
+          <EquipmentTableImport componentClass={componentClass} assetsLabel={tab.toLowerCase()} assetNames={assetNames} onClose={() => setTableImportOpen(false)}
             onApplied={() => {
               lastMutationAtRef.current = Date.now()
               const projectId = useUIStore.getState().currentProject

@@ -72,6 +72,8 @@ class DocumentPreviewIn(BaseModel):
     currency: str | None = None
     money_year: int | None = None
     confirm: list[str] = Field(default_factory=list)
+    # The dialog's quote picker: list candidate lines for each of the class's fields.
+    find: bool = False
 
 
 def args_of(body: DocumentPreviewIn | DocumentValuesIn) -> dict[str, Any]:
@@ -141,8 +143,13 @@ class CommercialValuesHttp(CommercialValuesIn):
     digest: str = Field(min_length=1)
 
 
+class CommercialPreviewHttp(CommercialPreviewIn):
+    # The dialog's quote picker: list candidate lines for each tariff item and PPA field.
+    find: bool = False
+
+
 @preview_router.post("/commercial/preview")
-def preview_commercial_document_values_http(body: CommercialPreviewIn, user: User = Depends(require_user)) -> dict:
+def preview_commercial_document_values_http(body: CommercialPreviewHttp, user: User = Depends(require_user)) -> dict:
     """The dialog's read in commercial mode: the document, and with citations the plan and
     the card (`document_values_commercial.preview`). Writes nothing."""
     from services import document_values_commercial as DC
