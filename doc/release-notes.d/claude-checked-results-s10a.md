@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Under Check answers, a checked answer can carry a chart drawn only from its own checked evidence (dispatch, storage, price or branch loading series); series the evidence does not hold are listed as not drawn, an outdated solve draws nothing, and the downloaded PNG is re-verified against its evidence.

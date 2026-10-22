@@ -165,6 +165,20 @@ class ApplyRequest(BaseModel):
     attribute: str | None = None
 
 
+class BatchMember(BaseModel):
+    component: str
+    point_id: str | None = None
+
+
+class BatchApplyRequest(BaseModel):
+    # Several points of one pending job, written in one validated, single-undo
+    # step. `all_from_job` takes every point named after a wind/solar generator.
+    job_id: str
+    members: list[BatchMember] = Field(default_factory=list)
+    all_from_job: bool = False
+    time_basis: str | None = None
+
+
 class LoadGenerateRequest(BaseModel):
     # A load archetype (`services/profile_gen/load_archetypes.py`) for the
     # named loads of the open network; one column per load, ids = names.
@@ -1278,7 +1292,8 @@ def apply_default_series(
             with pending_io_lock(), xr.open_dataset(nc) as ds:
                 frame = ds.to_dataframe()
             frame.index = pd.DatetimeIndex(frame.index)
-            summary = assign_profile(ctx, component, frame[component], meta,
+            summary = assign_profile(ctx, component, frame[component],
+                                     {**meta, "point_id": component},
                                      component_type=component_type, attribute=attribute)
         except ProfileApplyError as exc:
             results.append({"job_id": job_id, "component": component, "applied": False,
@@ -1351,6 +1366,78 @@ def list_pending_profiles(
     return {"pending": records, "jobs": live, "keep": KEEP_PENDING}
 
 
+def _read_point_series(nc, job_id: str, point_id: str, component: str) -> pd.Series:
+    """One point's weather-year series from a pending artifact, named after
+    the component. A missing column is 422 `point_not_in_profile`, an
+    unreadable artifact a 422, never a 500."""
+    try:
+        with pending_io_lock(), xr.open_dataset(nc) as ds:
+            return _series_of(ds, point_id, component)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
+        raise HTTPException(
+            status_code=422,
+            detail=(f"pending profile for job {job_id!r} is unreadable: "
+                    f"{public_message(exc, route='apply', job_id=job_id)}"),
+        ) from exc
+
+
+def _series_of(ds, point_id: str, component: str) -> pd.Series:
+    """`_read_point_series` on an artifact already open (the batch opens it once)."""
+    if point_id not in ds.data_vars:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error_kind": "point_not_in_profile",
+                "message": f"the pending profile has no column "
+                           f"{point_id!r}; it holds "
+                           f"{sorted(ds.data_vars)}",
+            },
+        )
+    series = ds[point_id].to_series()
+    return pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
+                     name=component, dtype=float)
+
+
+def _moved_bus_warning(ctx, meta: dict, point_id: str, component: str,
+                       component_type: str | None) -> str | None:
+    """A generator's bus that moved (or lost its coordinates) since the point
+    was generated, as the warning apply returns; None when it still fits."""
+    warning = None
+    coords = (meta.get("point_coords") or {}).get(point_id)
+    gen = ctx.network.generators
+    if (coords is not None and component in gen.index
+            and component_type in (None, "generators")):
+        bus = str(gen.at[component, "bus"])
+        if bus in ctx.network.buses.index:
+            from services.network_geometry import _bus_coord
+
+            now = _bus_coord(ctx.network, bus)
+            if now is None:
+                warning = (
+                    f"bus '{bus}' has no coordinates now: profile was made "
+                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
+                )
+            elif (abs(now[0] - coords[0]) > 0.5
+                  or abs(now[1] - coords[1]) > 0.5):
+                warning = (
+                    f"bus '{bus}' moved since generation: profile was made for "
+                    f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
+                    f"({now[0]:.3f}, {now[1]:.3f})"
+                )
+    return warning
+
+
+@project_router.get("/{name}/profiles/readiness")
+def profile_readiness(proj: AuthorizedProject = ProjectAccessDep):
+    """One row per wind/solar generator: its coordinate state, the profile it
+    carries now and whether a generated one is stale (RP-02, read-only)."""
+    from services.profile_gen.readiness import readiness_rows
+
+    return {"generators": readiness_rows(_foreground_ctx(proj, "read readiness"))}
+
+
 @project_router.post("/{name}/profiles/apply")
 def apply_profile(
     body: ApplyRequest,
@@ -1371,29 +1458,7 @@ def apply_profile(
     nc, meta = _pending_artifact(proj, body.job_id)
 
     point_id = body.point_id or body.component
-    try:
-        with pending_io_lock(), xr.open_dataset(nc) as ds:
-            if point_id not in ds.data_vars:
-                raise HTTPException(
-                    status_code=422,
-                    detail={
-                        "error_kind": "point_not_in_profile",
-                        "message": f"the pending profile has no column "
-                                   f"{point_id!r}; it holds "
-                                   f"{sorted(ds.data_vars)}",
-                    },
-                )
-            series = ds[point_id].to_series()
-    except HTTPException:
-        raise
-    except Exception as exc:  # noqa: BLE001 — a corrupt artifact is a 422, not a 500
-        raise HTTPException(
-            status_code=422,
-            detail=(f"pending profile for job {body.job_id!r} is unreadable: "
-                    f"{public_message(exc, route='apply', job_id=body.job_id)}"),
-        ) from exc
-    series = pd.Series(series.to_numpy(), index=pd.DatetimeIndex(series.index),
-                       name=body.component, dtype=float)
+    series = _read_point_series(nc, body.job_id, point_id, body.component)
 
     # Apply writes the FOREGROUND context — the project the caller is looking
     # at. Refuse to write a background project the user may not even have open.
@@ -1408,28 +1473,8 @@ def apply_profile(
                    "open it first, then apply",
         )
 
-    warning = None
-    coords = (meta.get("point_coords") or {}).get(point_id)
-    gen = ctx.network.generators
-    if (coords is not None and body.component in gen.index
-            and body.component_type in (None, "generators")):
-        bus = str(gen.at[body.component, "bus"])
-        if bus in ctx.network.buses.index:
-            from services.network_geometry import _bus_coord
-
-            now = _bus_coord(ctx.network, bus)
-            if now is None:
-                warning = (
-                    f"bus '{bus}' has no coordinates now: profile was made "
-                    f"for ({coords[0]:.3f}, {coords[1]:.3f})"
-                )
-            elif (abs(now[0] - coords[0]) > 0.5
-                  or abs(now[1] - coords[1]) > 0.5):
-                warning = (
-                    f"bus '{bus}' moved since generation: profile was made for "
-                    f"({coords[0]:.3f}, {coords[1]:.3f}), the bus now sits at "
-                    f"({now[0]:.3f}, {now[1]:.3f})"
-                )
+    warning = _moved_bus_warning(ctx, meta, point_id, body.component,
+                                 body.component_type)
 
     # Undo snapshot BEFORE the write — the middleware only covers
     # /api/network/ and /api/io/, and apply is neither.
@@ -1440,7 +1485,10 @@ def apply_profile(
     try:
         component_type, attribute = default_target(
             meta, body.component_type, body.attribute)
-        summary = assign_profile(ctx, body.component, series, meta,
+        # The point applied is recorded, so readiness can tell which of the
+        # job's point_coords the series came from (RP-02).
+        summary = assign_profile(ctx, body.component, series,
+                                 {**meta, "point_id": point_id},
                                  component_type=component_type,
                                  attribute=attribute,
                                  time_basis=body.time_basis)
@@ -1457,6 +1505,111 @@ def apply_profile(
     if warning:
         summary["warning"] = warning
     return summary
+
+
+@project_router.post("/{name}/profiles/apply-batch")
+def apply_profile_batch(
+    body: BatchApplyRequest,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Write several points of one pending job under ONE undo step (RP-09).
+
+    Every member is validated first through `prepare_profile` (the pure half
+    of `assign_profile`: carrier guard, alignment, time basis); like a single
+    apply, an explicit batch replaces what a component carries (the receipt
+    shows `before`, one Undo restores it); any refusal is a 422 `batch_refused`
+    naming every bad member, and nothing is written. Only then is the undo
+    snapshot pushed and each member written. A write that fails midway is a
+    409 `batch_partially_applied` (applied / not_applied); one Undo reverts
+    the batch. No automatic undo: it re-imports the whole network."""
+    from services.network_undo import push_undo_snapshot
+    from services.profile_gen.apply import prepare_profile
+    from services.profile_gen.batch import batch_members
+
+    _check_lock(proj, db, user)
+    nc, meta = _pending_artifact(proj, body.job_id)
+    ctx = _foreground_ctx(proj, "apply")
+
+    with pending_io_lock(), xr.open_dataset(nc) as ds:
+        columns = [str(c) for c in meta.get("points") or []]
+        chosen, skipped = batch_members(
+            columns, ctx.network.generators,
+            [(m.component, m.point_id) for m in body.members], body.all_from_job)
+        members = [BatchMember(component=c, point_id=pid) for c, pid in chosen]
+        if not members:
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "no_members",
+                "message": "nothing to apply: name `members` (component, "
+                           "optional point_id) or use all_from_job with points "
+                           "named after wind/solar generators"
+                           + (f"; the job's points {columns} are none" if body.all_from_job else ""),
+                "skipped": skipped})
+        refused: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        prepared: list[tuple[str, pd.Series, str, str, dict]] = []
+        for m in members:
+            if m.component in seen:
+                refused.append({"component": m.component, "error_kind": "duplicate_member",
+                                "message": f"{m.component!r} is listed twice"})
+                continue
+            seen.add(m.component)
+            point_id = m.point_id or m.component
+            try:
+                series = _series_of(ds, point_id, m.component)
+                member_meta = {**meta, "point_id": point_id}
+                component_type, attribute = default_target(member_meta, None, None)
+                prepare_profile(ctx, m.component, series, member_meta,
+                                component_type=component_type, attribute=attribute,
+                                time_basis=body.time_basis)
+            except HTTPException as exc:
+                detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+                refused.append({"component": m.component, **detail})
+                continue
+            except ProfileApplyError as exc:
+                refused.append({"component": m.component, **_apply_refusal_kind(exc),
+                                "message": public_message(exc, route="apply", job_id=body.job_id)})
+                continue
+            prepared.append((m.component, series, component_type, attribute, member_meta))
+    if refused:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "batch_refused",
+            "message": f"{len(refused)} of {len(members)} members cannot be applied; "
+                       "nothing was written",
+            "members": refused})
+
+    push_undo_snapshot()
+    applied: list[dict[str, Any]] = []
+    for i, (component, series, component_type, attribute, member_meta) in enumerate(prepared):
+        try:
+            summary = assign_profile(ctx, component, series, member_meta,
+                                     component_type=component_type, attribute=attribute,
+                                     time_basis=body.time_basis)
+        except Exception as exc:  # noqa: BLE001 — typed below, the raw text never leaves
+            kind = (_apply_refusal_kind(exc)["error_kind"]
+                    if isinstance(exc, ProfileApplyError) else "write_failed")
+            message = public_message(exc, route="apply", job_id=body.job_id)
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "batch_partially_applied",
+                "message": f"{len(applied)} of {len(prepared)} written before "
+                           f"{component!r} failed ({message}); one Undo reverts "
+                           "the whole batch",
+                "applied": [a["component"] for a in applied],
+                "not_applied": [{"component": c, "error_kind": kind if c == component
+                                 else "not_attempted"}
+                                for c, *_ in prepared[i:]],
+            }) from exc
+        warning = _moved_bus_warning(ctx, meta, member_meta["point_id"], component,
+                                     component_type)
+        if warning:
+            summary["warning"] = warning
+        applied.append(summary)
+
+    from routers.simulation import _state_update
+
+    _state_update(status="idle")
+    return {"applied": applied, "count": len(applied), "skipped": skipped}
 
 
 @project_router.post("/{name}/profiles/shape")

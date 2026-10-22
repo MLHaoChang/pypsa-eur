@@ -24,6 +24,7 @@ class RequestScope(BaseModel):
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
         "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
+        "copt-screening/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -39,6 +40,8 @@ class RequestScope(BaseModel):
     component_class: Literal[
         "Line", "Transformer", "Generator", "Link", "StorageUnit", "Store"
     ] | None = None
+    # A checked chart of these evidence series (S10), drawn from this request's evidence only.
+    chart: list[str] | None = Field(default=None, min_length=1, max_length=8)
 
 
 def validate(value):
@@ -47,6 +50,9 @@ def validate(value):
     scope = RequestScope.model_validate(value).model_dump(exclude_none=True)
     if ("start" in scope) != ("end" in scope):
         raise ValueError("both_window_bounds_required")
+    if "chart" in scope and (len(set(scope["chart"])) != len(scope["chart"])
+                             or any(not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", s) for s in scope["chart"])):
+        raise ValueError("invalid_chart_series")
     if "metrics" in scope:
         if len(set(scope["metrics"])) != len(scope["metrics"]) or any(
             not 1 <= len(m) <= 64 for m in scope["metrics"]
@@ -84,7 +90,8 @@ def validate(value):
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
         raise ValueError("unsupported_component_class")
-    if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1") and (
+    if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1", "investment-lcoe/1",
+                            "copt-screening/1") and (
         scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("network_scope_required")
@@ -101,6 +108,18 @@ def validate(value):
 
 
 def from_message(message, project_id, ui_context):
+    """Whole-message profile grammar, with an optional trailing "; chart <series>, ..."
+    (S10) that asks for a checked chart of those evidence series."""
+    match = re.fullmatch(r"(.*?);\s*chart\s+([a-z0-9_]+(?:\s*,\s*[a-z0-9_]+)*)\s*[.!?]?", message.strip(), re.I | re.S)
+    if not match:
+        return _from_message(message, project_id, ui_context)
+    scope = _from_message(match[1], project_id, ui_context)
+    if scope is None:
+        return None
+    return validate({**scope, "chart": [s.strip().lower() for s in match[2].split(",")]})
+
+
+def _from_message(message, project_id, ui_context):
     """Whole-message profile grammar: no extra quantity or instruction is ignored."""
     selected = ui_context.get("selected_component") if isinstance(ui_context, dict) else None
     if (
@@ -181,6 +200,10 @@ def from_message(message, project_id, ui_context):
     if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:investment case )?lcoe\s+for\s+network[.!?]?",
                     message.strip(), re.I):
         return validate({"version": 1, "profile": "investment-lcoe/1", "project_id": project_id,
+                         "entity_id": "network", "retain": False})
+    if re.fullmatch(r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:copt|screening adequacy|copt screening)"
+                    r"\s+for\s+network[.!?]?", message.strip(), re.I):
+        return validate({"version": 1, "profile": "copt-screening/1", "project_id": project_id,
                          "entity_id": "network", "retain": False})
     if site:
         value = {"version": 1, "profile": "site-import/1", "project_id": project_id,

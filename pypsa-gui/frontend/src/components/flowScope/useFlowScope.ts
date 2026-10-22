@@ -24,6 +24,8 @@ export function useFlowScope() {
       qc.setQueryData(flowScopeKey(project), (old: typeof q.data) => old && { ...old, scope })
       // The flow's states, notes and run request follow the scope.
       void qc.invalidateQueries({ queryKey: nk(project, 'flow') })
+      // The scope owns run options in the solver config (Asset sizing, Load flow).
+      void qc.invalidateQueries({ queryKey: nk(project, 'solverConfig') })
     },
   })
   return { ...q, registry: q.data ?? null, scope: q.data?.scope ?? null, save }
@@ -34,4 +36,12 @@ export function useFlowScope() {
 export function useInScope(card: ScopeCardId, option?: string): boolean {
   const { scope, isSuccess } = useFlowScope()
   return !isSuccess || inScope(scope, card, option)
+}
+
+/** Whether Grid › Load flow is on, live: the scope is what the scope cards
+ *  write (W4b), so a reader beside them never shows a hydrated copy of the
+ *  solver config. `fallback` is used until the scope is read. */
+export function useLoadFlowOn(fallback: boolean): boolean {
+  const { scope } = useFlowScope()
+  return scope ? inScope(scope, 'grid', 'load_flow') : fallback
 }

@@ -18,6 +18,9 @@ vi.mock('../store/uiStore', () => ({
   useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
 }))
 
+const openTs = vi.hoisted(() => vi.fn())
+vi.mock('../layout/flowNavigation', () => ({ openTimeSeriesFor: openTs }))
+
 const api = vi.hoisted(() => ({
   presets: vi.fn(), estimate: vi.fn(), generate: vi.fn(), pending: vi.fn(), apply: vi.fn(),
 }))
@@ -171,6 +174,21 @@ describe('profile studio: pending + apply', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() => expect(api.apply).toHaveBeenCalledWith('Hub A', 'job-abc123', 'g_wind'))
     expect((await screen.findByTestId('apply-ok')).textContent).toMatch(/applied to g_wind: 8784 h, mean 32\.0%/)
+  })
+
+  it('"View in Time Series ›" opens Time Series on the applied generator', async () => {
+    api.pending.mockResolvedValue({ pending: [PENDING_RECORD], jobs: [], keep: 10 })
+    api.apply.mockResolvedValue({
+      component: 'g_wind', attribute: 'p_max_pu', hours: 8784, weather_year: 2023,
+      leap_day: 'dropped', tiled: false, dispatch_cleared: true, mean: 0.32, peak: 0.91,
+    })
+    renderPanel()
+    await screen.findByTestId('pending-job-abc123')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const link = await screen.findByTestId('apply-view-time-series')
+    expect(link.textContent).toBe('View in Time Series ›')
+    await userEvent.click(link)
+    expect(openTs).toHaveBeenCalledWith('Generator', 'g_wind', { field: 'p_max_pu' })
   })
 
   it('surfaces the assumed-UTC time-basis warning with the result', async () => {

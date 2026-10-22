@@ -168,15 +168,16 @@ def _window(raw, scope):
     return a, b
 
 
-def _loading(branch, weights, a, b):
-    """Per-branch values over the window; None when any input is missing."""
+def utilisation_series(branch, a, b):
+    """(flow MW, utilisation) per snapshot of the window, or None when any input is
+    missing: the series the loading figures and a checked chart both use."""
     rating = branch["rating"]
     if rating is None or not math.isfinite(rating) or rating <= 1e-9:
         return None
     flows, utilisation = [], []
     for i in range(a, b + 1):
-        p0, p1, smax, w = branch["p0"][i], branch["p1"][i], branch["s_max_pu"][i], weights[i]
-        if p0 is None or p1 is None or smax is None or w is None or w < 0:
+        p0, p1, smax = branch["p0"][i], branch["p1"][i], branch["s_max_pu"][i]
+        if p0 is None or p1 is None or smax is None:
             return None
         limit = rating * smax
         if not math.isfinite(limit) or limit <= 1e-9:
@@ -184,6 +185,18 @@ def _loading(branch, weights, a, b):
         flow = max(abs(p0), abs(p1))
         flows.append(flow)
         utilisation.append(flow / limit)
+    return flows, utilisation
+
+
+def _loading(branch, weights, a, b):
+    """Per-branch values over the window; None when any input is missing."""
+    rating = branch["rating"]
+    if any(weights[i] is None or weights[i] < 0 for i in range(a, b + 1)):
+        return None
+    series = utilisation_series(branch, a, b)
+    if series is None:
+        return None
+    flows, utilisation = series
     try:
         return {
             "peak_branch_utilisation": 100 * max(utilisation),
