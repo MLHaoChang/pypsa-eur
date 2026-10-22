@@ -1779,12 +1779,13 @@ def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
                                     "entries with a need and a reason")
     if not assets and source_hash is None:
         return CampusSource()
-    tags = _ic_cost_tags(assets)
-    if isinstance(tags, str):
-        return CampusSource.refused("campus_assets_invalid", tags)
+    # The money first: a `meta` that is no record states no money year (as before 02).
     problem = _ic_money_year_problem(assets, fin)
     if problem:
         return CampusSource.refused("campus_assets_money_year_mismatch", problem)
+    tags = _ic_cost_tags(assets)
+    if isinstance(tags, str):
+        return CampusSource.refused("campus_assets_invalid", tags)
     stale = bool(resp.get("stale"))
     flags = ("campus_study_stale",) if stale else \
         (("campus_needs_unresolved",) if unresolved else ())
