@@ -267,10 +267,11 @@ def effective_preset(preset: Preset, *, has_template: bool, no_load: bool = Fals
 class ScopeError(ValueError):
     """A scope the store refuses: ``error_kind`` is the typed refusal."""
 
-    def __init__(self, error_kind: str, message: str):
+    def __init__(self, error_kind: str, message: str, blocker_code: str | None = None):
         super().__init__(message)
         self.error_kind = error_kind
         self.message = message
+        self.blocker_code = blocker_code      # the validation code behind an option refusal
 
 
 _write_lock = threading.Lock()

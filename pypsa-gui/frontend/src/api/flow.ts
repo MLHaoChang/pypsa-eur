@@ -83,6 +83,8 @@ export interface FlowRunBlocker {
   message: string
   /** The item's own message, the detail to fix from (unchanged by the title). */
   detail?: string
+  /** The validation code behind it ("sclopf_no_branches"). */
+  code?: string
   target: FlowTarget
 }
 export type FlowNote = FlowRunBlocker

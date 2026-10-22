@@ -19,13 +19,13 @@ vi.mock('../api/network', async (importOriginal) => ({
 beforeEach(() => useUIStore.setState({ currentProject: 'Demo' }))
 afterEach(() => cleanup())
 
-function mount(n1On: boolean, patch = vi.fn()) {
+function mount(n1On: boolean, patch = vi.fn(), onShowSwitch = vi.fn()) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(<QueryClientProvider client={qc}>
     <SclopfPanel draft={{ sclopf: false, sclopf_include_all_lines: false } as SolverConfig}
-      patch={patch} n1On={n1On} />
+      patch={patch} n1On={n1On} onShowSwitch={onShowSwitch} />
   </QueryClientProvider>)
-  return patch
+  return { patch, onShowSwitch }
 }
 
 it('reads On from the scope whatever the hydrated draft says, with no Enable checkbox', () => {
@@ -34,10 +34,15 @@ it('reads On from the scope whatever the hydrated draft says, with no Enable che
   expect(screen.queryByText('Enable SCLOPF')).toBeNull()
 })
 
-it('reads Off and points at the scope row; the selectors stay clickable', () => {
-  mount(false)
-  expect(screen.getByTestId('sclopf-state').textContent)
-    .toMatch(/^Off:.*What the Run computes › N-1 security, above\./)
+it('reads Off and the button takes the user to the scope row; the selectors stay clickable', () => {
+  const { onShowSwitch } = mount(false)
+  const state = screen.getByTestId('sclopf-state').textContent ?? ''
+  expect(state).toMatch(/^Off: N-1 security is not applied in a solve\. Switch it under What the Run computes › N-1 security ›/)
+  expect(state).not.toMatch(/above/i)
+  screen.getByTestId('sclopf-show-switch').click()
+  expect(onShowSwitch).toHaveBeenCalledOnce()
+  expect(screen.getByText('Used when N-1 security is on (What the Run computes).')).toBeTruthy()
+  expect(screen.getByText('N-1 security (contingency constraints)')).toBeTruthy()
   const boxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
   expect(boxes.length).toBeGreaterThan(0)
   expect(boxes.every(b => !b.disabled)).toBe(true)

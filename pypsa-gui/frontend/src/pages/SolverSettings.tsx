@@ -249,11 +249,24 @@ export default function SolverSettings() {
   const blockRequest = useUIStore(s => s.solverBlockRequest)
   const clearBlockRequest = useUIStore(s => s.clearSolverBlockRequest)
   useEffect(() => {
-    if (blockRequest !== 'economic' || !draft) return
-    if (tab !== 'dispatch') { setTab('dispatch'); return }
-    document.getElementById('solver-economic-assumptions')?.scrollIntoView({ block: 'start' })
+    if (!blockRequest || !draft) return
+    const [want, target] = blockRequest === 'sclopf'
+      ? ['network', 'solver-sclopf-panel'] as const
+      : ['dispatch', 'solver-economic-assumptions'] as const
+    if (tab !== want) { setTab(want); return }
+    document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
   }, [blockRequest, draft, tab, clearBlockRequest])
+  // "Switch it under What the Run computes › N-1 security": the General tab,
+  // scrolled to the scope cards' N-1 row.
+  const [showN1Row, setShowN1Row] = useState(false)
+  useEffect(() => {
+    if (!showN1Row) return
+    if (tab !== 'general') { setTab('general'); return }
+    document.querySelector('[data-testid="expert-scope-cards-row-grid-n1_sclopf"]')
+      ?.scrollIntoView({ block: 'center' })
+    setShowN1Row(false)
+  }, [showN1Row, tab])
 
   if (!draft) return <div className="p-6 text-muted text-xs">Loading…</div>
 
@@ -412,7 +425,7 @@ export default function SolverSettings() {
             {(n1On || loadFlowOn) && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
                 Rolling horizon is not compatible with{' '}
-                {n1On && <code>SCLOPF</code>}
+                {n1On && 'N-1 security (What the Run computes › N-1 security)'}
                 {n1On && loadFlowOn && ' or '}
                 {loadFlowOn && 'Load flow (What the Run computes › Load flow)'}
                 . Switch one off to run.
@@ -521,7 +534,7 @@ export default function SolverSettings() {
             )}
             {n1On && (
               <p className="text-[10px] text-muted bg-panel border border-border rounded px-2 py-1">
-                SCLOPF is enabled — contingency constraints are applied per
+                N-1 security is on — contingency constraints are applied per
                 myopic iteration. Choose <code>Contingency scope</code> below
                 (Horizon / Current period).
               </p>
@@ -880,7 +893,7 @@ export default function SolverSettings() {
             Enable transmission losses
             <span className="block text-[11px] text-muted">
               {n1On
-                ? 'Disabled — SCLOPF cannot model losses (LODF assumes a lossless DC network).'
+                ? 'Disabled — N-1 security cannot model losses (it assumes a lossless DC network).'
                 : 'Iterative LOPF that approximates AC line losses.'}
             </span>
           </span>
@@ -899,7 +912,7 @@ export default function SolverSettings() {
       <StressConditionsSection project={currentProject} />
 
       {/* ── N-1 Security-Constrained LOPF ────────────────────── */}
-      <SclopfPanel draft={draft} patch={patch} n1On={n1On} />
+      <SclopfPanel draft={draft} patch={patch} n1On={n1On} onShowSwitch={() => setShowN1Row(true)} />
       </>}
 
       {tab === 'constraints' && <>
@@ -1616,11 +1629,13 @@ export function ReliabilityAssumptions({
 //   4) two explicit pick lists (extra lines, extra transformers)
 // The four selectors UNION at solve time, so the user can layer them.
 export function SclopfPanel({
-  draft, patch, n1On,
+  draft, patch, n1On, onShowSwitch,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
   n1On: boolean
+  /** Show the scope cards' N-1 security row (the one on/off). */
+  onShowSwitch: () => void
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),        queryFn: networkApi.getLines })
@@ -1689,10 +1704,9 @@ export function SclopfPanel({
   }
 
   return (
-    <section className="border-t border-border pt-4">
+    <section id="solver-sclopf-panel" className="border-t border-border pt-4">
       <div className="flex items-center gap-2 mb-1">
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">N-1 Security-Constrained LOPF</h3>
-        <span className="text-[10px] text-muted">(SCLOPF — preventive)</span>
+        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">N-1 security (contingency constraints)</h3>
       </div>
       <p className="text-[11px] text-muted mb-3">
         Adds one constraint per (contingency × monitored branch) so no branch is
@@ -1705,8 +1719,15 @@ export function SclopfPanel({
       <p data-testid="sclopf-state" className="text-xs mb-3">
         <span className="font-semibold">{n1On ? 'On' : 'Off'}:</span>{' '}
         {n1On ? 'N-1 security is applied in each solve.' : 'N-1 security is not applied in a solve.'}{' '}
-        Switch it under What the Run computes › N-1 security, above. Choose the
-        branches to check here.
+        Switch it under{' '}
+        <button type="button" data-testid="sclopf-show-switch" onClick={onShowSwitch}
+          className="text-accent hover:underline">
+          What the Run computes › N-1 security ›
+        </button>
+        {' '}Choose the branches to check here.
+      </p>
+      <p className="text-[10.5px] text-muted mb-3">
+        Used when N-1 security is on (What the Run computes).
       </p>
 
       <div className="flex flex-col gap-3">
@@ -1765,7 +1786,7 @@ export function SclopfPanel({
           </div>
           <div className="p-3 flex flex-col gap-2">
             <label className="text-[11px] text-muted">
-              When myopic foresight is active, choose how SCLOPF constraints
+              When myopic foresight is active, choose how N-1 security constraints
               apply across each iteration's snapshot window:
             </label>
             <select
@@ -1789,10 +1810,10 @@ export function SclopfPanel({
               count.
               <br />
               <span className="font-medium text-text">Current period</span>:
-              the SCLOPF LP for each iteration drops future-period snapshots
+              the contingency LP for each iteration drops future-period snapshots
               entirely — only current-period hourly snapshots get N-1
               constraints. Faster, but limited foresight has no effect during
-              SCLOPF iterations.
+              those iterations.
             </p>
             {draft.sclopf_scope === 'current_period' && draft.solve_strategy === 'myopic' && (
               <div className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
@@ -1805,7 +1826,7 @@ export function SclopfPanel({
             {draft.solve_strategy !== 'myopic' && (
               <div className="text-[10px] text-muted italic">
                 Applies only when <code>solve_strategy = "myopic"</code> is set
-                above. Ignored on the full-horizon SCLOPF path.
+                above. Ignored on the full-horizon solve.
               </div>
             )}
           </div>
@@ -1900,7 +1921,7 @@ export function Stage2Panel({
     <section>
       <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Stage 2: AC Power Flow</h3>
       <p className="text-xs text-muted mb-3">
-        After the LOPF / SCLOPF solve, fix the optimal dispatch and run a
+        After the solve, fix the optimal dispatch and run a
         non-linear Newton-Raphson AC power flow per snapshot to recover real
         voltages, reactive power, and physical line losses. Each snapshot
         solves independently; non-converged snapshots are flagged in the

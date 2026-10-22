@@ -707,6 +707,53 @@ def test_load_flow_is_refused_on_with_its_verdicts_reason_and_off_is_always_allo
     assert client.get("/api/simulation/solver_config").json()["run_ac_pf_after_lopf"] is False
 
 
+def test_two_options_on_together_are_checked_each_and_neither_is_written_on_a_refusal(
+        client, tmp_projects_dir, monkeypatch):
+    """One PUT turning Load flow and N-1 on: each option's verdict is asked,
+    the refusal names the blocked one with its code, and neither field is
+    written (the verdicts set one flag each; no validator rule couples
+    ``sclopf`` with ``run_ac_pf_after_lopf``)."""
+    from services import run_separability as RS
+
+    name = _create(client, "eh_h2_hub", "dc_both_on")
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    ready = {"ready": True, "deferred": False, "blocker": None}
+    blocked = {"ready": False, "deferred": False,
+               "blocker": {"code": "sclopf_no_branches", "message": "no branches to check"}}
+    monkeypatch.setattr(RS, "verdicts", lambda *a, **k: {
+        "optimisation": ready, "loadflow": ready, "sclopf": blocked})
+    before = client.get("/api/simulation/solver_config").json()
+    r = client.put(f"/api/projects/{name}/flow/scope", json={
+        "version": 1, "groups": [*scope["groups"], "grid"],
+        "options": {**scope["options"], "grid": ["load_flow", "n1_sclopf"]}})
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert detail["error_kind"] == "flow_scope_option_blocked"
+    assert detail["blocker_code"] == "sclopf_no_branches"
+    assert "N-1 security" in detail["message"] and "Load flow" not in detail["message"]
+    assert client.get("/api/simulation/solver_config").json() == before
+    assert not (tmp_projects_dir / name / S.SCOPE_FILE).exists()
+
+
+def test_switching_n1_off_writes_only_sclopf_and_keeps_the_chosen_branches(
+        client, tmp_projects_dir):
+    name = _create(client, "eh_h2_hub", "dc_n1_off")
+    chosen = {"sclopf": True, "sclopf_include_all_lines": True,
+              "sclopf_voltage_threshold_kv": 110.0, "sclopf_extra_lines": ["L1", "L2"],
+              "sclopf_scope": "current_period"}
+    client.put("/api/simulation/solver_config", json=chosen)
+    before = client.get("/api/simulation/solver_config").json()
+    assert before["sclopf"] is True
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    assert S.selected(scope, "grid", "n1_sclopf")
+    _put(client, name, {**scope, "options": {
+        **scope["options"], "grid": [o for o in scope["options"]["grid"] if o != "n1_sclopf"]}})
+    after = client.get("/api/simulation/solver_config").json()
+    assert after["sclopf"] is False
+    assert {k: v for k, v in after.items() if k != "sclopf"} == \
+        {k: v for k, v in before.items() if k != "sclopf"}
+
+
 def test_the_stores_own_guard_refuses_while_a_calculation_runs(tmp_path, monkeypatch):
     from routers import flow as flow_router
     import routers.simulation as sim
