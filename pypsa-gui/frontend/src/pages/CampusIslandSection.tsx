@@ -84,6 +84,8 @@ const COLUMN_WORDS: Record<string, string> = {
   ramp_s: 'Ramp time (s)', shortfall_mw: 'Shortfall (MW)', ups: 'UPS', drops: 'Drops', first_drop_s: 'First drop (s)',
   t_online_s: 'Back online (s)', autonomy_ok: 'Autonomy enough',
 }
+/** A title inside a sentence: its first letter lowercased unless it starts an acronym ("UPS", "E1"). */
+const inSentence = (t: string) => (/^[A-Z][a-z]/.test(t) ? t.charAt(0).toLowerCase() + t.slice(1) : t)
 const columnWords = (c: string) => COLUMN_WORDS[c] ?? (c.charAt(0).toUpperCase() + c.slice(1)).replace(/_/g, ' ')
 
 /** The island requirement fields in words ("bridge_s" → "UPS bridge (s)"); a field not listed
@@ -302,7 +304,7 @@ export function IslandReportView({ report }: { report: IslandReport | undefined 
       )}
       {empty.length > 0 && (
         <p className="text-[12px] text-muted mb-2" data-testid="island-empty">
-          Nothing to report for this run: {empty.map(t => t.title.toLowerCase()).join('; ')}.
+          Nothing to report for this run: {empty.map(t => inSentence(t.title)).join('; ')}.
         </p>
       )}
       {tables.map((t, i) => (

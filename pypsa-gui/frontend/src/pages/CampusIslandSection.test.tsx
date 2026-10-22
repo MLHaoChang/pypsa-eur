@@ -131,10 +131,11 @@ describe('island section: the report', () => {
   })
 
   it('leaves out a table without rows and says so once', async () => {
-    renderReport({ ...REPORT, tables: [...REPORT.tables, { ...REPORT.tables[3], id: 'freq_ups', title: 'UPS ride-through', rows: [] }] })
+    renderReport({ ...REPORT, tables: [...REPORT.tables, { ...REPORT.tables[3], id: 'freq_ups', title: 'UPS ride-through', rows: [] },
+      { ...REPORT.tables[3], id: 'freq_planned', title: 'Planned islanding', rows: [] }] })
     await screen.findByTestId('island-table-freq_events')
     expect(screen.queryByTestId('island-table-freq_ups')).toBeNull()
-    expect(screen.getByTestId('island-empty').textContent).toBe('Nothing to report for this run: ups ride-through.')
+    expect(screen.getByTestId('island-empty').textContent).toBe('Nothing to report for this run: UPS ride-through; planned islanding.')
   })
 
   it('says what is missing', async () => {
