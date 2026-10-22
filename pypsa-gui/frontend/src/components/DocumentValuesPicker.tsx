@@ -86,11 +86,19 @@ const LIBRARY: FlowTarget = { section: 'commercial', panel: 'library', component
 /** A library-pinned tariff or contract is updated in the Commercial library: in Expert
  *  its page, in Guided the field drawer over the card (openFlowTarget would switch to
  *  Expert). */
-function LibraryLink({ onClose }: { onClose: () => void }) {
+export function LibraryLink({ onClose, item }: { onClose: () => void; item?: DocumentGap['library'] }) {
   const guided = useUIStore(s => s.uiMode) === 'guided'
   return (
     <button type="button" data-testid="document-values-library-link" className="ml-1 text-accent hover:underline"
-      onClick={() => { onClose(); (guided ? openFlowTargetInPlace : openFlowTarget)(LIBRARY) }}>
+      onClick={() => {
+        onClose()
+        ;(guided ? openFlowTargetInPlace : openFlowTarget)(LIBRARY)
+        // The page opens on the pinned item, not at the top of the list.
+        const version = Number(item?.version)
+        if (item && Number.isFinite(version)) {
+          useUIStore.getState().focusLibraryItem({ kind: item.kind, id: item.id, version })
+        }
+      }}>
       Update it there ›
     </button>
   )
@@ -101,7 +109,7 @@ function GapLine({ gap, onClose }: { gap: DocumentGap; onClose: () => void }) {
     <li className="text-muted">
       {gap.message}
       {gap.library && <span className="ml-1">({gap.library.id}, v{gap.library.version})</span>}
-      {gap.kind === 'library_pinned' && <LibraryLink onClose={onClose} />}
+      {gap.kind === 'library_pinned' && <LibraryLink onClose={onClose} item={gap.library} />}
     </li>
   )
 }
