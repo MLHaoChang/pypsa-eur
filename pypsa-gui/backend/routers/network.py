@@ -210,6 +210,12 @@ from routers.network_equipment_table import router as _equipment_table_router
 
 router.include_router(_equipment_table_router)
 
+# Apply values cited from a PDF datasheet to assets (data-to-model slice 2): an edit-card write.
+from routers.network_document_values import apply_document_values  # noqa: E402,F401
+from routers.network_document_values import router as _document_values_router
+
+router.include_router(_document_values_router)
+
 
 # `df_to_json` (static-DataFrame → NaN-safe row dicts) now lives in
 # `services/serialization.py` — the single JSON-boundary scrub home. Imported

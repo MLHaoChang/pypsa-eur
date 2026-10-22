@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the COPT screening LOLE, EUE and peak hourly LOLP for the network (`copt-screening/1`, opt-in), reconvolved independently for classical two-state fleets; fleets with profiled units, period-varying or folded capacity, or capacities off the 1 MW grid are refused, named.

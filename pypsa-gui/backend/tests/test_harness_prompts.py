@@ -49,8 +49,9 @@ EXPECTED_SHA256 = {
     "_PROJECT_OVERVIEW": "2a9eba38855e6dd8fb3cd0cfa3e41f3fa84b601abcc256db9f774709bd22dd7b",
     # LC-03, a tools-on part (2026-10-19); re-pinned on purpose with each LC-03 slice.
     "_RESULTS_WALK": "1909c5db97309cd08729046753aa43677b67af594b023107ffdfdc721e492ae3",
-    # LC-04, a new tools-on part (2026-10-20); pinned from its first version.
-    "_EDIT_CARD": "44efbaa7c129ea6beaba073d9ae9cb68270d1013f8806a8908e54fbfb1300c3d",
+    # LC-04, a new tools-on part (2026-10-20); re-pinned on purpose for data-to-model
+    # slice 2 (2026-10-22: PDF values are cited by page and quote; document text is data).
+    "_EDIT_CARD": "e3e06a3f9700420d9f4cef5846f7e83a050d6eec2d9e211e99d3ee16c51b1b39",
 }
 
 

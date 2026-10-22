@@ -10,6 +10,7 @@ import { useState } from 'react'
 import { Lock } from 'lucide-react'
 import type { FlowScopeValue, ScopeCardDef, ScopeCardId } from '../../api/flow'
 import { inScope } from '../../api/flow'
+import { useRunGate } from '../../hooks/useRunGate'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { useFlowScope } from './useFlowScope'
 
@@ -130,6 +131,7 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
   collapsed?: boolean
 }) {
   const { registry, scope, save, isError, refetch } = useFlowScope()
+  const gate = useRunGate('optimisation')
   const [open, setOpen] = useState(!collapsed)
   if (isError) {
     return (
@@ -228,6 +230,19 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                           </span>
                         )}
                       </label>
+                      {card.id === 'capacity' && o.id === 'sizing' && on && !checked && (
+                        <p data-testid={`${testId}-fixed-sizes`}
+                          className="pl-5 text-[10.5px] text-muted">
+                          Dispatch on fixed sizes from the{' '}
+                          {registry.fixed_sizes === 'nameplate' ? 'sizes entered on each asset' : 'last capacity run'}.
+                          {gate.blocked && (
+                            <span data-testid={`${testId}-fixed-sizes-blocked`} role="alert"
+                              className="block text-warn">
+                              The Run can't start yet: {gate.reason}
+                            </span>
+                          )}
+                        </p>
+                      )}
                       {o.reason && (
                         <p id={`${testId}-why-${card.id}-${o.id}`}
                           data-testid={`${testId}-why-${card.id}-${o.id}`}

@@ -94,6 +94,7 @@ GET     /api/chat/{session_id}/progress                                         
 POST    /api/chat/{session_id}/rewind                                              -> chat_rewind_api_chat__session_id__rewind_post
 GET     /api/dictation/config                                                      -> config_api_dictation_config_get
 POST    /api/dictation/transcribe                                                  -> transcribe_api_dictation_transcribe_post
+POST    /api/document_values/preview                                               -> preview_document_values_http_api_document_values_preview_post
 POST    /api/durable-conversations                                                 -> create_thread_api_durable_conversations_post
 GET     /api/durable-conversations/{thread_id}                                     -> get_thread_api_durable_conversations__thread_id__get
 POST    /api/durable-conversations/{thread_id}/checkpoint                          -> checkpoint_thread_api_durable_conversations__thread_id__checkpoint_post
@@ -164,6 +165,7 @@ DELETE  /api/network/carriers/{name}                                            
 PUT     /api/network/carriers/{name}                                               -> update_carrier_api_network_carriers__name__put
 GET     /api/network/catalog/{component}                                           -> get_attribute_catalog_api_network_catalog__component__get
 POST    /api/network/cluster                                                       -> apply_clustering_api_network_cluster_post
+POST    /api/network/document_values/apply                                         -> apply_document_values_api_network_document_values_apply_post
 POST    /api/network/equipment_table/apply                                         -> apply_equipment_mapping_api_network_equipment_table_apply_post
 GET     /api/network/generators                                                    -> get_generators_api_network_generators_get
 POST    /api/network/generators                                                    -> create_generator_api_network_generators_post
@@ -282,6 +284,7 @@ POST    /api/projects/{name}/profiles/generate                                  
 POST    /api/projects/{name}/profiles/loads/generate                               -> generate_load_profiles_api_projects__name__profiles_loads_generate_post
 POST    /api/projects/{name}/profiles/loads/upload                                 -> upload_load_profiles_api_projects__name__profiles_loads_upload_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
+GET     /api/projects/{name}/profiles/readiness                                    -> profile_readiness_api_projects__name__profiles_readiness_get
 POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
 POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post

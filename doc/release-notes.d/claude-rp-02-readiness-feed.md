@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A read-only readiness feed for wind and solar generators (`GET /api/projects/{name}/profiles/readiness`, chat tool `get_profile_readiness`): each generator's coordinates (its bus's, or missing), the profile it carries (none, uploaded, generated, network-native) and whether a generated one is stale because the bus moved or the horizon changed.

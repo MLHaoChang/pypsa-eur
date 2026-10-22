@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Capacity expansion › Asset sizing can be switched off in the scope cards; the Run then dispatches on fixed sizes (the last capacity run). The disabled Run title on the Guided Run now follows why Reliability is out of scope.

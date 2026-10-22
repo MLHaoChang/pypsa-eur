@@ -499,6 +499,10 @@
       "surface": "inline",
       "why": "Recorded on a published run-evidence manifest when an adequacy/study worker ends failed; get_run_evidence surfaces the typed error field."
     },
+    "ac_pf_already_run": {
+      "surface": "inline",
+      "why": "run_ac_pf_stage was refused: AC power flow already ran on this solve and its results replaced the LOPF values, so a second run would take them as the LP baseline. The model tells the user to re-run the LOPF first."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
@@ -1126,6 +1130,18 @@
     "ambiguous_members": {
       "surface": "inline",
       "why": "apply_generated_profiles was given both named components and all_from_job. Nothing was written; the assistant picks one and retries."
+    },
+    "pdf_unreadable": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) could not read the PDF: its child-process parse ran past the time budget (`budget_seconds`) or under the memory limit, or pypdf failed on it. Nothing was written; the assistant says the document cannot be read and asks for a re-export or the values typed in, per call."
+    },
+    "pdf_encrypted": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) refused an encrypted PDF without opening it. The assistant asks for an unprotected copy, per call."
+    },
+    "unsupported_document_format": {
+      "surface": "inline",
+      "why": "preview_document_values / apply_document_values (data-to-model slice 2) was pointed at an upload that is not a PDF. The assistant uses the import that fits the upload (a table goes to preview_equipment_mapping), per call."
     }
   }
 }

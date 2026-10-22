@@ -10,11 +10,7 @@ from typing import Any, Sequence
 
 from fastapi import HTTPException
 
-
-def is_wind_or_solar(carrier: Any) -> bool:
-    """The engine's carrier guard (`families._renewable_guard`)."""
-    cl = str(carrier or "").lower()
-    return "wind" in cl or "solar" in cl or "pv" in cl
+from services.profile_gen.readiness import technology_of
 
 
 def batch_members(points: Sequence[str], generators, members: Sequence[tuple[str, str | None]],
@@ -32,7 +28,7 @@ def batch_members(points: Sequence[str], generators, members: Sequence[tuple[str
     chosen: list[tuple[str, str | None]] = []
     skipped: list[dict[str, str]] = []
     for pid in (str(p) for p in points):
-        if pid in generators.index and is_wind_or_solar(generators.at[pid, "carrier"]):
+        if pid in generators.index and technology_of(generators.at[pid, "carrier"]) is not None:
             chosen.append((pid, None))
         else:
             skipped.append({"point_id": pid,

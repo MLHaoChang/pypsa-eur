@@ -293,6 +293,27 @@ component (`frontend/src/components/EditCard.tsx`).
   previews through `POST /api/equipment_table/preview`, a read outside
   `/api/network` (no undo snapshot, no results cleared), and applies through
   the same route with the card's digest.
+- **PDF datasheets (data-to-model slice 2).** `apply_document_values` writes
+  values cited from an uploaded PDF onto assets of one class
+  (`services/document_values.py`). The model cites `{names, field, page, quote,
+  unit, value_text?}` and never a value: the server finds the quote on that page
+  (NFKC and whitespace only; `quote_not_found` names the pages where it is), reads
+  the one number in it (`ambiguous_value` for several, a range or any ±;
+  `ambiguous_number` for `1.250` until `decimal_mark` is stated; spaces group
+  thousands only with a stated mark; a negative needs a field whose schema states a
+  negative minimum, `negative_not_allowed`), takes the unit from the field's schema
+  as slice 1 does, and checks a cost's currency against the quote and the project's
+  finance currency (`currency_mismatch`; `money_basis_missing` when none is stated).
+  The plan has slice 1's shape, so `equipment_table.apply` writes it, with the same
+  in-lock check, `partial` and one undo. Each typed row's `source` holds the upload,
+  full sha256, page, raw quote, number text, unit, scale and decimal mark; the
+  digest binds all but the number text (the value is the row's `new`). Provenance:
+  `pdf:<id>#<sha16> p<page> "<quote>"`. The PDF is parsed in a child process
+  (`services/pdf_text_worker.py`) killed at `PARSE_SECONDS`, under an address-space
+  limit: over budget or unparseable refuses `pdf_unreadable`, an encrypted file
+  `pdf_encrypted`, a cited page with no text layer `no_text_layer` (no OCR). Text in
+  the document is data: it is only matched and parsed. The dialog's preview is
+  `POST /api/document_values/preview` (a read, as slice 1's).
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path
@@ -352,7 +373,7 @@ an omitted/downgraded acknowledgement. Retries, edits and clarification choices
 preserve checked policy, including a conservative history hint when an earlier
 answer is unavailable. That hint is never approval. Read the
 [pilot activation and rollback guide](../../../.scratch/assistant-assurance/checked-opt-in-runbook.md).
-The repeatable CI pilot evaluation runs 274 independent positive/adversarial cases
+The repeatable CI pilot evaluation runs 283 independent positive/adversarial cases
 and rejects missing coverage or nonzero errors. `pixi run gui-pilot-evaluation`
 writes a versioned report; optional live generation has fixed pre-send ceilings.
 See the [evaluation runbook](../../../.scratch/assistant-assurance/pilot-evaluation-runbook.md).
@@ -402,6 +423,9 @@ staleness key is read outside the network lock before and after the read.
 `investment-lcoe/1` (opt-in) rebuilds the engine's nominal and real LCOE from the per-year
 generation and value the report retains (reports stored before that read
 `lcoe_inputs_not_retained`); payback, cover ratios and the solved PPA stay withheld.
+`copt-screening/1` (opt-in) reconvolves the COPT's two-state fleet in plain numpy on the
+1 MW grid (strict LOLP, the engine's 1e-12 snap, generator weights, horizon totals) against a
+residual it recomputes; profiled, period-varying, folded or off-grid fleets are refused.
 The storage profile validates separate charging/discharging power and the complete
 predecessor state chain before calculating exact-window energy, peaks and final
 stored energy. It uses storage duration weights and refuses cyclic units,
