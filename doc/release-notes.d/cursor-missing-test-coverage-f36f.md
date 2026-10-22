@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A ride-through battery shaves the import peak only in the periods it is still in service. A 5-year life built in 2030 covers 2030 through 2034 and drops out in 2035; a build year of 0 stays in service.
