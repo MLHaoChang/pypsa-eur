@@ -13,12 +13,18 @@ from tests.test_workflow_tools import baseline  # noqa: F401
 @pytest.fixture(autouse=True)
 def private_store(tmp_path, monkeypatch):
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
-    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "branch-loading/1")
+    monkeypatch.setenv("PYPSA_GUI_ANSWER_ASSURANCE_PROFILES", "branch-loading/1,network-loading/1")
 
 
 def evidence(ctx, **window):
     scope = {"version": 1, "profile": "branch-loading/1", "project_id": ctx.project_uuid, "entity_id": "L12",
              "component_class": "Line", "retain": False, **window}
+    return scope, assurance_records.capture_scoped(assurance_records.actor_id(), scope)
+
+
+def network_evidence(ctx, **window):
+    scope = {"version": 1, "profile": "network-loading/1", "project_id": ctx.project_uuid,
+             "entity_id": "network", "retain": False, **window}
     return scope, assurance_records.capture_scoped(assurance_records.actor_id(), scope)
 
 
@@ -82,3 +88,43 @@ def test_another_profile_or_tab_is_not_joined(client, grid):
                                 scope, record) is None
     assert navigation_join.join(ctx, action, {**scope, "profile": "bus-price/1"}, record) is None
 
+
+
+def test_a_network_loading_answer_joins_like_a_branch_one(client, grid):
+    ctx = solve(grid)
+    scope, record = network_evidence(ctx)
+    assert scope["profile"] == "network-loading/1"
+    assert navigation_join.join(ctx, opened(client, ctx), scope, record) == {
+        "shows": "checked_evidence", "window": {"start": record["scope"]["start"], "end": record["scope"]["end"]}}
+    first, second = (v.isoformat() for v in ctx.network.snapshots[:2])
+    scope, record = network_evidence(ctx, start=first, end=second)
+    assert navigation_join.join(ctx, opened(client, ctx), scope, record) == {
+        "shows": "different_view", "reason": "window_differs"}
+
+
+def test_a_display_bound_to_another_project_is_named(client, grid):
+    ctx = solve(grid)
+    scope, record = evidence(ctx)
+    action = opened(client, ctx)
+    other = {**action, "source_binding": {**action["source_binding"], "project_id": "another-project"}}
+    assert navigation_join.join(ctx, other, scope, record) == {
+        "shows": "different_view", "reason": "project_differs"}
+
+
+def test_a_solve_without_a_recorded_fingerprint_is_named(client, grid):
+    ctx = solve(grid)
+    scope, record = evidence(ctx)
+    action = opened(client, ctx)
+    # A project solved before the exact fingerprint was recorded.
+    ctx.network.meta.pop("assistant_solve_exact_input_fingerprint")
+    assert navigation_join.join(ctx, action, scope, record) == {
+        "shows": "different_view", "reason": "fingerprint_basis_unknown"}
+
+
+def test_a_display_without_an_input_hash_is_named(client, grid):
+    ctx = solve(grid)
+    scope, record = evidence(ctx)
+    action = opened(client, ctx)
+    bare = {**action, "source_binding": {**action["source_binding"], "input_sha256": ""}}
+    assert navigation_join.join(ctx, bare, scope, record) == {
+        "shows": "different_view", "reason": "fingerprint_basis_unknown"}

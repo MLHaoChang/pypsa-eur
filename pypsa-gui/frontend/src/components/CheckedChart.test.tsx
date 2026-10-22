@@ -26,13 +26,14 @@ describe('CheckedChart', () => {
   })
 
   it.each(['guided', 'expert'] as const)('opens Results on the native tab and stays in %s', mode => {
-    useUIStore.setState({ uiMode: mode, activeSection: null, activeSlidePanel: null, resultsTabRequest: null })
+    useUIStore.setState({ uiMode: mode, activeSection: null, activeSlidePanel: null, resultsTabRequest: null, resultsWindowRequest: null })
     render(<CheckedChart chart={DRAWN} profile="generator-dispatch/1" />)
     fireEvent.click(screen.getByTestId('checked-chart-native'))
     const ui = useUIStore.getState()
     expect(ui.uiMode).toBe(mode)
     expect(ui.activeSlidePanel).toBe('results')
     expect(ui.resultsTabRequest).toBe('dispatch')
+    expect(ui.resultsWindowRequest).toEqual({ start: '2026-01-01T00:00:00', end: '2026-01-01T01:00:00' })
     expect(screen.getByTestId('checked-chart-native').textContent).toBe('Open in Results › Dispatch')
   })
 

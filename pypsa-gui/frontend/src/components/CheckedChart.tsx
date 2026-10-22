@@ -14,11 +14,13 @@ const NATIVE: Record<string, { tab: string; label: string }> = {
 // The Results panel on that tab, in the mode the user is in. Guided opens the
 // panel itself (as ResultsCard and ImproveCard do), never the hub card, and
 // stays Guided: Results shows an Expert-only tab there as its advanced tab.
-function openNative(tab: string) {
+// It opens on the chart's window, so the tab shows the data that was checked.
+function openNative(tab: string, window: Chart['window']) {
   const ui = useUIStore.getState()
   if (ui.uiMode === 'guided') ui.setSlidePanel('results')
   else openSectionInExpert('results')
   ui.requestResultsTab(tab)
+  if (window?.start && window.end) ui.requestResultsWindow({ start: window.start, end: window.end })
 }
 
 /** The checked chart's download and its footer (S10). Every line comes from the
@@ -44,7 +46,7 @@ export function CheckedChart({ chart, profile, compact = false }: { chart: Chart
     {notDrawn.length > 0 && <ul className="mt-1" aria-label="Not drawn">{notDrawn.map(s =>
       <li key={s.series}>Not drawn: {s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
     {native && <button type="button" className="mt-1 underline" data-testid="checked-chart-native"
-      onClick={() => openNative(native.tab)}>
+      onClick={() => openNative(native.tab, chart.window)}>
       Open in Results › {native.label}</button>}
   </div>
 }

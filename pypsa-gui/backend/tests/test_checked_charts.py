@@ -164,3 +164,30 @@ def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, 
     again = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
     assert again["chart"]["evidence_id"] != chart["evidence_id"]
     assert checked.client.get(again["chart"]["download_url"]).headers["X-Checked-Chart"] == "evidence re-verified now"
+
+
+def test_a_chart_whose_evidence_file_is_gone_says_it_is_no_longer_stored(solved, checked):
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    chart = receipt["chart"]
+    stamp = checked_charts.readable_stamp(sidecar(chart)["drawn_at"])
+    assurance_records._path(assurance_records.actor_id(), receipt["evidence_ids"][0]).unlink()
+    old = checked.client.get(chart["download_url"])
+    assert old.status_code == 200
+    assert old.headers["X-Checked-Chart"] == (
+        f"drawn {stamp}; its evidence is no longer stored, so it was not re-verified now")
+
+
+def test_a_refused_save_leaves_no_provenance_file(solved, checked, monkeypatch):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.assistant_tools import _project
+
+    def refuse(*args, **kwargs):
+        raise HTTPException(409, "locked")
+
+    monkeypatch.setattr(chat_tools, "_save_agent_export", refuse)
+    receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
+    assert receipt["chart"]["reason"] == "render_failed"
+    _, root, _ = _project()
+    assert not list((root / "assistant_artifacts").glob("*.json"))

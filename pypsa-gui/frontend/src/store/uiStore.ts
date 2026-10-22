@@ -509,6 +509,9 @@ interface UIStore {
   /** A section within the requested Results tab (the Investment tab's
    *  `SECTIONS` ids, e.g. 'case'); consumed and cleared by that tab. */
   resultsSectionRequest: string | null
+  /** One-shot: the Results Horizon filter opens on this window (a checked chart's
+   *  "Open in Results"), as snapshot labels. Consumed and cleared by the Results shell. */
+  resultsWindowRequest: { start: string; end: string } | null
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
@@ -661,6 +664,8 @@ interface UIStore {
   requestResultsTab: (tab: string, section?: string) => void
   clearResultsTabRequest: () => void
   clearResultsSectionRequest: () => void
+  requestResultsWindow: (window: { start: string; end: string }) => void
+  clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
   requestSolverBlock: (block: 'economic' | 'sclopf') => void
@@ -754,6 +759,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   resultsSectionRequest: null,
+  resultsWindowRequest: null,
   economicsTabRequest: null,
   solverBlockRequest: null,
   gridReadinessRequest: false,
@@ -1008,6 +1014,8 @@ export const useUIStore = create<UIStore>((set, get) => ({
   },
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
+  requestResultsWindow: (window) => set({ resultsWindowRequest: window }),
+  clearResultsWindowRequest: () => set({ resultsWindowRequest: null }),
   requestEconomicsTab: (tab) => set({ economicsTabRequest: tab }),
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),

@@ -202,6 +202,8 @@ export default function Results() {
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
+  const resultsWindowRequest = useUIStore(s => s.resultsWindowRequest)
+  const clearResultsWindowRequest = useUIStore(s => s.clearResultsWindowRequest)
   const discussedRun = useUIStore(s => s.discussedRun)
   const clearDiscussedRun = useUIStore(s => s.clearDiscussedRun)
   const uiMode = useUIStore(s => s.uiMode)
@@ -484,6 +486,20 @@ export default function Results() {
     }
     seededRef.current = true
   }, [firstSnap16, lastSnap16, snap])
+
+  // A checked chart's "Open in Results" brings its window: the tab then shows
+  // the window that was checked, not the opening default. Applied once the
+  // horizon is seeded (the effect above runs first), then cleared.
+  useEffect(() => {
+    if (!resultsWindowRequest || !firstSnap16 || !lastSnap16) return
+    const from16 = resultsWindowRequest.start.replace(' ', 'T').slice(0, 16)
+    const to16 = resultsWindowRequest.end.replace(' ', 'T').slice(0, 16)
+    if (from16 >= firstSnap16 && to16 <= lastSnap16 && from16 <= to16) {
+      setFromIso(from16)
+      setToIso(to16)
+    }
+    clearResultsWindowRequest()
+  }, [resultsWindowRequest, firstSnap16, lastSnap16, clearResultsWindowRequest])
 
   // datetime-local inputs return "YYYY-MM-DDTHH:mm"; PyPSA ISO timestamps are
   // "YYYY-MM-DDTHH:mm:ss". The resolveRange string compare doesn't need

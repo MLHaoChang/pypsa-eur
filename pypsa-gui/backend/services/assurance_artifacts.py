@@ -61,8 +61,9 @@ def verify_chart(root, meta, data, project_id, *, provenance=False):
             if not status:
                 raise ValueError("checked chart evidence mismatch")
             manifest = {**manifest, "evidence_status": status}
-            if status == "expired":
-                manifest["evidence_note"] = checked_charts.EXPIRED_NOTE.format(
+            if status in ("expired", "missing"):
+                note = checked_charts.EXPIRED_NOTE if status == "expired" else checked_charts.MISSING_NOTE
+                manifest["evidence_note"] = note.format(
                     drawn_at=checked_charts.readable_stamp(manifest["drawn_at"]))
         return record if provenance else manifest
     except (OSError, ValueError, TypeError, KeyError):

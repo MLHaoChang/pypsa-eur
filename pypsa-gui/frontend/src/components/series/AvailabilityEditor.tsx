@@ -19,7 +19,7 @@ import { Btn, Seg } from '../PageKit'
 import { errorText, seriesApi, type PendingSeries } from '../../api/profiles'
 import { useUIStore } from '../../store/uiStore'
 import {
-  openFlowTarget, openFlowTargetInPlace, openSectionInExpert, openSectionInGuided,
+  openFlowTarget, openFlowTargetInPlace, openSectionInExpert,
 } from '../../layout/flowNavigation'
 import {
   CurrentSeriesLine, DisabledReason, INPUT, MeasuredFileTab, PendingCard, RefinePanel, type EditorMode,
@@ -103,10 +103,11 @@ export default function AvailabilityEditor({ project, component, componentType, 
   const [perK, setPerK] = useState('')
 
   // The reliability study is the Results section's adequacy tab: opened
-  // through the shared section navigation, in the mode the user is in.
+  // through the shared section navigation, in the mode the user is in. Guided
+  // opens the Results panel itself, not the hub card, and stays Guided.
   const openReliability = () => {
     const ui = useUIStore.getState()
-    if (ui.uiMode === 'guided') openSectionInGuided('results')
+    if (ui.uiMode === 'guided') ui.setSlidePanel('results')
     else openSectionInExpert('results')
     ui.requestResultsTab('adequacy')
   }
