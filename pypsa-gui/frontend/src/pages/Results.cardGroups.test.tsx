@@ -148,7 +148,7 @@ describe('the group header', () => {
     expect(screen.getByTestId('results-ghead-failed').textContent)
       .toContain('Did not complete: The model is infeasible. Check the demand.')
     fireEvent.click(screen.getByTestId('results-ghead-failed-open'))
-    expect(useUIStore.getState().activeSection).toBe('scenarios')
+    expect(useUIStore.getState().activeSection).toBe('readiness')
   })
 })
 
