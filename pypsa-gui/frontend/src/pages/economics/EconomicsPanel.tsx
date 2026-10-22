@@ -15,6 +15,7 @@ import SiteConnectionSection from '../results/investment/SiteConnectionSection'
 import TariffSection from '../results/investment/TariffSection'
 import AssetCostsTable from './AssetCostsTable'
 import RatesForm from './RatesForm'
+import FillFromPdf from '../../components/FillFromPdf'
 
 const TABS = [
   { id: 'basis', label: 'Basis' },
@@ -74,8 +75,8 @@ export default function EconomicsPanel() {
         {tab === 'assets' && <AssetCostsTable />}
         {tab === 'tariffs' && (
           <div className="p-3 flex flex-col gap-4">
-            <Block title="Import tariff"><TariffSection /></Block>
-            <Block title="Contracts"><ContractsEditor /></Block>
+            <Block title="Import tariff"><FillFromPdf target="tariff" /><TariffSection /></Block>
+            <Block title="Contracts"><FillFromPdf target="ppa" /><ContractsEditor /></Block>
             <Block title="Participants"><ParticipantsDesigner /></Block>
             <p className="text-[11px] text-muted" data-testid="economics-open-library">
               Tariffs and contracts can be taken from the commercial library.{' '}

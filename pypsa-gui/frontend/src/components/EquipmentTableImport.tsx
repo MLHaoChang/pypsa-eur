@@ -8,15 +8,20 @@ import type { FlowSectionId } from '../api/flow'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { sectionMeta } from '../layout/flowSections'
 import { useUIStore } from '../store/uiStore'
+import DocumentValuesPicker, { type PickerMode } from './DocumentValuesPicker'
 
-// "Import rows from a table…" (data-to-model, owner AI-567): map an uploaded
+// "Import values from a file…" (data-to-model, owner AI-567): map an uploaded
 // CSV/XLSX, one row per existing asset, onto assets of ONE class. The user
 // picks the upload (the project uploads list chat shares), the name column and
 // a field and unit per column from the server's field schema; the preview is
 // the same edit card the assistant shows, and Apply writes exactly that card
 // and shows its receipt. The server decides every value (services/equipment_table.py).
+// A PDF (slice 2, owner AI-567b) switches the steps after the file to the quote
+// picker (DocumentValuesPicker); section 7 opens the same dialog for the import
+// tariff or a PPA contract, PDFs only.
 
 const TABLE_FILE = /\.(csv|xlsx|xlsm)$/i
+const PDF_FILE = /\.pdf$/i
 
 /** The asset-table classes the server's mapper writes to (section 3: lines and
  *  transformers; 4: loads; 5: the rest). */
@@ -24,7 +29,7 @@ export const TABLE_IMPORT_CLASSES: ReadonlySet<string> = new Set([
   'Line', 'Transformer', 'Load', 'Generator', 'StorageUnit', 'Store', 'Link',
 ])
 
-function errorText(e: unknown, fallback: string): string {
+export function errorText(e: unknown, fallback: string): string {
   const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   if (typeof detail === 'string') return detail
   if (detail && typeof detail === 'object' && 'message' in detail) return String((detail as { message: unknown }).message)
@@ -34,15 +39,21 @@ function errorText(e: unknown, fallback: string): string {
 
 const select = 'border border-border rounded bg-bg px-1.5 py-1 text-[11px] focus:outline-none focus:border-accent'
 
-export default function EquipmentTableImport({ componentClass, assetsLabel, onClose, onApplied }: {
-  componentClass: string
+export default function EquipmentTableImport({ componentClass = '', assetsLabel = '', assetNames = [], commercial,
+  onClose, onApplied }: {
+  componentClass?: string
   /** What the asset table calls these assets ("generators"). */
-  assetsLabel: string
+  assetsLabel?: string
+  /** The class's assets, for the PDF picker's explicit choice. */
+  assetNames?: string[]
+  /** Section 7: values from a PDF onto the import tariff or a PPA contract. */
+  commercial?: 'tariff' | 'ppa'
   onClose: () => void
   /** After a write: refresh what shows the class's assets. */
   onApplied: () => void
 }) {
   const project = useUIStore(s => s.currentProject)
+  const accepted = (name: string) => PDF_FILE.test(name) || (!commercial && TABLE_FILE.test(name))
   const [uploads, setUploads] = useState<UploadMeta[] | null>(null)
   const [uploadId, setUploadId] = useState('')
   const [sheet, setSheet] = useState<string | null>(null)
@@ -61,10 +72,11 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
     if (!project) { setUploads([]); return }
     let cancelled = false
     listUploads(project, 'user_upload')
-      .then(list => { if (!cancelled) setUploads(list.filter(u => TABLE_FILE.test(u.filename))) })
+      .then(list => { if (!cancelled) setUploads(list.filter(u => accepted(u.filename))) })
       .catch(() => { if (!cancelled) setUploads([]) })
     return () => { cancelled = true }
-  }, [project])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, commercial])
 
   // A table added here joins the same project uploads list chat uses.
   const addUpload = async (file: File | undefined) => {
@@ -78,9 +90,13 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
     finally { setBusy(false) }
   }
 
+  const isPdf = PDF_FILE.test(uploads?.find(u => u.file_id === uploadId)?.filename ?? '')
+  const mode: PickerMode = useMemo(() => commercial ? { kind: 'commercial', target: commercial }
+    : { kind: 'assets', componentClass, assetNames }, [commercial, componentClass, assetNames])
+
   // Reading the table: its headers, a few rows, and the class's mappable fields.
   useEffect(() => {
-    if (!uploadId) { setTable(null); return }
+    if (!uploadId || isPdf) { setTable(null); return }
     let cancelled = false
     setError(null); setPreview(null); setConfirmed(false)
     equipmentTableApi.preview({ upload_id: uploadId, sheet, component_class: componentClass })
@@ -93,7 +109,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
       })
       .catch(e => { if (!cancelled) { setTable(null); setError(errorText(e, 'The table could not be read.')) } })
     return () => { cancelled = true }
-  }, [uploadId, sheet, componentClass])
+  }, [uploadId, isPdf, sheet, componentClass])
 
   const fields = useMemo(() => new Map((table?.fields ?? []).map(f => [f.field, f])), [table])
   const costPicked = Object.values(columns).some(c => fields.get(c.field)?.currency)
@@ -151,7 +167,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
   const mapped = Object.keys(columns).length
   const unitless = Object.keys(columns).find(h => !columns[h].unit)
   // Why Preview or Apply is not available yet, with its fix, shown beside the buttons.
-  const previewWhy = !table ? 'Choose a table first.'
+  const previewWhy = !table ? (commercial ? 'Choose a PDF first.' : 'Choose a table or a PDF first.')
     : !nameColumn ? 'Pick the name column first.'
       : mapped === 0 ? 'Pick a field for at least one column.'
         : unitless ? `Pick the unit of “${unitless}” in the table.`
@@ -162,15 +178,53 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
       : plan.missing.length ? 'Confirm the money year above, then preview again.'
         : 'Nothing to change: every mapped value is already set or left out.')
 
+  // The file step: shared by the table mapping and the PDF quote picker.
+  const fileSection = (
+    <section className="flex flex-col gap-1.5">
+      <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted">File</h3>
+      {uploads === null ? <p className="text-muted">Reading the project's uploads…</p>
+        : (
+          <div className="flex flex-wrap items-center gap-2">
+            {uploads.length === 0 && <span className="text-muted" data-testid="table-import-no-uploads">
+              {commercial ? 'No PDF' : 'No CSV, XLSX or PDF'} in this project's uploads yet.
+            </span>}
+            {uploads.length > 0 && <select aria-label="Uploaded file" className={select} value={uploadId} data-testid="table-import-upload"
+              onChange={e => { setUploadId(e.target.value); setSheet(null) }}>
+              <option value="">Choose an upload…</option>
+              {uploads.map(u => <option key={u.file_id} value={u.file_id}>{u.filename}</option>)}
+            </select>}
+            <label className="cursor-pointer text-accent hover:underline">
+              Upload a file…
+              <input type="file" accept={commercial ? '.pdf' : '.csv,.xlsx,.xlsm,.pdf'} className="sr-only" data-testid="table-import-file"
+                disabled={busy} onChange={e => { void addUpload(e.target.files?.[0]); e.target.value = '' }} />
+            </label>
+            {source && source.sheets.length > 1 && (
+              <select aria-label="Sheet" className={select} value={source.sheet}
+                onChange={e => setSheet(e.target.value)}>
+                {source.sheets.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            )}
+            {table && <span className="text-muted">{table.table.row_count} row{table.table.row_count === 1 ? '' : 's'}</span>}
+          </div>
+        )}
+    </section>
+  )
+  const title = commercial ? 'Fill values from a PDF' : 'Import values from a file'
+
   return (
-    <Dialog open onClose={onClose} title="Import rows from a table" z={950} dismissOnBackdrop={!busy}
+    <Dialog open onClose={onClose} title={title} z={950} dismissOnBackdrop={!busy}
       panelClassName="bg-bg rounded-lg shadow-2xl w-[44rem] max-w-[94vw] max-h-[85vh] flex flex-col overflow-hidden border border-border">
       <div className="px-4 py-3 border-b border-border">
-        <div className="text-sm font-semibold text-text">Import rows from a table</div>
+        <div className="text-sm font-semibold text-text">{title}</div>
         <div className="text-[11px] text-muted">
-          One row per existing asset among the {assetsLabel}, named in the table. Each value is checked against its field before anything is written.
+          {commercial ? `Values from a PDF onto ${commercial === 'tariff' ? 'the import tariff' : 'a PPA contract'}, each shown with its page and quote.`
+            : `From a table, one row per existing asset among the ${assetsLabel}; from a PDF, values with their page and quote.`}
+          {' '}Each value is checked against its field before anything is written.
         </div>
       </div>
+      {isPdf ? (
+        <DocumentValuesPicker uploadId={uploadId} mode={mode} fileSection={fileSection} onClose={onClose} onApplied={onApplied} />
+      ) : (<>
       <div className="flex-1 overflow-auto px-4 py-3 text-xs flex flex-col gap-4" data-testid="table-import">
         {applied ? (
           <section data-testid="table-import-receipt">
@@ -183,34 +237,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
             )}
           </section>
         ) : (<>
-          <section className="flex flex-col gap-1.5">
-            <h3 className="text-[10px] font-bold uppercase tracking-wider text-muted">Table</h3>
-            {uploads === null ? <p className="text-muted">Reading the project's uploads…</p>
-              : (
-                <div className="flex flex-wrap items-center gap-2">
-                  {uploads.length === 0 && <span className="text-muted" data-testid="table-import-no-uploads">
-                    No CSV or XLSX in this project's uploads yet.
-                  </span>}
-                  {uploads.length > 0 && <select aria-label="Uploaded table" className={select} value={uploadId} data-testid="table-import-upload"
-                    onChange={e => { setUploadId(e.target.value); setSheet(null) }}>
-                    <option value="">Choose an upload…</option>
-                    {uploads.map(u => <option key={u.file_id} value={u.file_id}>{u.filename}</option>)}
-                  </select>}
-                  <label className="cursor-pointer text-accent hover:underline">
-                    Upload a table…
-                    <input type="file" accept=".csv,.xlsx,.xlsm" className="sr-only" data-testid="table-import-file"
-                      disabled={busy} onChange={e => { void addUpload(e.target.files?.[0]); e.target.value = '' }} />
-                  </label>
-                  {source && source.sheets.length > 1 && (
-                    <select aria-label="Sheet" className={select} value={source.sheet}
-                      onChange={e => setSheet(e.target.value)}>
-                      {source.sheets.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  )}
-                  {table && <span className="text-muted">{table.table.row_count} row{table.table.row_count === 1 ? '' : 's'}</span>}
-                </div>
-              )}
-          </section>
+          {fileSection}
 
           {table && (
             <section className="flex flex-col gap-1.5">
@@ -325,6 +352,7 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
           </button>
         </>)}
       </div>
+      </>)}
     </Dialog>
   )
 }

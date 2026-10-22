@@ -6,6 +6,7 @@ import TariffSection from '../../results/investment/TariffSection'
 import RatesForm from '../../economics/RatesForm'
 import { Block } from '../../economics/EconomicsPanel'
 import { openSectionInExpert } from '../../../layout/flowNavigation'
+import FillFromPdf from '../../../components/FillFromPdf'
 
 // Guided section 7, Commercial & parties: the same editors Expert mounts in
 // its Economics panel (one editor per value, design §2.2), three decisions
@@ -14,8 +15,8 @@ import { openSectionInExpert } from '../../../layout/flowNavigation'
 export function CommercialCard() {
   return (
     <div data-testid="hub-card-commercial" className="flex flex-col gap-4 rounded border border-border bg-panel p-4">
-      <Block title="Import tariff"><TariffSection /></Block>
-      <Block title="Contracts"><ContractsEditor /></Block>
+      <Block title="Import tariff"><FillFromPdf target="tariff" /><TariffSection /></Block>
+      <Block title="Contracts"><FillFromPdf target="ppa" /><ContractsEditor /></Block>
       <Block title="Finance inputs"><FinanceInputsEditor /></Block>
       <details data-testid="commercial-more">
         <summary className="cursor-pointer text-[12px] text-muted hover:text-accent">More settings</summary>

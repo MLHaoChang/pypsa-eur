@@ -25,7 +25,11 @@ page and reads the number from it. Cases:
 - DV-12 the preview route is a read; its card is the one the apply accepts;
 - DV-13 (code review) a quote is matched as whole words and its number read with the
   page text around it, so a quote cannot cut a digit, a separator, a range or a sign
-  off the number; a unit note matches the unit as a word, case and all.
+  off the number; a unit note matches the unit as a word, case and all;
+- DV-14 the dialog's quote finder: lines holding a number and one of the field's units
+  as whole words, label matches first, `value_text` when a line holds several numbers,
+  never a line its own citation would refuse; every candidate cited passes;
+- DV-15 `find` on the preview route lists candidates and leaves the card as it is.
 """
 from __future__ import annotations
 
@@ -435,3 +439,63 @@ def test_dv13_a_quote_cannot_cut_its_number_and_a_unit_note_matches_the_unit_as_
     cost = {"names": ["PV1"], "field": "overnight_cost", "page": 1, "quote": "Price 480 EUR/kW", "unit": "EUR/kW"}
     out = chat_tools.preview_document_values(**_args(uid, [cost], currency="eur", money_year=2024))
     assert out["unmapped"] == [] and out["cells"][0]["currency"] == "EUR"  # a stated code in any case
+
+
+FIND_SHEET = [["Model XR-500 inverter", "Nominal power 1.2 MW", "Max output 2 MW to 3 MW", "Energy 4 MWh",
+               "Charging efficiency 92.5 % at 1.5 MW", "Rated 1.250 MW", "Tolerance 5 MW ± 2 %"],
+              ["Capacity 0.8 MW per block", "Notes " + "x" * 300 + " 9 MW"]]
+
+
+def test_dv14_the_finder_offers_only_lines_their_citation_would_pass(grid):
+    uid = _pdf(FIND_SHEET)
+    doc = D.read_pages("P", uid)
+    fields = {"p_nom": {"label": "Capacity", "units": ["MW"]},
+              "efficiency_store": {"label": "Charging efficiency", "units": ["fraction", "%"]},
+              "inv_energy_overnight": {"label": "Overnight", "units": ["EUR/MWh", "EUR/kWh"]}}
+    out = D.find(doc["pages"], fields)
+    p_nom = [(c["page"], c["quote"], c["value_text"], c["value"]) for c in out["p_nom"]["candidates"]]
+    # The label first, then by page; a range, a ± line, MWh, 1.250 (two readings) and a
+    # line over the quote limit are not offered.
+    assert p_nom == [(2, "Capacity 0.8 MW per block", None, "0.8"),
+                     (1, "Nominal power 1.2 MW", None, "1.2"),
+                     (1, "Charging efficiency 92.5 % at 1.5 MW", "1.5", "1.5")]
+    (eff,) = out["efficiency_store"]["candidates"]
+    assert (eff["value_text"], eff["unit"], eff["label"]) == ("92.5", "%", True)
+    assert out["inv_energy_overnight"] == {"candidates": [], "more": 0}
+    # A stated decimal mark reads 1.250 one way.
+    stated = D.find(doc["pages"], {"p_nom": fields["p_nom"]}, decimal_mark=",")
+    assert ("Rated 1.250 MW", "1250") in [(c["quote"], c["value"]) for c in stated["p_nom"]["candidates"]]
+    # Each candidate cited as offered passes the server's check.
+    cites = [{"names": ["Battery"], "field": "p_nom", "page": c["page"], "quote": c["quote"], "unit": c["unit"],
+              **({"value_text": c["value_text"]} if c["value_text"] else {})} for c in out["p_nom"]["candidates"]]
+    for c in cites:
+        res = chat_tools.preview_document_values(**_args(uid, [c], klass="StorageUnit"))
+        assert res["unmapped"] == [] and res["changed_cells"] == 1, (c, res["unmapped"])
+
+
+def test_dv14b_money_units_read_with_a_symbol_a_code_or_the_currency_before_the_number(grid):
+    page = [["Price 450 EUR/kWh", "Price 400 €/kWh", "Price € 380/kWh", "Price 300 EUR per kWh",
+             "Fee 20 EUR/kW/yr", "Other 7 EUR/kWh/yr", "Capex 900 EUR/kW", "Levy 3 EUR per kW per year"]]
+    pages = ["\n".join(lines) for lines in page]  # "€" is not in WinAnsi: the page text, as dv03b
+    out = D.find(pages, {"cost": {"label": "Price", "units": ["EUR/kWh"]},
+                         "fom": {"label": "Fee", "units": ["EUR/kW/yr"]},
+                         "kw": {"label": "Capex", "units": ["EUR/kW"]}})
+    assert [c["value"] for c in out["cost"]["candidates"]] == ["450", "400", "380", "300"]
+    assert [c["quote"] for c in out["fom"]["candidates"]] == ["Fee 20 EUR/kW/yr", "Levy 3 EUR per kW per year"]
+    # "EUR/kW" is not the start of "EUR/kW/yr", "EUR/kWh" or "EUR per kW per year".
+    assert [c["quote"] for c in out["kw"]["candidates"]] == ["Capex 900 EUR/kW"]
+
+
+def test_dv15_find_on_the_preview_route_lists_candidates_and_leaves_the_card(client, grid, session_ctx):
+    from tests.test_chat_tools_dispatch import _bound_to
+
+    path = "/api/document_values/preview"
+    assert client.post("/api/projects/P", params={"force": True, "rebind": True}).status_code == 200
+    with _bound_to(session_ctx(client)):
+        uid = _pdf(SHEET)
+    body = client.post(path, json={"upload_id": uid, "component_class": "StorageUnit", "find": True}).json()
+    (cand,) = body["candidates"]["efficiency_store"]["candidates"]
+    assert (cand["page"], cand["quote"], cand["unit"]) == (2, EFF["quote"], "%")
+    plain = client.post(path, json={**_args(uid, [EFF], klass="StorageUnit")}).json()
+    found = client.post(path, json={**_args(uid, [EFF], klass="StorageUnit"), "find": True}).json()
+    assert found["card"]["digest"] == plain["card"]["digest"] and "candidates" not in plain

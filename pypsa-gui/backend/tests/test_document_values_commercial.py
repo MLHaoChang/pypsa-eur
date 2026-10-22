@@ -21,6 +21,8 @@ section 7 adds:
 - CDV-09 undo: the receipt says `undo_last` does not revert it, and the tool is not on
   the network's undo stack; the write is behind the foreign-lock gate;
 - CDV-10 the preview route is a read, and its card is the one the apply accepts;
+- CDV-14 the dialog's quote finder in commercial mode: per tariff item and PPA field, in
+  the units `plan` accepts; a candidate cited as offered passes; `find` leaves the card;
 - CDV-15 the HTTP apply writes under the signed-in user's authority (outside a chat
   turn there is no acting user to fall back on).
 """
@@ -415,6 +417,30 @@ def test_cdv13_preflight_errors_from_before_the_change_are_card_notes(site, monk
     _, args = _preview(uid, [PEAK])
     _, result, _ = _dispatch(site, "apply_commercial_document_values", args)  # not this change's refusal
     assert result["read_back"] is True
+
+
+def test_cdv14_the_finder_offers_tariff_and_ppa_lines_in_the_units_plan_accepts(site):
+    uid = _pdf()
+    out = DC.preview({"upload_id": uid, "find": True})
+    found = {k: [(c["page"], c["quote"], c["unit"]) for c in v["candidates"]] for k, v in out["candidates"].items()}
+    assert found["tariff:energy"] == [(1, "Energy charge peak 72.50 EUR/MWh", "/MWh"),
+                                      (1, "Energy charge off-peak 0.11 EUR/kWh", "/kWh"),
+                                      (1, "Peak energy 0.25 per kWh", "/kWh"),
+                                      (2, "Fixed price 48.20 £/MWh", "/MWh"), (2, "Fixed price 61.5 EUR/MWh", "/MWh")]
+    # /kW/yr is not /kW/month: no implied ÷12.
+    assert found["tariff:demand"] == [(1, "Demand charge 12 EUR/kW/month", "/kW/month")]
+    # The label first: the fixed prices before another line in /MWh.
+    assert found["ppa:price"][:2] == [(2, "Fixed price 48.20 £/MWh", "/MWh"), (2, "Fixed price 61.5 EUR/MWh", "/MWh")]
+    assert found["ppa:tenor_years"] == [(2, "Contract term 15 years", "years")]
+    assert found["ppa:share"] == []
+    (peak, *_) = out["candidates"]["tariff:energy"]["candidates"]
+    cite = {"target": "tariff", "entity": "energy", "field": "periods[offpeak].rate", "page": peak["page"],
+            "quote": peak["quote"], "unit": peak["unit"]}
+    plain, _ = _preview(uid, [cite], currency="EUR")
+    assert plain["unmapped"] == [] and plain["changed_cells"] == 1
+    with_find = DC.preview({"upload_id": uid, "citations": [cite], "currency": "EUR", "find": True})
+    without = DC.preview({"upload_id": uid, "citations": [cite], "currency": "EUR"})
+    assert with_find["card"]["digest"] == without["card"]["digest"]
 
 
 def test_cdv15_the_http_apply_writes_as_the_signed_in_user(client, site, session_ctx):

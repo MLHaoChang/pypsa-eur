@@ -309,6 +309,69 @@ def _value(citation: dict, quote: str, page: str, at: int, decimal_mark: str | N
     return {"text": number["text"], "value": value}, None
 
 
+# ── Candidate quotes (the dialog's picker) ─────────────────────────────────
+
+MAX_CANDIDATES = 12
+_CURRENCY = r"(?-i:€|£|\$|[A-Z]{3})"
+_PER = r"\s?(?:/|per\s)\s?"
+# A unit goes on after "/", or after "per" and a unit word ("EUR per kW per year"); "MW
+# per block" is MW.
+_YEAR = r"(?:yr|year|a|annum)"
+_GOES_ON = r"(?!\s?/)(?!\s?per\s(?:year|yr|annum|a|month|mo|day|d|hour|h|[kmg]wh|[km]w|[km]va|km)\b)"
+_LABEL_WORD = re.compile(r"[A-Za-z]{4,}")
+# The sign is the plan's check, with the field: a candidate is only offered.
+_ANY_SIGN = {"validation_schema": {"minimum": float("-inf")}}
+
+
+def _unit_re(unit: str) -> re.Pattern:
+    """A unit as a quote may write it after its number, as whole words: "EUR/kW/yr" also
+    reads "€/kW/yr", "EUR per kW/yr" and "/kW/yr" (the currency before the number). A unit
+    that goes on ("kW" in "kW/yr", "kWh", "kW per year") is not it."""
+    head, slash, rest = unit.partition("/")
+    money = bool(slash) and (head in ("", "currency") or re.fullmatch(_CURRENCY, head) is not None)
+    parts = rest.split("/") if money else unit.split("/")
+    body = _PER.join(_YEAR if p.lower() in ("yr", "year", "a") else re.escape(p).replace(r"\ ", r"\s?")
+                     for p in parts)
+    lead = rf"(?:{_CURRENCY}\s?)?{_PER}" if money else ""
+    return re.compile(rf"^\s?{lead}{body}(?![A-Za-z0-9]){_GOES_ON}", re.IGNORECASE)
+
+
+def find(pages: list[str], wanted: dict[str, dict], decimal_mark: str | None = None) -> dict[str, dict]:
+    """Lines of the document that could be cited for each wanted field: `{key: {candidates:
+    [{page, quote, value_text, value, unit, label}], more}}`, from `wanted` = `{key: {label,
+    units}}`. A candidate is a line (normalised, at most `MAX_QUOTE_CHARS`) holding a number
+    followed by one of the field's units; it is offered only when it would pass `locate`
+    and `_value` as cited. `value_text` names the number when the line holds several.
+    Lines naming a word of the field's label come first, then by page."""
+    units = {k: [(u, _unit_re(u)) for u in sorted(w.get("units") or [], key=len, reverse=True)]
+             for k, w in wanted.items()}
+    words = {k: {x.lower() for x in _LABEL_WORD.findall(str(w.get("label") or ""))} for k, w in wanted.items()}
+    found: dict[str, list[dict]] = {k: [] for k in wanted}
+    for p, raw in enumerate(pages, start=1):
+        text = normal(raw)
+        for line in dict.fromkeys(normal(x) for x in (raw or "").splitlines()):
+            at = on_page(text, line) if line and len(line) <= MAX_QUOTE_CHARS else None
+            if at is None:
+                continue
+            nums = numbers(line, decimal_mark)
+            lowered = line.lower()
+            for x in nums:
+                pick = x["text"] if len(nums) > 1 else None
+                number, gap = _value({"value_text": pick}, line, text, at, decimal_mark, _ANY_SIGN)
+                if gap:
+                    continue
+                for k, options in units.items():
+                    unit = next((u for u, rx in options if rx.match(line[x["end"]:])), None)
+                    if unit is not None:
+                        found[k].append({"page": p, "quote": line, "value_text": pick, "value": str(number["value"]),
+                                         "unit": unit, "label": any(w in lowered for w in words[k])})
+    out = {}
+    for k, rows in found.items():
+        rows.sort(key=lambda r: not r["label"])  # stable: page order within each group
+        out[k] = {"candidates": rows[:MAX_CANDIDATES], "more": max(0, len(rows) - MAX_CANDIDATES)}
+    return out
+
+
 def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: str | None = None,
          currency: str | None = None, money_year: int | None = None, confirm=(), base_year: int | None = None,
          project_currency: str | None = None, fields: dict | None = None) -> dict:
@@ -445,10 +508,11 @@ def summary(n, p: dict) -> dict:
 
 
 def preview(args: dict) -> dict:
-    """The dialog's preview, for the active project: `{document, fields?, plan?, card?}`.
-    `document` = `{source}`; with `component_class`, `fields` (`equipment_table.
-    mappable_fields`); with `citations` too, `plan` (`summary`) and `card`, the edit card
-    the apply checks, None while a confirmation is missing or nothing changes. Writes nothing."""
+    """The dialog's preview, for the active project: `{document, fields?, candidates?, plan?,
+    card?}`. `document` = `{source}`; with `component_class`, `fields` (`equipment_table.
+    mappable_fields`) and, with `find`, `candidates` (`find`); with `citations` too, `plan`
+    (`summary`) and `card`, the edit card the apply checks, None while a confirmation is
+    missing or nothing changes. Writes nothing."""
     from harness import edit_card
     from services import chat_tools
     from services.pypsa_service import PyPSAService
@@ -459,9 +523,12 @@ def preview(args: dict) -> dict:
     if not klass:
         return out
     out["fields"] = T.mappable_fields(edit_card._fields(klass))
+    if args.get("find"):
+        out["candidates"] = find(doc["pages"], {f["field"]: f for f in out["fields"]}, args.get("decimal_mark"))
     if not args.get("citations"):
         return out
-    args = {**args, "source_sha256": doc["source"]["sha256"]}
+    # `find` is the picker's, not the edit's: the card is the one the apply builds.
+    args = {**{k: v for k, v in args.items() if k != "find"}, "source_sha256": doc["source"]["sha256"]}
     with PyPSAService.get_lock():
         p = plan_active(args)
         out["plan"] = summary(PyPSAService.get_network(), p)
