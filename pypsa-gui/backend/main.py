@@ -1295,6 +1295,10 @@ app.include_router(_equipment_table_preview, prefix="/api/equipment_table", tags
 from routers.network_document_values import preview_router as _document_values_preview  # noqa: E402
 
 app.include_router(_document_values_preview, prefix="/api/document_values", tags=["network"])
+# Its import tariff and PPA write: a solver-config write, so under the gated `/api/simulation/`.
+from routers.network_document_values import commercial_router as _document_values_commercial  # noqa: E402
+
+app.include_router(_document_values_commercial, prefix="/api/simulation/document_values", tags=["simulation"])
 # Path-scoped per-project READ endpoints (B6). Mounted BEFORE projects/snapshots
 # so its `{project_id}/network/...` routes (static `network` segment) resolve
 # first — they don't collide with projects.py's `{name}/<static>` routes, but

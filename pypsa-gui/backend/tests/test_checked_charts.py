@@ -2,6 +2,7 @@
 
 # ruff: noqa: F811 -- imported shared fixtures.
 import json
+import re
 
 import pytest
 
@@ -48,7 +49,7 @@ def test_a_dispatch_chart_draws_the_evidence_and_names_what_it_did_not_draw(solv
         {"series": "p", "disposition": "drawn", "unit": "MW"},
         {"series": "marginal_cost", "disposition": "not_drawn", "reason": "not_in_evidence",
          "title": "Not part of this answer's checked evidence"}]
-    assert chart["caption"][0].startswith("Chart drawn from checked evidence · 1 series · ")
+    assert chart["caption"][0] == "Chart drawn from checked evidence · 1 series · 1 Jan 2026, 00:00–01:00"
     assert chart["caption"][1] == "Not drawn: marginal cost — Not part of this answer's checked evidence"
     manifest = sidecar(chart)
     record = evidence(receipt)
@@ -145,7 +146,9 @@ def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, 
     receipt = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
     chart = receipt["chart"]
     drawn_at = sidecar(chart)["drawn_at"]
-    assert chart["caption"][-1].startswith(f"Checked against the solve of {drawn_at} · evidence ")
+    stamp = checked_charts.readable_stamp(drawn_at)
+    assert stamp.endswith(" UTC") and not re.search(r"\dT\d", stamp)
+    assert chart["caption"][-1].startswith(f"Drawn {stamp} from checked evidence · evidence ")
     fresh = checked.client.get(chart["download_url"])
     assert fresh.headers["X-Checked-Chart"] == "evidence re-verified now"
     path = assurance_records._path(assurance_records.actor_id(), receipt["evidence_ids"][0])
@@ -156,7 +159,7 @@ def test_after_its_evidence_expires_a_chart_says_it_was_not_re_verified(solved, 
     old = checked.client.get(chart["download_url"])
     assert old.status_code == 200
     assert old.headers["X-Checked-Chart"] == (
-        f"checked against the solve of {drawn_at}; evidence expired, not re-verified now")
+        f"drawn {stamp}; its evidence has expired, so it was not re-verified now")
     # A checked turn never re-presents it: a new request draws a fresh chart from new evidence.
     again = ask(checked, solved, "generator-dispatch/1", "G1", GENERATOR, ["p"])
     assert again["chart"]["evidence_id"] != chart["evidence_id"]

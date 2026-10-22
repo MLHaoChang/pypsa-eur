@@ -3,6 +3,7 @@ import { useChatStore, type ChatMessage } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { getOwnedCheckedAnswer, type OwnedCheckedAnswer } from '../api/checkedAnswers'
 import { CheckedEvidenceCard } from './CheckedEvidenceCard'
+import { CheckedChart } from './CheckedChart'
 import ChatMarkdown from './ChatMarkdown'
 
 const UPLOAD_BLOB = /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/
@@ -77,6 +78,8 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
           onClick={() => setOpen(true)}>Show answer</button>
         {!checked && download && <a data-testid="companion-download" className="underline"
           href={download.href} download={download.filename ?? undefined}>Download</a>}
+        {/* A checked chart's download is bound to its verified answer (S10). */}
+        {answer?.receipt.chart && <CheckedChart chart={answer.receipt.chart} compact />}
       </div>
       {/* The same words as the transcript (LC-C7): read by screen readers, shown when opened. */}
       {body && <div className="sr-only" data-testid="companion-answer-text"><ChatMarkdown>{body}</ChatMarkdown></div>}
@@ -105,6 +108,7 @@ function OutcomeCard({ message, checked, failed, download, docked }: {
     {answer && <div className="max-h-[25vh] overflow-auto break-words">
       <CheckedEvidenceCard answerId={answer.answer_id} receipt={answer.receipt}
         sourceLabel={answer.receipt.request_scope?.retain ? 'Retained evidence' : 'Recorded evidence'} />
+      {answer.receipt.chart && <CheckedChart chart={answer.receipt.chart} profile={answer.receipt.request_scope?.profile} />}
     </div>}
     <div className="mt-2 flex flex-wrap gap-3">
       {body && <button type="button" className="underline" aria-expanded={expanded}

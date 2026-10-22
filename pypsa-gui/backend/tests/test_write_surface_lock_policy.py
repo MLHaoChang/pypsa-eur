@@ -255,6 +255,12 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
         "ACTIVE project in a child process, checks each quote on a copy of the "
         "network, returns the edit card, and writes nothing. The write is "
         "`/api/network/document_values/apply`, behind the foreign-lock gate."),
+    ("POST", "/api/document_values/commercial/preview"): (NOT_PROJECT_DATA,
+        "a POST only to carry a body (the citations): it reads a PDF upload of the "
+        "ACTIVE project in a child process, checks each quote against the stored "
+        "commercial config, returns the edit card, and writes nothing. The write is "
+        "`/api/simulation/document_values/apply`, behind the foreign-lock gate as "
+        "`PUT /api/simulation/solver_config` is."),
     ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session
@@ -600,3 +606,15 @@ def test_every_known_gap_is_still_a_gap(tool):
         f"{tool!r} is lock-checked now ({KNOWN_GAPS[tool]}). Delete its "
         f"KNOWN_GAPS entry, and close the OPEN-ITEMS entry in the same change."
     )
+
+
+def test_the_commercial_document_values_apply_is_gated_as_the_solver_config_save():
+    """Data-to-model slice 2, PR-B (gatekeeper): the tariff and PPA write from a PDF sits
+    outside /api/network, behind the same foreign-lock gate as `PUT /api/simulation/
+    solver_config`, and its chat tool is gated at the seam."""
+    from services import chat_tools
+
+    for path in ("/api/simulation/document_values/apply", "/api/simulation/solver_config"):
+        assert any(path.startswith(p) for p in main._FOREIGN_LOCK_GATE_PREFIXES), path
+        assert not main._foreign_lock_gate_exempt(path), path
+    assert "apply_commercial_document_values" in chat_tools._lock_gated_tool_names()
