@@ -245,6 +245,11 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
         "in memory and returns it downsampled, writes nothing, resolves no "
         "project — the same shape as studies/preview, without even the path "
         "project."),
+    ("POST", "/api/equipment_table/preview"): (NOT_PROJECT_DATA,
+        "a POST only to carry a body (the column mapping): it reads an upload of "
+        "the ACTIVE project and plans the mapping on a copy of the network, "
+        "returns the edit card, and writes nothing. The write is "
+        "`/api/network/equipment_table/apply`, behind the foreign-lock gate."),
     ("POST", "/api/chat/operations/{operation_id}/reconcile"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     ("POST", "/api/chat/ui-ack"): (NOT_PROJECT_DATA, _R_ASSURANCE),
     # chat session

@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronUp, Terminal, Trash2, History, Columns3, X, Search, ExternalLink } from 'lucide-react'
+import { ChevronDown, ChevronUp, Terminal, Trash2, History, Columns3, X, Search, ExternalLink, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
@@ -24,6 +24,7 @@ import {
 import { isNumericDtype } from '../utils/attributeCatalog'
 import BusAutocomplete from '../components/BusAutocomplete'
 import CarrierSelect from '../components/CarrierSelect'
+import EquipmentTableImport, { TABLE_IMPORT_CLASSES } from '../components/EquipmentTableImport'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -307,6 +308,7 @@ function AssetTable({
   tab, componentClass, data, defaultColumns, selectedName, onRowClick,
 }: AssetTableProps) {
   const qc = useQueryClient()
+  const [tableImportOpen, setTableImportOpen] = useState(false)
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({})
@@ -1065,6 +1067,32 @@ function AssetTable({
             </span>
           )}
         </div>
+
+        {/* Data-to-model (AI-567): the one entry for mapping an uploaded table
+            onto this class's assets, in the class's own asset list. */}
+        {TABLE_IMPORT_CLASSES.has(componentClass) && (
+          <button
+            onClick={() => setTableImportOpen(true)}
+            data-testid="asset-table-import"
+            className="flex shrink-0 items-center gap-1 whitespace-nowrap px-2 py-1 border border-border rounded text-muted hover:text-text hover:border-text/40"
+            title="Set field values on these assets from an uploaded CSV or XLSX table, one row per asset"
+          >
+            <FileSpreadsheet size={11} />
+            Import rows from a table…
+          </button>
+        )}
+        {tableImportOpen && (
+          <EquipmentTableImport componentClass={componentClass} assetsLabel={tab.toLowerCase()} onClose={() => setTableImportOpen(false)}
+            onApplied={() => {
+              lastMutationAtRef.current = Date.now()
+              const projectId = useUIStore.getState().currentProject
+              qc.invalidateQueries({ queryKey: [TAB_TO_API_KEY[componentClass] ?? componentClass.toLowerCase() + 's'] })
+              qc.invalidateQueries({ queryKey: nk(projectId, 'undoInfo') })
+              qc.invalidateQueries({ queryKey: ['changelog'] })
+              qc.invalidateQueries({ queryKey: nk(projectId, 'results') })
+              qc.invalidateQueries({ queryKey: nk(projectId, 'flow') })
+            }} />
+        )}
 
         {/* The select-a-column-and-type-a-value toolbar is gone (D29): paste
             respects the row selection and Ctrl/Cmd+Enter fills it, so the

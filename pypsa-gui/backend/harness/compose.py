@@ -263,6 +263,30 @@ def _workflow_addendum(session: Any, ui_context: dict[str, Any] | None) -> str |
     return "\n\n".join(parts)
 
 
+def _results_card_addendum(session: Any) -> str | None:
+    """The open card's views and their reads, while the card explanation's
+    task cap holds (W10 H2a). Server text from the registry, so it sits
+    outside the untrusted fence; the card id is the validated hint."""
+    from services import result_views
+
+    if getattr(session, "turn_task_cap", None) is None:
+        return None
+    card = result_views.card_hint(session.turn_ui_context)
+    lines = [f'Explain the results of the "{card}" card only. The user has it open; do not '
+             "navigate. Its views, each with the read that grounds it:"]
+    for v in result_views.card_views(card):
+        reads = "; ".join(
+            r.tool + "(" + ", ".join(f"{k}={val}" for k, val in r.args.items()) + ")"
+            for r in v.reads)
+        lines.append(f"- {v.label} [{v.view_id}]: {v.shows}. Read: {reads}." + (
+            f" Needs: {', '.join(v.needs)}." if v.needs else ""))
+    cap = session.turn_task_cap
+    lines.append(f"Make at most {cap.tool_calls} reads, all in your first step, then answer "
+                 f"in about {cap.output_tokens} tokens. A view whose read has no data is "
+                 "unavailable, never zero.")
+    return "\n".join(lines)
+
+
 def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
     """
     Render what the user is looking at, for the USER turn.
@@ -289,6 +313,11 @@ def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
     add("open panel", ui_context.get("panel"))
     add("canvas view", ui_context.get("canvas_view"))
     add("results tab", ui_context.get("results_tab"))
+    from services.result_views import card_hint
+    card = card_hint(ui_context)
+    if card is None and ui_context.get("results_card") is not None:
+        logger.info("results_card hint dropped: not a card id")
+    add("results card", card)
     add("bottom tab", ui_context.get("bottom_tab"))
     add("snapshot index", ui_context.get("snapshot_index"))
     add("comparison rail open", ui_context.get("compare_rail_open"))

@@ -122,10 +122,23 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # The project flow's acknowledged warnings (B1).
                  # `test_project_flow` pins it equal to flow_service.ACKS_FILE.
                  "flow_acks.json",
+                 # The project's scope: the work cards the Run computes (W4a).
+                 # `test_flow_scope` pins it equal to flow_scope.SCOPE_FILE.
+                 "flow_scope.json",
                  # The user's own grid-readiness limits (DC 03 slice 6):
                  # services/adequacy/grid_limits.py owns it; the walk in
                  # `test_bundle_sidecars` pins it to its SIDECAR_NAME.
-                 "grid_readiness_limits.json")
+                 "grid_readiness_limits.json",
+                 # A sensitivity case's record of its baseline and changes
+                 # (SR-1, F10). Carried by bundles, copies and snapshots so a
+                 # case keeps its provenance, but NOT by scenario forks
+                 # (`_FORK_SKIPPED_FILES`): a fork of a case is not that case.
+                 # `test_bundle_provenance` pins it to SENSITIVITY_CASE_FILE.
+                 "sensitivity_case.json")
+
+# Bundle files a scenario fork (`create_scenario`, the study option forks)
+# must not inherit, though bundles, copies and snapshots carry them.
+_FORK_SKIPPED_FILES = frozenset({"sensitivity_case.json"})
 
 # The campus electrical study's inputs and investment results (plan C9), under
 # `campus_electrical/`: the campus description, the asset library (the
@@ -169,6 +182,17 @@ _BUNDLE_CAMPUS_FILES = (
 # into the bundle zip and extracted from it. `sites/` is the 3D site view's
 # cached site context (services/site_context.py), one directory per site id.
 _BUNDLE_DIRS = ("uploads", "reports", "studies", "sites")
+
+# Per-project HISTORY: append-only records of what happened, not working state
+# (SR-1, F10). Carried by bundle export/import and Save-As/Save-a-Copy, so a
+# copy keeps its provenance; NOT by snapshots (a restore must never erase runs
+# recorded after the capture) or scenario forks (a fork did not run them).
+# `run_evidence/` (services/run_evidence.py) is bounded there: 16 KB per
+# section, artifacts for the newest 20 runs, 200 manifests. Its records name
+# the project they were recorded in, so a copy carries them without claiming
+# them. `experiments/` is deliberately absent: its plans name other case
+# projects' ids, so a copy would hold duplicate or dangling plans.
+_HISTORY_DIRS = ("run_evidence",)
 
 # The metadata keys a decision-study option fork carries (S4), and a tornado's
 # throw-away fork (S6: `owner_variant_id`, `throwaway`). Literals, like
@@ -271,10 +295,10 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
     replacing any existing destination dir of the same name. No-op for
     sources that don't exist (legacy projects predate uploads/).
 
-    Used by Save-As / Save-a-Copy / create_scenario / snapshot create.
-    Snapshot restore wraps the call inside `_force_rmtree(dst / dname)`
-    first so a stale upload from a post-snapshot session is dropped
-    before the snapshot's bundle dirs are reinstated.
+    Used by Save-As / Save-a-Copy / create_scenario / snapshot create and
+    restore. A dir missing from `src` leaves `dst`'s copy in place; snapshot
+    restore removes it afterwards when the snapshot's capture manifest says
+    the dir was absent when the snapshot was taken.
 
     Errors are swallowed individually per dir so a failure copying
     one dir (e.g. an in-use file in uploads/) doesn't abort the
@@ -294,6 +318,21 @@ def _copy_bundle_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
                 "bundle: copy_bundle_dir %s → %s failed: %s",
                 src_d, dst_d, exc,
             )
+
+
+def _copy_history_dirs(src: pathlib.Path, dst: pathlib.Path) -> None:
+    """`_copy_bundle_dirs` for `_HISTORY_DIRS`: Save-As / Save-a-Copy only."""
+    import shutil as _shutil
+    for dname in _HISTORY_DIRS:
+        src_d, dst_d = src / dname, dst / dname
+        if not src_d.is_dir() or src_d.is_symlink():
+            continue
+        try:
+            if dst_d.exists():
+                _force_rmtree(dst_d)
+            _shutil.copytree(str(src_d), str(dst_d))
+        except OSError as exc:
+            logger.warning("bundle: copy_history_dir %s → %s failed: %s", src_d, dst_d, exc)
 
 
 def _safe_project_dir(name: str) -> pathlib.Path:
@@ -1235,7 +1274,7 @@ async def import_bundle(
     # stay inside `dest` before writing (zip-slip defence) and the parent
     # subdirs are created on demand.
     for member in members:
-        for dname in _BUNDLE_DIRS:
+        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
             if not member.startswith(f"{dname}/"):
                 continue
             # Sanity: refuse any member that resolves outside dest.
@@ -2113,7 +2152,8 @@ def _carry_sidecars_on_move(
       conversation goes with it), COPIED otherwise (Save-a-Copy must leave the
       original's thread intact).
     * `uploads/` and every other `_BUNDLE_DIRS` entry — ALWAYS copied.
-      Reference material a user may want in both projects.
+      Reference material a user may want in both projects. `_HISTORY_DIRS`
+      (run evidence) likewise, so the copy keeps its provenance.
     * Every `_BUNDLE_FILES` sidecar the save does not write itself
       (`layout.json`, `sites.json`, the adequacy sidecars, …) — ALWAYS copied,
       REPLACING whatever the destination holds: a forced Save-As over an
@@ -2200,6 +2240,7 @@ def _carry_sidecars_on_move(
             # with the chat half so the two sidecars cannot disagree about
             # where the source project is.
             _copy_bundle_dirs(src_dir, dest)
+            _copy_history_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
 
@@ -3532,6 +3573,8 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
 
     try:
         for fname in _BUNDLE_FILES:
+            if fname in _FORK_SKIPPED_FILES:
+                continue
             src_file = base_dir / fname
             if src_file.exists():
                 atomic_write_bytes(child_dir / fname, src_file.read_bytes())
@@ -4688,7 +4731,7 @@ def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
         # Chatbot uploads (Phase A) — locked decision row 6: uploads/ travels
         # with the bundle. Walk each _BUNDLE_DIRS recursively so an exported
         # bundle round-trips on import with all reference files intact.
-        for dname in _BUNDLE_DIRS:
+        for dname in _BUNDLE_DIRS + _HISTORY_DIRS:
             d = src / dname
             if not d.is_dir():
                 continue

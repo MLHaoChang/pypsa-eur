@@ -11,7 +11,7 @@ import time
 
 from harness.protocol import ProviderError
 
-SUITE_VERSION = "checked-pilot-evaluation/7"
+SUITE_VERSION = "checked-pilot-evaluation/9"
 ORACLE_VERSION = "hand-worked-network-and-carrier-oracles/1"
 UNSAFE = "Unchecked invented narrative: the network is certified safe at 999 MW."
 
@@ -85,6 +85,14 @@ CYCLES = {"window_discharged_energy": (4, "MWh"), "energy_capacity": (20, "MWh")
 # generation 6, served 6, shortfall 4 MWh; nothing stored, a lossless link.
 BALANCE = {"generation_energy": (6, "MWh"), "served_energy": (6, "MWh"), "unserved_energy": (4, "MWh"),
            "storage_change": (0, "MWh"), "export_losses_and_conversion": (0, "MWh")}
+# A site behind a 6 MW grid_import meter imports 6 MW for 2 weighted hours and 3 MW for 1,
+# each at p_nom_opt x p_max_pu (1 then 0.5): 15 MWh, peak 6 MW, nothing sold, 3 h at the limit.
+SITE = {"grid_import_energy": (15, "MWh"), "peak_grid_import": (6, "MW"), "export_energy": (0, "MWh"),
+        "hours_at_import_limit": (3, "h")}
+# A stored investment-case report with equity cash -100, 150 and project cash -100, 175,
+# both at 25 %: NPVs -100 + 150/1.25 = 20 and -100 + 175/1.25 = 40 USD; IRRs 0.5 and 0.75.
+INVESTMENT = {"equity_npv": (20, "USD"), "project_npv": (40, "USD"), "equity_irr": (0.5, "fraction/year"),
+              "project_irr": (0.75, "fraction/year")}
 PROFILE_METRICS = {
     "generator-dispatch/1": tuple(GENERATOR)[:3],
     "generator-cost/1": tuple(GENERATOR),
@@ -116,6 +124,8 @@ ADDED = {
     "capacity/1": ("generator G2", "Show the capacity for", CAPACITY, "optimal_capacity"),
     "storage-cycles/1": ("storage unit Battery", "Show the cycles for", CYCLES, "window_discharged_energy"),
     "energy-balance/1": ("network", "Show the energy balance for", BALANCE, "generation_energy"),
+    "site-import/1": ("network", "Show the grid import for", SITE, "grid_import_energy"),
+    "investment-case/1": ("network", "Show the investment returns for", INVESTMENT, "equity_npv"),
 }
 # Profiles whose scope names the component's class.
 SCOPE_CLASS = {"capacity/1": "Generator", "storage-cycles/1": "StorageUnit"}
@@ -160,6 +170,10 @@ LABELS = {
     "served_energy": "Demand served", "unserved_energy": "Demand not served (shed and process shortfall)",
     "storage_change": "Change in stored energy",
     "export_losses_and_conversion": "Export, branch and storage losses, and conversion to other carriers (not split)",
+    "grid_import_energy": "Grid import", "peak_grid_import": "Peak grid import",
+    "export_energy": "Export to the grid", "hours_at_import_limit": "Weighted hours at the import limit",
+    "equity_npv": "Equity NPV (post tax, at the cost of equity)", "project_npv": "Project NPV (post tax, at the WACC)",
+    "equity_irr": "Equity IRR (post tax)", "project_irr": "Project IRR (post tax)",
 }
 
 

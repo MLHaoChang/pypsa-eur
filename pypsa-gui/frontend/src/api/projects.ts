@@ -53,6 +53,9 @@ export interface SnapshotInfo {
   //   would be misleading if restored as-is.
   // 'none'  — no dispatch tables at all (truly unsolved).
   dispatch_status?: 'fresh' | 'stale' | 'none'
+  // False for a snapshot taken before restore recorded which files existed:
+  // restoring it leaves files and folders added since then in place.
+  has_capture_manifest?: boolean
 }
 
 export interface RestoreResult {

@@ -23,6 +23,14 @@ vi.mock('../../../api/network', async (importOriginal) => {
   return { ...actual, networkApi: { ...actual.networkApi, getGenerators: vi.fn(async () => []),
     getStorageUnits: vi.fn(async () => []) } }
 })
+// The scope (W4a): unread by default (every block shows); one test reads a
+// scope with Commercial & finance off.
+const getFlowScope = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../api/flow')>()),
+  getFlowScope: (...a: unknown[]) => getFlowScope(...a),
+}))
+
 const api = vi.mocked(financeApi)
 
 const YEARS = [2030, 2031, 2032]
@@ -77,6 +85,7 @@ function renderView() {
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  getFlowScope.mockReturnValue(new Promise(() => {}))
   api.getInvestmentCase.mockResolvedValue(null)
   api.getReport.mockResolvedValue(null)
   api.startInvestmentCase.mockResolvedValue({ status: 'running' })
@@ -192,6 +201,26 @@ describe('InvestmentCaseView', () => {
     renderView()
     await screen.findByTestId('ic-report')
     expect(screen.getByTestId('ic-island-breakeven').textContent).toMatch(/at least EUR 693,523 a year.*break even.*needs an outage duration/)
+  })
+
+  it('with Commercial & finance off, the revenue and capture tables give way to adding it (W4a)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [], reliability: [],
+          commercial: ['tariffs', 'contracts'], handoff: ['reports'] } },
+      cards: [{ id: 'commercial', label: 'Commercial & finance', locked_reason: null,
+        intended: ['tariffs', 'contracts'], sections: ['commercial'], chip: 'Commercial',
+        options: [{ id: 'tariffs', label: 'Tariffs & bill', status: 'available', reason: null },
+          { id: 'contracts', label: 'Contracts & PPAs', status: 'available', reason: null }] }],
+      preset_id: 'eh_ipp_hybrid', preset_label: 'IPP', preset: { version: 1, groups: [], options: {} },
+    })
+    api.getInvestmentCase.mockResolvedValue({ status: 'done', report: { present: true } })
+    api.getReport.mockResolvedValue(structuredClone(REPORT))
+    renderView()
+    await screen.findByTestId('ic-report')
+    expect((await screen.findByTestId('ic-revenue-scope-add')).textContent).toBe('Add Commercial & finance')
+    expect(screen.queryByTestId('ic-revenue-streams')).toBeNull()
+    expect(screen.queryByTestId('ic-revenue-unavailable')).toBeNull()
   })
 
   it('no baseline flag: no caveat', async () => {

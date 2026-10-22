@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-21",
+  "generated_at": "2026-10-22",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 276,
+  "tool_count": 279,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -47,11 +47,12 @@
         "_service_call_"
       ],
       "input_keys": [
-        "exclude_shown"
+        "exclude_shown",
+        "card"
       ],
       "required": [],
       "safety_tier": "read",
-      "schema_sha256": "d475a280cf69833ce1b367185a956ef4e36e7e38cb9c722587dd18dc4a4706e4",
+      "schema_sha256": "9c914e11d02c18d953c65eab78934c415263d4c751d906ca74139b6ad0246887",
       "behavioral_fixture": "pending"
     },
     {
@@ -2402,6 +2403,31 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "refine_generated_profile",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/refine"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "job_id",
+        "ops"
+      ],
+      "required": [
+        "project_id",
+        "job_id",
+        "ops"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "14771d18c344f4d2ba2c0783cf73e8ecc8c6396b6c8071a9de620c98d2da3c98",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "generate_series_profile",
       "toolsets": [
         "network"
@@ -2885,7 +2911,7 @@
         "new_name"
       ],
       "safety_tier": "destructive",
-      "schema_sha256": "e0a09e1749bbfc1dcba31d51fd1a0fe017b77abc2d81db5b7217a058fb0363a5",
+      "schema_sha256": "ca48da82f598cd3ad8996b65bec04dfe94961be6da8fb4e63d35cce295e29e0f",
       "behavioral_fixture": "pending"
     },
     {
@@ -3279,7 +3305,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "c375b301eb8bef557b7a963d94c0d28096123d4ae6080075f6abccdda738a7cd",
+      "schema_sha256": "9d68599e2baa3edfb739918d5fbcfca3cc1296ead8ee1ad03dd73bfaa21242bf",
       "behavioral_fixture": "pending"
     },
     {
@@ -5225,6 +5251,63 @@
       "behavioral_fixture": "pending"
     },
     {
+      "name": "preview_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        "_service_call_"
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1c2443ff6f0d5d79a2626d5d1c850603441be36936b236c8173cc55dc934e281",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "apply_equipment_mapping",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/equipment_table/apply"
+        ]
+      ],
+      "input_keys": [
+        "upload_id",
+        "sheet",
+        "component_class",
+        "name_column",
+        "columns",
+        "currency",
+        "money_year",
+        "confirm",
+        "source_sha256"
+      ],
+      "required": [
+        "upload_id",
+        "component_class",
+        "name_column",
+        "columns",
+        "source_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "c8b2666c513bdd1c6ee6a9aea17927f9cba659c9039101d4b843d6e641e76b63",
+      "behavioral_fixture": "pending"
+    },
+    {
       "name": "set_site_connection",
       "toolsets": [
         "network"
@@ -6013,7 +6096,8 @@
       "input_keys": [
         "title",
         "request_id",
-        "steps"
+        "steps",
+        "brief"
       ],
       "required": [
         "title",
@@ -6021,7 +6105,7 @@
         "request_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "68f6c7fd7e6c05dd31f17824b4aeb905514c5f1a8b1f73ceeb25eded58ae40a2",
+      "schema_sha256": "4d6b132ebaa33a6237e5459f77cdbd57da6776e2753b0a35e15c1f5273ccfe9a",
       "behavioral_fixture": "pending"
     },
     {
@@ -6405,7 +6489,8 @@
     "campusElectrical",
     "decision",
     "economics",
-    "profiles"
+    "profiles",
+    "library"
   ],
   "tool_panel_enum": [
     "Results",
@@ -6468,7 +6553,9 @@
     "Economics",
     "economics",
     "ProfileStudio",
-    "profiles"
+    "profiles",
+    "CommercialLibrary",
+    "library"
   ],
   "slide_panels_not_in_tool_enum": [],
   "requested_aliases": {

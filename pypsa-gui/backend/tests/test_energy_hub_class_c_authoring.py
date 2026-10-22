@@ -202,6 +202,11 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     refs = root / "services" / "library" / "reference_data"
     refs.mkdir(parents=True)
     (refs / "eu-dea-2026-08.json").write_text("{}")
+    # The shipped common Library items (GS-EU P2d) sit beside `common.py` the same way.
+    tariffs = root / "services" / "library" / "common_items" / "tariff"
+    tariffs.mkdir(parents=True)
+    for name in ("nl-tennet-2026-ehs.json", "nl-tennet-2026-hs.json"):
+        (tariffs / name).write_text("{}")
     # The chat harness's Markdown (prompts, workflows, skills) is read
     # `__file__`-relative from the package too (chat harness issue 10).
     assert any("harness/prompts/base_identity.md" in m

@@ -658,6 +658,9 @@ _WRITE_ARGS = {
     "apply_project_changes": lambda n: (("00000000-0000-0000-0000-000000000000",), {}),
     # A shipped cost reference on one asset (GS-EU P2b); needs no confirmation on G1.
     "apply_library_reference": lambda n: (("Generator", "G1", "onwind", 2030), {}),
+    # An equipment table onto assets (data-to-model slice 1); no such upload, refused first.
+    "apply_equipment_mapping": lambda n: (("no-such-file", "Line", "name", {"r": {"field": "s_nom", "unit": "MVA"}},
+                                           "0" * 64), {}),
 }
 
 # Tools whose effect needs something to act on first (outside the sweep).

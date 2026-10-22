@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Check answers can verify the investment case's post-tax equity and project NPV and IRR, rebuilt from the stored report's cash rows (`investment-case/1`, opt-in); an IRR only when the cash changes sign once, and a report stale on its own key is refused. The LCOE, payback, cover ratios and the solved PPA price stay not checkable yet.

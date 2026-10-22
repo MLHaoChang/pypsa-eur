@@ -1694,6 +1694,45 @@ def apply_library_reference(component_class: str, name: str, technology: str, pr
     return _route(_h, body)
 
 
+def preview_equipment_mapping(upload_id: str, component_class: str, name_column: str, columns: dict,
+                              sheet: str | None = None, currency: str | None = None,
+                              money_year: int | None = None, confirm: list[str] | None = None) -> dict:
+    """Map an uploaded CSV/XLSX equipment table onto assets of one class and say, cell
+    by cell, what an apply would write and what stays out. Writes nothing."""
+    from services import equipment_table as T
+
+    p = T.plan_active({"upload_id": upload_id, "sheet": sheet, "component_class": component_class,
+                       "name_column": name_column, "columns": columns, "currency": currency,
+                       "money_year": money_year, "confirm": confirm})
+    return {**T.summary(PyPSAService.get_network(), p),
+            "next": "apply_equipment_mapping with the same arguments and source_sha256 = source.sha256"}
+
+
+def apply_equipment_mapping(upload_id: str, component_class: str, name_column: str, columns: dict,
+                            source_sha256: str, sheet: str | None = None, currency: str | None = None,
+                            money_year: int | None = None, confirm: list[str] | None = None) -> dict:
+    """Write a previewed equipment table onto its assets through the network route (the
+    edit card is shown and confirmed before this runs; the route rechecks the digest of
+    the card the user approved, which the turn loop binds)."""
+    from harness import edit_card
+    from routers.network_equipment_table import EquipmentMappingHttp
+    from routers.network_equipment_table import apply_equipment_mapping as _h
+
+    if not edit_card.approved_digest():
+        from services import equipment_table as T
+
+        T._refuse("edit_preview_stale", "No approved edit card for this table; nothing was applied. "
+                  "Propose the edit again.", 409)
+    body = EquipmentMappingHttp(upload_id=upload_id, sheet=sheet, component_class=component_class,
+                                name_column=name_column, columns=columns, currency=currency,
+                                money_year=money_year, confirm=list(confirm or []), source_sha256=source_sha256,
+                                digest=edit_card.approved_digest())
+    out = _route(_h, body)
+    # The turn loop attaches the card's receipt as `_edit_receipt`; the route's copy would repeat it.
+    out.pop("receipt", None)
+    return out
+
+
 def _urdb_rate(data, item_index: int | None = None):
     """The rate object of an uploaded URDB file: the object itself, one item
     of an OpenEI response, or a REopt scenario's `urdb_response`."""
@@ -3597,6 +3636,12 @@ def generate_availability_profile(project_id: str, kind: str, generators: list,
     body = AvailabilityGenerateRequest(kind=kind, components=generators,
                                        component_type=component_type,
                                        params=params, year=year)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
+    from routers.profiles import RefineRequest, refine_profile as _h
+    body = RefineRequest(job_id=job_id, ops=ops)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -7699,6 +7744,7 @@ DISPATCHERS: dict[str, Any] = {
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,
     "generate_series_profile": generate_series_profile,
+    "refine_generated_profile": refine_generated_profile,
     # gridspine (16)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
@@ -7746,6 +7792,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_library_references": list_library_references,
     "get_library_reference": get_library_reference,
     "apply_library_reference": apply_library_reference,
+    "preview_equipment_mapping": preview_equipment_mapping,
+    "apply_equipment_mapping": apply_equipment_mapping,
     "set_site_connection": set_site_connection,
     "define_participants": define_participants,
     # investment case (4) — IC P4 WP4.6c

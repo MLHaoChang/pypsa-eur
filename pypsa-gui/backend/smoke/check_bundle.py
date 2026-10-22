@@ -204,6 +204,9 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-20/manifest.json",
     # GS-2b typed cost units: the first typed EU version.
     "services/library/defaults_pack/versions/2026-10-22/manifest.json",
+    # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
+    # sibling `common_items/`; one probe per shipped kind.
+    "services/library/common_items/tariff/nl-tennet-2026-hs.json",
     # GS-2 regional cost packs (`<date>+<region>`), one manifest per region.
     "services/library/defaults_pack/versions/2026-10-21+ca_federal/manifest.json",
     "services/library/defaults_pack/versions/2026-10-21+uk/manifest.json",
