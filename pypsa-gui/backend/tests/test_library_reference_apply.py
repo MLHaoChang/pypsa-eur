@@ -311,6 +311,11 @@ def test_money_years_in_use_lists_each_recorded_cost_year():
     assert sorted(years) == [2020, 2025]
     assert ("Generator", "pv", "overnight_cost") in years[2025]
     assert ("Generator", "wind", "overnight_cost") in years[2020]
+    # A cost typed over the applied reference is not that reference's year (B9).
+    from services.asset_schema import provenance
+    provenance.mark_customised(n, "Generator", "pv", ["overnight_cost"])
+    assert ("Generator", "pv", "overnight_cost") not in A.money_years_in_use(n).get(2025, [])
+    assert A.hand_typed_cost_fields(n) == [("Generator", "pv", "overnight_cost")]
 
 
 def test_the_http_apply_needs_the_digest_of_a_card_the_user_saw(client, install_network):
