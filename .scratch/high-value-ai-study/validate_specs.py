@@ -39,6 +39,175 @@ def read_json(name: str) -> dict:
     return json.loads((HERE / name).read_text(), object_pairs_hook=unique_pairs)
 
 
+def check_implementation_spec() -> None:
+    spec = read_json("harness-implementation-plan.json")
+    require(
+        spec["status"] == "implementation_spec_for_review",
+        "Implementation spec status changed",
+    )
+    require(
+        spec["runtime_implemented"] is False, "Runtime implementation misrepresented"
+    )
+    sha = spec["assessed_master"]
+    require(
+        re.fullmatch(r"[0-9a-f]{40}", sha) is not None,
+        "Invalid implementation source pin",
+    )
+    choices = spec["closed_design_choices"]
+    expected = {
+        "plain_steps_max": 12,
+        "brief_steps_max": 24,
+        "plain_steps_chars_max": 16000,
+        "brief_steps_chars_max": 32000,
+        "step_args_chars_max": 1800,
+        "task_view_chars_max": 3800,
+        "network_cases_executable_max": 2,
+        "working_context_bytes_max": 6144,
+        "mutable_history_bytes_max": 65536,
+    }
+    require(
+        all(
+            type(choices.get(k)) is int and choices[k] == v for k, v in expected.items()
+        ),
+        "Closed implementation limits drifted",
+    )
+    require(
+        choices["every_brief_write_run_requires_click"] is True
+        and choices["card_boundary_requires_continue"] is True
+        and choices["new_top_level_modules"] is False,
+        "Owner gate drift",
+    )
+    units = {item["id"]: item for item in spec["units"]}
+    require(len(units) == len(spec["units"]) == 7, "Implementation unit IDs/count")
+    require(
+        set(units) == {f"HS-{i:02}" for i in range(1, 8)}, "Implementation unit set"
+    )
+    active, done = set(), set()
+
+    def visit(key: str) -> None:
+        require(
+            key in units and key not in active, f"Invalid implementation DAG at {key}"
+        )
+        if key in done:
+            return
+        active.add(key)
+        item = units[key]
+        require(
+            item["status"] == "specified_not_implemented",
+            "Unit falsely claimed implemented",
+        )
+        require(
+            bool(item["existing_owners"])
+            and bool(item["build_gates"])
+            and bool(item["code_targets"]),
+            f"Incomplete delivery unit {key}",
+        )
+        for dependency in item["depends_on"]:
+            visit(dependency)
+        active.remove(key)
+        done.add(key)
+
+    for key in units:
+        visit(key)
+    cases = spec["acceptance_cases"]
+    ids = [item["id"] for item in cases]
+    declared = [case for item in units.values() for case in item["acceptance_cases"]]
+    require(
+        len(ids) == len(set(ids)) == len(declared) == len(set(declared)) == 47,
+        "Implementation acceptance count/duplicates",
+    )
+    require(set(ids) == set(declared), "Unmapped implementation acceptance")
+    expected_ids = {
+        f"{prefix}-{i:02}"
+        for prefix in ("CAP", "CMP", "CTX", "ANA", "RUN")
+        for i in range(1, 7)
+    }
+    expected_ids |= {f"E2E-{i:02}" for i in range(1, 15)} | {
+        f"SKL-{i:02}" for i in range(1, 4)
+    }
+    require(set(ids) == expected_ids, "Missing required acceptance family")
+    table = (HERE / "10-HARNESS-DELIVERY-AND-TESTS.md").read_text()
+    for case in cases:
+        require(
+            case["unit"] in units
+            and case["id"] in units[case["unit"]]["acceptance_cases"],
+            f"Wrong acceptance owner {case['id']}",
+        )
+        require(
+            case["status"] == "planned_not_run",
+            "Future acceptance represented as executed",
+        )
+        require(
+            all(
+                case[field]
+                for field in ("fixture", "action", "required_assertions", "test_target")
+            ),
+            f"Incomplete implementation acceptance {case['id']}",
+        )
+        row = (
+            f"| {case['id']} / {case['unit']} | {case['fixture']} {case['action']} | "
+            f"{case['required_assertions']} | `{case['test_target']}` |"
+        )
+        require(table.count(row) == 1, f"Implementation matrix drift: {case['id']}")
+    require(
+        len(spec["coverage_families"]) == len(set(spec["coverage_families"])) == 14,
+        "Coverage family count/duplicates",
+    )
+    require(
+        {case["title"] for case in cases if case["unit"] == "HS-06"}
+        == set(spec["coverage_families"]),
+        "Missing family journey contract",
+    )
+    fixture_ids = [item["id"] for item in spec["fixtures"]]
+    require(len(fixture_ids) == len(set(fixture_ids)) == 7, "Fixture IDs/count")
+    for case in cases:
+        require(
+            bool(case["fixture_ids"]) and set(case["fixture_ids"]) <= set(fixture_ids),
+            f"Unknown/missing concrete fixture: {case['id']}",
+        )
+    paths = [item["path"] for item in spec["source_pins"]]
+    require(len(paths) == len(set(paths)), "Duplicate implementation source pin")
+    require(
+        {path for item in units.values() for path in item["code_targets"]}
+        <= set(paths),
+        "Unpinned implementation code target",
+    )
+    for pin in spec["source_pins"]:
+        require(
+            ".." not in Path(pin["path"]).parts and not Path(pin["path"]).is_absolute(),
+            "Unsafe pinned implementation path",
+        )
+        result = subprocess.run(
+            ["git", "show", f"{sha}:{pin['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        require(
+            result.returncode == 0,
+            f"Fetch assessed source {sha} before validating pins",
+        )
+        require(
+            hashlib.sha256(result.stdout).hexdigest() == pin["sha256"],
+            "Implementation source hash drift",
+        )
+        require(
+            pin["url"]
+            == f"https://github.com/MLHaoChang/pypsa-eur/blob/{sha}/{pin['path']}",
+            "Unpinned implementation source URL",
+        )
+    validation = spec["validation"]
+    require(
+        validation["runtime_acceptance"] == "not_run_not_implemented"
+        and validation["paid_calls"] == 0
+        and validation["reviewers_contacted"] is False,
+        "Implementation-spec scope changed",
+    )
+    print(
+        "Implementation specs passed: 7 existing-owner units, 47 PLANNED acceptance cases, 14 families; runtime NOT implemented."
+    )
+
+
 def check_harness_supplement(plan: dict) -> None:
     supplement = read_json("harness-assessment.json")
     require(supplement["status"] == "research_only", "Harness research scope changed")
@@ -304,6 +473,7 @@ def main() -> None:
         "Research boundaries changed",
     )
     check_harness_supplement(plan)
+    check_implementation_spec()
 
     markdown = [
         *HERE.glob("*.md"),

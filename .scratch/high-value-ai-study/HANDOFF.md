@@ -3,7 +3,15 @@
 
 # Handoff: next high-value AI capabilities
 
-Status: specification/research only. Do not implement automatically on reading this file.
+Status: implementation specifications for review; runtime unchanged. Do not implement automatically on reading this file.
+
+## Latest request and concrete implementation entry point
+
+The owner explicitly asked to turn the harness recommendations into implementation specifications and publish them in a PR. Read `08-HARNESS-IMPLEMENTATION-SPEC.md`, `09-HARNESS-DATA-AND-STATE-CONTRACTS.md`, `10-HARNESS-DELIVERY-AND-TESTS.md` and `harness-implementation-plan.json` first. These now specify seven delivery units, exact contracts/code targets/dependencies and 47 planned acceptance cases, rather than relying on this handoff or the older assessment as the build plan.
+
+Fresh source for this concretization: `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. #559 is merged; its owner decisions are now on master. #569 also merged LC-23's concrete design: brief plans use 24 steps/32,000 serialized characters, plain plans retain 12/16,000, with 1,800-char step arguments. Adopt it, not another task schema. A proposed native checkpoint reference on the existing stream binds the actual Continue click; a model/MCP resume alone cannot grant it. New context limits are packing bounds, not token/cost guarantees.
+
+The 47 cases remain planned and unexecuted because runtime is not implemented here. Historical 370-test/244-case evidence is not relabeled for this source. Current inventory/matrix checks passed (276 tools/17 tabs/20 panels; 170 controls/14 families/full coverage not established). Keep speculative H08 agents/code workspaces out of the build.
 
 ## Context to carry forward
 

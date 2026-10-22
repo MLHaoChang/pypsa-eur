@@ -6,6 +6,8 @@
 Status: research/specification only; no runtime changes or implementation approval.
 Runtime assessed and tested master: `322df0cf495260442eb35bb9c0c5d8e11a274ffe`. This supplements the earlier value assessment; it does not relabel its older test results.
 
+The subsequent [implementation specification](08-HARNESS-IMPLEMENTATION-SPEC.md), [contracts](09-HARNESS-DATA-AND-STATE-CONTRACTS.md) and [delivery/test plan](10-HARNESS-DELIVERY-AND-TESTS.md) concretize this roadmap on newer master `089aea276c75b098c8d349cb5fa0eb4cb7267d64`. Use them for implementation; this assessment remains evidence/context.
+
 Later master `fdcd35c1bd11eb8b10a19db82fa499e6794480b3` was also reviewed: #566 adds the approved card-workspace design and release fragment, with no backend/frontend code changes. [OWNER-DISPOSITION.md](OWNER-DISPOSITION.md) records the newer AI-567b/COP-1 and RC decisions; they supersede conflicting earlier research suggestions.
 
 ## Main conclusion

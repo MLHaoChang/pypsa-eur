@@ -61,5 +61,15 @@
     "planned_foundation_checks": 24,
     "new_feature_tests_run": false,
     "scope": "Separate tested baseline subsets; do not sum with historical 161 tests or claim new feature implementation"
+  },
+  "implementation_spec": {
+    "manifest": "harness-implementation-plan.json",
+    "assessed_master": "089aea276c75b098c8d349cb5fa0eb4cb7267d64",
+    "units": 7,
+    "planned_acceptance_cases": 47,
+    "runtime_acceptance": "not_run_not_implemented",
+    "current_inventory": "passed:276 tools,17tabs,20panels",
+    "current_control_matrix": "passed:170controls,14families,full_coverage_not_established",
+    "historical_evidence_reused_without_relabeling": true
   }
 }

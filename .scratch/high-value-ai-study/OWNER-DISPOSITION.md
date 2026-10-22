@@ -5,7 +5,7 @@
 
 Status: research only; implementation follows existing packages and their normal gates.
 
-This record supersedes conflicting suggestions elsewhere in the original draft. The detailed specs and planned cases have been adjusted accordingly. Source: coordinator-relayed owner decisions in [open PR #559](https://github.com/MLHaoChang/pypsa-eur/pull/559), exact head `e36d1e714382aa00086c08b80ef97ad4e8dbf657`, [pinned owner log](https://github.com/MLHaoChang/pypsa-eur/blob/e36d1e714382aa00086c08b80ef97ad4e8dbf657/docs/agents/owner-decisions.md). These rows were not yet in assessed master. This research session did not contact reviewers or obtain a separate approval.
+This record supersedes conflicting suggestions elsewhere in the original draft. The detailed specs and planned cases have been adjusted accordingly. Source: coordinator-relayed owner decisions in [PR #559](https://github.com/MLHaoChang/pypsa-eur/pull/559), exact head `e36d1e714382aa00086c08b80ef97ad4e8dbf657`, [pinned owner log](https://github.com/MLHaoChang/pypsa-eur/blob/e36d1e714382aa00086c08b80ef97ad4e8dbf657/docs/agents/owner-decisions.md). Those rows were not yet in the original assessed master; #559 is now merged at current specification baseline 089aea276c75b098c8d349cb5fa0eb4cb7267d64. This research session did not contact reviewers or obtain a separate approval.
 
 | Decision | Consequence for #567 |
 |---|---|
@@ -17,8 +17,10 @@ This record supersedes conflicting suggestions elsewhere in the original draft. 
 
 AI-567b supersedes AI-567's earlier rejection of a cross-card brief and deferral of document extraction. It does **not** reinstate an evidence map, a second progress surface, a new planner runtime or new top-level modules. Relevant source/status/coverage limits stay inline in existing native result explanations. “Decision study” is the existing product concept; do not add a new “advisor” module.
 
-The current runtime still enforces 1–12 task steps; this PR does not change it. Raising it is an approved direction for LC-05 but the exact new finite bound, performance/resource tests and migration handling belong to that implementation slice. Until it lands, a generated plan cannot exceed the current cap. Do not simulate a larger plan through hidden nested controls or unlimited phases.
+The current runtime still enforces 1–12 task steps; this PR does not change it. Raising it is an approved direction for LC-05 but LC-23, merged through #569, now specifies 24 steps/32,000 serialized characters for a brief and 12/16,000 for a plain plan; implementation tests and migration handling follow that exact design. Until it lands, a generated plan cannot exceed the current cap. Do not simulate a larger plan through hidden nested controls or unlimited phases.
 
 The [card-workspaces design](https://github.com/MLHaoChang/pypsa-eur/blob/fdcd35c1bd11eb8b10a19db82fa499e6794480b3/.scratch/project-workflow/card-workspaces.md) merged during this assessment as #566. The incoming diff since tested master `322df0cf495260442eb35bb9c0c5d8e11a274ffe` contains only that design and its release fragment; backend/frontend code is unchanged. The test records remain labeled with the source actually tested.
 
 No runtime build, paid calls, production activation or new reviewer contact is performed by this research PR. Independent domain review and real-use calibration remain pending.
+
+The latest direct request asks for implementation specs in this PR. Documents 08–10 and harness-implementation-plan.json supply those contracts; the runtime remains unchanged and existing owning packages/reviews govern building.
