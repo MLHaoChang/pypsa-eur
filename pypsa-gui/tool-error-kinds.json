@@ -943,6 +943,18 @@
       "surface": "inline",
       "why": "A series kind's parameters are missing, unknown or out of range (an unpriced hour, a malformed period, a bad COP temperature). The detail names the parameter; the assistant fixes it and retries, per call."
     },
+    "invalid_refine_op": {
+      "surface": "inline",
+      "why": "A refinement op is unknown, malformed, or makes no sense for the series' target (rescale_energy on a price, keep_energy, a bad window). The detail names the op and its index; the assistant fixes it, per call."
+    },
+    "window_clock_unknown": {
+      "surface": "inline",
+      "why": "A refinement window was asked for on a series whose site clock is unknown (no project timezone, no profile timezone). The detail says so; the assistant asks the user to set the project's timezone, per call."
+    },
+    "refine_replay": {
+      "surface": "inline",
+      "why": "A recorded refinement no longer fits the regenerated series (a changed target, an op that cannot run). The detail names the op and its index; the assistant re-proposes the refinement, per call."
+    },
     "point_not_in_profile": {
       "surface": "inline",
       "why": "apply_generated_profile asked for a point the pending profile does not hold. The detail lists the points it does hold; the assistant picks the right point_id, per call."
@@ -975,6 +987,10 @@
       "surface": "inline",
       "why": "LC-12: a continuation turn named a job with no continuation due to this session (none finished, already continued, the plan was cancelled, the job was aborted, or another session or project). The turn does not start and nothing runs; the panel simply stops offering it."
     },
+    "plan_continue_unavailable": {
+      "surface": "inline",
+      "why": "LC-23 COP-1: the user's Continue on the plan card named a plan that is not paused at a card (already continued, cancelled, or another project), or the request also carried a message. The turn does not start and nothing runs; the plan card stops offering Continue."
+    },
     "invalid_continuation": {
       "surface": "inline",
       "why": "LC-12: /stream carried continuation_job_id together with typed words, attachments, a script or checked fields. A continuation is written by the harness, never by the user; the request is refused before any turn."
@@ -986,6 +1002,10 @@
     "task_step_waiting": {
       "surface": "inline",
       "why": "LC-12: the plan step is already waiting on its job, so it never runs twice. Refused before any card; the conversation continues when the job ends."
+    },
+    "changed_during_restore": {
+      "surface": "inline",
+      "why": "restore_project_snapshot: an edit landed between the pre-restore save and the restore's lock, so nothing was restored (it would be in neither the before-restore snapshot nor the restored state). The model says so and offers to retry within the turn."
     },
     "dc_load_invalid": {
       "surface": "inline",

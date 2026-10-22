@@ -21,6 +21,7 @@ import pytest
 
 from services.commercial import hashing as H
 from services.library import bundle_pins as P
+from services.library import common
 from tests.fixtures.investment_case.edge_15min import build_edge_15min
 
 TARIFF = {"id": "nl-tou", "name": "NL TOU", "jurisdiction": "NL", "valid_from": "2030-01-01",
@@ -48,7 +49,10 @@ def test_put_list_get_round_trip_per_kind(client):
         ref = r.json()
         assert ref == {"kind": kind, "id": name, "version": 1, "hash": ref["hash"]}
         assert len(ref["hash"]) == 64
-        assert [x["id"] for x in client.get(f"/api/library/items/{kind}").json()] == [name]
+        # The org's own item, plus the shipped common items of that kind (the same in every org).
+        listed = [x["id"] for x in client.get(f"/api/library/items/{kind}").json()]
+        assert [i for i in listed if not common.is_common(kind, i)] == [name]
+        assert sorted(set(listed) - {name}) == common.names(kind)
         got = client.get(f"/api/library/items/{kind}/{name}").json()
         assert got["ref"] == ref
         assert got["payload"]["import_cap_mw" if kind == "connection_agreement" else "id"] == \
@@ -99,7 +103,9 @@ def test_unknown_item_is_404_and_the_org_acl_applies(client, other_org_client, a
     assert client.get("/api/library/items/tariff/nope").status_code == 404
     _put(client, "tariff", "nl", TARIFF)
     assert client.get("/api/library/items/tariff/nl", params={"version": 9}).status_code == 404
-    assert other_org_client.get("/api/library/items/tariff").json() == []
+    # Another org sees only the shipped common items, never this org's.
+    assert [x["id"] for x in other_org_client.get("/api/library/items/tariff").json()] == \
+        common.names("tariff")
     assert other_org_client.get("/api/library/items/tariff/nl").status_code == 404
     assert anon_client.get("/api/library/items/tariff").status_code == 401
 

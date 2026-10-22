@@ -23,7 +23,7 @@ class RequestScope(BaseModel):
         "storage-unit-dispatch/1", "storage-unit-cost/1", "carrier-energy/1",
         "branch-loading/1", "network-loading/1", "lost-load/1", "bus-price/1",
         "generator-emissions/1", "network-emissions/1", "curtailment/1", "capacity/1",
-        "storage-cycles/1", "energy-balance/1",
+        "storage-cycles/1", "energy-balance/1", "site-import/1", "investment-case/1",
     ]
     project_id: str = Field(min_length=1, max_length=128)
     entity_id: str = Field(min_length=1, max_length=128)
@@ -84,7 +84,7 @@ def validate(value):
                "storage-cycles/1": ("StorageUnit", "Store")}
     if scope.get("component_class") and scope["component_class"] not in classed.get(scope["profile"], ()):
         raise ValueError("unsupported_component_class")
-    if scope["profile"] == "energy-balance/1" and (
+    if scope["profile"] in ("energy-balance/1", "site-import/1", "investment-case/1") and (
         scope["entity_id"] != "network" or scope.get("cost_basis") or scope.get("comparison_evidence_id")
     ):
         raise ValueError("network_scope_required")
@@ -165,6 +165,25 @@ def from_message(message, project_id, ui_context):
         r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
         message.strip(), re.I,
     )
+    site = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:grid import|site import|import and export)\s+for\s+network"
+        r"(?:;\s*from\s+(\S+)\s+to\s+(\S+?))?[.!?]?",
+        message.strip(), re.I,
+    )
+    invest = re.fullmatch(
+        r"(?:please\s+)?(?:give me|show me|show)\s+(?:the\s+)?(?:investment case returns|investment returns|npv and irr)"
+        r"\s+for\s+network[.!?]?",
+        message.strip(), re.I,
+    )
+    if invest:
+        return validate({"version": 1, "profile": "investment-case/1", "project_id": project_id,
+                         "entity_id": "network", "retain": False})
+    if site:
+        value = {"version": 1, "profile": "site-import/1", "project_id": project_id,
+                 "entity_id": "network", "retain": False}
+        if site[1]:
+            value.update(start=site[1], end=site[2])
+        return validate(value)
     if balance:
         value = {"version": 1, "profile": "energy-balance/1", "project_id": project_id,
                  "entity_id": "network", "retain": False}

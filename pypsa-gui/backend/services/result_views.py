@@ -144,6 +144,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                "results", (_r("get_load_shape"),),
                guided_label="Load shape",
                requires_tools=("get_load_shape",),
+               checked_profiles=("site-import/1",),
                claim_limits="Energy carriers only; a group the network does not model, or the run "
                             "cannot establish, is named, not shown as zero.",
                units="MW, MWh",
@@ -204,6 +205,7 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
     ResultView("investment", _RESULTS, "investment", "Investment case",
                "the investment case verdict and its cash flows", "investment",
                (_r("get_investment_case"),),
+               checked_profiles=("investment-case/1",),
                units="EUR, %",
                card="commercial", sub_option="investment_case", card_tab="investment_case"),
     ResultView("asset", _RESULTS, "asset", "Asset Detail",

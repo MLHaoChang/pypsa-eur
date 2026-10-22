@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Clock, Coins, FileText, FlaskConical,
+  AlertTriangle, BarChart2, Cable, Camera, ChevronDown, Library, Clock, Coins, FileText, FlaskConical,
   GitBranch, Layers, ListChecks, Plus, Scale, Settings2, Table2, TrendingUp, Wand2,
 } from 'lucide-react'
 import type { FlowSectionId } from '../../api/flow'
@@ -232,8 +232,13 @@ export function SectionRows({ id, onCloseModal }: { id: FlowSectionId } & Props)
 export function ProjectUtilityRows({ onCloseModal }: Props) {
   const { activeSlidePanel, toggle } = usePanelToggle(onCloseModal)
   return (
-    <SItem icon={<Camera size={15} />} label="Snapshots"
-      title="Saved copies of the network: restore one, or compare it with the network you have now."
-      active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+    <>
+      <SItem icon={<Camera size={15} />} label="Snapshots"
+        title="Saved copies of the network: restore one, or compare it with the network you have now."
+        active={activeSlidePanel === 'snapshots'} onClick={() => toggle('snapshots')} />
+      <SItem icon={<Library size={15} />} label="Commercial library"
+        title="Tariffs, contracts, connection agreements and price series your organisation keeps, with the versions a project pins."
+        active={activeSlidePanel === 'library'} onClick={() => toggle('library')} />
+    </>
   )
 }

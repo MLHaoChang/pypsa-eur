@@ -18,7 +18,17 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile == "energy-balance/1":
+    if case.profile == "site-import/1":
+        n.generators.at["G1", "marginal_cost"] = 0
+        n.generators_t.p_max_pu = pd.DataFrame({"G1": [0.0, 0.0]}, index=n.snapshots)
+        n.loads_t.p_set = pd.DataFrame({"L1": [6, 3]}, index=n.snapshots)
+        n.add("Bus", "grid")
+        n.add("Carrier", ["grid"])
+        n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=100, p_min_pu=-1, marginal_cost=20)
+        n.add("Link", "meter", bus0="grid", bus1="B1", p_nom=6, p_min_pu=-1, eh_role="grid_import")
+        n.links_t.p_max_pu = pd.DataFrame({"meter": [1.0, 0.5]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, "generators"] = [2, 1]
+    elif case.profile == "energy-balance/1":
         n.loads.at["L1", "p_set"] = 0
         n.add("Bus", "prod")
         n.add("Carrier", ["product_shortfall"])
@@ -99,7 +109,12 @@ def evaluation_project(baseline, request):
             "lost_load_t": pd.DataFrame({"L1": [0.0, 5.0]}, index=n.snapshots),
             "voll_eur_per_mwh": 1000.0,
         }
-    return ctx
+    if case.profile == "investment-case/1":
+        from tests.test_investment_assurance import hand, store
+
+        store(ctx, lambda p: hand(p, equity=[-100.0, 150.0], project=[-100.0, 175.0], coe=0.25, wacc=0.25))
+    yield ctx
+    ctx.solver_state["investment_case_report"] = None
 
 
 @pytest.fixture
@@ -150,8 +165,16 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
     if case.fault == "battery":
         su = n.storage_units_t
         su.p_store.iloc[1, 0], su.p_dispatch.iloc[1, 0], su.p.iloc[1, 0] = 5, 4, -1
-    if case.fault == "stale":
+    invested = case.profile == "investment-case/1"
+    if case.fault == "stale" and invested:
+        # The report's own key: a finance input changed since the run.
+        cfg = evaluation_project.solver_state["solver_config"]
+        cfg.finance = {**(cfg.finance or {}), "cost_of_equity": 0.2}
+    elif case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and invested:
+        report = evaluation_project.solver_state["investment_case_report"]
+        report["sections"]["project"]["payload"]["cash"]["equity_post_tax"][1] = None
     elif case.fault == "missing" and case.profile == "capacity/1":
         n.generators.at["G2", "p_nom_opt"] = float("nan")
     elif case.fault == "missing" and case.profile == "bus-price/1":
