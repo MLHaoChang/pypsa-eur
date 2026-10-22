@@ -90,10 +90,9 @@ export function IslandTab() {
         </>
       ) : (
         <NoIslandResults>
-          <div className="space-y-2" data-testid="island-tab-state">
-            <Note testId="island-none">Not run yet: the island study has not produced results for this project.</Note>
-            <Btn onClick={() => openPanel('scenarios', 'campusStudy')}>Run the island study in Grid study ›</Btn>
-          </div>
+          <Btn onClick={() => openPanel('scenarios', 'campusStudy')} data-testid="island-run-link">
+            Run the island study in Grid study ›
+          </Btn>
         </NoIslandResults>
       )}
       <ControlNext />
@@ -109,9 +108,12 @@ function NoIslandResults({ children }: { children: React.ReactNode }) {
   const opt = registry?.cards.find(c => c.id === 'control')?.options.find(o => o.id === 'island_checks')
   if (opt?.status === 'not_yet_available') {
     return (
-      <p className="text-[12px] text-muted" data-testid="island-gate-why">
-        Not yet available{opt.reason ? `: ${opt.reason}` : '.'}
-      </p>
+      <div className="space-y-2" data-testid="island-tab-state">
+        <p className="text-[12px] text-muted" data-testid="island-gate-why">
+          Not yet available{opt.reason ? `: ${opt.reason}` : '.'}
+        </p>
+        {children}
+      </div>
     )
   }
   return <ScopeGate card="control" option="island_checks" testId="island-gate">{children}</ScopeGate>
@@ -128,9 +130,10 @@ export function GridFormingTab() {
   if (gfm.isPending) return <div className="p-4"><Note>Loading…</Note></div>
   return (
     <div className="space-y-3 p-4 h-full overflow-y-auto" data-testid="grid-forming-tab">
-      <p className="text-[11px] text-muted" data-testid="grid-forming-from">
-        From the island study's frequency check; heuristic screening, not a certificate.
-      </p>
+      {gfm.data.recommendation && (
+        <Provenance at={gfm.data.recommended_at} stale={gfm.data.state === 'stale'} testId="grid-forming-from" />
+      )}
+      <p className="text-[11px] text-muted" data-testid="grid-forming-label">Heuristic screening, not a certificate.</p>
       <CampusIslandGfmSection name={name} />
       <ControlNext />
     </div>

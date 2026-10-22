@@ -278,7 +278,7 @@ component (`frontend/src/components/EditCard.tsx`).
   digest to `POST …/gfm-settings/apply` (which then answers with the `receipt`;
   without a digest the route applies as before). `apply_settings`' refusals
   map to the card's kinds: 409 `edit_preview_stale`, nothing to change
-  `empty_edit`, a refused value `invalid_edit_value`.
+  `nothing_to_change`, a refused value `invalid_edit_value`.
 - **Flow section (PR-2).** Each component row carries a FlowTarget
   `{section, panel, component, entity, field}` from
   `flow_service.section_for_component` (the flow's own class rule), and the

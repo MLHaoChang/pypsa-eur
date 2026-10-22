@@ -609,6 +609,8 @@ export interface GfmSettingsState {
   applied?: GfmApplied | null
   /** Whether the solver settings have island constraints on now; absent from a server that predates it. */
   island_rows_now?: boolean
+  /** When the recommendation was made (UTC, ISO 8601); null without one. Absent from a server that predates it. */
+  recommended_at?: string | null
 }
 
 export interface IslandCuts {

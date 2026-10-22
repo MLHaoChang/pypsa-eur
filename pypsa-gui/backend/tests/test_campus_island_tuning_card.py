@@ -51,8 +51,8 @@ def test_with_the_island_rows_off_the_card_says_the_hub_solve_does_not_read_them
 
 
 @pytest.mark.parametrize("status, kind, code", [
-    ("not_achievable", "empty_edit", 422), ("unchanged", "empty_edit", 422), ("incomplete", "empty_edit", 422)])
-def test_a_recommendation_with_nothing_to_apply_is_the_cards_empty_edit(drafted, status, kind, code):  # noqa: F811
+    ("not_achievable", "nothing_to_change", 422), ("unchanged", "nothing_to_change", 422), ("incomplete", "nothing_to_change", 422)])
+def test_a_recommendation_with_nothing_to_apply_is_the_cards_nothing_to_change(drafted, status, kind, code):  # noqa: F811
     _recommend(drafted, status=status)
     with pytest.raises(HTTPException) as exc:
         _card(drafted)
@@ -96,6 +96,13 @@ def test_the_receipt_reads_both_files_back(drafted):  # noqa: F811
     assert receipt["outcome"] == "verified"
     assert {(r["field"], r["readback"]) for r in receipt["rows"] if r["role"] == "typed"} == {
         ("droop_pct", 2.5), ("tau_f_s", 0.6)}
+
+
+def test_the_settings_say_when_the_recommendation_was_made(drafted):  # noqa: F811
+    assert cit.get_settings(drafted)["recommended_at"] is None
+    _recommend(drafted)
+    at = cit.get_settings(drafted)["recommended_at"]
+    assert at.endswith("+00:00") and len(at) == 25
 
 
 def test_a_value_the_files_disagree_on_is_not_verified(drafted):  # noqa: F811

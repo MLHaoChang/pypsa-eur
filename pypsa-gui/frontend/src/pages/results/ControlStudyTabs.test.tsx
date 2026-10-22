@@ -93,6 +93,9 @@ describe('Island & ride-through', () => {
       .toBe('Not yet available: The one Run does not request this yet.')
     expect(screen.queryByTestId('island-report')).toBeNull()
     expect(screen.queryByTestId('island-table-requirements')).toBeNull()
+    // The way to the study stays under the line.
+    fireEvent.click(screen.getByTestId('island-run-link'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('campusStudy')
   })
 
   it('does not take the island inputs a project carries for results: they alone read "Not yet available"', async () => {
@@ -145,10 +148,11 @@ describe('Grid-forming', () => {
   }
 
   it('shows the recommendation, labelled heuristic, and applies only through the edit card', async () => {
-    api.gfmSettings.mockResolvedValue({ state: 'ready', reason: '', recommendation: rec })
+    api.gfmSettings.mockResolvedValue({ state: 'ready', reason: '', recommendation: rec, recommended_at: '2026-10-22T18:55:48+00:00' })
     mount(<GridFormingTab />)
     expect(await screen.findByTestId('gfm-recommendation')).toBeTruthy()
-    expect(screen.getByTestId('grid-forming-from').textContent).toContain('heuristic screening, not a certificate')
+    expect(screen.getByTestId('grid-forming-from').textContent).toContain('From the island study (run 2026-10-22).')
+    expect(screen.getByTestId('grid-forming-label').textContent).toBe('Heuristic screening, not a certificate.')
     expect(screen.queryByRole('button', { name: /^Apply to the island data/ })).toBeNull()   // the card comes first
     expect(screen.getByTestId('gfm-review')).toBeTruthy()
   })
@@ -163,6 +167,7 @@ describe('Grid-forming', () => {
     api.gfmSettings.mockResolvedValue({ state: 'stale', reason: 'The campus run changed; recommend them again', recommendation: rec })
     mount(<GridFormingTab />)
     expect((await screen.findByTestId('gfm-reason')).textContent).toContain('Out of date')
+    expect((await screen.findByTestId('grid-forming-from')).textContent).toContain('Out of date')
     expect(screen.queryByTestId('gfm-review')).toBeNull()
   })
 })

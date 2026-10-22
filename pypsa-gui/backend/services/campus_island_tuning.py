@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import logging
@@ -81,6 +82,10 @@ def get_settings(project) -> dict:
     # stand now, so a "capacity is needed" verdict can say it will not show in any result while they
     # are off. Not "when the hub was last solved": the name says now.
     out["island_rows_now"] = _island_rows_on(project)
+    # When the recommendation was made (UTC, ISO 8601), for the Results tab's "run <date>".
+    path = _run_dir(project) / ce.cs.GFM_SETTINGS_JSON
+    out["recommended_at"] = (datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
+                             if path.is_file() else None)
     return out
 
 
@@ -485,12 +490,12 @@ _FIELD_WORDS = {"droop_pct": ("Droop", "%"), "tau_f_s": ("Frequency filter time 
 
 def _card_refusal(exc: HTTPException) -> HTTPException:
     """The apply's own refusal as the card's: a stale or missing recommendation (409) is
-    ``edit_preview_stale``, nothing to change ``empty_edit``, any other 422 ``invalid_edit_value``."""
+    ``edit_preview_stale``, nothing to change ``nothing_to_change``, any other 422 ``invalid_edit_value``."""
     text = str(exc.detail)
     if exc.status_code == 409:
         kind = "edit_preview_stale"
     elif "nothing to apply" in text or "changes no setting" in text or text in _REFUSE.values():
-        kind = "empty_edit"
+        kind = "nothing_to_change"
     else:
         kind = "invalid_edit_value"
     return HTTPException(exc.status_code, {"error_kind": kind, "message": text})
