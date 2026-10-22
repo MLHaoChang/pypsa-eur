@@ -15,6 +15,7 @@ import { PageHeader } from '../components/PageKit'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
+import { useLoadFlowOn } from '../components/flowScope/useFlowScope'
 import { ScopeGate } from '../components/flowScope/ScopeGate'
 
 // Two-tier UI: a "common" form per-solver covering ~6 parameters most users
@@ -155,6 +156,10 @@ export default function SolverSettings() {
   // those sibling-page edits with the stale draft values, silently
   // reverting them.
   const baselineRef = useRef<SolverConfig | null>(null)
+
+  // Load flow's on/off is the scope's (W4b), written by the scope cards; the
+  // draft is hydrated once, so the live value comes from the scope.
+  const loadFlowOn = useLoadFlowOn(false)
 
   // Hydrate the form from the backend once. We don't useEffect on every cfg
   // refetch because that would clobber the user's in-progress edits if a
@@ -329,7 +334,7 @@ export default function SolverSettings() {
           with `rolling_overlap` snapshots of overlap to carry SoC across.
           Recommended for problems where the full LP is too large for memory
           (typically > ~1000 snapshots × > ~100 buses).
-          Incompatible with SCLOPF and auto-chained AC PF — backend validation
+          Incompatible with SCLOPF and Load flow — backend validation
           rejects those combinations. */}
       <section>
         <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em] mb-2.5">Solve strategy</h3>
@@ -403,13 +408,13 @@ export default function SolverSettings() {
             {/* Surface the SCLOPF / AC PF incompatibility BEFORE the user
                 clicks Run. The backend will also reject these — this is a
                 UX courtesy so they don't have to read the failure log. */}
-            {(draft.sclopf || draft.run_ac_pf_after_lopf) && (
+            {(draft.sclopf || loadFlowOn) && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
                 Rolling horizon is not compatible with{' '}
                 {draft.sclopf && <code>SCLOPF</code>}
-                {draft.sclopf && draft.run_ac_pf_after_lopf && ' or '}
-                {draft.run_ac_pf_after_lopf && <code>auto-chained AC PF</code>}
-                . Disable one to run.
+                {draft.sclopf && loadFlowOn && ' or '}
+                {loadFlowOn && 'Load flow (What the Run computes › Load flow)'}
+                . Switch one off to run.
               </p>
             )}
             <p className="text-[10px] text-muted">
@@ -507,10 +512,10 @@ export default function SolverSettings() {
                 </label>
               </div>
             )}
-            {draft.run_ac_pf_after_lopf && (
+            {loadFlowOn && (
               <p className="text-[10px] text-warn bg-warn/10 border border-warn/30 rounded px-2 py-1">
-                Myopic foresight is not yet compatible with{' '}
-                <code>auto-chained AC PF</code>. Disable one to run.
+                Myopic foresight is not yet compatible with Load flow
+                (What the Run computes › Load flow). Switch one off to run.
               </p>
             )}
             {draft.sclopf && (
@@ -530,7 +535,7 @@ export default function SolverSettings() {
           LP. Lives next to Solve strategy / Validate so the user configures
           the full solve pipeline in one place. */}
       <div className="border-t border-border pt-4">
-        <Stage2Panel draft={draft} patch={patch} />
+        <Stage2Panel draft={draft} patch={patch} loadFlowOn={loadFlowOn} />
       </div>
 
       {/* ── Pre-run validation CTA ──────────────────────────────
@@ -1874,10 +1879,11 @@ function SclopfPanel({
 // (What the Run computes › Load flow, W4b): this panel shows it read-only, and
 // the one Run (the header Run) chains it after the solve.
 function Stage2Panel({
-  draft, patch,
+  draft, patch, loadFlowOn,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  loadFlowOn: boolean
 }) {
   const currentProject = useUIStore(s => s.currentProject)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
@@ -1900,8 +1906,8 @@ function Stage2Panel({
       </p>
 
       <p data-testid="stage2-state" className="text-xs mb-3">
-        <span className="font-semibold">{draft.run_ac_pf_after_lopf ? 'On' : 'Off'}:</span>{' '}
-        {draft.run_ac_pf_after_lopf
+        <span className="font-semibold">{loadFlowOn ? 'On' : 'Off'}:</span>{' '}
+        {loadFlowOn
           ? 'AC power flow runs after each solve.'
           : 'AC power flow does not run after a solve.'}{' '}
         Switch it under What the Run computes › Load flow, above.
