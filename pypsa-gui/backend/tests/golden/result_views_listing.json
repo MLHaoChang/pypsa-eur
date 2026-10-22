@@ -86,6 +86,20 @@
     "card": "grid"
    },
    {
+    "id": "island",
+    "label": "Island & ride-through",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
+    "id": "grid_forming",
+    "label": "Grid-forming",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
     "id": "prices",
     "label": "Prices",
     "data": "available",
@@ -241,6 +255,20 @@
     "data": "available",
     "shown": false,
     "card": "grid"
+   },
+   {
+    "id": "island",
+    "label": "Island & ride-through",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
+    "id": "grid_forming",
+    "label": "Grid-forming",
+    "data": "available",
+    "shown": false,
+    "card": "control"
    },
    {
     "id": "prices",
@@ -422,6 +450,20 @@
     "card": "grid"
    },
    {
+    "id": "island",
+    "label": "Island & ride-through (advanced)",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
+    "id": "grid_forming",
+    "label": "Grid-forming (advanced)",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
     "id": "prices",
     "label": "Prices (advanced)",
     "data": "available",
@@ -577,6 +619,20 @@
     "data": "available",
     "shown": false,
     "card": "grid"
+   },
+   {
+    "id": "island",
+    "label": "Island & ride-through (advanced)",
+    "data": "available",
+    "shown": false,
+    "card": "control"
+   },
+   {
+    "id": "grid_forming",
+    "label": "Grid-forming (advanced)",
+    "data": "available",
+    "shown": false,
+    "card": "control"
    },
    {
     "id": "prices",

@@ -4078,7 +4078,13 @@ def campus_recommend_gfm_settings(project_id: str, allow_i_max: bool | None = No
 
 
 def campus_apply_gfm_settings(project_id: str) -> dict:
+    from harness import edit_card as _ec
     from services import campus_island_tuning as _cit
+    # The card the user approved must still be this recommendation's (the digest binds its
+    # time and values), checked again here, right before the write.
+    approved = _ec.approved_digest()
+    if approved is not None:
+        _ec.require_current("campus_apply_gfm_settings", {"project_id": project_id}, {"digest": approved})
     with _acting() as (db, user):
         project = _gridspine_project(db, user, project_id)
         _campus_check_lock(db, user, project)

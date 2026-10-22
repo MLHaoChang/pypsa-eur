@@ -102,6 +102,8 @@ RESULTS_TAB_ENUM = [
     "loadshape",    # site commercial UX A2 (Load shape)
     "grid_code",    # W10 R2 (Grid code & connection)
     "electrical_design",  # W10 R2 (Electrical design)
+    "island",       # W10 R3 (Control: Island & ride-through)
+    "grid_forming",  # W10 R3 (Control: Grid-forming)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",

@@ -84,6 +84,7 @@ import tempfile
 import threading
 import time
 from collections import OrderedDict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -1061,6 +1062,9 @@ def get_island(project) -> dict:
             services, warnings = offered_services(valid), island_warnings(valid)
     return {"config": config,
             "study": json.loads(study.read_text()) if study.is_file() else None,
+            # When the study was written (UTC, ISO 8601): the Results tab says "run <date>".
+            "study_at": (datetime.fromtimestamp(study.stat().st_mtime, tz=timezone.utc).isoformat(timespec="seconds")
+                         if study.is_file() else None),
             "presets": {name: {"kinds": list(p["kinds"]), "converter": p["converter"], "ups": p["ups"]}
                         for name, p in PRESETS.items()},
             "services": services, "warnings": warnings}

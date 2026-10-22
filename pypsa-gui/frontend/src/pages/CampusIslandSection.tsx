@@ -22,7 +22,7 @@ import {
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
 import CampusIslandCutsSection from './CampusIslandCutsSection'
-import CampusIslandGfmSection from './CampusIslandGfmSection'
+import { useUIStore } from '../store/uiStore'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
 export const ISLAND_REPORT_KEY = (name: string) => ['campusElectrical', 'islandReport', name] as const
@@ -96,8 +96,6 @@ function ReportTable({ table }: { table: IslandTable }) {
 export default function CampusIslandSection({ name }: { name: string }) {
   const qc = useQueryClient()
   const island = useQuery({ queryKey: ISLAND_KEY(name), queryFn: () => campusApi.island(name), retry: false })
-  const report = useQuery({ queryKey: ISLAND_REPORT_KEY(name), queryFn: () => campusApi.islandReport(name),
-                            retry: false })
   const [config, setConfig] = useState<IslandConfig | null>(null)
   const [text, setText] = useState('')
   const [textError, setTextError] = useState<string | null>(null)
@@ -221,15 +219,20 @@ export default function CampusIslandSection({ name }: { name: string }) {
           </Btn>
         </div>
 
-        <IslandReportView report={report.data} />
-        {saved && <CampusIslandCutsSection name={name} />}
-        {saved && <CampusIslandGfmSection name={name} />}
+        {/* The report, the proposed cuts and the grid-forming settings are results: they
+            live in Results › Control (W10 R3). The cuts' loop is started here. */}
+        <p className="text-[12px] text-muted mt-3" data-testid="island-results-link">
+          The island report, the frequency cuts and the grid-forming settings are in Results › Control.{' '}
+          <button type="button" className="text-accent hover:underline" data-testid="island-results-open"
+            onClick={() => { const ui = useUIStore.getState(); ui.setSlidePanel('results'); ui.requestResultsTab('island') }}>Open Island & ride-through ›</button>
+        </p>
+        {saved && <CampusIslandCutsSection name={name} mode="actions" />}
       </PageSection>
     </div>
   )
 }
 
-function IslandReportView({ report }: { report: IslandReport | undefined }) {
+export function IslandReportView({ report }: { report: IslandReport | undefined }) {
   if (!report) return null
   return (
     <div className="mt-4" data-testid="island-report">

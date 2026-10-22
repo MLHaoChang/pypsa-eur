@@ -35,6 +35,10 @@ vi.mock('./results/GridStudyTabs', () => ({
   GridCodeTab: () => <div data-testid="gridcode-stub" />,
   ElectricalDesignTab: () => <div data-testid="electrical-stub" />,
 }))
+vi.mock('./results/ControlStudyTabs', () => ({
+  IslandTab: () => <div data-testid="island-stub" />,
+  GridFormingTab: () => <div data-testid="gridforming-stub" />,
+}))
 vi.mock('./results/SummaryTab', () => stub('summary-stub'))
 vi.mock('./CompareView', () => ({ default: () => <div data-testid="compare-stub" /> }))
 vi.mock('../api/simulation', () => ({
@@ -98,8 +102,8 @@ describe('the group strip', () => {
     fireEvent.click(control)
     expect(screen.getByTestId('results-outside-scope').textContent).toContain('Outside scope.')
     expect(screen.getByTestId('results-outside-scope-add')).toBeTruthy()
-    // No tab yet: no earlier results to keep.
-    expect(screen.queryByTestId('results-earlier')).toBeNull()
+    // Its tabs read what the island study holds: those stay below, dimmed (RC3).
+    expect(screen.getByTestId('results-earlier').textContent).toContain('Read-only while Control is outside the scope')
   })
 
   it('earlier results of a switched-off card stay below, dimmed and read-only', async () => {
@@ -116,13 +120,13 @@ describe('the group strip', () => {
   })
 
   it('a card in scope with no tab yet says so; a card with tabs shows its card tabs', async () => {
-    getFlowScope.mockResolvedValue(registry(['capacity', 'control', 'reliability']))
+    getFlowScope.mockResolvedValue(registry(['capacity', 'control', 'reliability', 'handoff']))
     await renderResults()
     fireEvent.click(screen.getByTestId('results-group-control'))
-    expect(screen.getByTestId('results-gempty').textContent).toContain('Grid study ›')
-    fireEvent.click(screen.getByTestId('results-gempty-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('campusStudy')
-    fireEvent.click(screen.getByTestId('results-group-control'))
+    expect(Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]')).map(el => el.textContent))
+      .toEqual(['Island & ride-through', 'Grid-forming'])
+    fireEvent.click(screen.getByTestId('results-group-handoff'))
+    expect(screen.getByTestId('results-gempty').textContent).toContain('Open Reports ›')
     fireEvent.click(screen.getByTestId('results-group-capacity'))
     const tabs = Array.from(document.querySelectorAll('[data-testid^="results-cardtab-"]'))
       .map(el => el.textContent)
@@ -209,5 +213,30 @@ describe('the Grid card (W10 R2)', () => {
     useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'grid_code' })
     await renderResults()
     expect(screen.getByTestId('gridcode-stub')).toBeTruthy()
+  })
+})
+
+describe('the Control card (W10 R3)', () => {
+  beforeEach(() => getFlowScope.mockResolvedValue(registry(['capacity', 'control'])))
+
+  it('holds Island & ride-through and Grid-forming as its card tabs', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-control'))
+    fireEvent.click(screen.getByTestId('results-cardtab-island'))
+    expect(screen.getByTestId('island-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-cardtab-grid_forming'))
+    expect(screen.getByTestId('gridforming-stub')).toBeTruthy()
+  })
+
+  it('shows no Run freshness: the tabs read a study, not the Run', async () => {
+    await renderResults()
+    fireEvent.click(screen.getByTestId('results-group-control'))
+    expect(screen.queryByTestId('results-ghead-freshness')).toBeNull()
+  })
+
+  it('opens the tab the assistant asks for, and Guided shows it as an advanced tab', async () => {
+    useUIStore.setState({ uiMode: 'guided', resultsTabRequest: 'grid_forming' })
+    await renderResults()
+    expect(screen.getByTestId('gridforming-stub')).toBeTruthy()
   })
 })

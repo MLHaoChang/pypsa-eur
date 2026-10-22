@@ -8,6 +8,7 @@ export type ResultsTab =
   | 'summary' | 'overview' | 'capex' | 'dispatch' | 'loadflow' | 'prices' | 'emissions'
   | 'economics' | 'curtailment' | 'lostload' | 'adequacy' | 'storage'
   | 'asset' | 'fmea' | 'investment' | 'flows' | 'loadshape' | 'grid_code' | 'electrical_design'
+  | 'island' | 'grid_forming'
 
 export type ResultsGroup = 'summary' | 'investment' | 'grid_plan' | 'reliability' | 'operation'
 
@@ -55,6 +56,8 @@ export interface CardGroup {
   label: string
   question: string
   tabs: readonly CardResultTab[]
+  /** The tabs show what a study holds, not the Run's output: the header shows no Run freshness. */
+  fromStudy?: boolean
 }
 
 export const CARD_GROUPS: readonly CardGroup[] = [
@@ -73,7 +76,13 @@ export const CARD_GROUPS: readonly CardGroup[] = [
       { id: 'grid_code', label: 'Grid code & connection', views: ['grid_code'] },
       { id: 'electrical_design', label: 'Electrical design', views: ['electrical_design'] },
     ] },
-  { id: 'control', label: 'Control', question: 'How the plant is controlled', tabs: [] },
+  // R3: the island study is not in the Run yet (island_checks is "not yet available"), so
+  // these tabs read what the campus island study holds. Frequency & dynamics has no engine.
+  { id: 'control', label: 'Control', question: 'How the plant is controlled', fromStudy: true,
+    tabs: [
+      { id: 'island', label: 'Island & ride-through', views: ['island'] },
+      { id: 'grid_forming', label: 'Grid-forming', views: ['grid_forming'] },
+    ] },
   { id: 'reliability', label: 'Reliability', question: 'Whether the critical load stays on',
     tabs: [
       { id: 'adequacy', label: 'Adequacy', views: ['adequacy'] },

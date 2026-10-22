@@ -121,6 +121,8 @@ BY_CARD = {
     'loadflow': ('grid', 'load_flow', 'load_flow'),
     'grid_code': ('grid', 'grid_code', 'grid_code'),
     'electrical_design': ('grid', 'grid_code', 'electrical_design'),
+    'island': ('control', 'island_checks', 'island'),
+    'grid_forming': ('control', 'presets', 'grid_forming'),
     'adequacy': ('reliability', 'goal_study', 'adequacy'),
     'fmea': ('reliability', 'stress', 'stress_fmea'),
     'investment': ('commercial', 'investment_case', 'investment_case'),
@@ -331,3 +333,67 @@ def test_grid_code_reads_a_planning_to_dynamics_project_through_gridspine(monkey
     assert rv._probe(rv.for_results_tab('grid_code')) == ('available', None)
     # Electrical design is the campus study's alone.
     assert rv._probe(rv.for_results_tab('electrical_design'))[0] == 'no_data'
+
+
+# --- R3 control views: the island study's reads resolve the active project ------
+
+_CONTROL_VIEWS = ('island', 'grid_forming')
+
+
+@pytest.mark.parametrize('view_id', _CONTROL_VIEWS)
+def test_each_listed_control_read_binds_to_its_dispatcher(monkeypatch, view_id):
+    import inspect
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    for read in rv.for_results_tab(view_id).reads:
+        call = read.call()
+        assert call['args']['project_id'] == 'proj-1'
+        inspect.signature(chat_tools.DISPATCHERS[call['tool']]).bind(**call['args'])
+
+
+def test_the_island_view_reads_nothing_from_the_readiness_scorecard():
+    """The smoothing screen is the scorecard's (RLR-527), and its read loads the whole network."""
+    for view_id in _CONTROL_VIEWS:
+        assert 'campus_grid_readiness' not in {r.tool for r in rv.for_results_tab(view_id).reads}
+
+
+def _fake_island(monkeypatch, *, study, recommendation, kind='hub'):
+    from fastapi import HTTPException
+
+    def refuse():
+        raise HTTPException(status_code=409, detail='not a hub project')
+
+    def campus_island_config(project_id):
+        return refuse() if kind != 'hub' else {'config': {'units': {}}, 'study': study}
+
+    def campus_island_gfm_settings(project_id):
+        return refuse() if kind != 'hub' else {'state': 'ready', 'recommendation': recommendation, 'job': None}
+
+    monkeypatch.setattr(rv, 'shown_key', lambda: 'proj-1')
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'campus_island_config', campus_island_config)
+    monkeypatch.setitem(chat_tools.DISPATCHERS, 'campus_island_gfm_settings', campus_island_gfm_settings)
+
+
+def test_a_project_with_no_island_study_or_recommendation_is_no_data_not_unavailable(monkeypatch):
+    _fake_island(monkeypatch, study=None, recommendation=None)
+    assert rv._probe(rv.for_results_tab('island')) == ('no_data', None)
+    assert rv._probe(rv.for_results_tab('grid_forming')) == ('no_data', None)
+
+
+def test_an_island_study_and_a_recommendation_make_the_views_available(monkeypatch):
+    _fake_island(monkeypatch, study={'variants': []}, recommendation={'status': 'recommended'})
+    assert rv._probe(rv.for_results_tab('island')) == ('available', None)
+    assert rv._probe(rv.for_results_tab('grid_forming')) == ('available', None)
+
+
+@pytest.mark.parametrize('view_id', _CONTROL_VIEWS)
+def test_another_kind_of_project_is_no_data(monkeypatch, view_id):
+    _fake_island(monkeypatch, study=None, recommendation=None, kind='study')
+    assert rv._probe(rv.for_results_tab(view_id)) == ('no_data', None)
+
+
+def test_the_control_views_sit_under_scope_options_the_run_does_not_own_yet():
+    """island_checks is "not yet available" in the scope; the tab still shows what a study holds (O2)."""
+    from services import flow_scope
+    assert flow_scope.AVAILABILITY[('control', 'island_checks')][0] == flow_scope.NOT_YET
+    assert rv.for_results_tab('island').sub_option == 'island_checks'
+    assert rv.for_results_tab('grid_forming').sub_option == 'presets'

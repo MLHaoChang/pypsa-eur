@@ -9,6 +9,7 @@
 // that inline, so every call passes `skipErrorToast`: a toast is the wrong
 // surface for an expected answer.
 import client, { formatApiDetail } from './client'
+import type { EditCard, EditReceipt } from '../components/EditCard'
 
 export type CheckStatus = 'pass' | 'fail' | 'not_rated' | 'not_rechecked'
 
@@ -504,7 +505,12 @@ export interface IslandTable {
 }
 
 export interface IslandReport { caveat: string; tables: IslandTable[]; missing: string[] }
-export interface IslandState { config: IslandConfig | null; study: Record<string, unknown> | null }
+export interface IslandState {
+  config: IslandConfig | null
+  study: Record<string, unknown> | null
+  /** When the study was written (UTC, ISO 8601); null without one. Absent from a server that predates it. */
+  study_at?: string | null
+}
 
 // ── the frequency cuts (campus island plan, I7; owner Q6: manual) ───────────
 
@@ -819,10 +825,16 @@ export const campusApi = {
     client.post<CampusRunJob>(`${base(project)}/island/gfm-settings`, { allow_i_max: allowIMax }, quiet)
       .then(r => r.data),
 
-  /** Write a recommended result into the island data and the campus file. */
-  applyGfmSettings: (project: string) =>
-    client.post<{ changes: GfmChange[]; hub_resolve_needed: boolean }>(
-      `${base(project)}/island/gfm-settings/apply`, {}, quiet).then(r => r.data),
+  /** The edit card for applying the recommendation: old → new per unit, then what follows from it. */
+  gfmApplyCard: (project: string) =>
+    client.get<EditCard>(`${base(project)}/island/gfm-settings/card`, quiet).then(r => r.data),
+
+  /** Write the recommended result into the island data and the campus file. With the digest
+   *  of the card the user approved, the write is refused when the recommendation moved, and
+   *  the response carries the receipt read back from both files. */
+  applyGfmSettings: (project: string, digest: string) =>
+    client.post<{ changes: GfmChange[]; hub_resolve_needed: boolean; receipt: EditReceipt }>(
+      `${base(project)}/island/gfm-settings/apply`, { digest }, quiet).then(r => r.data),
 
   /** The island report: tables with their model, caveat and assumed rows. */
   islandReport: (project: string) =>

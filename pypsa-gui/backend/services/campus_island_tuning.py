@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 from pathlib import Path
 
 import logging
@@ -333,46 +334,14 @@ def _project_busy(project) -> str | None:
     return None
 
 
-def apply_settings(project) -> dict:
-    """Write a ``recommended`` result that is still the run's into the island
-    sidecar and the campus file (see the module docstring). Returns
-    ``{changes, hub_resolve_needed}``, each change ``{unit, pypsa_name, field,
-    from, to}``, ``from`` being the recommendation's ``current`` (what the
-    search started from, which the ready state guarantees the files still
-    hold). Refused, with nothing written:
-
-    - 409 while a job of the project runs or is queued, or the cuts loop runs;
-      when there is no recommendation for this run, it is stale, or it was
-      already applied;
-    - 422 for a result other than ``recommended``, a unit either file lacks, a
-      unit whose control in either file is not the recommendation's model, a
-      recommended field either file lacks, a value the schema refuses, or a
-      file over its size cap.
-
-    Both texts are built, size-checked and validated first; the sidecar is
-    written atomically, then the campus file (temp and rename), and the old
-    sidecar is put back if that fails; the island study made with the old
-    inputs goes only after both are written. The campus file is re-dumped as
-    YAML, so its comments go (as the cuts loop's refresh does).
-
-    The busy check shares no lock with ``enqueue_settings`` or the queue: a
-    job enqueued in the milliseconds between the check and the writes can
-    still start. Both writes are atomic renames, so such a job reads either
-    file whole, old or new; accepted.
-
-    The record (``APPLIED_FILE``) says the hub must be re-solved only when its
-    solve reads the island rows (``island_constraints``); an apply before an
-    earlier one was re-solved merges its changes in."""
-    import time
-
+def _plan_apply(project) -> dict:
+    """Everything ``apply_settings`` decides before it writes, with nothing written: the
+    recommendation, the files' paths, and the new texts, validated. The edit card shows
+    these changes; the apply writes these texts. A refusal is the apply's own."""
     import yaml
 
     from services.adequacy.island_config import validate
-    from services.atomic_io import atomic_write_text
 
-    busy = _project_busy(project)
-    if busy:
-        raise HTTPException(status_code=409, detail=f"{busy}; wait for it before applying GFM settings")
     state = get_settings(project)
     if state["state"] != "ready":
         raise HTTPException(status_code=409, detail="no recommendation for the last campus run; "
@@ -432,6 +401,50 @@ def apply_settings(project) -> dict:
         ce.cs.check_campus(spec)
     except ce.ContractError as exc:
         raise ce._unprocessable(exc)
+    return {"rec": rec, "rec_path": rec_path, "campus_path": campus_path, "sidecar_path": sidecar_path,
+            "study_path": study_path, "old_sidecar": old_sidecar, "changes": changes,
+            "campus_text": campus_text, "sidecar_text": sidecar_text}
+
+
+def apply_settings(project) -> dict:
+    """Write a ``recommended`` result that is still the run's into the island
+    sidecar and the campus file (see the module docstring). Returns
+    ``{changes, hub_resolve_needed}``, each change ``{unit, pypsa_name, field,
+    from, to}``, ``from`` being the recommendation's ``current`` (what the
+    search started from, which the ready state guarantees the files still
+    hold). Refused, with nothing written:
+
+    - 409 while a job of the project runs or is queued, or the cuts loop runs;
+      when there is no recommendation for this run, it is stale, or it was
+      already applied;
+    - 422 for a result other than ``recommended``, a unit either file lacks, a
+      unit whose control in either file is not the recommendation's model, a
+      recommended field either file lacks, a value the schema refuses, or a
+      file over its size cap.
+
+    Both texts are built, size-checked and validated first; the sidecar is
+    written atomically, then the campus file (temp and rename), and the old
+    sidecar is put back if that fails; the island study made with the old
+    inputs goes only after both are written. The campus file is re-dumped as
+    YAML, so its comments go (as the cuts loop's refresh does).
+
+    The busy check shares no lock with ``enqueue_settings`` or the queue: a
+    job enqueued in the milliseconds between the check and the writes can
+    still start. Both writes are atomic renames, so such a job reads either
+    file whole, old or new; accepted.
+
+    The record (``APPLIED_FILE``) says the hub must be re-solved only when its
+    solve reads the island rows (``island_constraints``); an apply before an
+    earlier one was re-solved merges its changes in."""
+    from services.atomic_io import atomic_write_text
+
+    busy = _project_busy(project)
+    if busy:
+        raise HTTPException(status_code=409, detail=f"{busy}; wait for it before applying GFM settings")
+    plan = _plan_apply(project)
+    rec_path, campus_path, sidecar_path = plan["rec_path"], plan["campus_path"], plan["sidecar_path"]
+    study_path, old_sidecar, changes = plan["study_path"], plan["old_sidecar"], plan["changes"]
+    campus_text, sidecar_text = plan["campus_text"], plan["sidecar_text"]
     atomic_write_text(sidecar_path, sidecar_text)
     try:
         atomic_write_text(campus_path, campus_text)
@@ -462,3 +475,73 @@ def _merge_changes(prior: list | None, new: list) -> list:
         k = (c["unit"], c["field"])
         by[k] = {**c, "from": by[k]["from"]} if k in by else dict(c)
     return [by[k] for k in sorted(by)]
+
+
+# ── the edit card (LC-04): one card for the panel and the copilot ────────────
+
+_FIELD_WORDS = {"droop_pct": ("Droop", "%"), "tau_f_s": ("Frequency filter time τ_f", "s"),
+                "H_v_s": ("Virtual inertia H_v", "s"), "i_max_pu": ("Current limit i_max", "pu")}
+
+
+def _card_refusal(exc: HTTPException) -> HTTPException:
+    """The apply's own refusal as the card's: a stale or missing recommendation (409) is
+    ``edit_preview_stale``, nothing to change ``empty_edit``, any other 422 ``invalid_edit_value``."""
+    text = str(exc.detail)
+    if exc.status_code == 409:
+        kind = "edit_preview_stale"
+    elif "nothing to apply" in text or "changes no setting" in text or text in _REFUSE.values():
+        kind = "empty_edit"
+    else:
+        kind = "invalid_edit_value"
+    return HTTPException(exc.status_code, {"error_kind": kind, "message": text})
+
+
+def card_rows(project) -> list[dict]:
+    """The edit card's rows for applying the recommendation: one typed row per setting it
+    changes (current → recommended, per unit), then the consequences as notes. The recommendation's
+    time is in the first note, so a newer recommendation is a different card (the digest binds it).
+    Writes nothing; refuses as ``apply_settings`` would, except for a busy project, which the apply
+    itself checks."""
+    try:
+        plan = _plan_apply(project)
+    except HTTPException as exc:
+        raise _card_refusal(exc) from exc
+    rows = []
+    for c in plan["changes"]:
+        label, unit = _FIELD_WORDS[c["field"]]
+        rows.append({"component_class": "Settings", "name": c["unit"], "field": c["field"], "label": label,
+                     "old": c["from"], "new": c["to"], "unit": unit, "role": "typed"})
+    when = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(plan["rec_path"].stat().st_mtime))
+    notes = [f"From the grid-forming recommendation made {when}: heuristic screening, not a certificate; "
+             "the values are written tagged assumed to the island data and the campus file.",
+             "The island study made with the current settings is discarded."]
+    notes.append("The hub must be re-solved: these settings change its island rows." if _island_rows_on(project)
+                 else "Island constraints are off, so the hub solve does not read these settings.")
+    rows += [{"component_class": "Settings", "name": "Island study", "field": f"note_{i}", "label": "Note",
+              "old": None, "new": None, "unit": "", "role": "note", "note": text}
+             for i, text in enumerate(notes)]
+    return rows
+
+
+def card_readback(project, rows: list[dict]) -> list:
+    """Each row's value as the files now hold it: the island sidecar's, only when the campus file
+    holds the same (the two are written together); None for a note or a disagreement."""
+    import yaml
+
+    try:
+        units = yaml.safe_load((ce.campus_dir(project) / ce.CAMPUS_FILE).read_text())["campus"]["units"]
+        sidecar = json.loads(ce._island_paths(project)[0].read_text())["units"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return [None] * len(rows)
+    out = []
+    for row in rows:
+        if row["role"] != "typed":
+            out.append(None)
+            continue
+        unit = units.get(row["name"]) or {}
+        side = sidecar.get(unit.get("pypsa_name")) or {}
+        value = (side.get(row["field"]) or {}).get("value")
+        same = (value is not None and
+                _same(value, ((unit.get("island") or {}).get(row["field"]) or {}).get("value")))
+        out.append(value if same else None)
+    return out

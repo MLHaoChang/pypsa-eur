@@ -5,7 +5,9 @@
 //   labelled as one; a cut the hub cannot take shows why, and no estimate;
 // - Apply starts the loop, the job is polled while it runs, and the cuts and
 //   the report are read again when it ends; Cancel asks it to stop;
-// - the trials and the applied cuts are listed, and cuts can be taken back.
+// - the trials and the applied cuts are listed, and cuts can be taken back;
+// - W10 R3: Results › Control shows them read-only (mode "read"), Grid study keeps the loop and
+//   the take-back (mode "actions"); neither repeats the other's half.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -42,9 +44,9 @@ const running: CutJobRecord = { state: 'running', started_at: 1, finished_at: nu
                                 stopped: null, error: null, message: 'applying the cuts' }
 
 let client: QueryClient
-function renderSection() {
+function renderSection(mode?: 'all' | 'read' | 'actions') {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><CampusIslandCutsSection name="Hub A" /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><CampusIslandCutsSection name="Hub A" mode={mode} /></QueryClientProvider>)
 }
 
 beforeEach(() => {
@@ -148,5 +150,26 @@ describe('frequency cuts: the record', () => {
       { period: 2030, hour: 1, kind: 'headroom_up' }))
     await user.click(screen.getByRole('button', { name: /Clear all cuts/ }))
     await waitFor(() => expect(api.clearIslandCuts).toHaveBeenCalledWith('Hub A'))
+  })
+})
+
+describe('the two places of the cuts (W10 R3)', () => {
+  it('read: the proposals, the trials and the applied cuts, with no button that changes anything', async () => {
+    renderSection('read')
+    expect(await screen.findByTestId('cuts-proposed')).toBeTruthy()
+    expect(screen.getByTestId('cuts-trials')).toBeTruthy()
+    expect(screen.getByTestId('cuts-applied')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: /Apply cuts/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Clear all cuts/ })).toBeNull()
+  })
+
+  it('actions: the loop and the take-back, and a line that says where the proposals are', async () => {
+    renderSection('actions')
+    expect((await screen.findByTestId('cuts-where')).textContent).toMatch(/2 cuts proposed.*Results › Control/)
+    expect(screen.queryByTestId('cuts-proposed')).toBeNull()
+    expect(screen.queryByTestId('cuts-trials')).toBeNull()
+    expect(screen.getByRole('button', { name: /Apply cuts/ })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Remove/ })).toBeTruthy()
   })
 })

@@ -37,7 +37,7 @@ export default function GroupHeader({ group, status, outsideScope, children }: {
     <div data-testid="results-ghead" data-group={group.id}
       className="shrink-0 border-b border-border bg-bg px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
       <h2 className="text-[13px] font-semibold text-text">{group.label}</h2>
-      {!outsideScope && group.tabs.length > 0 && (
+      {!outsideScope && group.tabs.length > 0 && !group.fromStudy && (
         <span data-testid="results-ghead-freshness" data-freshness={fresh}
           className="flex items-center gap-2 text-[11px] text-muted">
           {fresh === 'fresh' ? 'From the latest run' : <StatePill state={fresh} />}
