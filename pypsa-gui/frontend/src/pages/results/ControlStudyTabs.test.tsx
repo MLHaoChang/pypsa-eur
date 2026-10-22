@@ -95,6 +95,21 @@ describe('Island & ride-through', () => {
     expect(screen.queryByTestId('island-table-requirements')).toBeNull()
   })
 
+  it('does not take the island inputs a project carries for results: they alone read "Not yet available"', async () => {
+    api.island.mockResolvedValue({ config: {}, study: null })      // REPORT holds only `inputs` tables
+    mount(<IslandTab />)
+    expect((await screen.findByTestId('island-gate-why')).textContent).toMatch(/^Not yet available/)
+    expect(screen.queryByTestId('island-table-requirements')).toBeNull()
+    expect(screen.queryByTestId('island-from')).toBeNull()
+  })
+
+  it('shows the island-hours tables as results even without the cost study', async () => {
+    api.island.mockResolvedValue({ config: {}, study: null })
+    api.islandReport.mockResolvedValue({ ...REPORT, tables: [{ ...REPORT.tables[0], id: 'freq', group: 'frequency' }] })
+    mount(<IslandTab />)
+    expect(await screen.findByTestId('island-from')).toBeTruthy()
+  })
+
   it('says a project of another kind has no island study', async () => {
     api.island.mockRejectedValue(notHub())
     mount(<IslandTab />)

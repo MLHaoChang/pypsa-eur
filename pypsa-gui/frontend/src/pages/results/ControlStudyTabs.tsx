@@ -64,8 +64,9 @@ export function IslandTab() {
     return <div className="p-4"><Note>{isOtherKind(island.error) ? OTHER_KIND : errorText(island.error)}</Note></div>
   }
   if (island.isPending || report.isPending) return <div className="p-4"><Note>Loading…</Note></div>
-  const tables = report.data?.tables ?? []
-  const has = tables.length > 0 || !!island.data?.study
+  // The report's `inputs` tables are the island data the project carries (a template ships it),
+  // not a result: only a study, or a table of the island hours, is something to show.
+  const has = !!island.data?.study || (report.data?.tables ?? []).some(t => t.group !== 'inputs')
   return (
     <div className="space-y-3 p-4 h-full overflow-y-auto" data-testid="island-tab">
       {has ? (
