@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The Expert sidebar no longer repeats the canvas tools (Select / Pan, Connect, zoom): they live on the canvas toolbar only, and the canvas "+" opens the same bus creation form as the Assets palette instead of creating a bus silently.
