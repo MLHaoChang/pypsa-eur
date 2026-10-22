@@ -1,6 +1,6 @@
 # Data-to-model slice 2: values from PDF datasheets, tariffs and PPAs (plan)
 
-Status: needs-triage (plan, waiting on the gatekeeper's GO and the UX reviewer's placement note)
+Status: needs-triage (plan; UX placement OK 2026-10-22 with the conditions below; waiting on the gatekeeper's GO)
 Owner decisions: AI-567, AI-567b, UX-flow, KEY-1, USE-1. Base: master 81232e93 (PR-1 #575, PR-2 #581).
 
 ## The rule (as slice 1: the model proposes a citation, never a value)
@@ -23,7 +23,9 @@ Each card row: `{component_class, name, field, label, old, new, unit, role, sour
 | **Tariff** (section 7, `commercial.import_tariff`) | an existing item's `periods[i].rate`, `tier_rates[j]`, `tiers[j].threshold/rate` | `commercial` save path (solver-config route), in lock, compare-and-set on the stored tariff | the item's own `TariffUnit` (`per_kwh`, `per_kw_month`, `per_kw_year`, `per_month`, `per_kva_year`, `per_day`); a quote in /MWh into a `per_kwh` item takes the one declared scale ×1/1000, any other unit refuses. Validated by `models.commercial.Tariff`, then the commercial preflight |
 | **PPA** (section 7, `commercial.contracts[type=ppa]`) | an existing contract's `price`, `indexation_pct_per_year`, `volume_cap_mwh_per_year`, `floor`, `cap`, `tenor_years`, `premium_eur_per_mwh`, `baseload_mw`, `sleeving_fee_eur_per_mwh`, `share` | same | per-field unit table (currency/MWh, %/yr, MWh/yr, MW, years, share); `PpaContract` validation, then the preflight |
 
-Values only, onto entities that exist: the structure (a tariff's items, periods, months, hours; a PPA's kind, parties, assets) is built in the TariffBuilder / ContractsEditor first. A citation naming no existing item or contract is left out (`component_not_found`). Building a whole tariff from a PDF is not in slice 2.
+Values only, onto entities that exist: the structure (a tariff's items, periods, months, hours; a PPA's kind, parties, assets) is built in the TariffBuilder / ContractsEditor first. A citation naming no existing item or contract is left out (`component_not_found`). Building a whole tariff from a PDF is not in slice 2. The left-out row says "Add it in <block> first".
+
+**Library-pinned items are refused in place (`library_pinned`).** A tariff under `import_tariff_ref`, or a contract with a `library_ref`, is not edited: the engine already refuses an inline tariff that no longer hashes to its ref (`services/commercial/binding.py`, `import_tariff_ref_conflict`, "drop import_tariff_ref to keep the edited tariff"), so a write would fork it silently or break the next solve. The row reads "This tariff comes from the Commercial library (v<n>). Update it there ›". A project override, with "differs from library v<n>" (library-and-live-lookup.md §1), is not in slice 2.
 
 **Currency (tariffs carry none, GS-EU issue 01).** The quoted currency is recorded in the row's source only. When the project's finance inputs set a currency (read as `generate_series_profile` reads it, `services/profile_gen/apply._project_money`) and the quote names another, the row refuses (`currency_mismatch`). When the project sets none, or the quote names none, the row is written with a note `currency_unchecked`. A PPA price also needs its money year: a year other than the project's base year asks the `money_year` confirmation, as slice 1 does; unadjusted.
 
@@ -37,6 +39,14 @@ Values only, onto entities that exist: the structure (a tariff's items, periods,
 - Datasheets → the existing asset-table entry ("Import rows from a table…", sections 3/4/5): a PDF upload in its file step switches step 2 to the quote picker. The button reads "Import values from a file…". One entry point.
 - Tariffs and PPAs → section 7, inside the Import tariff and Contracts blocks of the Commercial card: one "Fill values from a PDF…" per block, the same dialog in its commercial mode. Ends on the block it was opened from.
 - The card (`EditCard.tsx`) shows a source column: "p. 4 · “Rated power 2 500 kW”".
+
+### UX reviewer's conditions (2026-10-22)
+
+- Datasheets: same 7 class tabs only; an explicit asset picker (one asset, or several of the same model, from that class's list), never guessed from the file name.
+- Quote picker: one row per field, candidates grouped by page, each showing page, quote, parsed value and unit. Nothing pre-ticked unless there is a single candidate, and that one is still shown. A field with no candidate says so and is left out without blocking the others.
+- Every disabled Preview or Apply explains itself in place; the asset path ends on the same card, receipt and "Open <section> ›" (SECTION_META).
+- Section 7: the same dialog component in commercial mode, not a second implementation. It ends back on its block with the receipt.
+- Card source column: "p. 4 · “…”"; a long quote is truncated with an ellipsis and the full quote goes in the tooltip.
 
 ## Build, in small PRs
 
