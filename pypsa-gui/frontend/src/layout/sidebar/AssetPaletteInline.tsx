@@ -17,8 +17,11 @@ const PALETTE_SECTIONS: PaletteSection[] = PALETTE_SECTIONS_DATA.map(section => 
   items: section.items.map(item => ({ ...item, icon: PALETTE_ICONS[item.id] })),
 }))
 
+/** The palette section that holds demand: it belongs to Loads & demand (4), not to Assets (5). */
+export const DEMAND_PALETTE_SECTION = 'demand'
+
 // ── AssetPaletteInline ─────────────────────────────────────────────────────────
-export default function AssetPaletteInline() {
+export default function AssetPaletteInline({ only, skip }: { only?: string[]; skip?: string[] } = {}) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   // The pointer-drag gesture and its drop hit-test live in the hook — it is
   // the single owner of "what is under the cursor", shared by the schematic
@@ -31,7 +34,7 @@ export default function AssetPaletteInline() {
 
   return (
     <div>
-      {PALETTE_SECTIONS.map(section => (
+      {PALETTE_SECTIONS.filter(s => (!only || only.includes(s.id)) && !(skip ?? []).includes(s.id)).map(section => (
         <div key={section.id}>
           <button
             onClick={() => toggle(section.id)}

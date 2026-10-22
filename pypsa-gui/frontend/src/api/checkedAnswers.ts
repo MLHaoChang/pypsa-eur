@@ -6,7 +6,7 @@ const PROFILES = new Set(['generator-dispatch/1', 'generator-cost/1', 'network-l
   'storage-unit-dispatch/1', 'storage-unit-cost/1', 'carrier-energy/1',
   'branch-loading/1', 'network-loading/1', 'lost-load/1',
   'bus-price/1', 'generator-emissions/1', 'network-emissions/1', 'curtailment/1',
-  'capacity/1', 'storage-cycles/1'])
+  'capacity/1', 'storage-cycles/1', 'energy-balance/1', 'site-import/1'])
 
 export interface OwnedCheckedAnswer extends ApprovedAnswerFrame {
   text: string

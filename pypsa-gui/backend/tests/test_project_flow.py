@@ -129,9 +129,10 @@ def test_an_item_carries_its_target(client, site, edit):
     row = next(s for s in body["sections"] if s["section"] == "loads")
     item = next(i for i in row["items"] if i["severity"] == "error")
     assert set(item) == {"code", "severity", "message", "source", "target", "blocking",
-                         "acknowledged", "title"}
+                         "acknowledged", "title", "card", "in_scope"}
     assert item["title"] and "_" not in item["title"]
     assert item["source"] == "validation" and item["blocking"] is True
+    assert item["card"] is None and item["in_scope"] is True
     assert item["target"] == {"section": "loads", "panel": None, "component": "Load",
                               "entity": "it", "field": None}
     assert body["run_blocker"]["section"] == "loads"
@@ -697,8 +698,9 @@ def test_section_for_component_uses_the_flows_connection(client, site, bound_ctx
 def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_projects_dir,
                                                                   edit, bound_ctx):
     """The generation-only rule is keyed on the network too: a Load added to an IPP project
-    brings the loads rules, the VOLL rule and the study back, as on any EH template. The flag
-    is the PROJECT's stored template meta (`read_template`), so a created project carries it."""
+    brings the loads rules back, and the VOLL rule and the study once the scope selects
+    Reliability (W4a: the IPP preset leaves it off, so the scope decides). The flag is the
+    PROJECT's stored template meta (`read_template`), so a created project carries it."""
     from services import flow_service
 
     name = _create(client, "eh_ipp_hybrid", "ipp")
@@ -715,6 +717,13 @@ def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_pro
     body = _flow(client, name)
     assert _states(body)["loads"] in ("incomplete", "warning", "complete")
     assert "presence_loads" not in _codes(body, "loads")
+    assert body["run_request"]["study"] is False             # Reliability off (its preset)
+    scope = client.get(f"/api/projects/{name}/flow/scope").json()["scope"]
+    r = client.put(f"/api/projects/{name}/flow/scope", json={
+        "version": 1, "groups": [*scope["groups"], "reliability"],
+        "options": {**scope["options"], "reliability": ["goal_study"]}})
+    assert r.status_code == 200, r.text
+    body = _flow(client, name)
     assert body["run_request"]["study"] is True
     assert "presence_voll" in _codes(body, "scenarios")      # the template ships VoLL 0
 

@@ -227,7 +227,7 @@ function SnapshotRow({
           <span className="text-[13px] font-semibold text-text truncate">
             {snap.label || <span className="text-muted italic font-normal">unlabeled</span>}
           </span>
-          {isNewest ? <Tag tone="accent">current</Tag>
+          {isNewest ? <Tag tone="accent">Latest saved</Tag>
             : type ? <Tag tone={SNAP_TYPE_TONE[type]}>{type}</Tag>
             : null}
           {snap.dispatch_status === 'stale' ? (
@@ -257,7 +257,7 @@ function SnapshotRow({
         <Btn
           onClick={onRestore}
           disabled={restoreDisabled}
-          title="Restore this snapshot (current state is auto-saved)"
+          title="Restore this snapshot (unsaved changes are saved first, then kept as the 'before-restore' snapshot)"
         >
           <RotateCcw size={11} /> Restore
         </Btn>
@@ -465,8 +465,8 @@ export function RestoreConfirmModal({
 
       <div className="bg-bg/60 border border-border rounded p-3 mb-4 text-xs text-muted">
         <div className="font-medium text-text mb-1">Safety net</div>
-        The current state will be auto-saved as a snapshot labelled
-        <strong> "before-restore"</strong> so you can roll back if this isn't what you wanted.
+        Unsaved changes are saved first, then kept with the current state as the snapshot labelled
+        <strong> "before-restore"</strong>. Restore that snapshot to roll back if this isn't what you wanted.
         {snapshot.has_capture_manifest !== false && (
           <div className="mt-1">
             Settings, uploads and reports added since this snapshot are removed; they are

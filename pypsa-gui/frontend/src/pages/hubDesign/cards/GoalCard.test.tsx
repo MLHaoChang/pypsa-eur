@@ -1,8 +1,6 @@
 // Guided-mode spec §5.3 (Goal): the allowed shortfall defaults from the
-// template, then from the pack readiness reports; Run posts exactly what the
-// Expert panel's `buildEhStudyBody` builds for the same inputs; VOLL ≤ 0
-// blocks the run and offers the assistant fix; running / failed / aborted are
-// read from the study record (P24-BE gate N2).
+// template, then from the pack readiness reports; VOLL ≤ 0 offers the
+// assistant fix. The Run is in section 9 (`shared/GoalStudyRun.test.tsx`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -10,7 +8,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi, simulationApi } from '../../../api/simulation'
 import { useChatStore } from '../../../store/chatStore'
 import { useUIStore } from '../../../store/uiStore'
-import { buildEhStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
@@ -30,7 +27,16 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   }
 })
 
+// The scope (W4a): unread by default, so every block shows; one test reads
+// a scope with Reliability off.
+const getFlowScope = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+})
+
 beforeEach(() => {
+  getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
@@ -116,63 +122,21 @@ describe('GoalCard defaults', () => {
   })
 })
 
-describe('GoalCard run', () => {
-  it('posts the Expert panel\'s body for the same inputs', async () => {
-    const user = mount()
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
-    await user.click(screen.getByTestId('hub-goal-advanced'))
-    await user.type(input('hub-goal-ens'), '5')
-    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
-    await user.click(screen.getByTestId('hub-goal-run'))
-    const expected = buildEhStudyBody('weak_flexible',
-      { ...formFromTemplate(DC_TEMPLATE), loleTarget: '3', ensCap: '5' }).body
-    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
-    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]).toEqual(expected)
-    expect(expected?.pack_overrides).toMatchObject({ import_p_nom_mw: 40, target_lole_h: 3,
-      ens_cap_permyriad: 5, certification_metric: 'mc_lole' })
-  })
-
-  it('an own network runs from the empty pack form', async () => {
-    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
-    useHubDesignStore.setState({ archetype: 'strong_grid' })
-    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
-      pack_defaults: { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' } }))
-    const user = mount()
-    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
-    await user.click(screen.getByTestId('hub-goal-run'))
-    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith(
-      buildEhStudyBody('strong_grid', EMPTY_PACK_FORM).body))
-  })
-
-  it('an invalid goal blocks the run with the builder\'s own message', async () => {
-    const user = mount()
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
-    await user.clear(input('hub-goal-lole'))
-    await user.type(input('hub-goal-lole'), '-1')
-    expect(screen.getByTestId('hub-goal-blocked').textContent).toContain('LOLE target must be ≥ 0 h/yr')
-    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
-  })
-
-  it('a refused start (409) shows the backend sentence', async () => {
-    vi.mocked(resultsApi.startEhStudy).mockRejectedValue(Object.assign(new Error('409'),
-      { response: { status: 409, data: { detail: 'an FMEA sweep is running — wait for it' } } }))
-    const user = mount()
-    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
-    await user.click(screen.getByTestId('hub-goal-run'))
-    await waitFor(() => expect(screen.getByTestId('hub-goal-blocked').textContent)
-      .toContain('an FMEA sweep is running — wait for it'))
-  })
-
-  it('VOLL ≤ 0 disables Run and offers the assistant fix', async () => {
+describe('GoalCard voll line', () => {
+  it('VOLL ≤ 0 offers the assistant fix', async () => {
     vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
     const user = mount()
-    await screen.findByTestId('hub-goal-voll-fix')
-    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
-    await user.click(screen.getByTestId('hub-goal-voll-fix'))
+    await user.click(await screen.findByTestId('hub-goal-voll-fix'))
     // P25 (§5.7): the fix is sent (queued for ChatPanel), not seeded.
     expect(useChatStore.getState().requestQueue.map(r => r.text)).toEqual([VOLL_TEXT])
     expect(useChatStore.getState().composerSeed).toBeNull()
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
+  })
+
+  it('has no Run of its own: the study runs from Readiness → run', async () => {
+    mount()
+    await screen.findByTestId('hub-goal-run-hint')
+    expect(screen.queryByTestId('hub-goal-run')).toBeNull()
   })
 
   it('keeps a set VOLL under More settings, not loose on the card (UX review L3)', async () => {
@@ -189,6 +153,24 @@ describe('GoalCard run', () => {
     await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
     expect(screen.getByTestId('hub-goal-stress').textContent).toContain('Stress conditions')
     expect(await screen.findByTestId('stress-editor')).toBeTruthy()
+  })
+
+  it('out of Reliability › Stress, the stress editor gives way to adding it in place (W4a)', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'reliability', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study', 'stress'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null },
+          { id: 'stress', label: 'Stress conditions & FMEA', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    mount()
+    await userEvent.click(await screen.findByTestId('hub-goal-advanced'))
+    expect((await screen.findByTestId('hub-goal-stress-scope-add')).textContent).toBe('Add Stress conditions & FMEA')
+    expect(screen.queryByTestId('stress-editor')).toBeNull()
   })
 
   it('opens More settings with the stress editor when a link asks for it, once', async () => {
@@ -214,96 +196,6 @@ describe('GoalCard run', () => {
   })
 })
 
-describe('GoalCard study states (from the study record, N2)', () => {
-  it('running: the card\'s own running text and Abort — never the review\'s message', async () => {
-    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running', budget_solves: 40 })
-    vi.mocked(resultsApi.abortEhStudy).mockResolvedValue({ status: 'running', aborting: true })
-    const user = mount()
-    const t = await screen.findByTestId('hub-goal-running')
-    expect(t.textContent).toBe('Studying… (up to 40 calculation steps) · 0:00 elapsed')
-    expect(t.textContent).not.toMatch(/poll|get_adequacy_results|solves/)
-    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
-    await user.click(screen.getByTestId('hub-goal-abort'))
-    expect(resultsApi.abortEhStudy).toHaveBeenCalled()
-  })
-
-  it('running text: plain words, and never "0 of N" when the count is missing', async () => {
-    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running', budget_solves: 40,
-      report: { archetype: 'weak_flexible', pack_hash: 'h', assumptions_hash: 'a',
-        pipeline: { budget_solves: 40 } } })
-    mount()
-    const t = await screen.findByTestId('hub-goal-running')
-    expect(t.textContent).toBe('Studying… (up to 40 calculation steps) · 0:00 elapsed')
-  })
-
-  it('running text with a count: "n of N calculation steps"', async () => {
-    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running',
-      report: { archetype: 'weak_flexible', pack_hash: 'h', assumptions_hash: 'a',
-        pipeline: { budget_solves: 40, solves_consumed: 12 } } })
-    mount()
-    expect((await screen.findByTestId('hub-goal-running')).textContent)
-      .toBe('Studying… 12 of 40 calculation steps · 0:00 elapsed')
-  })
-
-  it('failed: the error and Run again', async () => {
-    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
-      { status: 'failed', error: 'solver infeasible', report: null })
-    mount()
-    await waitFor(() => expect(screen.getByTestId('hub-goal-error').textContent)
-      .toContain('solver infeasible'))
-    expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
-  })
-
-  it('aborted: says so and offers Run again', async () => {
-    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'aborted', report: null })
-    mount()
-    await waitFor(() => expect(screen.getByTestId('hub-goal-error').textContent).toMatch(/Stopped/))
-    expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
-  })
-})
-
-// P24-FE re-gate note 2 (P25 step 0): when only the template read failed the
-// card cannot know the template's recommended settings, so Run must not
-// silently start the default-site-type study. It is disabled with a plain
-// reason and a Retry that re-reads the template; once the read recovers Run
-// posts the template's body.
-describe('GoalCard when the template read failed', () => {
-  it('disables Run with a plain reason and a Retry that recovers', async () => {
-    vi.mocked(resultsApi.getEhTemplate).mockRejectedValueOnce(new Error('500'))
-    const user = mount()
-    const reason = await screen.findByTestId('hub-goal-template-error')
-    expect(reason.textContent).toMatch(/recommended settings could not be read/)
-    expect(reason.textContent).not.toMatch(/eh_template|500/)
-    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
-    // P30 (B8): the disabled Run says why.
-    expect(screen.getByTestId('hub-goal-run').getAttribute('title'))
-      .toBe('The template could not be read — retry above.')
-    await user.click(screen.getByTestId('hub-goal-run'))
-    expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
-
-    await user.click(screen.getByTestId('hub-goal-template-retry'))
-    await waitFor(() => expect(screen.queryByTestId('hub-goal-template-error')).toBeNull())
-    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
-      .disabled).toBe(false))
-    expect(screen.getByTestId('hub-goal-run').getAttribute('title')).toBeNull()
-    await user.click(screen.getByTestId('hub-goal-run'))
-    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
-    const form = { ...formFromTemplate(DC_TEMPLATE),
-      loleTarget: useHubDesignStore.getState().loleTarget,
-      ensCap: useHubDesignStore.getState().ensCap }
-    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0])
-      .toEqual(buildEhStudyBody('weak_flexible', form).body)
-  })
-
-  it('an own network (template read → null) runs as before', async () => {
-    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
-    mount()
-    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
-      .disabled).toBe(false))
-    expect(screen.queryByTestId('hub-goal-template-error')).toBeNull()
-  })
-})
-
 // A1-FE (deferred spec 2026-09-28 §2.4): the VOLL "Let the assistant set it"
 // button is disabled with one plain sentence while an FMEA sweep runs.
 describe('GoalCard while a risk check runs (A1-FE)', () => {
@@ -320,5 +212,27 @@ describe('GoalCard while a risk check runs (A1-FE)', () => {
       client.setQueryData(nk('Demo', 'results', 'fmea_modes'), { per_mode: [], sweep_status: 'done' })
     })
     await waitFor(() => expect(fix.disabled).toBe(false))
+  })
+})
+
+describe('GoalCard scope (W4a)', () => {
+  it('with Reliability off the goal hides and VOLL stays', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_datacenter',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: ['goal_study'], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: ['goal_study'],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'available', reason: null }] }],
+      preset_id: 'eh_datacenter', preset_label: 'Data Center Energy Hub',
+      preset: { version: 1, groups: [], options: {} },
+    })
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
+    mount()
+    expect((await screen.findByTestId('hub-goal-out-of-scope-add')).textContent)
+      .toBe('Add Reliability goal & study')
+    expect(screen.queryByTestId('hub-goal-lole')).toBeNull()
+    expect(await screen.findByTestId('hub-goal-voll')).toBeTruthy()
+    expect(screen.queryByTestId('hub-goal-run')).toBeNull()
   })
 })
