@@ -4,15 +4,12 @@
 // stay on Results → Investment. IC's editors are embedded as they are (E0
 // moved the two wrappers this panel mounts into their own files).
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { commercialApi } from '../../api/commercial'
 import { useUIStore } from '../../store/uiStore'
-import { nk } from '../../utils/queryKeys'
 import ContractsEditor from '../results/investment/ContractsEditor'
 import FinanceInputsEditor from '../results/investment/FinanceInputsEditor'
 import ParticipantsDesigner from '../results/investment/ParticipantsDesigner'
-import SiteConnectionSection from '../results/investment/SiteConnectionSection'
 import TariffSection from '../results/investment/TariffSection'
+import { SiteConnectionSummary } from './SiteConnectionLink'
 import AssetCostsTable from './AssetCostsTable'
 import RatesForm from './RatesForm'
 import SolveAssumptionsSummary from './SolveAssumptionsSummary'
@@ -23,17 +20,6 @@ const TABS = [
   { id: 'tariffs', label: 'Tariffs & contracts' },
 ] as const
 type TabId = typeof TABS[number]['id']
-
-/** The site connection before any solve: the Investment tab's query (shared
- *  cache), and the form whenever the commercial root is missing. */
-function SiteConnection() {
-  const project = useUIStore(s => s.currentProject)
-  const config = useQuery({ queryKey: nk(project, 'commercial', 'config'),
-                            queryFn: () => commercialApi.getCommercial() })
-  if (config.isPending) return <p className="text-[11px] text-muted">Loading the site connection…</p>
-  if (config.isError) return <p className="text-[11px] text-warn">The site connection could not be read.</p>
-  return <SiteConnectionSection config={config.data} needed={!config.data?.poc_link} />
-}
 
 export function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -69,7 +55,7 @@ export default function EconomicsPanel() {
           <div className="p-3 flex flex-col gap-3">
             <RatesForm />
             <SolveAssumptionsSummary />
-            <SiteConnection />
+            <SiteConnectionSummary />
             <FinanceInputsEditor />
           </div>
         )}

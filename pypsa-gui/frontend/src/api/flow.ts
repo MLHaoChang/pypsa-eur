@@ -183,6 +183,8 @@ export interface FlowScopeRegistry {
   /** The example's name, for "Reset to <name>'s cards". */
   preset_label: string
   preset: FlowScopeValue
+  /** The solver config's size source: 'off' (sizing on), 'capacity_run' or 'nameplate'. */
+  fixed_sizes?: 'off' | 'capacity_run' | 'nameplate'
 }
 
 export function getFlowScope(project: string): Promise<FlowScopeRegistry> {

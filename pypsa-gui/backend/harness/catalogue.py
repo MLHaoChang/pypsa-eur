@@ -1478,6 +1478,17 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "get_profile_readiness",
+        "One row per wind/solar generator: its coordinates (the bus's; "
+        "`missing` when the bus is unplaced), the profile it carries now "
+        "(none, uploaded, generated with its provenance, network_native) "
+        "and a stale_reason (bus_moved, horizon_changed) when a generated "
+        "profile no longer fits. Read it before generating. `project_id` is "
+        "the project NAME. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
         "generate_renewable_profile",
         "Queue a renewable-profile generation for a project as a solve-queue "
         "job (kind profile_gen) and answer the job — it does NOT complete "
@@ -4425,6 +4436,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_profile_parameters": _SERVICE_CALL,
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
+    "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     "preview_default_series": [("POST", "/api/projects/{name}/profiles/defaults/preview")],

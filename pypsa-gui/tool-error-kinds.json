@@ -499,6 +499,10 @@
       "surface": "inline",
       "why": "Recorded on a published run-evidence manifest when an adequacy/study worker ends failed; get_run_evidence surfaces the typed error field."
     },
+    "ac_pf_already_run": {
+      "surface": "inline",
+      "why": "run_ac_pf_stage was refused: AC power flow already ran on this solve and its results replaced the LOPF values, so a second run would take them as the LP baseline. The model tells the user to re-run the LOPF first."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."

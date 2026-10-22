@@ -18,7 +18,18 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
-    if case.profile == "site-import/1":
+    if case.profile == "copt-screening/1":
+        n.remove("Generator", "G1")
+        n.add("Carrier", ["gas", "wind"])
+        n.add("Generator", "thermal1", bus="B1", carrier="gas", p_nom=60, outage_rate_value=0.5,
+              outage_rate_basis="EFORd", mttr_hours=50.0, marginal_cost=10)
+        n.add("Generator", "thermal2", bus="B1", carrier="gas", p_nom=40, outage_rate_value=0.25,
+              outage_rate_basis="EFORd", mttr_hours=40.0, marginal_cost=10)
+        n.add("Generator", "windfarm", bus="B1", carrier="wind", p_nom=50)
+        n.generators_t.p_max_pu = pd.DataFrame({"windfarm": [0.6, 0.0]}, index=n.snapshots)
+        n.loads_t.p_set = pd.DataFrame({"L1": [100.0, 100.0]}, index=n.snapshots)
+        n.snapshot_weightings.loc[:, :] = 2.0
+    elif case.profile == "site-import/1":
         n.generators.at["G1", "marginal_cost"] = 0
         n.generators_t.p_max_pu = pd.DataFrame({"G1": [0.0, 0.0]}, index=n.snapshots)
         n.loads_t.p_set = pd.DataFrame({"L1": [6, 3]}, index=n.snapshots)
@@ -178,6 +189,8 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         cfg.finance = {**(cfg.finance or {}), "cost_of_equity": 0.2}
     elif case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile == "copt-screening/1":
+        n.generators.at["thermal1", "outage_rate_value"] = 1.5  # no usable outage rate
     elif case.fault == "missing" and invested:
         report = evaluation_project.solver_state["investment_case_report"]
         report["sections"]["project"]["payload"]["cash"]["equity_post_tax"][1] = None

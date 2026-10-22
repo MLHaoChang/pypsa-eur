@@ -12,6 +12,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Play, Wand2 } from 'lucide-react'
 import { useUIStore } from '../store/uiStore'
+import { openTimeSeriesFor } from '../layout/flowNavigation'
 import { Btn, PageSection, Seg, Sparkline, Tag } from '../components/PageKit'
 import {
   errorText, profilesApi,
@@ -107,9 +108,9 @@ function PendingCard({ name, record }: { name: string; record: PendingProfile })
       {message && <p className="text-[11px] text-green-600 mt-1.5" data-testid="apply-ok">{message}</p>}
       {message && appliedTo && (
         <button type="button" data-testid="apply-view-time-series"
-          onClick={() => useUIStore.getState().focusTimeSeries('Generator', appliedTo)}
+          onClick={() => openTimeSeriesFor('Generator', appliedTo, { field: 'p_max_pu' })}
           className="mt-1 text-[11px] text-accent hover:underline">
-          View in Time Series →
+          View in Time Series ›
         </button>
       )}
       {refusal && <p className="text-[11px] text-red-600 mt-1.5" data-testid="apply-refusal">{refusal}</p>}

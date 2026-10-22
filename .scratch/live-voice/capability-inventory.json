@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 285,
+  "tool_count": 286,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2259,6 +2259,27 @@
         [
           "GET",
           "/api/projects/{name}/profiles/pending"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_profile_readiness",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/readiness"
         ]
       ],
       "input_keys": [
