@@ -1257,7 +1257,8 @@ def apply_default_series(
             with pending_io_lock(), xr.open_dataset(nc) as ds:
                 frame = ds.to_dataframe()
             frame.index = pd.DatetimeIndex(frame.index)
-            summary = assign_profile(ctx, component, frame[component], meta,
+            summary = assign_profile(ctx, component, frame[component],
+                                     {**meta, "point_id": component},
                                      component_type=component_type, attribute=attribute)
         except ProfileApplyError as exc:
             results.append({"job_id": job_id, "component": component, "applied": False,

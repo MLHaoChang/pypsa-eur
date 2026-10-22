@@ -154,3 +154,21 @@ def test_bus_moved_follows_the_applied_point_not_the_generator_name(
     assert row["profile"] == "generated" and "stale_reason" not in row
     ctx_of().network.buses.loc["B_ok", ["x", "y"]] = [15.0, 45.0]
     assert _rows(client, project)["g_ok"]["stale_reason"] == "bus_moved"
+
+
+def test_bus_moved_finds_a_generator_named_point_with_no_recorded_point_id(
+        client, project, ctx_of):
+    # Profiles applied before point_id was recorded, from a two-generator
+    # from_generators job: the point ids ARE the generator names (gatekeeper).
+    ctx = ctx_of()
+    key = ("generators", "p_max_pu", "g_ok")
+    ctx.user_ts[key] = pd.Series(0.4, index=SNAPS)
+    ctx.user_ts_meta[key] = {
+        "source": "synthetic", "technology": "wind", "family": "renewable",
+        "weather_year": 2019, "provenance": "synthetic/assumed",
+        "points": ["g_ok", "g_up"],
+        "point_coords": {"g_ok": [8.0, 50.0], "g_up": [10.0, 52.0]},
+    }
+    assert "stale_reason" not in _rows(client, project)["g_ok"]
+    ctx.network.buses.loc["B_ok", ["x", "y"]] = [15.0, 45.0]
+    assert _rows(client, project)["g_ok"]["stale_reason"] == "bus_moved"

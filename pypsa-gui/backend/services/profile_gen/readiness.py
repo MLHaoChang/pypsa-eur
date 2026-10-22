@@ -59,13 +59,13 @@ def _profile_state(ctx, name: str) -> tuple[str, dict | None, str | None]:
     return "generated", provenance, stale
 
 
-def _bus_moved(meta: dict, now: tuple[float, float] | None) -> bool:
+def _bus_moved(meta: dict, name: str, now: tuple[float, float] | None) -> bool:
     """Whether the point the series was made for is now far from the bus.
-    The point is the applied `point_id` the apply route records; a profile
-    applied before that was recorded falls back to a single-point job, and
-    one with several points and no `point_id` stays unchecked (not stale)."""
+    The point is the applied `point_id` the apply route records, else the
+    generator's own name (the default point id), else a single-point job's
+    only point; anything else stays unchecked (not stale)."""
     coords = meta.get("point_coords") or {}
-    then = coords.get(meta.get("point_id"))
+    then = coords.get(meta.get("point_id")) or coords.get(name)
     if then is None and len(coords) == 1:
         then = next(iter(coords.values()))
     if then is None or now is None:
@@ -93,7 +93,7 @@ def readiness_rows(ctx) -> list[dict[str, Any]]:
         }
         if provenance is not None:
             row["provenance"] = provenance
-            if _bus_moved(ctx.user_ts_meta.get((*KEY, name)) or {}, coord):
+            if _bus_moved(ctx.user_ts_meta.get((*KEY, name)) or {}, name, coord):
                 stale = "bus_moved"
             if stale:
                 row["stale_reason"] = stale
