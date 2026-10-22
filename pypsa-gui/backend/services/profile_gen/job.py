@@ -237,6 +237,7 @@ def run_queued(job: Any, progress: Any, stop_event: Any) -> tuple[Path, Path]:
     record["job_id"] = str(job.id)
     record["project_id"] = job.project_id
     record["points"] = list(result.series.columns)
+    record["year_source"] = str(spec.get("year_source") or "default")
     # Per-point coordinates, so a later apply can warn when an asset's bus
     # has moved since its profile was generated.
     record["point_coords"] = {

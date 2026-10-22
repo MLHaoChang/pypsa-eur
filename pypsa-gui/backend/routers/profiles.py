@@ -54,6 +54,10 @@ from services.profile_gen.apply import (
     InvalidSeriesUnitError,
     ProfileApplyError,
     ProfileBoundConflictError,
+    StepAggregationUnsupportedError,
+    StepIrregularError,
+    StepNotWholeHoursError,
+    StepOverDstGapError,
     UnknownFamilyError,
     UnsupportedTargetError,
     WindowSourceGapError,
@@ -436,6 +440,10 @@ _APPLY_REFUSALS: tuple[tuple[type[Exception], dict[str, str]], ...] = (
     (CurrentChangedError, {"error_kind": "current_changed_since_refinement"}),
     (WindowSourceGapError, {"error_kind": "window_source_gap"}),
     (SeriesUploadError, {"error_kind": "series_upload"}),
+    (StepNotWholeHoursError, {"error_kind": "step_not_whole_hours"}),
+    (StepIrregularError, {"error_kind": "step_irregular"}),
+    (StepOverDstGapError, {"error_kind": "step_over_dst_gap"}),
+    (StepAggregationUnsupportedError, {"error_kind": "step_aggregation_unsupported"}),
 )
 
 # Generation and upload refusals (load, availability), literal for the same
@@ -590,6 +598,19 @@ def generate_profiles(
     _check_lock(proj, db, user)
     spec = body.model_dump()
     spec.pop("from_generators", None)  # resolved into concrete points below
+    # The weather year, decided here so the job and the answer agree: an
+    # explicit year wins; else the OPEN project's snapshots; a project that is
+    # not the open one never has its snapshots read implicitly (RP-03).
+    if body.year is not None:
+        spec["year_source"] = "explicit"
+    else:
+        from services.profile_gen.horizon import default_weather_year
+        from services.pypsa_service import PyPSAService
+
+        ctx = PyPSAService.get_active_context()
+        open_here = ctx.loaded_project in (None, proj.name)
+        spec["year"], spec["year_source"] = default_weather_year(
+            ctx.network.snapshots if open_here else None)
     try:
         # Validate the way the runner will, minus the work: points, technology,
         # preset name (resolve_params raises UnknownPresetError), and a CDS

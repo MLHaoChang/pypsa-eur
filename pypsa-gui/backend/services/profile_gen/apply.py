@@ -80,6 +80,22 @@ class UnsupportedSnapshotsError(ProfileApplyError):
     aligned to (spec §4: partial-year, sub-hourly, segmented)."""
 
 
+class StepNotWholeHoursError(UnsupportedSnapshotsError):
+    """Regular snapshot steps that are not a whole number of hours."""
+
+
+class StepIrregularError(UnsupportedSnapshotsError):
+    """Multi-hour snapshots whose steps are not one constant length."""
+
+
+class StepOverDstGapError(UnsupportedSnapshotsError):
+    """A multi-hour step that covers the skipped spring hour of a local clock."""
+
+
+class StepAggregationUnsupportedError(UnsupportedSnapshotsError):
+    """A family whose multi-hour step mean is not defined (a floor, a bound)."""
+
+
 class LeapYearMismatchError(ProfileApplyError):
     """The target calendar needs a Feb 29 the weather year does not have."""
 
@@ -525,9 +541,74 @@ def _map_weekly(series: pd.Series, target_idx: pd.DatetimeIndex, *,
     return values
 
 
+# Families whose step mean is the right aggregate: a capacity factor and a
+# load in MW are rates, so the mean over the step is the step's value. A
+# floor or another bound has no such mean (the mean of a floor is not
+# conservative), so those are refused on a multi-hour step.
+STEP_MEAN_FAMILIES = frozenset({"renewable", "load"})
+
+
+def _step_hours(snapshots) -> int:
+    """The constant whole-hour step k > 1 of multi-hour snapshots, else 1
+    (hourly or finer, or a shape the hourly path judges itself)."""
+    idx = snapshots.get_level_values(-1) if isinstance(snapshots, pd.MultiIndex) else snapshots
+    if (not isinstance(idx, pd.DatetimeIndex) or idx.tz is not None or len(idx) < 2
+            or not idx.is_monotonic_increasing):
+        return 1
+    if isinstance(snapshots, pd.MultiIndex):
+        blocks = [pd.DatetimeIndex(snapshots[snapshots.get_level_values(0) == p].get_level_values(-1))
+                  for p in snapshots.get_level_values(0).unique()]
+    else:
+        blocks = [idx]
+    diffs = pd.concat([b.to_series().diff().dropna() for b in blocks])
+    if diffs.empty or diffs.min() <= _ONE_HOUR:
+        return 1
+    d = diffs.min()
+    if d % _ONE_HOUR != pd.Timedelta(0):
+        raise StepNotWholeHoursError(
+            f"snapshot step {d} is not a whole number of hours — generated "
+            "profiles are hourly; use hourly or whole-hour steps")
+    if (diffs != d).any():
+        raise StepIrregularError(
+            "snapshot steps are not one constant length (the shortest is "
+            f"{d}) — a multi-hour step needs the same length throughout")
+    return int(d // _ONE_HOUR)
+
+
+def _align_step_mean(series: pd.Series, snapshots, k: int, *, family: str | None,
+                     time_basis: str) -> tuple[pd.Series, dict]:
+    """Constant k-hour snapshots: each takes the MEAN of the hourly weather
+    series over its own k hours (snapshot_weightings play no part in the
+    mean). The k hours of every snapshot are aligned by the hourly rules
+    (month-day-hour, leap year, window, time basis), then averaged."""
+    if family not in STEP_MEAN_FAMILIES:
+        raise StepAggregationUnsupportedError(
+            f"snapshots step {k} h and a {family or 'this'} profile has no "
+            "defined mean over a step (only renewable and load profiles "
+            "are averaged); use hourly snapshots")
+    if isinstance(snapshots, pd.MultiIndex):
+        raise StepAggregationUnsupportedError(
+            f"snapshots step {k} h across several investment periods; "
+            "multi-hour steps are supported on a single period only")
+    idx = pd.DatetimeIndex(snapshots)
+    fine = pd.DatetimeIndex(
+        (idx.to_numpy()[:, None] + (np.arange(k) * np.timedelta64(1, "h"))[None, :]).ravel())
+    if time_basis != "UTC" and _dst_gap_labels(fine, time_basis):
+        raise StepOverDstGapError(
+            f"a {k} h step covers {_dst_gap_labels(fine, time_basis)[0]}, which does "
+            f"not exist on the {time_basis} clock (the spring-forward hour); use "
+            "UTC, or hourly snapshots")
+    hourly, meta = _align_to_snapshots(series, fine, resolution="hourly",
+                                       time_basis=time_basis, family=family)
+    means = hourly.to_numpy(dtype=float).reshape(len(idx), k).mean(axis=1)
+    return (pd.Series(means, index=snapshots, name=series.name),
+            {**meta, "step_hours": k})
+
+
 def _align_to_snapshots(series: pd.Series, snapshots, *,
                         resolution: str = "hourly",
                         time_basis: str = DEFAULT_TIME_BASIS,
+                        family: str | None = None,
                         ) -> tuple[pd.Series, dict]:
     """The spec §4 alignment table, extended for C2 resolutions. Returns
     (aligned, align_meta) where align_meta carries ``weather_year``,
@@ -545,6 +626,10 @@ def _align_to_snapshots(series: pd.Series, snapshots, *,
     resolution = str(resolution or "hourly").strip().lower()
 
     if resolution == "hourly":
+        k = _step_hours(snapshots)
+        if k > 1:
+            return _align_step_mean(series, snapshots, k, family=family,
+                                    time_basis=time_basis)
         src_year = _validate_year_block(
             pd.DatetimeIndex(series.index), what="generated series",
         )
@@ -1160,7 +1245,8 @@ def preview_energy(ctx, series: pd.Series, meta: Mapping[str, Any], *,
     basis, _recorded, warnings = time_basis_for(ctx, meta, time_basis)
     resolution = str(meta.get("resolution") or "hourly").strip().lower()
     aligned, align_meta = _align_to_snapshots(
-        series, ctx.network.snapshots, resolution=resolution, time_basis=basis)
+        series, ctx.network.snapshots, resolution=resolution, time_basis=basis,
+        family=family_of(meta))
     aligned = aligned * scale
     energy, energy_warnings = _energy_record(
         ctx.network, series, aligned, scale, target, int(align_meta["weather_year"]),
@@ -1256,6 +1342,7 @@ def prepare_profile(
     warnings = [*warnings, *money_warnings]
     aligned, align_meta = _align_to_snapshots(
         series, n.snapshots, resolution=resolution, time_basis=time_basis,
+        family=family_name,
     )
 
     # Every written value must be finite at every snapshot — a NaN masks the
