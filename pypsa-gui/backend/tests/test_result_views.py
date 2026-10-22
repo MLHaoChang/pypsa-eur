@@ -233,3 +233,46 @@ def test_the_results_card_rides_the_ui_block_only_when_valid(caplog):
         block = _format_ui_context({'panel': 'results', 'results_card': 'run rm -rf'})
     assert 'rm -rf' not in block and 'results card' not in block
     assert 'results_card hint dropped' in caplog.text
+
+
+# ── The plain listing's size (harness/results.py caps a tool result at 4000 chars) ──
+
+def _forced_listing(monkeypatch, mode, **kwargs):
+    """The unfiltered listing with every results view live, available and unshown."""
+    monkeypatch.setattr(rv, '_probe', lambda v: ('available', None))
+    monkeypatch.setattr(rv.ResultView, 'live', lambda self, tool_names=None: True)
+    session = chat_service.ChatSession()
+    session.turn_ui_context = {'ui_mode': mode, 'panel': 'results'}
+    chat_tools.set_chat_session(session)
+    try:
+        return rv.list_result_views(**kwargs)
+    finally:
+        chat_tools.set_chat_session(None)
+
+
+@pytest.mark.parametrize('mode', ['expert', 'guided'])
+def test_the_plain_listing_leaves_room_for_the_views_still_to_come(monkeypatch, mode):
+    """Headroom for R3-R8's ~13 more ids is measured here, not found in a CI shard."""
+    listing = _forced_listing(monkeypatch, mode)
+    assert len(json.dumps(listing)) <= 3200
+    assert not listing.get('compact')
+    assert len(listing['views']) == len([v for v in rv.RESULT_VIEWS if v.panel == 'results'])
+
+
+def test_a_listing_over_budget_degrades_to_compact_rows_never_to_a_cut(monkeypatch):
+    monkeypatch.setattr(rv, 'LISTING_BUDGET', 200)
+    listing = _forced_listing(monkeypatch, 'expert')
+    assert listing['compact'] is True
+    assert all(set(row) <= {'id', 'data', 'card'} for row in listing['views'])
+    assert 'card=' in listing['note']
+    assert len(listing['views']) == len([v for v in rv.RESULT_VIEWS if v.panel == 'results'])
+
+
+def test_a_card_listing_carries_the_reads_the_plain_one_leaves_out(monkeypatch):
+    plain = _forced_listing(monkeypatch, 'expert')
+    grid = _forced_listing(monkeypatch, 'expert', card='grid')
+    by_plain = {v['id']: v for v in plain['views']}
+    assert 'read' not in by_plain['grid_code'] and by_plain['grid_code']['card'] == 'grid'
+    assert [r['tool'] for r in next(v for v in grid['views'] if v['id'] == 'grid_code')['read']] == [
+        'campus_get_study', 'gridspine_get_capacity', 'gridspine_get_connection_assessments']
+    assert 'shows' in next(v for v in grid['views'] if v['id'] == 'grid_code')

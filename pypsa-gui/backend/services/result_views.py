@@ -33,6 +33,7 @@ every card) have none.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal, Mapping
@@ -166,8 +167,9 @@ RESULT_VIEWS: tuple[ResultView, ...] = (
                (_r("campus_get_study"), _r("gridspine_get_capacity"),
                 _r("gridspine_get_connection_assessments")),
                claim_limits="A steady-state screen at the selected hours, not a compliance "
-                            "certificate. Campus rows exist only after a campus study run; the "
-                            "gridspine tables only for a planning-to-dynamics project.",
+                            "certificate. Campus rows exist only after a campus study run. A "
+                            "planning-to-dynamics project's tables come from gridspine_get_capacity "
+                            "and gridspine_get_connection_assessments (study projects only).",
                units="MW, MVA, Mvar, kV, %, pu",
                card="grid", sub_option="grid_code", card_tab="grid_code"),
     ResultView("electrical_design", _RESULTS, "electrical_design", "Electrical design",
@@ -335,6 +337,11 @@ def note_shown(session, results_tab: str | None) -> None:
         shown.append(results_tab)
 
 
+# Below harness/results.py's 4000-character tool-result cap, so the listing degrades by
+# its own rule (compact rows) and never by truncation.
+LISTING_BUDGET = 3600
+
+
 def list_result_views(exclude_shown: bool = False, card: str | None = None) -> dict:
     from fastapi import HTTPException
 
@@ -367,18 +374,32 @@ def list_result_views(exclude_shown: bool = False, card: str | None = None) -> d
         data, reason = _probe(v)
         # A results view's id is its tab id (ui_open_panel results_tab).
         row = {"id": v.view_id, "label": v.label_for(mode) or f"{v.label} (advanced)",
-               "data": data, "shown": v.tab in shown,
-               "read": [r.call() for r in v.reads]}
+               "data": data, "shown": v.tab in shown}
+        if v.card is not None:
+            row["card"] = v.card
+        # The reads and the one-line summary come with `card=`, so the plain listing keeps
+        # inside the tool-result cap (harness/results.py, 4000 chars) as views are added.
+        # A view that belongs to no card (Summary, Asset Detail) carries them itself.
+        if card is not None or v.card is None:
+            row["read"] = [r.call() for r in v.reads]
+            if data == "available" and v.tab not in shown:
+                row["shows"] = v.shows
         if v.verification == "displayed_data":
             row["verification"] = v.verification
         if reason:
             row["reason"] = reason
-        if data == "available" and v.tab not in shown:
-            row["shows"] = v.shows
         out.append(row)
     listing = {"status": "ok", "mode": mode, "shown": shown, "on_screen": on_screen, "views": out,
                "note": ("Statuses only, no values: call a view's read before you open its tab, "
-                        "and quote numbers from that read.")}
+                        "and quote numbers from that read." if card is not None else
+                        "Statuses only, no values. Call list_result_views(card=…) for a card's "
+                        "reads, then call a view's read before you open its tab and quote "
+                        "numbers from that read.")}
+    if card is None and len(json.dumps(listing)) > LISTING_BUDGET:
+        # Degrade explicitly rather than let the tool-result cap cut the listing.
+        listing["views"] = [{"id": r["id"], "data": r["data"], **({"card": r["card"]} if "card" in r else {})}
+                            for r in out]
+        listing["compact"] = True
     if card is not None:
         listing["card"] = card
     return listing

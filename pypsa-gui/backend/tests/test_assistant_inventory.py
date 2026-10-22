@@ -38,8 +38,9 @@ def test_written_inventory_is_complete_and_explicit_about_unverified_behavior(tm
     assert data['slide_panels_not_in_tool_enum'] == []
     assert {t['id'] for t in data['result_tabs']} >= {'summary', 'adequacy', 'fmea', 'loadflow', 'investment'}
     # 19 panels: Economics in Expert added 'economics' (plan 2026-10-14-economics-in-expert.md).
-    # 17 result tabs: M3 added 'summary'; site commercial UX added 'flows' and 'loadshape'.
-    assert len(data['result_tabs']) == 17 and len(data['slide_panels']) == 23
+    # One tab per registry view with a tab, so each slice that adds a view needs no bump here.
+    from services import result_views as rv
+    assert len(data['result_tabs']) == len([v for v in rv.RESULT_VIEWS if v.panel == 'results']) and len(data['slide_panels']) == 23
     assert 'pending' in data['status']
 
 
