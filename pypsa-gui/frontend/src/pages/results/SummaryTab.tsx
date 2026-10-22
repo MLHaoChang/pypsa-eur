@@ -18,9 +18,16 @@ import {
   type EmissionsPayload, type LostLoadPayload, type ReserveMarginSummary,
 } from './summary'
 import type { AdequacyReportPayload } from './adequacy'
+import { CARD_GROUPS, type CardGroupId } from './groups'
+import { freshnessOf } from './GroupHeader'
+import { StatePill } from '../../components/ResultState'
+import { AddCardToScope } from '../../components/flowScope/ScopeCards'
+import { useFlowScope } from '../../components/flowScope/useFlowScope'
+import { inScope, type ScopeCardId } from '../../api/flow'
+import type { SimulationStatus } from '../../api/types'
 
 /** The Results tabs a card links to. */
-export type SummaryLink = 'capex' | 'emissions' | 'lostload' | 'adequacy' | 'economics'
+export type SummaryLink = 'capex' | 'emissions' | 'lostload' | 'adequacy' | 'economics' | 'loadflow' | 'investment'
 
 const MAX_CAPACITY_ROWS = 6
 
@@ -88,11 +95,16 @@ function Absent({ children }: { children: ReactNode }) {
   return <p className="text-[11px] text-muted italic">{children}</p>
 }
 
-export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) => void }) {
+export default function SummaryTab({ onOpenTab, onOpenGroup }: {
+  onOpenTab: (t: SummaryLink) => void
+  /** A card with no tab yet (Control, Hand-off) opens as a group. */
+  onOpenGroup?: (g: CardGroupId) => void
+}) {
   const project = useUIStore(s => s.currentProject)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
   const requestIoModal = useUIStore(s => s.requestIoModal)
   const { selectedPeriod } = useResultsFilter()
+  const { scope: flowScope, isSuccess: scopeRead } = useFlowScope()
   const { data: status } = useQuery({ queryKey: nk(project, 'simulationStatus'), queryFn: simulationApi.getStatus })
   const { data: cost } = useQuery({ queryKey: nk(project, 'results', 'cost_breakdown'), queryFn: resultsApi.getCostBreakdown })
   const { data: emissions } = useQuery({ queryKey: nk(project, 'results', 'emissions'), queryFn: resultsApi.getEmissions })
@@ -136,6 +148,17 @@ export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) 
           <span>Showing the {scope}</span>
         </div>
       )}
+      <CardRows
+        status={status} onOpenTab={onOpenTab} onOpenGroup={onOpenGroup}
+        isIn={card => !scopeRead || inScope(flowScope, card)}
+        headline={{
+          capacity: c ? `${fmtCurrency(c.total)} a year${ll && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
+          reliability: target
+            ? `${fmtEnergy(target.target.system.achieved_ens_mwh)} unserved of ${fmtEnergy(target.target.system.cap_mwh)} allowed`
+            : rm ? `Reserve margin ${rm.text}` : null,
+        }}
+        openReports={() => setSlidePanel('reports')}
+      />
       <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(240px,1fr))]">
         <Card title="Cost" testId="summary-cost" link="capex" linkLabel="Capacity Expansion" onOpen={onOpenTab}
           hint="From /results/cost_breakdown (n.statistics(): annualised capital cost with fixed O&M, plus operating cost). Shed load is not included; see Adequacy.">
@@ -227,6 +250,70 @@ export default function SummaryTab({ onOpenTab }: { onOpenTab: (t: SummaryLink) 
           Export <ArrowRight size={11} />
         </button>
       </div>
+    </div>
+  )
+}
+
+// One row per card in scope (card-workspaces.md §4.1): its name, a headline
+// when the solve gave one, its state, and "Open ›". Cards outside the scope
+// sit under "Not in scope" with "Add" (W4a). The headlines the solve cannot
+// give yet (grid, control, commercial) say where to look instead.
+const ROW_OPEN: Partial<Record<CardGroupId, SummaryLink>> = {
+  capacity: 'capex', grid: 'loadflow', reliability: 'adequacy', commercial: 'investment',
+}
+const ROW_HINT: Partial<Record<CardGroupId, string>> = {
+  grid: 'Line loading and voltages are on the Load Flow tab.',
+  control: 'No control results yet.',
+  commercial: 'NPV and IRR are on the Investment case tab.',
+  handoff: 'Reports and exports.',
+}
+
+function CardRows({ status, onOpenTab, onOpenGroup, isIn, headline, openReports }: {
+  status: SimulationStatus | undefined
+  onOpenTab: (t: SummaryLink) => void
+  onOpenGroup?: (g: CardGroupId) => void
+  isIn: (card: ScopeCardId) => boolean
+  headline: Partial<Record<CardGroupId, string | null>>
+  openReports: () => void
+}) {
+  const cards = CARD_GROUPS.filter(g => g.id !== 'summary')
+  const inRows = cards.filter(g => isIn(g.id as ScopeCardId))
+  const outRows = cards.filter(g => !isIn(g.id as ScopeCardId))
+  const fresh = freshnessOf(status)
+  return (
+    <div data-testid="summary-card-rows" className="rounded-[10px] border border-border bg-bg-2 px-4 py-2">
+      <ul className="divide-y divide-border">
+        {inRows.map(g => {
+          const link = ROW_OPEN[g.id]
+          const open = () => (g.id === 'handoff' ? openReports()
+            : link ? onOpenTab(link) : onOpenGroup?.(g.id))
+          const hasResults = g.id === 'capacity' || g.id === 'grid' || g.id === 'reliability'
+          return (
+            <li key={g.id} data-testid={`summary-row-${g.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5">
+              <span className="w-44 shrink-0 text-[12px] font-semibold text-text">{g.label}</span>
+              <span className="min-w-0 flex-1 text-[11px] text-muted">{headline[g.id] ?? ROW_HINT[g.id] ?? ''}</span>
+              {hasResults && fresh !== 'fresh' && <StatePill state={fresh} />}
+              <button type="button" onClick={open} data-testid={`summary-row-open-${g.id}`}
+                className="text-[10.5px] text-accent hover:underline inline-flex items-center gap-1">
+                Open <ArrowRight size={10} />
+              </button>
+            </li>
+          )
+        })}
+      </ul>
+      {outRows.length > 0 && (
+        <div data-testid="summary-not-in-scope" className="mt-1 border-t border-border pt-1.5 text-[11px] text-muted">
+          <span className="font-semibold">Not in scope</span>
+          <ul>
+            {outRows.map(g => (
+              <li key={g.id} data-testid={`summary-out-${g.id}`} className="flex items-center gap-3 py-0.5">
+                <span className="w-44 shrink-0">{g.label}</span>
+                <AddCardToScope card={g.id as ScopeCardId} testId={`summary-out-add-${g.id}`} />
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }
