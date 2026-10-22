@@ -25,8 +25,10 @@ export interface EditCardRow {
   readback?: Scalar
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
-  /** The table cell the value came from (apply_equipment_mapping). */
-  source?: { filename?: string; sheet: string; cell: string; raw: Scalar; raw_unit: string; formula?: boolean }
+  /** Where the value came from: a table cell (apply_equipment_mapping), or a PDF page
+   *  and the raw quote the server read it from (apply_document_values). */
+  source?: { filename?: string; sheet?: string; cell?: string; page?: number; quote?: string
+    raw: Scalar; raw_unit: string; formula?: boolean }
   /** A cost's stated money basis. */
   money?: { currency: string; money_year: number }
 }
@@ -85,6 +87,12 @@ function show(value: Scalar | undefined, known = true): string {
   // The backend sends a non-finite number as its string ("inf"): an unbounded value.
   if (value === 'inf' || value === '-inf' || value === Infinity || value === -Infinity) return 'no limit'
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
+}
+
+/** A quote as the card shows it: at most QUOTE_SHOWN characters, the rest in the tooltip. */
+const QUOTE_SHOWN = 60
+function clip(quote: string): string {
+  return quote.length > QUOTE_SHOWN ? `${quote.slice(0, QUOTE_SHOWN - 1).trimEnd()}\u2026` : quote
 }
 
 /** A value in its display unit, rounded for reading (the stored value stays in the small line). */
@@ -162,8 +170,12 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                       {r.target.panel ? 'Show in its panel' : 'Show in Properties'}
                     </button>
                   )}
-                  {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source">
-                    {[r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell]
+                  {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source"
+                    title={r.source.quote}>
+                    {(r.source.page != null
+                      ? [r.source.filename, r.source.quote
+                          ? `p. ${r.source.page} \u00b7 \u201c${clip(r.source.quote)}\u201d` : `p. ${r.source.page}`]
+                      : [r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell])
                       .filter(Boolean).join(' \u203a ')}{' '}
                     ({[show(r.source.raw), r.source.raw_unit].filter(Boolean).join(' ')}{r.source.formula ? ', saved formula value' : ''})
                   </span>}
