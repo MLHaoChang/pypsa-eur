@@ -809,11 +809,14 @@ def test_a_cost_tag_of_the_wrong_type_is_refused_naming_the_asset_only(meta):
 
 
 def test_a_meta_that_is_no_record_is_refused():
+    """It states no money year, so it is the money refusal, as before 02
+    (`test_a_money_year_refusal_names_data_not_exception_text`); no summary."""
     import routers.results as R
 
     a = {**_asset(), "meta": SECRET}
     src = R._ic_campus_from_response(_response([a]), None, unsaved=False)
-    assert src.refusal == "campus_assets_invalid" and SECRET not in src.detail
+    assert src.refusal == "campus_assets_money_year_mismatch" and SECRET not in src.detail
+    assert src.summary is None and src.extras == ()
 
 
 def test_a_stale_or_refused_study_has_no_summary():

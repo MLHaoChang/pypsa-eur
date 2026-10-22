@@ -550,6 +550,9 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
     // The reason is the refusal's own line; this one says where to fix it.
     expect(screen.getByTestId('ic-error').textContent).toMatch(/in USD/)
     expect(line.textContent).not.toMatch(/in USD/)
+    // Two places, each named for what it fixes (UX: not one path).
+    expect(line.textContent).toBe("Fix the money: the asset library's costs in Grid connection › "
+                                  + "or the case's money year in Commercial & finance ›")
     fireEvent.click(within(line).getByRole('button', { name: 'Grid connection ›' }))
     expect(openPanel).toHaveBeenLastCalledWith('connection', 'campusElectrical')
     fireEvent.click(within(line).getByRole('button', { name: 'Commercial & finance ›' }))
@@ -572,7 +575,7 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
                        ['campus_needs_unresolved'])
     const note = screen.getByTestId('ic-campus-unresolved')
     expect(note.textContent).toMatch(
-      /^The grid study found no equipment for 2 needs, so this design does not meet the grid-code profile:/)
+      /^The grid study found no equipment for 2 needs, so by this screening the design does not meet the grid-code profile:/)
     expect(note.textContent).toContain('reactive: campus_voltage: 0.88 pu at MV')
     fireEvent.click(within(note).getByRole('button', { name: 'See Electrical design ›' }))
     expect(openPanel).toHaveBeenCalledWith('results', 'results')

@@ -279,8 +279,8 @@ function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload 
       ))}
       {n > 0 && (
         <div role="note" className="text-warn" data-testid="ic-campus-unresolved">
-          <p>The grid study found no equipment for {n === 1 ? '1 need' : `${n} needs`}, so this design
-            {' '}does not meet the grid-code profile:</p>
+          <p>The grid study found no equipment for {n === 1 ? '1 need' : `${n} needs`}, so by this
+            {' '}screening the design does not meet the grid-code profile:</p>
           <ul className="pl-3 list-disc">
             {c.unresolved.slice(0, MAX_NEEDS_LISTED).map((u, i) => <li key={i}>{u.need}: {u.reason}</li>)}
             {n > MAX_NEEDS_LISTED && <li>+{n - MAX_NEEDS_LISTED} more</li>}
@@ -472,7 +472,7 @@ export default function InvestmentCaseView() {
         {failure && <span className="text-danger" data-testid="ic-error">{failure}</span>}
         {campusLine && (
           <span className="text-warn" data-testid="ic-campus-refusal">{campusLine.text}
-            {campusLine.links.map(l => <span key={l.label}>{' '}<CampusLinkButton link={l} /></span>)}</span>
+            {campusLine.links.map(l => <span key={l.label}>{' '}{l.lead && `${l.lead} `}<CampusLinkButton link={l} /></span>)}</span>
         )}
         {blocked && <span className="text-warn" data-testid="ic-blocked">Blocked: {blocked}</span>}
       </div>

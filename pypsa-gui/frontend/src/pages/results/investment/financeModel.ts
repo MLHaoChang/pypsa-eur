@@ -752,7 +752,11 @@ export function campusEquipment(report: InvestmentCaseReportPayload | null | und
 
 /** Where a campus line sends the user: a flow section's panel, opened with
  *  `openPanel` (mode-aware); the label ends in "›" (review-ux.md). */
-export interface CampusLink { label: string; section: FlowSectionId; panel: string; resultsTab?: string }
+export interface CampusLink {
+  label: string; section: FlowSectionId; panel: string; resultsTab?: string
+  /** Words before the link: what that panel fixes. */
+  lead?: string
+}
 
 /** What a campus study stops, with where the user fixes it. */
 export interface CampusRefusal { text: string; links: CampusLink[] }
@@ -767,9 +771,11 @@ export const CAMPUS_REFUSALS: Record<string, CampusRefusal> = {
     links: [{ ...GRID_STUDY, label: 'Run the grid study again in Grid study ›' }],
   },
   campus_assets_money_year_mismatch: {
-    text: 'Fix the money in',
-    links: [{ label: 'Grid connection ›', section: 'connection', panel: 'campusElectrical' },
-            { label: 'Commercial & finance ›', section: 'commercial', panel: 'economics' }],
+    text: 'Fix the money:',
+    links: [{ lead: "the asset library's costs in", label: 'Grid connection ›', section: 'connection',
+              panel: 'campusElectrical' },
+            { lead: "or the case's money year in", label: 'Commercial & finance ›', section: 'commercial',
+              panel: 'economics' }],
   },
 }
 
