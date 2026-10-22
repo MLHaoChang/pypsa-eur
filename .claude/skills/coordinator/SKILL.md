@@ -105,7 +105,7 @@ Merge one PR at a time:
 1. Start from a session's `premerge ok <sha>` report. Run `scripts/coord/premerge.sh <pr>`; it covers conflicts, overlap, the semantic tests on a trial merge, template sync and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
    - On "TEMPLATE NOT UPDATED", ask the session to port the change to `templates/agent-coordination/`.
    - When the change is specific to this project, rerun with `PREMERGE_TEMPLATE_SYNC=skip` instead and log why.
-2. For gridspine and IC engine changes, get the gatekeeper's OK (session_01Fz66v1SpJnjGHky1RbUuqC) for that same SHA, recorded in the state file.
+2. For gridspine and IC engine changes, get the gatekeeper's OK (`docs/agents/coordinator.md`) for that same SHA, recorded in the state file.
    - For a PR that changes UI, also get the UX reviewer's OK (`docs/agents/coordinator.md`) for that same SHA. The reviewer checks it against the approved project workflow (`.scratch/project-workflow/design.md`). When a PR needs both OKs, both must name the same SHA. A clean master merge carries an OK when merge-tree equals the head tree.
 3. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged.
 4. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.

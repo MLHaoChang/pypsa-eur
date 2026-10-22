@@ -1,0 +1,696 @@
+{
+ "eh_ammonia_staged": {
+  "Generator:solar_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_park": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_farm": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Link:electrolyser": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Link:electrolyser_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:electrolyser_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:electrolyser_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:haber_bosch": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "StorageUnit:bess_new_2027": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2030": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2035": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:site_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Store:h2_storage": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 668.5021377,
+   "lifetime": 30.0,
+   "overnight_cost": 60046.9
+  },
+  "Store:nh3_tank": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 4.236512,
+   "lifetime": 20.0,
+   "overnight_cost": 211.8256
+  }
+ },
+ "eh_datacenter": {
+  "Generator:genset_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ },
+ "eh_datacenter_staged": {
+  "Generator:genset_1": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:genset_2": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:genset_3": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:genset_4": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:genset_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "Generator:genset_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "Generator:genset_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "Generator:rooftop_pv": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Link:site_transformer": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "StorageUnit:bess_new_2027": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2030": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2035": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:ups_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  }
+ },
+ "eh_h2_hub": {
+  "Generator:solar_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:wind_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Link:fuel_cell": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 36734.585,
+   "lifetime": 10.0,
+   "overnight_cost": 734691.7
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 128210.943825906,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ },
+ "eh_h2_hub_staged": {
+  "Generator:solar_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:solar_park": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_farm": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Link:electrolyser": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Link:electrolyser_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:electrolyser_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:electrolyser_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 51299.25168,
+   "lifetime": 25.0,
+   "overnight_cost": 1282481.292
+  },
+  "Link:fuel_cell": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 36734.585,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "StorageUnit:bess_new_2027": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2030": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2035": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:site_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Store:h2_storage": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  }
+ },
+ "eh_ipp_hybrid": {
+  "Generator:pv_plant": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:wind_farm": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "StorageUnit:bess": {
+   "capital_cost": 63042.661385775,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ },
+ "eh_microgrid": {
+  "Generator:diesel_1": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_2": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_3": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11284.985715,
+   "lifetime": 25.0,
+   "overnight_cost": 458180.5
+  },
+  "Generator:pv_plant": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_turbines": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Link:hospital_feeder": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:island_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  }
+ },
+ "eh_microgrid_staged": {
+  "Generator:diesel_1": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_2": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_3": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:diesel_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11284.985715,
+   "lifetime": 25.0,
+   "overnight_cost": 458180.5
+  },
+  "Generator:diesel_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11284.985715,
+   "lifetime": 25.0,
+   "overnight_cost": 458180.5
+  },
+  "Generator:diesel_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11284.985715,
+   "lifetime": 25.0,
+   "overnight_cost": 458180.5
+  },
+  "Generator:pv_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:pv_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:pv_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 11944.7202245,
+   "lifetime": 40.0,
+   "overnight_cost": 482478.5
+  },
+  "Generator:pv_plant": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Generator:wind_new_2027": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2030": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_new_2035": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 16830.6828853,
+   "lifetime": 30.0,
+   "overnight_cost": 1383305.9
+  },
+  "Generator:wind_turbines": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "Link:hospital_feeder": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  },
+  "StorageUnit:bess_new_2027": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2030": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:bess_new_2035": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:island_battery": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 0.0,
+   "lifetime": Infinity,
+   "overnight_cost": 0.0
+  }
+ },
+ "redundancy:n1_conversion": {
+  "Generator:genset_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "Link:eh_spare_conversion": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 69795.7115,
+   "lifetime": 10.0,
+   "overnight_cost": 1395914.23
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ },
+ "redundancy:n1_generation": {
+  "Generator:eh_spare_gen": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "Generator:genset_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ },
+ "redundancy:parallel_storage@2": {
+  "Generator:genset_new": {
+   "capital_cost": 0.0,
+   "discount_rate": 0.07,
+   "fom_cost": 10345.9222455,
+   "lifetime": 25.0,
+   "overnight_cost": 581394.9
+  },
+  "StorageUnit:bess_new": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  },
+  "StorageUnit:eh_spare_storage": {
+   "capital_cost": 95626.802605841,
+   "discount_rate": 0.07,
+   "fom_cost": 722.0066625,
+   "lifetime": 25.0,
+   "overnight_cost": null
+  }
+ }
+}

@@ -23,7 +23,7 @@ import pandas as pd
 TID = "eh_ipp_hybrid"
 YEAR = 2030
 #: The defaults-pack version the candidates are priced from.
-PACK_VERSION = "2026-10-20"
+PACK_VERSION = "2026-10-22"
 
 # ── The plant and the connection (owner Q-IPP2 = A, Q-IPP3 = A) ────────────
 WIND_MW = 60.0

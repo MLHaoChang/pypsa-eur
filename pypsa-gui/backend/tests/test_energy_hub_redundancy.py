@@ -425,7 +425,7 @@ def test_scenario_costs_name_the_defaults_pack():
     n = _network()
     for sid in ("n1_generation", "parallel_storage", "n1_conversion"):
         undo, mut = R.apply_redundancy_scenario(n, sid)
-        assert mut["cost_basis"] == "defaults_pack:2026-10-13" == R.REDUNDANCY_COST_BASIS, sid
+        assert mut["cost_basis"] == "defaults_pack:2026-10-22" == R.REDUNDANCY_COST_BASIS, sid
         undo()
 
 

@@ -202,6 +202,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-07/manifest.json",
     "services/library/defaults_pack/versions/2026-10-13/manifest.json",
     "services/library/defaults_pack/versions/2026-10-20/manifest.json",
+    # GS-2b typed cost units: the first typed EU version.
+    "services/library/defaults_pack/versions/2026-10-22/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",
@@ -209,6 +211,9 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-21+ca_federal/manifest.json",
     "services/library/defaults_pack/versions/2026-10-21+uk/manifest.json",
     "services/library/defaults_pack/versions/2026-10-21+us_federal/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-22+ca_federal/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-22+uk/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-22+us_federal/manifest.json",
     # The EU cost references (GS-EU): `europe_reference._DATA_FILE` = the module's
     # sibling `reference_data/`; the reader refuses to run without its pinned bytes.
     "services/library/reference_data/eu-dea-2026-08.json",

@@ -3644,6 +3644,24 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
+# Generate defaults for all (TS UI, plan D): one review list over every
+# family's default; apply-all writes the chosen rows under one undo step.
+
+
+def preview_default_series(project_id: str, replace_generated: bool = False,
+                           peak_sized: list | None = None) -> dict:
+    from routers.profiles import DefaultsPreviewRequest, preview_default_series as _h
+    body = DefaultsPreviewRequest(replace_generated=replace_generated,
+                                  peak_sized=list(peak_sized or []))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def apply_default_series(project_id: str, job_ids: list) -> dict:
+    from routers.profiles import DefaultsApplyRequest, apply_default_series as _h
+    body = DefaultsApplyRequest(job_ids=list(job_ids))
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
 # Load profiles (time-series generators ticket 01): the archetype catalogue and
 # synchronous generation into the same pending store; apply is the tool above.
 
@@ -7777,6 +7795,8 @@ DISPATCHERS: dict[str, Any] = {
     "list_pending_profiles": list_pending_profiles,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
+    "preview_default_series": preview_default_series,
+    "apply_default_series": apply_default_series,
     "list_load_profile_archetypes": list_load_profile_archetypes,
     "generate_load_profile": generate_load_profile,
     "generate_availability_profile": generate_availability_profile,

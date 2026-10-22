@@ -29,7 +29,7 @@ HORIZON_END = 2045
 DISCOUNT_RATE = 0.07
 
 #: The defaults-pack version that carries the ammonia rows (``haber-bosch``, ``nh3-tank``, ``h2-tank``).
-AMMONIA_PACK_VERSION = "2026-10-20"
+AMMONIA_PACK_VERSION = "2026-10-22"
 
 # ── The numbers, each with its ledger row below ────────────────────────────
 #: NH3 energy content (MWh LHV per t): config.default.yaml:1015 (``MWh_NH3_per_tNH3``).
@@ -271,7 +271,10 @@ def _ledger(T) -> list[dict]:
          "value": "linearised (process_uc auto), then one binary check per period",
          "source": "assumed",
          "note": "the relaxation understates restarts, so the binary operational check runs after "
-                 "the plan and reports its per-period gap"},
+                 "the plan and reports its per-period gap. Measured on this plan (electrolysis priced "
+                 "per MW of electrical input, GS-2b, 2026-10-21): in 2027 no new electrolyser is "
+                 "built and the loop stays off for the whole 168 h week, so the 2027 binary check "
+                 "costs 41.2 M EUR against 6.9 M linearised"},
         {"item": "grey NH3 buy-in (__buy_nh3)", "value": f"{BUY_EUR_PER_MWH:g} EUR/MWh_NH3 "
                                                          f"(about {BUY_EUR_PER_MWH * MWH_PER_T:.0f} EUR/t)",
          "source": "sourced",

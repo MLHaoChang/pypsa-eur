@@ -17,11 +17,12 @@ example intends; the ones not yet available are dropped from the effective
 preset (a "not yet available" sub-option is never pre-selected) and are
 listed as ``intended`` so the card can show them.
 
-Availability (``AVAILABILITY``) follows modular-cards §1's last column, with
-every "per W0" entry not yet available until W0's separability matrix marks it
-supported (§11.1: unknown stays non-runnable). W0 owns flipping these rows.
-Once W0's ``services/run_separability.py`` lands, "available" derives from its
-``MATRIX`` (agreed with W0); until then the rows below are the source.
+Availability (``AVAILABILITY``) follows modular-cards §1's last column. A
+"per W0" entry is decided by W0's separability matrix
+(``services/run_separability.MATRIX``, through ``MATRIX_KIND``): not yet
+available until its kind's row says ``runnable_in_run`` (§11.1: a kind the
+matrix lacks stays non-runnable). The static row for such an entry is the
+reason shown while it is not yet available; the matrix flips the status.
 
 Pure data plus the sidecar's read and write; ``flow_service`` reads it.
 """
@@ -32,6 +33,8 @@ import pathlib
 import threading
 from dataclasses import dataclass
 from typing import Any, Final
+
+from services import run_separability
 
 SCOPE_FILE: Final = "flow_scope.json"
 SCOPE_VERSION: Final = 1
@@ -136,6 +139,16 @@ AVAILABILITY: Final[dict[tuple[str, str], tuple[str, str | None]]] = {
     ("handoff", "specialist_packet"): (AVAILABLE, None),
 }
 
+# The sub-options the separability matrix decides: (card, option) → the
+# matrix's run kind. Investment case has no kind in the matrix yet, so it reads
+# as unknown and stays not yet available until a row is added.
+MATRIX_KIND: Final[dict[tuple[str, str], str]] = {
+    ("capacity", "process_detail"): "process_detail",
+    ("control", "island_checks"): "control_checks",
+    ("control", "dynamics"): "dynamics",
+    ("commercial", "investment_case"): "investment_case",
+}
+
 # Reliability runs the EH study pipeline, which needs the template's pack.
 _TEMPLATE_ONLY: Final[frozenset[str]] = frozenset({"reliability"})
 
@@ -143,6 +156,9 @@ _TEMPLATE_ONLY: Final[frozenset[str]] = frozenset({"reliability"})
 def option_status(card: str, option: str, *, has_template: bool, no_load: bool = False) -> tuple[str, str | None]:
     """``(status, reason)`` of a sub-option for this project."""
     status, reason = AVAILABILITY[(card, option)]
+    kind = MATRIX_KIND.get((card, option))
+    if kind is not None and run_separability.runnable(kind):
+        status, reason = AVAILABLE, None
     if card in _TEMPLATE_ONLY and not has_template and status == AVAILABLE:
         return NOT_YET, _NEEDS_TEMPLATE
     if card in _TEMPLATE_ONLY and no_load and status == AVAILABLE:

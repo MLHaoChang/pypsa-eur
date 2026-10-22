@@ -371,8 +371,10 @@ export const networkApi = {
   uploadGeneratorProfile: (file: File, attribute = 'p_max_pu') => {
     const fd = new FormData()
     fd.append('file', file)
+    // The Time Series page shows a refusal itself: under the row, or as its
+    // own toast for a whole-tab upload.
     return client.post<{ matched: string[]; unmatched: string[]; rows: number; snapshot_count: number }>(
-      `/network/generators/upload_profile?attribute=${attribute}`, fd
+      `/network/generators/upload_profile?attribute=${attribute}`, fd, { skipErrorToast: true }
     ).then(r => r.data)
   },
 

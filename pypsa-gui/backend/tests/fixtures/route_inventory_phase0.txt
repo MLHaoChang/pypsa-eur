@@ -275,12 +275,17 @@ GET     /api/projects/{name}/members                                            
 PUT     /api/projects/{name}/members                                               -> put_project_members_api_projects__name__members_put
 POST    /api/projects/{name}/profiles/apply                                        -> apply_profile_api_projects__name__profiles_apply_post
 POST    /api/projects/{name}/profiles/availability/generate                        -> generate_availability_profiles_api_projects__name__profiles_availability_generate_post
+GET     /api/projects/{name}/profiles/current                                      -> get_current_series_api_projects__name__profiles_current_get
+POST    /api/projects/{name}/profiles/defaults/apply                               -> apply_default_series_api_projects__name__profiles_defaults_apply_post
+POST    /api/projects/{name}/profiles/defaults/preview                             -> preview_default_series_api_projects__name__profiles_defaults_preview_post
+POST    /api/projects/{name}/profiles/from-current                                 -> pending_from_current_api_projects__name__profiles_from_current_post
 POST    /api/projects/{name}/profiles/generate                                     -> generate_profiles_api_projects__name__profiles_generate_post
 POST    /api/projects/{name}/profiles/loads/generate                               -> generate_load_profiles_api_projects__name__profiles_loads_generate_post
 POST    /api/projects/{name}/profiles/loads/upload                                 -> upload_load_profiles_api_projects__name__profiles_loads_upload_post
 GET     /api/projects/{name}/profiles/pending                                      -> list_pending_profiles_api_projects__name__profiles_pending_get
 POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
+POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get
 POST    /api/projects/{name}/reports                                               -> create_report_api_projects__name__reports_post

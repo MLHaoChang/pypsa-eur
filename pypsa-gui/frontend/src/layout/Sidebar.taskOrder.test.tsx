@@ -70,9 +70,9 @@ const ORDER = ['setup', 'model', 'run', 'results', 'reports']
 // mocked project list is empty (unknown is not "not a study").
 const ROWS: Record<string, string[]> = {
   setup: ['Model Horizon', 'Carriers'],
-  model: ['Campus electrical', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
-  run: ['Solver Settings', 'Scenarios', 'Issues', 'Solve Queue'],
-  results: ['Results', 'Planning → dynamics', 'Reports'],
+  model: ['Grid connection', 'Loads', 'Add demand', 'Assets', 'Capacity Bounds', 'Time Series', 'Profile Studio', 'Economics'],
+  run: ['Solver Settings', 'Scenarios', 'Grid study', 'Issues', 'Solve Queue'],
+  results: ['Results', 'Grid study results', 'Planning → dynamics', 'Reports'],
   reports: ['Snapshots', 'Commercial library'],
 }
 
@@ -120,7 +120,7 @@ describe('M2 — Expert sidebar, expanded', () => {
     useDecisionStore.setState({ active: { project: 'Demo', studyId: 's1' } })
     await renderSidebar()
     expect(rowLabels(screen.getByTestId('sidebar-group-results')))
-      .toEqual(['Results', 'Decision study', 'Planning → dynamics', 'Reports'])
+      .toEqual(['Results', 'Grid study results', 'Decision study', 'Planning → dynamics', 'Reports'])
     cleanup()
     useDecisionStore.setState({ active: { project: 'Elsewhere', studyId: 's1' } })
     await renderSidebar()

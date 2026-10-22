@@ -18,6 +18,7 @@ TABLES = (
     emissions_calculations.NETWORK_METRICS, curtailment_calculations.METRICS,
     capacity_calculations.METRICS, storage_cycles_calculations.METRICS, energy_balance_calculations.METRICS,
     site_import_calculations.METRICS, investment_calculations.METRICS,
+    investment_calculations.LCOE_METRICS,
 )
 
 

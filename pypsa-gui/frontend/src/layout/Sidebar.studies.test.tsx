@@ -69,7 +69,7 @@ describe('Planning → dynamics row', () => {
   it('is hidden in a capacity-expansion project', async () => {
     vi.mocked(projectsApi.list).mockResolvedValue([project('Demo', 'capacity_expansion')])
     renderSidebar()
-    await screen.findByText('Campus electrical')
+    await screen.findByText('Grid connection')
     await waitFor(() => expect(screen.queryByText('Planning → dynamics')).toBeNull())
   })
 
@@ -82,7 +82,7 @@ describe('Planning → dynamics row', () => {
   it('stays when the open project is not in the list (unknown is not "not a study")', async () => {
     vi.mocked(projectsApi.list).mockResolvedValue([project('Other', 'capacity_expansion')])
     renderSidebar()
-    await screen.findByText('Campus electrical')
+    await screen.findByText('Grid connection')
     await waitFor(() => expect(vi.mocked(projectsApi.list)).toHaveBeenCalled())
     expect(screen.getByText('Planning → dynamics')).toBeTruthy()
   })

@@ -10,8 +10,14 @@ an annualised literal.
   * any other asset gets one `investment` part on PyPSA's own columns: `overnight_cost`, `lifetime`,
     `fom_cost` (fom_share × overnight) and `discount_rate`, with `capital_cost` 0 (PyPSA annuitises
     `overnight_cost` and would ignore it anyway);
-  * a Link's `p_nom` is its input, so a pack price per kW of output (the fuel cell) is scaled by the
-    Link's efficiency (PyPSA-Eur's convention).
+  * the overnight cost is scaled by the ratio from the component's nominal to what the row's
+    `capacity_basis` measures (`SCALING_RULES`, one table: component x basis -> scale or refusal).
+    A Link's `p_nom` is its input (`bus0`), so a price per kW of electrical OUTPUT (the fuel cell) is
+    scaled by the efficiency of the bus that carries the output, a price per kW of electrical INPUT
+    (electrolysis) is not, and a price per kW of PRODUCT (Haber-Bosch NH3) is scaled by the product
+    bus's efficiency. A pair that cannot be converted unambiguously raises `CapacityBasisMismatch`
+    before anything is written, never a guess;
+  * a version without typed cost units (`LEGACY_VERSIONS`) cannot price: `LegacyPackVersion`.
 
 Each TYPED field it writes is stamped `default` through `asset_schema.provenance.record` (source
 `<pack id>@<version>#<hash16>`, the row's source year, money year, range and illustrative flag); a
@@ -22,11 +28,102 @@ from __future__ import annotations
 
 from typing import Any
 
-from services.library.defaults_pack.loader import load_defaults_pack
+from services.library.defaults_pack.loader import (
+    LegacyPackVersion, load_defaults_pack, typed_successor)
 
 BATTERY = "battery"
 _CLASS = {"generators": "Generator", "storage_units": "StorageUnit", "links": "Link",
           "stores": "Store"}
+
+
+class CapacityBasisMismatch(ValueError):
+    """The component cannot be priced from this row: what its nominal measures does not convert
+    unambiguously to what the row's capacity measures."""
+
+
+#: Bus carriers that are electricity (a bus with any other carrier, e.g. "low voltage", is refused,
+#: which errs safe: a refusal, never a misprice), and the carrier of a product-priced technology's
+#: output.
+ELECTRIC_CARRIERS = frozenset({"AC", "DC", "electricity"})
+PRODUCT_CARRIER = {"haber-bosch": "NH3"}
+
+#: Component x row capacity basis -> how the overnight cost is scaled (or "refuse"). `_ac` / `_dc`
+#: bases follow `output_electric`. A battery is priced through its parts, not through this table.
+SCALING_RULES: dict[tuple[str, str], str] = {
+    ("generators", "output_electric"): "unit",
+    ("generators", "input_electric"): "refuse",
+    ("generators", "output_product"): "unit_on_product_bus",
+    ("generators", "storage_energy"): "refuse",
+    ("generators", "not_applicable"): "refuse",
+    ("storage_units", "output_electric"): "unit",
+    ("storage_units", "input_electric"): "refuse",
+    ("storage_units", "output_product"): "refuse",
+    ("storage_units", "storage_energy"): "refuse",
+    ("storage_units", "not_applicable"): "refuse",
+    ("stores", "output_electric"): "refuse",
+    ("stores", "input_electric"): "refuse",
+    ("stores", "output_product"): "refuse",
+    ("stores", "storage_energy"): "unit",
+    ("stores", "not_applicable"): "refuse",
+    ("links", "output_electric"): "link_output_electric",
+    ("links", "input_electric"): "link_input_electric",
+    ("links", "output_product"): "link_output_product",
+    ("links", "storage_energy"): "refuse",
+    ("links", "not_applicable"): "refuse",
+}
+
+
+def _rule_basis(capacity_basis: str) -> str:
+    return "output_electric" if capacity_basis.startswith("output_electric") else capacity_basis
+
+
+def _carrier(n, bus) -> str:
+    return str(n.buses.at[bus, "carrier"]) if bus in n.buses.index else ""
+
+
+def _link_outputs(n, df, name) -> list[tuple[str, float]]:
+    """(carrier, efficiency) of each bus a Link delivers to, bus1 upwards. A bus with an efficiency
+    of zero or less (e.g. `efficiency2` -0.3) is drawn from, an input, and never an output."""
+    out = []
+    for i in range(1, 10):
+        col = f"bus{i}"
+        if col not in df.columns or not str(df.at[name, col]).strip():
+            continue
+        eff = float(df.at[name, "efficiency" if i == 1 else f"efficiency{i}"])
+        if eff > 0:
+            out.append((_carrier(n, df.at[name, col]), eff))
+    return out
+
+
+def _scale_for(n, component: str, name: str, technology: str, capacity_basis: str) -> float:
+    df, basis = getattr(n, component), _rule_basis(capacity_basis)
+    rule = SCALING_RULES.get((component, basis), "refuse")
+
+    def refuse(why: str):
+        raise CapacityBasisMismatch(
+            f"{component[:-1]} {name!r} cannot be priced from {technology!r} "
+            f"(capacity_basis {capacity_basis}): {why}")
+
+    if rule == "unit":
+        return 1.0
+    if rule == "refuse":
+        refuse("the component's nominal does not measure what the row's capacity measures")
+    product = PRODUCT_CARRIER.get(technology)
+    if rule == "unit_on_product_bus":
+        if product is None or _carrier(n, df.at[name, "bus"]) != product:
+            refuse(f"its bus does not carry the product {product!r}")
+        return 1.0
+    if rule == "link_input_electric":
+        if _carrier(n, df.at[name, "bus0"]) not in ELECTRIC_CARRIERS:
+            refuse("bus0 is not an electricity bus, so p_nom is not the electrical input")
+        return 1.0
+    wanted = ELECTRIC_CARRIERS if rule == "link_output_electric" else {product}
+    if rule == "link_output_product" and product is None:
+        refuse("the pack names no product carrier for this technology")
+    hits = [eff for carrier, eff in _link_outputs(n, df, name) if carrier in wanted]
+    if len(hits) != 1:
+        refuse(f"{len(hits)} of its output buses carry {sorted(wanted)}; exactly one must")
+    return hits[0]
 
 
 def _refuse_unpriced(pack, key: str) -> None:
@@ -80,6 +177,22 @@ def _stamp(n, component_class: str, name: str, pack, entries: dict, *, money=())
                           fallback="eu_fallback" if fell_back else None)
 
 
+def _review(flag) -> bool:
+    """`connection_fee_review`: the row includes the connection or does not say."""
+    return flag is not False
+
+
+def _annotate(n, component_class: str, name: str, field: str, row) -> None:
+    """The row's typed cost units on the field's provenance: a row that includes the grid
+    connection (or does not say) is flagged, so a separately priced connection can be checked
+    against a double count (`connection_fee_review`)."""
+    from services.asset_schema import provenance
+
+    provenance.annotate(n, component_class, name, field, capacity_basis=row.capacity_basis,
+                        includes_grid_connection=row.includes_grid_connection,
+                        connection_fee_review=_review(row.includes_grid_connection))
+
+
 def _value(pack, key: str) -> float:
     for row in pack.cost_values:
         if row.key == key:
@@ -97,34 +210,47 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
     date; a money row the region lacks raises `MissingRegionalRow` before anything is written, the
     EU row is never substituted."""
     pack = load_defaults_pack(version, region=region)
+    if not pack.typed:
+        raise LegacyPackVersion(pack.version, typed_successor(pack.version, region))
     rate = float(pack.finance.discount_rate.value)
     df = getattr(n, component)
+    currency = pack.region_info.currency if pack.region_info is not None else pack.finance.currency
     stamp = {"technology": technology, "pack_id": pack.pack_id, "pack_version": pack.version,
-             "pack_hash": pack.hash, "discount_rate": rate}
+             "pack_hash": pack.hash, "discount_rate": rate, "currency": currency}
+    annual_key = ("annualised_cost_per_mw_yr" if pack.region_info is not None
+                  else "annualised_cost_eur_per_mw_yr")
     if technology == BATTERY:
         from services.asset_schema.derive import apply_parts
 
         parts = {f"inv_{part}_{field}": _value(pack, f"battery.{part}.{field}")
                  for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")}
+        rows = {part: _row(pack, f"battery.{part}.overnight") for part in ("power", "energy")}
         df.at[name, "discount_rate"] = rate
         apply_parts(n, "StorageUnit", name, parts, discount_rate=rate)
         _stamp(n, "StorageUnit", name, pack,
                {**{f"inv_{part}_{field}": (_row(pack, f"battery.{part}.{field}"), 1.0)
                    for part in ("power", "energy") for field in ("overnight", "lifetime", "fom_share")},
-                "discount_rate": (None, 1.0)})
+                "discount_rate": (None, 1.0)},
+               money=tuple(f"inv_{part}_overnight" for part in rows))
+        for part, row in rows.items():
+            _annotate(n, "StorageUnit", name, f"inv_{part}_overnight", row)
         capital, fom = float(df.at[name, "capital_cost"]), float(df.at[name, "fom_cost"])
+        flags = [r.includes_grid_connection for r in rows.values()]
         return {**stamp, **parts, "capital_cost": capital, "fom_cost": fom,
-                "annualised_cost_eur_per_mw_yr": capital + fom}
-    overnight = _value(pack, f"{technology}.investment.overnight")
-    scale = float(df.at[name, "efficiency"]) if component == "links" else 1.0
-    overnight *= scale
+                "money_year": rows["power"].money_year,
+                "capacity_basis": {part: r.capacity_basis for part, r in rows.items()},
+                "includes_grid_connection": flags[0] if len(set(map(str, flags))) == 1 else "unknown",
+                "connection_fee_review": any(_review(f) for f in flags),
+                annual_key: capital + fom}
+    over_row = _row(pack, f"{technology}.investment.overnight")
+    scale = _scale_for(n, component, name, technology, over_row.capacity_basis)
+    overnight = _value(pack, f"{technology}.investment.overnight") * scale
     written = {"overnight_cost": overnight,
                "lifetime": _value(pack, f"{technology}.investment.lifetime"),
                "fom_cost": overnight * _value(pack, f"{technology}.investment.fom_share"),
                "discount_rate": rate, "capital_cost": 0.0}
     for col, v in written.items():
         df.at[name, col] = v
-    over_row = _row(pack, f"{technology}.investment.overnight")
     _stamp(n, _CLASS.get(component, component), name, pack,
            {"overnight_cost": (over_row, scale),
             "lifetime": (_row(pack, f"{technology}.investment.lifetime"), 1.0),
@@ -132,14 +258,16 @@ def price_from_pack(n, component: str, name: str, technology: str, *,
             "fom_cost": (_row(pack, f"{technology}.investment.fom_share"), overnight),
             "discount_rate": (None, 1.0)},   # capital_cost: derived on every class
            money=("overnight_cost", "fom_cost"))
+    _annotate(n, _CLASS.get(component, component), name, "overnight_cost", over_row)
     from pypsa.costs import annuity as _annuity   # PyPSA's own; an IC package never imports the solver
 
     # The disclosure states what the LP charges per MW-year: `capital_cost` the annuity alone
     # (its meaning everywhere in the GUI; the column itself stays 0, PyPSA annuitises
-    # `overnight_cost`), `fom_cost` beside it, and their sum.
+    # `overnight_cost`), `fom_cost` beside it, and their sum. A regional sum is in the region's
+    # money, not EUR.
     annuity = overnight * _annuity(rate, written["lifetime"])
-    if pack.region_info is not None:           # a regional sum is in the region's money, not EUR
-        return {**stamp, "currency": pack.region_info.currency, **written, "capital_cost": annuity,
-                "annualised_cost_per_mw_yr": annuity + written["fom_cost"]}
-    return {**stamp, **written, "capital_cost": annuity,
-            "annualised_cost_eur_per_mw_yr": annuity + written["fom_cost"]}
+    return {**stamp, **written, "capital_cost": annuity, "scale": scale,
+            "money_year": over_row.money_year, "capacity_basis": over_row.capacity_basis,
+            "includes_grid_connection": over_row.includes_grid_connection,
+            "connection_fee_review": _review(over_row.includes_grid_connection),
+            annual_key: annuity + written["fom_cost"]}

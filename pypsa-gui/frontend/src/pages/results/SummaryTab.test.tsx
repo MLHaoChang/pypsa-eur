@@ -6,6 +6,10 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { ResultsFilterProvider } from './filterContext'
+import type { FlowScopeRegistry } from '../../api/flow'
+
+const flowApi = vi.hoisted(() => ({ getFlowScope: vi.fn() }))
+vi.mock('../../api/flow', async (orig) => ({ ...(await orig<typeof import('../../api/flow')>()), getFlowScope: flowApi.getFlowScope }))
 
 const api = vi.hoisted(() => ({
   getCostBreakdown: vi.fn(), getEmissions: vi.fn(), getLostLoad: vi.fn(), getReserveMargin: vi.fn(),
@@ -147,5 +151,30 @@ describe('the Summary hands on (UX-flow #25)', () => {
     expect(useUIStore.getState().ioModalRequest).toBe('export')
     fireEvent.click(screen.getByTestId('summary-open-reports'))
     expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+  })
+})
+
+// W10 R1 (card-workspaces.md §4.1): one row per card in scope; the others sit
+// under "Not in scope" with "Add".
+describe('the Summary card rows (W10 R1)', () => {
+  const ids = ['capacity', 'grid', 'control', 'reliability', 'commercial', 'handoff']
+  const registry = (on: string[]) => ({
+    cards: ids.map(id => ({ id, label: id, options: [{ id: 'a', label: 'a', status: 'available', reason: null }],
+      locked_reason: null, intended: [], sections: [] })),
+    scope: { version: 1, groups: on, options: Object.fromEntries(ids.map(id => [id, on.includes(id) ? ['a'] : []])),
+      source: 'project', preset_id: 'p' },
+    preset: { version: 1, groups: on, options: {} },
+  }) as unknown as FlowScopeRegistry
+
+  it('lists the cards in scope with a headline and Open, and the rest under Not in scope', async () => {
+    flowApi.getFlowScope.mockResolvedValue(registry(['capacity', 'reliability', 'handoff']))
+    const onOpen = renderTab()
+    const rows = await screen.findByTestId('summary-card-rows')
+    await screen.findByTestId('summary-out-grid')
+    expect(within(rows).getByTestId('summary-row-capacity').textContent).toContain('a year')
+    expect(within(rows).queryByTestId('summary-row-grid')).toBeNull()
+    expect(within(rows).getByTestId('summary-not-in-scope').textContent).toContain('AC power flow')
+    fireEvent.click(within(rows).getByTestId('summary-row-open-capacity'))
+    expect(onOpen).toHaveBeenCalledWith('capex')
   })
 })
