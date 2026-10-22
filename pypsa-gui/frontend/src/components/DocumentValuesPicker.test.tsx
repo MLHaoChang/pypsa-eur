@@ -30,9 +30,11 @@ vi.mock('../api/uploads', () => ({
     { file_id: 'p1', filename: 'datasheet.pdf', kind: 'user_upload' },
   ]),
 }))
+const openInPlace = vi.fn()
 vi.mock('../layout/flowNavigation', () => ({
   openSectionInExpert: (id: string) => openSection(id),
   openFlowTarget: (t: unknown) => openTarget(t),
+  openFlowTargetInPlace: (t: unknown) => openInPlace(t),
 }))
 
 const SOURCE = { upload_id: 'p1', filename: 'datasheet.pdf', sha256: 'b'.repeat(64), pages: 2, truncated: [] }
@@ -61,8 +63,8 @@ const RECEIPT = { version: 1, digest: CARD.digest, outcome: 'verified', rows: [{
   section: { id: 'assets', label: 'Assets', state: 'complete', changed: false } }
 
 beforeEach(() => {
-  for (const f of [previewAssets, applyAssets, previewCommercial, applyCommercial, openSection, openTarget]) f.mockReset()
-  useUIStore.setState({ currentProject: 'P' })
+  for (const f of [previewAssets, applyAssets, previewCommercial, applyCommercial, openSection, openTarget, openInPlace]) f.mockReset()
+  useUIStore.setState({ currentProject: 'P', uiMode: 'expert' })
   previewAssets.mockImplementation(async (b: { citations?: unknown[] }) => b.citations
     ? { document: { source: SOURCE }, fields: FIELDS, plan: PLAN, card: CARD }
     : { document: { source: SOURCE }, fields: FIELDS, candidates: CANDIDATES })
@@ -160,7 +162,8 @@ describe('DocumentValuesPicker, section 7', () => {
     await userEvent.click(within(peak).getAllByRole('radio')[0])
     expect(why()).toBe('State the currency of the picked values.')
     await userEvent.type(screen.getByLabelText('Currency'), 'EUR')
-    expect(screen.queryByLabelText('Money year')).toBeNull()  // a tariff rate has no money year
+    expect(screen.queryByLabelText('Money year')).toBeNull()
+    expect(within(peak).getByText('→ 72.50 EUR/MWh')).toBeTruthy()  // the stated currency, not a field id  // a tariff rate has no money year
     await userEvent.click(screen.getByTestId('document-values-preview-btn'))
     await waitFor(() => expect(previewCommercial).toHaveBeenLastCalledWith({ upload_id: 'p1',
       citations: [{ target: 'tariff', entity: 'energy', field: 'periods[peak].rate', page: 1,
@@ -173,6 +176,7 @@ describe('DocumentValuesPicker, section 7', () => {
     await userEvent.click(link)
     expect(onClose).toHaveBeenCalledTimes(1)  // the dialog does not stay over the library page
     expect(openTarget).toHaveBeenCalledWith(expect.objectContaining({ section: 'commercial', panel: 'library' }))
+    expect(openInPlace).not.toHaveBeenCalled()
 
     await userEvent.click(screen.getByTestId('document-values-apply'))
     expect(await screen.findByTestId('chat-edit-receipt')).toBeTruthy()
@@ -191,5 +195,17 @@ describe('DocumentValuesPicker, section 7', () => {
     expect(within(pinned).getByTestId('document-values-library-link')).toBeTruthy()
     expect(why()).toBe('This one comes from the Commercial library; update it there.')
     expect(screen.getByTestId('document-values-preview-btn')).toHaveProperty('disabled', true)
+  })
+
+  it('in Guided, "Update it there ›" opens the library in place, without switching to Expert', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    previewCommercial.mockResolvedValue({ document: { source: SOURCE }, targets: TARGETS, candidates: TARIFF_CANDIDATES })
+    const onClose = vi.fn()
+    render(<EquipmentTableImport commercial="ppa" onClose={onClose} onApplied={() => {}} />)
+    await userEvent.selectOptions(await screen.findByTestId('table-import-upload'), 'p1')
+    await userEvent.click(within(await screen.findByTestId('document-values-pinned')).getByTestId('document-values-library-link'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(openInPlace).toHaveBeenCalledWith(expect.objectContaining({ section: 'commercial', panel: 'library' }))
+    expect(openTarget).not.toHaveBeenCalled()
   })
 })

@@ -8,7 +8,8 @@ import type { MappableField } from '../api/equipmentTable'
 import type { EditCard } from './EditCard'
 import { networkApi } from '../api/network'
 import type { FlowSectionId, FlowTarget } from '../api/flow'
-import { openFlowTarget, openSectionInExpert } from '../layout/flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace, openSectionInExpert } from '../layout/flowNavigation'
+import { useUIStore } from '../store/uiStore'
 import { sectionMeta } from '../layout/flowSections'
 import { errorText } from '../utils/errorText'
 
@@ -82,11 +83,14 @@ function byPage(list: QuoteCandidate[]): [number, { c: QuoteCandidate; i: number
 
 const LIBRARY: FlowTarget = { section: 'commercial', panel: 'library', component: null, entity: null, field: null }
 
-/** A library-pinned tariff or contract is updated in the Commercial library. */
+/** A library-pinned tariff or contract is updated in the Commercial library: in Expert
+ *  its page, in Guided the field drawer over the card (openFlowTarget would switch to
+ *  Expert). */
 function LibraryLink({ onClose }: { onClose: () => void }) {
+  const guided = useUIStore(s => s.uiMode) === 'guided'
   return (
     <button type="button" data-testid="document-values-library-link" className="ml-1 text-accent hover:underline"
-      onClick={() => { onClose(); openFlowTarget(LIBRARY) }}>
+      onClick={() => { onClose(); (guided ? openFlowTargetInPlace : openFlowTarget)(LIBRARY) }}>
       Update it there ›
     </button>
   )
@@ -224,6 +228,9 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
     finally { setBusy(false) }
   }
 
+  // A money unit carries the stated currency ("EUR/MWh"), never a field id's "eur".
+  const shownUnit = (r: Row, unit: string) => r.money && currency.length === 3 && unit.startsWith('/') ? `${currency}${unit}` : unit
+
   const renderRow = (r: Row) => {
     const found = candidates[r.find]
     return (
@@ -238,7 +245,7 @@ export default function DocumentValuesPicker({ uploadId, mode, fileSection, onCl
                   onChange={() => { invalidate(); setPicks(prev => ({ ...prev, [r.key]: i })) }} />
                 <span className="flex-1">
                   <span className="text-text">“{c.quote}”</span>
-                  <span className="ml-1 font-mono text-muted">→ {c.value} {c.unit}</span>
+                  <span className="ml-1 font-mono text-muted">→ {c.value} {shownUnit(r, c.unit)}</span>
                 </span>
               </label>
             ))}
