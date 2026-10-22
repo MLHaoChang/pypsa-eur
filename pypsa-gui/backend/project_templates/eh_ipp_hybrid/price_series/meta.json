@@ -49,6 +49,38 @@
       "source": "illustrative (assumed)",
       "targets": [],
       "vintage_year": 2030
+    },
+    {
+      "description": "Observed 2024 hourly day-ahead prices, DE-LU (Bundesnetzagentur | SMARD.de). The data changed: re-dated to the 2030 calendar (hour of year kept, 29 Feb dropped, UTC kept, so weekdays shift by one day) and taken as 2030 real money (assumed). The price\u2013weather correlation not preserved: the prices are 2024's, the template's wind and PV profiles are synthetic. Fetched once by project_templates/fetch_ipp_market_series.py.",
+      "file": "smard_2024.csv",
+      "label": "Observed DE-LU day-ahead price 2024, re-dated to 2030",
+      "name": "ipp_da_smard_2024",
+      "notes": [
+        "currency:EUR",
+        "price_basis:real",
+        "currency_year:2030",
+        "region:DE-LU"
+      ],
+      "provider": "SMARD",
+      "source": "Bundesnetzagentur | SMARD.de (CC BY 4.0)",
+      "targets": [],
+      "vintage_year": 2024
+    },
+    {
+      "description": "Observed 2024 hourly day-ahead prices, DK1 (Source: Energinet (www.energidataservice.dk)). The data changed: re-dated to the 2030 calendar (hour of year kept, 29 Feb dropped, UTC kept, so weekdays shift by one day) and taken as 2030 real money (assumed). The price\u2013weather correlation not preserved: the prices are 2024's, the template's wind and PV profiles are synthetic. Fetched once by project_templates/fetch_ipp_market_series.py.",
+      "file": "dk1_2024.csv",
+      "label": "Observed DK1 day-ahead price 2024, re-dated to 2030",
+      "name": "ipp_da_dk1_2024",
+      "notes": [
+        "currency:EUR",
+        "price_basis:real",
+        "currency_year:2030",
+        "region:DK1"
+      ],
+      "provider": "Energinet",
+      "source": "Source: Energinet (www.energidataservice.dk) (CC BY 4.0)",
+      "targets": [],
+      "vintage_year": 2024
     }
   ]
 }

@@ -24,6 +24,10 @@ export interface EditCardRow {
   readback?: Scalar
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
+  /** The table cell the value came from (apply_equipment_mapping). */
+  source?: { filename?: string; sheet: string; cell: string; raw: Scalar; raw_unit: string; formula?: boolean }
+  /** A cost's stated money basis. */
+  money?: { currency: string; money_year: number }
 }
 
 export interface EditCard {
@@ -143,6 +147,14 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                       {r.target.panel ? 'Show in its panel' : 'Show in Properties'}
                     </button>
                   )}
+                  {r.source && <span className="block text-[10px] text-muted" data-testid="chat-edit-source">
+                    {[r.source.filename, r.source.sheet === '(csv)' ? null : r.source.sheet, r.source.cell]
+                      .filter(Boolean).join(' \u203a ')}{' '}
+                    ({show(r.source.raw)} {r.source.raw_unit}{r.source.formula ? ', saved formula value' : ''})
+                  </span>}
+                  {r.money && <span className="block text-[10px] text-muted" data-testid="chat-edit-money">
+                    {r.money.currency}, {r.money.money_year} money, not adjusted
+                  </span>}
                   {follows && <span className="block text-[10px]">
                     {r.role === 'derived' ? 'Follows from the change, read-only'
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}

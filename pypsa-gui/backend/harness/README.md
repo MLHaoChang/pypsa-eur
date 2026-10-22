@@ -271,6 +271,21 @@ component (`frontend/src/components/EditCard.tsx`).
   the card outside the digest (`section_state`); the receipt adds `section`
   with the state after the write and whether it `changed`. The browser's
   "Show in Properties" selects the component in place; the chat stays open.
+- **Equipment tables (data-to-model slice 1).** `apply_equipment_mapping`
+  writes a mapped CSV/XLSX table onto assets of one class
+  (`services/equipment_table.py`). Each typed row also carries `source`
+  (upload id, filename, full sha256, sheet, row, column, cell, raw value and
+  unit) and, for a cost, `money`; left-out cells ride as `note` rows with
+  `gap`. The digest binds each row's source cell but not its `raw` text.
+  Changed table bytes refuse (`source_changed`); an XLSX zip bomb or DOCTYPE
+  refuses before parsing (`table_unsafe`); time-series fields stay out
+  (`time_series_not_supported_here`). The live write holds the mutation lock
+  across the loop and writes exactly the card's typed cells, refusing
+  (`edit_preview_stale`) before the first write if any `old` moved. It loops
+  the native update per asset, so a native refusal part-way returns `partial`
+  with `written`, `failed` and `not_attempted`; one undo snapshot (the turn's,
+  or the HTTP middleware's) reverts the whole table. Provenance source:
+  `upload:<id>#<sha16> <sheet>!<cell>`.
 - **Prompt.** `prompts/edit_card.md` (tools-on): ambiguity asks one Choice of
   component and app-described field with unit and basis; never a derived field.
 - **Not covered here.** Checked-assurance turns keep their own effect path

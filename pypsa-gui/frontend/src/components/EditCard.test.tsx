@@ -127,3 +127,25 @@ it.each([['complete', 'complete'], ['warning', 'to check'], ['incomplete', 'to d
   render(<AssistantResultCard result={{ _edit_receipt: receipt }} disabled={false} onRequest={vi.fn()} />)
   expect(screen.getByTestId('chat-edit-section').textContent).toBe(`Assets & sizing: ${words}.`)
 })
+
+it('a table-sourced row names its file, sheet and cell, and a cost its money basis', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.csv', sheet: '(csv)', cell: 'B3', raw: '400', raw_unit: 'MVA' },
+    money: { currency: 'EUR', money_year: 2025 } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent).toBe('lines.csv \u203a B3 (400 MVA)')
+  expect(screen.getByTestId('chat-edit-money').textContent).toBe('EUR, 2025 money, not adjusted')
+})
+
+it('a workbook row names its sheet, and a formula cell says its value was saved', () => {
+  const pending = useChatStore.getState().pending!
+  const sourced = { ...typed, source: { filename: 'lines.xlsx', sheet: 'Lines', cell: 'B3', raw: 450, raw_unit: 'MVA',
+    formula: true } }
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_equipment_mapping',
+    edit_card: { ...card, tool: 'apply_equipment_mapping', rows: [sourced] } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-edit-source').textContent)
+    .toBe('lines.xlsx \u203a Lines \u203a B3 (450 MVA, saved formula value)')
+})

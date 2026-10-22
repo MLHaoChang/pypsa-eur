@@ -46,13 +46,13 @@ export default function RatesForm() {
           Discount rate (%)
           <input type="number" step="0.1" value={rate} onChange={e => setRate(e.target.value)} aria-label="Discount rate (%)"
             className="bg-bg border border-border rounded px-1.5 py-0.5 text-xs font-mono text-text" />
-          <span>Annualises every overnight cost over its lifetime; an asset's own rate overrides it.</span>
+          <span>Annualises each overnight cost over its lifetime with the annuity factor r(1+r)^L / ((1+r)^L−1); an asset's own rate overrides it. Typical: 5–10 %. A nominal rate needs the inflation rate beside it.</span>
         </label>
         <label className="flex flex-col gap-0.5 text-[10px] text-muted">
           Inflation rate (%)
           <input type="number" step="0.1" value={inflation} onChange={e => setInflation(e.target.value)} aria-label="Inflation rate (%)"
             className="bg-bg border border-border rounded px-1.5 py-0.5 text-xs font-mono text-text" />
-          <span>Set it with a nominal discount rate; leave 0 when costs are in real euros.</span>
+          <span>With a nominal discount rate, the real rate is (1+nominal)/(1+inflation)−1 (the Fisher relation), used for the cross-period present value. Leave 0 when costs are already in real euros. Typical: 1.5–3 %.</span>
         </label>
       </div>
       <div className="px-3 pb-3 flex items-center gap-2">

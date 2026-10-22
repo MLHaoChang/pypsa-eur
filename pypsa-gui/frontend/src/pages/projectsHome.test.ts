@@ -69,15 +69,26 @@ describe('sortProjectsByRecency', () => {
 })
 
 describe('countScenarios', () => {
-  it('counts only the direct children of the given root', () => {
+  it('counts the scenarios under a root, at any depth', () => {
     const projects = [
       project({ name: 'root' }),
       project({ name: 'a', parent_project: 'root' }),
       project({ name: 'b', parent_project: 'root' }),
+      project({ name: 'a1', parent_project: 'a' }),
+      project({ name: 'a1x', parent_project: 'a1' }),
       project({ name: 'c', parent_project: 'other' }),
     ]
-    expect(countScenarios(projects, 'root')).toBe(2)
+    expect(countScenarios(projects, 'root')).toBe(4)
+    expect(countScenarios(projects, 'a')).toBe(2)
     expect(countScenarios(projects, 'unknown')).toBe(0)
+  })
+
+  it('does not loop on a cycle in the parent links', () => {
+    const projects = [
+      project({ name: 'x', parent_project: 'y' }),
+      project({ name: 'y', parent_project: 'x' }),
+    ]
+    expect(countScenarios(projects, 'x')).toBe(1)
   })
 })
 

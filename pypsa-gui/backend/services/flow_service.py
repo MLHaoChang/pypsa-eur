@@ -50,7 +50,9 @@ the value, or the ledger row's value), so a changed value re-raises the
 warning. Errors cannot be acknowledged.
 
 eh_readiness copies the network; its result is cached per (network revision,
-VOLL, template hash, solver-config hash).
+VOLL, template hash, solver-config hash). The template is read with the user's
+own grid-readiness limits laid over its ledger (``grid_limits.with_user_limits``),
+so the template hash takes in that sidecar's hash.
 """
 from __future__ import annotations
 
@@ -765,7 +767,11 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     from services import study_state
     from services.pypsa_service import PyPSAService
 
-    template = read_template(project_dir)
+    from services.adequacy.grid_limits import with_user_limits
+
+    # The user's own grid-readiness limits (DC 03 slice 6) stand in for the
+    # ledger rows they set, and their hash joins the readiness key.
+    template = with_user_limits(read_template(project_dir), project_dir)
     body = _request_for(template) if template is not None else None
     islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
