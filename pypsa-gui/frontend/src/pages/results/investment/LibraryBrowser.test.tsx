@@ -44,6 +44,21 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
 describe('LibraryBrowser', () => {
+  it('opens the item a link names, at that version, once', async () => {
+    useUIStore.setState({ libraryFocus: { kind: 'tariff', id: 'nl', version: 1 } })
+    renderBrowser()
+    const view = await screen.findByTestId('lib-item-view')
+    expect((within(view).getByLabelText('Version of nl') as HTMLSelectElement).value).toBe('1')
+    expect(useUIStore.getState().libraryFocus).toBeNull()
+  })
+
+  it('shows the latest version when the linked one does not exist', async () => {
+    useUIStore.setState({ libraryFocus: { kind: 'tariff', id: 'nl', version: 9 } })
+    renderBrowser()
+    const view = await screen.findByTestId('lib-item-view')
+    expect((within(view).getByLabelText('Version of nl') as HTMLSelectElement).value).toBe('2')
+  })
+
   it('lists items and shows one with its versions and the project pin', async () => {
     const { container } = renderBrowser()
     fireEvent.click(await screen.findByRole('button', { name: 'nl' }))
