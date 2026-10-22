@@ -73,16 +73,30 @@ def _bus_moved(meta: dict, name: str, now: tuple[float, float] | None) -> bool:
     return abs(now[0] - then[0]) > BUS_MOVED_DEG or abs(now[1] - then[1]) > BUS_MOVED_DEG
 
 
-def unplaced_renewables(n) -> list[tuple[str, str]]:
+def _needs_no_location(ctx, n, name: str) -> bool:
+    """A profile that was not generated here (uploaded, or the network's own)
+    needs no weather point. Same stores as `_profile_state`, no stamp check."""
+    key = (*KEY, name)
+    if key in ctx.user_ts:
+        meta = ctx.user_ts_meta.get(key) or {}
+        return not meta or str(meta.get("provenance") or "").startswith("measured")
+    return name in n.generators_t.p_max_pu.columns
+
+
+def unplaced_renewables(n, ctx=None) -> list[tuple[str, str]]:
     """`(generator, bus)` for each wind/solar generator whose bus has no
-    location, by the same rule as the flow's `buses_placed`."""
+    location, by the same rule as the flow's `buses_placed`. With `ctx`, a
+    generator whose profile was not generated is left out."""
     out: list[tuple[str, str]] = []
     for name, gen in n.generators.iterrows():
         if technology_of(gen["carrier"]) is None:
             continue
         bus = str(gen["bus"] or "")
-        if _bus_coord(n, bus) is None:
-            out.append((str(name), bus))
+        if _bus_coord(n, bus) is not None:
+            continue
+        if ctx is not None and _needs_no_location(ctx, n, str(name)):
+            continue
+        out.append((str(name), bus))
     return out
 
 

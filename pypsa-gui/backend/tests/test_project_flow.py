@@ -218,6 +218,32 @@ def test_profile_location_many_generators_and_buses(client, site):
     assert "for s1 needs" in by_bus["B2"]
 
 
+def test_profile_location_skips_profiles_not_generated(client, site):
+    """A series the network carries (opening seeds the store from it) needs no
+    weather point, so no note."""
+    n = _unplaced_wind_site()
+    n.generators_t.p_max_pu["g1"] = 0.5
+    n.generators_t.p_max_pu["g2"] = 0.3
+    body = _flow(client, site(n))
+    assert "profile_location_missing" not in _codes(body, "profiles")
+
+
+def test_unplaced_renewables_by_profile_state():
+    from types import SimpleNamespace
+
+    from services.profile_gen.readiness import unplaced_renewables
+
+    n = _unplaced_wind_site()
+    n.add("Generator", "g3", bus="B1", carrier="wind", p_nom=1.0)
+    key = lambda g: ("generators", "p_max_pu", g)            # noqa: E731
+    ctx = SimpleNamespace(
+        user_ts={key("g1"): 1, key("g2"): 1},
+        user_ts_meta={key("g2"): {"provenance": "generated: era5"}})
+    assert unplaced_renewables(n) == [("g1", "B1"), ("g2", "B1"), ("g3", "B1")]
+    # g1: uploaded (no record) → skipped; g2: generated → still needs a point.
+    assert unplaced_renewables(n, ctx) == [("g2", "B1"), ("g3", "B1")]
+
+
 def test_profile_location_ignores_non_renewables(client, site):
     n = _site_network()
     n.add("Bus", "B1", x=0.0, y=0.0, carrier="AC")
