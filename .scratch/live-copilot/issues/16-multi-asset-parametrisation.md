@@ -4,6 +4,7 @@
 # LC-16 — parametrising several assets in one request
 
 Status: ready-for-agent inside LC-04, after the storage/line slice (OJ-05/06)
+Progress: Edit cards for bulk_update_components (one class) and solver config exist; no mixed-class card, relative/set changes, or other settings cards.
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-04 storage/line slice; LC-10 resolution ladder

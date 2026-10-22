@@ -1,6 +1,6 @@
 # P2: criticality tiers and lost-production value
 
-Status: needs-triage
+Status: done (#489, e6b4290a)
 Type: task
 Blocked by: 05
 Gated: **yes** (adequacy)

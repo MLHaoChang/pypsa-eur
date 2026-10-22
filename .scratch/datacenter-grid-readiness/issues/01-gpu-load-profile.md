@@ -1,6 +1,6 @@
 # GPU / AI-training load profile in the data-centre template
 
-Status: ready-for-agent
+Status: done (#421, 6196cb93)
 Type: task
 Blocked by: none
 Gated: yes (adequacy reads the profile)

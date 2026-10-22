@@ -1,6 +1,7 @@
 # UX-flow audit: one entry point, owning section, visible next step
 
 Status: ready-for-agent
+Progress: Audit document (26 findings) merged; the fix tickets it routes are not shown done.
 Type: audit, which routes into fix tickets
 Owner of the audit: UX reviewer. The coordinator routes each fix to its package.
 Source: owner decision **UX-flow**, 2026-10-21 16:2x CEST (`docs/agents/owner-decisions.md`).

@@ -1,6 +1,6 @@
 # Home card and artwork
 
-Status: needs-triage
+Status: done (#504, 8e2337fb)
 Type: task
 Blocked by: 03 (the card is "In development" until then); W2 places it
 Gated: UX

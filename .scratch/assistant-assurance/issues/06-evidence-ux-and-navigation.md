@@ -4,6 +4,7 @@
 # P5: evidence navigation and honest process UI
 
 Status: ready-for-agent
+Progress: Evidence card and navigation ACKs shipped; complete browser, device and accessibility journeys pending
 Type: task
 Blocked by: 03, 04, 05; live-voice issues 03/06 for exact historical UI
 

@@ -1,6 +1,6 @@
 # LC-04 — supported parameter edits and verified postconditions
 
-Status: ready-for-agent
+Status: done (#479, d327f645)
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and ordinary admission/confirmation

@@ -1,6 +1,7 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
 Status: ready-for-agent (spec decided 2026-10-14: `../mcp-spec.md` Part A, build step 2; step 1, the tier fallback, merged as PR #220)
+Progress: mcp_client.py slice 1 on master; slice 2 settings routes, panel section, PYPSA_GUI_MCP_KEY managed-key not found
 Type: research
 Blocked by: 08 (done), the MCP spec (done), PR #220 (done)
 

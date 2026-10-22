@@ -1,6 +1,6 @@
 # B1. Flow backbone: the section state endpoint
 
-Status: ready-for-agent
+Status: done (#434, 6acc89a7)
 Type: task
 Blocked by: #426 merged (this design)
 Gated: no engine change. Send the gatekeeper the plan first (steward "Before a plan"), because it reads `validation_service` and `services/adequacy/eh_readiness.py`. Touching `harness/catalogue.py` needs the coordinator's go.

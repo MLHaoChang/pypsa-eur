@@ -3,7 +3,7 @@
 
 # LC-09 (VS-1) — "show me the load flow results of the latest calculation"
 
-Status: ready-for-agent inside LC-03. Owner decision Q1 kept the Codex order:
+Status: done (#407, 3466328b)
 this slice is LC-03's first acceptance target (OJ-01), not a reordering.
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`

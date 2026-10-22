@@ -1,6 +1,6 @@
 # CP-06c — saved personal project restrictions
 
-Status: ready-for-human
+Status: done (#358, 87235780)
 Baseline: master `3f45c0e7d9ad66ee74e6bd918d655419152f3e8f` (#357)
 
 Add personal, saved-project restrictions through Access and approvals. The three

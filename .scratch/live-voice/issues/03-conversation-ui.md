@@ -1,6 +1,7 @@
 # Continuous voice UX and interruption
 
 Status: ready-for-agent
+Progress: Presence-led Live grid node shipped; no continuous media, real-device gates or speech transport; blocked on issue 01
 Type: task
 Blocked by: 02, 08, 09 (typed UI); 01, 11 (media/monitoring acceptance)
 

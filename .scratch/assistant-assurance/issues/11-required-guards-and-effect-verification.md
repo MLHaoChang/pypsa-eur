@@ -4,6 +4,7 @@
 # Required effect guards and independent completion verification
 
 Status: needs-triage
+Progress: Effect read-back for exact update_component only; general guards, untasked idempotency and task-resolution evidence pending
 Type: task
 Blocked by: reliability contract review; 01 for guard/receipt schemas; 04 for outcomes
 

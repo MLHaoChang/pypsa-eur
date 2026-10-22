@@ -1,6 +1,6 @@
 # The example's cases (base + 8)
 
-Status: needs-triage
+Status: done (#510, d97e42fa)
 Type: task
 Blocked by: 03; creation needs #448 S5
 Gated: told

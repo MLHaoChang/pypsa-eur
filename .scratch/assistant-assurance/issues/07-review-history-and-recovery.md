@@ -4,6 +4,7 @@
 # P6: bounded reviewer, approved history and recovery
 
 Status: ready-for-agent
+Progress: harness/reviewer.py and assurance_recovery.py shipped; general task and effect recovery pending
 Type: task
 Blocked by: 03, 06; live-voice issue 09 for durable restarts
 

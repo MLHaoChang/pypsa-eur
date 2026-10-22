@@ -1,6 +1,6 @@
 # A investment case: grey NH3 counterfactual
 
-Status: needs-triage
+Status: done (#459, 7cf85e13)
 Type: task
 Blocked by: 05
 Gated: **yes** (IC)

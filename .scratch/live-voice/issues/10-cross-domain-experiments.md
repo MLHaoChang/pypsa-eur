@@ -4,6 +4,7 @@
 # Typed cross-domain experimentation and resumable task advancement
 
 Status: ready-for-agent
+Progress: Network experiment persistence, prepare, compare, two-case admission shipped; commercial, reliability, GridSpine execution adapters and resume absent
 Type: task
 Blocked by: 02, 08, 09, 11
 

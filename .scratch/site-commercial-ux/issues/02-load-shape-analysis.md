@@ -1,6 +1,6 @@
 # Load Shape Analysis tab
 
-Status: ready-for-agent
+Status: done (#440, 59b2f92f)
 Type: task
 Blocked by: none (it can share the flows helper from 01 if that lands first)
 Gated: no

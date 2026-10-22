@@ -1,6 +1,6 @@
 # 18 — Confirmation decisions as durable, fail-closed events
 
-Status: ready-for-agent (done 2026-10-13: harness/approvals.py, fail-closed gate, revoked cards released at once)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: none
 

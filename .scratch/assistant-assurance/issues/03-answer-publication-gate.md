@@ -4,6 +4,7 @@
 # P2: private drafts and approved answer publication
 
 Status: ready-for-agent
+Progress: harness/publication.py strict answer gate and Check answers shipped; arbitrary-language completeness still pending
 Type: task
 Blocked by: 01, 02
 

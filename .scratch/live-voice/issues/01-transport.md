@@ -1,6 +1,7 @@
 # Hosted streaming speech transport and account proof
 
 Status: ready-for-agent
+Progress: Mocked STT/TTS contracts in harness/providers/live_media.py with test; no LiveKit, routes, session or live probe gate on master
 Type: task
 Blocked by: 02, 09 (integrated live acceptance; adapter development can start earlier)
 

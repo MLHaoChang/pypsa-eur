@@ -1,6 +1,6 @@
 # ESS / UPS / converter control presets
 
-Status: ready-for-agent
+Status: done (#422, b8228771)
 Type: task
 Blocked by: none
 Gated: yes (gridspine island schema)

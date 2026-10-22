@@ -3,7 +3,7 @@
 
 # Microgrid: GFM recommender is not_achievable at the Guided default k=3
 
-Status: ready-for-human
+Status: done (#332, 95f9d9ee)
 Type: bug
 Found by: Guided smoke re-run, 2026-10-16, master dc4e4b37
 

@@ -1,6 +1,7 @@
 # E1. Examples for any planning years
 
 Status: ready-for-agent
+Progress: E1a #540 and E1b #574 and #580 merged; E1c ammonia and E1d single-year and IPP templates lack planning_spec.
 Type: task
 Gated: yes, the engine gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC). Each slice needs its own OK on its head.
 Model tier: opus

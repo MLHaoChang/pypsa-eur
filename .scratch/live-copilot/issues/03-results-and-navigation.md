@@ -1,6 +1,7 @@
 # LC-03 — generic native evidence and navigation adapters
 
 Status: ready-for-agent
+Progress: Result-view registry #407, walk #410, retained load flow #416 merged; only load-flow family retained, LC-14 reach fixes open.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores

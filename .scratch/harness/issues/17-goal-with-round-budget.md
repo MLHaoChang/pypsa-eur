@@ -1,6 +1,6 @@
 # 17 — A goal with a round budget: bounded autonomous continuation
 
-Status: ready-for-agent (done 2026-10-14: goal on the session, rounds through admission, goal strip; Q17a/Q17b asked, built on the recommendations)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 06 (done)
 

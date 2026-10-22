@@ -3,7 +3,7 @@
 
 # LC-12 (VS-4) — finish "edit, relaunch, walk me through" across long jobs
 
-Status: ready-for-agent inside LC-05 scope (owner decision Q1); closes LC-05 with OJ-07/08/10
+Status: done (#542, d6fd19b2)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-03 and LC-04 closed; existing `start_task`, `wait_for_job`,

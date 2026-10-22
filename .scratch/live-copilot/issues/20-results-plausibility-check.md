@@ -4,6 +4,7 @@
 # LC-20 — "do these results make sense?"
 
 Status: ready-for-agent. Owner decision Q5 = A (2026-10-19): the first item
+Progress: Only interim rung (prompt chains pre-solve checks, says rules absent) merged; no native post-solve plausibility rule set or tool.
 after LC-05 closes, ahead of the other LC-06 work, with the interim rung
 (item 4) from LC-03 on.
 Type: task

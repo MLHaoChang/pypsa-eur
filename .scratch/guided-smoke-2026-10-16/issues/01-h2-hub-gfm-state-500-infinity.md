@@ -3,7 +3,7 @@
 
 # H2 hub: GET island/gfm-settings answers 500 (inf in the recommendation)
 
-Status: ready-for-human
+Status: done (#329, ef48c4cd)
 Type: bug
 Found by: Guided smoke re-run, 2026-10-16, master dc4e4b37
 

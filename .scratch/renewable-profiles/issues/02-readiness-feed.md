@@ -3,7 +3,7 @@
 
 # RP-02 — readiness feed for wind/solar generators
 
-Status: ready-for-agent
+Status: done (#603, 9a9d17ea)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: RP-01

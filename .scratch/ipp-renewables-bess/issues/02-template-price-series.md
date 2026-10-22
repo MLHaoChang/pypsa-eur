@@ -1,6 +1,6 @@
 # Template price series minted at create
 
-Status: needs-triage
+Status: done (#473, 6568b642)
 Type: task
 Blocked by: —
 Gated: told (Library write path; no LP change)

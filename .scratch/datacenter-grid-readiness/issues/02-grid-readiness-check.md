@@ -1,6 +1,6 @@
 # Grid-readiness check: a generic red-flag scorecard
 
-Status: needs-triage
+Status: done (#442, c7cb3ca6)
 Type: task
 Blocked by: 01 (envelope), 04 (presets). An MVP can ship against defaults first.
 Gated: yes (gridspine, adequacy)

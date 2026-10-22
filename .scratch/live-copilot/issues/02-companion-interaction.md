@@ -1,6 +1,7 @@
 # LC-02 — usable generic companion interaction
 
 Status: ready-for-agent
+Progress: Composer pointer (#369) and narrow layout (#370) merged; generic scope/plan/source UX still not delivered.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01 for resolved scope; browser layout repairs may land first

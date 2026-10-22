@@ -1,6 +1,6 @@
 # 12 — Vocabulary and docs
 
-Status: ready-for-agent (done for the phase-0 terms)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 01
 

@@ -1,6 +1,6 @@
 # 06 — `start_workflow` / `advance_workflow` tools and the per-turn addendum
 
-Status: ready-for-agent (done 2026-10-05, follow-up included: `workflow_state` frame, `/chat/history.workflow`, the panel's strip, `ui_context.workflow`)
+Status: done (05b94b51, no own PR)
 Type: task
 Blocked by: 03, 04
 

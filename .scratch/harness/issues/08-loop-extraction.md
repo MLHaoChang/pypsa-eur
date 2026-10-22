@@ -1,6 +1,6 @@
 # 08 — The turn loop, session, confirmation and persistence move into the harness
 
-Status: ready-for-agent (done 2026-10-06: the loop moved whole to `harness/loop.py`; `sse`, `fence`, `results`, `history`, `metrics`, `ratelimit`, `session`, `confirm`, `providers/wiring`, `stub`, `budget`, `compose`, `solver_bridge` extracted under the README's splitting rule; the turn body itself stays in `loop.py` by design)
+Status: done (e1adb0db, no own PR)
 Type: task
 Blocked by: 02, 06, 07
 

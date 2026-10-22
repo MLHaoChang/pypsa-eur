@@ -4,6 +4,7 @@
 # P3: verified action outcomes and real progress
 
 Status: ready-for-agent
+Progress: harness/effects.py covers only update_component static inputs; more operation and job mappings pending
 Type: task
 Blocked by: 01, 02; live-voice issue 11 for nonblocking jobs
 

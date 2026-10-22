@@ -1,6 +1,6 @@
 # Energy-flow Sankey and energy-flows export
 
-Status: ready-for-agent
+Status: done (#423, 1a9ca8d3)
 Type: task
 Blocked by: none
 Gated: no (post-processing of solved results; no LP change)
