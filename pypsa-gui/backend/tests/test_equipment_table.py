@@ -38,7 +38,9 @@ The manual-mapping form (PR-2), with the gatekeeper's PR-1 fold-ins:
 - ET-20 the preview gives the class's mappable fields, and no card while a cell needs
   a money basis or nothing would change;
 - ET-21 the in-lock check refuses a card whose `new` differs from the value written;
-- ET-22 the assistant's apply carries the digest of the card the user approved.
+- ET-22 the assistant's apply carries the digest of the card the user approved;
+- ET-23 through the real dispatch (turn loop, worker thread), the route receives the
+  digest of the card the user clicked, and the binding is gone after the turn.
 """
 from __future__ import annotations
 
@@ -569,3 +571,22 @@ def test_et22_the_chat_apply_carries_the_approved_digest(grid):
     with edit_card.approved(_card({k: v for k, v in args.items() if k != "source_sha256"})["digest"]):
         out = chat_tools.apply_equipment_mapping(**args)
     assert out["written"] == {"L1": {"s_nom": 500, "x": 10.5}, "L2": {"s_nom": 450, "x": 7.25}}
+
+
+def test_et23_the_real_dispatch_hands_the_clicked_card_digest_to_the_route(grid, monkeypatch):
+    from harness import edit_card
+    from routers import network_equipment_table as R
+
+    seen = []
+    real = R.apply_equipment_mapping
+
+    def spy(body, user=None):
+        seen.append(body.digest)
+        return real(body, user)
+
+    monkeypatch.setattr(R, "apply_equipment_mapping", spy)
+    _, args = _args(_csv(LINES))
+    cards, result, _ = _dispatch(grid, "apply_equipment_mapping", args)
+    assert seen == [cards[0]["edit_card"]["digest"]]
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert edit_card.approved_digest() is None  # reset after the handler

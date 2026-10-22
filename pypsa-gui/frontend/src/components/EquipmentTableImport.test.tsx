@@ -57,13 +57,16 @@ describe('EquipmentTableImport', () => {
     expect([...upload.querySelectorAll('option')].map(o => o.textContent)).toEqual(['Choose an upload…', 'lines.csv'])
     await userEvent.selectOptions(upload, 'u1')
     await waitFor(() => expect(preview).toHaveBeenCalledWith({ upload_id: 'u1', sheet: null, component_class: 'Line' }))
+    expect((await screen.findByTestId('table-import-why')).textContent).toBe('Pick a field for at least one column.')
 
     expect(screen.getByTestId('table-import-apply')).toHaveProperty('disabled', true)
     await userEvent.selectOptions(await screen.findByLabelText('Field for rating'), 's_nom')
     // The table's unit is the user's statement: never pre-filled, and no preview without it.
     expect((screen.getByLabelText('Unit for rating') as HTMLSelectElement).value).toBe('')
     expect(screen.getByTestId('table-import-preview-btn')).toHaveProperty('disabled', true)
+    expect(screen.getByTestId('table-import-why').textContent).toBe('Pick the unit of \u201crating\u201d in the table.')
     await userEvent.selectOptions(screen.getByLabelText('Unit for rating'), 'MVA')
+    expect(screen.getByTestId('table-import-why').textContent).toBe('Preview the changes first.')
     expect(screen.queryByTestId('table-import-money')).toBeNull()
     await userEvent.click(screen.getByTestId('table-import-preview-btn'))
     expect(preview).toHaveBeenLastCalledWith(expect.objectContaining({
@@ -90,6 +93,7 @@ describe('EquipmentTableImport', () => {
     expect(screen.getByTestId('table-import-money')).toBeTruthy()
     // Not assumed: the user states the table's currency.
     expect((screen.getByLabelText('Currency') as HTMLInputElement).value).toBe('')
+    expect(screen.getByTestId('table-import-why').textContent).toBe('Pick a currency and money year for the cost columns.')
     await userEvent.type(screen.getByLabelText('Currency'), 'eur')
     await userEvent.type(screen.getByLabelText('Money year'), '2024')
     await userEvent.click(screen.getByTestId('table-import-preview-btn'))

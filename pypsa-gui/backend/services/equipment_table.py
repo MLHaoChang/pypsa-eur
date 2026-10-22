@@ -523,10 +523,12 @@ def preview(args: dict) -> dict:
     if not args.get("name_column") or not args.get("columns"):
         return out
     args = {**args, "source_sha256": table["source"]["sha256"]}
-    p = plan_active(args)
-    out["plan"] = summary(PyPSAService.get_network(), p)
-    out["card"] = None if p["missing"] or not out["plan"]["changed_cells"] else edit_card.preview(
-        "apply_equipment_mapping", args)
+    # Under the network's lock: the plan, the counts and the card read one network.
+    with PyPSAService.get_lock():
+        p = plan_active(args)
+        out["plan"] = summary(PyPSAService.get_network(), p)
+        out["card"] = None if p["missing"] or not out["plan"]["changed_cells"] else edit_card.preview(
+            "apply_equipment_mapping", args)
     return out
 
 

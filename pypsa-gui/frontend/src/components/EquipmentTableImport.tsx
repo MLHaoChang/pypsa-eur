@@ -6,6 +6,7 @@ import { listUploads, uploadFile, type UploadMeta } from '../api/uploads'
 import { networkApi } from '../api/network'
 import type { FlowSectionId } from '../api/flow'
 import { openSectionInExpert } from '../layout/flowNavigation'
+import { sectionMeta } from '../layout/flowSections'
 import { useUIStore } from '../store/uiStore'
 
 // "Import rows from a table…" (data-to-model, owner AI-567): map an uploaded
@@ -17,9 +18,10 @@ import { useUIStore } from '../store/uiStore'
 
 const TABLE_FILE = /\.(csv|xlsx|xlsm)$/i
 
-/** The asset-table classes a table maps onto (section 3: lines and transformers; 5: the rest). */
+/** The asset-table classes the server's mapper writes to (section 3: lines and
+ *  transformers; 4: loads; 5: the rest). */
 export const TABLE_IMPORT_CLASSES: ReadonlySet<string> = new Set([
-  'Line', 'Transformer', 'Generator', 'StorageUnit', 'Store', 'Link',
+  'Line', 'Transformer', 'Load', 'Generator', 'StorageUnit', 'Store', 'Link',
 ])
 
 function errorText(e: unknown, fallback: string): string {
@@ -141,8 +143,20 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
 
   const source = table?.table.source
   const plan = preview?.plan
-  const section = (applied?.receipt.section ?? preview?.card?.section) as { id: FlowSectionId; label: string } | undefined
+  const sectionId = (applied?.receipt.section ?? preview?.card?.section)?.id as FlowSectionId | undefined
   const mapped = Object.keys(columns).length
+  const unitless = Object.keys(columns).find(h => !columns[h].unit)
+  // Why Preview or Apply is not available yet, with its fix, shown beside the buttons.
+  const previewWhy = !table ? 'Choose a table first.'
+    : !nameColumn ? 'Pick the name column first.'
+      : mapped === 0 ? 'Pick a field for at least one column.'
+        : unitless ? `Pick the unit of “${unitless}” in the table.`
+          : costPicked && (!currency || moneyYear.length !== 4) ? 'Pick a currency and money year for the cost columns.'
+            : null
+  const applyWhy = previewWhy ?? (!plan ? 'Preview the changes first.'
+    : preview?.card ? null
+      : plan.missing.length ? 'Confirm the money year above, then preview again.'
+        : 'Nothing to change: every mapped value is already set or left out.')
 
   return (
     <Dialog open onClose={onClose} title="Import rows from a table" z={950} dismissOnBackdrop={!busy}
@@ -284,21 +298,22 @@ export default function EquipmentTableImport({ componentClass, assetsLabel, onCl
       <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
         {applied ? (<>
           <button type="button" onClick={onClose} className="px-3 py-1.5 text-xs rounded border border-border text-text hover:bg-border/30">Close</button>
-          {section && (
+          {sectionId && (
             <button type="button" data-testid="table-import-open-section"
-              onClick={() => { openSectionInExpert(section.id); onClose() }}
+              onClick={() => { openSectionInExpert(sectionId); onClose() }}
               className="px-3 py-1.5 text-xs rounded bg-accent text-white hover:opacity-90">
-              Open {section.label} ›
+              Open {sectionMeta(sectionId).label} ›
             </button>
           )}
         </>) : (<>
+          {applyWhy && <span className="mr-auto text-[11px] text-muted" data-testid="table-import-why">{previewWhy ?? applyWhy}</span>}
           <button type="button" onClick={onClose} className="px-3 py-1.5 text-xs rounded border border-border text-text hover:bg-border/30">Cancel</button>
-          <button type="button" disabled={busy || !table || !nameColumn || mapped === 0 || Object.values(columns).some(c => !c.unit)} onClick={() => { void runPreview() }}
+          <button type="button" disabled={busy || previewWhy !== null} onClick={() => { void runPreview() }}
             data-testid="table-import-preview-btn"
             className="px-3 py-1.5 text-xs rounded border border-border text-text hover:bg-border/30 disabled:opacity-40">
             Preview
           </button>
-          <button type="button" disabled={busy || !preview?.card} onClick={() => { void runApply() }}
+          <button type="button" disabled={busy || applyWhy !== null} onClick={() => { void runApply() }}
             data-testid="table-import-apply"
             className="px-3 py-1.5 text-xs rounded bg-accent text-white hover:opacity-90 disabled:opacity-40">
             Apply {preview?.plan?.changed_cells ?? ''} change{preview?.plan?.changed_cells === 1 ? '' : 's'}
