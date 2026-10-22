@@ -243,6 +243,12 @@ export function ScopeCards({ testId = 'scope-cards', collapsed = false }: {
                           )}
                         </p>
                       )}
+                      {card.id === 'grid' && o.id === 'load_flow' && on && checked && gate.blocked && (
+                        <p data-testid={`${testId}-load-flow-blocked`} role="alert"
+                          className="pl-5 text-[10.5px] text-warn">
+                          The Run can't start yet: {gate.reason}
+                        </p>
+                      )}
                       {o.reason && (
                         <p id={`${testId}-why-${card.id}-${o.id}`}
                           data-testid={`${testId}-why-${card.id}-${o.id}`}

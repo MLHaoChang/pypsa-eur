@@ -139,6 +139,16 @@ describe('ScopeCards', () => {
       .toBe('Dispatch on fixed sizes from the sizes entered on each asset.')
   })
 
+  it('Load flow is a live checkbox that writes into the scope (W4b)', async () => {
+    const user = mount()
+    const box = await screen.findByTestId('scope-cards-option-grid-load_flow') as HTMLInputElement
+    expect(box.disabled).toBe(false)
+    await user.click(box)
+    await waitFor(() => expect(putFlowScope).toHaveBeenCalled())
+    const sent = putFlowScope.mock.calls[0][1] as FlowScopeValue
+    expect(sent.options.grid).toEqual(['grid_code'])
+  })
+
   it('shows the Run blocker in words under unchecked Asset sizing (W4b)', async () => {
     getFlowScope.mockResolvedValue(registry({ ...PRESET,
       options: { ...PRESET.options, capacity: ['dispatch'] } }))
