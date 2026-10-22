@@ -124,6 +124,25 @@ describe('GoalStudyRun run', () => {
   })
 })
 
+describe('GoalStudyRun where Reliability is not offered', () => {
+  it('the disabled Run title gives the registry reason, not "add…"', async () => {
+    getFlowScope.mockResolvedValue({
+      scope: { version: 1, groups: ['capacity', 'handoff'], source: 'project', preset_id: 'eh_ipp_hybrid',
+        options: { capacity: ['sizing', 'dispatch'], grid: [], control: [],
+          reliability: [], commercial: [], handoff: ['reports'] } },
+      cards: [{ id: 'reliability', label: 'Reliability', locked_reason: null, intended: [],
+        sections: ['assets', 'scenarios'], chip: 'Reliability',
+        options: [{ id: 'goal_study', label: 'Reliability goal & study', status: 'not_yet_available',
+          reason: 'Nothing to make adequate: this site only generates and has no load.' }] }],
+      preset_id: 'eh_ipp_hybrid', preset_label: 'IPP', preset: { version: 1, groups: [], options: {} },
+    })
+    mount()
+    const run = await screen.findByTestId('hub-run-start') as HTMLButtonElement
+    await waitFor(() => expect(run.title).toBe(
+      'Not offered for this site: Nothing to make adequate: this site only generates and has no load.'))
+  })
+})
+
 describe('GoalStudyRun study states (from the study record, N2)', () => {
   it('running: the card\'s own running text and Abort — never the review\'s message', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running', budget_solves: 40 })
