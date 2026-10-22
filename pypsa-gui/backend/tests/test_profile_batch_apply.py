@@ -169,3 +169,27 @@ def test_the_chat_tool_is_a_write_with_one_card(client, project, bound_ctx):
         out = chat_tools.DISPATCHERS["apply_generated_profiles"](
             project_id=project, job_id=job_id, components=["g_a", "g_b"])
     assert out["count"] == 2
+
+
+def test_the_card_and_the_route_pick_the_same_members(client, project, bound_ctx):
+    from services.profile_gen import card
+
+    points = [*POINTS[:2], {"id": "g_gas", "lon": 8.0, "lat": 50.0},
+              {"id": "site_x", "lon": 8.0, "lat": 50.0}]
+    job_id = _job(client, project, points)
+    args = {"project_id": project, "job_id": job_id, "all_from_job": True}
+    with bound_ctx(client):
+        shown = {r["name"] for r in card.preview_members(args)}
+    resp = client.post(f"/api/projects/{project}/profiles/apply-batch",
+                       json={"job_id": job_id, "all_from_job": True})
+    assert resp.status_code == 200, resp.text
+    written = {a["component"] for a in resp.json()["applied"]}
+    assert written == {"g_a", "g_b"} and shown == written
+
+
+def test_members_together_with_all_from_job_is_refused(client, project):
+    job_id = _job(client, project)
+    resp = client.post(f"/api/projects/{project}/profiles/apply-batch", json={
+        "job_id": job_id, "all_from_job": True, "members": [{"component": "g_a"}]})
+    assert resp.status_code == 422
+    assert resp.json()["detail"]["error_kind"] == "ambiguous_members"

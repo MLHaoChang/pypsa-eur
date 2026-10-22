@@ -1122,6 +1122,10 @@
     "batch_partially_applied": {
       "surface": "inline",
       "why": "A write failed midway through apply_generated_profiles. The detail names what was and was not applied; the assistant says so and that one Undo reverts the whole batch."
+    },
+    "ambiguous_members": {
+      "surface": "inline",
+      "why": "apply_generated_profiles was given both named components and all_from_job. Nothing was written; the assistant picks one and retries."
     }
   }
 }

@@ -208,23 +208,23 @@ def readback_batch(args: dict, rows: list[dict]) -> list[Any]:
 
 def _members(args: dict) -> list[dict]:
     """One `preview`/`readback` argument set per member, in the order the
-    batch route writes them: the named components, or with `all_from_job`
-    every point of the job named after a wind/solar generator."""
+    batch route writes them: both come from `batch.batch_members`."""
     from services import chat_tools
+    from services.profile_gen.batch import batch_members
     from services.pypsa_service import PyPSAService
 
     base = {"project_id": str(args.get("project_id") or ""),
             "job_id": str(args.get("job_id") or ""),
             "time_basis": args.get("time_basis")}
-    names = [str(c) for c in args.get("components") or []]
-    if args.get("all_from_job"):
-        meta = _job_meta(base["project_id"], base["job_id"])
-        gens = PyPSAService.get_active_context().network.generators
-        names = [str(c) for c in meta.get("points") or [] if str(c) in gens.index
-                 and any(k in str(gens.at[str(c), "carrier"]).lower()
-                         for k in ("wind", "solar", "pv"))]
     chat_tools._authorized_project(base["project_id"])
-    return [{**base, "component": c} for c in names]
+    meta = _job_meta(base["project_id"], base["job_id"])
+    chosen, _skipped = batch_members(
+        [str(c) for c in meta.get("points") or []],
+        PyPSAService.get_active_context().network.generators,
+        [(str(c), None) for c in args.get("components") or []],
+        bool(args.get("all_from_job")))
+    return [{**base, "component": c, **({"point_id": pid} if pid else {})}
+            for c, pid in chosen]
 
 
 def preview_members(args: dict) -> list[dict]:

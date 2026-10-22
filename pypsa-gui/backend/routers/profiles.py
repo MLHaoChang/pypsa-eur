@@ -1378,12 +1378,6 @@ def _series_of(ds, point_id: str, component: str) -> pd.Series:
                      name=component, dtype=float)
 
 
-def _is_wind_or_solar(carrier: Any) -> bool:
-    """The engine's carrier guard (`families._renewable_guard`)."""
-    cl = str(carrier or "").lower()
-    return "wind" in cl or "solar" in cl or "pv" in cl
-
-
 def _moved_bus_warning(ctx, meta: dict, point_id: str, component: str,
                        component_type: str | None) -> str | None:
     """A generator's bus that moved (or lost its coordinates) since the point
@@ -1498,24 +1492,18 @@ def apply_profile_batch(
     the batch. No automatic undo: it re-imports the whole network."""
     from services.network_undo import push_undo_snapshot
     from services.profile_gen.apply import prepare_profile
+    from services.profile_gen.batch import batch_members
 
     _check_lock(proj, db, user)
     nc, meta = _pending_artifact(proj, body.job_id)
     ctx = _foreground_ctx(proj, "apply")
 
     with pending_io_lock(), xr.open_dataset(nc) as ds:
-        columns = [str(c) for c in ds.data_vars]
-        gens = ctx.network.generators
-        skipped: list[dict[str, str]] = []
-        members = list(body.members)
-        if body.all_from_job:
-            members = []
-            for pid in columns:
-                if pid in gens.index and _is_wind_or_solar(gens.at[pid, "carrier"]):
-                    members.append(BatchMember(component=pid))
-                else:
-                    skipped.append({"point_id": pid,
-                                    "reason": "not a wind/solar generator on the network"})
+        columns = [str(c) for c in meta.get("points") or []]
+        chosen, skipped = batch_members(
+            columns, ctx.network.generators,
+            [(m.component, m.point_id) for m in body.members], body.all_from_job)
+        members = [BatchMember(component=c, point_id=pid) for c, pid in chosen]
         if not members:
             raise HTTPException(status_code=422, detail={
                 "error_kind": "no_members",
