@@ -172,6 +172,69 @@ def test_project_section(client, site, edit):
     assert body["run_ready"] is True                           # W3: warnings never block
 
 
+def _unplaced_wind_site() -> pypsa.Network:
+    n = _site_network()
+    n.add("Carrier", "wind")
+    n.add("Bus", "B1", x=0.0, y=0.0, carrier="AC")           # never placed
+    n.add("Generator", "g1", bus="B1", carrier="wind", p_nom=10.0)
+    n.add("Generator", "g2", bus="B1", carrier="wind", p_nom=5.0)
+    return n
+
+
+def test_profiles_section_missing_renewable_location(client, site, edit):
+    """One display-only item per unplaced bus that carries wind or solar."""
+    name = site(_unplaced_wind_site())
+    body = _flow(client, name)
+    verdicts = (body["run_ready"], body["verdicts"])
+    items = [i for s in body["sections"] if s["section"] == "profiles" for i in s["items"]]
+    assert [i["code"] for i in items] == ["profile_location_missing"]
+    it = items[0]
+    assert it["message"] == ("Bus B1 has no location: a weather profile for g1, g2 "
+                             "needs to know where it is.")
+    assert it["target"]["component"] == "Bus" and it["target"]["entity"] == "B1"
+    assert it["target"]["field"] == "x" and it["blocking"] is False
+    assert body["run_ready"] is True and body["verdicts"]["optimisation"]["ready"] is True
+    assert it["title"]
+    # Filled: the bus gets a place and the item goes.
+    with edit() as n:
+        n.buses.loc["B1", ["x", "y"]] = (4.0, 51.0)
+    body = _flow(client, name)
+    assert "profile_location_missing" not in _codes(body, "profiles")
+    assert (body["run_ready"], body["verdicts"]) == verdicts
+
+
+def test_profile_location_many_generators_and_buses(client, site):
+    n = _unplaced_wind_site()
+    for k in range(3):
+        n.add("Generator", f"g{k + 3}", bus="B1", carrier="wind", p_nom=1.0)
+    n.add("Bus", "B2", x=0.0, y=0.0, carrier="AC")
+    n.add("Generator", "s1", bus="B2", carrier="solar", p_nom=1.0)
+    body = _flow(client, site(n))
+    items = [i for s in body["sections"] if s["section"] == "profiles" for i in s["items"]]
+    by_bus = {i["target"]["entity"]: i["message"] for i in items}
+    assert set(by_bus) == {"B1", "B2"}
+    assert by_bus["B1"].endswith("a weather profile for g1, g2, g3 and 2 more needs "
+                                 "to know where it is.")
+    assert "for s1 needs" in by_bus["B2"]
+
+
+def test_profile_location_ignores_non_renewables(client, site):
+    n = _site_network()
+    n.add("Bus", "B1", x=0.0, y=0.0, carrier="AC")
+    n.add("Generator", "gas2", bus="B1", carrier="gas", p_nom=1.0)
+    body = _flow(client, site(n))
+    assert "profile_location_missing" not in _codes(body, "profiles")
+
+
+def test_profile_location_defers_to_site_location_missing(client, site, edit):
+    name = site(_unplaced_wind_site())
+    with edit() as n:
+        n.buses[["x", "y"]] = 0.0                              # no bus placed at all
+    body = _flow(client, name)
+    assert _codes(body, "project") == ["site_location_missing"]
+    assert "profile_location_missing" not in _codes(body, "profiles")
+
+
 def test_carriers_section(client, site, edit):
     name = site()
     with edit() as n:

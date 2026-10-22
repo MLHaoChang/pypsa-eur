@@ -73,6 +73,19 @@ def _bus_moved(meta: dict, name: str, now: tuple[float, float] | None) -> bool:
     return abs(now[0] - then[0]) > BUS_MOVED_DEG or abs(now[1] - then[1]) > BUS_MOVED_DEG
 
 
+def unplaced_renewables(n) -> list[tuple[str, str]]:
+    """`(generator, bus)` for each wind/solar generator whose bus has no
+    location, by the same rule as the flow's `buses_placed`."""
+    out: list[tuple[str, str]] = []
+    for name, gen in n.generators.iterrows():
+        if technology_of(gen["carrier"]) is None:
+            continue
+        bus = str(gen["bus"] or "")
+        if _bus_coord(n, bus) is None:
+            out.append((str(name), bus))
+    return out
+
+
 def readiness_rows(ctx) -> list[dict[str, Any]]:
     n = ctx.network
     rows: list[dict[str, Any]] = []
