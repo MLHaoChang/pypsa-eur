@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The report's grid-readiness chapter shows each row's value after the site's battery/UPS smoothing in its own column, beside the before-mitigation verdict, and says how many red flags pass after it. A report with no smoothing battery or UPS keeps its table unchanged.

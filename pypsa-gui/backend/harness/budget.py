@@ -13,6 +13,7 @@ function that lives here is patched on THIS module (harness/README.md,
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 import os
 from harness import history as harness_history
@@ -74,6 +75,42 @@ PYPSA_GUI_CHAT_DAILY_TOKEN_CAP: int = int(
 PER_TOOL_TIMEOUT_SECONDS: float = float(
     os.environ.get("PYPSA_GUI_CHAT_TOOL_TIMEOUT", "30.0")
 )
+
+
+# Task caps (W10 H2a, ROI-B in the #558 AI-priorities spec). A bounded task
+# lowers the turn's limits while it runs and never raises them. It is decided
+# once, at the start of the turn, from harness state the model cannot set: the
+# active workflow and the browser's validated results card. Ending the
+# workflow mid-turn does not lift it.
+@dataclass(frozen=True)
+class TaskCap:
+    output_tokens: int
+    tool_calls: int
+    # Provider calls: tools in the first, the answer in the last.
+    rounds: int
+
+
+EXPLAIN_CARD = TaskCap(output_tokens=512, tool_calls=3, rounds=2)
+TASK_STEP_LIMIT = "Stopped at the explanation's step limit; ask to continue."
+
+
+def task_cap(session: ChatSession) -> TaskCap | None:
+    from services.result_views import card_hint
+
+    state = getattr(session, "workflow", None)
+    if not isinstance(state, dict) or state.get("id") != "explain-results":
+        return None
+    if card_hint(session.turn_ui_context) is None:
+        return None
+    return EXPLAIN_CARD
+
+
+def output_limit(cap: TaskCap | None, limit: int) -> int:
+    return limit if cap is None else min(limit, cap.output_tokens)
+
+
+def tool_call_limit(cap: TaskCap | None) -> int:
+    return MAX_TOOL_CALLS_PER_TURN if cap is None else min(MAX_TOOL_CALLS_PER_TURN, cap.tool_calls)
 
 
 def _turn_budget_block(

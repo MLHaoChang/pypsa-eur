@@ -163,7 +163,16 @@ def preserve_bus_topology(n, lock=None):
                 "values")
 
 
-def freeze_capacities(n, lock=None) -> Callable[[], None]:
+# Set instead of `_ic_operational` by a fixed-size run (F1, `transient=False`):
+# the design is fixed but the run is a real one. The connection is pinned and
+# the island rows buy nothing (as on an operational solve), but the commercial
+# records commit and both UC checks run (gatekeeper, 2026-10-21, option A).
+# Its value is ``{"source", "sizes"}``: what was pinned, keyed "<table>/<name>".
+FIXED_DESIGN_ATTR = "_fixed_design"
+
+
+def freeze_capacities(n, lock=None, *, source: str = "opt", sizes: dict | None = None,
+                      transient: bool = True) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
     current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
@@ -174,8 +183,10 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
     Why bounds rather than flipping ``*_nom_extendable`` off: preflight
     rightly rejects a fixed asset with zero capacity
     (``generator_p_nom_invalid`` / ``link_p_nom_invalid``), and a
-    never-built option freezes at exactly 0, and preflight equally rejects
-    extendable bounds with min == max (generator_p_nom_bounds). So the pin
+    never-built option freezes at exactly 0, which preflight also rejects as
+    extendable bounds of min == max == 0 (generator_p_nom_bounds). Equal
+    positive bounds now pass (an explicit forced size, IPP ticket 03), but the
+    ε pin is kept deliberately, with no churn: the pin
     is ``min = size, max = size + ε`` (ε = 1e-6 MW): the LP may "build" at
     most a micro-MW above the solved size — orders of magnitude below every
     tolerance in the sweep — and the (near-)constant capital term is the
@@ -183,54 +194,75 @@ def freeze_capacities(n, lock=None) -> Callable[[], None]:
     ΔEUE. Returns an undo closure restoring both bound columns exactly.
 
     ``lock`` (P27a, A1): the runner's captured lock; when given, the undo
-    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked."""
+    runs inside ``with lock:``. ``None`` (a private copy) stays unlocked.
+
+    The fixed-size run (F1) passes ``transient=False``: it sets
+    ``FIXED_DESIGN_ATTR`` instead of ``_ic_operational``. Its size is
+    ``sizes["<table>/<name>"]`` where given (the sizing record's vector, so
+    repeated runs never drift by the +1e-6), else ``*_nom`` for
+    ``source="nom"`` (the nameplate). ``*_nom_opt`` is never written here, so a
+    failed solve keeps the previous sizes."""
     undo_ops: list[Callable[[], None]] = []
-    for attr, nom in _CAPACITY_ATTRS:
-        df = getattr(n, attr, None)
-        ext_col = f"{nom}_extendable"
-        min_col, max_col = f"{nom}_min", f"{nom}_max"
-        if df is None or df.empty or ext_col not in df.columns:
-            continue
-        if min_col not in df.columns or max_col not in df.columns:
-            continue
-        mask = df[ext_col].astype(bool)
-        if not mask.any():
-            continue
-        idx = df.index[mask]
-        orig_min = df.loc[idx, min_col].copy()
-        orig_max = df.loc[idx, max_col].copy()
+    pinned: dict[str, float] = {}
+    try:
+        for attr, nom in _CAPACITY_ATTRS:
+            df = getattr(n, attr, None)
+            ext_col = f"{nom}_extendable"
+            min_col, max_col = f"{nom}_min", f"{nom}_max"
+            if df is None or df.empty or ext_col not in df.columns:
+                continue
+            if min_col not in df.columns or max_col not in df.columns:
+                continue
+            mask = df[ext_col].astype(bool)
+            if not mask.any():
+                continue
+            idx = df.index[mask]
+            orig_min = df.loc[idx, min_col].copy()
+            orig_max = df.loc[idx, max_col].copy()
 
-        # Re-fetch the frame at undo time: run_simulation's transient
-        # add/remove (VOLL slacks, vintages) can REPLACE the component
-        # DataFrame, so a captured reference goes stale and the restore
-        # would write into a dead object.
-        def _undo(n=n, attr=attr, min_col=min_col, max_col=max_col,
-                  orig_min=orig_min, orig_max=orig_max):
-            live = getattr(n, attr)
-            keep = [i for i in orig_min.index if i in live.index]
-            live.loc[keep, min_col] = orig_min.loc[keep]
-            live.loc[keep, max_col] = orig_max.loc[keep]
+            # Re-fetch the frame at undo time: run_simulation's transient
+            # add/remove (VOLL slacks, vintages) can REPLACE the component
+            # DataFrame, so a captured reference goes stale and the restore
+            # would write into a dead object.
+            def _undo(n=n, attr=attr, min_col=min_col, max_col=max_col,
+                      orig_min=orig_min, orig_max=orig_max):
+                live = getattr(n, attr)
+                keep = [i for i in orig_min.index if i in live.index]
+                live.loc[keep, min_col] = orig_min.loc[keep]
+                live.loc[keep, max_col] = orig_max.loc[keep]
 
-        undo_ops.append(_undo)
-        size = df.loc[idx, nom].astype(float)
-        opt_col = f"{nom}_opt"
-        if opt_col in df.columns:
-            opt = df.loc[idx, opt_col].astype(float)
-            good = opt.notna() & opt.map(math.isfinite)
-            size[good] = opt[good]
-        size = size.fillna(0.0).clip(lower=0.0)
-        df.loc[idx, min_col] = size
-        df.loc[idx, max_col] = size + 1e-6
+            undo_ops.append(_undo)
+            size = df.loc[idx, nom].astype(float)
+            opt_col = f"{nom}_opt"
+            if source == "opt" and opt_col in df.columns:
+                opt = df.loc[idx, opt_col].astype(float)
+                good = opt.notna() & opt.map(math.isfinite)
+                size[good] = opt[good]
+            if sizes is not None:
+                for name in idx:
+                    key = f"{attr}/{name}"
+                    if sizes.get(key) is not None:
+                        size[name] = float(sizes[key])
+            size = size.fillna(0.0).clip(lower=0.0)
+            pinned.update({f"{attr}/{name}": float(v) for name, v in size.items()})
+            df.loc[idx, min_col] = size
+            df.loc[idx, max_col] = size + 1e-6
+    except BaseException:
+        # A raise part-way leaves no clamp behind on the (possibly live) network.
+        for op in reversed(undo_ops):
+            op()
+        raise
 
     # Edge Investment Case: tell the commercial layer this is an OPERATIONAL
     # solve, so a connection agreement pins the designed connection instead of
     # re-sizing it per contingency (WP1.4 review round 2 #1). Set LAST, once
     # the pins are in place, so a raise above can never leave it behind.
-    setattr(n, "_ic_operational", True)
+    flag = "_ic_operational" if transient else FIXED_DESIGN_ATTR
+    setattr(n, flag, True if transient else {"source": source, "sizes": pinned})
 
     def _clear_operational(n=n):
-        if hasattr(n, "_ic_operational"):
-            delattr(n, "_ic_operational")
+        if hasattr(n, flag):
+            delattr(n, flag)
 
     undo_ops.append(_clear_operational)
 
@@ -594,6 +626,27 @@ def class_b_contingencies(n) -> list[dict]:
     return out
 
 
+def _process_loss_rows(network, rows, *, restored) -> None:
+    """Grid-to-process ticket 08b: each solved row's lost production per year (`process_loss.expected_outage_loss`,
+    a feed-forward on the base dispatch: the units the outage cuts off, priced at the lost-production value), only on
+    a network with process units. Without the base dispatch (not restored) it is not established, never 0."""
+    from services.adequacy.process_loss import expected_outage_loss
+    from services.solver.process_uc import process_mask
+
+    links = getattr(network, "links", None)
+    if links is None or links.empty or not process_mask(links).any():
+        return
+    for row in rows:
+        if row["failure_mode"] is None:
+            continue
+        if restored is False:
+            row["process_loss"] = {"status": "not_established", "reason": "base_not_restored"}
+            continue
+        meta = row["meta"]
+        row["process_loss"] = {"status": "ok", **expected_outage_loss(
+            network, meta["name"], meta["mttr_hours"], meta["q"])}
+
+
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                       final_state_update=None,
                       stop_event=None,
@@ -682,6 +735,7 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
             },
             "meta": meta,
         })
+    _process_loss_rows(network, rows, restored=swept.get("base_restored"))
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
     # Phase 12e (shipped-code review, finding 1): the restore's outcome rides
     # OUT of the engine. It was computed and dropped here, so a sweep whose

@@ -1,6 +1,6 @@
 """
-The report's investment-case and island (control) chapters (E2E demo plan
-2026-10-14 D8, data center first).
+The report's investment-case, island (control) and grid-readiness chapters
+(E2E demo plan 2026-10-14 D8, data center first; DC grid readiness 02).
 
 Pure, as ``evidence``: the route reads the stored investment case report
 (``routers.results.get_investment_case_report``) and, for a hub project, the
@@ -23,10 +23,12 @@ from services.reports import formatting as F
 
 INVESTMENT = "investment_case"
 ISLAND = "island"
+GRID_READINESS = "grid_readiness"
 
 TITLES = {
     INVESTMENT: "Investment case",
     ISLAND: "Islanding and control",
+    GRID_READINESS: "Grid readiness (screening)",
 }
 
 #: The island report tables a chapter shows (the hourly and per-event ones
@@ -35,6 +37,7 @@ ISLAND_TABLES = ("requirements", "costs", "static_summary", "freq_summary")
 
 NO_INVESTMENT = ("no investment case has been stored for this project: run it from the "
                  "Investment tab")
+NO_GRID_READINESS = ("no grid-readiness scorecard for this project: it needs a saved network")
 NO_ISLAND = ("no island check and no grid-forming recommendation for this project: run the "
              "campus study with island requirements")
 
@@ -235,4 +238,97 @@ def island_disclosures(payload: dict) -> list[str]:
     elif isinstance(applied, dict):
         out.append("Islanding and control — the recommended settings were applied to the island data; "
                    "island constraints are off, so the hub solve does not read them.")
+    return out
+
+
+# ── the grid-readiness scorecard (DC grid readiness 02) ────────────────────
+
+_VERDICT_WORD = {"pass": "Pass", "warn": "Warn", "fail": "Fail", "unknown": "Unknown"}
+
+
+def grid_readiness_payload(source: dict | None) -> dict | None:
+    """The chapter's facts from ``grid_readiness(...)``: its rows (limit and
+    project value as numbers where they are), the profile and the counts;
+    None when there is no scorecard."""
+    if not isinstance(source, dict) or not isinstance(source.get("rows"), list):
+        return None
+    rows = []
+    for r in source["rows"]:
+        value = r.get("project_value")
+        if isinstance(value, dict):          # LOLE: {lole_h_per_year, ci_h_per_year, horizon_years}
+            value = value.get("lole_h_per_year")
+        row = {"id": r.get("id"), "requirement": r.get("requirement"), "limit": r.get("limit"),
+               "unit": r.get("unit"), "project_value": value, "verdict": r.get("verdict"),
+               "assumed": bool(r.get("assumed")), "source": r.get("source")}
+        after = r.get("after_battery")
+        if isinstance(after, dict):          # DC 03: the value once the battery/UPS has smoothed
+            row["after_battery"] = {"value": after.get("value"), "verdict": after.get("verdict")}
+        rows.append(row)
+    return {"profile": dict(source.get("profile") or {}), "rows": rows,
+            "summary": dict(source.get("summary") or {}), "envelope": bool(source.get("envelope"))}
+
+
+def _cell(v: Any, unit: str | None) -> str:
+    x = _num(v)
+    if x is not None:
+        return f"{x:.4g}{f' {unit}' if unit else ''}"
+    return F.NOT_ESTABLISHED if v is None else F.fmt_text(v)
+
+
+def _after_cell(row: dict) -> str:
+    """``3.2 MW/min, Pass`` once smoothed; "not known yet" without a value;
+    blank for a row the battery/UPS does not change."""
+    after = row.get("after_battery")
+    if after is None:
+        return ""
+    if _num(after.get("value")) is None:
+        return "not known yet"
+    verdict = _VERDICT_WORD.get(after.get("verdict"), str(after.get("verdict")))
+    return f"{_cell(after['value'], row['unit'])}, {verdict}"
+
+
+def grid_readiness_table(payload: dict, source_path: str):
+    from services.reports.evidence import EvidenceTable
+
+    # The after-battery column only when a row has one, so a report without a
+    # smoothing battery/UPS keeps its table (and its evidence hash).
+    mitigated = any("after_battery" in r for r in payload["rows"])
+    rows = []
+    for r in payload["rows"]:
+        cells = [F.fmt_text(r["requirement"]), _cell(r["limit"], r["unit"]),
+                 _cell(r["project_value"], r["unit"]), _VERDICT_WORD.get(r["verdict"], str(r["verdict"]))]
+        if mitigated:
+            cells.append(_after_cell(r))
+        rows.append([*cells, "assumed" if r["assumed"] else "", F.fmt_text(r["source"])])
+    columns = ["Requirement", "Limit", "Project", "Verdict",
+               *(["After battery/UPS"] if mitigated else []), "Assumed", "Source"]
+    title = payload["profile"].get("title") or payload["profile"].get("id")
+    return EvidenceTable(table_id=GRID_READINESS, columns=columns,
+                         rows=rows, caption=f"Grid-readiness screening against {title}",
+                         source_path=f"{source_path}/rows")
+
+
+def grid_readiness_disclosures(payload: dict) -> list[str]:
+    head = "Grid readiness"
+    s = payload.get("summary") or {}
+    out = [f"{head} — an advisory screening, not a compliance study: nothing in it blocks a run, and a "
+           "fail is a red flag to take to the network operator. Unknown means an input is missing, "
+           "never a pass.",
+           f"{head} — {s.get('red_flags', 0)} red flag(s), {s.get('unknown', 0)} unknown, "
+           f"{s.get('assumed', 0)} on an assumed limit."]
+    if payload.get("envelope"):
+        out.append(f"{head} — the ramp, oscillation and voltage-change rows read the AI-training load "
+                   "envelope IT-side at the point of connection, before UPS/BESS smoothing: before "
+                   "mitigation, not final.")
+    if any("after_battery" in r for r in payload["rows"]):
+        out.append(f"{head} — {s.get('pass_after_mitigation', 0)} of {s.get('red_flags', 0)} red flag(s) "
+                   "pass after the site's battery/UPS smoothing (a closed-form screen, not a dynamic "
+                   "study); the Verdict column stays before mitigation.")
+    if any(str(r["id"]).startswith("dynamic:") for r in payload["rows"]):
+        out.append(f"{head} — the grid code's dynamic requirements need a dynamic (EMT) study; a "
+                   "steady-state screening never passes them.")
+    assumed = [str(r["requirement"]) for r in payload["rows"] if r["assumed"] and r["limit"] is not None]
+    if assumed:
+        out.append(f"{head} — assumed limits, to confirm with the network operator: "
+                   + "; ".join(assumed) + ".")
     return out

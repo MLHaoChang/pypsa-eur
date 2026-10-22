@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Connection & grid lists the connection's energization, ramp limit and oscillation band (read-only, with their source and an "assumed" tag), with a route to the connection link where each is set.

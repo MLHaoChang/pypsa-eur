@@ -977,8 +977,12 @@ def preflight():
     }
 
 
-def preflight_validate(under_lock=None):
+def preflight_validate(under_lock=None, *, validate: bool = True):
     """``(deferred, issues, extra)``: preflight's gates and its validation.
+
+    ``validate=False`` keeps the gates and the lock span but skips
+    ``validate_for_run`` (``issues`` is ``[]``): a run kind whose start does not
+    validate (the load flow) reads its own precondition in ``under_lock``.
 
     ``deferred`` is the payload `/preflight` answers while a solver worker or a
     study is live (then ``issues`` is ``[]`` and ``extra`` None). Otherwise
@@ -1074,7 +1078,7 @@ def preflight_validate(under_lock=None):
     try:
         n = PyPSAService.get_network()
         config = _state["solver_config"]
-        issues = validate_for_run(n, config)
+        issues = validate_for_run(n, config) if validate else []
         extra = under_lock(n, config) if under_lock is not None else None
     finally:
         lock.release()
@@ -1408,6 +1412,28 @@ def abort():
     raise HTTPException(400, "No simulation running")
 
 
+def ac_pf_refusal(n) -> tuple[str, str] | None:
+    """``(error_kind, message)`` for why `/run_ac_pf` would refuse ``n`` (its
+    400), or None. Only a solved network with ``fresh`` dispatch has an LP
+    dispatch to fix. One copy for the route and for the load-flow verdict
+    (`services.run_separability`)."""
+    from services.dispatch_status import dispatch_status
+
+    if not getattr(n, "is_solved", False):
+        return "ac_pf_not_solved", "No LOPF solution to fix dispatch from. Run /run first."
+    # `dispatch_status` returns 'fresh'/'stale'/'none'; only 'fresh' is acceptable.
+    status = dispatch_status(n)
+    if status == "none":
+        return ("ac_pf_no_dispatch",
+                "n.generators_t.p is empty — re-run LOPF to populate dispatch.")
+    if status == "stale":
+        return ("ac_pf_stale_dispatch",
+                "Dispatch tables exist but their column-set doesn't match the "
+                "current topology (rows added/removed since the last solve). "
+                "Re-run LOPF to regenerate consistent dispatch before Stage 2.")
+    return None
+
+
 @router.post("/run_ac_pf")
 def run_ac_pf():
     """
@@ -1446,7 +1472,6 @@ def run_ac_pf():
     n = PyPSAService.get_network()
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
-    from services.dispatch_status import dispatch_status as _disp_status
 
     def _worker():
         t0 = _time.time()
@@ -1499,24 +1524,9 @@ def run_ac_pf():
             if existing is not None and existing.is_alive():
                 raise HTTPException(409, "Simulation already running")
             # stale state (worker died) → fall through and claim
-        if not getattr(n, "is_solved", False):
-            raise HTTPException(
-                400, "No LOPF solution to fix dispatch from. Run /run first."
-            )
-        # Reject stale dispatch BEFORE claiming. `dispatch_status` returns
-        # 'fresh'/'stale'/'none'; only 'fresh' is acceptable here.
-        _s = _disp_status(n)
-        if _s == "none":
-            raise HTTPException(
-                400, "n.generators_t.p is empty — re-run LOPF to populate dispatch."
-            )
-        if _s == "stale":
-            raise HTTPException(
-                400,
-                "Dispatch tables exist but their column-set doesn't match the "
-                "current topology (rows added/removed since the last solve). "
-                "Re-run LOPF to regenerate consistent dispatch before Stage 2.",
-            )
+        _refusal = ac_pf_refusal(n)
+        if _refusal is not None:
+            raise HTTPException(400, _refusal[1])
         # Atomic claim — lifecycle reset + thread handle in one apply, so no
         # window where status="running" but thread is unset.
         _state_update(

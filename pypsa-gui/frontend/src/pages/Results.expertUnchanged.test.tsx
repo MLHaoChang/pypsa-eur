@@ -13,7 +13,9 @@ import { useUIStore } from '../store/uiStore'
 // a group row (Summary · Investment · Grid plan · Reliability · Operation,
 // Asset detail on the right) plus a row holding the active group's tabs. The
 // snapshot covers both rows; test ids are still stripped.
-const NEW_TEST_IDS = /\s?data-testid="results-(tab|group)-[a-z_]+"/g
+// Re-recorded for W10 R1 (card-workspaces.md §8): the group row is Summary and
+// the six cards, the second row the card's tabs (Build, Operation, …).
+const NEW_TEST_IDS = /\s?data-testid="results-(tab|group|cardtab)-[a-z_]+"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')
 }

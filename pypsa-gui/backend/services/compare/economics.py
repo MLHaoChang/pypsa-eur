@@ -27,7 +27,7 @@ from services.compare.support import (
     _safe_capital_cost,
 )
 from services import period_utils
-from services.process_products import SHORTFALL, generator_role, lost_production_value, product_value
+from services.process_products import product_value, shortfalls
 from services.results.load_frames import corrected_marginal_prices
 
 
@@ -302,17 +302,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 series = t_p_df[asset_name].reindex(sns).fillna(0.0).astype(float)
             except Exception:
                 continue
-            role, role_flag = generator_role(n, asset_name) if df is n.generators else ("", None)
-            if role == SHORTFALL:
-                # A shortfall slack is product NOT delivered: lost revenue at its lost-production value, never an
-                # expense as well, never dispatch and never revenue (ticket 04). It is booked under the product
-                # bus's carrier, as lost load is, whatever the slack's own carrier. A buy-in generator stays an
-                # ordinary expense below.
-                bus = row.get("bus")
-                bus_carrier = n.buses.at[bus, "carrier"] if bus in n.buses.index else None
-                _book_lost_production(_bucket(str(bus_carrier or carrier).lower()), n, asset_name, series,
-                                      role_flag)
-                continue
+            if df is n.generators and asset_name in shortfall_gens:
+                continue            # booked from the accessor below (lost production, never an expense)
             b = _bucket(carrier)
             # Storage: split the signed series into discharge (positive) and
             # charge (negative magnitude). The dispatch + revenue series use
@@ -408,17 +399,16 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                 except Exception:
                     pass
 
-    def _book_lost_production(bucket: dict, n, gen: str, series, role_flag: str | None) -> None:
-        value = lost_production_value(n, gen)
-        if value is None or bucket["lost_production_eur"] == "unavailable":
+    def _book_lost_production(bucket: dict, short) -> None:
+        if short.p is None or short.value is None or bucket["lost_production_eur"] == "unavailable":
             bucket["lost_production_eur"] = "unavailable"
-            bucket["lost_production_flag"] = "lost_production_value_missing"
+            bucket["lost_production_flag"] = short.flag if short.p is None else "lost_production_value_missing"
             return
-        # A role read from the slack's name only (no process_role column) is booked, and says so.
-        bucket["lost_production_flag"] = bucket["lost_production_flag"] or role_flag
+        # A role read from the slack's name only, or a stale capture, is booked, and says so.
+        bucket["lost_production_flag"] = bucket["lost_production_flag"] or short.flag
         if bucket["lost_production_eur"] is None:
             bucket["lost_production_eur"] = {"total": 0.0, "by_period": {}}
-        lost_t = series.clip(lower=0) * value * weights
+        lost_t = short.p.reindex(sns).fillna(0.0).clip(lower=0) * short.cost.reindex(sns) * weights
         _accum(bucket["lost_production_eur"], float(lost_t.sum()), _per_period_groupby(lost_t, sns, is_multi))
 
     # CAPEX: vintage path first, then plain path for assets without vintages.
@@ -453,9 +443,18 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # Sector-coupling Links contribute CAPEX + OPEX + dispatch to their
     # carrier bucket (heat-pump-waste, H2, P2X, etc.) so the economics tab
     # surfaces them in the per-carrier rollup.
+    # A shortfall is product NOT delivered: lost revenue at its lost-production value, never an expense as well,
+    # never dispatch and never revenue (ticket 04), from the one accessor (a role Generator, else the solve's capture,
+    # ticket 08). It is booked under the product bus's carrier, as lost load is. A buy-in stays an ordinary expense.
+    lost_src = shortfalls(n, lost_load_cap,
+                          gen_p=getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None)
+    shortfall_gens = {x.name for x in lost_src if x.source == "generator"}
     _walk_dispatch_side(n.generators,    getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None)
     _walk_dispatch_side(n.storage_units, getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None)
     _walk_dispatch_side(n.links,         getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None)
+    for short in lost_src:
+        carrier = n.buses.at[short.bus, "carrier"] if short.bus in n.buses.index else None
+        _book_lost_production(_bucket(str(carrier or "unknown").lower()), short)
 
     # ── Curtailment cost per carrier ────────────────────────────────────────
     # For each renewable generator with `curtailment_cost > 0`, the LP pays

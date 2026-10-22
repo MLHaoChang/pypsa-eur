@@ -247,6 +247,9 @@ def project_readiness(project_id: str | None = None) -> dict:
                 "next_tools": ["validate_network", "update_solver_config"] if blockers else (["save_project"] if dirty else (["get_study_evidence"] if freshness.get("state") == "fresh" else ["run_simulation"]))}
 
 
+# A sensitivity case's provenance record, beside its network. In
+# `routers.projects._BUNDLE_FILES` (not forked); `test_bundle_provenance` pins it.
+SENSITIVITY_CASE_FILE = "sensitivity_case.json"
 _EVIDENCE_CACHE = OrderedDict()
 _EVIDENCE_LOCK = threading.Lock()
 
@@ -420,6 +423,25 @@ def _exact_frame_json(frame):
         sort_keys=True, allow_nan=False)
 
 
+def solve_freshness(ctx=None):
+    """LC-12: whether results describe the current inputs, for result reads.
+
+    `results_current` is Check answers' own guard (`calculations.
+    solve_matches_inputs`), so every read agrees on it. `inputs_changed_since_
+    solve` compares both recorded solve fingerprints with the current inputs,
+    None when no solve recorded them: no claim either way."""
+    from harness.calculations import solve_matches_inputs
+    from services.pypsa_service import PyPSAService
+    ctx = ctx or PyPSAService.get_active_context()
+    meta = getattr(ctx.network, "meta", None) or {}
+    solved = meta.get("assistant_solve_input_fingerprint")
+    if not solved:
+        return {"inputs_changed_since_solve": None, "results_current": False}
+    changed = (solved != _network_input_fingerprint(ctx)
+               or meta.get("assistant_solve_exact_input_fingerprint") != _network_input_fingerprint(ctx, exact=True))
+    return {"inputs_changed_since_solve": changed, "results_current": solve_matches_inputs(ctx)}
+
+
 def _network_input_fingerprint(ctx, *, exact=False):
     """Hash model inputs, excluding solver outputs so a solve can be reused."""
     # PyPSA assigns a slack control while solving. Canonicalise controls on a
@@ -522,7 +544,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                     # find_project checks org/name uniqueness, not tree ACLs.
                     # Authorize BEFORE reading any existing case's provenance.
                     existing = project_registry.resolve_project(db, user, str(existing.id))
-                    old = _read_json(project_registry.project_dir(existing) / "sensitivity_case.json")
+                    old = _read_json(project_registry.project_dir(existing) / SENSITIVITY_CASE_FILE)
                     if existing.parent_project_id != base.id or any(old.get(k) != v for k, v in spec.items()) or _network_input_fingerprint(_load_context(existing)) != expected:
                         _refuse("sensitivity_name_conflict", "A case name already exists with different inputs; choose a new name.", 409)
                     existing_ctx = PyPSAService.get_context(project_registry.registry_key(existing))
@@ -558,7 +580,7 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
                         projects._enforce_project_lock(db, existing, user)
                         projects._save_context(ctx, existing.name, storage_dir=Path(ctx.storage_dir), db=db, user=user, project_row=existing)
                         from services.atomic_io import atomic_write_bytes
-                        atomic_write_bytes(Path(ctx.storage_dir) / "sensitivity_case.json", json.dumps(spec, sort_keys=True).encode())
+                        atomic_write_bytes(Path(ctx.storage_dir) / SENSITIVITY_CASE_FILE, json.dumps(spec, sort_keys=True).encode())
                         checkpoint('child_saved')
                     result["project_id"] = str(existing.id)
                     saved_ctx = _load_context(existing)

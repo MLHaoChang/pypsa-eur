@@ -59,6 +59,19 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "chat_tools.py": (2, "prose / output-budget guidance"),
     "harness/catalogue.py": (3, "tool descriptions (row counts, default hours)"),
     "legacy_import.py": (1, "prose describing a legacy fixture"),
+    "profile_gen/load_archetypes.py": (1, "an archetype is drawn on the source year's "
+                                          "HOURS by design (load shapes are hourly only); "
+                                          "apply aligns it onto the snapshots and refuses "
+                                          "a sub-hourly axis"),
+    "profile_gen/load_upload.py": (1, "resamples a meter export to HOURLY power, the load "
+                                      "family's axis: sub-hourly readings are averaged and a "
+                                      "coarser step is refused, never assumed"),
+    "profile_gen/availability.py": (1, "an availability bound is drawn on the source year's "
+                                       "HOURS like every generated profile; apply aligns it "
+                                       "onto the snapshots"),
+    "profile_gen/series.py": (1, "a price/inflow/COP series is drawn on the source "
+                                 "year's HOURS like every generated profile; apply aligns "
+                                 "it onto the snapshots"),
     "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
                              "to follow; with snapshots the template follows the axis"),
     "results/finance_case.py": (2, "IC P4 C3: a period is a year when its represented hours "
@@ -132,6 +145,10 @@ def test_the_inventory_is_pinned():
     # S1a: `asset_schema/fields.py` (1 site, MTTR help text) is added.
     # Profile generator: synthetic.py (3), atlite_source.py (1), apply.py (1) added.
     # RP-06: profile_gen/shape.py (2) added.
-    assert sum(c for c, _ in ALLOWED.values()) == 80
-    assert len(ALLOWED) == 39
+    # TS 03: profile_gen/series.py (1) added.
+    # TS 02: profile_gen/availability.py (1) added.
+    # TS 01 B3: profile_gen/load_upload.py (1) added.
+    # TS 01 B1: profile_gen/load_archetypes.py (1) added.
+    assert sum(c for c, _ in ALLOWED.values()) == 84
+    assert len(ALLOWED) == 43
     assert all(reason for _, reason in ALLOWED.values())

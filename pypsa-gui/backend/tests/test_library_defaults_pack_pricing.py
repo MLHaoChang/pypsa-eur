@@ -19,7 +19,7 @@ import math
 import pypsa
 import pytest
 
-VERSION = "2026-10-13"
+VERSION = "2026-10-22"
 
 
 def _pack():

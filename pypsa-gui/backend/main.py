@@ -89,6 +89,7 @@ from routers import (
     guides,
     io,
     library,
+    library_references,
     local_settings,
     network,
     profiles,
@@ -1264,6 +1265,8 @@ app.include_router(
 )
 # Edge Investment Case (P1 WP1.1b): the org-scoped Library.
 app.include_router(library.router, prefix="/api/library", tags=["library"])
+# The shipped (common) cost references: read-only, the same for every org.
+app.include_router(library_references.router, prefix="/api/library/references", tags=["library"])
 app.include_router(network.router, prefix="/api/network", tags=["network"])
 # Mount /api/network/cluster from the dedicated clustering router. Sharing the
 # /api/network prefix keeps the endpoint adjacent to other network mutations.
@@ -1283,6 +1286,11 @@ app.include_router(asset_results.router, prefix="/api/results/asset", tags=["ass
 # so it's adjacent to the foreground solve lifecycle it shares (_state, log_stream).
 app.include_router(solve_queue.router, prefix="/api/simulation/queue", tags=["solve-queue"])
 app.include_router(io.router, prefix="/api/io", tags=["io"])
+# The manual-mapping form's preview of an equipment table: a read, mounted outside
+# /api/network so it takes no undo snapshot and clears no results.
+from routers.network_equipment_table import preview_router as _equipment_table_preview  # noqa: E402
+
+app.include_router(_equipment_table_preview, prefix="/api/equipment_table", tags=["network"])
 # Path-scoped per-project READ endpoints (B6). Mounted BEFORE projects/snapshots
 # so its `{project_id}/network/...` routes (static `network` segment) resolve
 # first — they don't collide with projects.py's `{name}/<static>` routes, but

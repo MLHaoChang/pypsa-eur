@@ -54,3 +54,52 @@ def test_pending_writes_beside_each_other_and_a_network_save_load_all_land(tmp_p
         t.join()
     assert errors == []
     assert len(written) == 24
+
+
+def test_cutout_month_merges_beside_a_network_save_load(tmp_path):
+    """The cutout cache's month check and merge take the same lock (GK
+    follow-up on #468): a queue worker merging ERA5 months must not run
+    beside a project save/load."""
+    import xarray as xr
+
+    from services.profile_gen.cutout_cache import _merge_months, _valid_month
+
+    months = []
+    for m in range(1, 4):
+        idx = pd.date_range(f"2025-{m:02d}-01", periods=24 * 28, freq="h")
+        p = tmp_path / f"m{m}.nc"
+        xr.Dataset({"t": ("time", np.random.default_rng(m).random(len(idx)))},
+                   coords={"time": idx}).to_netcdf(p)
+        months.append(p)
+    errors: list[str] = []
+
+    def merger(i):
+        for k in range(6):
+            final = tmp_path / f"cutout_{i}_{k}.nc"
+            try:
+                _merge_months(months, final)
+                assert _valid_month(final)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(repr(exc))
+
+    def saver():
+        n = pypsa.Network()
+        n.set_snapshots(pd.date_range("2025-01-01", periods=8760, freq="h"))
+        n.add("Bus", "b")
+        path = tmp_path / "network.nc"
+        for _ in range(4):
+            try:
+                with PyPSAService.get_netcdf_io_lock():
+                    PyPSAService.export_network_to_netcdf(n, path)
+                with PyPSAService.get_netcdf_io_lock():
+                    PyPSAService.import_network_from_netcdf(pypsa.Network(), path)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(repr(exc))
+
+    threads = [threading.Thread(target=merger, args=(i,)) for i in range(3)]
+    threads.append(threading.Thread(target=saver))
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []

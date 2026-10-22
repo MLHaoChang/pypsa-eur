@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The Run's blocker and notes read in the check's plain title and entity ("Connection & grid: Bus voltage must be positive (grid)") instead of the validator's detail text. The plain titles now come from the server (`services/issue_titles.py`): `/validate` issues and project-flow items carry a `title`, and the frontend's own title table is gone.

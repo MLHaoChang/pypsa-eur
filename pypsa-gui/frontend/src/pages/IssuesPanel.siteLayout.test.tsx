@@ -63,7 +63,8 @@ describe('IssuesPanel — Site layout group (S2)', () => {
     expect(useUIStore.getState().selectedComponent).toEqual({ type: 'Transformer', name: 'TR1' })
     expect(useUIStore.getState().highlightedComponent).toMatchObject({ type: 'Transformer', name: 'TR1' })
     // jumpTo closes the slide panel so the properties editor is visible.
-    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    // J9: Issues stays open beside the editor, so the user can return to it.
+    expect(useUIStore.getState().activeSlidePanel).toBe('issues')
   })
 
   it('follows the store: the group disappears when the site view clears it', async () => {
