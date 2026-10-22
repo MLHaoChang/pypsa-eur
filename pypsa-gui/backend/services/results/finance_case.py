@@ -2176,7 +2176,10 @@ def _stage_rules(n, periods: list, period_year: int, invest_list, dates: dict[st
                                      f"{first_active if first_active is not None else 'none'}")
     for e in extras:
         d = extra_dates[e.name]
-        if d.year > cod.year:
+        if d.year > cod.year and not e.existing_renewal:
+            # An existing asset's first renewal (campus-IC 04, GK point 2) is
+            # exempt: the kept asset serves until its build year, which the
+            # campus study places in the period that holds it.
             first_active = next((p for p in periods if p >= e.build_year), None)
             if first_active != d.year:
                 raise FinanceRefused(f"staged_cod_not_active_period:{e.name}",
@@ -2187,6 +2190,22 @@ def _stage_rules(n, periods: list, period_year: int, invest_list, dates: dict[st
         raise FinanceRefused("cod_mismatch",
                              f"the case COD {cod} is before the first period {first}: an asset "
                              "in service before the first period cannot open a staged case")
+
+
+def _drop_fom_before_stages(templates: tuple[Template, ...], late: dict[str, int]
+                            ) -> tuple[Template, ...]:
+    """A later extra's fixed O&M line left out of each period that ends by its
+    COD year `late[name]` (P5c); kept in the period holding it, where the cash
+    flow starts it in that year (campus-IC 04, GK point 2: an existing asset's
+    renewal in 2043 pays no FOM before 2043, and from 2043 on). A COD on a
+    period keeps exactly the periods it had (and so the case hash)."""
+    nxt = {t.first_year: u.first_year for t, u in zip(templates, templates[1:])}
+    return tuple(dataclasses.replace(t, lines=tuple(
+        ln for ln in t.lines
+        if not (ln.source == "extra_asset_fom" and ln.source_id in late
+                and t.first_year < late[ln.source_id]
+                and nxt.get(t.first_year, math.inf) <= late[ln.source_id])))
+        for t in templates)
 
 
 def _extra_fom_lines(extra_finance: tuple[AssetFinance, ...], k: str, base_year: int
@@ -2432,10 +2451,7 @@ def _build_finance_case(n, cfg, fin, *, result_df, lost_load=None,
         else {}
     late = {name: d.year for name, d in extra_dates.items() if d.year > cod.year}
     if late:
-        templates = [dataclasses.replace(t, lines=tuple(
-            ln for ln in t.lines
-            if not (ln.source == "extra_asset_fom" and t.first_year < late.get(ln.source_id, 0))))
-            for t in templates]
+        templates = list(_drop_fom_before_stages(tuple(templates), late))
     if extras and fin.currency_year is None:
         # The extras' costs are in the caller's money; with no case currency year
         # nothing says whether it matches (IC G2 gate r1 note 5).
@@ -2467,6 +2483,14 @@ def _canon(o):
         # campus-IC 02/05: no campus summary keeps the hash.
         if isinstance(o, FinanceCase) and o.campus is None:
             del out["campus"]
+        # campus-IC 04 (GK point 5): an extra without a lineage keeps its hash.
+        if isinstance(o, ExtraOwnerAsset):
+            if o.renewals == ():
+                del out["renewals"]
+            if o.service_to is None:
+                del out["service_to"]
+            if o.existing_renewal is False:
+                del out["existing_renewal"]
         # P5 (staged builds) likewise: a case without stages, at the default
         # lead, keeps its pre-P5 hash.
         if isinstance(o, FinanceCase):

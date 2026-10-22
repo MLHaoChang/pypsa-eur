@@ -227,7 +227,7 @@ def test_the_engine_absent_with_a_run_directory_is_flagged_unavailable(
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "CAMPUS_AVAILABLE", False)
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: pytest.fail("the producer is not called without the engine"))
+                        lambda p, **kw: pytest.fail("the producer is not called without the engine"))
     _put_fin(client, _s2_inputs())
     assert _run(client)["status"] == "done"
     (src,) = seen
@@ -262,7 +262,7 @@ def test_a_producer_error_is_a_refused_report_campus_assets_invalid(
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
 
-    def boom(project):
+    def boom(project, **kw):
         if raise_ == "http422":
             raise HTTPException(422, "/secret/path: X is not in the library the run used")
         if raise_ == "contract":
@@ -320,7 +320,7 @@ def test_a_malformed_or_rejected_campus_response_is_refused_without_its_values(
     _save(client, install_network, "campus_ic_malformed")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: resp)
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: resp)
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     body = _run(client)
     assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
@@ -340,7 +340,7 @@ def test_a_money_year_refusal_names_data_not_exception_text(client, install_netw
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: _response([{**_asset(), "meta": SECRET}]))
+                        lambda p, **kw: _response([{**_asset(), "meta": SECRET}]))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     body = _run(client)
     assert body["error_code"] == "campus_assets_money_year_mismatch", body
@@ -403,7 +403,7 @@ def test_a_money_year_problem_is_refused(assets, fin_over, client, install_netwo
     _save(client, install_network, "campus_ic_money")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _response(assets))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _response(assets))
     _put_fin(client, _s2_inputs(currency="EUR", **fin_over))
     body = _run(client)
     assert body["status"] == "refused", body
@@ -420,7 +420,7 @@ def test_a_money_year_refusal_names_both_years_and_what_to_change(
     _save(client, install_network, "campus_ic_money_text")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _response([_asset(price_year=2026)]))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _response([_asset(price_year=2026)]))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2020))
     body = _run(client)
     assert body["error_code"] == "campus_assets_money_year_mismatch" and calls == []
@@ -438,7 +438,7 @@ def test_an_unstated_currency_year_takes_any_agreeing_price_year(
     _save(client, install_network, "campus_ic_unstated")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _response([_asset(price_year=2019)]))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _response([_asset(price_year=2019)]))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=None))
     assert _run(client)["status"] == "done"
     assert [e.name for e in calls[0]["extra_assets"]] == ["campus:TR_132_33_40#1"]
@@ -453,7 +453,7 @@ def test_a_stale_study_gives_no_extras_and_is_flagged(client, install_network, s
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: {**real(p), "stale": True})
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: {**real(p, **kw), "stale": True})
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     body = _run(client)
     assert body["status"] == "done", body
@@ -486,7 +486,7 @@ def test_a_study_with_no_purchase_is_valid_and_its_hash_is_digested(
     # Another (still empty) study is another source_hash: stale, `extra_assets` named.
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: {**real(p), "source_hash": "fedcba9876543210"})
+                        lambda p, **kw: {**real(p, **kw), "source_hash": "fedcba9876543210"})
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["extra_assets"]
 
@@ -529,7 +529,7 @@ def test_a_new_source_hash_marks_the_report_stale(client, install_network, sessi
     assert _run(client)["report"]["stale"] is False
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: {**real(p), "source_hash": "fedcba9876543210"})
+                        lambda p, **kw: {**real(p, **kw), "source_hash": "fedcba9876543210"})
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["extra_assets"]
     monkeypatch.setattr(ce, "owner_assets_response", real)
@@ -593,7 +593,7 @@ def test_the_factory_applies_a_source_extras_flags_and_refusal(monkeypatch):
         return S.to_finance_case("s2")
     monkeypatch.setattr(FC, "build_finance_case", fake)
     cfg = type("Cfg", (), {"finance": _s2_inputs()})()
-    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset) if f.default is dataclasses.MISSING]
     extra = ExtraOwnerAsset(**{k: _asset()[k] for k in names})
     src = R.CampusSource(extras=(extra,), flags=("campus_study_stale",), unsaved=True, digest="d")
     case = R._ic_build_case(None, cfg, owner="o", lost_load=None, campus=src)()
@@ -615,7 +615,7 @@ def test_the_route_and_solve_ppa_price_hand_the_seam_the_same_source(install_net
     from services.finance.case import ExtraOwnerAsset
     from services.results import finance_case as FC
 
-    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset) if f.default is dataclasses.MISSING]
     extra = ExtraOwnerAsset(**{k: _asset()[k] for k in names})
     source = R.CampusSource(extras=(extra,), digest="campus-digest-for-test")
     finances: list = []
@@ -718,7 +718,7 @@ def test_unresolved_needs_flag_the_case_list_the_needs_and_keep_the_assets(
     assert "campus_needs_unresolved" not in _run(client)["flags"]
     without = [e.name for e in calls[0]["extra_assets"]]
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: _with(real(p), unresolved=[NEED, NEED]))
+                        lambda p, **kw: _with(real(p, **kw), unresolved=[NEED, NEED]))
     body = _run(client)
     assert body["status"] == "done", body
     assert [e.name for e in calls[1]["extra_assets"]] == without and len(without) == 3
@@ -736,7 +736,7 @@ def test_a_study_with_only_an_unresolved_need_builds_without_extras_and_is_flagg
 
     calls = _fake_adapter(monkeypatch)
     _save(client, install_network, "campus_ic_only_need")
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: {
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: {
         "assets": [], "source_hash": "0123456789abcdef", "stale": False, "study_method": None,
         "unresolved": [NEED]})
     with _row(_auth_db, session_ctx, client) as (_db, row):
@@ -845,7 +845,7 @@ def test_a_malformed_unresolved_list_is_refused_without_its_values(
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: _with(_response([_asset()]), unresolved=unresolved))
+                        lambda p, **kw: _with(_response([_asset()]), unresolved=unresolved))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     body = _run(client)
     assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
@@ -862,7 +862,7 @@ def test_a_stale_study_with_unresolved_needs_is_only_stale(client, install_netwo
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
-                        lambda p: _with(real(p), stale=True, unresolved=[NEED]))
+                        lambda p, **kw: _with(real(p, **kw), stale=True, unresolved=[NEED]))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     body = _run(client)
     assert body["status"] == "done" and calls[0]["extra_assets"] == ()
@@ -881,14 +881,14 @@ def test_a_changed_unresolved_list_alone_marks_the_report_stale(client, install_
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[NEED]))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _with(real(p, **kw), unresolved=[NEED]))
     _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
     assert _run(client)["report"]["stale"] is False
     other = {**NEED, "reason": "another reason"}
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[other]))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _with(real(p, **kw), unresolved=[other]))
     rep = client.get(STUDY_URL).json()["report"]
     assert rep["stale"] is True and rep["changed"] == ["extra_assets"]
-    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[NEED]))
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _with(real(p, **kw), unresolved=[NEED]))
     assert client.get(STUDY_URL).json()["report"]["stale"] is False
 
 
@@ -948,7 +948,7 @@ def test_the_report_rows_carry_the_cost_tag_and_the_case_hash_ignores_no_summary
     from services.finance.report import _campus_study_block, _extra_assets_block
     from services.results.finance_case import finance_case_hash
 
-    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset) if f.default is dataclasses.MISSING]
     extra = ExtraOwnerAsset(**{k: _asset()[k] for k in names})
     case = dataclasses.replace(S.to_finance_case("s2"), extra_assets=(extra,))
     summary = CampusSummary("least_cost", (("campus:TR_132_33_40#1", "assumed", True),),

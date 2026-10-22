@@ -682,6 +682,31 @@ export interface CampusEquipment {
   money: string | null
   /** The needs the campus study could not meet, one line per need and reason. */
   unresolved: Array<{ need: string; reason: string }>
+  /** What the replacement schedule says about the campus assets' later lives
+   *  (campus-IC 04), one sentence per flag. */
+  lifeNotes: string[]
+}
+
+const LIFE_ENDS = 'campus_life_ends_unreplaced:'
+const AFTER_HORIZON = 'campus_renewal_after_horizon:'
+
+/** The campus-IC 04 flags in words; an asset name may contain ':', so the
+ *  year is the last segment. */
+function campusLifeNotes(flags: string[]): string[] {
+  return flags.flatMap(f => {
+    if (f.startsWith(LIFE_ENDS)) {
+      return [`The grid study plans no replacement for ${f.slice(LIFE_ENDS.length)} after its life ends `
+        + "inside the case's horizon (campus_life_ends_unreplaced). Under the part-lifetimes replacement "
+        + 'rule the case buys it again on its own lifetime rule; under the fixed rule it is not bought again.']
+    }
+    if (f.startsWith(AFTER_HORIZON)) {
+      const rest = f.slice(AFTER_HORIZON.length)
+      const at = rest.lastIndexOf(':')
+      return [`The grid study renews ${rest.slice(0, at)} in ${rest.slice(at + 1)}, after the case's `
+        + 'horizon: the case leaves that purchase out.']
+    }
+    return []
+  })
 }
 
 const CAMPUS_METHODS: Record<string, string> = {
@@ -719,7 +744,7 @@ export function campusEquipment(report: InvestmentCaseReportPayload | null | und
   }))
   const money = extras.map(e => e.money_year).find((m): m is string => typeof m === 'string') ?? null
   return {
-    rows, money, unresolved,
+    rows, money, unresolved, lifeNotes: campusLifeNotes(reportFlags(report as InvestmentCaseReportPayload, 'project')),
     method: typeof study.study_method === 'string' ? CAMPUS_METHODS[study.study_method] ?? null : null,
     illustrative: rows.filter(r => r.illustrative === true).length,
   }

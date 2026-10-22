@@ -216,7 +216,8 @@ def scale_capex(case: FinanceCase, f: float, *, asset: str | None = None,
 
     * No `asset` (IC S0b plan S2): every purchase — each asset's parts and
       `overnight_cost` together, and the amounts of the `fixed`
-      `replacement_capex` entries; one CAPEX bound moves every purchase (a
+      `replacement_capex` entries, and a campus lineage's renewals (campus-IC 04;
+      a part bound moves its part's); one CAPEX bound moves every purchase (a
       `part_lifetimes` replacement is its part's cost, so it moves with it).
     * `asset` alone: the same, for that asset only (its parts, its
       `overnight_cost`, its own `replacement_capex` entries).
@@ -266,12 +267,18 @@ def scale_capex(case: FinanceCase, f: float, *, asset: str | None = None,
                              "a part bound cannot say how much of it moves")
     scale = whole if part is None else one_part
     assets = tuple(scale(a) if asset in (None, a.name) else a for a in case.assets)
+    # A campus lineage's renewals (campus-IC 04) are its parts bought again: they
+    # move with the asset, or with the part a part bound names.
+    extras = tuple(dataclasses.replace(e, renewals=tuple(
+        dataclasses.replace(r, amount=r.amount * f) if part in (None, r.part) else r
+        for r in e.renewals)) if e.renewals and asset in (None, e.name) else e
+        for e in case.extra_assets)
     if part is not None:
-        return dataclasses.replace(case, assets=assets)
+        return dataclasses.replace(case, assets=assets, extra_assets=extras)
     inputs = case.inputs.model_copy(update={"replacement_capex": [
         (year, name, amount * f if asset in (None, name) else amount)
         for year, name, amount in case.inputs.replacement_capex]})
-    return dataclasses.replace(case, inputs=inputs, assets=assets)
+    return dataclasses.replace(case, inputs=inputs, assets=assets, extra_assets=extras)
 
 
 @dataclass(frozen=True)
@@ -358,6 +365,25 @@ def _extra_part(p) -> ExtraAssetPart | None:
 
 
 @dataclass(frozen=True)
+class CampusRenewal:
+    """One later purchase of one part of a campus lineage (campus-IC 04; campus
+    plan C14, like for like), folded into the lineage's first purchase
+    (`ExtraOwnerAsset.renewals`) so it is never an asset of its own (no second
+    fixed O&M, no stage). `build_year` is the new unit's first service year;
+    `amount` the part's whole purchase, upfront_per_unit × quantity, unescalated,
+    in the case's money (the basis of `asset_finance`'s overnight cost); `name`
+    the producer's entry name (`campus:<library_id>#<k>`); `service_to` the year
+    its successor starts, or the study horizon's end. The replacement schedule
+    pays it in `build_year − stage_capex_lead_years`."""
+
+    part: str
+    build_year: int
+    amount: float
+    name: str
+    service_to: float | None = None
+
+
+@dataclass(frozen=True)
 class ExtraOwnerAsset:
     """Equipment the owner buys that is not a network component (IC G2 plan G-4,
     U1 landing §8): a campus study's chosen transformer, cable, capacitor bank,
@@ -383,7 +409,19 @@ class ExtraOwnerAsset:
     (`fom_share`), a part name that is not a non-empty string (`parts`), a
     `derived_from_capital_cost` that is not a bool or `numpy.bool_`
     (`derived_from_capital_cost`). Each number is checked as passed (a bool or a
-    string is refused), then stored as a float (IC G3 F-1)."""
+    string is refused), then stored as a float (IC G3 F-1).
+
+    A campus lineage (campus-IC 04) also states `service_to` (the first
+    purchase's: the year its successor starts, or the study horizon's end; None
+    for an asset without a lineage, which the case treats as before 04),
+    `renewals` (a tuple of `CampusRenewal`: per part, each naming one of `parts`,
+    a build year in 1900..2200 after `build_year`, strictly increasing per part,
+    an amount finite and >= 0) and `existing_renewal` (True when this first entry
+    is an existing asset's first renewal: a P5 stage at COD = `build_year` that
+    P5-a's `staged_cod_not_active_period` exempts, since the kept asset serves
+    until then). Refused as `extra_asset_invalid:<name>:renewals`,
+    `:service_to` (not a finite number after `build_year`) or
+    `:existing_renewal` (not a bool)."""
 
     name: str
     kind: str
@@ -393,6 +431,9 @@ class ExtraOwnerAsset:
     build_year: int
     source: str
     source_hash: str
+    renewals: tuple[CampusRenewal, ...] = ()
+    service_to: float | None = None
+    existing_renewal: bool = False
 
     def __post_init__(self):
         def bad(field_: str, detail: str):
@@ -442,6 +483,41 @@ class ExtraOwnerAsset:
             fom = _real(p.fom_share)
             if fom is None or not 0.0 <= fom <= 1.0:
                 bad("fom_share", f"part {p.name!r}: {p.fom_share!r} is not a share in [0, 1]")
+        if not isinstance(self.existing_renewal, bool):
+            bad("existing_renewal", f"{self.existing_renewal!r} is not a bool")
+        if self.service_to is not None:
+            to = _real(self.service_to)
+            if to is None or to <= self.build_year:
+                bad("service_to", f"{self.service_to!r} is not a year after {self.build_year}")
+            object.__setattr__(self, "service_to", to)
+        if not isinstance(self.renewals, tuple):
+            bad("renewals", "the renewals are a tuple of CampusRenewal")
+        names = {p.name for p in self.parts}
+        renewals, last = [], {}
+        for r in self.renewals:
+            if not isinstance(r, CampusRenewal):
+                bad("renewals", f"{r!r} is not a CampusRenewal")
+            if not isinstance(r.name, str) or not r.name.strip():
+                bad("renewals", f"a renewal needs a name, not {r.name!r}")
+            if r.part not in names:
+                bad("renewals", f"a renewal names part {r.part!r}, which is not one of {sorted(names)}")
+            y = r.build_year
+            if isinstance(y, bool) or not isinstance(y, numbers.Integral) or not 1900 <= y <= 2200:
+                bad("renewals", f"part {r.part!r}: build year {y!r} is not a year in 1900..2200")
+            if y <= last.get(r.part, self.build_year):
+                bad("renewals", f"part {r.part!r}: build year {y} is not after the purchase "
+                                f"before it ({last.get(r.part, self.build_year)})")
+            last[r.part] = y
+            amount = _real(r.amount)
+            if amount is None or amount < 0:
+                bad("renewals", f"part {r.part!r} in {y}: amount {r.amount!r} is not a finite "
+                                "cost >= 0")
+            to = None if r.service_to is None else _real(r.service_to)
+            if r.service_to is not None and (to is None or to <= y):
+                bad("renewals", f"part {r.part!r} in {y}: service_to {r.service_to!r} is not a "
+                                "year after its build year")
+            renewals.append(dataclasses.replace(r, build_year=int(y), amount=amount, service_to=to))
+        object.__setattr__(self, "renewals", tuple(renewals))
 
     def asset_finance(self) -> AssetFinance:
         """The one `AssetFinance` it becomes (G-5): `campus:<kind>`, no carrier, one
