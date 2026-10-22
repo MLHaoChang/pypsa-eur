@@ -89,13 +89,13 @@ function show(value: Scalar | undefined, known = true): string {
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
-/** A value in its display unit, rounded for reading (the stored value stays in the small line). */
 /** A quote as the card shows it: at most QUOTE_SHOWN characters, the rest in the tooltip. */
 const QUOTE_SHOWN = 60
 function clip(quote: string): string {
   return quote.length > QUOTE_SHOWN ? `${quote.slice(0, QUOTE_SHOWN - 1).trimEnd()}\u2026` : quote
 }
 
+/** A value in its display unit, rounded for reading (the stored value stays in the small line). */
 function showDisplay(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'not set'
   return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })

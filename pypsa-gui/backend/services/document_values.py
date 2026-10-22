@@ -139,9 +139,15 @@ def normal(text: str) -> str:
 # ── Numbers ────────────────────────────────────────────────────────────────
 
 _MINUS = "-−"
-_RANGE_AFTER = re.compile(r"^\s?(?:[-‐-―]|to|bis|\.\.)\s?[+\-−]?\d", re.IGNORECASE)
-_RANGE_BEFORE = re.compile(r"\d\s?(?:[-‐-―]|to|bis|\.\.)\s?$", re.IGNORECASE)
+# A unit may sit between the two numbers of a range ("10 kW - 12 kW").
+_UNIT_WORD = r"(?:[A-Za-z%°/²³·]+\s?)?"
+_RANGE_AFTER = re.compile(rf"^\s?{_UNIT_WORD}(?:[-‐-―]|to|bis|\.\.)\s?[+\-−]?\d", re.IGNORECASE)
+_RANGE_BEFORE = re.compile(rf"\d\s?{_UNIT_WORD}(?:[-‐-―]|to|bis|\.\.)\s?$", re.IGNORECASE)
+# Page text on each side of a quote that its numbers are read with: a quote cannot cut a
+# range, a sign, a tolerance or a separator off its number.
+CONTEXT_CHARS = 16
 _PLUSMINUS = re.compile(r"(?:±|\+/-|\+-)")
+_TOLERANCE_AFTER = re.compile(rf"^\s?{_UNIT_WORD}(?:±|\+/-|\+-)")
 
 
 def _token_re(decimal_mark: str | None) -> re.Pattern:
@@ -180,10 +186,9 @@ def numbers(quote: str, decimal_mark: str | None = None) -> list[dict]:
             value = _read(m.group(), decimal_mark)
         except InvalidOperation:
             value = None
-        out.append({"text": m.group(), "value": value, "negative": negative,
+        out.append({"text": m.group(), "start": m.start(), "end": m.end(), "value": value, "negative": negative,
                     "range": bool(_RANGE_AFTER.match(after) or _RANGE_BEFORE.search(before)),
-                    # A tolerance anywhere in the quote: whose number it qualifies is a reading.
-                    "plusminus": bool(_PLUSMINUS.search(quote))})
+                    "plusminus": bool(_PLUSMINUS.search(before[-4:]) or _TOLERANCE_AFTER.match(after))})
     return out
 
 
@@ -226,8 +231,22 @@ def _negative_allowed(field: dict) -> bool:
     return isinstance(floor, (int, float)) and floor < 0
 
 
-def _value(citation: dict, quote: str, decimal_mark: str | None, field: dict) -> tuple[dict | None, dict | None]:
-    """`(number, None)` read from the quote, else `(None, gap)`."""
+def on_page(text: str, quote: str) -> int | None:
+    """Where the quote first occurs on the (normalised) page text as whole words, or None:
+    "2500 kW" is not on a page that reads "12500 kW"."""
+    start = text.find(quote)
+    while start >= 0:
+        end = start + len(quote)
+        if (start == 0 or not text[start - 1].isalnum()) and (end == len(text) or not text[end].isalnum()):
+            return start
+        start = text.find(quote, start + 1)
+    return None
+
+
+def _value(citation: dict, quote: str, page: str, at: int, decimal_mark: str | None,
+           field: dict) -> tuple[dict | None, dict | None]:
+    """`(number, None)` read from the quote at `page[at:]`, else `(None, gap)`. The number is
+    picked in the quote and read with `CONTEXT_CHARS` of page text on each side."""
     found = numbers(quote, decimal_mark)
     want = citation.get("value_text")
     if want is not None:
@@ -240,8 +259,15 @@ def _value(citation: dict, quote: str, decimal_mark: str | None, field: dict) ->
                           f"({[x['text'] for x in found]}); name the one to read in value_text.", citation)
     else:
         picked = found
-    number = picked[0]
-    if number["range"] or number["plusminus"]:
+    left = max(0, at - CONTEXT_CHARS)
+    window = numbers(page[left:at + len(quote) + CONTEXT_CHARS], decimal_mark)
+    same = [x for x in window if (x["start"], x["end"]) == (picked[0]["start"] + at - left, picked[0]["end"] + at - left)]
+    if not same:
+        return None, _gap("ambiguous_value", f"The quote cuts {picked[0]['text']} off a longer number on the page; "
+                          "cite the whole number.", citation)
+    number = same[0]
+    # A tolerance anywhere in the quote: whose number it qualifies is a reading.
+    if number["range"] or number["plusminus"] or _PLUSMINUS.search(quote):
         return None, _gap("ambiguous_value", f"{number['text']} is part of a range or a ± value in the quote; "
                           "a single value is not read from it. Type it in if one is meant.", citation)
     if number["value"] is None:
@@ -294,11 +320,13 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
             unmapped.append(_gap("no_text_layer", f"Page {page} has no text layer (a scan or an image); "
                                  "nothing is read from it, as there is no OCR. Type the value in.", c))
             continue
-        if quote not in pages[page - 1]:
-            elsewhere = [k + 1 for k, text in enumerate(pages) if quote in text]
+        at = on_page(pages[page - 1], quote)
+        if at is None:
+            elsewhere = [k + 1 for k, text in enumerate(pages) if on_page(text, quote) is not None]
             unmapped.append(_gap("quote_not_found", f"The quote is not on page {page}" + (
                 f"; it is on page {', '.join(map(str, elsewhere))}." if elsewhere else
-                " or on any other page read, word for word.")
+                " or on any other page read, word for word (whole words: a quote cannot start or end "
+                "inside a word or number).")
                 + (f" Pages {src['truncated']} are read up to {MAX_PAGE_CHARS} characters." if src["truncated"] else ""),
                 c, on_pages=elsewhere))
             continue
@@ -306,7 +334,7 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
         field = (fields or {}).get(field_name)
         unit = (str(c.get("unit") or "")).strip() or None
         named = quoted_currencies(quote)
-        stated = currency or (next(iter(named)) if len(named) == 1 and "$" not in named else None)
+        stated = (currency or "").strip().upper() or (next(iter(named)) if len(named) == 1 and "$" not in named else None)
         verdict, reason = T._column_verdict(field_name, field, unit, {"currency": stated, "money_year": money_year})
         if reason:
             unmapped.append(_gap(reason["kind"], reason["message"], c,
@@ -322,7 +350,7 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
                 unmapped.append(_gap("currency_mismatch", f"The project's finance inputs are in {project_currency}; "
                                      f"this value is {verdict['currency']}. Nothing is converted.", c))
                 continue
-        number, reason = _value(c, quote, decimal_mark, field)
+        number, reason = _value(c, quote, pages[page - 1], at, decimal_mark, field)
         if reason:
             unmapped.append(reason)
             continue
@@ -359,7 +387,7 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
                 continue
             targets.setdefault(nm, {})[verdict["field"]] = value
             notes = []
-            if normal(verdict["unit"]).lower() not in quote.lower():
+            if not re.search(rf"(?<![A-Za-z]){re.escape(normal(verdict['unit']))}(?![A-Za-z])", quote):
                 notes.append(f"The quote does not state {verdict['unit']}; it was named for it.")
             if verdict["currency"] and not project_currency:
                 notes.append(f"The project's finance inputs set no currency; recorded as {verdict['currency']}, "
@@ -367,8 +395,8 @@ def plan(n, doc: dict, component_class: str, citations: list, *, decimal_mark: s
             cells.append({"name": nm, "field": verdict["field"], "label": verdict["label"], "value": value,
                           "unit": verdict["stored_unit"], "currency": verdict["currency"],
                           "money_year": verdict["money_year"], "source": lineage, "notes": notes})
-        if verdict["money_year"] is not None:
-            years.setdefault(verdict["money_year"], verdict["currency"])
+            if verdict["money_year"] is not None:
+                years.setdefault(verdict["money_year"], verdict["currency"])
     needs, notes = T.money_needs(years, base_year, said="the document states")
     return {"component_class": component_class, "source": src, "targets": {k: v for k, v in targets.items() if v},
             "cells": cells, "unmapped": unmapped, "needs": needs,
