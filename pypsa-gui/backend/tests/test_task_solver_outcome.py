@@ -38,7 +38,9 @@ def test_incomplete_solver_receipt_cannot_advance_task(session, tool, result):
 def test_task_solver_wait_refuses_completion_without_terminal_outcome(
     session, monkeypatch, boundary
 ):
-    from harness import budget
+    import time
+
+    from harness import continuation
     from routers.simulation import BufferedLogQueue
     from services.pypsa_service import PyPSAService
 
@@ -63,13 +65,24 @@ def test_task_solver_wait_refuses_completion_without_terminal_outcome(
         return {"status": "started"}
 
     monkeypatch.setattr(chat_tools, "run_simulation", start_only)
-    monkeypatch.setattr(budget, "PER_TOOL_TIMEOUT_SECONDS", 0.01)
+    # Dispatch calls through DISPATCHERS; without this a real solve ran instead.
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "run_simulation", start_only)
+    monkeypatch.setattr(continuation, "GRACE_SECONDS", 0.01)
     try:
         result = output(dispatch(session, "run_simulation", {}))
-        assert result["status"] == "started" and result["final_status"] == "running"
-        state = chat_tools.get_task(task["task_id"])
-        assert state["status"] == "needs_review" and state["completed_steps"] == 0
+        # LC-12: the step waits on its job instead of the turn; a running
+        # status with no new native worker behind it is no outcome, so the
+        # job settles failed and the plan never counts the solve as done.
+        assert result["status"] == "started" and result["job_id"].startswith("fg:")
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            state = chat_tools.get_task(task["task_id"])
+            if state["next_step"]["status"] != "waiting":
+                break
+            time.sleep(0.05)
+        assert state["completed_steps"] == 0
         assert state["next_step"]["tool"] == "run_simulation"
+        assert state["next_step"]["status"] == "failed"
     finally:
         with ctx.solver_state_lock:
             ctx.solver_state["status"] = "idle"

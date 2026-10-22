@@ -25,6 +25,8 @@ hourly dispatch move 52 hours of stored energy.
 """
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 import pandas as pd
 import pypsa
@@ -118,7 +120,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     offices share the MV bus and are the non-critical demand. A UPS battery
     rides on the IT bus, a four-unit gas genset fleet on the MV bus.
 
-    ``phases`` (``DC_PHASES``) makes it the staged-growth campus
+    ``phases`` (a ``_DcPlan``) makes it the staged-growth campus
     (``_staged_datacenter``); None is the single-year template, unchanged.
     ``load_spec`` (a checked ``DataCentreLoadSpec``, ``dc_load_spec``) opts in
     to the AI-training profile; None keeps today's load bit for bit.
@@ -207,6 +209,127 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     return n
 
 
+# ── Planning years (E1; workspace reconciliation §3.3, owner Q3 = B) ─────────
+#
+# A staged example is built for the years a create body's ``planning`` enters:
+# the start year and the later investment dates are the periods, the end year
+# the horizon. Without dates the example's own spacing is shifted to the
+# start year and a stage at or after the end year is dropped (owner decision
+# E1-stages, 2026-10-21). Each period's years run to the next period, the
+# last to the end year; the solve's ``auto_discount_periods`` derives the
+# objective weights from them, so nothing here discounts. A growth value the
+# example has no figure for in an entered year (IT MW, energized MW) is the
+# example's value for the same stage, marked a placeholder in the metadata
+# (``growth_inputs``) and the ledger, never interpolated.
+
+#: The bounds of an entered year and the most periods (the generic site's).
+PLANNING_YEAR_MIN, PLANNING_YEAR_MAX, PLANNING_MAX_PERIODS = 2025, 2060, 3
+_PLANNING_KEYS = ("start_year", "end_year", "dates")
+
+
+class PlanningError(ValueError):
+    """A refused ``planning`` entry, naming its field (``planning.<key>``)."""
+
+    def __init__(self, message: str, field: str):
+        super().__init__(message)
+        self.field = field
+
+
+class Planning(NamedTuple):
+    """Investment periods ``years`` (increasing) and the horizon ``end_year``.
+    (A NamedTuple, not a dataclass: this file is loaded by path without a
+    ``sys.modules`` entry, which a dataclass's annotation check needs.)"""
+
+    years: tuple[int, ...]
+    end_year: int
+
+    @property
+    def start_year(self) -> int:
+        return self.years[0]
+
+    @property
+    def analysis_years(self) -> int:
+        return self.end_year - self.start_year
+
+    @property
+    def period_years(self) -> dict[int, int]:
+        """The years each period stands for: to the next, the last to the end year."""
+        return {y: e - y for y, e in zip(self.years, (*self.years[1:], self.end_year))}
+
+
+#: The years each staged example is built for when no ``planning`` is entered.
+NATIVE_PLANNING: dict[str, Planning] = {
+    "eh_datacenter_staged": Planning((2027, 2030, 2035), 2045),
+}
+
+
+def _planning_year(raw: dict, key: str) -> int:
+    field = f"planning.{key}"
+    if key not in raw:
+        raise PlanningError(f"{field}: required", field)
+    y = raw[key]
+    if isinstance(y, bool) or not isinstance(y, int) \
+            or not PLANNING_YEAR_MIN <= y <= PLANNING_YEAR_MAX:
+        raise PlanningError(f"{field}: a whole year from {PLANNING_YEAR_MIN} to "
+                            f"{PLANNING_YEAR_MAX}, got {y!r}", field)
+    return y
+
+
+def planning_spec(template_id: str, raw) -> Planning:
+    """The checked ``planning`` entry for a staged example, or ``PlanningError``."""
+    if not isinstance(raw, dict):
+        raise PlanningError("planning: must be an object {start_year, end_year, dates?}",
+                            "planning")
+    extra = sorted(set(raw) - set(_PLANNING_KEYS))
+    if extra:
+        raise PlanningError(f"planning.{extra[0]}: unknown key", f"planning.{extra[0]}")
+    start, end = _planning_year(raw, "start_year"), _planning_year(raw, "end_year")
+    if end == start:
+        raise PlanningError("planning.end_year: one year is a single-period study; this is a "
+                            "staged example, so use the single-year example or a later end year",
+                            "planning.end_year")
+    if end < start:
+        raise PlanningError(f"planning.end_year: after the start year ({start}), got {end}",
+                            "planning.end_year")
+    native = NATIVE_PLANNING[template_id]
+    if "dates" not in raw:
+        years = tuple(start + y - native.start_year for y in native.years
+                      if start + y - native.start_year < end)
+        return Planning(years, end)
+    dates = raw["dates"]
+    if not isinstance(dates, list) or any(isinstance(d, bool) or not isinstance(d, int)
+                                          for d in dates):
+        raise PlanningError(f"planning.dates: a list of whole years, got {dates!r}",
+                            "planning.dates")
+    years = (start, *dates)
+    if len(years) > PLANNING_MAX_PERIODS:
+        raise PlanningError(f"planning.dates: at most {PLANNING_MAX_PERIODS} periods with the "
+                            f"start year, got {list(years)}", "planning.dates")
+    if list(years) != sorted(set(years)) or years[-1] >= end:
+        raise PlanningError(f"planning.dates: increasing years after the start year ({start}) "
+                            f"and before the end year ({end}), got {dates}", "planning.dates")
+    return Planning(years, end)
+
+
+def _is_native(template_id: str, planning: Planning | None) -> bool:
+    return planning is None or planning == NATIVE_PLANNING[template_id]
+
+
+def _by_stage(planning: Planning, native: Planning, values: dict[int, float]):
+    """``[(year, value, set)]``: each entered period takes the example's value
+    for the same stage; it is ``set`` only where the year is the example's."""
+    out = []
+    for i, y in enumerate(planning.years):
+        ny = native.years[min(i, len(native.years) - 1)]
+        out.append((y, values[ny], y == ny))
+    return out
+
+
+def _years_text(years) -> str:
+    years = [str(y) for y in years]
+    return years[0] if len(years) == 1 else f"{', '.join(years[:-1])} and {years[-1]}"
+
+
 # ── Data Center Energy Hub, staged growth (E2E demo plan 2026-10-14, slice 8) ─
 #
 # The same campus planned from a projected load: three investment periods, the
@@ -231,6 +354,30 @@ DC_ENERGIZATION_MW = {2027: 15.0, 2030: _DC_POC_MW, 2035: _DC_POC_MW}
 DC_PERIOD_YEARS = {2027: 3, 2030: 5, 2035: 10}
 _DC_IT_MW = 36.0                                   # the single-year template's IT load
 
+
+class _DcPlan(NamedTuple):
+    """The staged campus for one ``Planning``: per period (year, IT MW, PUE),
+    the energized import (MW) and whether each growth value is the example's
+    own (``set``) or its same-stage placeholder."""
+
+    planning: Planning
+    phases: tuple
+    energization: dict
+    it_set: dict
+    energized_set: dict
+
+
+def _dc_plan(planning: Planning | None = None) -> _DcPlan:
+    native = NATIVE_PLANNING["eh_datacenter_staged"]
+    p = planning or native
+    it = _by_stage(p, native, {y: v for y, v, _pue in DC_PHASES})
+    pue = _by_stage(p, native, {y: v for y, _it, v in DC_PHASES})
+    en = _by_stage(p, native, DC_ENERGIZATION_MW)
+    return _DcPlan(p, tuple((y, it_mw, pue_y)
+                            for (y, it_mw, _set), (_year, pue_y, _pue_set) in zip(it, pue)),
+                   {y: mw for y, mw, _set in en}, {y: is_set for y, _mw, is_set in it},
+                   {y: is_set for y, _mw, is_set in en})
+
 # ── The staged campus's commercial and finance inputs (slice D4) ────────────
 # Inline only (no Library refs a fresh project would not have), so the
 # investment case computes on a project made from the template. Synthetic
@@ -250,36 +397,54 @@ DC_TARIFF: dict = {
                "periods": [{"name": "day", "rate": 0.035, "start_hour": 8, "end_hour": 20},
                            {"name": "night", "rate": 0.020}]}],
 }
-DC_FINANCE: dict = {
-    "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
-    "financial_close": "2026-01-01",
-    "cod_by_asset": {a: "2027-01-01" for a in DC_EXISTING},
-    "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
-    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
-    # Every owned generator and battery needs an entry (the engine never reads
-    # a missing one as 0): PV 0.5 %/yr, the gensets and batteries none (the
-    # batteries on the no-degradation basis, as the guided case).
-    "degradation_by_asset": {
-        **{a: 0.0 for a in DC_EXISTING if a not in ("rooftop_pv", "site_transformer")},
-        "rooftop_pv": 0.005,
-        **{f"{k}_new_{y}": 0.0 for y, _it, _pue in DC_PHASES for k in ("genset", "bess")}},
-    "analysis_years": sum(DC_PERIOD_YEARS.values()),            # 2027-2044
-    "annualise": False,                                         # each period weighs 8,760 h
-    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
-    "replacement_rule": "part_lifetimes",
-    "terminal_value": {"method": "remaining_life_annuity"},
-    "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
-}
 
 
-def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Network:
-    """The single-year campus as a three-period plan: the week repeated in each
-    period, the load scaled to ``phases``, the import capped per period by
-    ``DC_ENERGIZATION_MW`` (an absolute MW schedule on the ``_DC_POC_MW`` link), and the two expansion
-    candidates replaced by one candidate per period with that period as its
-    ``build_year`` (explicit rows, not vintage bounds, so the finance adapter
-    sees each stage)."""
+def _dc_tariff(plan: _DcPlan) -> dict:
+    """The tariff, valid from the first period."""
+    return {**DC_TARIFF, "valid_from": f"{plan.planning.start_year}-01-01"}
+
+
+def _dc_finance(plan: _DcPlan) -> dict:
+    """The finance inputs over the planning horizon: close the year before the
+    first period, every existing asset in service then, the case running to
+    the end year (Σ of the periods' years, so the LP and the case count the
+    same years)."""
+    p = plan.planning
+    return {
+        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "financial_close": f"{p.start_year - 1}-01-01",
+        "cod_by_asset": {a: f"{p.start_year}-01-01" for a in DC_EXISTING},
+        "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
+        "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+        # Every owned generator and battery needs an entry (the engine never reads
+        # a missing one as 0): PV 0.5 %/yr, the gensets and batteries none (the
+        # batteries on the no-degradation basis, as the guided case).
+        "degradation_by_asset": {
+            **{a: 0.0 for a in DC_EXISTING if a not in ("rooftop_pv", "site_transformer")},
+            "rooftop_pv": 0.005,
+            **{f"{k}_new_{y}": 0.0 for y in p.years for k in ("genset", "bess")}},
+        "analysis_years": p.analysis_years,                         # 2027-2044 natively
+        "annualise": False,                                         # each period weighs 8,760 h
+        "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+        "replacement_rule": "part_lifetimes",
+        "terminal_value": {"method": "remaining_life_annuity"},
+        "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
+    }
+
+
+DC_FINANCE: dict = _dc_finance(_dc_plan())
+
+
+def _staged_datacenter(n: pypsa.Network, plan: _DcPlan, load_spec=None) -> pypsa.Network:
+    """The single-year campus as a plan over ``plan``'s periods: the week
+    repeated in each period, the load scaled to its phases, the import capped
+    per period by its energization (an absolute MW schedule on the
+    ``_DC_POC_MW`` link), and the two expansion candidates replaced by one
+    candidate per period with that period as its ``build_year`` (explicit
+    rows, not vintage bounds, so the finance adapter sees each stage)."""
+    phases = plan.phases
     years = [int(y) for y, _it, _pue in phases]
+    period_years = plan.planning.period_years
     flat = {
         ("generators_t", "p_max_pu"): n.generators_t.p_max_pu.copy(),
         ("generators_t", "marginal_cost"): n.generators_t.marginal_cost.copy(),
@@ -290,8 +455,8 @@ def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Networ
     n.investment_periods = years
     n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
     n.snapshot_weightings.loc[:, "stores"] = 1.0                    # hours per snapshot (S0)
-    n.investment_period_weightings["years"] = [float(DC_PERIOD_YEARS[y]) for y in years]
-    n.investment_period_weightings["objective"] = [float(DC_PERIOD_YEARS[y]) for y in years]
+    n.investment_period_weightings["years"] = [float(period_years[y]) for y in years]
+    n.investment_period_weightings["objective"] = [float(period_years[y]) for y in years]
     snaps = n.snapshots                                 # PyPSA's own index (names and all)
     for (frame, attr), df in flat.items():
         tiled = pd.DataFrame(np.tile(df.to_numpy(), (len(years), 1)), index=snaps, columns=df.columns)
@@ -312,7 +477,7 @@ def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Networ
     # overlay that rewrites p_nom composes as min(E, cap) instead of
     # rescaling a stored fraction (gatekeeper review of #266).
     n.links_t["eh_energization_mw"] = pd.DataFrame(
-        {"grid_import": np.repeat([DC_ENERGIZATION_MW[y] for y in years], len(SNAPSHOTS))},
+        {"grid_import": np.repeat([plan.energization[y] for y in years], len(SNAPSHOTS))},
         index=snaps)
     n.remove("Generator", "genset_new")
     n.remove("StorageUnit", "bess_new")
@@ -351,8 +516,10 @@ def _staged_datacenter(n: pypsa.Network, phases, load_spec=None) -> pypsa.Networ
     return n
 
 
-def build_eh_datacenter_staged(load_spec=None) -> pypsa.Network:
-    return build_eh_datacenter(phases=DC_PHASES, load_spec=load_spec)
+def build_eh_datacenter_staged(load_spec=None, planning: Planning | None = None) -> pypsa.Network:
+    """The staged campus for ``planning`` (None: the example's 2027 / 2030 /
+    2035 to 2045)."""
+    return build_eh_datacenter(phases=_dc_plan(planning), load_spec=load_spec)
 
 
 # ── The AI-training load profile, opt-in (DC grid readiness 01) ─────────────
@@ -397,9 +564,10 @@ def _apply_dc_profile(n, spec, snapshots, it_mw: float, *, timezone, period=None
     p_set.loc[rows, "cooling"] = (1.0 - spec.critical_share) * facility
 
 
-def dc_load_spec(template_id: str, raw: dict | None):
+def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None = None):
     """The checked opt-in spec from a create body's ``dc_load`` (merged over
-    ``dc_load_preset``), or ``DcLoadError`` naming the field."""
+    ``dc_load_preset``), or ``DcLoadError`` naming the field. The staged
+    campus needs one phase per period of ``planning`` (None: the example's)."""
     import pydantic
 
     from models.flex_archetypes import DataCentreLoadSpec
@@ -424,7 +592,7 @@ def dc_load_spec(template_id: str, raw: dict | None):
         raise DcLoadError("dc_load.critical_share: must be > 0 (it_load is the critical load)",
                           "dc_load.critical_share")
     if template_id == "eh_datacenter_staged":
-        expected = [y for y, _it, _pue in DC_PHASES]
+        expected = list(_dc_plan(planning).planning.years)
         got = [p.cod.year for p in spec.phases]
         if got != expected:
             raise DcLoadError(f"dc_load.phases: the staged template's periods are {expected}; "
@@ -433,47 +601,40 @@ def dc_load_spec(template_id: str, raw: dict | None):
     elif _single_year_phase(spec) is None:
         raise DcLoadError(f"dc_load.phases: no phase is in service by the modelled week "
                           f"({SNAPSHOTS[0].date()})", "dc_load.phases")
-    _check_dc_peak(template_id, spec)
+    _check_dc_peak(template_id, spec, planning)
     return spec
 
 
 def firm_genset_mw(n, template_id: str) -> tuple[float, str]:
     """The committed genset fleet's firm MW and the rule that gave it: the
     island requirements' genset N+k (``genset_redundancy_n``) takes out the
-    k largest units; without it the whole fleet counts."""
-    cfg = ISLAND_CONFIG.get(template_id, {})
-    names = [u for u, d in cfg.get("units", {}).items()
-             if d.get("kind") == "genset" and u in n.generators.index
-             and not bool(n.generators.at[u, "p_nom_extendable"])]
-    sizes = sorted((float(n.generators.at[u, "p_nom"]) for u in names), reverse=True)
-    k = int((cfg.get("requirements", {}).get("genset_redundancy_n") or {}).get("value", 0))
-    if k:
-        return sum(sizes[k:]), f"genset N+{k}: the fleet less its {k} largest unit(s)"
-    return sum(sizes), "the whole genset fleet (no genset redundancy required)"
+    k largest units; without it the whole fleet counts
+    (``services.adequacy.site_peak.firm_genset_mw`` on the template's sidecar)."""
+    from services.adequacy.site_peak import firm_genset_mw as firm
+
+    return firm(n, ISLAND_CONFIG.get(template_id, {"units": {}}))
 
 
-def _check_dc_peak(template_id: str, spec) -> None:
-    """Each period's modelled peak must fit the energized import plus the
-    committed fleet's firm genset MW; above that the plan could only shed
-    (gatekeeper review of DC grid readiness 01)."""
+def _check_dc_peak(template_id: str, spec, planning: Planning | None = None) -> None:
+    """Each hour's modelled load must fit the energized import (after the
+    PoC Link's efficiency) plus the committed fleet's firm genset MW; above that
+    the plan could only shed (gatekeeper review of DC grid readiness 01).
+    The one check the grid-readiness scorecard also reports
+    (``services.adequacy.site_peak.peak_check``)."""
+    from services.adequacy.site_peak import describe, peak_check, unset_periods
     from services.dc_load_profile import DcLoadError
 
-    n = BUILDERS[template_id](load_spec=spec)
-    firm, rule = firm_genset_mw(n, template_id)
-    total = n.loads_t.p_set.sum(axis=1)
-    if isinstance(n.snapshots, pd.MultiIndex):
-        peaks = total.groupby(level=0).max()
-        energized = {y: DC_ENERGIZATION_MW[y] for y in peaks.index}
+    if planning is None:
+        n = BUILDERS[template_id](load_spec=spec)
     else:
-        peaks = pd.Series({SNAPSHOTS[0].year: total.max()})
-        energized = {y: float(n.links.at["grid_import", "p_nom"]) for y in peaks.index}
-    for y, peak in peaks.items():
-        cap = energized[y] + firm
-        if peak > cap + 1e-9:
+        n = BUILDERS[template_id](load_spec=spec, planning=planning)
+    # A period whose energization is a placeholder is unknown, never refused.
+    unset = unset_periods(template_meta(template_id, planning, load_spec=spec))
+    for row in peak_check(n, island_config(template_id, planning), unset=unset):
+        if row["headroom_mw"] is not None and row["headroom_mw"] < -1e-9:
             raise DcLoadError(
-                f"dc_load.phases: the {y} peak is {peak:.1f} MW, above the {energized[y]:g} MW "
-                f"energized import plus {firm:g} MW of firm gensets ({rule}) = {cap:g} MW",
-                "dc_load.phases")
+                f"dc_load.phases: the {row['period']} peak is {row['load_mw']:.1f} MW (at "
+                f"{row['binding_snapshot']}), above {describe(row)}", "dc_load.phases")
 
 
 def dc_load_meta(template_id: str, spec) -> dict:
@@ -708,6 +869,262 @@ H2_ISLAND_LEDGER = [
              "a grid code"},
 ]
 
+#: The growth inputs a staged example reads by year: kind → (label, unit,
+#: flow section, component, entity, field).
+_GROWTH_KINDS = {
+    "it_mw": ("IT load", "MW", "loads", "Load", "it_load", "p_set"),
+    "energized_mw": ("Energized import", "MW", "connection", "Link", "grid_import",
+                     "eh_energization_mw"),
+    # The staged hubs (E1b): the H2 offtake (MW of H2, not an electric load) and
+    # the microgrid's load scale per load (×, the example's 2027 load = 1).
+    "h2_offtake_mw": ("H2 offtake", "MW", "loads", "Load", "h2_offtake", "p_set"),
+    "load_scale": ("Load scale", "×", "loads", "Load", None, "p_set"),
+}
+
+
+#: The growth kinds the site's electric peak reads (``site_peak.PEAK_INPUTS``;
+#: a test pins the two equal). The H2 offtake is not one: it is a load on the H2 bus.
+_PEAK_KINDS = ("it_mw", "energized_mw", "load_scale")
+
+
+def _growth_value_text(value) -> str:
+    """A growth value in the ledger's words: a number, or ``load ×scale`` per load."""
+    if isinstance(value, dict):
+        return ", ".join(f"{k} ×{v:g}" for k, v in value.items())
+    return f"{value:g}"
+
+
+def _growth_rows(kind: str, staged, *, source_set: str = "example", overrides=None):
+    """``growth_inputs`` rows for one kind: ``staged`` is ``[(year, the
+    example's same-stage value, set)]``; ``overrides`` ({year: value}) are
+    entered values (set, ``source_set``)."""
+    rows = []
+    for y, v, is_set in staged:
+        if overrides is not None and y in overrides:
+            rows.append({"kind": kind, "year": y, "value": float(overrides[y]), "set": True,
+                         "example_value": v, "source": source_set})
+        else:
+            rows.append({"kind": kind, "year": y, "value": v, "set": bool(is_set),
+                         "example_value": v, "source": "example" if is_set else "unset"})
+    return rows
+
+
+#: The follow-up that lets a placeholder be set (until then it stays one).
+PLACEHOLDER_FOLLOW_UP = "E1-set-growth-placeholders"
+
+
+def _in_words(label: str) -> str:
+    """``Energized import`` → ``energized import``; an acronym stays (``IT load``)."""
+    return label if label[1:2].isupper() or label[1:2].isdigit() else label[:1].lower() + label[1:]
+
+
+def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
+    """One assumed ledger row per placeholder growth value (the flow lists it
+    as a warning to confirm; gatekeeper E1 condition 3). It says which stage
+    the value comes from, and that it stays a placeholder: nothing sets one
+    yet (``PLACEHOLDER_FOLLOW_UP``)."""
+    out = []
+    years: dict[str, list[int]] = {}
+    for g in growth:
+        years.setdefault(g["kind"], []).append(g["year"])
+    for g in growth:
+        if g["set"]:
+            continue
+        label, unit, section, component, entity, field = _GROWTH_KINDS[g["kind"]]
+        y = g["year"]
+        stage = years[g["kind"]].index(y) + 1
+        value = (_growth_value_text(g["example_value"]) if isinstance(g["example_value"], dict)
+                 else f"{g['example_value']:g} {unit}")
+        if y in native.years:
+            why = (f"the example's {y} value is not used: this planning puts {y} in stage "
+                   f"{stage}, so it takes {value}")
+        else:
+            why = f"the example has no {_in_words(label)} for {y}; it takes its stage {stage} value, {value}"
+        out.append({
+            "item": f"placeholder {g['kind']} {y}",
+            "label": f"{label} {y} (placeholder)",
+            "value": (_growth_value_text(g["value"]) if isinstance(g["value"], dict)
+                      else g["value"]), "unit": unit,
+            "source": "assumed",
+            "note": (f"not set: {why} (the example is built for {_years_text(native.years)}). A "
+                     "placeholder, never interpolated: "
+                     + ("the peak check and the scorecard read this period unknown, and it "
+                        "stays unknown for this period" if g["kind"] in _PEAK_KINDS else
+                        "the investment case flags it, and it stays flagged")
+                     + f" (setting a placeholder is follow-up {PLACEHOLDER_FOLLOW_UP})"),
+            "section": section, "panel": None, "component": component, "entity": entity,
+            "field": field})
+    return out
+
+
+def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
+    """The staged campus's ``eh_template.json`` for ``plan``. The example's own
+    years give the shipped metadata; other years add ``growth_inputs`` (each
+    growth value set or a placeholder), a placeholder ledger row per unset
+    value and the entered planning period."""
+    p = plan.planning
+    native = NATIVE_PLANNING["eh_datacenter_staged"]
+    is_native = p == native
+    years = list(p.years)
+    y0, end = years[0], p.end_year
+    e0 = plan.energization[y0]
+    it_mw = {y: it for y, it, _pue in plan.phases}
+    spec_it = ({ph.cod.year: ph.it_mw for ph in load_spec.phases}
+               if load_spec is not None else None)
+    shown_it = spec_it if spec_it is not None else it_mw
+    until = f"{e0:g} MW until {years[1]}" if len(years) > 1 else f"{e0:g} MW"
+    # Each candidate battery's inverter lives 10 years; list those that end
+    # inside the horizon.
+    ends = [f"bess_new_{y}'s in {y + 10}" for y in years if y + 10 < end]
+    if ends:
+        ends[0] = ends[0].replace("'s in", "'s inverter ends in", 1)
+        inverter_note = (f"{' and '.join(ends)}, inside the {end} horizon; the template's finance "
+                         "inputs re-buy it at the end of its lifetime (replacement_rule "
+                         "part_lifetimes)")
+    else:
+        inverter_note = (f"no candidate battery's inverter ends inside the {end} horizon "
+                         "(replacement_rule part_lifetimes re-buys one that does)")
+
+    def _projected_note(y):
+        if spec_it is not None:
+            return "the dc_load phase entered at create"
+        if plan.it_set[y]:
+            return "synthetic illustrative fit-out ramp; replace with the client's load projection"
+        return f"placeholder: the example's same-stage IT load; not set for {y}"
+
+    if is_native:
+        stage_note = ("Load is picked up in 2.5 MW blocks after an islanding (assumed): the island "
+                      "rows then follow the load, so the plan stages — a small genset in 2027 and "
+                      "2030, the bulk in 2035.")
+        cap_note = (f"The energization schedule caps the import at {e0:g} MW in "
+                    f"{y0}, below that period's peak: the plan builds on site for it.")
+    else:
+        stage_note = ("Load is picked up in 2.5 MW blocks after an islanding (assumed): the island "
+                      "rows then follow the load, so the plan stages.")
+        cap_note = ("The energization schedule caps the import per period ("
+                    + ", ".join(f"{plan.energization[y]:g} MW in {y}" for y in years)
+                    + "): where it is below a period's peak the plan builds on site for it.")
+    meta = {
+        "id": "eh_datacenter_staged",
+        "name": "Data Center Energy Hub (staged growth)",
+        "description": (
+            "The data center campus planned from a projected load: IT grows "
+            f"{' → '.join(f'{shown_it[y]:g}' for y in years)} MW over {_years_text(years)} while "
+            f"the utility energizes a {_DC_POC_MW:g} MW connection in steps "
+            f"({until}). "
+            "Genset and battery candidates per period, so the plan says what "
+            "to build when. Multi-period; tagged for an Energy Hub study."),
+        "recommended_archetype": "weak_flexible",
+        "pack_overrides": {"import_p_nom_mw": _DC_POC_MW},
+        "stages": None,
+        "dtc_attribution": "per_load",
+        "projected_load": [
+            {"year": y, "it_mw": shown_it[y], "pue": pue, "note": _projected_note(y)}
+            for y, _it, pue in plan.phases],
+        "energization": [
+            {"year": y, "available_import_mw": plan.energization[y], "connection_mw": _DC_POC_MW,
+             "source": "assumed",
+             "note": ("utility energization schedule (assumed)" if plan.energized_set[y] else
+                      f"placeholder: the example's same-stage energization; not set for {y}")}
+            for y in years],
+        "period_years": {str(y): n for y, n in p.period_years.items()},
+        "ledger": [
+            {"item": "discount rate", "value": "7 % nominal (the solver settings' discount_rate)",
+             "source": "assumed",
+             "note": "the solve discounts each period's costs at it (auto_discount_periods)"},
+            {"item": "PUE", "value": "1.3 design figure",
+             "source": "assumed",
+             "note": "metadata: cooling is the single-year template's profile scaled with the IT "
+                     f"load, so the modelled peak-to-IT ratio is about 1.46 in {years[-1]}"},
+            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
+             "source": "assumed",
+             "note": inverter_note},
+            {"item": "PoC and transformer losses", "value": "efficiency 1.0 on grid_import and "
+                                                            "site_transformer",
+             "source": "assumed",
+             "note": "losses are not modelled in the staged plan (the single-year template keeps "
+                     "0.995 and 0.99), so the investment case's counterfactual bill (the served "
+                     "load at the meter) is established; about 1.5 % of the import is left out"},
+            {"item": "import tariff", "value": f"{DC_TARIFF['id']}: network energy charge "
+                                               "35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise",
+             "source": "synthetic",
+             "note": "an illustrative network-use charge on the metered import, on top of the "
+                     "wholesale price the grid supply carries; no demand charge (the template "
+                     "models one July week, so a monthly item would be billed for one month); "
+                     "replace with the site's tariff"},
+            {"item": "tariff clock", "value": "UTC",
+             "source": "assumed",
+             "note": "the representative week's hours are the site clock; stating them as UTC "
+                     "reads each tariff window on the snapshot hour as is"},
+            {"item": "existing campus", "value": "gensets 1-4, rooftop_pv, ups_battery, "
+                                                 f"site_transformer: COD {y0}-01-01, overnight cost 0",
+             "source": "assumed",
+             "note": "in service at the first period and sunk: no capex in the case; only the "
+                     "candidates the plan builds are investments, each a stage at its period"},
+            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+               "source": "assumed",
+               "note": "held flat to the base year, then escalated from it at the case's rates; "
+                       "nothing is converted with a price index"
+                       + ("" if is_native else
+                          "; entering other planning years does not re-date the pack's money "
+                          "year (per-period cost sourcing is a separate follow-up)")},
+            {"item": "finance inputs", "value": "nominal EUR, escalation "
+                                                "2 %/yr, inflation 2 %, all equity at 7 %, "
+                                                f"close {y0 - 1}-01-01, {p.analysis_years} years "
+                                                f"to {end}",
+             "source": "assumed",
+             "note": "a later stage's capex is paid one year before its COD; pre-tax (no tax "
+                     "pack); the terminal value is the remaining-life annuity of each part"},
+            {"item": "depreciation of the staged assets",
+             "value": "straight-line AfA (not degressive)",
+             "source": "assumed",
+             "note": "a deliberate deviation: a dated degressive election on a later stage is refused by "
+                     "the investment case (P5), so the staged assets are planned on straight-line AfA"},
+        ],
+        "study_notes": [
+            "Each period is the same representative July week, with the period's load and import cap.",
+            "Candidates are one row per period (build_year = the period): the plan says what to build when.",
+            cap_note,
+            stage_note,
+            "After a solve the investment case runs on the shipped commercial config and finance "
+            f"inputs: the existing campus is in service in {y0} at no capex, each candidate the plan "
+            "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
+            "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
+            "investment case can compare against the grid-only site.",
+            f"The {_DC_POC_MW:g} MW connection carries the {years[-1]} peak. The investment case "
+            "compares against the site as it stands today: with the plan's new builds removed, "
+            f"the site still meets its load (the {e0:g} MW energized in {y0} "
+            "included), and the island capability the new builds buy is shown as a break-even "
+            "beside the NPV.",
+        ],
+        "provenance": PROVENANCE,
+    }
+    if is_native:
+        return meta
+    growth = [*_growth_rows("it_mw", [(y, it_mw[y], plan.it_set[y]) for y in years],
+                            source_set="dc_load", overrides=spec_it),
+              *_growth_rows("energized_mw",
+                            [(y, plan.energization[y], plan.energized_set[y]) for y in years])]
+    meta["growth_inputs"] = growth
+    meta["planning"] = {"start_year": y0, "end_year": end, "periods": years,
+                        "native_periods": list(native.years), "native_end_year": native.end_year}
+    tariff_year = int(DC_TARIFF["valid_from"][:4])
+    held = [] if y0 >= tariff_year else [
+        {"item": "import tariff before its year",
+         "value": f"{DC_TARIFF['id']}'s rates from {y0}-01-01", "source": "assumed",
+         "note": (f"assumed, held from {tariff_year}: the synthetic tariff is dated "
+                  f"{DC_TARIFF['valid_from']}, so its rates are held from the start year; "
+                  "replace with the site's tariff for those years")}]
+    meta["ledger"] = [
+        {"item": "planning period",
+         "value": f"{' / '.join(map(str, years))} → {end} (entered)", "source": "entered",
+         "note": (f"the example is built for {_years_text(native.years)} → {native.end_year}; "
+                  "each period's years run to the next, the last to the end year, and the solve "
+                  "discounts them (auto_discount_periods)")},
+        *meta["ledger"], *held, *_placeholder_ledger(growth, native)]
+    return meta
+
+
 TEMPLATE_META: dict[str, dict] = {
     "eh_datacenter": {
         "id": "eh_datacenter",
@@ -730,100 +1147,8 @@ TEMPLATE_META: dict[str, dict] = {
         ],
         "provenance": PROVENANCE,
     },
-    "eh_datacenter_staged": {
-        "id": "eh_datacenter_staged",
-        "name": "Data Center Energy Hub (staged growth)",
-        "description": (
-            "The data center campus planned from a projected load: IT grows "
-            "12 → 24 → 36 MW over 2027, 2030 and 2035 while the utility "
-            f"energizes a {_DC_POC_MW:g} MW connection in steps "
-            f"({DC_ENERGIZATION_MW[2027]:g} MW until 2030). "
-            "Genset and battery candidates per period, so the plan says what "
-            "to build when. Multi-period; tagged for an Energy Hub study."),
-        "recommended_archetype": "weak_flexible",
-        "pack_overrides": {"import_p_nom_mw": _DC_POC_MW},
-        "stages": None,
-        "dtc_attribution": "per_load",
-        "projected_load": [
-            {"year": y, "it_mw": it, "pue": pue,
-             "note": "synthetic illustrative fit-out ramp; replace with the client's load projection"}
-            for y, it, pue in DC_PHASES],
-        "energization": [
-            {"year": y, "available_import_mw": DC_ENERGIZATION_MW[y], "connection_mw": _DC_POC_MW,
-             "source": "assumed", "note": "utility energization schedule (assumed)"}
-            for y, _it, _pue in DC_PHASES],
-        "period_years": {str(y): DC_PERIOD_YEARS[y] for y, _it, _pue in DC_PHASES},
-        "ledger": [
-            {"item": "discount rate", "value": "7 % nominal (the solver settings' discount_rate)",
-             "source": "assumed",
-             "note": "the solve discounts each period's costs at it (auto_discount_periods)"},
-            {"item": "PUE", "value": "1.3 design figure",
-             "source": "assumed",
-             "note": "metadata: cooling is the single-year template's profile scaled with the IT "
-                     "load, so the modelled peak-to-IT ratio is about 1.46 in 2035"},
-            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
-             "source": "assumed",
-             "note": "bess_new_2027's inverter ends in 2037 and bess_new_2030's in 2040, inside the "
-                     "2045 horizon; the template's finance inputs re-buy it at the end of its "
-                     "lifetime (replacement_rule part_lifetimes)"},
-            {"item": "PoC and transformer losses", "value": "efficiency 1.0 on grid_import and "
-                                                            "site_transformer",
-             "source": "assumed",
-             "note": "losses are not modelled in the staged plan (the single-year template keeps "
-                     "0.995 and 0.99), so the investment case's counterfactual bill (the served "
-                     "load at the meter) is established; about 1.5 % of the import is left out"},
-            {"item": "import tariff", "value": f"{DC_TARIFF['id']}: network energy charge "
-                                               "35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise",
-             "source": "synthetic",
-             "note": "an illustrative network-use charge on the metered import, on top of the "
-                     "wholesale price the grid supply carries; no demand charge (the template "
-                     "models one July week, so a monthly item would be billed for one month); "
-                     "replace with the site's tariff"},
-            {"item": "tariff clock", "value": "UTC",
-             "source": "assumed",
-             "note": "the representative week's hours are the site clock; stating them as UTC "
-                     "reads each tariff window on the snapshot hour as is"},
-            {"item": "existing campus", "value": "gensets 1-4, rooftop_pv, ups_battery, "
-                                                 "site_transformer: COD 2027-01-01, overnight cost 0",
-             "source": "assumed",
-             "note": "in service at the first period and sunk: no capex in the case; only the "
-                     "candidates the plan builds are investments, each a stage at its period"},
-            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
-               "source": "assumed",
-               "note": "held flat to the base year, then escalated from it at the case's rates; "
-                       "nothing is converted with a price index"},
-            {"item": "finance inputs", "value": "nominal EUR, escalation "
-                                                "2 %/yr, inflation 2 %, all equity at 7 %, "
-                                                "close 2026-01-01, 18 years to 2045",
-             "source": "assumed",
-             "note": "a later stage's capex is paid one year before its COD; pre-tax (no tax "
-                     "pack); the terminal value is the remaining-life annuity of each part"},
-            {"item": "depreciation of the staged assets",
-             "value": "straight-line AfA (not degressive)",
-             "source": "assumed",
-             "note": "a deliberate deviation: a dated degressive election on a later stage is refused by "
-                     "the investment case (P5), so the staged assets are planned on straight-line AfA"},
-        ],
-        "study_notes": [
-            "Each period is the same representative July week, with the period's load and import cap.",
-            "Candidates are one row per period (build_year = the period): the plan says what to build when.",
-            f"The energization schedule caps the import at {DC_ENERGIZATION_MW[2027]:g} MW in "
-            "2027, below that period's peak: the plan builds on site for it.",
-            "Load is picked up in 2.5 MW blocks after an islanding (assumed): the island rows then "
-            "follow the load, so the plan stages — a small genset in 2027 and 2030, the bulk in 2035.",
-            "After a solve the investment case runs on the shipped commercial config and finance "
-            "inputs: the existing campus is in service in 2027 at no capex, each candidate the plan "
-            "builds is a stage with its own COD, and an unbuilt later candidate is not an investment.",
-            "PoC and transformer losses are not modelled in the staged plan (efficiency 1.0), so the "
-            "investment case can compare against the grid-only site.",
-            f"The {_DC_POC_MW:g} MW connection carries the 2035 peak. The investment case "
-            "compares against the site as it stands today: with the plan's new builds removed, "
-            f"the site still meets its load (the {DC_ENERGIZATION_MW[2027]:g} MW energized in 2027 "
-            "included), and the island capability the new builds buy is shown as a break-even "
-            "beside the NPV.",
-        ],
-        "provenance": PROVENANCE,
-    },
+    # Built from the plan below (E1): the example's own years.
+    "eh_datacenter_staged": None,
     "eh_h2_hub": {
         "id": "eh_h2_hub",
         "name": "Industrial Hydrogen Hub",
@@ -962,6 +1287,7 @@ TEMPLATE_META: dict[str, dict] = {
         "provenance": PROVENANCE,
     },
 }
+TEMPLATE_META["eh_datacenter_staged"] = _dc_staged_meta(_dc_plan())
 
 # Preloaded Class-C registry per template (the stress.py schema).
 STRESS_SCENARIOS: dict[str, list[dict]] = {
@@ -1018,20 +1344,22 @@ SOLVER_CONFIG_EXTRA: dict[str, dict] = {
 }
 
 
-def _staged_commercial_and_finance() -> dict:
-    """The staged template's `commercial` and `finance` blocks, stored as the
-    routes store them (validated, dumped): the value flows are the
-    `single_owner` template built on the template's network."""
+def _staged_commercial_and_finance(planning: Planning | None = None) -> dict:
+    """The staged template's `commercial` and `finance` blocks for
+    ``planning`` (None: the example's years), stored as the routes store them
+    (validated, dumped): the value flows are the `single_owner` template
+    built on the template's network."""
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
+    plan = _dc_plan(planning)
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": DC_TARIFF, "timezone": "UTC"})
-    vf = VFT.build("single_owner", build_eh_datacenter_staged(), base).config
+        {"poc_link": "grid_import", "import_tariff": _dc_tariff(plan), "timezone": "UTC"})
+    vf = VFT.build("single_owner", build_eh_datacenter_staged(planning=planning), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(DC_FINANCE).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(_dc_finance(plan)).model_dump(mode="json")}
 
 
 def _microgrid_commercial_and_finance() -> dict:
@@ -1053,19 +1381,31 @@ def _microgrid_commercial_and_finance() -> dict:
 #: Template blocks that need the backend's models (built on first use).
 _SOLVER_CONFIG_BUILT = {"eh_datacenter_staged": _staged_commercial_and_finance,
                         "eh_microgrid": _microgrid_commercial_and_finance}
-_BUILT_CACHE: dict[str, dict] = {}
+#: Built blocks by template id, or by (id, Planning) for entered years.
+_BUILT_CACHE: dict[str | tuple, dict] = {}
 
 
-def solver_config(template_id: str) -> dict:
-    """The solver settings written beside one template."""
+def solver_config(template_id: str, planning: Planning | None = None) -> dict:
+    """The solver settings written beside one template, for ``planning`` on a
+    staged example (None or the example's own years: the shipped settings)."""
     import copy
 
     built = {}
+    key = template_id if _planned(template_id, planning) is None else (template_id, planning)
     if template_id in _SOLVER_CONFIG_BUILT:
-        if template_id not in _BUILT_CACHE:
-            _BUILT_CACHE[template_id] = _SOLVER_CONFIG_BUILT[template_id]()
-        built = copy.deepcopy(_BUILT_CACHE[template_id])
+        if key not in _BUILT_CACHE:
+            _BUILT_CACHE[key] = (_SOLVER_CONFIG_BUILT[template_id]() if key == template_id
+                                 else _SOLVER_CONFIG_BUILT[template_id](planning))
+        built = copy.deepcopy(_BUILT_CACHE[key])
     return {**SOLVER_CONFIG, **SOLVER_CONFIG_EXTRA.get(template_id, {}), **built}
+
+
+def _planned(template_id: str, planning: Planning | None) -> Planning | None:
+    """``planning`` when it differs from the template's own years, else None
+    (the shipped template)."""
+    if template_id not in NATIVE_PLANNING or _is_native(template_id, planning):
+        return None
+    return planning
 
 # The island sidecar (plan 2026-10-07 campus island, I1): control modes, unit
 # dynamics and island requirements, keyed by PyPSA name. Its schema is
@@ -1153,18 +1493,20 @@ def _h2_hub_island(bess_new, wind_new, solar_new) -> dict:
 ISLAND_CONFIG["eh_h2_hub"] = _h2_hub_island(["bess_new"], ["wind_new"], ["solar_new"])
 
 
-def _staged_island(cfg: dict) -> dict:
+def _staged_island(cfg: dict, years=None) -> dict:
     """The single-year island sidecar with the expansion candidates renamed
-    per period (``genset_new_<y>``, ``bess_new_<y>``)."""
+    per period (``genset_new_<y>``, ``bess_new_<y>``; ``years`` None: the
+    example's)."""
     import copy
 
+    years = list(years) if years is not None else [y for y, _it, _pue in DC_PHASES]
     out = copy.deepcopy(cfg)
     units = out["units"]
     gen, bess = units.pop("genset_new"), units.pop("bess_new")
-    for y, _it, _pue in DC_PHASES:
+    for y in years:
         units[f"genset_new_{y}"] = copy.deepcopy(gen)
         units[f"bess_new_{y}"] = copy.deepcopy(bess)
-    out["requirements"]["ride_through_storage"] = [f"bess_new_{y}" for y, _it, _pue in DC_PHASES]
+    out["requirements"]["ride_through_storage"] = [f"bess_new_{y}" for y in years]
     # The halls are fitted out in smaller steps: 2.5 MW pickup blocks (the
     # single-year campus's 5 MW blocks need 36.7 MW more genset inertia in
     # every period, whatever its load, so the plan could not stage).
@@ -1173,6 +1515,12 @@ def _staged_island(cfg: dict) -> dict:
 
 
 ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacenter"])
+
+#: Staged examples built for entered years: id → (meta, island) for a Planning
+#: (the staged hubs add theirs when they register).
+_PLANNED_META = {"eh_datacenter_staged": lambda p, spec: _dc_staged_meta(_dc_plan(p), spec)}
+_PLANNED_ISLAND = {"eh_datacenter_staged":
+                   lambda p: _staged_island(ISLAND_CONFIG["eh_datacenter"], p.years)}
 
 
 def _register_staged_hubs() -> None:
@@ -1214,6 +1562,107 @@ def _register_ammonia() -> None:
 
 _register_ammonia()
 
+#: Templates that ship price series (`price_series/`, minted at create; IPP ticket 02): id →
+#: a writer of the directory, called by `write_sidecars`.
+PRICE_SERIES: dict = {}
+#: Templates that ship pre-built sensitivity cases (IPP ticket 04): id → a builder of the
+#: `cases.json` document (declared changes, data only until the sensitivities slice, S5).
+CASES: dict = {}
+CASES_FILE = "cases.json"
+
+
+def _register_ipp() -> None:
+    """The renewables IPP (``eh_ipp.py``, IPP renewables + BESS ticket 03)."""
+    import importlib.util
+    import pathlib
+    import types
+
+    path = pathlib.Path(__file__).resolve().with_name("eh_ipp.py")
+    if not path.is_file():           # this module copied on its own (a test's tmp dir)
+        return
+    spec = importlib.util.spec_from_file_location("_eh_ipp", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.register(types.SimpleNamespace(**globals()))
+
+
+_register_ipp()
+
+# ── Grid-readiness markings (DC grid readiness 02, UX review) ───────────────
+#
+# The connection limits the grid-readiness scorecard checks against that no
+# grid code here states: the connection ramp limit, the oscillation limit,
+# the PoC Link's efficiency, the PoC fault level and the reliability goal.
+# They are ledger rows like every other template assumption, so the project
+# flow lists them "to check"; each names the flow section and field it
+# belongs to (``section``, ``panel``, ``component``, ``entity``, ``field``,
+# the flow's target shape). The scorecard reads its limits from these rows
+# and marks a row ``assumed`` while its source is not "code". All values are
+# placeholders until the network operator's connection offer arrives.
+
+#: A connection ramp limit of 10 % of the connection capacity per minute.
+RAMP_SHARE_PER_MIN = 0.10
+#: Peak-to-peak oscillation limit, % of the connection, in the band of concern.
+OSCILLATION_LIMIT_PCT = 1.0
+OSCILLATION_BAND_HZ = (0.1, 2.0)
+
+#: tid → (import Link, connection MW, PoC Link efficiency, PoC bus, PoC Sk MVA
+#: or None, LOLE goal h/yr or None). Pinned against the built networks by
+#: tests/test_grid_readiness.py.
+_GRID_READINESS_SITE = {
+    "eh_datacenter": ("grid_import", 40.0, 0.995, "grid", 250.0, 3.0),
+    "eh_datacenter_staged": ("grid_import", _DC_POC_MW, 1.0, "grid", 250.0, 3.0),
+    "eh_h2_hub": ("grid_import", 200.0, 0.995, "grid", 5000.0, None),
+    "eh_h2_hub_staged": ("grid_import", 200.0, 1.0, "grid", 5000.0, None),
+    "eh_microgrid": ("subsea_tie", 20.0, 0.97, "mainland", None, 3.0),
+    "eh_microgrid_staged": ("subsea_tie", 20.0, 0.97, "mainland", None, 3.0),
+}
+
+
+def _gr_row(item, label, value, unit, note, section, component=None, entity=None, field=None,
+            panel=None) -> dict:
+    return {"item": item, "label": label, "value": value, "unit": unit, "source": "assumed",
+            "note": note,
+            "section": section, "panel": panel, "component": component, "entity": entity,
+            "field": field or item}
+
+
+def grid_readiness_ledger(template_id: str) -> list[dict]:
+    """The template's grid-readiness ledger rows."""
+    link, mw, eff, bus, sk, lole = _GRID_READINESS_SITE[template_id]
+    rows = [
+        _gr_row("connection_ramp", "Connection ramp limit", round(RAMP_SHARE_PER_MIN * mw, 6), "MW/min",
+                f"assumed: {RAMP_SHARE_PER_MIN:.0%} of the {mw:g} MW connection per minute; RfG/DCC "
+                "set no ramp limit for a demand facility, so this is a placeholder of the order a "
+                "network operator writes into a connection offer for large loads", "connection",
+                "Link", link),
+        _gr_row("oscillation", "Power oscillation limit", OSCILLATION_LIMIT_PCT, "% of connection, peak-to-peak",
+                f"assumed: peak-to-peak power oscillation at most {OSCILLATION_LIMIT_PCT:g} % of the "
+                f"connection in the {OSCILLATION_BAND_HZ[0]:g}-{OSCILLATION_BAND_HZ[1]:g} Hz band "
+                "(forced-oscillation concern for large loads, NERC 2025 large-loads white paper); "
+                "no code value", "connection", "Link", link),
+        _gr_row("import_efficiency", "Import efficiency", eff, "p.u.",
+                f"assumed: the {link} Link's efficiency (losses = 1 - efficiency); what reaches the "
+                "site side of the PoC Link. Losses further in (transformers, UPS) are not in it",
+                "connection", "Link", link, "efficiency"),
+    ]
+    if sk is not None:
+        rows.append(_gr_row("fault_level", "Fault level at the PoC", sk, "MVA",
+                            f"assumed: short-circuit power at the PoC ({bus}); the SCR and "
+                            "rapid-voltage-change screenings read it", "connection", "Bus", bus,
+                            "eh_sk_mva"))
+    if lole is not None:
+        rows.append(_gr_row("lole_goal", "Reliability goal (LOLE)", lole, "h/yr",
+                            f"assumed: the recommended pack's target_lole_h ({lole:g} h/yr); the "
+                            "reliability study certifies the site against it", "scenarios",
+                            None, None, "target_lole_h", panel="simparams"))
+    return rows
+
+
+for _tid in _GRID_READINESS_SITE.keys() & TEMPLATE_META.keys():   # staged hubs: when registered
+    TEMPLATE_META[_tid]["ledger"] = [*(TEMPLATE_META[_tid].get("ledger") or []),
+                                     *grid_readiness_ledger(_tid)]
+
 # Sidecar file names copied by POST /api/projects/from_template/<id>.
 META_FILE = "eh_template.json"
 STRESS_FILE = "adequacy_stress_scenarios.json"
@@ -1226,21 +1675,51 @@ ISLAND_FILE = "island_config.json"
 SCHEMA = 1
 
 
-def write_sidecars(out_dir, template_id: str) -> None:
+def template_meta(template_id: str, planning: Planning | None = None, *, load_spec=None) -> dict:
+    """The template's ``eh_template.json`` content for ``planning`` (None or
+    the example's own years: the shipped metadata)."""
+    import copy
+
+    p = _planned(template_id, planning)
+    if p is None:
+        return copy.deepcopy(TEMPLATE_META[template_id])
+    meta = _PLANNED_META[template_id](p, load_spec)
+    if template_id in _GRID_READINESS_SITE:
+        meta["ledger"] = [*meta["ledger"], *grid_readiness_ledger(template_id)]
+    return meta
+
+
+def island_config(template_id: str, planning: Planning | None = None) -> dict | None:
+    """The template's island sidecar for ``planning``, or None when it has none."""
+    p = _planned(template_id, planning)
+    if p is not None and template_id in _PLANNED_ISLAND:
+        return _PLANNED_ISLAND[template_id](p)
+    return ISLAND_CONFIG.get(template_id)
+
+
+def write_sidecars(out_dir, template_id: str, planning: Planning | None = None, *,
+                   load_spec=None) -> None:
     """Write the template's metadata and stress registry beside network.nc,
-    and its island sidecar when it has one."""
+    and its island sidecar when it has one, for ``planning`` on a staged
+    example (None: the example's own years)."""
     import json
     import pathlib
 
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / META_FILE).write_text(
-        json.dumps(TEMPLATE_META[template_id], indent=2, sort_keys=True) + "\n")
+    (out_dir / META_FILE).write_text(json.dumps(
+        template_meta(template_id, planning, load_spec=load_spec), indent=2,
+        sort_keys=True) + "\n")
     (out_dir / STRESS_FILE).write_text(json.dumps(
         {"__schema__": SCHEMA, "scenarios": STRESS_SCENARIOS[template_id]},
         indent=2, sort_keys=True) + "\n")
     (out_dir / SOLVER_FILE).write_text(
-        json.dumps(solver_config(template_id), indent=2, sort_keys=True) + "\n")
-    if template_id in ISLAND_CONFIG:
-        (out_dir / ISLAND_FILE).write_text(
-            json.dumps(ISLAND_CONFIG[template_id], indent=2, sort_keys=True) + "\n")
+        json.dumps(solver_config(template_id, planning), indent=2, sort_keys=True) + "\n")
+    if template_id in PRICE_SERIES:
+        PRICE_SERIES[template_id](out_dir)
+    if template_id in CASES:
+        (out_dir / CASES_FILE).write_text(
+            json.dumps(CASES[template_id](), indent=1, ensure_ascii=False) + "\n")
+    island = island_config(template_id, planning)
+    if island is not None:
+        (out_dir / ISLAND_FILE).write_text(json.dumps(island, indent=2, sort_keys=True) + "\n")

@@ -165,7 +165,7 @@ function Badge({
 }
 
 function StatChips({ project, scenarios }: { project: ProjectInfo; scenarios: number }) {
-  const updated = formatRelativeTime(project.created_at)
+  const created = formatRelativeTime(project.created_at)
   const scenarioLabel = scenarioCountLabel(scenarios)
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--brand-ink-dim)]">
@@ -191,7 +191,7 @@ function StatChips({ project, scenarios }: { project: ProjectInfo; scenarios: nu
           {scenarioLabel}
         </span>
       )}
-      {updated && <span className="text-[var(--brand-ink-dim)]">Updated {updated}</span>}
+      {created && <span className="text-[var(--brand-ink-dim)]">Created {created}</span>}
     </div>
   )
 }

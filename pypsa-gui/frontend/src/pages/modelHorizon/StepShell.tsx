@@ -86,11 +86,14 @@ export interface StepShellProps<Id extends string = HorizonStepId> {
    * header for when to reach for this instead of the native always-mounted
    * behaviour. */
   unmountAdvancedWhenCollapsed?: boolean
+  /** Opt-in: Back / Next under the step body. On the last step `finish`
+   * (the way on to the next section) takes the place of Next. */
+  stepNav?: { finish?: ReactNode }
 }
 
 export function StepShell<Id extends string = HorizonStepId>({
   steps, current, onSelect, labels, navLabel = 'Model horizon steps', title, children, advanced,
-  unmountAdvancedWhenCollapsed = false,
+  unmountAdvancedWhenCollapsed = false, stepNav,
 }: StepShellProps<Id>) {
   const [advancedOpen, setAdvancedOpen] = useState(false)
   // A step switch (e.g. clicking a rail entry) reuses this same StepShell
@@ -140,6 +143,27 @@ export function StepShell<Id extends string = HorizonStepId>({
             )}
           </details>
         )}
+        {stepNav && (() => {
+          const i = steps.indexOf(current)
+          if (i < 0) return null
+          return (
+            <div data-testid="step-nav" className="mt-3 flex items-center gap-2">
+              {i > 0 && (
+                <button type="button" data-testid="step-back" onClick={() => onSelect(steps[i - 1])}
+                  className="rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
+                  ← Back
+                </button>
+              )}
+              {i < steps.length - 1 ? (
+                <button type="button" data-testid="step-next" onClick={() => onSelect(steps[i + 1])}
+                  title={`Next: ${labels[steps[i + 1]]}`}
+                  className="rounded border border-border px-2.5 py-1 text-[11px] text-accent hover:border-accent">
+                  Next →
+                </button>
+              ) : stepNav.finish}
+            </div>
+          )
+        })()}
       </section>
     </div>
   )

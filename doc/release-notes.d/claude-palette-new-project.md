@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The command palette no longer has a "New project" row that reset the open network with no confirmation. A new project starts from the Projects-home create wizard; the palette's "Projects home" row now also answers "new project".

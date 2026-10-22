@@ -122,6 +122,8 @@ describe('docked outcome (L2 follow-up)', () => {
     expect(screen.queryByText('Open transcript')).toBeNull()
     fireEvent.click(screen.getByTestId('companion-outcome-show'))
     expect(screen.getByTestId('companion-outcome').getAttribute('data-docked')).toBeNull()
+    // Opened on a full-screen tab: capped, scrolls inside (UX note on #446).
+    expect(screen.getByTestId('companion-outcome').className).toMatch(/max-h-\[60vh\] overflow-y-auto/)
     expect(screen.getByText('Open transcript')).toBeTruthy()
     fireEvent.click(screen.getByTestId('companion-outcome-hide'))
     expect(screen.getByTestId('companion-outcome').getAttribute('data-docked')).toBe('true')

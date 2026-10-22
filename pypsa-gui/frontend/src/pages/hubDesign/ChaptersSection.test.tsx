@@ -66,7 +66,7 @@ describe('ChaptersSection', () => {
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().resultsTabRequest).toBe('investment')
     await user.click(screen.getByTestId('hub-chapter-grid_plan-open'))
-    expect(useUIStore.getState().activeSlidePanel).toBe('campusElectrical')
+    expect(useUIStore.getState().activeSlidePanel).toBe('campusStudy')
   })
 
   it('no study yet: the reliability tile goes to the Goal step', async () => {

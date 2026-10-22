@@ -52,3 +52,33 @@ describe('StepShell with its own step ids', () => {
     expect(missing).toBeTruthy()
   })
 })
+
+describe('StepShell step navigation (opt-in)', () => {
+  it('steps Back and Next, and offers `finish` on the last step', () => {
+    const onSelect = vi.fn()
+    const { rerender } = render(
+      <StepShell<Id> steps={['site', 'load']} current="site" onSelect={onSelect}
+        labels={LABELS} title="t" stepNav={{ finish: <button>on to next section</button> }}>
+        <p>body</p>
+      </StepShell>,
+    )
+    expect(screen.queryByTestId('step-back')).toBeNull()
+    screen.getByTestId('step-next').click()
+    expect(onSelect).toHaveBeenCalledWith('load')
+    rerender(
+      <StepShell<Id> steps={['site', 'load']} current="load" onSelect={onSelect}
+        labels={LABELS} title="t" stepNav={{ finish: <button>on to next section</button> }}>
+        <p>body</p>
+      </StepShell>,
+    )
+    expect(screen.queryByTestId('step-next')).toBeNull()
+    expect(screen.getByText('on to next section')).toBeTruthy()
+    screen.getByTestId('step-back').click()
+    expect(onSelect).toHaveBeenCalledWith('site')
+  })
+
+  it('shows no step navigation unless asked', () => {
+    render(<StepShell<Id> steps={['site', 'load']} current="site" onSelect={vi.fn()} labels={LABELS} title="t"><p>b</p></StepShell>)
+    expect(screen.queryByTestId('step-nav')).toBeNull()
+  })
+})

@@ -1,7 +1,7 @@
 # Coordinator
 
-Current coordinator session: `session_01DoaUNsUvYu3N4LphcgyNfL`
+Current coordinator session: `session_0178wPpXBL7soVFLf2JZwtAm`
 
-UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01LtF1LAnp5TM7QpSMiDZ2mF`
+UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01SBnAY2gvgh32BgjsB9ye89`
 
 Send every coordinator message to this id. A rotating coordinator (`.claude/skills/coordinator/SKILL.md`, "Rotation") replaces this line in a tiny PR, and tells each live session the new id.

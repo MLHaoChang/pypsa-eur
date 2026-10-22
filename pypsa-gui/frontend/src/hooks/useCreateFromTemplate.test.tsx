@@ -10,10 +10,15 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { projectsApi } from '../api/projects'
+import { resultsApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { useCreateFromTemplate } from './useCreateFromTemplate'
 
 vi.mock('../api/projects')
+vi.mock('../api/simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/simulation')>()
+  return { ...actual, resultsApi: { ...actual.resultsApi, getEhTemplate: vi.fn() } }
+})
 // P24-BE gate N1: the navigate call itself is recorded (synchronously, in
 // the same `calls` log as addTab), so the order addTab → navigate is pinned —
 // a re-render of <Where> would only ever see the final location.
@@ -61,6 +66,7 @@ const real = {
   note: useUIStore.getState().noteNewProjectCreated,
   setCurrentProject: useUIStore.getState().setCurrentProject,
   addTab: useUIStore.getState().addTab,
+  requestResultsTab: useUIStore.getState().requestResultsTab,
 }
 
 beforeEach(() => {
@@ -74,14 +80,17 @@ beforeEach(() => {
       calls.push(`current:${p}`); real.setCurrentProject(p)
     }),
     addTab: vi.fn((n: string) => { calls.push(`tab:${n}`); real.addTab(n) }),
+    requestResultsTab: vi.fn(),
   })
+  vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
   vi.mocked(projectsApi.createFromTemplate).mockResolvedValue(
     { imported: NAME, summary: { buses: 3 } } as never)
 })
 afterEach(() => {
   window.history.pushState({}, '', '/')
   useUIStore.setState({ noteNewProjectCreated: real.note,
-    setCurrentProject: real.setCurrentProject, addTab: real.addTab })
+    setCurrentProject: real.setCurrentProject, addTab: real.addTab,
+    requestResultsTab: real.requestResultsTab })
 })
 
 function render(path: string | null, onCreated?: (name: string) => void) {
@@ -112,6 +121,24 @@ describe('useCreateFromTemplate', () => {
     act(() => hook.result.current.mutate('eh_datacenter'))
     await waitFor(() => expect(calls).toContain(`tab:${NAME}`))
     expect(where).toBe('/app')
+  })
+
+  // UX-flow #26: Expert starts at the top of the flow; Guided opens its own step.
+  it('in Expert: opens section 1 of the flow', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSection: null, activeSlidePanel: null })
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter'))
+    await waitFor(() => expect(useUIStore.getState().activeSection).toBe('project'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('horizon')
+  })
+
+  it('in Guided: leaves the section to the hub design', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSection: null, activeSlidePanel: null })
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter'))
+    await waitFor(() => expect(calls).toContain(`tab:${NAME}`))
+    expect(useUIStore.getState().activeSection).toBeNull()
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 
   it('outside a router: creates and adds the tab, nowhere to navigate', async () => {
@@ -201,5 +228,36 @@ describe('useCreateFromTemplate', () => {
     expect(calls).toEqual([])
     expect(onCreated).not.toHaveBeenCalled()
     expect(where).toBe('/projects')
+  })
+
+  // IPP ticket 05: the template's meta may name the Results tab to open on.
+  it('asks for the template meta\'s initial Results tab once after the create', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(
+      { id: 'ipp', name: 'IPP', recommended_archetype: 'grid_tied', initial_results_tab: 'investment' } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('ipp'))
+    await waitFor(() => expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledTimes(1))
+    expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledWith('investment', undefined)
+    expect(resultsApi.getEhTemplate).toHaveBeenCalledWith(NAME, { quiet: true })
+  })
+
+  it('a template meta without the key, or none, asks for no tab', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(
+      { id: 'eh', name: 'EH', recommended_archetype: 'grid_tied' } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_datacenter'))
+    await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalledTimes(1))
+    await new Promise(r => setTimeout(r, 0))
+    expect(useUIStore.getState().requestResultsTab).not.toHaveBeenCalled()
+  })
+
+  it('passes the meta\'s initial section with the tab', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ id: 'ipp', name: 'IPP',
+      recommended_archetype: 'grid_tied', initial_results_tab: 'investment',
+      initial_results_section: 'case' } as never)
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('ipp'))
+    await waitFor(() => expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledTimes(1))
+    expect(useUIStore.getState().requestResultsTab).toHaveBeenCalledWith('investment', 'case')
   })
 })

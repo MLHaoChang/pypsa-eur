@@ -34,6 +34,10 @@ PROFILE_TOOLS = (
     "list_pending_profiles",
     "generate_renewable_profile",
     "apply_generated_profile",
+    "list_load_profile_archetypes",
+    "generate_load_profile",
+    "generate_availability_profile",
+    "generate_series_profile",
 )
 
 SNAPS_2025 = pd.date_range("2025-01-01", periods=8760, freq="h")
@@ -94,6 +98,10 @@ def test_safety_tiers_match_the_declared_markers():
     assert safety_tier_for("list_pending_profiles") == "read"
     assert safety_tier_for("generate_renewable_profile") == "execution"
     assert safety_tier_for("apply_generated_profile") == "write"
+    assert safety_tier_for("list_load_profile_archetypes") == "read"
+    assert safety_tier_for("generate_load_profile") == "execution"
+    assert safety_tier_for("generate_availability_profile") == "execution"
+    assert safety_tier_for("generate_series_profile") == "execution"
 
 
 def test_route_templates_are_in_the_phase0_inventory():
@@ -397,3 +405,95 @@ def test_generate_for_a_bus_without_coordinates_is_a_typed_refusal(
     assert detail["generators"] == ["g_nocoord"]
     assert "set coordinates on the bus" in detail["message"]
     assert "upload a profile" in detail["message"]
+
+
+# ---------------------------------------------------------------------------
+# load profiles (time-series generators ticket 01)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def load_project(client, install_network):
+    n = _wind_network()
+    n.add("Load", "plant", bus="B1", p_set=1.0)
+    install_network(n)
+    resp = client.post("/api/projects/Chat Plant",
+                       params={"force": True, "rebind": True})
+    assert resp.status_code == 200, resp.text
+    return "Chat Plant"
+
+
+def test_list_load_profile_archetypes_tool(client):
+    out = chat_tools.DISPATCHERS["list_load_profile_archetypes"]()
+    assert any(a["name"] == "industrial" for a in out["archetypes"])
+    assert any(p["name"] == "commercial_office" for p in out["presets"])
+
+
+def test_a_generated_load_profile_applies_to_p_set_through_the_chat_tools(
+    client, load_project, bound_ctx,
+):
+    with bound_ctx(client) as ctx:
+        gen = chat_tools.DISPATCHERS["generate_load_profile"](
+            project_id=load_project, archetype="industrial", loads=["plant"],
+            params={"shifts": 3, "annual_mwh": 2000.0}, year=2025,
+        )
+        assert gen["family"] == "load"
+        assert gen["stats"]["plant"]["annual_mwh"] == pytest.approx(2000.0)
+        out = chat_tools.DISPATCHERS["apply_generated_profile"](
+            project_id=load_project, job_id=gen["job_id"], component="plant",
+            time_basis="UTC",
+        )
+    assert out["attribute"] == "p_set"
+    assert ("loads", "p_set", "plant") in ctx.user_ts
+
+
+def test_apply_generated_profile_passes_an_explicit_target(
+    client, load_project, bound_ctx,
+):
+    with bound_ctx(client), pytest.raises(HTTPException) as err:
+        gen = chat_tools.DISPATCHERS["generate_load_profile"](
+            project_id=load_project, archetype="industrial", loads=["plant"],
+            params={"peak_mw": 1.0}, year=2025,
+        )
+        chat_tools.DISPATCHERS["apply_generated_profile"](
+            project_id=load_project, job_id=gen["job_id"], component="g_wind",
+            point_id="plant", component_type="generators", attribute="p_max_pu",
+        )
+    assert err.value.detail["error_kind"] == "family_target_mismatch"
+
+
+def test_a_maintenance_window_applies_through_the_chat_tools(
+    client, install_network, bound_ctx,
+):
+    n = _wind_network()
+    n.add("Carrier", "gas")
+    n.add("Generator", "chp", bus="B1", carrier="gas", p_nom=10.0)
+    install_network(n)
+    assert client.post("/api/projects/Chat CHP",
+                       params={"force": True, "rebind": True}).status_code == 200
+    with bound_ctx(client) as ctx:
+        gen = chat_tools.DISPATCHERS["generate_availability_profile"](
+            project_id="Chat CHP", kind="maintenance", generators=["chp"],
+            params={"windows": [{"from": "07-03", "to": "07-04"}]},
+        )
+        out = chat_tools.DISPATCHERS["apply_generated_profile"](
+            project_id="Chat CHP", job_id=gen["job_id"], component="chp",
+            time_basis="UTC",
+        )
+    assert out["attribute"] == "p_max_pu"
+    assert ("generators", "p_max_pu", "chp") in ctx.user_ts
+
+
+def test_a_series_generates_through_the_chat_tools(client, install_network, bound_ctx):
+    n = _wind_network()
+    n.add("StorageUnit", "dam", bus="B1", p_nom=5.0, max_hours=100.0)
+    install_network(n)
+    assert client.post("/api/projects/Chat Dam",
+                       params={"force": True, "rebind": True}).status_code == 200
+    with bound_ctx(client):
+        gen = chat_tools.DISPATCHERS["generate_series_profile"](
+            project_id="Chat Dam", kind="inflow", components=["dam"],
+            params={"annual_mwh": 500.0, "shape": "snowmelt"},
+        )
+    assert gen["target"] == ["storage_units", "inflow"]
+    assert gen["stats"]["dam"]["annual_mwh"] == pytest.approx(500.0)

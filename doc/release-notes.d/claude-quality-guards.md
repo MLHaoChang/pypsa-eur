@@ -1,0 +1,1 @@
+* Chore(pypsa-gui): Add `CODING_STANDARDS.md` (the server's `/flow` verdict decides what the UI says can run; no internal ids in user-facing copy) and a vitest copy guard that fails on `§`, workstream, question and ticket ids and raw PyPSA class paths in the flow rail, sidebar, Issues panel, grid-readiness and scope-card copy.

@@ -6,16 +6,20 @@
 // - each result table shows what the backend sent;
 // - the "stale" warning appears when the backend says so.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, within, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { CampusRunJob, CampusState, InvestmentRow, MilpJobRecord } from '../api/campusElectrical'
-import CampusElectricalPanel from './CampusElectricalPanel'
+import CampusElectricalPanel from './campusTestParts'
+import OnePart, { CampusResultsPanel as ResultsOnly, CampusStudyPanel as StudyOnly } from './CampusElectricalPanel'
+import { useCampusRunNotice, useCampusSettingsDraft } from '../store/campusSettingsDraft'
 
-const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null, requestRunSolve: (() => {}) as () => void }))
+const store = vi.hoisted(() => ({ currentProject: 'Hub A' as string | null, requestRunSolve: (() => {}) as () => void,
+  activeSlidePanel: null as string | null }))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null; requestRunSolve: () => void }) => unknown) =>
-    sel({ currentProject: store.currentProject, requestRunSolve: () => store.requestRunSolve() }),
+  useUIStore: (sel: (s: { currentProject: string | null; requestRunSolve: () => void; setSlidePanel: (p: string | null) => void }) => unknown) =>
+    sel({ currentProject: store.currentProject, requestRunSolve: () => store.requestRunSolve(),
+          setSlidePanel: (p: string | null) => { store.activeSlidePanel = p } } as never),
 }))
 
 const api = vi.hoisted(() => ({
@@ -75,13 +79,15 @@ const sized = (): CampusState => ({
   },
 })
 
-function renderPanel() {
+function renderPanel(Panel: typeof CampusElectricalPanel = CampusElectricalPanel) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}><CampusElectricalPanel /></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><Panel /></QueryClientProvider>)
 }
 
 beforeEach(() => {
   store.currentProject = 'Hub A'
+  useCampusSettingsDraft.setState({ drafts: {} })
+  useCampusRunNotice.setState({ notices: {} })
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
@@ -93,13 +99,13 @@ afterEach(() => cleanup())
 describe('CampusElectricalPanel', () => {
   it('says what to do without a project', () => {
     store.currentProject = null
-    renderPanel()
+    renderPanel(OnePart)
     expect(screen.getByText(/open a solved hub project/i)).toBeTruthy()
   })
 
   it('renders a project of another kind inline, not as an error toast', async () => {
     api.state.mockRejectedValue({ response: { status: 409, data: { detail: 'is a planning_dynamics project' } } })
-    renderPanel()
+    renderPanel(OnePart)
     expect(await screen.findByText(/for capacity-expansion \(hub\) projects/i)).toBeTruthy()
   })
 
@@ -234,6 +240,7 @@ describe('CampusElectricalPanel', () => {
     expect(((await screen.findByLabelText('Buy assets from the library (least cost, AC-checked)')) as HTMLInputElement).checked).toBe(false)
     expect((screen.getByLabelText('PCC switchgear owned by the grid operator (not costed)') as HTMLInputElement).checked).toBe(true)
     first.unmount()
+    useCampusSettingsDraft.setState({ drafts: {} })
     api.state.mockResolvedValue({
       ...empty, campus_yaml: YAML,
       settings: { k: 3, pf: null, profile: 'eu_rfg_dcc_ce', margin: 0.2, n_minus_1: true } as never,
@@ -246,7 +253,7 @@ describe('CampusElectricalPanel', () => {
   it('shows the library section between the grid codes and the settings', async () => {
     api.state.mockResolvedValue({ ...empty, campus_yaml: YAML })
     renderPanel()
-    expect(await screen.findByLabelText('Asset library')).toBeTruthy()
+    expect(await screen.findByLabelText('Equipment library')).toBeTruthy()
   })
 
   it('shows compliance as is and with measures, with the clause and its tag', async () => {
@@ -614,5 +621,54 @@ describe('the run is a solve-queue job (E2E demo plan 2026-10-14, D1)', () => {
     renderPanel()
     await screen.findByTestId('trafo-GRID_IMPORT')
     expect(screen.queryByTestId('campus-run-status')).toBeNull()
+  })
+})
+
+describe('the study split over three panels (3 → 8 → 10)', () => {
+  const YAML_ = 'campus:\n  pcc: x\n'
+  beforeEach(() => { api.state.mockResolvedValue({ ...empty, campus_yaml: YAML_ }) })
+
+  it('section 3 holds the grid code, power factor and PCC ownership; the settings and run are not there', async () => {
+    renderPanel(OnePart)
+    expect(await screen.findByLabelText('Grid code')).toBeTruthy()
+    expect(screen.getByLabelText('Connection-agreement power factor')).toBeTruthy()
+    expect(screen.getByLabelText('PCC switchgear owned by the grid operator (not costed)')).toBeTruthy()
+    expect(screen.queryByLabelText('Hours per criterion')).toBeNull()
+    expect(screen.queryByRole('button', { name: /Run study/ })).toBeNull()
+  })
+
+  it('section 8 holds the study settings and the run, not the grid code', async () => {
+    renderPanel(StudyOnly)
+    expect(await screen.findByLabelText('Hours per criterion')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Run study/ })).toBeTruthy()
+    expect(screen.queryByLabelText('Grid code')).toBeNull()
+  })
+
+  it('a grid code chosen in section 3 is the one the run in section 8 sends', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML_, profiles: { eu_rfg_dcc_ce: 'EU', other_code: 'Other' } })
+    api.run.mockResolvedValue(undefined)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><OnePart /><StudyOnly /></QueryClientProvider>)
+    const pick = await screen.findByLabelText('Grid code')
+    await userEvent.selectOptions(pick, 'other_code')
+    await userEvent.click(await screen.findByRole('button', { name: /Run study/ }))
+    await waitFor(() => expect(api.run).toHaveBeenCalledWith('Hub A', expect.objectContaining({ profile: 'other_code' })))
+  })
+
+  it('results show only in section 10, and each part links to the next', async () => {
+    api.state.mockResolvedValue({ ...empty, campus_yaml: YAML_, results: { ...(empty.results ?? {}) } as never })
+    renderPanel(OnePart)
+    fireEvent.click(await screen.findByTestId('campus-next-inputs'))
+    expect(store.activeSlidePanel).toBe('campusStudy')
+    cleanup()
+    renderPanel(StudyOnly)
+    fireEvent.click(await screen.findByTestId('campus-next-study'))
+    expect(store.activeSlidePanel).toBe('campusResults')
+  })
+
+  it('section 10 without results says so and holds no inputs', async () => {
+    renderPanel(ResultsOnly)
+    expect(await screen.findByTestId('campus-no-results')).toBeTruthy()
+    expect(screen.queryByLabelText('Hours per criterion')).toBeNull()
   })
 })
