@@ -375,6 +375,8 @@ def remember(turn):
                 end=evidence["scope"]["end"],
             )
             scope = assurance_scope.validate(scope)
+        # A chart is asked for once; a follow-up that reuses the scope draws none (S10).
+        scope.pop("chart", None)
         pending = None
         expires = frozen["expires_at"]
     else:

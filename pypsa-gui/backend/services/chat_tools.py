@@ -3684,6 +3684,19 @@ def apply_generated_profile(project_id: str, job_id: str, component: str,
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
+def apply_generated_profiles(project_id: str, job_id: str,
+                             components: list | None = None,
+                             all_from_job: bool = False,
+                             time_basis: str | None = None) -> dict:
+    from routers.profiles import (
+        BatchApplyRequest, BatchMember, apply_profile_batch as _h,
+    )
+    body = BatchApplyRequest(
+        job_id=job_id, members=[BatchMember(component=str(c)) for c in components or []],
+        all_from_job=bool(all_from_job), time_basis=time_basis)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
 # Generate defaults for all (TS UI, plan D): one review list over every
 # family's default; apply-all writes the chosen rows under one undo step.
 
@@ -7836,6 +7849,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_profile_readiness": get_profile_readiness,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
+    "apply_generated_profiles": apply_generated_profiles,
     "preview_default_series": preview_default_series,
     "apply_default_series": apply_default_series,
     "list_load_profile_archetypes": list_load_profile_archetypes,

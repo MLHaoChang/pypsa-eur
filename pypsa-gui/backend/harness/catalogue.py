@@ -1546,6 +1546,29 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id", "job_id", "component"],
     ),
     _t(
+        "apply_generated_profiles",
+        "Write SEVERAL points of one PENDING renewable profile job onto "
+        "their generators' p_max_pu in one step (undoable with ONE Undo; one "
+        "confirmation card lists every member). `components` names the "
+        "generators (the point feeding each is its own name), or "
+        "`all_from_job` takes every point named after a wind/solar "
+        "generator and lists the points it left out under `skipped`. "
+        "All-or-nothing check first: any refusal (carrier mismatch, a "
+        "column the job lacks, a component listed twice) is a 422 "
+        "batch_refused naming every bad member, and nothing is written. A "
+        "write failing midway is a 409 batch_partially_applied naming what "
+        "was and was not applied; say one Undo reverts the batch. Each "
+        "applied member carries its before and any moved-bus warning; "
+        "`time_basis` as in apply_generated_profile. `project_id` is the "
+        "project NAME and must be the open project. Safety: write.",
+        {"project_id": {"type": "string"},
+         "job_id": {"type": "string"},
+         "components": {"type": "array", "items": {"type": "string"}},
+         "all_from_job": {"type": "boolean"},
+         "time_basis": {"type": "string"}},
+        ["project_id", "job_id"],
+    ),
+    _t(
         "preview_default_series",
         "Generate a DEFAULT series for every component of the open project "
         "that has none (\"generate default series for everything missing\"): "
@@ -4439,6 +4462,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
+    "apply_generated_profiles": [("POST", "/api/projects/{name}/profiles/apply-batch")],
     "preview_default_series": [("POST", "/api/projects/{name}/profiles/defaults/preview")],
     "apply_default_series": [("POST", "/api/projects/{name}/profiles/defaults/apply")],
     "list_load_profile_archetypes": [("GET", "/api/profiles/load-archetypes")],
