@@ -15,6 +15,7 @@ from harness import copt_calculations as copt_screen
 from harness import curtailment_calculations as curtailment
 from harness import emissions_calculations as emissions
 from harness import energy_balance_calculations as balance
+from harness import grid_readiness_calculations as readiness
 from harness import investment_calculations as investment
 from harness import lost_load_calculations as lost_load
 from harness import price_calculations as price
@@ -84,7 +85,8 @@ DEFINITIONS = {**METRICS, **COST_METRICS, **COMPARISON_METRICS, **storage.METRIC
                **lost_load.METRICS, **price.METRICS, **emissions.GENERATOR_METRICS,
                **emissions.NETWORK_METRICS, **curtailment.METRICS, **capacity.METRICS,
                **cycles.METRICS, **balance.METRICS, **site_import.METRICS, **investment.METRICS,
-               **investment.LCOE_METRICS, **copt_screen.METRICS}
+               **investment.LCOE_METRICS, **copt_screen.METRICS,
+               **readiness.METRICS}
 COST_PROFILES = frozenset({"generator-cost/1", "network-linear-cost/1", storage_costs.PROFILE})
 STORAGE_PROFILES = frozenset({storage.PROFILE, storage_costs.PROFILE})
 PROFILES = {
@@ -108,13 +110,15 @@ PROFILES = {
     investment.PROFILE: tuple(investment.METRICS),
     investment.LCOE_PROFILE: tuple(investment.LCOE_METRICS),
     copt_screen.PROFILE: tuple(copt_screen.METRICS),
+    readiness.PROFILE: tuple(readiness.METRICS),
 }
 # Profiles added after the pilot's first five run only when listed explicitly
 # in PYPSA_GUI_ANSWER_ASSURANCE_PROFILES (`rollout.profile_enabled`).
 OPT_IN_PROFILES = frozenset({carrier.PROFILE, *branch.PROFILES, lost_load.PROFILE, price.PROFILE,
                              *emissions.PROFILES, curtailment.PROFILE, capacity.PROFILE,
                              cycles.PROFILE, balance.PROFILE, site_import.PROFILE,
-                             *investment.PROFILES, copt_screen.PROFILE})
+                             *investment.PROFILES, copt_screen.PROFILE,
+                             readiness.PROFILE})
 DISCLOSURE = (
     "Energy uses generator snapshot weights; expenditure uses objective snapshot weights. "
     "Expenditure excludes fixed, startup, shutdown and quadratic costs; it is not total system cost. "
@@ -355,6 +359,8 @@ def scoped_source(ctx, scope, owner=None, investment_state=None):
         return site_import.source(ctx, scope["entity_id"])
     if scope["profile"] == copt_screen.PROFILE:
         return copt_screen.source(ctx, scope["entity_id"])
+    if scope["profile"] == readiness.PROFILE:
+        return readiness.source(ctx, scope["entity_id"])
     if scope["profile"] in investment.PROFILES:
         return investment.source(ctx, scope["entity_id"], investment_state, scope["profile"])
     if scope["profile"] in branch.PROFILES:
@@ -555,6 +561,8 @@ def scoped_calculate(raw, scope):
         return investment.calculate(raw, scope)
     if scope["profile"] == copt_screen.PROFILE:
         return copt_screen.calculate(raw, scope)
+    if scope["profile"] == readiness.PROFILE:
+        return readiness.calculate(raw, scope)
     if scope["profile"] == storage.PROFILE:
         return storage.calculate(raw["storage_unit"], scope)
     if scope["profile"] == storage_costs.PROFILE:
@@ -729,6 +737,8 @@ def disclosure(scope):
         return investment.LCOE_DISCLOSURE
     if scope["profile"] == copt_screen.PROFILE:
         return copt_screen.DISCLOSURE
+    if scope["profile"] == readiness.PROFILE:
+        return readiness.DISCLOSURE
     if scope["profile"] == storage_costs.PROFILE:
         return storage_costs.disclosure(scope)
     if scope["profile"] == storage.PROFILE:

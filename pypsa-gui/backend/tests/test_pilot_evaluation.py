@@ -18,6 +18,15 @@ def evaluation_project(baseline, request):
     ctx = baseline[0]
     n = ctx.network
     n.generators.at["G1", "capital_cost"] = 3
+    if case.profile == "grid-readiness/1":
+        import sys
+
+        from tests.test_grid_readiness import BACKEND
+        sys.path.insert(0, str(BACKEND / "project_templates"))
+        import eh_templates as T
+
+        T.BUILDERS["eh_datacenter"]().export_to_netcdf(str(baseline[2] / "network.nc"))
+        T.write_sidecars(baseline[2], "eh_datacenter")
     if case.profile == "copt-screening/1":
         n.remove("Generator", "G1")
         n.add("Carrier", ["gas", "wind"])
@@ -189,6 +198,12 @@ def test_pilot_case(case, evaluation_project, pilot_harness, request):
         cfg.finance = {**(cfg.finance or {}), "cost_of_equity": 0.2}
     elif case.fault == "stale":
         n.loads.at["L1", "p_set"] = 6
+    elif case.fault == "missing" and case.profile == "grid-readiness/1":
+        from services import chat_tools, project_registry
+
+        with chat_tools._acting() as (db, user):
+            project = project_registry.resolve_project(db, user, evaluation_project.project_uuid)
+        (project_registry.project_dir(project) / "network.nc").unlink()  # no saved project
     elif case.fault == "missing" and case.profile == "copt-screening/1":
         n.generators.at["thermal1", "outage_rate_value"] = 1.5  # no usable outage rate
     elif case.fault == "missing" and invested:
