@@ -58,7 +58,7 @@ tab    flag words under the campus table (financeModel.ts campusLifeNotes)
 
 ### Evidence
 
-- Backend: `test_campus_ic_replacements.py` 56 passed; the wider suites (counts below).
+- Backend: `test_campus_ic_replacements.py` 62 passed; `test_finance_*`, `test_investment_case_*`, `test_chat_tools_investment_case`, `test_campus_electrical_service` 890 passed.
 - Frontend: vitest `src/pages/results/investment/` 183 passed; `tsc --noEmit` clean.
 - Ruff: no new findings (5 already on the base).
 
