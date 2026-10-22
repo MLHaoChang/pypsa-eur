@@ -11,7 +11,8 @@
 # This is the whole merge gate: one command, nothing checked by hand. It exits
 # non-zero on a conflict, a code-file overlap with master, a failing semantic
 # test or catalogue inventory check on the trial merge, or any check run on the
-# head that is not success or skipped (or that it could not read), or a live
+# head that is not success or skipped (or that it could not read), a GK/UX
+# "NOT OK" PR comment newer than that reviewer's last OK, or a live
 # coordination-file change with no matching template change. Docs-only
 # overlap and files identical on both sides are reported, not fatal. A code
 # overlap is waived when the trial merge is clean, the semantic tests pass and
@@ -293,6 +294,67 @@ else
   sed 's/^/  /' <<<"$live"
   fail=1
   reasons+=("template not updated")
+fi
+
+echo
+echo "== reviewer verdicts"
+# The gatekeeper (GK) and UX reviewer post "GK OK @<sha>: ..." / "GK NOT OK @<sha>: ..."
+# (and UX) as PR comments. A missing or stale OK is reported, not blocking:
+# premerge cannot know whether this PR needs that review. A NOT OK newer than
+# the reviewer's last OK blocks. An OK carries to the head when every commit
+# after it is a clean merge of $base_branch, or when its tree merged with the
+# current $base_branch equals the head tree.
+verdict_carries() { # verdict_carries <full-sha>: succeeds when an OK at <sha> still holds for the head
+  local x=$1 c p1 p2 extra mt ok=1
+  git merge-base --is-ancestor "$x" "$head" || return 1
+  while read -r c p1 p2 extra; do
+    # A clean master merge: two parents, the second already in master, and a
+    # tree equal to merge-tree of the two parents.
+    if [[ -z $p2 || -n $extra ]] || ! git merge-base --is-ancestor "$p2" "$master" \
+      || ! mt=$(git merge-tree --write-tree "$p1" "$p2") \
+      || [[ ${mt%%$'\n'*} != "$(git rev-parse "$c^{tree}")" ]]; then
+      ok=0; break
+    fi
+  done < <(git rev-list --first-parent --reverse --parents "$x..$head")
+  ((ok)) && return 0
+  mt=$(git merge-tree --write-tree "$x" "$master" 2>/dev/null) && [[ ${mt%%$'\n'*} == "$(git rev-parse "$head^{tree}")" ]]
+}
+
+if verdicts=$(command -v gh >/dev/null &&
+  gh api "repos/$gh_repo/issues/$pr/comments" --paginate \
+    --jq '.[] | .body | split("\n")[] | capture("^(?<who>GK|UX) (?<v>NOT OK|OK) @(?<sha>[0-9a-f]{7,40})") | [.who, .v, .sha] | @tsv'); then
+  for who in GK UX; do
+    mine=$(awk -F'\t' -v w="$who" '$1 == w' <<<"$verdicts")
+    if [[ -z $mine ]]; then
+      echo "$who: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)"
+      continue
+    fi
+    last_ok=$(awk -F'\t' '$2 == "OK" { n = NR } END { print n + 0 }' <<<"$mine")
+    last_no=$(awk -F'\t' '$2 == "NOT OK" { n = NR } END { print n + 0 }' <<<"$mine")
+    if ((last_no > last_ok)); then
+      sha=$(sed -n "${last_no}p" <<<"$mine" | cut -f3)
+      echo "$who NOT OK @$sha is newer than the last $who OK: blocks"
+      fail=1
+      reasons+=("$who NOT OK")
+    fi
+    ((last_ok)) || continue
+    x=$(sed -n "${last_ok}p" <<<"$mine" | cut -f3)
+    full=$(git rev-parse -q --verify "$x^{commit}" 2>/dev/null || true)
+    if [[ -z $full ]]; then
+      echo "$who OK @$x: unknown commit (not fetched), cannot compare to the head"
+    elif [[ $full == "$head" ]]; then
+      echo "$who OK @$full: current"
+    elif verdict_carries "$full"; then
+      echo "$who OK @$full: carries (clean $base_branch merge)"
+    else
+      files=$(git diff --name-only "$full" "$head" 2>/dev/null | head -15 | paste -sd' ')
+      echo "$who OK @$full: stale: changed since: ${files:-unreadable}"
+    fi
+  done
+else
+  echo "verdicts: not read"
+  fail=1
+  reasons+=("verdicts: not read")
 fi
 
 echo

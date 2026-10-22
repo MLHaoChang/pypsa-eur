@@ -164,3 +164,22 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **Two reads cost hundreds of thousands of characters: `pull_request_read get_files` on #491 (684k) and raw `list_events`.**
   - Fix: read a PR's file list with `git diff --stat <base>...<head>`, and a session's events only from a saved file through `events.py`.
   - Lives in: coordinator "Tool hygiene".
+
+## 22 Oct 2026: lean coordination retro
+
+- **Contexts outgrew their limits unnoticed.** The coordinator reached 214k in 32 minutes against a 150k rule; three sessions passed 200k because `sessions.py` flagged at 300k and sessions checked themselves every ~10 events.
+  - Fix: a PostToolUse hook reads the transcript's latest usage and tells the agent to hand off at 200k (150k for the coordinator, marked by `~/.claude-coordinator`), again every +20k. `ROTATE_TOKENS` is 200k.
+  - Lives in: `.claude/hooks/context-guard.sh`, steward "Rotation".
+- **Session admin filled the coordinator's context.** Each `list_sessions` or `get_session` dump costs ~2.5k tokens.
+  - Fix: a Haiku subagent does session admin and returns one line; `list_triggers` takes `enabled: true`; sessions send the coordinator only `premerge ok`, a review request, a question or a hand-off.
+  - Lives in: coordinator "Tool hygiene" and "Wakes", steward "Messages to the coordinator".
+- **Hand-off notes re-typed standing reviewer rules into every successor prompt.**
+  - Fix: standing rules live in `docs/agents/review-*.md`; a note carries only live state; briefs name owner decisions by key.
+  - Lives in: steward "Finishing a package", session brief.
+- **Verdicts crossed with PR openings, and every verdict took a relay hop.**
+  - Fix: reviewers post verdicts as PR comments; premerge.sh reads them and says whether an OK is current, carries through a clean base merge or is stale; a PR whose plan went to review opens after the plan verdicts arrive.
+  - Lives in: steward "Merge gate" and "Gatekeeper checkpoints", premerge.sh "reviewer verdicts".
+- **Two parties watched the same CI.** Fix: the PR's session drives CI and reports `premerge ok`; the coordinator runs premerge once at merge; `scripts/coord/ciwait.sh` is for PRs with no session.
+- **`ciwait.sh` called a running macOS job "runner-less", and the coordinator cancelled it.** The check keyed on `started_at` age, which a running job also has, and a normal macOS run lasts over 30 minutes.
+  - Fix: `MACOS` fires only when the job's `runner_id` is 0 (premerge's own test; a queued job has none) and it is over 30 minutes old. The check run's `status` is not used: it can read `queued` while the job is already running.
+  - Lives in: `scripts/coord/ciwait.sh`.

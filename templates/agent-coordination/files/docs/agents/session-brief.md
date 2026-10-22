@@ -7,7 +7,7 @@ You are a session for {{REPO}}, commissioned by the owner through the coordinato
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
-**Owner decisions.** <rows of docs/agents/owner-decisions.md this task rests on; a decision not yet logged, in the owner's own words with the option they picked>
+**Owner decisions.** <keys only. Look each up with `grep -F '| KEY |' docs/agents/owner-decisions.md`; never read the whole file. A decision not yet logged, in the owner's own words with the option they picked>
 
 **Starts from.** `{{BASE_BRANCH}}` at <full SHA>.
 
@@ -23,6 +23,6 @@ You are a session for {{REPO}}, commissioned by the owner through the coordinato
 **Process.** Follow `.claude/skills/steward/SKILL.md`:
 - one PR on its own `claude/*` branch;
 - a release-note fragment;
-- report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green;
+- drive its CI, then report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green;
 - send questions to the coordinator as 2–4 options.
 ```

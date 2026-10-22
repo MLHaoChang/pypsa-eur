@@ -1,0 +1,1 @@
+* Chore(agents): Lean coordination: a context-guard hook tells sessions to hand off at 200k tokens (150k for the coordinator), reviewers post verdicts as PR comments that `premerge.sh` reads, standing reviewer rules live in `docs/agents/review-*.md`, and `scripts/coord/ciwait.sh` replaces the CI watcher in the coordinator brief.

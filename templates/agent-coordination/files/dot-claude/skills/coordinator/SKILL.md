@@ -10,6 +10,8 @@ The **coordinator**:
 
 PR sessions follow `.claude/skills/steward/SKILL.md`, and this skill is the coordinator's side of the same rules. When an owner decision changes a rule, the change lands here or in steward. The sweep routine's prompt only points at this file. `docs/agents/roles.md` holds the session ids, the dashboard link and the routine id.
 
+At start, `touch ~/.claude-coordinator`: the context-guard hook then warns at 150k instead of 200k.
+
 Work from a checkout of current `{{BASE_BRANCH}}`. Before a sweep, run `git switch {{BASE_BRANCH}} && git pull --ff-only`, because a stale checkout loads stale rules.
 
 Keep two files in the session's scratchpad:
@@ -59,10 +61,10 @@ Done when every package is running, queued with a named reason, or merged.
 ## Sweep
 
 1. **Notifications.** Call `ReadNotifications` until it reports 0 remaining; act on or log each one.
-2. **Sessions.** Save the `list_sessions` output to a file, then run `python3 scripts/coord/sessions.py <file>`.
+2. **Sessions.** Have a Haiku subagent ([Tool hygiene](#tool-hygiene)) save the `list_sessions` output and return the `python3 scripts/coord/sessions.py <file>` summary.
    - A session waiting on an `AskUserQuestion` in its own window: fetch the question and bring it to the owner as options.
    - Check [Rotation](#rotation)'s trigger.
-   - A session flagged `ROTATE` (over 300k context): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
+   - A session flagged `ROTATE` (over 200k context): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
    - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state log lists as pending.
    Done when each one is merged or has a named blocker in the log.
@@ -75,6 +77,7 @@ Log each event in the state log as `- HH:MMZ ...` ([Time](#time)); `board.py` lo
 Every wake re-reads the whole context, so fewer wakes cost less.
 - Merges follow the sessions' `premerge ok <sha>` reports. Never `subscribe_pr_activity`: a subscription costs about 3 wakes and 3k tokens of boilerplate per PR.
 - The sweep routine fires every 6 hours, as a safety net.
+- Call `list_triggers` with `enabled: true`; the full list is large.
 - With no live session, `update_trigger` the routine to `enabled: false`. The next `create_session` re-enables it.
 - A routine created with `create_new_session_on_fire` starts without the repo and without the session tools, so the sweep stays in this session.
 
@@ -89,6 +92,7 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    - open owner questions;
    - the dashboard's last `ArtifactData` `if_version`, and the routine's trigger id.
 2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for {{REPO}}. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
+   The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
 3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` each live session the new id.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
@@ -133,9 +137,8 @@ When a package's last PR merges, read the session's hand-off note, `archive_sess
 
 Merge one PR at a time:
 
-1. Start from a session's `premerge ok <sha>` report. Run `scripts/coord/premerge.sh <pr>`; it checks conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
-2. For {{GATED_AREAS}}, get the gatekeeper's OK for that same SHA and record it in the state log. A clean `{{BASE_BRANCH}}` merge on top of an OK needs no re-review when the gatekeeper says so.
-   - Where the project has a UX reviewer, a PR that changes UI also needs the reviewer's OK for that same SHA.
+1. Start from a session's `premerge ok <sha>` report. The session drives its PR's CI, so run `scripts/coord/premerge.sh <pr>` once, here; it checks conflicts, overlap, the semantic tests on a trial merge and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
+2. For {{GATED_AREAS}}, the gatekeeper's OK must be on the PR, and where the project has a UX reviewer a PR that changes UI needs its OK too. Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean {{BASE_BRANCH}} merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks.
 3. Call `merge_pull_request` with `merge_method: merge` and `expectedHeadSha` set to the full 40-character `head:` line. premerge leaves out one check, GitHub's mergeable state; a refused merge reports it. Done when GitHub reports the PR merged.
 4. Tell each dependent session the state log lists for this PR, then go on to the next PR. Each premerge run measures against the new `{{BASE_BRANCH}}`, so run it again after every merge.
 
@@ -164,7 +167,11 @@ Each refresh is three calls, made at most once per owner report:
 
 - Read check runs through `premerge.sh`, which prints only the runs that block, never through one-off check-run reads per PR.
 - Start a long command with the tool's own background option. A `&` inside a background command detaches it, and its completion notice never arrives.
-- `list_sessions` output is large. Save it and summarize it with `sessions.py`; use `get_session` for a single session.
+- Session admin runs in a Haiku subagent (Agent tool, `model: haiku`) that returns one line, so the JSON dumps (~2.5k tokens each) stay out of this context:
+  - retire a session: rename it "Done · …", then `archive_session`;
+  - `list_sessions`: save it and return the `sessions.py` summary;
+  - `get_session` of another session.
+- A PR with no session (the coordinator's own): start `scripts/coord/ciwait.sh <max-min ≤ 118> <pr>...` with the Bash tool's `run_in_background`. It prints READY, FAIL, MACOS or TIMEOUT on the first hit. Sessions drive the CI of their own PRs.
 - `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call. Read a session's events only that way, from a saved file.
 - Read a PR's file list with `git diff --stat origin/{{BASE_BRANCH}}...<head>`; `pull_request_read get_files` returns hundreds of thousands of characters on a large PR (684k on #491).
 
