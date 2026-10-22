@@ -102,7 +102,8 @@ def test_the_saved_source_is_used_when_the_request_names_none(client, install_ne
 @pytest.mark.parametrize("body", [
     {"source": "nasa", "year": 2019},
     {"source": "synthetic", "year": LAST + 1},
-    {"source": "synthetic", "year": 1900},
+    {"source": "synthetic", "year": 1899},
+    {"source": "atlite", "year": 1939},
 ])
 def test_a_bad_saved_choice_is_refused(client, install_network, body):
     project = _project(client, install_network)
@@ -115,3 +116,27 @@ def test_clearing_returns_to_the_snapshot_default(client, install_network):
     assert client.delete(f"/api/projects/{project}/profiles/weather").status_code == 200
     got = client.get(f"/api/projects/{project}/profiles/weather").json()
     assert (got["year"], got["year_source"]) == (2023, "snapshots")
+
+
+@pytest.mark.parametrize("body", [
+    {"source": "synthetic", "year": 1900},
+    {"source": "synthetic", "year": 1939},
+    {"source": "atlite", "year": 1940},
+    {"source": "atlite", "year": LAST},
+])
+def test_each_sources_own_year_bounds_are_accepted(client, install_network, body):
+    project = _project(client, install_network)
+    assert client.put(f"/api/projects/{project}/profiles/weather", json=body).status_code == 200
+
+
+def test_saving_a_year_leaves_existing_series_alone(client, install_network, session_ctx):
+    project = _project(client, install_network, 2023)
+    rec = _generate(client, project, year=2021)
+    assert client.post(f"/api/projects/{project}/profiles/apply", json={
+        "job_id": rec["job_id"], "component": "g_wind", "time_basis": "UTC"}).status_code == 200
+    before = session_ctx(client).user_ts[("generators", "p_max_pu", "g_wind")].copy()
+    client.put(f"/api/projects/{project}/profiles/weather", json={"source": "synthetic", "year": 2019})
+    after = session_ctx(client).user_ts[("generators", "p_max_pu", "g_wind")]
+    assert after.equals(before)
+    rows = client.get(f"/api/projects/{project}/profiles/readiness").json()["generators"]
+    assert rows[0]["profile"] == "generated" and "stale_reason" not in rows[0]

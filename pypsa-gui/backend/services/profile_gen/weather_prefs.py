@@ -17,7 +17,10 @@ from services.profile_gen.horizon import default_weather_year, last_completed_ye
 
 META_KEY = "profile_weather"
 SOURCES = ("synthetic", "atlite")
-FIRST_YEAR = 1950  # the ERA5 record starts here
+# The earliest year each source can serve: ERA5 reanalysis starts in 1940; the
+# synthetic source is a deterministic function of the year, so any calendar year
+# from 1900 is meaningful. Neither serves a year not yet complete.
+FIRST_YEAR = {"synthetic": 1900, "atlite": 1940}
 
 
 class WeatherChoiceError(ValueError):
@@ -47,8 +50,10 @@ def validate(source: str, year: int) -> None:
     if source not in SOURCES:
         raise WeatherChoiceError(f"the weather source is one of {', '.join(SOURCES)}, not {source!r}")
     last = last_completed_year()
-    if not FIRST_YEAR <= year <= last:
-        raise WeatherChoiceError(f"the weather year is a completed year from {FIRST_YEAR} to {last}, not {year}")
+    first = FIRST_YEAR[source]
+    if not first <= year <= last:
+        raise WeatherChoiceError(
+            f"the {source} weather year is a completed year from {first} to {last}, not {year}")
 
 
 def save_choice(project_dir: Path | str, source: str, year: int) -> None:

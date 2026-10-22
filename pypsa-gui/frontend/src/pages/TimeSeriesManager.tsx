@@ -783,14 +783,6 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
           </div>
           {has && rowsShown != null && <span className="text-[9px] text-success font-mono shrink-0">{rowsShown}h</span>}
         </button>
-        {onGenerate && (
-          <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
-            onClick={e => { e.stopPropagation(); onGenerate() }}
-            className="text-[10px] text-accent hover:underline disabled:opacity-50 shrink-0"
-            title="Generate this generator's profile from the weather bar's source and year">
-            {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
-          </button>
-        )}
         <button
           type="button"
           onClick={e => { e.stopPropagation(); onDownload() }}
@@ -844,6 +836,16 @@ function GenItem({ gen, meta, readiness, onGenerate, generating, hasActive, acti
           }}
         />
       </div>
+      {onGenerate && (
+        <div className="px-3 pl-[34px] pb-1.5 -mt-0.5 border-b border-border/40">
+          <button type="button" data-testid={`generate-${gen.name}`} disabled={generating}
+            onClick={e => { e.stopPropagation(); onGenerate() }}
+            className="text-[10px] text-accent hover:underline disabled:opacity-50"
+            title="Generate this generator's profile from the weather bar's source and year">
+            {generating ? 'Generating…' : readiness?.profile === 'generated' ? 'Regenerate' : 'Generate'}
+          </button>
+        </div>
+      )}
       {uploadError && (
         <p className="px-3 py-1 text-[11px] text-red-600 border-b border-border/40" data-testid={`row-upload-error-${gen.name}`}>
           {uploadError}{' '}

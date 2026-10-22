@@ -240,9 +240,12 @@ export function ProfileStudioView({ name }: { name: string }) {
             type="number"
             value={year}
             onChange={e => setYear(Number(e.target.value))}
-            title="Weather year"
+            title="Weather year for this run only: the project's year is set in Time Series"
             data-testid="year-input"
           />
+          <span className="text-[10px] text-muted self-center" data-testid="year-override-note">
+            this run only · the project&apos;s weather year is set in Time Series
+          </span>
         </div>
 
         <textarea
