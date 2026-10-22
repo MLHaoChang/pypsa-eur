@@ -16,6 +16,7 @@ import { useSitesStore } from '../site3d/sitesStore'
 import { primaryBus } from '../site3d/siteModel'
 import { fromLocal } from '../site3d/geo'
 import { PLACEABLE_CLASSES } from '../site3d/types'
+import { openTimeSeriesFor } from './flowNavigation'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { PALETTE_COMPONENT_TYPE } from './paletteData'
@@ -669,8 +670,8 @@ function CreationFormBody({ item, schema }: { item: CreationRequest; schema: Ass
           <span className="flex items-center gap-2" data-testid="asset-added-toast">
             <span>{item.label} "{name}" added</span>
             <button type="button" className="underline font-medium" data-testid="asset-give-time-series"
-              onClick={() => { toast.dismiss(t.id); useUIStore.getState().focusTimeSeries(cls, name) }}
-            >Give it a time series →</button>
+              onClick={() => { toast.dismiss(t.id); openTimeSeriesFor(cls, name, { field: cls === 'Generator' ? 'p_max_pu' : 'p_set', openEditor: true }) }}
+            >Next: give it a time series ›</button>
           </span>
         ), { duration: 8000 })
       } else {
