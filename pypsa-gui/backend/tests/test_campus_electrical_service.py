@@ -659,6 +659,67 @@ def test_a_publish_that_dies_mid_rename_is_put_back(tmp_path):
     assert not work.exists() and not backup.exists()
 
 
+def test_a_leftover_backup_beside_a_published_study_is_dropped(tmp_path):
+    """A publish that finished its renames and died while deleting ``run.bak``
+    leaves the new study in ``run`` and the old one beside it. The next open
+    must keep the new study. Restoring the backup would throw the sizing away."""
+    published = tmp_path / "run"
+    published.mkdir()
+    (published / "kept.txt").write_text("current")
+    backup = tmp_path / ce._RUN_BACKUP
+    backup.mkdir()
+    (backup / "kept.txt").write_text("stale")
+    ce._recover_run(published)
+    assert (published / "kept.txt").read_text() == "current"
+    assert not backup.exists()
+
+
+def test_a_missing_partial_puts_the_previous_study_back(tmp_path):
+    """The previous study is already renamed to ``run.bak`` before the partial
+    takes its place. If that second rename fails, the previous study has to be
+    put back before the error leaves; otherwise the project has no ``run``."""
+    published = tmp_path / "run"
+    published.mkdir()
+    (published / "kept.txt").write_text("previous")
+    work = tmp_path / ce._RUN_PARTIAL
+    with pytest.raises(FileNotFoundError):
+        ce._publish_run(work, published)
+    assert (published / "kept.txt").read_text() == "previous"
+    assert not (tmp_path / ce._RUN_BACKUP).exists()
+    assert not work.exists()
+
+
+def test_a_symlinked_study_is_replaced_without_deleting_its_target(tmp_path):
+    """``run`` and ``run.partial`` can be links planted in the project directory.
+    Removing one unlinks the link. It must not walk into the target and delete
+    whatever that directory holds."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("keep")
+    partial = tmp_path / ce._RUN_PARTIAL
+    partial.symlink_to(outside, target_is_directory=True)
+    ce._remove_tree(partial)
+    assert not partial.exists() and not partial.is_symlink()
+    assert (outside / "secret.txt").read_text() == "keep"
+
+    dangling = tmp_path / "dangling"
+    dangling.symlink_to(tmp_path / "missing-target")
+    ce._remove_tree(dangling)
+    assert not dangling.is_symlink()
+
+    published = tmp_path / "run"
+    published.symlink_to(outside, target_is_directory=True)
+    work = tmp_path / "next-study"
+    work.mkdir()
+    (work / "new.txt").write_text("next")
+    ce._publish_run(work, published)
+    assert (published / "new.txt").read_text() == "next"
+    assert not published.is_symlink()
+    assert (outside / "secret.txt").read_text() == "keep"
+    assert not (tmp_path / ce._RUN_BACKUP).exists()
+    assert not work.exists()
+
+
 def test_an_abort_before_sizing_keeps_the_previous_study(hub, monkeypatch):
     """Aborting during the island checks used to leave the new critical hours
     beside the previous sizing and purchases, and the study still read as
