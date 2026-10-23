@@ -517,6 +517,7 @@ def _harmonic_row(inp: _Inputs) -> dict:
     import pandas as pd
 
     from gridspine.drivers.campus_study import harmonic_units
+    from gridspine.schema.contracts import ContractError
     from gridspine.static import harmonics as hm
 
     rid, req = "harmonic_distortion", "Harmonic voltage distortion at the PoC from the site's drives and heaters"
@@ -548,6 +549,15 @@ def _harmonic_row(inp: _Inputs) -> dict:
                     section="assets",
                     target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                                    "eh_sk_mva"))
+    for rec in units.to_dict("records"):
+        try:
+            hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
+        except ContractError as exc:
+            # One unit's malformed stored input reads as unknown here, not a failed scorecard.
+            field = "harmonic_spectrum" if str(exc).startswith("Harmonic spectrum") else "harmonic_source"
+            return _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=None,
+                        verdict="unknown", assumed=True, note=f"{rec['unit']}: {exc}", section="assets",
+                        target=_target("assets", "Link", rec["unit"], field))
     study = hm.harmonic_table(units, {"PoC": sk}, limits)
     poc = study.pocs.iloc[0]
     demo = study.units.loc[study.units["spectrum_source"].astype(str).str.startswith("demo"), "unit"].tolist()

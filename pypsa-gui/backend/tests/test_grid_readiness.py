@@ -917,6 +917,16 @@ def test_without_a_process_unit_the_row_is_unknown(tmp_path):
     assert "No process unit" in row["note"] and row["target"]["field"] == "eh_process"
 
 
+@pytest.mark.parametrize("source, spectrum, field", [("12-pulse", "5:abc", "harmonic_spectrum"),
+                                                      ("24-pulse", "", "harmonic_source")])
+def test_an_invalid_stored_unit_input_makes_the_row_unknown(tmp_path, source, spectrum, field):
+    # A malformed stored value must not take the whole scorecard down with it.
+    row = _harmonic_row_of(tmp_path, _harmonic_site(source=source, spectrum=spectrum))
+    assert row["verdict"] == "unknown" and row["assumed"] and row["project_value"] is None
+    assert row["note"].startswith("compressor: Harmonic ")
+    assert row["target"]["field"] == field and row["target"]["entity"] == "compressor"
+
+
 def test_without_a_fault_level_the_row_is_unknown(tmp_path):
     row = _harmonic_row_of(tmp_path, _harmonic_site(sk=math.nan))
     assert row["verdict"] == "unknown" and row["project_value"] is None
