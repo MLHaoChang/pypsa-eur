@@ -1,6 +1,7 @@
 # IPP renewables + BESS: an example for a developer's revenue case
 
-Status: ready-for-agent (spec; docs only, no code). Owner answered Q-IPP1–5 and the scope question on 2026-10-20, about 19:42 CEST, all A (§11). UX OK at the spec stage. Gatekeeper: engine read, "go with changes" (2026-10-20, about 19:42 CEST), folded into §3 and §10.
+Status: done (spec #453, 90c7b8ff; issues 01-08 done)
+History: ready-for-agent (spec; docs only, no code). Owner answered Q-IPP1–5 and the scope question on 2026-10-20, about 19:42 CEST, all A (§11). UX OK at the spec stage. Gatekeeper: engine read, "go with changes" (2026-10-20, about 19:42 CEST), folded into §3 and §10.
 Date: 2026-10-20
 Author: ipp-renewables-bess session (commissioned through the coordinator)
 Base: master `ceff6b1` (#447 merged). #448 read at `760a48e` (`claude/workspace-integration-sensitivities`).

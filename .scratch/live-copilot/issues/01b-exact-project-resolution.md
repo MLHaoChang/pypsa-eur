@@ -3,7 +3,7 @@
 
 # LC-01B — exact project names before companion shortcuts
 
-Status: implementation in progress (Claude, branch `claude/copilot-target-resolution-b`)
+Status: done (#391, 14a49dda)
 Resume: [2026-10-19 implementation handoff](../handoff-2026-10-19-target-resolution.md).
 Parent: [LC-01](01-discovery-and-scope.md)
 Starting actual master: `d006f4beaa302b97432c65757762ae180222731a` (PR376).
