@@ -7,8 +7,10 @@ because ``astype`` launders a fractional hour into an integer and the string
 
 Contingency set
     One row per outage to study: ``contingency_id``, ``kind`` in {branch,
-    unit, bus_section}, ``element_ids`` (a list of canonical element ids) and ``order`` in
-    {1, 2}. The set is engine-free data — whether every element id names a
+    unit, bus_section, n_m_1, n_1_1}, ``element_ids`` (a list of canonical
+    element ids) and ``order`` in {1, 2}. The two compound kinds are order 2
+    and their id is the element ids joined on the kind's separator
+    (``COMPOUND_SEPARATORS``): ``"{maint}|{fault}"`` and ``"{first}>{second}"``. The set is engine-free data — whether every element id names a
     real element is the CALLER's check against the registry, so this module
     stays importable without pandapower.
 
@@ -36,6 +38,8 @@ PSS/E v33 NAME field width and applies to the bus and unit names that reach
 the .raw. A pair id like ``BUS_01-BUS_02-1--BUS_02-BUS_03-1`` is longer by
 construction and never becomes a NAME.
 """
+import re
+
 import numpy as np
 import pandas as pd
 
@@ -47,7 +51,12 @@ from .network import NAME_CHARSET
 #: and survives a CSV round-trip, which ``inf`` does not reliably do.
 NON_CONVERGED_SEVERITY = 1.0e6
 
-CONTINGENCY_KINDS = frozenset({"branch", "unit", "bus_section"})
+#: The compound kinds and the separator their id joins its two element ids on.
+#: Both are outside the canonical charset, so a compound id never collides
+#: with a plain one and its parts are recovered by one split.
+COMPOUND_SEPARATORS = {"n_m_1": "|", "n_1_1": ">"}
+CONTINGENCY_KINDS = frozenset({"branch", "unit", "bus_section", *COMPOUND_SEPARATORS})
+_COMPOUND_SPLIT = re.compile("|".join(re.escape(sep) for sep in COMPOUND_SEPARATORS.values()))
 FAULT_CASES = frozenset({"max", "min"})
 
 CONTINGENCY_SET_COLUMNS = {
@@ -93,6 +102,18 @@ def _check_ids(values, what: str) -> None:
             )
 
 
+def _check_contingency_ids(values, what: str) -> None:
+    """``_check_ids``, except that one compound separator may join two canonical parts."""
+    for v in values:
+        if isinstance(v, str) and any(sep in v for sep in COMPOUND_SEPARATORS.values()):
+            parts = _COMPOUND_SPLIT.split(v)
+            if len(parts) != 2:
+                raise ContractError(f"{what} id has more than one compound separator: {v!r}")
+            _check_ids(parts, what)
+        else:
+            _check_ids([v], what)
+
+
 def _integral(series: pd.Series, what: str) -> pd.Series:
     """The pre-coercion integrality guard, shared by hour and count columns."""
     raw = pd.to_numeric(series, errors="coerce")
@@ -111,7 +132,7 @@ def validate_contingency_set(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     # --- guards on the values as supplied; coercion below would hide these ---
-    _check_ids(out["contingency_id"], "contingency_id")
+    _check_contingency_ids(out["contingency_id"], "contingency_id")
     order_raw = out["order"]
     bad_order = (order_raw != 1) & (order_raw != 2)  # NaN != x is True, so NaN is bad
     if bad_order.any():
@@ -139,6 +160,18 @@ def validate_contingency_set(df: pd.DataFrame) -> pd.DataFrame:
         _check_ids(elems, f"contingency {cid} element_ids")
         if len(set(elems)) != len(elems):
             raise ContractError(f"contingency {cid}: element_ids repeat an element")
+    for cid, kind, elems in zip(out["contingency_id"], out["kind"], out["element_ids"]):
+        sep = COMPOUND_SEPARATORS.get(kind)
+        if sep is None:
+            if any(s in cid for s in COMPOUND_SEPARATORS.values()):
+                raise ContractError(f"contingency {cid}: a compound separator on kind {kind!r}")
+        elif len(elems) != 2:
+            raise ContractError(f"contingency {cid}: a {kind} contingency is order 2, got {len(elems)} element_ids")
+        elif cid != sep.join(elems):
+            raise ContractError(
+                f"contingency {cid}: a {kind} id is its element_ids joined on {sep!r}, "
+                f"expected {sep.join(elems)!r}"
+            )
 
     try:
         out = out.astype(CONTINGENCY_SET_COLUMNS)
@@ -287,6 +320,9 @@ def validate_fault_levels(df: pd.DataFrame) -> pd.DataFrame:
 #: The verdicts of the planning-criteria check (``static/planning_criteria``).
 #: ``not_solved`` is an islanded or non-converged contingency: no flow to judge.
 PLANNING_VERDICTS = frozenset({"pass", "fail", "not_solved"})
+#: The angle-limit verdicts: ``unknown`` where no limit is set or no pair could
+#: be measured, never ``pass``; ``not_solved`` exactly where stage 1 is.
+ANGLE_VERDICTS = frozenset({"pass", "fail", "unknown", "not_solved"})
 
 PLANNING_RESULT_COLUMNS = {
     "contingency_id": "object",
@@ -305,6 +341,9 @@ PLANNING_RESULT_COLUMNS = {
     "stage2_max_vm_pu": "float64",
     "stage2_verdict": "object",
     "remedial": "object",
+    "angle_deg": "float64",
+    "angle_pair": "object",
+    "angle_verdict": "object",
     "note": "object",
 }
 _STAGE2_PHYSICS = ("stage2_loading_pct", "stage2_min_vm_pu", "stage2_max_vm_pu")
@@ -320,7 +359,7 @@ def validate_planning_results(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
 
     # --- guards on the values as supplied; coercion below would hide these ---
-    _check_ids(out["contingency_id"], "contingency_id")
+    _check_contingency_ids(out["contingency_id"], "contingency_id")
     bad_kind = ~out["kind"].isin(CONTINGENCY_KINDS)
     if bad_kind.any():
         raise ContractError(f"kind must be one of {sorted(CONTINGENCY_KINDS)}, got "
@@ -335,6 +374,10 @@ def validate_planning_results(df: pd.DataFrame) -> pd.DataFrame:
         if bad.any():
             raise ContractError(f"{col} must be one of {sorted(PLANNING_VERDICTS)}, got "
                                 f"{out.loc[bad, col].unique().tolist()}")
+    bad = ~out["angle_verdict"].isin(ANGLE_VERDICTS)
+    if bad.any():
+        raise ContractError(f"angle_verdict must be one of {sorted(ANGLE_VERDICTS)}, got "
+                            f"{out.loc[bad, 'angle_verdict'].unique().tolist()}")
 
     try:
         out = out.astype(PLANNING_RESULT_COLUMNS)
@@ -362,6 +405,15 @@ def validate_planning_results(df: pd.DataFrame) -> pd.DataFrame:
     if (s2.isna().any(axis=1) & s2_solved).any() or (s2.notna().any(axis=1) & ~s2_solved).any() \
             or np.isinf(s2.fillna(0.0)).any(axis=None):
         raise ContractError("stage-2 figures must be finite where stage 2 is solved and NaN elsewhere")
+    a_solved = out["angle_verdict"] != "not_solved"
+    if (a_solved != s1_solved).any():
+        raise ContractError("angle_verdict is not_solved exactly where stage 1 is: "
+                            f"{ids[a_solved != s1_solved].tolist()}")
+    ang = out["angle_deg"]
+    judged = out["angle_verdict"].isin(["pass", "fail"])
+    if (ang.isna() & judged).any() or (ang.notna() & ~a_solved).any() or np.isinf(ang.fillna(0.0)).any() \
+            or (ang < 0).any():
+        raise ContractError("angle_deg must be finite and >= 0 where the angle is judged, NaN where not solved")
     dup = out.duplicated(subset=["contingency_id", "hour"])
     if dup.any():
         raise ContractError(f"duplicate (contingency_id, hour) rows: {ids[dup].tolist()}")

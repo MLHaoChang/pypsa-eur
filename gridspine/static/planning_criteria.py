@@ -33,6 +33,21 @@ everything on it go out. The load and generation lost are reported, on the
 section and on any bus left unsupplied, so a bus loss cannot read benign
 because its load vanished; the lost generation is picked up by the slack.
 
+**N-M-1 and N-1-1** (``contingency_set.n_m_1_contingencies`` /
+``n_1_1_contingencies``): the first branch goes out, the named controls walk
+to re-adjust, then the second goes out and the two stages are judged as for
+any outage. In this static model the two kinds share these mechanics; they
+differ only in which branches may go out first. ``max_compound`` caps each
+compound kind to its first rows in id order; the report counts what it
+skipped, and a kind with skipped rows never summarises as ``pass``.
+
+**Angle limit** (``AngleLimit``, an argument, not a grid-code key): the
+largest voltage-angle difference across each named branch (its two
+terminals, net of a transformer's phase shift) or named bus pair (raw), on
+the stage-1 state. With no pairs named, every in-service branch is
+measured; the outaged branch (the standing angle across its open breaker)
+only when named. No limit gives ``unknown``, never ``pass``.
+
 An outage that leaves any other bus unsupplied is ISLANDED, as in
 ``static/contingency.py``: not solved, both stages ``not_solved``, and the
 note names the buses cut off.
@@ -50,9 +65,11 @@ import time
 import numpy as np
 import pandapower as pp
 import pandas as pd
+from pandapower.pypower.idx_brch import SHIFT
 from pandapower.topology import unsupplied_buses
 
 from gridspine.schema.contingency import (
+    COMPOUND_SEPARATORS,
     PLANNING_RESULT_COLUMNS,
     validate_contingency_set,
     validate_planning_results,
@@ -94,7 +111,24 @@ PLANNING_LEDGER = (
     "picked up by the slack",
     "an outage that leaves any other bus unsupplied is islanded: not solved, "
     "both stages not_solved",
+    "N-M-1 and N-1-1 share mechanics in this static model: the first branch "
+    "goes out, the named controls re-adjust, then the second goes out; they "
+    "differ only in which branches may go out first (a maintenance list or any)",
+    "max_compound keeps the first rows of each compound kind in contingency_id "
+    "order, so a small cap covers the lexically first outages only; the rest "
+    "are skipped, counted in the report, and the kind's summary is then "
+    "incomplete, never pass",
+    "the angle check is judged on the stage-1 state (taps and shunts barely "
+    "move angles); with no pairs named, every in-service branch is measured, "
+    "and the outaged branch (the standing angle across its open breaker) only "
+    "when named; across a transformer the angle is net of its phase shift "
+    "(vector group and phase-shifting tap); a named (bus, bus) pair is measured "
+    "raw, since it may span several transformers; a pair with a bus out of "
+    "service is skipped and named in the note; no limit set gives unknown, "
+    "never pass",
 )
+
+ANGLE_BASES = frozenset({"assumed", "sagc"})
 
 
 @dataclasses.dataclass(frozen=True)
@@ -104,6 +138,45 @@ class Controls:
     names them) and switched shunts by ``net.shunt`` name."""
     oltc: tuple = ()
     switched_shunts: tuple = ()
+
+
+def _finite_number(v) -> bool:
+    """A real, finite number; bool and strings are not."""
+    return not isinstance(v, bool) and isinstance(v, (int, float, np.integer, np.floating)) \
+        and math.isfinite(float(v))
+
+
+@dataclasses.dataclass(frozen=True)
+class AngleLimit:
+    """The voltage-angle limit across a branch or bus pair, in degrees.
+    ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
+    SAGC clause in ``reference``. ``pairs`` holds branch ids and (bus, bus)
+    name pairs; empty means every in-service branch on the net. A branch
+    pair is measured net of a transformer's phase shift; a (bus, bus) pair
+    is measured raw, since it may span several transformers, so name a
+    shifted transformer by its branch id."""
+    deg: float
+    basis: str
+    reference: str = ""
+    pairs: tuple = ()
+
+    def __post_init__(self):
+        d = self.deg
+        if not _finite_number(d):
+            raise ContractError(f"angle limit must be a finite number of degrees, got {d!r}")
+        if float(d) <= 0.0:
+            raise ContractError(f"angle limit must be > 0 degrees, got {d!r}")
+        if self.basis not in ANGLE_BASES:
+            raise ContractError(f"angle limit basis must be one of {sorted(ANGLE_BASES)}, got {self.basis!r}")
+        if self.basis == "sagc" and not (isinstance(self.reference, str) and self.reference.strip()):
+            raise ContractError("an angle limit on basis 'sagc' needs the SAGC clause in reference")
+        for p in self.pairs:
+            if not (isinstance(p, str) or (isinstance(p, tuple) and len(p) == 2
+                                           and all(isinstance(b, str) for b in p))):
+                raise ContractError(f"angle pair must be a branch id or a (bus, bus) tuple, got {p!r}")
+
+    def ledger(self) -> dict:
+        return {"deg": float(self.deg), "basis": self.basis, "reference": self.reference}
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +328,10 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
         if name not in shunt_idx:
             raise ContractError(f"switched shunt {name!r} is not on the net")
         i = shunt_idx[name]
+        for col in ("step", "max_step"):
+            v = work.shunt.at[i, col]
+            if not _finite_number(v):
+                raise ContractError(f"switched shunt {name!r} has no finite {col} (got {v!r})")
         knobs.append(_Knob(name, "shunt", i, "step", 0, int(work.shunt.at[i, "max_step"])))
     return knobs
 
@@ -326,13 +403,21 @@ class _Handles:
         )
 
 
+def _apply_branches(work, cid, elems, h: _Handles) -> None:
+    for e in elems:
+        if e not in h.branch:
+            raise ContractError(f"contingency {cid} names a branch not on the net: {e}")
+        etype, eidx = h.branch[e]
+        work[etype].at[eidx, "in_service"] = False
+
+
 def _apply_outage(work, r, h: _Handles) -> None:
+    """Take out the row's elements; a compound row's SECOND branch only, since
+    the screen takes out its first and re-adjusts before calling this."""
     if r.kind == "branch":
-        for e in r.element_ids:
-            if e not in h.branch:
-                raise ContractError(f"contingency {r.contingency_id} names a branch not on the net: {e}")
-            etype, eidx = h.branch[e]
-            work[etype].at[eidx, "in_service"] = False
+        _apply_branches(work, r.contingency_id, r.element_ids, h)
+    elif r.kind in COMPOUND_SEPARATORS:
+        _apply_branches(work, r.contingency_id, r.element_ids[1:], h)
     elif r.kind == "unit":
         uid = r.element_ids[0]
         if uid in h.gen:
@@ -381,47 +466,196 @@ def _row(r, hour, **kw):
         "converged": False, "islanded": False, "load_lost_mw": 0.0, "gen_lost_mw": 0.0,
         "stage1_loading_pct": np.nan, "stage1_branch": "", "stage1_verdict": "not_solved",
         "stage2_loading_pct": np.nan, "stage2_branch": "", "stage2_min_vm_pu": np.nan,
-        "stage2_max_vm_pu": np.nan, "stage2_verdict": "not_solved", "remedial": "", "note": "",
+        "stage2_max_vm_pu": np.nan, "stage2_verdict": "not_solved", "remedial": "",
+        "angle_deg": np.nan, "angle_pair": "", "angle_verdict": "not_solved", "note": "",
     }
     row.update(kw)
     return row
 
 
-def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, controls: Controls | None = None):
+# ---------------------------------------------------------------------------
+# the angle check
+# ---------------------------------------------------------------------------
+
+def _angle_pairs(net, angle_limit: AngleLimit | None, keys, ids, h: _Handles) -> list:
+    """``[(label, bus index, bus index, branch)]`` to measure: the limit's
+    pairs, or every branch when it names none (or no limit is set).
+    ``branch`` is ``(element type, index, default)`` for a branch pair, where
+    ``default`` marks one measured only while in service, and None for a
+    (bus, bus) pair."""
+    ends = {}
+    for bid, t, i in zip(ids, keys["element_type"], keys["element_index"]):
+        a, b = ("from_bus", "to_bus") if t == "line" else ("hv_bus", "lv_bus")
+        table = net.line if t == "line" else net.trafo
+        ends[bid] = (int(table.at[i, a]), int(table.at[i, b]), t, i)
+    default = angle_limit is None or not angle_limit.pairs
+    named = tuple(ids) if default else angle_limit.pairs
+    out = []
+    for p in named:
+        if isinstance(p, str):
+            if p not in ends:
+                raise ContractError(f"angle pair {p!r} is not a branch on the net")
+            a, b, t, i = ends[p]
+            out.append((p, a, b, (t, i, default)))
+        else:
+            unknown = [b for b in p if b not in h.bus]
+            if unknown:
+                raise ContractError(f"angle pair {p!r} names bus(es) not on the net: {unknown}")
+            out.append((f"{p[0]}:{p[1]}", h.bus[p[0]], h.bus[p[1]], None))
+    return out
+
+
+def _trafo_shift(work, i) -> float:
+    """The phase shift, in degrees, the last load flow applied across
+    transformer ``i`` (vector group and phase-shifting tap; 0 when the flow
+    ran without voltage angles), read from pandapower's branch matrix."""
+    start, _ = work._pd2ppc_lookups["branch"]["trafo"]
+    return float(work._ppc["branch"][start + work.trafo.index.get_loc(i), SHIFT].real)
+
+
+def _angle(work, pairs, live: set):
+    """``(largest |angle difference| in degrees, its label, skipped labels)``
+    over ``pairs`` whose two buses are both in ``live``; NaN when none is.
+    Across a transformer the difference is net of its phase shift; a default
+    branch pair out of service is not measured."""
+    va = work.res_bus["va_degree"]
+    worst, label, skipped = np.nan, "", []
+    for name, a, b, branch in pairs:
+        if branch is not None and branch[2] and not bool(work[branch[0]].at[branch[1], "in_service"]):
+            continue
+        if a not in live or b not in live:
+            skipped.append(name)
+            continue
+        shift = _trafo_shift(work, branch[1]) if branch is not None and branch[0] == "trafo" else 0.0
+        d = abs((float(va.at[a]) - float(va.at[b]) - shift + 180.0) % 360.0 - 180.0)
+        if not d <= worst:   # NaN worst takes the first
+            worst, label = d, name
+    return worst, label, skipped
+
+
+def _angle_fields(work, pairs, live, angle_limit: AngleLimit | None, notes: list) -> dict:
+    deg, pair, skipped = _angle(work, pairs, live)
+    if skipped:
+        notes.append(f"angle pairs skipped, a bus out of service: {', '.join(skipped)}")
+    if angle_limit is None:
+        verdict = "unknown"
+    elif math.isnan(deg):
+        verdict = "unknown"
+        notes.append("no angle pair measurable")
+    else:
+        verdict = "pass" if deg <= float(angle_limit.deg) else "fail"
+    return {"angle_deg": deg, "angle_pair": pair, "angle_verdict": verdict}
+
+
+# ---------------------------------------------------------------------------
+# the screen
+# ---------------------------------------------------------------------------
+
+def _capped(cset: pd.DataFrame, max_compound) -> tuple:
+    """``(kept rows, {compound kind: rows skipped})``; ``max_compound`` None keeps all."""
+    if max_compound is not None and (isinstance(max_compound, bool) or not isinstance(max_compound, (int, np.integer))
+                                     or max_compound < 0):
+        raise ContractError(f"max_compound must be a whole number >= 0 or None, got {max_compound!r}")
+    skipped = {k: 0 for k in sorted(COMPOUND_SEPARATORS)}
+    if max_compound is None:
+        return cset, skipped
+    keep = pd.Series(True, index=cset.index)
+    for kind in skipped:
+        ids = cset.loc[cset["kind"] == kind, "contingency_id"]
+        dropped = ids.sort_values(kind="mergesort").iloc[int(max_compound):]
+        keep[dropped.index] = False
+        skipped[kind] = len(dropped)
+    return cset[keep], skipped
+
+
+def _summary(results: pd.DataFrame, kinds, skipped: dict) -> dict:
+    """Per kind: the worst stage and angle verdicts; a kind with skipped rows
+    is ``incomplete`` unless a judged row already fails."""
+    out = {}
+    for kind in sorted(kinds):
+        rows = results[results["kind"] == kind]
+        n_skip = skipped.get(kind, 0)
+        stages = set(rows["stage1_verdict"]) | set(rows["stage2_verdict"])
+        angles = set(rows["angle_verdict"])
+        verdict = ("fail" if "fail" in stages else "incomplete" if n_skip
+                   else "not_solved" if "not_solved" in stages else "pass")
+        angle = ("fail" if "fail" in angles else "incomplete" if n_skip
+                 else "unknown" if "unknown" in angles else "not_solved" if "not_solved" in angles else "pass")
+        note = f"{n_skip} of {n_skip + len(rows)} {kind} rows skipped by max_compound" if n_skip else ""
+        out[kind] = {"verdict": verdict, "angle_verdict": angle, "note": note}
+    return out
+
+
+def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, controls: Controls | None = None,
+                    max_compound: int | None = None, angle_limit: AngleLimit | None = None):
     """``(results, report)``: one ``validate_planning_results`` row per
-    contingency in the set's order, and ``{"counts": {kind: n}, "seconds"}``.
-    Kinds judged: branch (any order), unit, bus_section."""
+    contingency judged, in the set's order, and ``{"counts": {kind: n judged},
+    "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
+    {...} or "unset", "seconds"}``. Kinds judged: branch (any order), unit,
+    bus_section, n_m_1, n_1_1."""
     cset = validate_contingency_set(contingencies)
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
     hour = int(hour)
     controls = controls or Controls()
+    if angle_limit is not None and not isinstance(angle_limit, AngleLimit):
+        raise ContractError(f"angle_limit must be an AngleLimit or None, got {type(angle_limit).__name__}")
     check_net_carries_hour(net, dispatch, loads, hour, registry)
     validate_emergency_ratings(net)
+    kinds = set(cset["kind"])
+    cset, skipped = _capped(cset, max_compound)
     t0 = time.perf_counter()
 
+    # the controls and angle pairs are checked before the base solve, so a bad one is named, not a divergence
+    keys = branch_keys(net)
+    ids = _branch_ids(net)
+    trafo_pos = {c: int(i) for c, t, i in zip(ids, keys["element_type"], keys["element_index"]) if t == "trafo"}
+    handles = _Handles.of(net)
+    knobs = _knobs(net, controls, trafo_pos)
+    pairs = _angle_pairs(net, angle_limit, keys, ids, handles)
     base = copy.deepcopy(net)
     try:
         pp.runpp(base)
     except pp.LoadflowNotConverged as exc:
         raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
-    keys = branch_keys(base)
-    ids = _branch_ids(base)
-    trafo_pos = {c: int(i) for c, t, i in zip(ids, keys["element_type"], keys["element_index"]) if t == "trafo"}
-    handles = _Handles.of(base)
-    knobs = _knobs(base, controls, trafo_pos)
     cut_before = set(unsupplied_buses(base))
     out_before = set(base.bus.index[~base.bus["in_service"].astype(bool)])
+
+    def live(work):
+        return [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
+
+    def bands_of(work, judged):
+        return {str(work.bus.at[b, "name"]): (V_MIN_PU, V_MAX_PU) for b in judged}
+
+    def cut_off(work):
+        out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
+        return out_bus, set(unsupplied_buses(work)) - cut_before - out_bus - out_before
 
     rows = []
     for r in cset.itertuples(index=False):
         work = copy.deepcopy(base)
+        notes = []
+        if r.kind in COMPOUND_SEPARATORS:
+            first = r.element_ids[0]
+            _apply_branches(work, r.contingency_id, [first], handles)
+            _, cut = cut_off(work)
+            if cut:
+                load_lost, gen_lost = _lost(base, work, cut)
+                names = ", ".join(sorted(str(base.bus.at[b, "name"]) for b in cut))
+                rows.append(_row(r, hour, islanded=True, load_lost_mw=load_lost, gen_lost_mw=gen_lost,
+                                 note=f"islanded at the first outage ({first}): disconnects {names}"))
+                continue
+            judged = live(work)
+            s0 = _solve(work, judged)
+            if s0 is None:
+                rows.append(_row(r, hour, note=f"load flow does not converge at the first outage ({first})"))
+                continue
+            _, pre = remedial_walk(work, knobs, bands_of(work, judged), judged, s0)
+            notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre)}")
         _apply_outage(work, r, handles)
-        out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
-        cut = set(unsupplied_buses(work)) - cut_before - out_bus - out_before
+        out_bus, cut = cut_off(work)
         load_lost, gen_lost = _lost(base, work, out_bus | cut)
         lost = {"load_lost_mw": load_lost, "gen_lost_mw": gen_lost}
-        notes = []
         if r.kind == "bus_section":
             notes.append(f"bus section lost: {load_lost:.1f} MW load, {gen_lost:.1f} MW generation "
                          "(the generation picked up by the slack)")
@@ -430,8 +664,8 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             notes.append(f"islanded: disconnects {names}")
             rows.append(_row(r, hour, islanded=True, note="; ".join(notes), **lost))
             continue
-        judged = [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
-        bands = {str(work.bus.at[b, "name"]): (V_MIN_PU, V_MAX_PU) for b in judged}
+        judged = live(work)
+        bands = bands_of(work, judged)
         s1 = _solve(work, judged)
         if s1 is None:
             notes.append("post-outage load flow does not converge")
@@ -439,6 +673,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             continue
         s1_pct, s1_branch = _worst(s1.emergency, ids)
         stage1 = {"stage1_loading_pct": s1_pct, "stage1_branch": s1_branch, "stage1_verdict": _verdict(s1_pct)}
+        angle = _angle_fields(work, pairs, set(judged), angle_limit, notes)
         notes.append(_rating_note(work))
         notes.append(NO_CONTROLS if not knobs else
                      NO_REDISPATCH if any(k.in_service(work) for k in knobs) else NO_CONTROLS_ON)
@@ -451,7 +686,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
                 notes.append(f"stage 2 does not converge at the chosen controls; last converged state "
                              f"{pct:.1f} % ({branch}), {min(s2.vm.values()):.3f}-{max(s2.vm.values()):.3f} pu")
                 rows.append(_row(r, hour, converged=True, remedial=_moved(moves),
-                                 note="; ".join(n for n in notes if n), **stage1, **lost))
+                                 note="; ".join(n for n in notes if n), **stage1, **angle, **lost))
                 continue
             s2 = final
         s2_pct, s2_branch = _worst(s2.loading, ids)
@@ -461,11 +696,14 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             stage2_loading_pct=s2_pct, stage2_branch=s2_branch,
             stage2_min_vm_pu=min(s2.vm.values()), stage2_max_vm_pu=max(s2.vm.values()),
             stage2_verdict="pass" if ok2 else "fail",
-            remedial=_moved(moves), note="; ".join(n for n in notes if n), **lost,
+            remedial=_moved(moves), note="; ".join(n for n in notes if n), **angle, **lost,
         ))
     results = validate_planning_results(pd.DataFrame(rows, columns=list(PLANNING_RESULT_COLUMNS)))
     report = {
         "counts": {k: int(n) for k, n in cset["kind"].value_counts().sort_index().items()},
+        "skipped": skipped,
+        "summary": _summary(results, kinds, skipped),
+        "angle_limit": angle_limit.ledger() if angle_limit is not None else "unset",
         "seconds": round(time.perf_counter() - t0, 3),
     }
     return results, report

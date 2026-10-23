@@ -20,7 +20,7 @@ import pandas as pd
 
 from gridspine.handoff.dyr_writer import _machines
 from gridspine.handoff.raw_writer import _bus_numbers
-from gridspine.schema.contingency import validate_contingency_set
+from gridspine.schema.contingency import COMPOUND_SEPARATORS, validate_contingency_set
 from gridspine.schema.contracts import ContractError
 
 ELEMENT_SEP = "|"
@@ -48,9 +48,10 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
             contingency_id=r.contingency_id, kind=r.kind, order=int(r.order),
             element_ids=ELEMENT_SEP.join(r.element_ids),
         )
-        if r.kind == "branch" and int(r.order) == 1:
+        if r.kind == "branch":
+            # an N-2 pair carries its two branch ids in element_ids only
             f, t = getattr(r, "from_bus", None), getattr(r, "to_bus", None)
-            if isinstance(f, str) and isinstance(t, str):
+            if int(r.order) == 1 and isinstance(f, str) and isinstance(t, str):
                 row.update(
                     from_bus=f, to_bus=t, ckt=str(r.ckt),
                     from_bus_number=float(nums[f]), to_bus_number=float(nums[t]),
@@ -69,6 +70,10 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
             if bus not in nums:
                 raise ContractError(f"contingency {r.contingency_id}: bus {bus} is not a bus on the net")
             row.update(bus=bus, bus_number=float(nums[bus]))
+        elif r.kind in COMPOUND_SEPARATORS:
+            pass  # N-M-1 / N-1-1: the two branch ids in element_ids, as for an N-2 pair
+        else:
+            raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} has no contingencies.csv form")
         rows.append(row)
 
     out = pd.DataFrame(rows, columns=COLUMNS)
