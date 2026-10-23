@@ -328,7 +328,13 @@ export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   const { data: schema } = useAssetSchema('StorageUnit')
   // U3: each field's provenance (default from the pack, customised, measured).
   const provenance = useAssetProvenance('StorageUnit', su.name)
-  const series = useSeriesFields(currentProject, 'storage_units', su.name, { inflow: 'Inflow' })
+  // Same query as the panel's Inflow section: a battery has no inflow editor, so no "Constant inflow" row.
+  const { data: inflow } = useQuery({
+    queryKey: ['series-current', currentProject, 'storage_units', 'inflow', su.name],
+    queryFn: () => seriesApi.current(currentProject as string, 'storage_units', 'inflow', su.name),
+    enabled: !!currentProject,
+  })
+  const series = useSeriesFields(currentProject, 'storage_units', su.name, inflow?.applicable ? { inflow: 'Inflow' } : {})
   const specs = schemaFields(schema)
   const asset = su as unknown as Record<string, unknown>
 
