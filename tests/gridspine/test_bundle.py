@@ -31,7 +31,7 @@ from gridspine.handoff.bundle import (
     write_ledger_readme,
 )
 from gridspine.handoff.contingencies import write_contingencies
-from gridspine.handoff.raw_writer import write_raw
+from gridspine.handoff.raw_writer import _bus_numbers, write_raw
 from gridspine.ingest.pandapower_source import RES_LEDGER, load_case39_res, registry_from_net
 from gridspine.ingest.synthetic_profiles import PROFILE_LEDGER
 from gridspine.schema.contingency import validate_contingency_set
@@ -39,6 +39,7 @@ from gridspine.schema.contracts import ContractError
 from gridspine.static.contingency_set import (
     EXT_GRID_EXCLUSION_LEDGER,
     branch_contingencies,
+    bus_section_contingencies,
     n2_candidates,
     unit_contingencies,
 )
@@ -153,6 +154,24 @@ def test_contingencies_csv_carries_n2_pairs_as_pipe_joined_element_ids(snapshot,
     back = pd.read_csv(tmp_path / "n2.csv")
     assert (back["order"] == 2).all()
     assert back["element_ids"].str.count(r"\|").eq(1).all()
+
+
+def test_contingencies_csv_carries_a_bus_section_by_bus_name_and_raw_number(snapshot, tmp_path):
+    net = snapshot["net"]
+    cset = bus_section_contingencies(net).head(3)
+    out = write_contingencies(cset, net, tmp_path / "bs.csv")
+    nums = _bus_numbers(net)
+    assert list(out["bus"]) == [ids[0] for ids in cset["element_ids"]]
+    assert list(out["bus_number"]) == [float(nums[b]) for b in out["bus"]]
+    assert out["machine_id"].isna().all() and out["from_bus"].isna().all()
+
+
+def test_contingencies_csv_refuses_a_bus_section_on_an_unknown_bus(snapshot, tmp_path):
+    cset = bus_section_contingencies(snapshot["net"]).head(1)
+    cset.at[0, "contingency_id"] = "BUS_99"
+    cset.at[0, "element_ids"] = ["BUS_99"]
+    with pytest.raises(ContractError, match="BUS_99 is not a bus on the net"):
+        write_contingencies(cset, snapshot["net"], tmp_path / "x.csv")
 
 
 def test_contingencies_csv_validates_its_input(snapshot, tmp_path):

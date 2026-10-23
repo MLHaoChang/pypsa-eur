@@ -15,6 +15,8 @@ across runs and platforms:
 * N-1 unit:   the canonical ``unit_id``.
 * N-2 pair:   ``"{a}--{b}"`` with ``a < b`` lexically, so ``(a, b)`` and
   ``(b, a)`` cannot both appear.
+* Bus section: the bus name, bare as a unit id is. A unit and a bus that
+  share a name collide, and the duplicate check names both kinds.
 
 A hyphen is inside the canonical charset, so an id is a KEY and not a parse
 target: the triple travels alongside as columns (``from_bus``, ``to_bus``,
@@ -44,6 +46,16 @@ EXT_GRID_EXCLUSION_LEDGER = (
     "unit contingencies exclude kind=ext_grid: outaging the slack leaves the "
     "pocket without a reference bus, which is an islanding study with its own "
     "frequency question, not an N-1 contingency (assumed scope)",
+)
+
+#: LEDGER — what a bus-section contingency is.
+BUS_SECTION_LEDGER = (
+    "a bus-section contingency is the loss of one model bus: every branch, "
+    "unit, load and shunt on it goes with it. One model bus is one bus "
+    "section, so a split busbar must be modelled as separate buses joined by "
+    "a coupler to be studied section by section (assumed scope)",
+    "bus-section contingencies exclude the ext_grid slack bus, for the reason "
+    "unit contingencies exclude kind=ext_grid",
 )
 
 _SET_COLUMNS = ["contingency_id", "kind", "element_ids", "order"]
@@ -117,4 +129,36 @@ def n2_candidates(n1: pd.DataFrame) -> pd.DataFrame:
         "order": 2,
     })
     out = out.sort_values("contingency_id", kind="mergesort").reset_index(drop=True)
+    return validate_contingency_set(out)
+
+
+def bus_section_contingencies(net, buses=None) -> pd.DataFrame:
+    """One row per bus section (``BUS_SECTION_LEDGER``): every in-service bus
+    but the slack's, or the named ``buses``. A named bus that is out of
+    service is skipped; an unknown or slack bus is refused."""
+    names = net.bus["name"].astype(str)
+    if names.duplicated().any():
+        raise ContractError(f"bus names on the net are not unique: {sorted(set(names[names.duplicated()]))}")
+    slack = {names.at[b] for b in net.ext_grid["bus"]}
+    on = {names.at[b] for b in net.bus.index if bool(net.bus.at[b, "in_service"])}
+    if buses is None:
+        picked = sorted(on - slack)
+    else:
+        buses = [str(b) for b in buses]
+        unknown = sorted(set(buses) - set(names))
+        if unknown:
+            raise ContractError(f"bus section(s) not on the net: {unknown}")
+        at_slack = sorted(set(buses) & slack)
+        if at_slack:
+            raise ContractError(
+                f"bus section(s) {at_slack} hold the ext_grid slack: {EXT_GRID_EXCLUSION_LEDGER[0]}"
+            )
+        picked = sorted(set(buses) & on)
+    out = pd.DataFrame({
+        "contingency_id": picked,
+        "kind": "bus_section",
+        "element_ids": [[b] for b in picked],
+        "order": 1,
+        "bus": picked,
+    })
     return validate_contingency_set(out)
