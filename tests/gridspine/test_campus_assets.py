@@ -110,18 +110,21 @@ def test_only_a_cost_is_a_cited_reference_value_and_each_names_its_row():
     """Ratings stay assumed; a cost is literature (with a note) or assumed; the money is 2025 EUR."""
     assert LIB["discount_rate"]["source"] == "assumed"
     assert (LIB["currency"], LIB["price_year"]) == ("EUR", 2025)
-    counts = {}
+    counts, tags = {}, {"literature": 0, "assumed": 1}             # the discount rate is one assumed value
     for kind in KINDS:
         for e in LIB[kind]:
             for f in FIELDS[kind]:
                 assert e[f]["source"] == "assumed", (e["id"], f)
+                tags["assumed"] += 1
             for f in COST[kind]:
                 src = e[f]["source"]
                 assert src in ("literature", "assumed"), (e["id"], f, src)
+                tags[src] += 1
                 if src == "literature":
                     assert e[f].get("note", "").strip(), (e["id"], f)
                     counts[(kind, f)] = counts.get((kind, f), 0) + 1
     assert counts == LITERATURE_COUNTS
+    assert tags == {"literature": 175, "assumed": 455}
     header = DEFAULT_PATH.read_text().split("\n\n")[0].lower()
     assert "reference values, not quotes" in header and "vendor quotes" in header
 

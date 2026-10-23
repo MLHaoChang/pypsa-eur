@@ -444,6 +444,11 @@ def test_a_case_in_2026_money_is_refused_against_the_shipped_2025_library(
     assert calls == []
     assert "2025 money (the campus asset library's price_year)" in body["error"]
     assert "the case's price data are 2026 (the finance inputs' currency_year)" in body["error"]
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))   # the library's money: it passes
+    body = _run(client)
+    assert body["status"] == "done", (body["error_code"], body["error"])
+    assert [e.name for e in calls[0]["extra_assets"]] == ["campus:TR_132_33_40#1", "campus:CB_33_AL95#1",
+                                                          "campus:SG_132_31p5#1"]
 
 
 def test_an_unstated_currency_year_takes_any_agreeing_price_year(
