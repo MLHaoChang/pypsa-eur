@@ -59,11 +59,12 @@ from gridspine.schema.contingency import (
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
-from gridspine.static.campus_taps import STEP_TOL, TAP_ROUNDS, V_TOL, _better, excursion
+from gridspine.static.campus_taps import TAP_ROUNDS, V_TOL, _better, excursion
 from gridspine.static.contingency import (
     LOADING_MAX_PCT,
     V_MAX_PU,
     V_MIN_PU,
+    BaseCaseNotConverged,
     branch_loading_pct,
 )
 from gridspine.static.contingency_set import branch_contingencies
@@ -74,6 +75,7 @@ TRAFO_EMERGENCY = "sn_mva_emergency"
 
 NO_REDISPATCH = "no redispatch modelled"
 NO_CONTROLS = "no remedial controls named; " + NO_REDISPATCH
+NO_CONTROLS_ON = "no named remedial control in service; " + NO_REDISPATCH
 
 PLANNING_LEDGER = (
     "stage 1 judges thermal loading only, right after the outage with taps and "
@@ -85,11 +87,11 @@ PLANNING_LEDGER = (
     f"[{V_MIN_PU}, {V_MAX_PU}] pu (the assumed band of static/contingency.py), "
     "after the named on-load tap changers and switched shunts walk one step at "
     "a time to lower (voltage excursion, worst overload, steps moved)",
-    "stage 2 models no redispatch (owner decision DC13-SCOPE): a branch above "
+    "stage 2 models no redispatch: a branch above "
     "its normal rating that taps and shunts cannot relieve fails stage 2",
     "a bus-section loss takes out the bus and everything on it; the load and "
-    "generation lost are reported, and the lost generation is picked up by "
-    "the slack",
+    "generation lost (p_mw x scaling) are reported, and the lost generation is "
+    "picked up by the slack",
     "an outage that leaves any other bus unsupplied is islanded: not solved, "
     "both stages not_solved",
 )
@@ -108,26 +110,38 @@ class Controls:
 # emergency ratings
 # ---------------------------------------------------------------------------
 
-def _column(table, col) -> np.ndarray:
-    if col not in table.columns:
-        return np.full(len(table), np.nan)
-    return pd.to_numeric(table[col], errors="coerce").to_numpy(dtype=float)
+def _branch_ids(net) -> list:
+    """Branch ids in ``branch_keys`` order (lines, then transformers)."""
+    keys = branch_keys(net)
+    return [f"{f}-{t}-{c}" for f, t, c in zip(keys["from_bus"], keys["to_bus"], keys["ckt"])]
+
+
+def _branches_on(net) -> np.ndarray:
+    return np.concatenate([net.line["in_service"].to_numpy(dtype=bool),
+                           net.trafo["in_service"].to_numpy(dtype=bool)])
+
+
+def _emergency(net) -> np.ndarray:
+    """Emergency ratings in ``branch_keys`` order, NaN where none is given."""
+    def column(table, col):
+        if col not in table.columns:
+            return np.full(len(table), np.nan)
+        return pd.to_numeric(table[col], errors="coerce").to_numpy(dtype=float)
+    return np.concatenate([column(net.line, LINE_EMERGENCY), column(net.trafo, TRAFO_EMERGENCY)])
 
 
 def validate_emergency_ratings(net) -> None:
     """Refuse an emergency rating below the normal one, at or below zero, or
     present but not finite; equal to the normal rating is allowed."""
-    ids = branch_keys(net)
-    names = [f"{f}-{t}-{c}" for f, t, c in zip(ids["from_bus"], ids["to_bus"], ids["ckt"])]
+    names = _branch_ids(net)
     nl = len(net.line)
     for table, col, normal, offset in ((net.line, LINE_EMERGENCY, "max_i_ka", 0),
                                        (net.trafo, TRAFO_EMERGENCY, "sn_mva", nl)):
         if col not in table.columns:
             continue
-        raw = table[col].tolist()
         norm = table[normal].to_numpy(dtype=float)
-        for pos, v in enumerate(raw):
-            if v is None or (isinstance(v, float) and math.isnan(v)):
+        for pos, v in enumerate(table[col].tolist()):
+            if v is None or (not isinstance(v, str) and pd.isna(v) and not np.isinf(v)):
                 continue
             what = f"{names[offset + pos]} ({col} = {v!r})"
             if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)) \
@@ -147,16 +161,16 @@ def emergency_loading_pct(net, i_from_ka, i_hv_ka) -> np.ndarray:
     normal = branch_loading_pct(net, i_from_ka, i_hv_ka)
     rated = np.concatenate([net.line["max_i_ka"].to_numpy(dtype=float),
                             net.trafo["sn_mva"].to_numpy(dtype=float)])
-    emerg = np.concatenate([_column(net.line, LINE_EMERGENCY), _column(net.trafo, TRAFO_EMERGENCY)])
+    emerg = _emergency(net)
     return normal * rated / np.where(np.isnan(emerg), rated, emerg)
 
 
-def _missing_emergency(net) -> tuple:
-    """(branches in service without an emergency rating, branches in service)."""
-    on = np.concatenate([net.line["in_service"].to_numpy(dtype=bool),
-                         net.trafo["in_service"].to_numpy(dtype=bool)])
-    emerg = np.concatenate([_column(net.line, LINE_EMERGENCY), _column(net.trafo, TRAFO_EMERGENCY)])
-    return int((on & np.isnan(emerg)).sum()), int(on.sum())
+def _rating_note(net) -> str:
+    """The row's "no emergency rating given (k of n branches)", over the
+    branches in service after its outage; empty when every one has one."""
+    on = _branches_on(net)
+    k = int((on & np.isnan(_emergency(net))).sum())
+    return f"no emergency rating given ({k} of {int(on.sum())} branches)" if k else ""
 
 
 # ---------------------------------------------------------------------------
@@ -177,11 +191,10 @@ def _solve(net, judged) -> _State | None:
         return None
     i_from = net.res_line["i_from_ka"].to_numpy(dtype=float)
     i_hv = net.res_trafo["i_hv_ka"].to_numpy(dtype=float)
-    on = np.concatenate([net.line["in_service"].to_numpy(dtype=bool),
-                         net.trafo["in_service"].to_numpy(dtype=bool)])
+    on = _branches_on(net)
     loading = np.where(on, branch_loading_pct(net, i_from, i_hv), np.nan)
     emergency = np.where(on, emergency_loading_pct(net, i_from, i_hv), np.nan)
-    vm = {net.bus.at[b, "name"]: float(net.res_bus.at[b, "vm_pu"]) for b in judged}
+    vm = {str(net.bus.at[b, "name"]): float(net.res_bus.at[b, "vm_pu"]) for b in judged}
     if any(not math.isfinite(v) or v <= 0.0 for v in vm.values()):
         return None
     return _State(loading, emergency, vm)
@@ -194,12 +207,36 @@ def _worst(values: np.ndarray, ids: list):
     return float(values[k]), ids[k]
 
 
+def _verdict(pct: float) -> str:
+    return "pass" if pct <= LOADING_MAX_PCT else "fail"
+
+
 # ---------------------------------------------------------------------------
 # stage 2: the remedial walk
 # ---------------------------------------------------------------------------
 
+@dataclasses.dataclass(frozen=True)
+class _Knob:
+    """One named control: ``net[table].at[index, column]`` moves in lo..hi."""
+    name: str
+    table: str
+    index: int
+    column: str
+    lo: int
+    hi: int
+
+    def get(self, net) -> int:
+        return int(net[self.table].at[self.index, self.column])
+
+    def put(self, net, value) -> None:
+        net[self.table].at[self.index, self.column] = value
+
+    def in_service(self, net) -> bool:
+        return bool(net[self.table].at[self.index, "in_service"])
+
+
 def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
-    """``[(name, table, index, column, lo, hi)]`` in sorted name order."""
+    """The named controls as ``_Knob``s, in sorted name order."""
     knobs = []
     for name in sorted(controls.oltc):
         if name not in trafo_pos:
@@ -212,53 +249,57 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
         if work.trafo.get("tap_changer_type", pd.Series(dtype=object)).get(i) != "Ratio":
             # pandapower 3 leaves a tap without a changer type inert (raw_writer reads it the same way)
             raise ContractError(f"OLTC {name!r} has no tap_changer_type 'Ratio': its taps would not act")
-        knobs.append((name, "trafo", i, "tap_pos", int(lo), int(hi)))
+        knobs.append(_Knob(name, "trafo", i, "tap_pos", int(lo), int(hi)))
     shunt_idx = {str(work.shunt.at[i, "name"]): i for i in work.shunt.index}
     for name in sorted(controls.switched_shunts):
         if name not in shunt_idx:
             raise ContractError(f"switched shunt {name!r} is not on the net")
         i = shunt_idx[name]
-        knobs.append((name, "shunt", i, "step", 0, int(work.shunt.at[i, "max_step"])))
+        knobs.append(_Knob(name, "shunt", i, "step", 0, int(work.shunt.at[i, "max_step"])))
     return knobs
 
 
 def _key(state: _State, bands: dict, moved: int):
+    """The walk's key: (voltage excursion pu, worst overload above the normal
+    rating in percentage points, steps moved). ``_better`` takes a lower
+    excursion or overload only when it drops by more than ``STEP_TOL``."""
     over = max(0.0, float(np.nanmax(state.loading, initial=0.0)) - LOADING_MAX_PCT)
     return (excursion(state.vm, bands), over, moved)
 
 
 def remedial_walk(work, knobs: list, bands: dict, judged, state: _State):
-    """Walk the knobs on ``work`` (module docstring) from ``state``, the
-    solved post-outage state. Returns ``(state, moves)``: the last converged
-    state, ``work`` left at its positions, and ``{name: steps moved}``."""
-    start = {k[0]: int(getattr(work, k[1]).at[k[2], k[3]]) for k in knobs}
+    """Walk the in-service ``knobs`` on ``work`` (module docstring) from
+    ``state``, the solved post-outage state. Returns ``(state, moves)``: the
+    last converged state, ``work`` left at its positions, and ``{name: steps
+    moved}``."""
+    on = [k for k in knobs if k.in_service(work)]
+    start = {k.name: k.get(work) for k in on}
     pos = dict(start)
-    on = [k for k in knobs if bool(getattr(work, k[1]).at[k[2], "in_service"])]
-    cap = TAP_ROUNDS * sum(k[5] - k[4] for k in on)
+    cap = TAP_ROUNDS * sum(k.hi - k.lo for k in on)
     now = _key(state, bands, 0)
     for _ in range(cap):
-        if now[0] <= V_TOL and now[1] <= STEP_TOL:
+        if now[0] <= V_TOL and now[1] == 0.0:
             break
         best = None
-        for name, tbl, i, col, lo, hi in on:
+        for k in on:
             for d in (+1, -1):
-                p = pos[name] + d
-                if not lo <= p <= hi:
+                p = pos[k.name] + d
+                if not k.lo <= p <= k.hi:
                     continue
-                getattr(work, tbl).at[i, col] = p
+                k.put(work, p)
                 trial = _solve(work, judged)
-                getattr(work, tbl).at[i, col] = pos[name]
+                k.put(work, pos[k.name])
                 if trial is None:
                     continue
-                moved = sum(abs(pos[n] - start[n]) for n in pos if n != name) + abs(p - start[name])
-                k = _key(trial, bands, moved)
-                if best is None or _better(k, best[0]):
-                    best = (k, name, tbl, i, col, p, trial)
+                moved = sum(abs(pos[n] - start[n]) for n in pos if n != k.name) + abs(p - start[k.name])
+                key = _key(trial, bands, moved)
+                if best is None or _better(key, best[0]):
+                    best = (key, k, p, trial)
         if best is None or not _better(best[0], now):
             break
-        now, name, tbl, i, col, p, state = best
-        getattr(work, tbl).at[i, col] = p
-        pos[name] = p
+        now, k, p, state = best
+        k.put(work, p)
+        pos[k.name] = p
     return state, {n: pos[n] - start[n] for n in pos if pos[n] != start[n]}
 
 
@@ -266,30 +307,49 @@ def remedial_walk(work, knobs: list, bands: dict, judged, state: _State):
 # the screen
 # ---------------------------------------------------------------------------
 
-def _apply_outage(work, r, handle, gen_idx, sgen_idx, bus_idx) -> None:
+@dataclasses.dataclass(frozen=True)
+class _Handles:
+    """Where each contingency element sits on the net, by name."""
+    branch: dict    # N-1 branch id -> (element_type, element_index)
+    gen: dict
+    sgen: dict
+    bus: dict
+
+    @classmethod
+    def of(cls, net):
+        n1 = branch_contingencies(net)
+        return cls(
+            {c: (t, int(i)) for c, t, i in zip(n1["contingency_id"], n1["element_type"], n1["element_index"])},
+            {str(net.gen.at[i, "name"]): i for i in net.gen.index},
+            {str(net.sgen.at[i, "name"]): i for i in net.sgen.index},
+            {str(net.bus.at[i, "name"]): i for i in net.bus.index},
+        )
+
+
+def _apply_outage(work, r, h: _Handles) -> None:
     if r.kind == "branch":
         for e in r.element_ids:
-            if e not in handle:
+            if e not in h.branch:
                 raise ContractError(f"contingency {r.contingency_id} names a branch not on the net: {e}")
-            etype, eidx = handle[e]
-            getattr(work, etype).at[eidx, "in_service"] = False
+            etype, eidx = h.branch[e]
+            work[etype].at[eidx, "in_service"] = False
     elif r.kind == "unit":
         uid = r.element_ids[0]
-        if uid in gen_idx:
-            work.gen.at[gen_idx[uid], "in_service"] = False
-        elif uid in sgen_idx:
-            work.sgen.at[sgen_idx[uid], "in_service"] = False
+        if uid in h.gen:
+            work.gen.at[h.gen[uid], "in_service"] = False
+        elif uid in h.sgen:
+            work.sgen.at[h.sgen[uid], "in_service"] = False
         else:
             raise ContractError(f"contingency {r.contingency_id} names a unit not on the net: {uid}")
     elif r.kind == "bus_section":
         bus = r.element_ids[0]
-        if bus not in bus_idx:
+        if bus not in h.bus:
             raise ContractError(f"contingency {r.contingency_id} names a bus not on the net: {bus}")
-        b = bus_idx[bus]
+        b = h.bus[bus]
         work.bus.at[b, "in_service"] = False
         for tbl, cols in (("line", ("from_bus", "to_bus")), ("trafo", ("hv_bus", "lv_bus")),
                           ("gen", ("bus",)), ("sgen", ("bus",)), ("load", ("bus",)), ("shunt", ("bus",))):
-            t = getattr(work, tbl)
+            t = work[tbl]
             hit = np.zeros(len(t), dtype=bool)
             for c in cols:
                 hit |= (t[c] == b).to_numpy()
@@ -298,19 +358,20 @@ def _apply_outage(work, r, handle, gen_idx, sgen_idx, bus_idx) -> None:
         raise ContractError(f"contingency {r.contingency_id}: kind {r.kind!r} is not judged here")
 
 
-def _p_on(table, buses) -> float:
-    on = table["in_service"].astype(bool) & table["bus"].isin(buses)
-    return float(table.loc[on, "p_mw"].sum())
+def _p_mw(table) -> pd.Series:
+    scaling = table["scaling"] if "scaling" in table.columns else 1.0
+    return table["p_mw"] * scaling
 
 
 def _lost(base, work, gone) -> tuple:
     """(load MW, generation MW) on ``gone`` buses plus units the outage took off."""
-    load = _p_on(base.load, gone)
+    on = base.load["in_service"].astype(bool) & base.load["bus"].isin(gone)
+    load = float(_p_mw(base.load)[on].sum())
     gen = 0.0
     for tbl in ("gen", "sgen"):
-        b, w = getattr(base, tbl), getattr(work, tbl)
+        b, w = base[tbl], work[tbl]
         off = b["in_service"].astype(bool) & (~w["in_service"].astype(bool) | b["bus"].isin(gone))
-        gen += float(b.loc[off, "p_mw"].sum())
+        gen += float(_p_mw(b)[off].sum())
     return load, gen
 
 
@@ -343,65 +404,64 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     try:
         pp.runpp(base)
     except pp.LoadflowNotConverged as exc:
-        raise ContractError(f"base case at hour {hour} does not converge; nothing to screen") from exc
+        raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
     keys = branch_keys(base)
-    ids = [f"{f}-{t}-{c}" for f, t, c in zip(keys["from_bus"], keys["to_bus"], keys["ckt"])]
-    n1 = branch_contingencies(base)
-    handle = {c: (t, int(i)) for c, t, i in zip(n1["contingency_id"], n1["element_type"], n1["element_index"])}
+    ids = _branch_ids(base)
     trafo_pos = {c: int(i) for c, t, i in zip(ids, keys["element_type"], keys["element_index"]) if t == "trafo"}
-    gen_idx = {base.gen.at[i, "name"]: i for i in base.gen.index}
-    sgen_idx = {base.sgen.at[i, "name"]: i for i in base.sgen.index}
-    bus_idx = {base.bus.at[i, "name"]: i for i in base.bus.index}
+    handles = _Handles.of(base)
     knobs = _knobs(base, controls, trafo_pos)
-    k_missing, n_branches = _missing_emergency(base)
-    rating_note = f"no emergency rating given ({k_missing} of {n_branches} branches)" if k_missing else ""
-    stage2_note = NO_REDISPATCH if knobs else NO_CONTROLS
     cut_before = set(unsupplied_buses(base))
     out_before = set(base.bus.index[~base.bus["in_service"].astype(bool)])
 
     rows = []
     for r in cset.itertuples(index=False):
         work = copy.deepcopy(base)
-        _apply_outage(work, r, handle, gen_idx, sgen_idx, bus_idx)
+        _apply_outage(work, r, handles)
         out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
         cut = set(unsupplied_buses(work)) - cut_before - out_bus - out_before
         load_lost, gen_lost = _lost(base, work, out_bus | cut)
         lost = {"load_lost_mw": load_lost, "gen_lost_mw": gen_lost}
+        notes = []
+        if r.kind == "bus_section":
+            notes.append(f"bus section lost: {load_lost:.1f} MW load, {gen_lost:.1f} MW generation "
+                         "(the generation picked up by the slack)")
         if cut:
             names = ", ".join(sorted(str(base.bus.at[b, "name"]) for b in cut))
-            rows.append(_row(r, hour, islanded=True, note=f"islanded: disconnects {names}", **lost))
+            notes.append(f"islanded: disconnects {names}")
+            rows.append(_row(r, hour, islanded=True, note="; ".join(notes), **lost))
             continue
         judged = [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
         bands = {str(work.bus.at[b, "name"]): (V_MIN_PU, V_MAX_PU) for b in judged}
         s1 = _solve(work, judged)
         if s1 is None:
-            rows.append(_row(r, hour, note="post-outage load flow does not converge", **lost))
+            notes.append("post-outage load flow does not converge")
+            rows.append(_row(r, hour, note="; ".join(notes), **lost))
             continue
         s1_pct, s1_branch = _worst(s1.emergency, ids)
+        stage1 = {"stage1_loading_pct": s1_pct, "stage1_branch": s1_branch, "stage1_verdict": _verdict(s1_pct)}
+        notes.append(_rating_note(work))
+        notes.append(NO_CONTROLS if not knobs else
+                     NO_REDISPATCH if any(k.in_service(work) for k in knobs) else NO_CONTROLS_ON)
         s2, moves = remedial_walk(work, knobs, bands, judged, s1)
-        notes = [n for n in (rating_note, stage2_note) if n]
         if moves:
-            # the walk keeps converged states only; re-solve the chosen positions as the result
+            # the walk keeps converged states only; the chosen positions are re-solved as the result
             final = _solve(work, judged)
             if final is None:
+                pct, branch = _worst(s2.loading, ids)
                 notes.append(f"stage 2 does not converge at the chosen controls; last converged state "
-                             f"{_worst(s2.loading, ids)[0]:.1f} % ({_worst(s2.loading, ids)[1]}), "
-                             f"{min(s2.vm.values()):.3f}-{max(s2.vm.values()):.3f} pu")
-                rows.append(_row(r, hour, converged=True, stage1_loading_pct=s1_pct, stage1_branch=s1_branch,
-                                 stage1_verdict="pass" if s1_pct <= LOADING_MAX_PCT else "fail",
-                                 remedial=_said(moves), note="; ".join(notes), **lost))
+                             f"{pct:.1f} % ({branch}), {min(s2.vm.values()):.3f}-{max(s2.vm.values()):.3f} pu")
+                rows.append(_row(r, hour, converged=True, remedial=_moved(moves),
+                                 note="; ".join(n for n in notes if n), **stage1, **lost))
                 continue
             s2 = final
         s2_pct, s2_branch = _worst(s2.loading, ids)
         ok2 = s2_pct <= LOADING_MAX_PCT and excursion(s2.vm, bands) <= V_TOL
         rows.append(_row(
-            r, hour, converged=True,
-            stage1_loading_pct=s1_pct, stage1_branch=s1_branch,
-            stage1_verdict="pass" if s1_pct <= LOADING_MAX_PCT else "fail",
+            r, hour, converged=True, **stage1,
             stage2_loading_pct=s2_pct, stage2_branch=s2_branch,
             stage2_min_vm_pu=min(s2.vm.values()), stage2_max_vm_pu=max(s2.vm.values()),
             stage2_verdict="pass" if ok2 else "fail",
-            remedial=_said(moves), note="; ".join(notes), **lost,
+            remedial=_moved(moves), note="; ".join(n for n in notes if n), **lost,
         ))
     results = validate_planning_results(pd.DataFrame(rows, columns=list(PLANNING_RESULT_COLUMNS)))
     report = {
@@ -411,5 +471,6 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     return results, report
 
 
-def _said(moves: dict) -> str:
+def _moved(moves: dict) -> str:
+    """``"SH1 +3, T1 -2"``: each control's steps from where it was, or "none"."""
     return ", ".join(f"{n} {d:+d}" for n, d in sorted(moves.items())) if moves else "none"

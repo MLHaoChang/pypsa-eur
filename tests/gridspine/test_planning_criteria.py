@@ -200,15 +200,15 @@ def test_no_emergency_rating_judges_stage_1_on_normal_and_says_so():
     row = _one(res, PARALLEL[1])
     assert row["stage1_loading_pct"] == pytest.approx(100.0 * SURVIVOR_LOADING, rel=1e-6)
     assert row["stage1_verdict"] == "fail"
-    n = len(net.line) + len(net.trafo)
+    n = len(net.line) + len(net.trafo) - 1          # per row: the outaged line is not counted
     assert f"no emergency rating given ({n} of {n} branches)" in row["note"]
 
 
 def test_partial_emergency_ratings_are_counted():
     net = _rated(_net())
     res, _ = _screen(net, _set(net))
-    n = len(net.line) + len(net.trafo)
-    assert f"no emergency rating given ({n - 2} of {n} branches)" in _one(res, PARALLEL[1])["note"]
+    n = len(net.line) + len(net.trafo) - 1          # per row: the outaged line is not counted
+    assert f"no emergency rating given ({n - 1} of {n} branches)" in _one(res, PARALLEL[1])["note"]
 
 
 def test_without_controls_stage_2_re_solves_unchanged_on_normal_ratings():
@@ -327,7 +327,7 @@ def test_unit_and_bus_sharing_a_name_fail_closed_naming_both_kinds():
 def test_ledgers_state_the_assumptions():
     assert any("split busbar" in s for s in BUS_SECTION_LEDGER)
     assert any("thermal loading only" in s for s in PLANNING_LEDGER)
-    assert any("DC13-SCOPE" in s for s in PLANNING_LEDGER)
+    assert any("no redispatch" in s for s in PLANNING_LEDGER)
 
 
 # --------------------------------------------------------------------------
