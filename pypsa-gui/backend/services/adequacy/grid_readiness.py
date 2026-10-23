@@ -29,7 +29,7 @@ Rules (gatekeeper review of 02):
 
 * a missing input gives ``unknown``, never ``pass``;
 * a requirement only a dynamic study can show (the profile's
-  ``dynamic_requirements``) is always ``unknown``, "needs RMS study" (EMT
+  ``dynamic_requirements``) is always ``unknown``, "needs an RMS study" (EMT
   where the code asks for it);
 * ``assumed`` is true unless the limit's own tag is ``code`` (an extracted,
   unconfirmed limit counts as assumed) or the user set it with a source other
@@ -617,7 +617,7 @@ def _support_rows(inp: _Inputs) -> list[dict]:
                          source=f"{_profile_title(inp)}: {r['clause']}",
                          project_value=(_services_text(offered) if offered else None),
                          verdict="unknown", assumed=r.get("source") != "code",
-                         note=("Needs RMS study (dynamic; EMT where the code asks for it); it applies to "
+                         note=("Needs an RMS study (dynamic; EMT where the code asks for it); it applies to "
                                f"{_APPLIES_WORDS.get(r.get('applies_to', 'facility'), 'the site')}; a "
                                "steady-state screening never passes it"),
                          section="assets", target=target))

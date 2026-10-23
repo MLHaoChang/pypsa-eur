@@ -245,7 +245,7 @@ def _results(run: Path):
         "compliance": _read_csv(run / cs.COMPLIANCE_CSV),
         "reactive": _read_csv(run / cs.REACTIVE_CSV),
         "requirement": json.loads((run / cs.REQUIREMENT_JSON).read_text()),
-        # What the grid code requires that no steady-state check can show ("needs RMS study"); [] for a run
+        # What the grid code requires that no steady-state check can show ("needs an RMS study"); [] for a run
         # from before it was kept.
         "reported_requirements": (json.loads((run / cs.REPORTED_REQUIREMENTS_JSON).read_text())
                                   if (run / cs.REPORTED_REQUIREMENTS_JSON).is_file() else []),

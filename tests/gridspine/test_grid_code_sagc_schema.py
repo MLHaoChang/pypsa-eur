@@ -98,7 +98,7 @@ def test_every_dynamic_kind_is_reported_as_needing_an_rms_study_never_judged(kin
            "clause": "generic", "source": "code", "applies_to": "facility"}
     out = reported_requirements(validate_profile("p", profile(dynamic_requirements=[row])))
     assert [r["status"] for r in out] == ["reported"]
-    assert out[0]["detail"] == "A dynamic requirement: 1 s (needs RMS study)"
+    assert out[0]["detail"] == "A dynamic requirement: 1 s (needs an RMS study)"
 
 
 @pytest.mark.parametrize("bad, match", [

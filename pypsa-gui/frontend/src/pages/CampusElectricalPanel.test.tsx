@@ -310,6 +310,21 @@ describe('CampusElectricalPanel', () => {
     expect(row.textContent).not.toContain('unknown')
     expect(row.textContent).toContain('The grid code sets no limit for this.')
     expect(row.textContent).not.toMatch(/pass|fail/)
+    // it assumes nothing, so it carries no source tag
+    expect(row.textContent).not.toContain('assumed')
+  })
+
+  it('prints a Q band with a negative edge as "−a to b", never with an en dash', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_q_band', status_as_is: 'fail', status_with_measures: 'fail', value: 0.05, limit: 0.045,
+      limit_min: -0.045, limit_max: 0.045, unit: 'Mvar', worst_period: 2030, worst_hour: 1, clause: 'generic clause',
+      source: 'code', detail: 'worst at P 1.00 MW (0.500 pu); band \u22120.045 to 0.045 Mvar there',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    await screen.findByTestId('compliance-pcc_q_band')
+    expect(screen.getByTestId('compliance-limit-pcc_q_band').textContent?.trim()).toBe('\u22120.045 to 0.045 Mvar')
   })
 
   it('never prints a unitless row\'s missing unit as "null"', async () => {

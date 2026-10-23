@@ -62,7 +62,7 @@ A profile may carry these optional keys:
     applies_to}`` each, ``applies_to`` one of ``ibr``, ``load``, ``facility``,
     and optionally a ``kind`` (``DYNAMIC_KINDS``) and a ``unit``.
     ``reported_requirements`` lists them with status ``reported``, as
-    "needs RMS study"; they are never passed and never counted in a verdict.
+    "needs an RMS study"; they are never passed and never counted in a verdict.
 ``notes``
     Text the report carries with the profile (scope, what is unverified).
 
@@ -330,11 +330,11 @@ def _check_dynamic(rows, where):
 def reported_requirements(profile: dict) -> list:
     """What the profile requires that a steady-state study cannot show, one
     row each with status ``reported`` (never ``pass``): its
-    ``dynamic_requirements`` ("needs RMS study"), then every band's
+    ``dynamic_requirements`` ("needs an RMS study"), then every band's
     time-limited ``v_max_30min`` ("dynamic study needed"). No verdict counts
     them, and nothing here reads the value, so no value can pass or fail."""
     out = [{**r, "status": "reported",
-            "detail": f"{r['requirement']}: {r['value']}{' ' + r['unit'] if r.get('unit') else ''} (needs RMS study)"}
+            "detail": f"{r['requirement']}: {r['value']}{' ' + r['unit'] if r.get('unit') else ''} (needs an RMS study)"}
            for r in profile.get("dynamic_requirements") or []]
     for b in profile.get("voltage_bands") or []:
         if "v_max_30min" in b:

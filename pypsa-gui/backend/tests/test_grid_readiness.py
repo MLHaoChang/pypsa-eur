@@ -863,4 +863,4 @@ def test_the_infrequent_tier_is_the_connection_over_the_fault_level(tmp_path, pc
 def test_the_dynamic_requirements_need_an_rms_study(tmp_path):
     d, n = _project(tmp_path, "eh_datacenter")
     dyn = [r for r in G.grid_readiness(d, n, PROFILE)["rows"] if r["id"].startswith("dynamic:")]
-    assert dyn and all(r["note"].startswith("Needs RMS study") and r["verdict"] == "unknown" for r in dyn)
+    assert dyn and all(r["note"].startswith("Needs an RMS study") and r["verdict"] == "unknown" for r in dyn)

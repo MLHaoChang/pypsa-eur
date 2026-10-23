@@ -187,7 +187,7 @@ def _why_unknown(lim, hours, p_ref):
     if lim is None:
         return NO_LIMIT
     if p_ref is None:
-        return "connection capacity (p_ref) unknown: the per-unit limit cannot be scaled"
+        return "connection capacity (P_ref) unknown: the per-unit limit cannot be scaled"
     if hours is None:
         return "no PCC active power for the studied hours"
     return None
@@ -215,6 +215,11 @@ def _q_band_status(lim, hours, p_ref, q_col):
     return ("fail" if fail else "pass"), worst, outside
 
 
+def _mvar(x):
+    """A Q-band edge as the Limit cell prints it: 3 decimals, a true minus sign."""
+    return f"{x:.3f}".replace("-", "\u2212")
+
+
 def _q_band_row(profile, hours, p_ref):
     lim = profile.get("q_capability_pq")
     why = _why_unknown(lim, hours, p_ref)
@@ -228,11 +233,12 @@ def _q_band_row(profile, hours, p_ref):
                   f"P range {lim['points'][0][0]:g} to {lim['points'][-1][0]:g} pu")
         if worst is not None and worst[0] > Q_TOL:
             _, period, hour, _, q, lo, hi, _ = worst
-            detail += f"; worst inside the P range: Q {q:.2f} Mvar at ({period}, {hour}), band {lo:.2f} to {hi:.2f} Mvar"
+            detail += (f"; worst inside the P range: Q {_mvar(q)} Mvar at ({period}, {hour}), "
+                       f"band {_mvar(lo)} to {_mvar(hi)} Mvar")
         return _row("pcc_q_band", as_is, after, p, math.nan, "MW", (outside.period, outside.hour), lim["clause"],
                     lim["source"], detail)
     key, period, hour, p, q, lo, hi, limit = worst
-    detail = f"worst at P {p:.2f} MW ({p / p_ref:.3f} pu); band {lo:.2f} to {hi:.2f} Mvar there"
+    detail = f"worst at P {p:.2f} MW ({p / p_ref:.3f} pu); band {_mvar(lo)} to {_mvar(hi)} Mvar there"
     if as_is == "pass" and key > 0:
         detail += f"; passes within the solver tolerance of {Q_TOL:g} Mvar"
     row = _row("pcc_q_band", as_is, after, q, limit, "Mvar", (period, hour), lim["clause"], lim["source"], detail)

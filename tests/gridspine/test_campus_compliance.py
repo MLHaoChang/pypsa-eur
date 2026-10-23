@@ -307,7 +307,7 @@ BAND = _lim(points=[[0.0, -0.1, 0.1], [1.0, -0.2, 0.2]])     # +-18 Mvar at 0.8 
 
 @pytest.mark.parametrize("profile, pcc, p_ref, why", [
     (PROFILE, None, P_REF, NO_LIMIT),
-    (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), None, None, "p_ref"),
+    (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), None, None, "P_ref"),
     (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), pd.DataFrame(), P_REF, "no PCC active power"),
 ])
 def test_an_unset_limit_or_unknown_base_is_unknown_never_pass_or_fail(profile, pcc, p_ref, why):
@@ -347,7 +347,7 @@ def test_a_p_outside_the_band_still_reports_the_worst_q_excursion_inside_it():
     narrow = _lim(points=[[0.0, -0.05, 0.05], [0.6, -0.05, 0.05]])
     row = sagc(profile=_with(q_capability_pq=narrow)).loc["pcc_q_band"]
     assert row["status_as_is"] == "fail" and "(2030, 2)" in row["detail"]
-    assert "worst inside the P range: Q 10.00 Mvar at (2030, 1), band -5.00 to 5.00 Mvar" in row["detail"]
+    assert "worst inside the P range: Q 10.000 Mvar at (2030, 1), band \u22125.000 to 5.000 Mvar" in row["detail"]
     wide = _lim(points=[[0.0, -0.3, 0.3], [0.6, -0.3, 0.3]])
     assert "worst inside" not in sagc(profile=_with(q_capability_pq=wide)).loc["pcc_q_band", "detail"]
 

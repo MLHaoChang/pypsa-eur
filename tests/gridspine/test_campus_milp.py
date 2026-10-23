@@ -272,7 +272,6 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     inv = out["investment"].set_index("need")
     assert inv.at["transformer TR1", "library_id"] == "T_B" and inv.at["reactive", "status"] == "not_needed"
     assert out["cost"]["annualised_eur_per_a"].sum() == pytest.approx(best[0])
-    comp_ = out["compliance"].set_index("check")
     assert_judged_rows_pass(out["compliance"])
     h = out["milp_history"]
     assert h.iloc[0]["note"].startswith("the least-cost choice") and h.iloc[0]["cost"] == pytest.approx(c8_cost)

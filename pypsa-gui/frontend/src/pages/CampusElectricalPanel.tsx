@@ -676,15 +676,21 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                     </td>
                     <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
                     {/* a unitless row (the power factor) reads back from the CSV with a null unit */}
+                    {/* a band with a negative edge reads "−a to b": an en dash beside a minus is hard to read */}
                     {c.limit_min != null && c.limit_max != null
-                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`.trim()
+                      ? (c.limit_min < 0
+                        ? `${num(c.limit_min, 3).replace('-', '\u2212')} to ${num(c.limit_max, 3)} ${c.unit ?? ''}`
+                        : `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`).trim()
                       : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
                     <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>
-                      <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
-                        <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
-                      </div>
+                      {/* a row without a limit has no clause, and so no source to tag */}
+                      {c.clause && (
+                        <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                          <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )

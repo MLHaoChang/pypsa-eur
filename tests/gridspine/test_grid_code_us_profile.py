@@ -94,7 +94,7 @@ def test_dynamic_requirements_are_reported_never_passed():
             assert r["clause"] and r["source"] in ("code", "assumed") and r["requirement"]
             assert r["applies_to"] in ("ibr", "load", "facility")
             # a dynamic requirement needs an RMS study; the 30-min voltage tier a dynamic one
-            assert ("dynamic study needed" if r["id"] == "v_max_30min" else "(needs RMS study)") in r["detail"]
+            assert ("dynamic study needed" if r["id"] == "v_max_30min" else "(needs an RMS study)") in r["detail"]
     us = {r["id"]: r for r in reported_requirements(load_grid_code(US))}
     assert {"frt", "vrt", "rocof", "pfr", "large_load_ride_through", "v_max_30min"} <= set(us)
     assert us["rocof"]["value"] == "5 Hz/s" and us["large_load_ride_through"]["applies_to"] == "load"
