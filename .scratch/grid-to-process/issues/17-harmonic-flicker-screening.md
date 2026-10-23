@@ -3,7 +3,7 @@
 
 # Harmonic and flicker screening for large drives and thyristor heaters
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine, and the choice of standard)
@@ -55,8 +55,10 @@ but not on power quality (note §6a.3, gap 3, "no issue covers harmonics, flicke
   default spectra (demo values).
 - Doubling the fault level halves the voltage distortion contribution (to 1e-9).
 - A unit with no spectrum uses the topology default and the row says so.
-- A thyristor heater whose step and repetition exceed the Pst limit fails; a burst-fired one of the
-  same MW passes.
+- A burst-fired heater whose step and repetition rate exceed the Pst limit fails, and the same heater
+  with a smaller step or a lower rate passes. Phase-angle control is the harmonic case (it carries a
+  spectrum) and the smooth one for flicker. Flicker is decided by step size and rate, never by the
+  control type's name.
 - No unit with `rated_mva` missing is silently skipped; the row says "no input".
 
 ## File pointers (checked on origin/master)
@@ -79,3 +81,50 @@ but not on power quality (note §6a.3, gap 3, "no issue covers harmonics, flicke
 
 - None blocking. Shares the PoC fault-level input with issue 12; do not duplicate it.
 - Related: issue 12 (motor start, kept separate), issue 15 (heaters appear as electric Links).
+
+## Triage (gatekeeper, 2026-10-23)
+
+**Status `needs-info`:** one owner question is open (below). After that it is `ready-for-agent`, still
+gated.
+
+Answers to the gatekeeper questions:
+
+- **The default is IEC 61000-3-6 (harmonics) and IEC 61000-3-7 (flicker).**
+  - `shortcircuit.py` is IEC 60909, the RVC row already cites IEC 61000-3-7, and the projects are
+    European.
+  - **IEEE 519 is not in this ticket.** It judges current distortion (TDD) at the PCC against
+    I_sc/I_L, which is a different quantity and a second code path. It gets a follow-up issue if a
+    client needs it.
+  - The operator's grid code still overrides all of these.
+- **Limits come from the grid-code profile, as the RVC row does.** `_rvc_row` reads
+  `profile["rvc_limit_pct"]` with its clause and source (`services/adequacy/grid_readiness.py:442`).
+  Add `thd_limit_pct`, per-order limits, `pst_limit` and `plt_limit` there, with the same
+  "no limit set → verdict unknown" behaviour, rather than a separate ledger. Demo values are marked
+  as not from the code, as `rvc_limit_pct` is.
+- **The summation law is IEC 61000-3-6's general summation law,** I_h = (Σ I_h,i^α)^(1/α), with
+  α = 1 for h < 5, 1.4 for 5 ≤ h ≤ 10 and 2 for h > 10.
+  - Arithmetic summation is the same formula with α = 1 everywhere, so expose it as one switch, not
+    a second path.
+  - Voltage distortion is U_h = I_h · h · Z_sc. Z_sc comes from `_poc_sk_mva`, which keeps the
+    "doubling the fault level halves it" acceptance exact.
+- **Filters go to a follow-up.** A unit's spectrum may already be the post-filter spectrum, and the
+  row says which.
+- **Flicker does not wait for issue 12, so I took that question off the owner's list.**
+  - The relative step d = ΔS / S_k is the same one-liner `_rvc_row` already uses, read from the same
+    `_poc_sk_mva`.
+  - Pst follows IEC 61000-3-7's analytic method: t_f = 2.3 · (F · d_max)^3.2 per step,
+    Pst = (Σ t_f / T_p)^(1/3.2).
+  - Whichever of 12 and 17 lands second reuses the other's PoC step helper. Neither adds a second
+    fault-level read.
+- **Ship it in two PRs:** harmonics first (M), then flicker (S–M). Size L in one PR is too much to
+  review.
+
+Owner question (send it as these options):
+
+- **Where do the harmonic spectra come from?**
+  - *(Recommended)* Ship default spectra per topology, labelled `demo`, and accept an optional
+    vendor spectrum per unit. The row says which one it used, as the acceptance asks. This works on
+    day one and gets exact when the client sends data.
+  - Vendor spectra only. A unit without one gets "no input". Nothing is assumed, but most early
+    projects would show no harmonic answer.
+  - Defaults only, no vendor input. Simplest, but a client with a measured spectrum cannot use it.

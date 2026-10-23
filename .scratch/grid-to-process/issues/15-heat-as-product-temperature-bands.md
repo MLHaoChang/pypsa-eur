@@ -3,7 +3,7 @@
 
 # Heat as a modelled product: temperature bands and pressure levels
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Blocked by: 02, 03
 Gated: **yes** (schema and validator: send the gatekeeper the plan first)
@@ -86,3 +86,42 @@ grep for `temperature_c`, `temp_band`, `process_heat`, `steam_pressure` found no
 
 - Blocked by 02 (schema and carriers) and 03 (committable Links), both done.
 - Blocks issue 16 (heat-pump COP by band).
+
+## Triage (gatekeeper, 2026-10-23)
+
+**Status `needs-info`:** one owner question is open (below). Once it is answered this is
+`ready-for-agent`, and still gated: send the gatekeeper the plan before writing code.
+
+**The design change is agreed.** This ticket moves "heat and steam carriers" in §2.6 and §7 from
+"later" to "planned" for the **level** only. The PR edits §2.6 and §7 to say so. HB waste heat,
+CO2 as a product and the steam/fuel-gas balance stay in §7.
+
+Answers to the gatekeeper questions:
+
+- **The level is a number with its unit in the field name, not an enum or a free tag.** Heat buses
+  get `temperature_c` (the supply temperature the bus delivers at). Steam buses get `pressure_bar`
+  (header pressure, gauge). The bands (low / medium / high) are display labels derived from edges in
+  the ledger; they are never stored. A free tag cannot be validated, and an enum would freeze the
+  edges.
+- **A new Bus field is acceptable; a Load field is not needed.** `unit` is already a Bus field set
+  for process products (`services/asset_schema/fields.py:487`, read in
+  `services/carrier_catalog.py:75`), so the level follows that precedent. A Load serves the level
+  of the bus it sits on. Do not encode the level in the carrier name (`heat_low`). The heat-bus
+  pickers match any carrier containing "heat" (`carrier_catalog.py:46-47`), so a name scheme would
+  be both fragile and invisible to the validator. Add a `steam` catalogue entry beside `heat`.
+- **Device reach is a Link field in the same units:** `max_supply_temp_c` for heat devices,
+  `max_pressure_bar` for steam devices, sourced or `demo` in the ledger. The validator compares
+  numbers: the reach must be at least the level of the bus the Link feeds (`bus1`, and `bus2` for a
+  heat pump's heat output where that is the heat side). An unset level on either side skips the
+  rule and the network behaves as today. That keeps acceptance item 4 true.
+
+Owner question (send it as these options):
+
+- **Which example comes first, and does this wait for B?**
+  - *(Recommended)* Do not wait. Build the generic two-level fixture from the acceptance (no
+    refinery template), because A (05) is done and B (10, the concentrator) shares no heat code. A
+    refinery template is its own later issue.
+  - Wait for B (10) to land first. This delays heat by B's whole run for no shared code.
+  - Start with a named refinery template (for example the paper's crude-unit heater). This needs
+    sourced refinery data first, or the template ships as `demo` values that look like a real
+    plant.

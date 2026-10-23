@@ -3,7 +3,7 @@
 
 # Heat-pump COP against the served band's sink temperature, plus part-load
 
-Status: needs-triage
+Status: needs-info
 Type: task
 Blocked by: 15
 Gated: no
@@ -39,7 +39,8 @@ already built the committable-Link path, so this reuses it.
 
 ## Acceptance (stated first)
 
-- For source 10 degC, eta 0.45, sink 45 degC the series equals today's output. At sink 90 degC the
+- For `source: ground`, `source_c` 10 degC, eta 0.45, sink 45 degC the series equals today's output (an
+  `air` source needs the site ambient, so it cannot be the fixed case). At sink 90 degC the
   COP is lower, by the Carnot formula, and equals η·T_sink/(T_sink−T_source) in kelvin to 1e-9.
 - Two heat pumps on two bands get two different COP series from the same weather.
 - A heat pump with `part_load` no longer raises; it becomes a committable Link, and a solve with
@@ -68,3 +69,35 @@ already built the committable-Link path, so this reuses it.
 - Blocked by 15 (it supplies the band's sink temperature).
 - Must not start before Codex task G-a merges (shared files in `services/profile_gen`).
 - Uses issue 03 (done).
+
+## Triage (gatekeeper, 2026-10-23)
+
+**Status `needs-info`:** one owner question is open (below). After that it is `ready-for-agent`, still
+blocked by 15.
+
+Answers to the gatekeeper questions:
+
+- **No part-load COP at all in this ticket: no derating factor and no piecewise curve.** Design §2.6
+  keeps efficiency constant per unit, and piecewise part load stays in §7. A single derating factor
+  would also lower the COP at full load, which is wrong. If the owner later wants part-load COP, it
+  is the §7 piecewise item, not this ticket.
+- **Part-load lives in the Link fields, not in the series generator.** A heat pump with a minimum
+  load is a committable Link (`committable`, `p_min_pu`, start-up and shut-down costs:
+  `fields.py:163-175`, the issue 03 path). The `part_load` series kind keeps its refusal, because a
+  series still cannot express it. Reword `PartLoadNotASeriesError`'s message to point at those Link
+  fields. "What to build" item 2 therefore shrinks to: the refusal message, plus a test that the
+  committable heat pump solves as the acceptance says.
+- **Overlap with Codex G-a is real, but it is not `series.py`.** G-a changes `presets.py`,
+  `engine.py`, `routers/profiles.py`, `tool-error-kinds.json` and the capability inventory, not
+  `series.py`. Keep the "after G-a merges" rule, because a reworded refusal and any new kind touch
+  `tool-error-kinds.json` and the inventory too.
+- **Size drops to S** with part-load reduced as above.
+
+Owner question (send it as these options):
+
+- **Is a sourced COP for high-temperature heat pumps needed before this starts?**
+  - *(Recommended)* No. Ship with `eta` and the reach labelled `demo`, and source them when the
+    heat-kit library rows (session_01FeAyYSfvoFrV9xVAWtRjDv) land. The Carnot form is exact; only
+    the parameters are unsourced.
+  - Yes. Wait for a sourced `eta` per band (Arpagaus et al., or the DEA technology catalogue)
+    before building. Safer numbers, but the ticket waits on research.
