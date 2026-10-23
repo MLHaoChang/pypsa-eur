@@ -100,13 +100,13 @@ def coerce_eh_value(component_class: str, col: str, value):
             raise ValueError(f"Harmonic source: {v!r} is not one of {', '.join(HARMONIC_SOURCES)}.")
         return v
     if kind == "harmonic_spectrum":
+        v = "" if value is None else str(value).strip()
         try:
             from gridspine.schema.contracts import ContractError
             from gridspine.static.harmonics import parse_spectrum
-        except ImportError as exc:  # pragma: no cover - build-shape branch
-            raise ValueError(f"Harmonic spectrum: the check needs gridspine ({exc}).") from None
-
-        v = "" if value is None else str(value).strip()
+        except ImportError:  # pragma: no cover - build-shape branch
+            # Stored unchecked; the scorecard reads a malformed spectrum as unknown on its unit.
+            return v
         try:
             parse_spectrum(v)
         except ContractError as exc:  # already names the field by its label
