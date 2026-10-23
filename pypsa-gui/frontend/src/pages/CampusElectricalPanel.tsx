@@ -675,9 +675,10 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                       {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
                     </td>
                     <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
+                    {/* a unitless row (the power factor) reads back from the CSV with a null unit */}
                     {c.limit_min != null && c.limit_max != null
-                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit}`
-                      : `${num(c.limit, 3)} ${c.unit}`}
+                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`.trim()
+                      : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
                     <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>

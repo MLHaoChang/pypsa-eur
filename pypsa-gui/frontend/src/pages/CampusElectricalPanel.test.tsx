@@ -312,6 +312,20 @@ describe('CampusElectricalPanel', () => {
     expect(row.textContent).not.toMatch(/pass|fail/)
   })
 
+  it('never prints a unitless row\'s missing unit as "null"', async () => {
+    const state = sized()
+    // a CSV round trip turns the power factor's empty unit into null
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_power_factor', status_as_is: 'pass', status_with_measures: 'pass', value: 0.97, limit: 0.95,
+      unit: null, worst_period: 2030, worst_hour: 1, clause: 'generic clause', source: 'code', detail: 'lagging',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_power_factor')
+    expect(row.textContent).not.toContain('null')
+    expect(screen.getByTestId('compliance-limit-pcc_power_factor').textContent?.trim()).toBe('0.950')
+  })
+
   it('shows an unknown check that lacks an input as "not checked", not "no limit"', async () => {
     const state = sized()
     state.results!.compliance = [...state.results!.compliance, {
