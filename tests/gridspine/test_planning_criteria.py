@@ -19,13 +19,15 @@ import pandapower as pp
 import pandas as pd
 import pytest
 
+import gridspine.static.planning_criteria as planning_criteria
 from gridspine.ingest.pandapower_source import load_case39_res, registry_from_net
 from gridspine.schema.contingency import (
     validate_contingency_set,
     validate_planning_results,
 )
 from gridspine.schema.contracts import ContractError
-from gridspine.static.contingency import branch_loading_pct
+from gridspine.static.capacity import capacity_ac
+from gridspine.static.contingency import branch_loading_pct, screen_n1
 from gridspine.static.contingency_set import (
     BUS_SECTION_LEDGER,
     branch_contingencies,
@@ -35,6 +37,7 @@ from gridspine.static.contingency_set import (
 from gridspine.static.loadflow import apply_snapshot
 from gridspine.static.planning_criteria import (
     NO_CONTROLS,
+    NO_CONTROLS_ON,
     NO_REDISPATCH,
     PLANNING_LEDGER,
     Controls,
@@ -252,6 +255,48 @@ def test_walk_does_not_move_when_every_voltage_is_in_band():
     assert _one(res, PARALLEL[1])["remedial"] == "none"
 
 
+def test_with_both_named_losing_the_oltc_leaves_the_shunt_to_clear_it():
+    # GK condition 1, with the OLTC-only test above: losing T1 takes its taps
+    # out, so the named shunt alone clears that low voltage.
+    net = _net()
+    res, _ = _screen(net, _set(net), controls=Controls(oltc=(T1,), switched_shunts=("SH1",)))
+    t2, t1 = _one(res, T2), _one(res, T1)
+    assert t2["stage2_verdict"] == t1["stage2_verdict"] == "pass"
+    assert t1["remedial"].startswith("SH1 +") and T1 not in t1["remedial"]
+    assert t1["stage2_min_vm_pu"] >= 0.9
+
+
+def test_losing_the_only_named_control_says_none_is_in_service():
+    net = _net()
+    res, _ = _screen(net, _set(net), controls=Controls(oltc=(T1,)))
+    row = _one(res, T1)
+    assert row["remedial"] == "none"
+    assert NO_CONTROLS_ON in row["note"]
+
+
+def test_stage_2_not_converging_at_the_chosen_controls_is_not_solved(monkeypatch):
+    net = _net()
+    walked = []
+    real_solve, real_walk = planning_criteria._solve, planning_criteria.remedial_walk
+
+    def walk(*a, **kw):
+        out = real_walk(*a, **kw)
+        walked.append(bool(out[1]))
+        return out
+
+    def solve(*a, **kw):
+        return None if walked and walked[-1] else real_solve(*a, **kw)
+
+    monkeypatch.setattr(planning_criteria, "remedial_walk", walk)
+    monkeypatch.setattr(planning_criteria, "_solve", solve)
+    res, _ = _screen(net, _set(net), controls=Controls(oltc=(T1,)))
+    row = _one(res, T2)
+    assert row["stage1_verdict"] == "pass"
+    assert row["stage2_verdict"] == "not_solved"
+    assert row["remedial"].startswith(f"{T1} -")
+    assert "stage 2 does not converge at the chosen controls" in row["note"]
+
+
 def test_unknown_or_inert_control_is_refused():
     net = _net()
     with pytest.raises(ContractError, match="not a transformer"):
@@ -313,6 +358,16 @@ def test_bus_section_set_refuses_unknown_and_slack_buses():
         bus_section_contingencies(net, ["BUS_X"])
     with pytest.raises(ContractError, match="slack"):
         bus_section_contingencies(net, ["BUS_A"])
+
+
+def test_n1_screens_refuse_a_bus_section_row_instead_of_dropping_it():
+    net = _net()
+    cset = _set(net, kinds=("branch", "bus_section"))
+    dispatch, loads, reg = _tables(net)
+    with pytest.raises(ContractError, match="kind not judged here.*bus_section"):
+        screen_n1(net, cset, dispatch, loads, 0, reg)
+    with pytest.raises(ContractError, match="kind not judged here.*bus_section"):
+        capacity_ac(net, "BUS_B", "load", cset)
 
 
 def test_unit_and_bus_sharing_a_name_fail_closed_naming_both_kinds():

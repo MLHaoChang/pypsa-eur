@@ -338,6 +338,9 @@ def screen_n1(net, contingencies, dispatch, loads, hour, registry) -> pd.DataFra
     hour = int(hour)
     if (cset["order"] != 1).any():
         raise ContractError("screen_n1 takes an N-1 set; got rows with order != 1")
+    unjudged = sorted(set(cset["kind"]) - {"branch", "unit"})
+    if unjudged:
+        raise ContractError(f"screen_n1 judges branch and unit outages only; kind not judged here: {unjudged}")
     check_net_carries_hour(net, dispatch, loads, hour, registry)
 
     work = copy.deepcopy(net)

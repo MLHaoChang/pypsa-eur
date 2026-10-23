@@ -238,6 +238,9 @@ def capacity_ac(net, bus, kind, contingencies, criteria=DEFAULT_CRITERIA, start_
     cset = validate_contingency_set(contingencies)
     if (cset["order"] != 1).any():
         raise ContractError("capacity_ac takes an N-1 set; got rows with order != 1")
+    unjudged = sorted(set(cset["kind"]) - {"branch", "unit"})
+    if unjudged:
+        raise ContractError(f"capacity_ac judges branch and unit outages only; kind not judged here: {unjudged}")
     base = _evaluate(copy.deepcopy(net), cset)
     if base is None:
         raise ContractError("the base case does not converge; there is no capacity to measure against it")
