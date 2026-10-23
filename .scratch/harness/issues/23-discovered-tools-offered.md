@@ -3,7 +3,7 @@
 
 # 23 — A tool the assistant just discovered is offered on its next request
 
-Status: ready-for-agent
+Status: done (#660, e8cb3f03)
 Outsourced: Codex (2026-10-22) — branch outsource/discovered-tools-offered
 Type: task
 Baseline: master `514c8feede1177b520a4dde74a4dffaf12cf696a`

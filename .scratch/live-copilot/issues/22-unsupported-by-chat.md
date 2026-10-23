@@ -3,7 +3,7 @@
 
 # LC-22 — features chat must refuse, by name and with a reason
 
-Status: ready-for-agent inside LC-06 (with LC-01 discovery metadata)
+Status: ready-for-agent (outsourced task E, docs/agents/outsourced.md)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-01 capability discovery
