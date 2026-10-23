@@ -198,6 +198,8 @@ def find_capabilities(goal: str | None = None, limit: int = 3, overview: bool = 
            "note": "Discovery grants no permissions. Use the named tool normally; use_toolset('all') restores a hidden domain. Missing prerequisites are described by each tool and project_readiness."}
     while len(json.dumps(out)) > 3800 and len(items) > 1:
         items.pop()
+    if session is not None:
+        session.discovered_tools = tuple(item["name"] for item in items)
     return out
 
 
