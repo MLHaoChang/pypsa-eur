@@ -38,12 +38,34 @@ A profile may carry these optional keys:
 ``voltage_bands[].v_max_30min``
     A time-limited upper voltage above ``v_max`` (IEEE 2800 / PRC-029's 30
     minutes). Reported with the dynamic requirements, never enforced.
+``rvc_limit_infrequent_pct``
+    The infrequent tier of a two-tier rapid-voltage-change limit (e.g. 1 %
+    frequent, 3 % infrequent); ``rvc_limit_pct`` is then the frequent tier.
+    It may not be below ``rvc_limit_pct``.
+``q_capability_pq``
+    A reactive band at the connection point that depends on the active
+    power: ``points`` ``[[p_pu, q_min_pu, q_max_pu], ...]``, interpolated
+    linearly, with ``p_pu`` strictly ascending. Every value is per unit of
+    the connection capacity (``p_ref``, the base of ``q_range_demand``).
+    Signs are the study's at the connection point: ``p_pu`` is positive
+    when the site imports active power, and a ``q`` is positive when the
+    grid supplies reactive power into the site. A site that imports and
+    exports states points on both sides of zero.
+``pf_min_lagging``, ``pf_min_leading``
+    Asymmetric power-factor limits at the connection point, each a value in
+    (0, 1]. Lagging is reactive power drawn from the grid (``q`` > 0 above),
+    leading is reactive power sent to it. ``q_range_demand`` stays as the
+    symmetric band.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
-    applies_to}`` each, ``applies_to`` one of ``ibr``, ``load``, ``facility``.
-    ``reported_requirements`` lists them with status ``reported``; they are
-    never passed and never counted in a verdict.
+    applies_to}`` each, ``applies_to`` one of ``ibr``, ``load``, ``facility``,
+    and optionally a ``kind`` (``DYNAMIC_KINDS``) and a ``unit``.
+    ``reported_requirements`` lists them with status ``reported``, as
+    "needs RMS study"; they are never passed and never counted in a verdict.
+
+Each of these is optional and has no default: a profile without one sets
+no such limit, and a check against it reports "no limit set".
 ``notes``
     Text the report carries with the profile (scope, what is unverified).
 
@@ -79,15 +101,20 @@ _REQUIRED = ("title", "voltage_bands", "q_range_demand", "rvc_limit_pct")
 PROFILE_ID = re.compile(r"[a-z0-9_]{1,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
-_SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr")
+_SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
+                  "q_capability_pq", "pf_min_lagging", "pf_min_leading")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
-                          "q_range_ibr", "dynamic_requirements", "notes", "document", "name"})
+                          "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
+                          "pf_min_leading", "dynamic_requirements", "notes", "document", "name"})
 #: Every key a voltage band may carry.
 BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
                        "clause", "source", "page", "quote"})
 _APPLIES_TO = ("ibr", "load", "facility")
 _DYNAMIC_KEYS = ("id", "requirement", "value", "clause", "source", "applies_to")
+#: What a dynamic requirement's optional ``kind`` may be.
+DYNAMIC_KINDS = ("vrt", "post_fault_recovery", "dynamic_voltage_support", "rocof_withstand", "droop",
+                 "fast_frequency_response", "pod")
 _log = logging.getLogger(__name__)
 _BAND_PATH = re.compile(r"voltage_bands\[(0|[1-9][0-9]*)\]")
 
@@ -176,12 +203,25 @@ def _check_profile(name, p):
     missing = [k for k in _REQUIRED if k not in p]
     if missing:
         raise ContractError(f"{where} is missing {missing}")
-    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr"):
+    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct"):
         if key not in p:
-            continue                                   # q_range_ibr is optional; the others are required
+            continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
         if not _is_number(p[key].get("value")) or p[key]["value"] <= 0:
             raise ContractError(f"{where}: {key} value must be a positive number, got {p[key].get('value')!r}")
+    if "rvc_limit_infrequent_pct" in p and p["rvc_limit_infrequent_pct"]["value"] < p["rvc_limit_pct"]["value"]:
+        raise ContractError(
+            f"{where}: rvc_limit_infrequent_pct ({p['rvc_limit_infrequent_pct']['value']:g} %) is below "
+            f"rvc_limit_pct ({p['rvc_limit_pct']['value']:g} %), the frequent tier"
+        )
+    for key in ("pf_min_lagging", "pf_min_leading"):
+        if key in p:
+            _check_limit(key, p[key], where)
+            v = p[key].get("value")
+            if not _is_number(v) or not 0 < v <= 1:
+                raise ContractError(f"{where}: {key} value must be a power factor in (0, 1], got {v!r}")
+    if "q_capability_pq" in p:
+        _check_q_capability(p["q_capability_pq"], where)
     bands = p["voltage_bands"]
     if not isinstance(bands, list) or not bands:
         raise ContractError(f"{where}: voltage_bands must be a non-empty list")
@@ -231,6 +271,36 @@ def _check_campus_voltage(cv, where):
         )
 
 
+def _check_q_capability(lim, where):
+    _check_limit("q_capability_pq", lim, where)
+    points = lim.get("points")
+    if not isinstance(points, list) or len(points) < 2:
+        raise ContractError(f"{where}: q_capability_pq.points must be a list of at least two "
+                            "[p_pu, q_min_pu, q_max_pu] points")
+    for i, pt in enumerate(points):
+        if not isinstance(pt, (list, tuple)) or len(pt) != 3 or not all(_is_number(x) for x in pt):
+            raise ContractError(f"{where}: q_capability_pq.points[{i}] must be three finite numbers "
+                                f"[p_pu, q_min_pu, q_max_pu], got {pt!r}")
+        if pt[1] > pt[2]:
+            raise ContractError(f"{where}: q_capability_pq.points[{i}] has q_min_pu {pt[1]:g} above q_max_pu {pt[2]:g}")
+        if i and not pt[0] > points[i - 1][0]:
+            raise ContractError(f"{where}: q_capability_pq.points[{i}] p_pu {pt[0]:g} does not follow "
+                                f"{points[i - 1][0]:g}; p_pu must rise strictly, each value once")
+
+
+def q_band_at(lim: dict, p_pu: float):
+    """``(q_min_pu, q_max_pu)`` of a ``q_capability_pq`` limit at ``p_pu``,
+    interpolated linearly between its points; None outside their p range."""
+    points = lim["points"]
+    if not points[0][0] <= p_pu <= points[-1][0]:
+        return None
+    for (p0, lo0, hi0), (p1, lo1, hi1) in zip(points, points[1:]):
+        if p0 <= p_pu <= p1:
+            t = (p_pu - p0) / (p1 - p0)
+            return lo0 + t * (lo1 - lo0), hi0 + t * (hi1 - hi0)
+    return None                                        # pragma: no cover - the range check above covers it
+
+
 def _check_dynamic(rows, where):
     if not isinstance(rows, list):
         raise ContractError(f"{where}: dynamic_requirements must be a list, got {type(rows).__name__}")
@@ -247,6 +317,10 @@ def _check_dynamic(rows, where):
             raise ContractError(f"{where}: {at} has source {r['source']!r}; a dynamic requirement is code or assumed")
         if r["applies_to"] not in _APPLIES_TO:
             raise ContractError(f"{where}: {at} applies_to {r['applies_to']!r}; allowed {list(_APPLIES_TO)}")
+        if "kind" in r and r["kind"] not in DYNAMIC_KINDS:
+            raise ContractError(f"{where}: {at} has kind {r['kind']!r}; allowed {list(DYNAMIC_KINDS)}")
+        if "unit" in r and (not isinstance(r["unit"], str) or not r["unit"].strip()):
+            raise ContractError(f"{where}: {at}.unit must be non-empty text, got {r['unit']!r}")
         if r["id"] in seen:
             raise ContractError(f"{where}: {at} has duplicate id {r['id']!r}")
         seen.add(r["id"])
@@ -255,9 +329,11 @@ def _check_dynamic(rows, where):
 def reported_requirements(profile: dict) -> list:
     """What the profile requires that a steady-state study cannot show, one
     row each with status ``reported`` (never ``pass``): its
-    ``dynamic_requirements``, then every band's time-limited ``v_max_30min``.
-    A report lists them as "dynamic study needed"; no verdict counts them."""
-    out = [{**r, "status": "reported", "detail": f"{r['requirement']}: {r['value']} (dynamic study needed)"}
+    ``dynamic_requirements`` ("needs RMS study"), then every band's
+    time-limited ``v_max_30min`` ("dynamic study needed"). No verdict counts
+    them, and nothing here reads the value, so no value can pass or fail."""
+    out = [{**r, "status": "reported",
+            "detail": f"{r['requirement']}: {r['value']}{' ' + r['unit'] if r.get('unit') else ''} (needs RMS study)"}
            for r in profile.get("dynamic_requirements") or []]
     for b in profile.get("voltage_bands") or []:
         if "v_max_30min" in b:
