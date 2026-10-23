@@ -792,8 +792,14 @@ def start_queue_run(job: Any) -> dict | None:
         return None
 
 
-def publish_queue_run(job: Any) -> dict | None:
-    """Publish a terminal solve-queue / GridSpine run from the job record."""
+def publish_queue_run(job: Any, status: str | None = None) -> dict | None:
+    """Publish a terminal solve-queue / GridSpine run from the job record.
+
+    ``status`` is the terminal status the job is about to take. The queue
+    publishes before it flips ``job.status``, so a caller that sees the
+    terminal status can always read the evidence; without it ``job.status``
+    is used.
+    """
     try:
         token = getattr(job, 'run_evidence_token', None)
         project_id = (token or {}).get('project_id') or _queue_project_id(job)
@@ -803,7 +809,7 @@ def publish_queue_run(job: Any) -> dict | None:
         )
         if root is None or not project_id:
             return None
-        status = map_worker_status(getattr(job, 'status', None))
+        status = map_worker_status(status if status is not None else getattr(job, 'status', None))
         if status is None:
             return None
         job_id = str(getattr(job, 'id', '') or '')
