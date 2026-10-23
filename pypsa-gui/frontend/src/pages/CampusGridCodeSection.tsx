@@ -33,6 +33,11 @@ const SOURCE_TONE: Record<GridLimit['source'], 'ok' | 'warn' | 'accent'> = {
   code: 'accent', assumed: 'warn', extracted: 'warn',
 }
 
+/** A stored selection (`1-40,120-180`) as shown: en dashes, a space after each comma. */
+function pageRangesText(ranges: string): string {
+  return ranges.split(',').map(r => r.trim().replace('-', '–')).join(', ')
+}
+
 function megabytes(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
@@ -129,18 +134,18 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
         {error && <p className="text-[12px] text-danger mb-2">{error}</p>}
 
         <div className="flex items-end gap-3 flex-wrap mb-3">
-          <Field label="Pages to read" hint="a longer code: up to 100 selected pages">
+          <Field label="Pages (optional)" hint="all pages, or ranges such as 1-40, 120-180; set before choosing the file">
             <input
-              aria-label="Pages to read"
+              aria-label="Pages (optional)"
               className={`${INPUT} w-[150px] font-mono`}
               value={pageRanges}
-              placeholder="all, or 1-40,120-180"
+              placeholder="all"
               spellCheck={false}
               disabled={upload.isPending}
               onChange={e => setPageRanges(e.target.value)}
             />
           </Field>
-          <Field label="Upload a PDF" hint="at most 20 MB and 100 pages">
+          <Field label="Upload a PDF" hint="at most 20 MB; at most 100 pages, or up to 100 selected pages of a longer PDF">
             <span className="inline-flex items-center gap-2">
               <Upload size={13} className="text-muted" />
               <input
@@ -274,7 +279,7 @@ function DocumentRow({ name, doc, available, onDraft, onDelete }: {
         <FileText size={13} className="text-muted shrink-0" />
         <span className="font-medium">{doc.filename}</span>
         <span className="text-muted">
-          {doc.page_ranges ? `pages ${doc.page_ranges} of ${doc.pages}` : `${doc.pages} pages`} · {megabytes(doc.size)}
+          {doc.page_ranges ? `pages ${pageRangesText(doc.page_ranges)} of ${doc.pages}` : `${doc.pages} pages`} · {megabytes(doc.size)}
         </span>
         <span className="flex-1" />
         <Field label="Profile id" row>
