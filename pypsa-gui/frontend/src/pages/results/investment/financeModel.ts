@@ -731,7 +731,7 @@ function campusLifeNotes(flags: string[]): string[] {
 /** The project flag list in words. A campus asset's life-end and later-renewal
  *  flags are worded in the campus equipment block, so they are not repeated;
  *  `part_not_replaced` for an asset that has a life-end flag states the same fact
- *  and is left out. Any other flag keeps its code as plain words. */
+ *  and is left out. Any other flag passes through unchanged. */
 export function projectFlagWords(flags: string[]): string[] {
   const lifeEnds = flags.filter(f => f.startsWith(LIFE_ENDS))
     .map(f => f.slice(LIFE_ENDS.length).split(':').slice(0, -2).join(':'))
