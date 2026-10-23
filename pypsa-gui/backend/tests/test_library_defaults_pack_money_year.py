@@ -93,7 +93,9 @@ def test_finance_tariffs_and_profiles_are_unchanged():
 
     new, prev = load_defaults_pack(NEW), load_defaults_pack(PREV)
     assert new.finance.currency_year == prev.finance.currency_year == 2020    # the seed tariffs' year
-    assert "2025" in new.finance.currency_year_source
+    assert "2025" in new.finance.currency_year_source       # only its text is corrected
+    assert new.finance.model_dump(exclude={"currency_year_source"}) == \
+        prev.finance.model_dump(exclude={"currency_year_source"})
     assert new.tariff_ids() == prev.tariff_ids() and new.load_profile_ids() == prev.load_profile_ids()
     for tid in new.tariff_ids():
         assert new.tariff_meta(tid) == prev.tariff_meta(tid)

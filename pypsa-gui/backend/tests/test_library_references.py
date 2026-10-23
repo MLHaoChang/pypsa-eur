@@ -124,7 +124,7 @@ def test_tools_list_and_read_with_the_assets_pack(client, install_network):
         technology="onwind", projection_year=2030, component="Generator", asset="wind")
     assert got["pack"]["chosen_by"] == "asset_provenance"
     overnight = next(r for r in got["comparison"] if r["parameter"] == "overnight")
-    assert overnight["differs"] and overnight["pack"]["currency_year"] == 2020
+    assert overnight["differs"] and overnight["pack"]["currency_year"] == 2025    # MONEY-YEAR-1
     assert n.generators.at["wind", "overnight_cost"] == pytest.approx(overnight["pack"]["value"])
 
 
