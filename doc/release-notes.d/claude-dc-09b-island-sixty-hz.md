@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The island sizing rows (RoCoF, droop gain ΣK, the RoCoF pickup block), the frequency-cut estimates and the island hourly tables now use the campus's nominal frequency (`campus.f_hz`, 50 or 60 Hz, 50 Hz when unstated) instead of a fixed 50 Hz; the baseline cache key carries it, and a campus save that changes it drops the stale island study.

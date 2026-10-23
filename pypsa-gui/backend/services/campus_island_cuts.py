@@ -30,7 +30,7 @@ import pandas as pd
 from fastapi import HTTPException
 
 from services import project_registry
-from services.solver.island import CUTS_FILE, cut_estimates, load_applied_cuts
+from services.solver.island import CUTS_FILE, IslandRefusal, campus_f_hz, cut_estimates, load_applied_cuts
 
 #: gridspine's frozen contract (``frequency.CUT_COLUMNS``,
 #: ``campus_study.FREQ_CUTS_CSV``).
@@ -137,6 +137,10 @@ def get_cuts(project) -> dict:
     if applicable:
         island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
         if island is not None:
+            try:
+                island["f_hz"] = campus_f_hz(project_registry.project_dir(project))
+            except IslandRefusal as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             with ce._netcdf_lock():
                 n = ce.cs.load_solved_network(ce._network(project))
             for rec, est in zip(applicable, cut_estimates(n, island, applicable)):

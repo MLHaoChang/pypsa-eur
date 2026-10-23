@@ -3,7 +3,7 @@
 
 # LC-10 (LC-01C) — resolving "this", "the" and "latest"
 
-Status: implementation in progress (Claude, branch `claude/copilot-reference-ladder`, stacked on PR #391)
+Status: done (#402, 16055419)
 Type: task
 Baseline: master `d006f4beaa302b97432c65757762ae180222731a`
 Dependencies: LC-01B (exact names), LC-01A (schema discovery)

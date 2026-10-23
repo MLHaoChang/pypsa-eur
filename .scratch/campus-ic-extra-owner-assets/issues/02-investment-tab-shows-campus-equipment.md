@@ -1,6 +1,6 @@
 # The Investment tab shows the campus equipment the case took
 
-Status: ready-for-agent
+Status: done (#647, f3de776c)
 Type: task
 Blocked by: 01
 

@@ -1,6 +1,6 @@
 # Plain Island Microgrid: its own investment case
 
-Status: ready-for-agent
+Status: done (#400, b6891c0b)
 
 ## Brief (coordinator, 2026-10-19)
 

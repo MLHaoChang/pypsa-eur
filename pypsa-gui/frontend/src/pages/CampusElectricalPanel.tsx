@@ -30,7 +30,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
-  campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind,
+  campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind, NO_LIMIT_DETAIL,
   type CampusRunJob, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
   type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
 } from '../api/campusElectrical'
@@ -71,12 +71,14 @@ const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   transformer_loading: 'Transformer loading',
   switchgear: 'Switchgear short circuit',
   cable_loading: 'Cable loading',
+  pcc_q_band: 'Reactive power band against active power at the PCC',
+  pcc_power_factor: 'Minimum power factor at the PCC',
 }
 const STATUS_TEXT: Record<CheckStatus, string> = {
-  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked',
+  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'not checked',
 }
 const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
-  pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn',
+  pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn', unknown: 'neutral',
 }
 
 function num(v: number | null | undefined, digits = 2): string {
@@ -601,8 +603,10 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
-function StatusTag({ s }: { s: CheckStatus }) {
-  return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
+function StatusTag({ s, detail }: { s: CheckStatus; detail?: string | null }) {
+  // unknown is "no limit" only when the profile sets none; a missing input is "not checked", its detail says which
+  const text = s === 'unknown' && detail === NO_LIMIT_DETAIL ? 'no limit' : STATUS_TEXT[s]
+  return <Tag tone={STATUS_TONE[s]}>{text}</Tag>
 }
 
 /** `show` picks the part of the results a Results tab mounts: the grid-code compliance
@@ -619,6 +623,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
   // the "with measures" column is part one's recommendation, and some checks are not re-checked.
   const invested = r.compliance_invested != null
   const rows: ComplianceRow[] = r.compliance_invested ?? r.compliance
+  // What the grid code asks that no steady-state check here can show, each named once.
+  const rms = [...new Set((r.reported_requirements ?? []).map(q => q.requirement))]
   return (
     <>
       {pending && (
@@ -663,21 +669,28 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                 return (
                   <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
                     <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} detail={c.detail} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} detail={detail} /></td>
                     <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
                       {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
                     </td>
                     <td data-testid={`compliance-limit-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums text-muted">
+                    {/* a unitless row (the power factor) reads back from the CSV with a null unit */}
+                    {/* a band with a negative edge reads "−a to b": an en dash beside a minus is hard to read */}
                     {c.limit_min != null && c.limit_max != null
-                      ? `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit}`
-                      : `${num(c.limit, 3)} ${c.unit}`}
+                      ? (c.limit_min < 0
+                        ? `${num(c.limit_min, 3).replace('-', '\u2212')} to ${num(c.limit_max, 3)} ${c.unit ?? ''}`
+                        : `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`).trim()
+                      : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
                     <td className="align-top min-w-[16rem]">
                       <div>{detail}</div>
-                      <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
-                        <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
-                      </div>
+                      {/* a row without a limit has no clause, and so no source to tag */}
+                      {c.clause && (
+                        <div className="text-[11px] text-muted flex items-start gap-1.5 mt-0.5">
+                          <Tag tone={c.source === 'code' ? 'accent' : 'warn'}>{c.source}</Tag><span>{c.clause}</span>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )
@@ -688,6 +701,11 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
         <p className="text-[11px] text-muted mt-2">
           PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
         </p>
+        {rms.length > 0 && (
+          <p data-testid="compliance-rms" className="text-[11px] text-muted mt-1">
+            Needs an RMS study (not checked here): {rms.join(' · ')}
+          </p>
+        )}
       </PageSection>}
 
       {design && <>

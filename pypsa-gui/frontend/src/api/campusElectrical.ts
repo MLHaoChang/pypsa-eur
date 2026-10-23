@@ -11,7 +11,8 @@
 import client, { formatApiDetail } from './client'
 import type { EditCard, EditReceipt } from '../components/EditCard'
 
-export type CheckStatus = 'pass' | 'fail' | 'not_rated' | 'not_rechecked'
+/** `unknown`: the profile sets no limit for the check (or its base is unknown), never pass or fail. */
+export type CheckStatus = 'pass' | 'fail' | 'not_rated' | 'not_rechecked' | 'unknown'
 
 export interface CampusSettings {
   k: number
@@ -32,6 +33,7 @@ export type PccTapControl = 'campus' | 'grid_operator'
 
 export interface ComplianceRow {
   check: 'pcc_reactive' | 'pcc_voltage' | 'campus_voltage' | 'transformer_loading' | 'switchgear' | 'cable_loading'
+    | 'pcc_q_band' | 'pcc_power_factor'
   status_as_is: CheckStatus
   status_with_measures: CheckStatus
   value: number | null
@@ -231,6 +233,21 @@ export interface CostBasis {
   currency: string
 }
 
+/** The detail of an `unknown` row whose limit the profile does not set (gridspine `NO_LIMIT`). Any other
+ *  `unknown` row lacks an input (P_ref, the PCC P, an hour on a side with a limit). */
+export const NO_LIMIT_DETAIL = 'The grid code sets no limit for this.'
+
+/** What the grid code requires that no steady-state check can show (status `reported`, never a verdict). */
+export interface ReportedRequirement {
+  id: string
+  requirement: string
+  value: string
+  status: 'reported'
+  detail: string
+  clause: string
+  source: GridLimit['source']
+}
+
 export interface CampusResults {
   selection: SelectedHour[]
   transformers: TransformerSizing[]
@@ -238,6 +255,8 @@ export interface CampusResults {
   short_circuit: FaultLevel[]
   compliance: ComplianceRow[]
   requirement: Requirement
+  /** Needs an RMS study; empty for a run from before it was kept. */
+  reported_requirements?: ReportedRequirement[]
   /** Null throughout when the run did not invest. */
   investment: InvestmentRow[] | null
   cost: CostRow[] | null
@@ -417,6 +436,12 @@ export interface GridCodeProfile {
   q_range_demand: GridLimit
   rvc_limit_pct: GridLimit
   campus_voltage?: GridLimit
+  /** The infrequent tier of a two-tier rapid-voltage-change limit, %. */
+  rvc_limit_infrequent_pct?: GridLimit
+  /** A P-dependent Q band at the PCC: `points` [p_pu, q_min_pu, q_max_pu], per unit of P_ref. */
+  q_capability_pq?: GridLimit & { points: [number, number, number][] }
+  pf_min_lagging?: GridLimit
+  pf_min_leading?: GridLimit
   document?: { sha256: string; filename: string; title: string }
 }
 
