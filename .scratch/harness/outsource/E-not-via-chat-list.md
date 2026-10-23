@@ -18,7 +18,7 @@ Source issue: `.scratch/live-copilot/issues/22-unsupported-by-chat.md` (LC-22), 
 
 ## Goal in plain words
 
-Some things in the app must not be done from chat (admin, sign-in, API keys). Some are done by hand on purpose (map layout, file uploads). One is not built yet (project sharing). Today the assistant cannot tell these apart from things it simply has not found, so it improvises.
+Some things in the app must not be done from chat (admin, sign-in, API keys). Some are done by hand on purpose (map layout, library uploads). One is not built yet (project sharing). Today the assistant cannot tell these apart from things it simply has not found, so it improvises.
 
 Two parts:
 
@@ -71,7 +71,7 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
 - `panel` is `None` or a value from `harness.catalogue.SAFETY_PANEL_ENUM` (l.57), so the model can pass it to `ui_open_panel`.
 - `NOTE` text: "not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them."
 
-The entries are below. Keep the ids, dispositions, panels and routes exactly. You may reword titles, reasons and pages within the limits the tests set (title ≤ 80 characters, reason 40–200, page ≤ 80). The one exception is `project_members`: its reason is pinned. Keywords are lowercase `[a-z0-9]+` tokens. Never use these generic words as keywords: `create get list run project projects result results network component settings data file change set show load flow user key keys token code pdf address coordinates`. (GK: the last eight collide with goals chat can do, e.g. a PDF datasheet's values, bus coordinates, a "user-defined" carrier, "key results".)
+The entries are below. Keep the ids, dispositions, panels and routes exactly. You may reword titles, reasons and pages within the limits the tests set (title ≤ 80 characters, reason 40–200, page ≤ 80). The one exception is `project_members`: its reason is pinned. Keywords are lowercase `[a-z0-9]+` tokens. Never use these generic words as keywords: `create get list run project projects result results network component settings data file change set show load flow user key keys token code pdf address coordinates tariff tariffs upload uploads import series profile profiles resume`. (GK: from `user` to `coordinates` they collide with goals chat can do, e.g. a PDF datasheet's values, bus coordinates, a "user-defined" carrier, "key results". From `tariff` on they collide with chat tools: `import_urdb_tariff`, `attach_tariff`, `upload_timeseries`, `upload_load_profile`, the `import_*` tools, and `resume_task`. `find_capabilities` also turns `import` into `upload` through its aliases.)
 
 | id | disposition | page / panel | keywords (proposal) | routes |
 |---|---|---|---|---|
@@ -81,10 +81,9 @@ The entries are below. Keep the ids, dispositions, panels and routes exactly. Yo
 | `project_members` | unbuilt; owner to decide later | "Workspace panel, project members" / `"workspace"` | share sharing shared member members collaborator collaborators colleague colleagues | `GET` and `PUT /api/projects/{name}/members`, `GET /api/auth/org-members` |
 | `assistant_keys_and_profiles` | out of chat | "Settings panel" / `"settings"` | api apikey secret secrets anthropic openai reveal | the 3 routes of `routers/local_settings.py`, and every `/api/chat/settings/...` route **except** `POST /api/chat/settings/llm/active` (9 routes) |
 | `assistant_access_rule` ‡ | out of chat | "Chat panel, access settings" / `"chat"` | permission permissions restriction restrictions readonly autoapprove | `PUT /api/chat/restrictions` |
-| `solve_queue_instance_controls` | out of chat | "Solve queue panel" / `"solveQueue"` | pause paused unpause halt | `POST /api/simulation/queue/pause`, `POST /api/simulation/queue/resume` |
+| `solve_queue_instance_controls` | out of chat | "Solve queue panel" / `"solveQueue"` | pause paused unpause halt (not `resume`) | `POST /api/simulation/queue/pause`, `POST /api/simulation/queue/resume` |
 | `map_layout_and_sites` | manual | "Map" / `"map"` | layout geocode geocoding osm openstreetmap thumbnail thumbnails | the 13 routes under `/api/projects/{name}/map_layout…` and `/api/projects/{name}/sites…`, plus `GET /api/geocode` and `GET /api/geocode/status` |
-| `library_uploads_and_tariff_edit` | manual | "Commercial library" / `"library"` | meter metering tariff upload uploads | the 6 routes of `routers/library.py` that are not in `TOOL_ROUTES` (`PUT /api/library/items/{kind}/{name}`, `POST /api/library/meter_data`, `GET`/`POST /api/library/series`, `POST /api/library/series/upload`, `GET /api/library/series/{name}`) |
-| `series_file_upload` ‡ | manual | "Time series panel" / `"timeseries"` | upload uploads | `POST /api/network/timeseries/upload`, `POST /api/projects/{name}/profiles/loads/upload`, `POST /api/projects/{name}/profiles/series/upload` |
+| `library_uploads_and_tariff_edit` | manual | "Commercial library" / `"library"` | meter metering | the 6 routes of `routers/library.py` that are not in `TOOL_ROUTES` (`PUT /api/library/items/{kind}/{name}`, `POST /api/library/meter_data`, `GET`/`POST /api/library/series`, `POST /api/library/series/upload`, `GET /api/library/series/{name}`) |
 | `grid_code_publish` | manual | "Campus electrical, Grid codes" / `"campusElectrical"` | publish published | the 10 `/api/campus-electrical/{name}/grid-codes/...` routes other than `GET …/grid-codes` and `POST …/documents/{document_id}/extract` (those two are reached by `campus_list_grid_codes` and `campus_extract_grid_code`) |
 
 ‡ = not in the issue's table. Each one is needed so that every route gets a disposition. The gatekeeper may move them; see Open questions.
@@ -93,9 +92,11 @@ Reasons:
 
 - Write each reason from the issue's table: admin = security; sign-in and keys = secrets; queue = instance-wide and super-admin.
 - For the `manual` rows, the reason says what chat *can* do, e.g. "From chat the assistant can list library items, import a URDB tariff and attach a tariff."
+- The library entry has no `tariff` or `upload` keyword because chat attaches, imports and lists tariffs. A goal like "edit the tariff's rates" therefore gets no entry. That is intended: a missing entry is a gap, but a refusal for something chat can do misleads the user.
+- The queue entry has no `resume` keyword because `resume_task` resumes a plan. "Unpause" and "the paused queue" still find it.
 - `project_members` uses exactly this text (GK: the issue's wording was internal, and the assistant relays the reason to the user; the disposition still records that the owner decides later): `"Sharing a project is not available from chat yet. Add or remove its members in the Workspace panel."`
 
-The issue's "Dictation" row ("Input path, LC-07") becomes UI-internal (below), not an entry: nobody asks chat to dictate.
+The issue's "Dictation" row ("Input path, LC-07") becomes UI-internal (below), not an entry: nobody asks chat to dictate. The browser's multipart series uploads are UI-internal too (`series_file_upload`, below), not an entry: chat writes the same series from a file ID or CSV text with `upload_timeseries`, `upload_load_profile`, `upload_generator_profile` and `upload_link_profile`, so a refusal would mislead.
 
 ### `pypsa-gui/backend/services/assistant_tools.py`
 
@@ -139,7 +140,7 @@ The route test (tests 9–15). Model it on `test_write_surface_lock_policy.py`:
   - the document-values and equipment-table previews → `preview_document_values`, `preview_commercial_document_values`, `preview_equipment_mapping`;
   - `POST /api/chat/settings/llm/active` → `set_active_profile`;
   - `GET /api/projects/{name}/uploads/{file_id}/blob` → `get_file_delivery` (it returns that link).
-- **`UI_INTERNAL: dict[str, dict]`**, in this test file. Keyed by a short name; each value is `{"reason": <one line>, "routes": frozenset(...)}` with the routes written out, not prefixes. These 9 entries (51 routes):
+- **`UI_INTERNAL: dict[str, dict]`**, in this test file. Keyed by a short name; each value is `{"reason": <one line>, "routes": frozenset(...)}` with the routes written out, not prefixes. These 10 entries (54 routes):
   - `spa`: `GET /{full_path:path}`, "serves the built frontend's pages";
   - `health`: `GET /api/health`, "liveness probe for the desktop shell and CI";
   - `chat_panel`: the 31 routes of `routers/chat.py` and `routers/assistant_activity.py` other than `/api/chat/settings/...` and `PUT /api/chat/restrictions`, "the chat panel itself: stream, cards, history, checked-answer records, Activity";
@@ -148,16 +149,17 @@ The route test (tests 9–15). Model it on `test_write_surface_lock_policy.py`:
   - `editor_lock`: `POST`/`DELETE /api/projects/{project_id}/lock`, `POST …/lock/heartbeat`, "the browser tab's editing lock; the assistant acts under the tab's lock";
   - `log_feeds`: `GET /api/simulation/log_stream`, `GET /api/simulation/queue/{job_id}/log_stream`, `GET …/log_history`, "solver log feeds for the log panel; the assistant follows jobs with wait_for_job";
   - `dictation`: the 2 `/api/dictation/...` routes, "the composer's voice input; the words arrive as the user's message (LC-07)";
-  - `browser_upload`: `POST /api/projects/{name}/uploads`, `GET …/uploads/{file_id}/signature`, "the browser's file upload and its signature; the assistant uses uploads by file ID".
+  - `browser_upload`: `POST /api/projects/{name}/uploads`, `GET …/uploads/{file_id}/signature`, "the browser's file upload and its signature; the assistant uses uploads by file ID";
+  - `series_file_upload`: `POST /api/network/timeseries/upload`, `POST /api/projects/{name}/profiles/loads/upload`, `POST /api/projects/{name}/profiles/series/upload`, "the time-series panel's file pickers; the assistant writes series with upload_timeseries and the upload_*_profile tools".
 
-  You may add at most 2 more entries if a route is plainly only for a screen (e.g. a form schema). Name each one in the PR body.
+  You may add at most 1 more entry if a route is plainly only for a screen (e.g. a form schema). Name each one in the PR body.
 - **`KNOWN_GAPS: dict[tuple[str, str], str]`**, in this test file. Routes that no tool reaches yet and that are not refusals (e.g. `PATCH /api/projects/{name}/settings`, studies `PATCH`/`DELETE`, `POST /api/network/reset`, `POST /api/simulation/queue/cancel_queued`). The value names the page where the user does it today. It is a ratchet:
   - a gap that gains a tool fails the exclusivity test until it is removed;
   - `_KNOWN_GAPS_CEILING` is set to the count at merge, so the list cannot grow.
 
   These stay out of `find_capabilities`: a route without a tool does not mean the capability is missing (another tool may cover it).
 
-Expected totals on today's `master`: 493 = 259 (`TOOL_ROUTES`) + 68 (`NOT_VIA_CHAT`) + 51 (`UI_INTERNAL`) + 115 (`SERVED_BY_TOOL` + `KNOWN_GAPS`, about 44 + 71). If outsourced task D merges first, `POST /api/network/library_reference/preview` becomes `POST /api/library_reference/preview`. Classify whichever path is live; the stale-entry test catches the other. Either path goes in `SERVED_BY_TOOL` as `apply_library_reference`: its confirmation card comes from the same `edit_card.preview` (`_library_reference_preview`).
+Expected totals on today's `master`: 493 = 259 (`TOOL_ROUTES`) + 65 (`NOT_VIA_CHAT`) + 54 (`UI_INTERNAL`) + 115 (`SERVED_BY_TOOL` + `KNOWN_GAPS`, about 44 + 71). If outsourced task D merges first, `POST /api/network/library_reference/preview` becomes `POST /api/library_reference/preview`. Classify whichever path is live; the stale-entry test catches the other. Either path goes in `SERVED_BY_TOOL` as `apply_library_reference`: its confirmation card comes from the same `edit_card.preview` (`_library_reference_preview`).
 
 ### `pypsa-gui/backend/tests/test_oj46_feature_chat_must_refuse_journey.py` (new)
 
@@ -192,7 +194,8 @@ In `tests/test_not_via_chat.py`. Use the `client` and `helpers_state` fixtures a
 2. `test_the_issue_rows_are_declared`:
    - each id in the table exists with its disposition and panel;
    - `project_members` has disposition `"unbuilt; owner to decide later"` and the pinned reason;
-   - `solve_queue_instance_controls.routes` does not contain `clear_finished`.
+   - `solve_queue_instance_controls.routes` is exactly `{("POST", "/api/simulation/queue/pause"), ("POST", "/api/simulation/queue/resume")}`, so it does not contain `clear_finished`;
+   - no entry has a keyword from the banned list, and no entry is `series_file_upload`.
 3. `test_oj46_goal_returns_the_admin_entry`: `find_capabilities("Create a user account for my colleague.")` (default limit):
    - `out["not_via_chat"][0]["title"]` is the admin entry's title;
    - every returned entry has exactly the keys `{title, disposition, reason, page, panel}`;
@@ -203,9 +206,9 @@ In `tests/test_not_via_chat.py`. Use the `client` and `helpers_state` fixtures a
    - `"Share this project with Anna"` → `project_members`;
    - `"Change my password"` → `sign_in_and_password`;
    - `"Set my Anthropic API key"` → `assistant_keys_and_profiles`;
-   - `"Pause the solve queue"` → `solve_queue_instance_controls`;
+   - `"Pause the solve queue"`, `"Unpause the solve queue"` and `"Resume the paused solve queue"` → `solve_queue_instance_controls`;
    - `"Geocode the site address"` → `map_layout_and_sites`.
-5. `test_ordinary_goals_get_no_refusal` (parametrised): `"get_component_schema"`, `"run the simulation"`, `"show the load flow results"`, `"parameter changes chart delivery"` and `"Change the storage cost to 150"`, plus the collision guards `"Read the capex from this PDF datasheet"`, `"Set the coordinates of bus 3"`, `"What are the key cost drivers"` and `"Add a user-defined carrier"`, return no `not_via_chat` key.
+5. `test_ordinary_goals_get_no_refusal` (parametrised): `"get_component_schema"`, `"run the simulation"`, `"show the load flow results"`, `"parameter changes chart delivery"` and `"Change the storage cost to 150"`, plus the collision guards `"Read the capex from this PDF datasheet"`, `"Set the coordinates of bus 3"`, `"What are the key cost drivers"` and `"Add a user-defined carrier"`, and the chat-capable guards `"Attach the TOU tariff to the grid connection"`, `"Import a URDB tariff"`, `"List the tariffs in the library"`, `"Upload this CSV as the load profile"`, `"Set the load profile from the uploaded file"`, `"Resume my task"` and `"Resume the plan"`, return no `not_via_chat` key.
 6. `test_entries_never_become_discovered_tools`: after the OJ-46 goal,
    - `session.discovered_tools == tuple(i["name"] for i in out["items"])`;
    - every name is in `TOOLS`;
@@ -230,7 +233,7 @@ In `tests/test_route_chat_disposition.py`:
     Also fail, with its own message, on a route that has more than one bucket.
 11. `test_no_disposition_names_a_missing_route`: every route in `NOT_VIA_CHAT`, `SERVED_BY_TOOL`, `UI_INTERNAL` and `KNOWN_GAPS` is live.
 12. `test_served_by_names_real_tools`: every value of `SERVED_BY_TOOL` is in `TOOLS`.
-13. `test_ui_internal_stays_small`: at most 11 entries, each reason 20–160 characters.
+13. `test_ui_internal_stays_small`: at most 11 entries, `series_file_upload` among them,, each reason 20–160 characters.
 14. `test_known_gaps_only_shrink`: `len(KNOWN_GAPS) <= _KNOWN_GAPS_CEILING`.
 15. `test_a_planted_route_is_reported`: pass the live routes plus `("POST", "/api/planted/route")` to the same pure helper that test 10 uses (e.g. `_unclassified(routes) -> list`). It reports exactly the planted route, and the message names `services/not_via_chat.py` and `UI_INTERNAL`.
 
@@ -281,7 +284,7 @@ pixi run gui-tests   # full backend suite before opening the PR
 - Add one release-note fragment, `doc/release-notes.d/outsource-not-via-chat-list.md`, containing one bullet in this form:
 
   ```
-  * Feat(pypsa-gui): Asked for something it cannot do from chat (admin, sign-in, API keys, project sharing, map layout, file uploads), the assistant gives the reason and names the page; a backend test now fails when a new route has no chat disposition.
+  * Feat(pypsa-gui): Asked for something it cannot do from chat (admin, sign-in, API keys, project sharing, map layout, library uploads), the assistant gives the reason and names the page; a backend test now fails when a new route has no chat disposition.
   ```
 
   Never edit `doc/release_notes.md`. See `doc/release-notes.d/README.md`.
