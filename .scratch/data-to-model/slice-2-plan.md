@@ -1,6 +1,6 @@
 # Data-to-model slice 2: values from PDF datasheets, tariffs and PPAs (plan)
 
-Status: ready-for-agent (gatekeeper GO WITH CHANGES and UX placement OK, 2026-10-22; the changes below override the text above them)
+Status: done (PR-A #591, PR-B #594, PR-C #599 merged; gatekeeper GO WITH CHANGES and UX placement OK, 2026-10-22)
 Owner decisions: AI-567, AI-567b, UX-flow, KEY-1, USE-1. Base: master 81232e93 (PR-1 #575, PR-2 #581).
 
 ## The rule (as slice 1: the model proposes a citation, never a value)
