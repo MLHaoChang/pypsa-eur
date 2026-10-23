@@ -6,6 +6,7 @@ import './index.css'
 import { useUIStore } from './store/uiStore'
 import InvestmentCaseView from './pages/results/investment/InvestmentCaseView'
 import CampusElectricalPanel from './pages/CampusElectricalPanel'
+import { CampusResultsTab } from './pages/CampusElectricalPanel'
 import { IslandReportView } from './pages/CampusIslandSection'
 
 const q = new URLSearchParams(location.search)
@@ -20,6 +21,7 @@ function Island() {
 }
 const view = q.get('view')
 const el = view === 'island' ? <div className="p-4 max-w-4xl"><Island /></div>
+  : view === 'investment' ? <div className="p-4 max-w-4xl"><CampusResultsTab name="Demo" part="electrical_design" /></div>
   : view === 'library' ? <div className="p-4 max-w-4xl"><CampusElectricalPanel /></div>
   : <div className="p-4 max-w-4xl"><InvestmentCaseView /></div>
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}>{el}</QueryClientProvider>)
