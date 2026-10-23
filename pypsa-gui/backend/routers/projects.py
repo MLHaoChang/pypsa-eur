@@ -2738,6 +2738,7 @@ def _save_context(
             scen_fields = _scenario_fields_from_meta(existing_meta)
             new_desc = scen_fields["scenario_description"]
             new_type = scen_fields["scenario_type"]
+        from services.profile_gen import weather_prefs
         _write_meta(dest, {
             "created_at": existing_meta.get(
                 "created_at", datetime.now(tz=timezone.utc).isoformat()
@@ -2774,6 +2775,11 @@ def _save_context(
             # dropped the key would silently reset the user's choice.
             **({"settings": existing_meta["settings"]}
                if isinstance(existing_meta.get("settings"), dict) else {}),
+            # The weather bar's saved source and year. PUT /profiles/weather
+            # is their only writer; dropping the key on save resets the choice,
+            # and the next generate that names no year uses the snapshot default.
+            **({weather_prefs.META_KEY: existing_meta[weather_prefs.META_KEY]}
+               if isinstance(existing_meta.get(weather_prefs.META_KEY), dict) else {}),
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.

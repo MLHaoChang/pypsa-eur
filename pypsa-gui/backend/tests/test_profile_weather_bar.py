@@ -129,6 +129,19 @@ def test_each_sources_own_year_bounds_are_accepted(client, install_network, body
     assert client.put(f"/api/projects/{project}/profiles/weather", json=body).status_code == 200
 
 
+def test_a_project_save_keeps_the_weather_choice(client, install_network):
+    """A save rewrites metadata.json from a fixed key list. The weather bar's
+    source and year have to ride along: the next autosave would otherwise drop
+    them, and a generate that names no year would use the snapshot default."""
+    project = _project(client, install_network, 2023)
+    assert client.put(f"/api/projects/{project}/profiles/weather",
+                      json={"source": "synthetic", "year": 2019}).status_code == 200
+    saved = client.post(f"/api/projects/{project}", params={"force": True})
+    assert saved.status_code == 200, saved.text
+    got = client.get(f"/api/projects/{project}/profiles/weather").json()
+    assert (got["source"], got["year"], got["year_source"]) == ("synthetic", 2019, "saved")
+
+
 def test_saving_a_year_leaves_existing_series_alone(client, install_network, session_ctx):
     project = _project(client, install_network, 2023)
     rec = _generate(client, project, year=2021)
