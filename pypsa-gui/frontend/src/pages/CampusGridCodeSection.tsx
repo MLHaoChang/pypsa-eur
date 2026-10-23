@@ -84,8 +84,9 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
     refreshList()
   }
 
+  const [pageRanges, setPageRanges] = useState('')
   const upload = useMutation({
-    mutationFn: (file: File) => campusApi.uploadGridCodeDocument(name, file),
+    mutationFn: (file: File) => campusApi.uploadGridCodeDocument(name, file, pageRanges),
     onMutate: () => setError(null),
     onSuccess: () => refreshList(),
     onError: e => setError(errorText(e)),
@@ -128,6 +129,17 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
         {error && <p className="text-[12px] text-danger mb-2">{error}</p>}
 
         <div className="flex items-end gap-3 flex-wrap mb-3">
+          <Field label="Pages to read" hint="a longer code: up to 100 selected pages">
+            <input
+              aria-label="Pages to read"
+              className={`${INPUT} w-[150px] font-mono`}
+              value={pageRanges}
+              placeholder="all, or 1-40,120-180"
+              spellCheck={false}
+              disabled={upload.isPending}
+              onChange={e => setPageRanges(e.target.value)}
+            />
+          </Field>
           <Field label="Upload a PDF" hint="at most 20 MB and 100 pages">
             <span className="inline-flex items-center gap-2">
               <Upload size={13} className="text-muted" />
@@ -261,7 +273,9 @@ function DocumentRow({ name, doc, available, onDraft, onDelete }: {
       <div className="flex items-center gap-2 flex-wrap">
         <FileText size={13} className="text-muted shrink-0" />
         <span className="font-medium">{doc.filename}</span>
-        <span className="text-muted">{doc.pages} pages · {megabytes(doc.size)}</span>
+        <span className="text-muted">
+          {doc.page_ranges ? `pages ${doc.page_ranges} of ${doc.pages}` : `${doc.pages} pages`} · {megabytes(doc.size)}
+        </span>
         <span className="flex-1" />
         <Field label="Profile id" row>
           <input
