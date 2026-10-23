@@ -171,7 +171,30 @@ describe('ConnectionLimits', () => {
     expect(campusApi.setGridLimit).toHaveBeenCalledWith('Demo', 'fault_level', { source: 'assumed', note: '' })
   })
 
+  it('each PoC bus has its own fault level field; a non-PoC bus has none', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level') })] } as never)
+    vi.mocked(networkApi.getBuses).mockResolvedValue([
+      { name: 'a', eh_poc: true, eh_sk_mva: 300 }, { name: 'b', eh_poc: true, eh_sk_mva: 500 },
+      { name: 'it', eh_poc: false, eh_sk_mva: 9 }] as never)
+    vi.mocked(networkApi.updateBus).mockClear().mockResolvedValue({ name: 'b' } as never)
+    mount()
+    expect(await screen.findByLabelText('Fault level value, bus a')).toHaveProperty('value', '300')
+    expect(screen.queryByLabelText(/bus it/)).toBeNull()
+    fireEvent.change(screen.getByLabelText('Fault level value, bus b'), { target: { value: '600' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save fault level' }))
+    await waitFor(() => expect(networkApi.updateBus).toHaveBeenCalledWith('b', expect.objectContaining({ eh_sk_mva: 600 })))
+    expect(networkApi.updateBus).toHaveBeenCalledTimes(1)
+  })
+
+  it('with no PoC bus the line says to tag one', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level') })] } as never)
+    vi.mocked(networkApi.getBuses).mockResolvedValue([{ name: 'it', eh_poc: false }] as never)
+    mount()
+    expect(await screen.findByText(/Tag a bus as the point of connection/)).toBeTruthy()
+  })
+
   it('a fault level of 0 or less is refused and nothing is written', async () => {
+    vi.mocked(networkApi.getBuses).mockResolvedValue([{ name: 'grid', eh_poc: true, eh_sk_mva: 250 }] as never)
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level') })] } as never)
     mount()
     fireEvent.change(await screen.findByLabelText('Fault level value'), { target: { value: '0' } })

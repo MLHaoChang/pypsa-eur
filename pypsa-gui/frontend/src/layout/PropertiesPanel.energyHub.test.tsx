@@ -78,6 +78,11 @@ describe('EH payload helpers', () => {
     expect(ehBusPayload({ eh_poc: 'false', eh_critical: 'false',
       eh_sk_mva: '', eh_ibr_mva: '' }, bus({ eh_poc: true, eh_sk_mva: 200 })))
       .toEqual({ eh_poc: false })
+    // A PoC bus's fault level is never sent from Properties; any other bus's is.
+    expect(ehBusPayload({ eh_poc: 'true', eh_critical: 'false', eh_sk_mva: '300', eh_ibr_mva: '' },
+      bus({ eh_poc: true, eh_sk_mva: 200 }))).toEqual({ eh_poc: true })
+    expect(ehBusPayload({ eh_poc: 'false', eh_critical: 'false', eh_sk_mva: '300', eh_ibr_mva: '' },
+      bus({ eh_sk_mva: 200 }))).toMatchObject({ eh_sk_mva: 300 })
     expect(ehLinkPayload({ eh_role: '' }, link({ eh_role: 'grid_import' })))
       .toEqual({ eh_role: '' })
   })
@@ -100,8 +105,9 @@ describe('Bus card — Energy Hub section', () => {
     renderPanel()
     await userEvent.click(await screen.findByRole('button', { name: /edit bus/i }))
     await userEvent.click(screen.getByRole('checkbox', { name: /critical bus/i }))
-    // The fault level is shown read-only here and edited in Connection & grid.
-    expect(screen.getByTestId('eh-sk-readonly').querySelector('input')).toBeNull()
+    // A bus that is not a point of connection keeps its own short-circuit field.
+    expect(screen.queryByTestId('eh-sk-readonly')).toBeNull()
+    expect(screen.getByText(/short-circuit level/i).closest('label')!.querySelector('input')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await vi.waitFor(() => expect(networkApi.updateBus).toHaveBeenCalledTimes(1))
     const [, payload] = vi.mocked(networkApi.updateBus).mock.calls[0]
@@ -110,10 +116,13 @@ describe('Bus card — Energy Hub section', () => {
   })
 
   it.each([['expert', 'campusElectrical'], ['guided', null]] as const)(
-    'the short-circuit level routes to Connection & grid in %s', async (mode, panel) => {
+    'a PoC bus shows the short-circuit level read-only and routes to Connection & grid in %s', async (mode, panel) => {
       useUIStore.setState({ uiMode: mode })
+      vi.mocked(networkApi.getBuses).mockResolvedValue([bus({ eh_poc: true, eh_sk_mva: 250 })])
       renderPanel()
       await userEvent.click(await screen.findByRole('button', { name: /edit bus/i }))
+      expect(screen.getByTestId('eh-sk-readonly').querySelector('input')).toBeNull()
+      expect(screen.getByTestId('eh-sk-readonly').textContent).toContain('250')
       await userEvent.click(screen.getByRole('button', { name: 'Edit in Connection & grid ›' }))
       const ui = useUIStore.getState()
       if (panel) expect(ui.activeSlidePanel).toBe(panel)
