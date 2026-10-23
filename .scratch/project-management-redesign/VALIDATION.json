@@ -1,0 +1,375 @@
+{
+  "baseline": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "fresh_remote_master_at_end": "a68db6cfcf254df17a5b0d96da7a4c995f26423f",
+  "checked_at_utc": "2026-10-21T18:37:05.166490+00:00",
+  "scope": "24-feature project-management audit, targeted existing tests, three deliberately unmet safe-restore expectations and proposed shared-assumption design",
+  "runtime_implementation": false,
+  "fixes_implemented": false,
+  "backend_project_persistence_existing": {
+    "cases": 382,
+    "passed": 382,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 163.77,
+    "test_files": [
+      "tests/test_bundle_campus.py",
+      "tests/test_bundle_sidecars.py",
+      "tests/test_history_does_not_clobber_a_live_session.py",
+      "tests/test_library_bundle_pins.py",
+      "tests/test_project_acl.py",
+      "tests/test_project_flow.py",
+      "tests/test_project_kind_info.py",
+      "tests/test_project_locks.py",
+      "tests/test_project_route_acl_policy.py",
+      "tests/test_project_settings.py",
+      "tests/test_project_state.py",
+      "tests/test_project_switch_isolation.py",
+      "tests/test_projects_tenancy.py",
+      "tests/test_reload_same_project.py",
+      "tests/test_save_activate_during_study.py",
+      "tests/test_save_guards_seam.py",
+      "tests/test_save_sidecar_carry_seam.py",
+      "tests/test_scenario_type.py",
+      "tests/test_snapshot_id_containment.py",
+      "tests/test_snapshot_slug.py",
+      "tests/test_undo_per_project.py",
+      "tests/test_undo_rekeys_the_session_context.py"
+    ],
+    "xml_sha256": "2b018ef086f73ff547c2a0823975823a0d06d567042249d5b5fddf20d66ce89a"
+  },
+  "backend_execution_comparison_existing": {
+    "cases": 187,
+    "passed": 187,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 85.076,
+    "test_files": [
+      "tests/test_compare_availability.py",
+      "tests/test_compare_contract.py",
+      "tests/test_compare_endpoint.py",
+      "tests/test_compare_invariants.py",
+      "tests/test_queue_releases_what_it_claims.py",
+      "tests/test_run_evidence_compare.py",
+      "tests/test_solve_queue_authz.py",
+      "tests/test_solve_queue_boot_reconcile.py",
+      "tests/test_solve_queue_cancel_queued.py",
+      "tests/test_solve_queue_config_snapshot.py",
+      "tests/test_solve_queue_dedupe.py",
+      "tests/test_solve_queue_job_log.py",
+      "tests/test_solve_queue_persisted_listing.py",
+      "tests/test_solve_queue_requeue.py",
+      "tests/test_workflow_tools.py"
+    ],
+    "xml_sha256": "1b3b14e9ceb30b4bfc495252b5286770934af3b0163ff2e336cf52391d791024"
+  },
+  "frontend_existing": {
+    "test_files": 13,
+    "tests_passed": 224,
+    "tests_failed": 0,
+    "pending": 0,
+    "success": true,
+    "files": [
+      "src/layout/NewProjectWizard.clone.test.tsx",
+      "src/layout/ProjectTabs.test.tsx",
+      "src/pages/CompareView.availability.test.tsx",
+      "src/pages/CompareView.test.tsx",
+      "src/pages/ProjectsHomePage.createBlank.test.tsx",
+      "src/pages/ProjectsHomePage.entry.test.tsx",
+      "src/pages/ProjectsHomePage.missing.test.tsx",
+      "src/pages/ScenariosPanel.forest.test.ts",
+      "src/pages/ScenariosPanel.test.tsx",
+      "src/pages/WorkspacePanel.readOnlyReason.test.tsx",
+      "src/pages/projectsHome.test.ts",
+      "src/utils/projectActions.switch.test.ts",
+      "src/utils/projectActions.test.ts"
+    ],
+    "classification": "Existing component/helper tests using mocks/fixtures; not live-browser E2E"
+  },
+  "save_load_qa_driver": {
+    "command": "python tests/qa_save_load_roundtrip.py",
+    "checks_passed": 74,
+    "checks_failed": 0,
+    "log_sha256": "5adde1af8dd277daabcbfef37d86f957a518ef728a9aea8e32670f4b418b0d5e"
+  },
+  "new_safe_restore_expectations": {
+    "cases": 3,
+    "passed": 0,
+    "failures": 3,
+    "errors": 0,
+    "skipped": 0,
+    "duration_seconds": 4.506,
+    "test_files": [
+      "tests/test_pm_audit_verification.py"
+    ],
+    "xml_sha256": "955747ceff1498d10cd07dd61be5b29a7d00fcfeb313c03fcd63eaf1aaf322a6"
+  },
+  "new_probe_failures_are_confirmed_findings_not_fixed": true,
+  "offline_source_pins": [
+    {
+      "path": "AGENTS.md",
+      "sha256": "a68ad8be2dca8047207d2ef55d9cd03ef96dc1507a1545a41bcf191fea4fa17b"
+    },
+    {
+      "path": "docs/agents/owner-decisions.md",
+      "sha256": "f83a7dec8a45377fc8c4bea25f4ac29690654edcb40e5159e6b51fcd00e014a4"
+    },
+    {
+      "path": "pypsa-gui/CONTEXT.md",
+      "sha256": "8ac6347da5427c2ee270a8e20f279a6f7710e402b2a38aa88b966ce3376ba512"
+    },
+    {
+      "path": "pypsa-gui/TESTING.md",
+      "sha256": "ea07bf7a56603bc5784e9f6746e9366d053ab99afafe8eb9e9b0a22140de91b5"
+    },
+    {
+      "path": ".scratch/project-workflow/design.md",
+      "sha256": "1ec6cacaa0879cf0815a9683af8a9bc9c42273f2cf90e7dc2e6995d8cd586510"
+    },
+    {
+      "path": ".scratch/project-workflow/workspace-reconciliation.md",
+      "sha256": "13971cd7d5f34391a1ea781a23a28bbba7123176fe20c68ddff6f4ec09e06964"
+    },
+    {
+      "path": ".scratch/project-workflow/integration-sensitivities.md",
+      "sha256": "d83e5b3157758cfcc85d49237bd3db88c9ac37790e62fdb1a5e5a18741f1ffef"
+    },
+    {
+      "path": ".scratch/project-workflow/modular-cards.md",
+      "sha256": "5a80c3a797d9b46787a7b3e1ab8e52e75d7877c6e6b8066a9a537b9b2e7b5312"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-07-26-project-bundle-load-export-design.md",
+      "sha256": "0a7e8d39273e580905ecd79625b64bcfc7c23df49427813c37387c372e167ab7"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-14-project-write-safety-design.md",
+      "sha256": "60a3e935a8cb10631b94eec1da7902fe115c1c654ddab55a951d7da61c00e34c"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-13-network-undo-router-lift-design.md",
+      "sha256": "754b1e17c0adb519976db82be1c1be0dc83f5f399b7128dbe366a93ec1e0e18f"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-08-27-unsaved-results-visibility-design.md",
+      "sha256": "5b7b0cde3f9c9c8f518ed90fceaef1fff01e97ca29ee521f286affedcb0418b3"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/ProjectsHomePage.tsx",
+      "sha256": "08565460418c7cca2cde213d7da093a7b3822dec1b14a2b1ffe1da4db8fb1c94"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/projectsHome.ts",
+      "sha256": "07bde3b0c63ac19b98cb07a838dd7ad92fa699157acff66eb707e65a87497f46"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/WorkspacePanel.tsx",
+      "sha256": "217742f5bb60f85fddc3248dd2244ce64d98947ebc46aa2a4fc71916d6d841c1"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/ScenariosPanel.tsx",
+      "sha256": "40eec2507cf15db1aad9fc6448274967b3e0c6fd9716ac12a9da5ca986c57cc8"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/SnapshotsPanel.tsx",
+      "sha256": "6deebb19bde340fb07e0c88e039fae6269a66a863b4cce25c1126db2b5a35b50"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/CompareView.tsx",
+      "sha256": "8fc9050f2ca12204f0aa3d0d81774e82dd76fb46a5ba37f6b22396ff10587b2e"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/NewProjectWizard.tsx",
+      "sha256": "9b5d6430148cbdafb4fab112bb7e39f4df4c2d3b9124020dfc0b303c1ed59c34"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/Sidebar.tsx",
+      "sha256": "e8c3103f34f812fd9a3d4471da474f5fa2fe0eb8fb9b6e3de0fd0ff13273316e"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/api/projects.ts",
+      "sha256": "ad93c166dd4d2d166b6f479f59cc46e2634f113c7292bb2ffc330b70b06421e2"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/api/types.ts",
+      "sha256": "1ab5f3b36787d6d1a36d046ecf28c9170fab6b001b9932993aea6b50d236f837"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/store/activeSection.ts",
+      "sha256": "b452f3f1dfb2f4d8cb77752a38fe2946096af278da24ed0c96ef46e32c5dd161"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/store/uiStore.ts",
+      "sha256": "a4a67fe99e7cb773211a9964b347ce61aca0b1a5419e28ff7b5ba87efc0800e4"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/utils/projectActions.ts",
+      "sha256": "f5233c60b7a83c6505e4d236cdeceeae393b31f0c6e97872913566b0b30d98c7"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/projects.py",
+      "sha256": "92c4b27cdfcd2746d4068ca93c2d2b1cd761365906cf54061148b52ea2f86db7"
+    },
+    {
+      "path": "pypsa-gui/backend/routers/snapshots.py",
+      "sha256": "ba03dfab8184b79940408be4853999f2a1e41b6c260683e74f572f2b61171489"
+    },
+    {
+      "path": "pypsa-gui/backend/models/schemas.py",
+      "sha256": "d1c0204f381a08ade7c05bb08d67047615261fd3d0a917f0bd6f46ba1e456cfa"
+    },
+    {
+      "path": "pypsa-gui/backend/db/models.py",
+      "sha256": "f2c04bf48da02a6165fda9e91b2eaf6044baa726f4505880af7d1eabf286188b"
+    },
+    {
+      "path": "pypsa-gui/backend/services/active_project.py",
+      "sha256": "21ce88e59fee8e6aeeaabe4ec76d6081dff7e8afb6131acca09d158368ff1780"
+    },
+    {
+      "path": "pypsa-gui/backend/services/pypsa_service.py",
+      "sha256": "ef0f9a7719808616632eb46a68b2d79d01095e32bc9a62e0a852a7e6f1f95680"
+    },
+    {
+      "path": "pypsa-gui/backend/services/project_context.py",
+      "sha256": "a6dd8063f01215db2e3e3da83f8d3ed78c38c26e790b78afc541a66e023f218f"
+    },
+    {
+      "path": "pypsa-gui/backend/services/project_acl.py",
+      "sha256": "3070db071e6cc5c2de790776a0bf59aa7dc218cae9d9798165af752925926bbd"
+    },
+    {
+      "path": "pypsa-gui/backend/services/project_registry.py",
+      "sha256": "d753bb252535a945ec8ea5f35e349de8dac7f1001617bf3a138e9a822bb8fde6"
+    },
+    {
+      "path": "pypsa-gui/backend/services/project_locks.py",
+      "sha256": "e5d78ff1fc808b84ac802d5131e9eaeb88981b973a318878f4a7b2523240bf43"
+    },
+    {
+      "path": "pypsa-gui/backend/services/undo_service.py",
+      "sha256": "98a7e0ea369882332992d9ccb95822b8f15b00e6712eb1ac13bd8c2b51c42d89"
+    },
+    {
+      "path": "pypsa-gui/backend/services/workflow_tools.py",
+      "sha256": "e0a82c3fbad5efbe7fe942e3d0cbd563019c6aaeadb2673d1127d2b5b03f6af0"
+    },
+    {
+      "path": "pypsa-gui/backend/main.py",
+      "sha256": "316378eb37c734c6efce31a44f4f6ea50f44df4ff7ac8f3150e68719d5fc143f"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/18-sensitivity-comparison.md",
+      "sha256": "0be84d100f16f2fbd222e28455b19ead43a2461ef82d4e47bfc7755c5e06793b"
+    },
+    {
+      "path": ".scratch/live-copilot/issues/17-sensitivity-create-and-run.md",
+      "sha256": "14ee56dd47637c44ca1a69b159020f8fd4080db64794effd66c65ee77a6dcb7a"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/README.md",
+      "sha256": "ec898cd0a9be08b25c8625dc0cf1421f730e700dab0cb48cfc76e8a24f652723"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/catalogue.py",
+      "sha256": "255e915938a55c2ea553e5d5b4c4e7aacaf25cad22ee1c7ae78ca7f5d26cdd36"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/continuation.py",
+      "sha256": "d48470d6a21d219fff7c4c89b41410035df599bbbcbec922666b356880ccd99c"
+    },
+    {
+      "path": "pypsa-gui/backend/harness/navigation.py",
+      "sha256": "8bbe00e4787522e7b0dc6f9f05f06da3b50e05f55fb3d3228ec440a559e7551c"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/AssistantDock.tsx",
+      "sha256": "09639ad77cd154ef24b3fa60d787d85fcffc547f0d7a4ef7d0eb477a33509c48"
+    }
+  ],
+  "commands": {
+    "python": "/workspace/pypsa-eur/.pixi/envs/test/bin/python",
+    "backend_common": "PYTHONPATH=<repository> NUMBA_CACHE_DIR=/tmp/gridspine-pm-numba MPLCONFIGDIR=/tmp/gridspine-pm-mpl OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 <python> -m pytest <listed test files> -q -p no:warnings -o faulthandler_timeout=45 --junitxml=<output>",
+    "frontend": "node node_modules/vitest/vitest.mjs run <listed frontend files> --maxWorkers=2 --reporter=json --outputFile=<output>",
+    "restore_probes": "Copy probes/audit_restore_probes.py temporarily into backend/tests/test_pm_audit_verification.py; execute pytest through existing fixture discovery, then remove temporary copy"
+  },
+  "execution_notes": [
+    "pytest-xdist not installed: final backend tests ran sequentially, no dependency install",
+    "Initial restricted invocation did not complete HTTP tests and was terminated; final authenticated tests completed with permitted network access and faulthandler timeouts",
+    "Initial audit-probe fixture/path startup attempts ran no assertions; final three assertions executed and failed as recorded",
+    "Shared frontend node_modules used through temporary symlink; no package install or shared dependency edits"
+  ],
+  "not_performed": [
+    "full remote CI/premerge",
+    "full backend/frontend regression",
+    "live-browser or multi-user usability assessment",
+    "exhaustive route/module verification",
+    "restart/fault-injection rollback transaction certification",
+    "paid model/media calls",
+    "production data writes",
+    "external reviewer contact",
+    "deployment",
+    "implementation of shared edits or restore fixes"
+  ],
+  "open_work": [
+    {
+      "pr": 496,
+      "state_at_inspection": "open",
+      "scope": "six work-card scope and per-example presets; reconcile before UI implementation"
+    },
+    {
+      "spec": "integration-sensitivities.md S5/S6",
+      "state": "planned behavior broader than current native A/B and bounded sweep"
+    }
+  ],
+  "artifact_checks": {
+    "authored_json": "pass",
+    "document_links": "pass",
+    "audit_probe_syntax": "pass",
+    "feature_count": 24,
+    "shared_edit_acceptance_cases": 20,
+    "source_pins": "pass",
+    "delivery_and_dependency_mapping": "pass",
+    "required_acceptance_cases_documented": 116,
+    "chatbot_tool_references": "pass"
+  },
+  "authored_artifacts": {
+    "01-MASTER-FEATURE-AUDIT.md": "129217825852d9a0fe0e8e0d73d1952dfc01f82b4c224f156a7c3499ac0de738",
+    "02-SHARED-ASSUMPTIONS-SPEC.md": "085723e76df179b24ea13263051ad733247df58f9e973b8b3382b4371ae26349",
+    "03-CHATBOT-INTEGRATION-SPEC.md": "c783aa0c3eb9f20cfe9de333962fb94e342eb94824ceca1f0cd74856e9036e78",
+    "04-IMPLEMENTATION-PLAN.md": "62e61f3b95589d38477ef169b0c2fb417d304507bfe958f0cf3c667f23962aec",
+    "05-API-AND-UX-CONTRACTS.md": "110a79d67e46f507e25c29ecb57096ccf812868a768412a1ca0cb1a6b16b2765",
+    "06-AI-PRIORITIES-AND-COST-SPEC.md": "b876829250062556e63d838b80bc2db18f14e1d469d03f544aeed6bd38e0a711",
+    "HANDOFF.md": "c080cb44565e7c9373f7bc6d98fe7806e1e36fea4f339839838fd6458733e9bc",
+    "README.md": "13cdbc8564c3a722a5ca7aa52b57eb3933147c97850d047fa67a1c8673effd89",
+    "ai-priorities.json": "817b815391aceb22fb88cc6abe502e54352cb3f5f87871433525219703aba74d",
+    "ai-priority-evidence.json": "941a019d8794053b3605f33f986030a49058026fe88f1dbad8cf15b0b7a7a956",
+    "chatbot-integration.json": "95d2602611d340ad512f4562b11b5fbc8052d26919b6d657af71fe382571e14b",
+    "findings.json": "520389f085cd9db638e91612739a59d9288cd48172aa7e254299565961300f4a",
+    "implementation-plan.json": "328fc79c4f0a7479a124cc81b74f37dd61de13aa3b6025a639e221fa87d27f91",
+    "master-feature-audit.json": "8f551552f8413f6c6b1b96d0f7624f2b0235bdaaa1f991feacf7a376f6b10ece",
+    "probes/audit_restore_probes.py": "d9bb0a191bbf258d7a38fb5aed07dcf5212430d67077f670d40ca013ea1f507e",
+    "validate_specs.py": "d352da16cc6abb37b24d385269dd6956b9a866405952be9ad7d35fe56d2a002a"
+  },
+  "specification_publication": {
+    "scope": "Entire project-management implementation including chatbot integration",
+    "checked_at_utc": "2026-10-21T18:54:58.392348+00:00",
+    "runtime_implementation": false,
+    "delivery_packages": 15,
+    "required_acceptance_cases_documented": 116,
+    "domain_contexts": 9,
+    "chatbot_capabilities": 12,
+    "new_runtime_tests_executed": false,
+    "historical_test_results_not_repeated": true,
+    "remote_ci_status": "must be read on published head; no green/premerge claim",
+    "focused_ai_assessment_baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15"
+  },
+  "focused_ai_assessment": {
+    "record": "ai-priority-evidence.json",
+    "baseline": "87546ef5d184a9b20c80a65e2164f7fac0930f15",
+    "existing_tests_passed": 120,
+    "new_feature_tests_executed": false,
+    "roi_or_paid_benchmark": false
+  }
+}
