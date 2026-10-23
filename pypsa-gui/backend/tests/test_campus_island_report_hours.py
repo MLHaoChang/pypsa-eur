@@ -27,8 +27,8 @@ from services import campus_electrical_service as ce
 from services.campus_island_report import CAVEAT, island_report
 from tests.test_campus_island_service import _config, project, user_and_db  # noqa: F401
 
-STATIC_MISSING = "island steady state and short circuit at the island hours (I4, I5, I5b)"
-FREQ_MISSING = "island frequency check at the island hours (I6)"
+STATIC_MISSING = "island steady state and short circuit at the island hours"
+FREQ_MISSING = "island frequency check at the island hours"
 
 
 def _tables(report):
@@ -242,3 +242,14 @@ def test_an_infinite_value_reads_as_inf_text_so_the_payload_is_strict_json(saved
     at = {c: i for i, c in enumerate(t["columns"])}
     assert t["rows"][0][at["autonomy_s"]] == "inf"
     assert t["rows"][0][at["needed_s"]] == "-inf"
+
+
+def test_no_title_model_or_missing_item_carries_an_internal_plan_tag(saved):
+    import re
+
+    run = _run_dir(saved)
+    _static(run)
+    _freq(run)
+    report = island_report(saved)
+    shown = [t["title"] for t in report["tables"]] + [t["model"] for t in report["tables"]] + report["missing"]
+    assert not [s for s in shown if re.search(r"\((I\d|Q\d)", s)]

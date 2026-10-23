@@ -1769,7 +1769,7 @@ export function SclopfPanel({
         <div className="px-3 py-2 bg-panel border border-border rounded text-[11px] text-muted">
           <span className="font-medium text-text">Resolved contingencies: {totalResolved}</span>
           {totalResolved === 0 && n1On && (
-            <span className="ml-2 text-danger">— pick at least one source above (otherwise the solve runs without N-1 security).</span>
+            <span className="ml-2 text-danger">— pick at least one source above, or switch N-1 security off under What the Run computes.</span>
           )}
           {totalResolved > 200 && (
             <span className="ml-2 text-warn">— large set, the LP may be slow.</span>

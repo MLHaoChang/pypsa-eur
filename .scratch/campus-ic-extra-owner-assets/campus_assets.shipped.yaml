@@ -1,0 +1,784 @@
+# The shipped default asset library for the campus electrical study (plan C7),
+# adopted from the 2026-10-12 reference-cost proposal.
+#
+# Reference costs for the campus asset library, read from public, cited
+# sources. These are REFERENCE VALUES, NOT QUOTES: a regulator's standard
+# costs or a planning catalogue's figures, converted to one currency and price
+# year. They do not replace vendor quotes.
+#
+# The investment case's defaults pack (version 2026-10-23) transcribes these
+# costs, and its manifest pins this file's sha256: a price change here needs a
+# new pack version, never an edit of a shipped one.
+#
+# How each number was read and converted:
+#   docs/superpowers/research/2026-10-12-campus-asset-reference-costs.md
+# Every cost carries its source tag and a note naming the row it came from.
+#
+# Tags. `literature`: read from a cited source below, converted as stated.
+# `assumed`: no usable source was found for that kind or size, or the value is
+# extrapolated outside the source's range; the note says which. Ratings,
+# impedances and losses are unchanged from the shipped library and stay
+# `assumed` (only a cost may be tagged `literature`).
+#
+# Sources (citation keys used in the notes):
+#   [EI-NVL]    Energimarknadsinspektionen (Swedish Energy Markets Inspectorate),
+#               "Normvärdeslista elnät 2024-2027", xlsx, sheet "NVL RP4", column
+#               "Normvärde 2022 [SEK]" (2023-10-13). Installed costs of grid
+#               assets used to value Swedish DSOs' capital base.
+#               https://ei.se/download/18.61d7efeb18b048db98c4e48/1697184391450/Normv%C3%A4rdeslista-2024-2027.xlsx
+#   [DEA-TRANS] Danish Energy Agency and Energinet, "Technology Data for Energy
+#               Transport", version 0008 (Dec 2025), ch. 1, Table 13 (O&M in %
+#               of capex) and Table 7 note 5. https://ens.dk/media/7680/download
+#   [DEA-DIST]  Danish Energy Agency and Energinet, "Technology Data for Energy
+#               Transport", version 0006, ch. 111 "Electricity distribution
+#               grid", data sheets (technical lifetime 40 a, note C; fixed O&M
+#               0.51 % of investment, notes L and Q). Version 0008 states that
+#               its distribution-level data are unchanged.
+#               https://ens.dk/media/6440/download
+#   [NEP-2021]  50Hertz, Amprion, TenneT, TransnetBW, "Netzentwicklungsplan
+#               Strom 2035, Version 2021, 2. Entwurf: Kostenschätzungen"
+#               (standard costs, cost basis mid-2020; quoted in notes only).
+#               https://www.netzentwicklungsplan.de/sites/default/files/2023-02/26_NEP_2035_V2021_2E_Kostenschaetzung_0.pdf
+#
+# Conversion. Money is EUR in 2025 prices. SEK of 2022 -> EUR at the ECB's
+# 2022 annual average reference rate, 10.6296 SEK/EUR (series
+# EXR.A.SEK.EUR.SP00.A), then escalated 2022 -> 2025 by the producer price
+# index for NACE C27.1 (electric motors, generators, transformers and
+# electricity distribution and control apparatus): Eurostat dataset
+# sts_inpp_a, euro area EA20, total market, unadjusted, index 2021=100,
+# annual values 108.6 (2022) -> 119.8 (2025), factor 1.1031; retrieved
+# 2026-10-12; the owner chose this index on 2026-10-12. Combined:
+# 1 SEK (2022) = 0.10378 EUR (2025). Rounded
+# to 100 EUR. A size between two of the source's sizes is interpolated on a
+# straight line in log-log (a local power law); the exponent is in the note.
+#
+# The discount rate is unchanged (0.07, assumed): no source here justifies
+# another, and the project's own rate replaces it when the study runs.
+#
+# Layout as in the shipped library: every number is {value, source[, note]}.
+
+discount_rate: {value: 0.07, source: assumed, note: "unchanged stand-in, no source justifies another; the project's own rate replaces it (plan D1a)"}
+currency: EUR
+price_year: 2025
+
+transformers:
+  - id: TR_132_33_20
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed, note: "producers/campus.py _TRAFO_CLASS"}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed, note: "producers/campus.py PFE_KW_PER_MVA x s_mva"}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1311000, source: literature, note: "[EI-NVL] R-NR-T-5-2, 123-145/36-52 kV 20 MVA, 12632363 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_25
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1352200, source: literature, note: "[EI-NVL] R-NR-T-5-3, 123-145/36-52 kV 25 MVA, 13029601 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_31p5
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1404500, source: literature, note: "[EI-NVL] 123-145/36-52 kV, log-log interpolation between R-NR-T-5-4 (30 MVA, 13438444 SEK) and R-NR-T-5-5 (40 MVA, 14006581 SEK), exponent 0.144: 13533150 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_40
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1453600, source: literature, note: "[EI-NVL] R-NR-T-5-5, 123-145/36-52 kV 40 MVA, 14006581 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_50
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 50.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 50.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1548000, source: literature, note: "[EI-NVL] 123-145/36-52 kV, log-log interpolation between R-NR-T-5-5 (40 MVA, 14006581 SEK) and R-NR-T-5-6 (63 MVA, 15920189 SEK), exponent 0.282: 14916001 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_63
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 63.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 63.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1652200, source: literature, note: "[EI-NVL] R-NR-T-5-6, 123-145/36-52 kV 63 MVA, 15920189 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_80
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 80.0, source: assumed}
+    vk_percent: {value: 12.5, source: assumed}
+    vkr_percent: {value: 0.35, source: assumed}
+    pfe_kw: {value: 80.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1879900, source: literature, note: "[EI-NVL] R-NR-T-5-7, 123-145/36-52 kV 80 MVA, 18114444 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_132_33_100
+    hv_kv: {value: 132.0, source: assumed}
+    lv_kv: {value: 33.0, source: assumed}
+    s_mva: {value: 100.0, source: assumed}
+    vk_percent: {value: 12.5, source: assumed}
+    vkr_percent: {value: 0.35, source: assumed}
+    pfe_kw: {value: 100.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 2201300, source: literature, note: "[EI-NVL] R-NR-T-5-8, 123-145/36-52 kV 100 MVA, 21210929 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_16
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 16.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 16.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 795400, source: literature, note: "[EI-NVL] R-NR-T-4-1, 123-145/12-24 kV 16 MVA, 7664165 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_20
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 939900, source: literature, note: "[EI-NVL] R-NR-T-4-2, 123-145/12-24 kV 20 MVA, 9056806 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_25
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1001400, source: literature, note: "[EI-NVL] R-NR-T-4-3, 123-145/12-24 kV 25 MVA, 9648928 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_31p5
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1109900, source: literature, note: "[EI-NVL] 123-145/12-24 kV, log-log interpolation between R-NR-T-4-4 (30 MVA, 10502113 SEK) and R-NR-T-4-5 (40 MVA, 11692751 SEK), exponent 0.373: 10695146 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_40
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1213500, source: literature, note: "[EI-NVL] R-NR-T-4-5, 123-145/12-24 kV 40 MVA, 11692751 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_50
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 50.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 50.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1351100, source: literature, note: "[EI-NVL] 123-145/12-24 kV, log-log interpolation between R-NR-T-4-5 (40 MVA, 11692751 SEK) and R-NR-T-4-6 (63 MVA, 14550720 SEK), exponent 0.481: 13018702 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_110_20_63
+    hv_kv: {value: 110.0, source: assumed}
+    lv_kv: {value: 20.0, source: assumed}
+    s_mva: {value: 63.0, source: assumed}
+    vk_percent: {value: 11.0, source: assumed}
+    vkr_percent: {value: 0.4, source: assumed}
+    pfe_kw: {value: 63.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1510100, source: literature, note: "[EI-NVL] R-NR-T-4-6, 123-145/12-24 kV 63 MVA, 14550720 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_2p5
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 2.5, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 2.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 244300, source: assumed, note: "outside the source's range (Ei 24-36/12 kV: 4-25 MVA): power law fitted to its six rows, 1334738 x S^0.619 SEK (2022), extrapolated, -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_4
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 4.0, source: assumed}
+    vk_percent: {value: 7.0, source: assumed}
+    vkr_percent: {value: 0.8, source: assumed}
+    pfe_kw: {value: 4.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 352500, source: literature, note: "[EI-NVL] R-NR-T-1-1, 24-36/12 kV 4 MVA, 3396373 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_6p3
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 6.3, source: assumed}
+    vk_percent: {value: 7.0, source: assumed}
+    vkr_percent: {value: 0.8, source: assumed}
+    pfe_kw: {value: 6.3, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 428800, source: literature, note: "[EI-NVL] R-NR-T-1-2, 24-36/12 kV 6.3 MVA, 4131638 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_10
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 10.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 10.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 493000, source: literature, note: "[EI-NVL] R-NR-T-1-3, 24-36/12 kV 10 MVA, 4750625 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_16
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 16.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 16.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 857200, source: literature, note: "[EI-NVL] R-NR-T-1-4, 24-36/12 kV 16 MVA, 8260262 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_20
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 20.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 20.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 782500, source: literature, note: "[EI-NVL] R-NR-T-1-5, 24-36/12 kV 20 MVA, 7540068 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_25
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 25.0, source: assumed}
+    vk_percent: {value: 8.0, source: assumed}
+    vkr_percent: {value: 0.6, source: assumed}
+    pfe_kw: {value: 25.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1135400, source: literature, note: "[EI-NVL] R-NR-T-1-6, 24-36/12 kV 25 MVA, 10940180 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_31p5
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 31.5, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 31.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1173600, source: assumed, note: "outside the source's range (Ei 24-36/12 kV: 4-25 MVA): power law fitted to its six rows, 1334738 x S^0.619 SEK (2022), extrapolated, -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_33_11_40
+    hv_kv: {value: 33.0, source: assumed}
+    lv_kv: {value: 11.0, source: assumed}
+    s_mva: {value: 40.0, source: assumed}
+    vk_percent: {value: 10.0, source: assumed}
+    vkr_percent: {value: 0.5, source: assumed}
+    pfe_kw: {value: 40.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 1360800, source: assumed, note: "outside the source's range (Ei 24-36/12 kV: 4-25 MVA): power law fitted to its six rows, 1334738 x S^0.619 SEK (2022), extrapolated, -> EUR 2025"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_20_0p4_0p4
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 0.4, source: assumed}
+    vk_percent: {value: 4.0, source: assumed}
+    vkr_percent: {value: 1.2, source: assumed}
+    pfe_kw: {value: 0.4, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 13600, source: literature, note: "[EI-NVL] 24/0.4 kV, log-log interpolation between NG15913 (315 kVA, 114525 SEK) and NG15912 (500 kVA, 148100 SEK), exponent 0.556: 130807 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_20_0p4_0p63
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 0.63, source: assumed}
+    vk_percent: {value: 4.0, source: assumed}
+    vkr_percent: {value: 1.2, source: assumed}
+    pfe_kw: {value: 0.63, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 18600, source: literature, note: "[EI-NVL] 24/0.4 kV, log-log interpolation between NG15912 (500 kVA, 148100 SEK) and NG15911 (800 kVA, 217721 SEK), exponent 0.820: 178996 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_20_0p4_1p0
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 1.0, source: assumed}
+    vk_percent: {value: 5.0, source: assumed}
+    vkr_percent: {value: 1.0, source: assumed}
+    pfe_kw: {value: 1.0, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 26200, source: literature, note: "[EI-NVL] L-NG-T-2-1, 24/0.4 kV 1000 kVA, 252237 SEK (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_20_0p4_1p6
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 1.6, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 1.6, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 36300, source: assumed, note: "outside the source's range (Ei 24/0.4 kV: 315-1250 kVA): power law fitted to its five rows, 251558 x S^0.702 SEK (2022, S in MVA), extrapolated, -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: TR_20_0p4_2p5
+    hv_kv: {value: 20.0, source: assumed}
+    lv_kv: {value: 0.4, source: assumed}
+    s_mva: {value: 2.5, source: assumed}
+    vk_percent: {value: 6.0, source: assumed}
+    vkr_percent: {value: 0.9, source: assumed}
+    pfe_kw: {value: 2.5, source: assumed}
+    i0_percent: {value: 0.1, source: assumed}
+    capex_eur: {value: 49700, source: assumed, note: "outside the source's range (Ei 24/0.4 kV: 315-1250 kVA): power law fitted to its five rows, 251558 x S^0.702 SEK (2022, S in MVA), extrapolated, -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+
+cables:
+  - id: CB_33_AL95
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed, note: "typical three-core XLPE, aluminium conductor, buried"}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.134, source: assumed}
+    c_nf_per_km: {value: 135.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 123700, source: assumed, note: "Ei lists no three-core 95 mm2 cable at 36 kV: L-NR-KL-5-1 (3x150, 1287680 SEK/km) x the 24 kV 95/150 ratio 0.9255 (NG14614/NG14615) = 1191714 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_33_AL150
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.125, source: assumed}
+    c_nf_per_km: {value: 150.0, source: assumed}
+    max_i_ka: {value: 0.27, source: assumed}
+    capex_eur_per_km: {value: 133600, source: literature, note: "[EI-NVL] L-NR-KL-5-1, buried cable, rural normal ground, 36 kV 3x150 mm2, 1287680 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_33_AL240
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.115, source: assumed}
+    c_nf_per_km: {value: 170.0, source: assumed}
+    max_i_ka: {value: 0.35, source: assumed}
+    capex_eur_per_km: {value: 137100, source: literature, note: "[EI-NVL] L-NR-KL-5-2, buried cable, rural normal ground, 36 kV 3x240 mm2, 1321465 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_33_AL400
+    vn_kv: {value: 33.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.11, source: assumed}
+    c_nf_per_km: {value: 190.0, source: assumed}
+    max_i_ka: {value: 0.44, source: assumed}
+    capex_eur_per_km: {value: 157200, source: literature, note: "[EI-NVL] L-NR-KL-5-4, buried cable, rural normal ground, 36 kV 3x400 mm2, 1514718 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_20_AL95
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.12, source: assumed}
+    c_nf_per_km: {value: 250.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 52300, source: literature, note: "[EI-NVL] NG14614, buried cable, rural normal ground, 24 kV 3x95 mm2, 503516 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_20_AL150
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.115, source: assumed}
+    c_nf_per_km: {value: 280.0, source: assumed}
+    max_i_ka: {value: 0.28, source: assumed}
+    capex_eur_per_km: {value: 56500, source: literature, note: "[EI-NVL] NG14615, buried cable, rural normal ground, 24 kV 3x150 mm2, 544063 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_20_AL240
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.105, source: assumed}
+    c_nf_per_km: {value: 320.0, source: assumed}
+    max_i_ka: {value: 0.36, source: assumed}
+    capex_eur_per_km: {value: 62900, source: literature, note: "[EI-NVL] NG14616, buried cable, rural normal ground, 24 kV 3x240 mm2, 606267 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_20_AL400
+    vn_kv: {value: 20.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.1, source: assumed}
+    c_nf_per_km: {value: 380.0, source: assumed}
+    max_i_ka: {value: 0.46, source: assumed}
+    capex_eur_per_km: {value: 85000, source: literature, note: "[EI-NVL] L-NR-KL-2-2, buried cable, rural normal ground, 24 kV 3x400 mm2, 818922 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_11_AL95
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 95.0, source: assumed}
+    r_ohm_per_km: {value: 0.32, source: assumed}
+    x_ohm_per_km: {value: 0.108, source: assumed}
+    c_nf_per_km: {value: 300.0, source: assumed}
+    max_i_ka: {value: 0.22, source: assumed}
+    capex_eur_per_km: {value: 48400, source: literature, note: "[EI-NVL] NG14624, buried cable, rural normal ground, 12 kV 3x95 mm2, 466377 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_11_AL150
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 150.0, source: assumed}
+    r_ohm_per_km: {value: 0.206, source: assumed}
+    x_ohm_per_km: {value: 0.1, source: assumed}
+    c_nf_per_km: {value: 350.0, source: assumed}
+    max_i_ka: {value: 0.28, source: assumed}
+    capex_eur_per_km: {value: 51400, source: literature, note: "[EI-NVL] NG14625, buried cable, rural normal ground, 12 kV 3x150 mm2, 495118 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_11_AL240
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 240.0, source: assumed}
+    r_ohm_per_km: {value: 0.125, source: assumed}
+    x_ohm_per_km: {value: 0.095, source: assumed}
+    c_nf_per_km: {value: 400.0, source: assumed}
+    max_i_ka: {value: 0.36, source: assumed}
+    capex_eur_per_km: {value: 57300, source: literature, note: "[EI-NVL] NG14626, buried cable, rural normal ground, 12 kV 3x240 mm2, 551762 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: CB_11_AL400
+    vn_kv: {value: 11.0, source: assumed}
+    cross_section_mm2: {value: 400.0, source: assumed}
+    r_ohm_per_km: {value: 0.078, source: assumed}
+    x_ohm_per_km: {value: 0.09, source: assumed}
+    c_nf_per_km: {value: 470.0, source: assumed}
+    max_i_ka: {value: 0.46, source: assumed}
+    capex_eur_per_km: {value: 78300, source: literature, note: "[EI-NVL] L-NR-KL-1-2, buried cable, rural normal ground, 12 kV 3x400 mm2, 754518 SEK/km (2022) -> EUR 2025"}
+    opex_frac: {value: 0.0051, source: literature, note: "[DEA-DIST] fixed O&M 0.51 % of investment a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+
+capacitor_banks:
+  - id: CAP_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 68100, source: literature, note: "[EI-NVL] R-NR-KB-2-1 base cost 401118 SEK + R-NR-KB-2-2 51042 SEK/Mvar x 5 Mvar = 656328 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 94600, source: literature, note: "[EI-NVL] R-NR-KB-2-1 base cost 401118 SEK + R-NR-KB-2-2 51042 SEK/Mvar x 10 Mvar = 911538 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    steps: {value: 4, source: assumed}
+    capex_eur: {value: 147600, source: literature, note: "[EI-NVL] R-NR-KB-2-1 base cost 401118 SEK + R-NR-KB-2-2 51042 SEK/Mvar x 20 Mvar = 1421958 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 38400, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 2 Mvar = 370176 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 52200, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 5 Mvar = 503331 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    steps: {value: 4, source: assumed}
+    capex_eur: {value: 75300, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 10 Mvar = 725256 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 33800, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 1 Mvar = 325791 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    steps: {value: 1, source: assumed}
+    capex_eur: {value: 40700, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 2.5 Mvar = 392368 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+  - id: CAP_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    steps: {value: 2, source: assumed}
+    capex_eur: {value: 52200, source: literature, note: "[EI-NVL] R-NR-KB-1-1 base cost 281406 SEK + R-NR-KB-1-2 44385 SEK/Mvar x 5 Mvar = 503331 SEK (2022) -> EUR 2025; bay and control equipment not included (the bay is priced as switchgear)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 25, source: assumed, note: "no source found for a capacitor bank's lifetime; unchanged"}
+
+shunt_reactors:
+  - id: SR_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 150000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    capex_eur: {value: 250000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    capex_eur: {value: 450000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    capex_eur: {value: 90000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 150000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    capex_eur: {value: 250000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    capex_eur: {value: 60000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    capex_eur: {value: 100000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+  - id: SR_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    capex_eur: {value: 160000, source: assumed, note: "no source found for a medium-voltage shunt reactor; unchanged. [NEP-2021] prices a 380 kV 100 Mvar reactor at 21 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 30, source: assumed, note: "no source found for a reactor's lifetime; unchanged"}
+
+statcoms:
+  - id: SC_33_5M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed, note: "symmetric: +/- this much"}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 450000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_33_10M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 800000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_33_20M
+    vn_kv: {value: 33.0, source: assumed}
+    q_mvar: {value: 20.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 1500000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_20_2M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 2.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 250000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_20_5M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 500000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_20_10M
+    vn_kv: {value: 20.0, source: assumed}
+    q_mvar: {value: 10.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 850000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_11_1M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 1.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 150000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_11_2p5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 2.5, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 300000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+  - id: SC_11_5M
+    vn_kv: {value: 11.0, source: assumed}
+    q_mvar: {value: 5.0, source: assumed}
+    losses_percent: {value: 1.2, source: assumed}
+    capex_eur: {value: 500000, source: assumed, note: "no source found for a medium-voltage STATCOM; unchanged. [NEP-2021] prices a 380 kV 100 Mvar STATCOM at 130 kEUR/Mvar (mid-2020)"}
+    opex_frac: {value: 0.03, source: assumed, note: "no source found for a STATCOM's fixed O&M; unchanged"}
+    lifetime_a: {value: 20, source: assumed, note: "no source found for a STATCOM's lifetime; unchanged"}
+
+switchgear:
+  - id: SG_132_31p5
+    vn_kv: {value: 132.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed, note: "2.5 x ik_rated_ka, the 50 Hz ratio in static/campus_sc.py"}
+    capex_eur: {value: 343600, source: literature, note: "[EI-NVL] R-NR-SF-8-5 breaker feeder bay 3077299 SEK + R-NR-KF-2-1 its control equipment 233524 SEK = 3310823 SEK per bay (2022) -> EUR 2025; Ei does not price by short-circuit rating"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_132_40p0
+    vn_kv: {value: 132.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 394800, source: assumed, note: "the 31.5 kA bay's cited cost x the library's earlier 40/31.5 kA ratio 1.1489 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_110_31p5
+    vn_kv: {value: 110.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 343600, source: literature, note: "[EI-NVL] R-NR-SF-7-5 breaker feeder bay 3077299 SEK + R-NR-KF-2-1 its control equipment 233524 SEK = 3310823 SEK per bay (2022) -> EUR 2025; Ei does not price by short-circuit rating"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_110_40p0
+    vn_kv: {value: 110.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 395100, source: assumed, note: "the 31.5 kA bay's cited cost x the library's earlier 40/31.5 kA ratio 1.1500 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_33_25p0
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 69000, source: literature, note: "[EI-NVL] R-NR-SF-3-3 breaker feeder bay 431735 SEK + R-NR-KF-2-1 its control equipment 233524 SEK = 665259 SEK per bay (2022) -> EUR 2025; Ei does not price by short-circuit rating"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_33_31p5
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 76700, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 31.5/25 kA ratio 1.1111 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_33_40p0
+    vn_kv: {value: 33.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 87700, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 40/25 kA ratio 1.2716 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_20_25p0
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 45800, source: literature, note: "[EI-NVL] R-NR-SF-2-3 breaker feeder bay 365156 SEK + R-NR-KF-1-1 its control equipment 76187 SEK = 441343 SEK per bay (2022) -> EUR 2025; Ei does not price by short-circuit rating"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_20_31p5
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 50900, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 31.5/25 kA ratio 1.1111 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_20_40p0
+    vn_kv: {value: 20.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 58500, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 40/25 kA ratio 1.2778 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_11_25p0
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 25.0, source: assumed}
+    ip_rated_ka: {value: 62.5, source: assumed}
+    capex_eur: {value: 40300, source: literature, note: "[EI-NVL] R-NR-SF-1-3 breaker feeder bay 311894 SEK + R-NR-KF-1-1 its control equipment 76187 SEK = 388081 SEK per bay (2022) -> EUR 2025; Ei does not price by short-circuit rating"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_11_31p5
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 31.5, source: assumed}
+    ip_rated_ka: {value: 78.75, source: assumed}
+    capex_eur: {value: 45300, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 31.5/25 kA ratio 1.1250 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}
+  - id: SG_11_40p0
+    vn_kv: {value: 11.0, source: assumed}
+    ik_rated_ka: {value: 40.0, source: assumed}
+    ip_rated_ka: {value: 100.0, source: assumed}
+    capex_eur: {value: 52400, source: assumed, note: "the 25 kA bay's cited cost x the library's earlier 40/25 kA ratio 1.3000 (an assumption: Ei does not price by short-circuit rating)"}
+    opex_frac: {value: 0.015, source: literature, note: "[DEA-TRANS] Table 13, onshore AC substation, 1.5 % of capex a year"}
+    lifetime_a: {value: 40, source: literature, note: "[DEA-DIST] technical lifetime of distribution stations and cables, 40 a"}

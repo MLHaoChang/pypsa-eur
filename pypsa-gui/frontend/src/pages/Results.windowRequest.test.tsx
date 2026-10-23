@@ -57,4 +57,41 @@ describe('the checked window request', () => {
     expect(screen.getByTestId('loadflow-window').textContent).toBe(`${SNAPSHOTS[10]}|${SNAPSHOTS[20]}`.replace(/(\d\d:\d\d):\d\d/g, '$1:00'))
     expect(useUIStore.getState().resultsWindowRequest).toBeNull()
   })
+
+  async function open(start: string, end: string) {
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false, activeSlidePanel: 'results' })
+    useUIStore.getState().requestResultsTab('loadflow')
+    useUIStore.getState().requestResultsWindow({ start, end })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={client}><Results /></QueryClientProvider>)
+    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+  }
+
+  it('clamps a window that reaches past the horizon and says so', async () => {
+    await open('2025-12-31T00:00:00', SNAPSHOTS[20])
+    expect(screen.getByTestId('loadflow-window').textContent).toBe(`${SNAPSHOTS[0].slice(0, 16)}:00|${SNAPSHOTS[20].slice(0, 16)}:00`)
+    expect(screen.getByTestId('results-window-note').textContent).toMatch(/reaches past this network's horizon/)
+  })
+
+  it('tells the user when the window is wholly outside the horizon', async () => {
+    await open('2020-01-01T00:00:00', '2020-01-02T00:00:00')
+    expect(screen.getByTestId('results-window-note').textContent).toMatch(/outside this network's horizon/)
+    expect(useUIStore.getState().resultsWindowRequest).toBeNull()
+  })
+
+  it('gives a reversed window its own wording', async () => {
+    await open(SNAPSHOTS[20], SNAPSHOTS[10])
+    const note = screen.getByTestId('results-window-note').textContent ?? ''
+    expect(note).toMatch(/ends before it starts/)
+    expect(note).not.toMatch(/outside/)
+  })
+
+  it('clears the note when the user edits From or To', async () => {
+    await open('2020-01-01T00:00:00', '2020-01-02T00:00:00')
+    expect(screen.getByTestId('results-window-note')).toBeTruthy()
+    fireEvent.click(screen.getByText('Horizon filter'))
+    const from = screen.getByText('From').closest('label')!.querySelector('input')!
+    fireEvent.change(from, { target: { value: SNAPSHOTS[5].slice(0, 16) } })
+    expect(screen.queryByTestId('results-window-note')).toBeNull()
+  })
 })

@@ -90,7 +90,7 @@ ISSUE_TITLES: dict[str, str] = {
 
     # Security-constrained dispatch (SCLOPF)
     "sclopf_with_transmission_losses": "N-1 security cannot be combined with line losses",
-    "sclopf_no_branches": "N-1 security has no branches to check yet",
+    "sclopf_no_branches": "N-1 security needs at least one branch to check",
     "sclopf_large_contingency_set": "Many contingencies: the solve will be slow",
     "sclopf_radial_subnet": "Radial network part: contingencies would island it",
     "sclopf_scope_invalid": "Security-constraint scope not recognised",

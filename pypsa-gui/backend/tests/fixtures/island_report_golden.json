@@ -2,8 +2,8 @@
   "caveat": "Screening, not a certificate: a steady-state hub LP, converter-aware fault current and aggregate-frequency screening of the site's island capability.",
   "missing": [
     "campus run with island tables",
-    "island steady state and short circuit at the island hours (I4, I5, I5b)",
-    "island frequency check at the island hours (I6)"
+    "island steady state and short circuit at the island hours",
+    "island frequency check at the island hours"
   ],
   "tables": [
     {

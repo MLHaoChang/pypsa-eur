@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Five small display fixes: island requirement rows start with a capital, the Control tab shows "Frequency cuts" once, edit cards round long numbers that carry no display value, the Results window note clears when From/To is edited, and a reversed chart window gets its own wording.

@@ -130,8 +130,9 @@ export function GridFormingTab() {
   if (gfm.isPending) return <div className="p-4"><Note>Loading…</Note></div>
   return (
     <div className="space-y-3 p-4 h-full overflow-y-auto" data-testid="grid-forming-tab">
+      {/* the section below wears the one Out of date pill, with its reason */}
       {gfm.data.recommendation && (
-        <Provenance at={gfm.data.recommended_at} stale={gfm.data.state === 'stale'} testId="grid-forming-from" />
+        <Provenance at={gfm.data.recommended_at} stale={false} testId="grid-forming-from" />
       )}
       <p className="text-[11px] text-muted" data-testid="grid-forming-label">Heuristic screening, not a certificate.</p>
       <CampusIslandGfmSection name={name} />

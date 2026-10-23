@@ -185,15 +185,54 @@ def test_the_pack_rows_are_the_transcription(new):
     assert len(new.seeded_from["campus_equipment"]["sha256"]) == 64
 
 
-def test_the_campus_cost_fields_match_the_current_yaml(new):
+def _yaml_sha256() -> str:
+    import hashlib
+
+    return hashlib.sha256((REPO / CAMPUS_YAML).read_bytes()).hexdigest()
+
+
+def _version_pinning(sha256: str) -> str | None:
+    """The latest pack version whose manifest pins the campus YAML at `sha256` (campus-IC 03A: the
+    parity test follows the YAML, never a version name); None when no version pins it."""
+    from services.library.defaults_pack import loader
+
+    def pinned(v: str):
+        manifest = json.loads((loader.version_dir(v) / "manifest.json").read_text(encoding="utf-8"))
+        return manifest.get("seeded_from", {}).get("campus_equipment", {}).get("sha256")
+
+    pinning = [v for v in loader.available_versions() if pinned(v) == sha256]
+    return pinning[-1] if pinning else None
+
+
+def test_the_campus_cost_fields_match_the_current_yaml():
     """G-3, review note 8, gate r1 note 4: the campus session edits the YAML (§8: it points at the
-    pack key), so only a cost value that differs, or an id that is gone, fails — and says why."""
+    pack key), so only a cost value that differs, or an id that is gone, fails — and says why.
+    The YAML is compared with the latest version whose manifest pins its sha256 (campus-IC 03A),
+    so shipping a new library needs a pack version that pins it first."""
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    version = _version_pinning(_yaml_sha256())
+    if version is None:
+        pytest.fail(f"{CAMPUS_YAML}: no defaults pack version pins its sha256 {_yaml_sha256()}; "
+                    "a price change needs a new pack version, never an edit of a shipped one")
+    pack = load_defaults_pack(version)
+    seed = pack.seeded_from["campus_equipment"]
     lib = _yaml()
-    assert (lib["currency"], lib["price_year"]) == ("EUR", 2026)
-    bad = _cost_mismatches(new, lib)
+    assert (lib["currency"], lib["price_year"]) == (seed["currency"], seed["price_year"])
+    bad = _cost_mismatches(pack, lib)
     if bad:
         pytest.fail(f"{CAMPUS_YAML}: a price change needs a new pack version, never an edit of "
-                    f"2026-10-07 ({len(bad)}: {'; '.join(bad[:5])})")
+                    f"{version} ({len(bad)}: {'; '.join(bad[:5])})")
+
+
+def test_the_parity_check_picks_the_latest_version_that_pins_the_yaml():
+    from services.library.defaults_pack import loader
+
+    manifest = json.loads((loader.version_dir(NEW) / "manifest.json").read_text(encoding="utf-8"))
+    placeholders = manifest["seeded_from"]["campus_equipment"]["sha256"]
+    picked = _version_pinning(placeholders)          # 2026-10-07 .. 2026-10-22 pin the placeholders
+    assert picked == "2026-10-22"
+    assert _version_pinning("0" * 64) is None
 
 
 def test_the_parity_check_ignores_non_cost_edits_and_catches_a_price_change(new):

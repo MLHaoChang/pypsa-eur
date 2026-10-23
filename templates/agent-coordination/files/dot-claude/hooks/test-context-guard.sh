@@ -48,8 +48,8 @@ go s1 "$t"; check "+20k warns again" "Context at 220k" "$out" $code
 go s2 "$t"; check "another session warns on its own" "Context at 220k" "$out" $code
 
 : >"$HOME/.claude-coordinator"
-transcript "$t" 10 100000 55000            # 155010
-go s3 "$t"; check "coordinator limit is 150k" "Context at 155k (limit 150k)" "$out" $code
+transcript "$t" 10 250000 55000            # 305010
+go s3 "$t"; check "coordinator limit is 300k" "Context at 305k (limit 300k)" "$out" $code
 rm "$HOME/.claude-coordinator"
 
 # Fail open.

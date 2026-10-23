@@ -5,7 +5,7 @@ description: The coordinator session's own procedure (the other side of steward)
 
 The **coordinator** relays the owner's decisions to the work sessions, does every merge and keeps the owner's dashboard current. PR sessions follow `.claude/skills/steward/SKILL.md`. This skill is the coordinator's side of the same rules. Owner decisions that change a rule land here or in steward; the sweep routine's prompt only points at this file.
 
-At start, `touch ~/.claude-coordinator`: the context-guard hook then warns at 150k instead of 200k.
+At start, `touch ~/.claude-coordinator`: the context-guard hook then warns at 300k instead of 200k (owner decision COORD-CTX-1).
 
 Work from a checkout of current master. Before a sweep, run `git switch master && git pull --ff-only`. A stale checkout loads stale `AGENTS.md`, steward and `scripts/coord/`.
 
@@ -34,7 +34,7 @@ Every wake re-reads the whole context, so fewer wakes cost less.
 
 ## Rotation
 
-A long context is this session's largest cost. Rotate to a fresh coordinator when `get_session` (no id) shows `context_usage.used_tokens` above 150k, or once a day, whichever comes first. The scratchpad is per session, so the new coordinator gets the state as content, not as files.
+A long context is this session's largest cost. Rotate to a fresh coordinator when `get_session` (no id) shows `context_usage.used_tokens` above 300k (owner decision COORD-CTX-1), or once a day, whichever comes first. The scratchpad is per session, so the new coordinator gets the state as content, not as files.
 
 1. **Brief.** Write a coordinator brief at the top of the state file (`## Coordinator brief`, with [Time](#time)'s stamp):
    - pending PRs, each with its head SHA and the gatekeeper's OK for that SHA;

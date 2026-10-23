@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The solve queue writes a job's run evidence before its status turns terminal, so a caller of `wait_for_job` that reads the evidence right away no longer sees `experiment_evidence_unavailable`.
