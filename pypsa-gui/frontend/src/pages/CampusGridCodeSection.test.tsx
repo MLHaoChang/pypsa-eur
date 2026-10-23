@@ -203,6 +203,36 @@ describe('grid codes: extract', () => {
     expect(screen.getByTestId('limit-rvc_limit_pct')).toBeTruthy()
   })
 
+  it('shows the SAGC-type limits a profile sets, and none it does not', async () => {
+    const lim = (value: number) => ({ value, clause: 'generic clause', source: 'code' as const })
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      rvc_limit_infrequent_pct: lim(3), pf_min_lagging: lim(0.9), pf_min_leading: lim(0.95),
+      q_capability_pq: { clause: 'generic clause', source: 'code', points: [[0, -0.1, 0.1], [1, -0.3, 0.3]] } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    expect((await screen.findByTestId('limit-rvc_limit_infrequent_pct')).textContent).toContain('Rapid voltage change, infrequent')
+    expect(screen.getByTestId('limit-rvc_limit_infrequent_pct').textContent).toContain('3 %')
+    const band = screen.getByTestId('limit-q_capability_pq').textContent
+    expect(band).toContain('Reactive power band against active power at the PCC')
+    expect(band).toContain('P 0 pu: Q −0.1 to 0.1 pu · P 1 pu: Q −0.3 to 0.3 pu')
+    expect(band).not.toContain('…')
+    expect(screen.getByTestId('limit-pf_min_lagging').textContent).toContain('Minimum power factor, lagging')
+    expect(screen.getByTestId('limit-pf_min_leading').textContent).toContain('0.95')
+  })
+
+  it('shows no SAGC-type row for a profile without those limits', async () => {
+    api.extractGridCode.mockResolvedValue(draft())
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    await screen.findByTestId('limit-rvc_limit_pct')
+    for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading']) {
+      expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
+    }
+  })
+
   it('leaves the profile id out when none is typed, so the backend derives one', async () => {
     api.extractGridCode.mockResolvedValue(draft())
     renderPanel()

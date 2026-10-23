@@ -245,6 +245,10 @@ def _results(run: Path):
         "compliance": _read_csv(run / cs.COMPLIANCE_CSV),
         "reactive": _read_csv(run / cs.REACTIVE_CSV),
         "requirement": json.loads((run / cs.REQUIREMENT_JSON).read_text()),
+        # What the grid code requires that no steady-state check can show ("needs an RMS study"); [] for a run
+        # from before it was kept.
+        "reported_requirements": (json.loads((run / cs.REPORTED_REQUIREMENTS_JSON).read_text())
+                                  if (run / cs.REPORTED_REQUIREMENTS_JSON).is_file() else []),
         # Part two: what the library was drawn on. All None when the run did not invest.
         "investment": investment,
         "cost": _read_csv(run / cs.COST_CSV),

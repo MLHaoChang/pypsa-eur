@@ -29,7 +29,8 @@ Rules (gatekeeper review of 02):
 
 * a missing input gives ``unknown``, never ``pass``;
 * a requirement only a dynamic study can show (the profile's
-  ``dynamic_requirements``) is always ``unknown``, "dynamic (EMT) study needed";
+  ``dynamic_requirements``) is always ``unknown``, "needs an RMS study" (EMT
+  where the code asks for it);
 * ``assumed`` is true unless the limit's own tag is ``code`` (an extracted,
   unconfirmed limit counts as assumed) or the user set it with a source other
   than ``assumed``, or an input it rests on is assumed
@@ -439,6 +440,37 @@ def _oscillation_row(inp: _Inputs) -> dict:
                 section="connection", target=target)
 
 
+def _rvc_infrequent_row(inp: _Inputs) -> dict:
+    """The infrequent tier of a two-tier RVC limit (``rvc_limit_infrequent_pct``):
+    the whole connection switched at once, connection / fault level × 100."""
+    target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                     "eh_sk_mva")
+    req = "Rapid voltage change at the PoC on an infrequent event (the whole connection switched)"
+    unit = "% of nominal"
+    lim = (inp.profile or {}).get("rvc_limit_infrequent_pct")
+    if not isinstance(lim, dict):
+        return _row("rapid_voltage_change_infrequent", req, rule=RULE_RVC, limit=None, unit=unit,
+                    source=inp.profile_error or "no limit set", project_value=None, verdict="unknown",
+                    assumed=True, note="No limit set: the grid code sets no infrequent rapid-voltage-change tier",
+                    section="connection", target=target)
+    limit, source = float(lim["value"]), f"{_profile_title(inp)}: {lim['clause']}"
+    lim_assumed = lim.get("source") != "code"
+    sk = _poc_sk_mva(inp.n) if inp.n is not None else None
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    if not inp.connection_mw or sk is None:
+        return _row("rapid_voltage_change_infrequent", req, rule=RULE_RVC, limit=limit, unit=unit, source=source,
+                    project_value=None, verdict="unknown", assumed=lim_assumed or fault_assumed,
+                    note="No short-circuit level at the point of connection" if sk is None
+                    else "No connection capacity", section="connection", target=target)
+    d = inp.connection_mw / sk * 100.0
+    return _row("rapid_voltage_change_infrequent", req, rule=RULE_RVC, limit=limit, unit=unit, source=source,
+                project_value=round(d, 4), verdict=_judge(d, limit, RULE_RVC), assumed=lim_assumed or fault_assumed,
+                note=(f"Voltage change ≈ connection capacity / fault level × 100 = {inp.connection_mw:g} MW / "
+                      f"{sk:g} MVA: a screening upper bound (IEC 61000-3-7 style) that ignores the grid X/R; "
+                      "above the limit a power-flow or EMT study is needed"),
+                section="connection", target=target)
+
+
 def _rvc_row(inp: _Inputs) -> dict:
     target = _target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                      "eh_sk_mva")
@@ -585,7 +617,7 @@ def _support_rows(inp: _Inputs) -> list[dict]:
                          source=f"{_profile_title(inp)}: {r['clause']}",
                          project_value=(_services_text(offered) if offered else None),
                          verdict="unknown", assumed=r.get("source") != "code",
-                         note=("Needs a dynamic (EMT) study; it applies to "
+                         note=("Needs an RMS study (dynamic; EMT where the code asks for it); it applies to "
                                f"{_APPLIES_WORDS.get(r.get('applies_to', 'facility'), 'the site')}; a "
                                "steady-state screening never passes it"),
                          section="assets", target=target))
@@ -820,7 +852,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
+            _rvc_row(inp), _rvc_infrequent_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
             _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
