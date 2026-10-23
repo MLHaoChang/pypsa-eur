@@ -1630,11 +1630,13 @@ class CampusSource:
         return cls(refusal=code, detail=detail, digest=json_digest({"error": code}))
 
 
-def _ic_campus_digest(source_hash, stale, flags, assets, unresolved=(), summary=None) -> str:
+def _ic_campus_digest(source_hash, stale, flags, assets, unresolved=(), summary=None,
+                      lineage=()) -> str:
     """The `extra_assets` staleness part. The study's own statements (campus-IC
     02/05: `unresolved` as given; the summary's `study_method` and each asset's
-    cost tag, after the cut) join only when stated, so a study that states none
-    of them keeps its digest from before (GK plan condition 1)."""
+    cost tag, after the cut; campus-IC 04: each asset's `lineage`, `purchase`,
+    `replaces` and `service_to`) join only when stated, so a study that states
+    none of them keeps its digest from before (GK plan condition 1)."""
     from services.finance.investment_case_runner import json_digest
 
     parts = {"source_hash": source_hash, "stale": stale, "flags": list(flags), "assets": assets}
@@ -1646,7 +1648,64 @@ def _ic_campus_digest(source_hash, stale, flags, assets, unresolved=(), summary=
             if (p, i) != (None, None)]
     if tags:
         parts["cost_tags"] = tags
+    if lineage:
+        parts["lineage"] = [list(x) for x in lineage]
     return json_digest(parts)
+
+
+def _ic_lineage_meta(assets: list) -> list:
+    """(name, purchase, lineage, replaces, service_to) of each asset whose meta
+    states a lineage (campus plan C14), for the digest (campus-IC 04, e)."""
+    out = []
+    for a in assets:
+        meta = a.get("meta")
+        if isinstance(meta, dict) and meta.get("lineage") is not None:
+            out.append((a.get("name"), meta.get("purchase"), meta.get("lineage"),
+                        meta.get("replaces"), meta.get("service_to")))
+    return out
+
+
+def _ic_fold_lineages(assets: list) -> list | str:
+    """Campus-IC 04 (c): each lineage's renewals folded into its first purchase,
+    as `[(i, first purchase, [renewals by build year])]` in the producer's order;
+    an entry without a stated lineage stands alone. Refused (a detail of fixed
+    text and `_ic_asset_label` only): a renewal whose `replaces` names no entry,
+    whose lineage is not its first purchase's, or whose kind, basis, quantity or
+    part names differ from it (campus plan C14 buys like for like, so a
+    difference is the producer's fault, never stored as a total); a lineage with
+    two first purchases."""
+    def meta(a):
+        m = a.get("meta")
+        return m if isinstance(m, dict) else {}
+
+    by_name = {a.get("name"): a for a in assets}
+    heads: dict = {}
+    for i, a in enumerate(assets):
+        lin = meta(a).get("lineage")
+        if meta(a).get("replaces") is None and lin is not None:
+            if lin in heads:
+                return f"{_ic_asset_label(a, i)} is a second first purchase of one lineage"
+            heads[lin] = a
+    later: dict[int, list] = {}
+    for i, a in enumerate(assets):
+        if meta(a).get("replaces") is None:
+            continue
+        seen, prev = set(), a
+        while meta(prev).get("replaces") is not None:      # walk back to the first purchase
+            if id(prev) in seen or meta(prev).get("replaces") not in by_name:
+                return f"{_ic_asset_label(a, i)} replaces no entry of the campus study"
+            seen.add(id(prev))
+            prev = by_name[meta(prev).get("replaces")]
+        head = prev
+        if meta(a).get("lineage") is None or meta(a).get("lineage") != meta(head).get("lineage"):
+            return f"{_ic_asset_label(a, i)} is not of the lineage it replaces"
+        parts = [p.get("name") if isinstance(p, dict) else None for p in a.get("parts") or ()]
+        first = [p.get("name") if isinstance(p, dict) else None for p in head.get("parts") or ()]
+        if any(a.get(k) != head.get(k) for k in ("kind", "basis", "quantity")) or parts != first:
+            return f"{_ic_asset_label(a, i)} is not like for like with its first purchase"
+        later.setdefault(id(head), []).append(a)
+    return [(i, a, later.get(id(a), [])) for i, a in enumerate(assets)
+            if meta(a).get("replaces") is None]
 
 
 #: Lengths a campus string is cut to in the report (campus-IC 02/05): the
@@ -1791,15 +1850,24 @@ def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
         (("campus_needs_unresolved",) if unresolved else ())
     bare = [{k: v for k, v in a.items() if k != "meta"} for a in assets]
     summary = _ic_campus_summary(resp, tags, unresolved)
-    digest = _ic_campus_digest(source_hash, stale, flags, bare, unresolved, summary)
+    digest = _ic_campus_digest(source_hash, stale, flags, bare, unresolved, summary,
+                               _ic_lineage_meta(assets))
     if stale:                             # GK plan condition 5: no summary for a stale study
         return CampusSource(flags=flags, unsaved=unsaved, digest=digest)
-    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    folded = _ic_fold_lineages(assets)
+    if isinstance(folded, str):
+        return CampusSource.refused("campus_assets_invalid", folded)
+    lineage_fields = {"renewals", "service_to", "existing_renewal"}
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset) if f.name not in lineage_fields]
     extras = []
-    for i, a in enumerate(bare):          # one at a time: the refused asset is known
+    for i, a, renewals in folded:         # one at a time: the refused asset is known
         try:
-            extras.append(ExtraOwnerAsset(**{k: a[k] for k in names}))
-        except (KeyError, TypeError, ValueError) as exc:
+            kw = {k: a[k] for k in names}
+            meta = a.get("meta") if isinstance(a.get("meta"), dict) else {}
+            if meta.get("lineage") is not None:
+                kw.update(_ic_lineage_fields(meta, renewals))
+            extras.append(ExtraOwnerAsset(**kw))
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
             logger.warning("investment_case: campus asset %s refused: %s",
                            _ic_asset_label(a, i), type(exc).__name__)
             return CampusSource.refused(
@@ -1807,6 +1875,22 @@ def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
                 f"{_ic_asset_label(a, i)} is not a valid extra owner asset")
     return CampusSource(extras=tuple(extras), flags=flags, unsaved=unsaved, digest=digest,
                         summary=summary)
+
+
+def _ic_lineage_fields(meta: dict, renewals: list) -> dict:
+    """`ExtraOwnerAsset`'s lineage fields from a first purchase's meta and its
+    renewals (campus-IC 04): `service_to`; `existing_renewal` when the first
+    entry is itself a renewal (an existing asset's, `action` "renew"); one
+    `CampusRenewal` per renewal and part, amount = upfront_per_unit × quantity."""
+    from services.finance.case import CampusRenewal
+
+    return {"service_to": meta.get("service_to"),
+            "existing_renewal": meta.get("action") == "renew",
+            "renewals": tuple(
+                CampusRenewal(part=p["name"], build_year=r["build_year"],
+                              amount=p["upfront_per_unit"] * r["quantity"], name=r["name"],
+                              service_to=r["meta"].get("service_to"))
+                for r in sorted(renewals, key=lambda r: r["build_year"]) for p in r["parts"])}
 
 
 def _ic_campus_source(finance: dict | None) -> CampusSource:
@@ -1841,7 +1925,7 @@ def _ic_campus_source(finance: dict | None) -> CampusSource:
             flags = ("campus_study_unavailable",)
             return CampusSource(flags=flags, digest=_ic_campus_digest(None, None, flags, []))
         try:
-            resp = ce.owner_assets_response(row)
+            resp = ce.owner_assets_response(row, replacements=True)     # campus-IC 04
         except Exception as exc:  # noqa: BLE001 — HTTPException, ContractError, anything
             logger.warning("investment_case: the campus study's owner assets could not be "
                            "read: %r", exc)

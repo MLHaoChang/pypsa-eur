@@ -672,6 +672,8 @@ Controls retain priority even if a query explicitly names more than 128 tools.
 Anthropic and other compatible endpoints keep their eligible catalogues, with
 the same optional provider-neutral toolset views.
 
+A goal-mode `find_capabilities` call replaces the session's discovered-tool selection hints with its returned names. Those hints rank below controls and pending plan tools but above explicit names, recent calls and query matches, so the next request (including in the same turn) offers the found tools. The current toolset and project eligibility still filter them; discovery grants no authority and does not change confirmation or dispatch checks.
+
 GridSpine studies bind a networkless backend project context on activation;
 the session pointer survives cold resolution. Tool selection reads that active
 context, so the study tools follow the project shown in the browser. A study

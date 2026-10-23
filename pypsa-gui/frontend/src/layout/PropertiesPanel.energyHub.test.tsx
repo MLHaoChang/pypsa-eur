@@ -77,7 +77,12 @@ describe('EH payload helpers', () => {
   it('clears an existing tag', () => {
     expect(ehBusPayload({ eh_poc: 'false', eh_critical: 'false',
       eh_sk_mva: '', eh_ibr_mva: '' }, bus({ eh_poc: true, eh_sk_mva: 200 })))
-      .toEqual({ eh_poc: false, eh_sk_mva: null })
+      .toEqual({ eh_poc: false })
+    // A PoC bus's fault level is never sent from Properties; any other bus's is.
+    expect(ehBusPayload({ eh_poc: 'true', eh_critical: 'false', eh_sk_mva: '300', eh_ibr_mva: '' },
+      bus({ eh_poc: true, eh_sk_mva: 200 }))).toEqual({ eh_poc: true })
+    expect(ehBusPayload({ eh_poc: 'false', eh_critical: 'false', eh_sk_mva: '300', eh_ibr_mva: '' },
+      bus({ eh_sk_mva: 200 }))).toMatchObject({ eh_sk_mva: 300 })
     expect(ehLinkPayload({ eh_role: '' }, link({ eh_role: 'grid_import' })))
       .toEqual({ eh_role: '' })
   })
@@ -96,19 +101,33 @@ describe('Bus card — Energy Hub section', () => {
       selectedComponent: { type: 'Bus', name: 'hub' } })
   })
 
-  it('tags the bus as critical with a short-circuit level', async () => {
+  it('tags the bus as critical; the short-circuit level is read-only', async () => {
     renderPanel()
     await userEvent.click(await screen.findByRole('button', { name: /edit bus/i }))
     await userEvent.click(screen.getByRole('checkbox', { name: /critical bus/i }))
-    const sk = screen.getByText(/short-circuit level/i).closest('label')!
-      .querySelector('input')!
-    await userEvent.type(sk, '250')
+    // A bus that is not a point of connection keeps its own short-circuit field.
+    expect(screen.queryByTestId('eh-sk-readonly')).toBeNull()
+    expect(screen.getByText(/short-circuit level/i).closest('label')!.querySelector('input')).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: /^save$/i }))
     await vi.waitFor(() => expect(networkApi.updateBus).toHaveBeenCalledTimes(1))
     const [, payload] = vi.mocked(networkApi.updateBus).mock.calls[0]
-    expect(payload).toMatchObject({ eh_critical: true, eh_sk_mva: 250 })
+    expect(payload).toMatchObject({ eh_critical: true })
     expect(payload).not.toHaveProperty('eh_poc')
   })
+
+  it.each([['expert', 'campusElectrical'], ['guided', null]] as const)(
+    'a PoC bus shows the short-circuit level read-only and routes to Connection & grid in %s', async (mode, panel) => {
+      useUIStore.setState({ uiMode: mode })
+      vi.mocked(networkApi.getBuses).mockResolvedValue([bus({ eh_poc: true, eh_sk_mva: 250 })])
+      renderPanel()
+      await userEvent.click(await screen.findByRole('button', { name: /edit bus/i }))
+      expect(screen.getByTestId('eh-sk-readonly').querySelector('input')).toBeNull()
+      expect(screen.getByTestId('eh-sk-readonly').textContent).toContain('250')
+      await userEvent.click(screen.getByRole('button', { name: 'Edit in Connection & grid ›' }))
+      const ui = useUIStore.getState()
+      if (panel) expect(ui.activeSlidePanel).toBe(panel)
+      else expect(ui.fieldDrawer).toMatchObject({ section: 'connection', panel: 'campusElectrical', field: 'eh_sk_mva' })
+    })
 
   it('keeps an existing tag through an unrelated save', async () => {
     vi.mocked(networkApi.getBuses).mockResolvedValue([bus({ eh_poc: true })])

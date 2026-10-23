@@ -1166,6 +1166,234 @@
     "weather_choice": {
       "surface": "inline",
       "why": "PUT /profiles/weather refused a weather source or year the project cannot save (a source that is not synthetic or atlite, or a year outside what the source serves: a completed year from 1900 for synthetic, from 1940 for ERA5). The detail message names the bounds; the assistant says which value to change. There is no conversation-wide recovery action."
+    },
+    "brief_cases_not_runnable": {
+      "surface": "inline",
+      "why": "start_task refuses cases outside the admitted network-case count or domain. The assistant proposes at most two supported network cases and leaves the rest for a reviewed follow-up."
+    },
+    "brief_inputs_unreadable": {
+      "surface": "inline",
+      "why": "start_task cannot fingerprint the project's inputs for its brief. The assistant explains that the inputs must be readable before drafting a current plan."
+    },
+    "evidence_too_large": {
+      "surface": "inline",
+      "why": "Run-evidence publication refuses a section above the native storage bound. The assistant uses smaller supported evidence sections rather than claiming that the oversized section was saved."
+    },
+    "evidence_unavailable": {
+      "surface": "inline",
+      "why": "get_run_evidence or a run comparison cannot read finished, retained evidence. The assistant names the missing evidence and does not substitute live values or declare the run verified."
+    },
+    "experiment_adapter_unavailable": {
+      "surface": "inline",
+      "why": "prepare_experiment has no execution adapter for the requested domain. The assistant explains the supported boundary and does not start an alternative engine implicitly."
+    },
+    "experiment_already_armed": {
+      "surface": "inline",
+      "why": "prepare_experiment refuses to replace an existing execution ledger and its frozen inputs. The assistant inspects that ledger before proposing another action."
+    },
+    "experiment_baseline_unavailable": {
+      "surface": "inline",
+      "why": "Experiment preflight requires a completed, intact baseline matching current inputs. The assistant asks for compatible retained evidence rather than restoring historical inputs silently."
+    },
+    "experiment_checkpoint_unreadable": {
+      "surface": "inline",
+      "why": "An experiment operation cannot reconcile its checkpoint with the index or reads invalid or uncertain state. The assistant reports the checkpoint issue without creating a replacement or retrying execution."
+    },
+    "experiment_context_changed": {
+      "surface": "inline",
+      "why": "Experiment preflight detects changed project, ownership or inputs. The assistant refreshes the current context and prepares a new reviewed proposal before execution."
+    },
+    "experiment_not_found": {
+      "surface": "inline",
+      "why": "An experiment read or update cannot find the owned plan in this project. The assistant lists the current project's experiments instead of guessing an identifier."
+    },
+    "experiment_project_required": {
+      "surface": "inline",
+      "why": "Experiment tools require a saved, active project. The assistant asks the user to create or open that project before planning an experiment."
+    },
+    "experiment_request_conflict": {
+      "surface": "inline",
+      "why": "start_experiment finds a request_id already bound to different plan content. The assistant inspects the existing plan and uses a distinct request only for a genuinely new reviewed plan."
+    },
+    "experiment_storage_full": {
+      "surface": "inline",
+      "why": "start_experiment refuses because the project's bounded experiment store is full. The assistant reports the limit without discarding existing plans."
+    },
+    "experiment_storage_unavailable": {
+      "surface": "inline",
+      "why": "An experiment operation cannot access its native store and starts no operation. The assistant reports the storage problem without assuming that a plan or execution was created."
+    },
+    "experiment_target_invalid": {
+      "surface": "inline",
+      "why": "Experiment preflight finds a value invalid under the actual component schema or changed by coercion. The assistant corrects the proposed value explicitly before requesting a new review."
+    },
+    "experiment_target_unavailable": {
+      "surface": "inline",
+      "why": "Experiment preflight cannot resolve the declared asset, field or value type in the supported static input schema. The assistant reads the available native target and asks for an admitted change."
+    },
+    "experiment_unit_mismatch": {
+      "surface": "inline",
+      "why": "Experiment preflight requires the exact native field unit and refuses implicit conversion. The assistant obtains the schema unit and revises the proposal before approval."
+    },
+    "invalid_brief": {
+      "surface": "inline",
+      "why": "start_task refuses a malformed objective, cards, cases or phase partition. The assistant drafts a bounded brief with declared cards and each step in exactly one ordered phase."
+    },
+    "invalid_experiment": {
+      "surface": "inline",
+      "why": "start_experiment refuses malformed identifiers, title or nonfinite plan data. The assistant corrects those arguments without claiming a plan was stored."
+    },
+    "invalid_experiment_cases": {
+      "surface": "inline",
+      "why": "start_experiment refuses invalid case IDs, labels, counts or change lists. The assistant constructs cases within the declared native bounds before submitting a new plan."
+    },
+    "invalid_experiment_change": {
+      "surface": "inline",
+      "why": "An experiment change has invalid keys, path, value type, unit or value. The assistant reads the native input contract and proposes a correctly typed change."
+    },
+    "invalid_experiment_domain": {
+      "surface": "inline",
+      "why": "start_experiment refuses an unknown domain. The assistant selects an actually supported domain without claiming that its execution adapter exists."
+    },
+    "invalid_experiment_limit": {
+      "surface": "inline",
+      "why": "list_experiments refuses a list size outside its native bound. The assistant requests a limit from one to twenty."
+    },
+    "invalid_experiment_limits": {
+      "surface": "inline",
+      "why": "start_experiment refuses invalid case, attempt, time or cost caps or failure policy. The assistant supplies finite bounded limits and the declared stop or continue policy."
+    },
+    "invalid_run_comparison": {
+      "surface": "inline",
+      "why": "compare_project_runs requires distinct recorded run IDs and an explicit valid input-change flag. The assistant selects runs from the owned project's run list and clarifies the comparison basis."
+    },
+    "invalid_run_limit": {
+      "surface": "inline",
+      "why": "list_project_runs refuses a requested page size outside the native bound. The assistant uses a supported smaller page rather than reporting a complete run inventory."
+    },
+    "invalid_run_metrics": {
+      "surface": "inline",
+      "why": "A run comparison requires bounded recorded metric names. The assistant inspects available metrics and requests only those actually retained."
+    },
+    "invalid_run_offset": {
+      "surface": "inline",
+      "why": "list_project_runs refuses a negative or malformed page offset. The assistant retries the read with a nonnegative integer offset."
+    },
+    "invalid_run_section": {
+      "surface": "inline",
+      "why": "get_run_evidence refuses a malformed section name. The assistant selects an existing lowercase snake_case evidence section."
+    },
+    "invalid_run_status": {
+      "surface": "inline",
+      "why": "list_project_runs refuses an unknown status filter. The assistant uses one of the native run statuses instead of inventing a state."
+    },
+    "invalid_task": {
+      "surface": "inline",
+      "why": "start_task refuses malformed titles, request IDs, steps or oversized arguments. The assistant proposes a smaller valid ordered plan and does not claim an invalid plan was saved."
+    },
+    "invalid_task_args": {
+      "surface": "inline",
+      "why": "start_task finds arguments that do not match the named tool's callable signature. The assistant checks that tool's required inputs before presenting the corrected plan."
+    },
+    "invalid_task_limit": {
+      "surface": "inline",
+      "why": "list_tasks refuses a page limit outside one to twenty. The assistant uses a supported bounded limit."
+    },
+    "invalid_task_reference": {
+      "surface": "inline",
+      "why": "start_task or reference resolution refuses a malformed or forward step reference. The assistant uses a whole-value reference to an earlier declared step."
+    },
+    "invalid_task_resolution": {
+      "surface": "inline",
+      "why": "resolve_task_step accepts only completed or retry and a bounded finite result object. The assistant supplies valid arguments while leaving native evidence checks authoritative."
+    },
+    "invalid_task_tool": {
+      "surface": "inline",
+      "why": "start_task refuses a control, project-rebinding tool, interactive Choice or an explicit wait inside a brief. The assistant revises the plan to ordinary admitted steps without hidden nested controls."
+    },
+    "run_already_finalized": {
+      "surface": "inline",
+      "why": "Run-evidence publication refuses to replace an immutable terminal manifest. The assistant reads the original result instead of claiming a replacement publication succeeded."
+    },
+    "run_not_found": {
+      "surface": "inline",
+      "why": "Run-evidence reads or comparisons cannot find an owned run in this project. The assistant lists the project's recorded runs and selects a real identifier."
+    },
+    "run_project_required": {
+      "surface": "inline",
+      "why": "Run-evidence tools require a saved, active project. The assistant asks the user to create or open the relevant project before reading retained runs."
+    },
+    "task_brief_stale": {
+      "surface": "inline",
+      "why": "A brief's next effect detects inputs changed outside the plan or cannot read them. The assistant explains the stale inputs and drafts a new brief for review rather than continuing the old one."
+    },
+    "task_cancelled": {
+      "surface": "inline",
+      "why": "resume_task cannot restart a cancelled plan. The assistant offers a new reviewed plan instead of replaying cancelled steps."
+    },
+    "task_dependency_pending": {
+      "surface": "inline",
+      "why": "Task reference resolution finds an earlier step not completed. The assistant waits for that step or inspects its failure without using an unavailable result."
+    },
+    "task_not_found": {
+      "surface": "inline",
+      "why": "Task tools cannot find the owned plan in the current project. The assistant lists current tasks and does not reveal or guess another owner's plan."
+    },
+    "task_not_paused": {
+      "surface": "inline",
+      "why": "The plan-card continuation has no current card pause to clear. The assistant refreshes the plan state instead of advancing a different boundary."
+    },
+    "task_pause_needs_user": {
+      "surface": "inline",
+      "why": "resume_task cannot clear a card-boundary pause. The assistant waits for the user's Continue on the existing plan card, which approves no later effect."
+    },
+    "task_paused_at_card": {
+      "surface": "inline",
+      "why": "Task admission refuses a next step before the user continues at its card boundary. The assistant leaves the pause in place and explains the pending card."
+    },
+    "task_project_required": {
+      "surface": "inline",
+      "why": "Task tools require a saved, active project. The assistant helps select that project before starting or reading a durable plan."
+    },
+    "task_reference_missing": {
+      "surface": "inline",
+      "why": "A task reference names data absent from a saved step result. The assistant inspects the actual result rather than inventing the missing field."
+    },
+    "task_reference_too_large": {
+      "surface": "inline",
+      "why": "Resolved task arguments exceed the native bound. The assistant uses file IDs or smaller result references instead of silently clipping an action."
+    },
+    "task_request_conflict": {
+      "surface": "inline",
+      "why": "start_task finds a request_id already identifying different plan content. The assistant inspects the existing plan and proposes a new request only for a genuinely different reviewed plan."
+    },
+    "task_resolution_not_needed": {
+      "surface": "inline",
+      "why": "resolve_task_step finds no failed or uncertain step needing reconciliation. The assistant reads the current plan rather than changing a completed, cancelled or pending step."
+    },
+    "task_resolution_unverifiable": {
+      "surface": "inline",
+      "why": "resolve_task_step cannot prove completion from the step's native records. The assistant reports the unresolved effect and asks for inspection, an explicitly approved retry or cancellation."
+    },
+    "task_step_already_completed": {
+      "surface": "inline",
+      "why": "Task admission refuses replay of a completed step. The assistant resumes the next step instead of repeating its effect."
+    },
+    "task_step_needs_retry": {
+      "surface": "inline",
+      "why": "A brief's next effect is blocked because its step failed. The assistant uses the correction hints and asks for an explicitly confirmed reconciliation before any retry."
+    },
+    "task_step_running": {
+      "surface": "inline",
+      "why": "Task resume or reconciliation finds the originating turn or worker still running. The assistant waits for it to stop before reconciling or retrying the step."
+    },
+    "task_step_uncertain": {
+      "surface": "inline",
+      "why": "Task admission cannot safely repeat a step whose effect is uncertain. The assistant inspects native effects and explicitly reconciles it first."
+    },
+    "task_unreadable": {
+      "surface": "inline",
+      "why": "Task tools cannot read a valid durable checkpoint. The assistant reports that the checkpoint needs repair instead of creating completion evidence or replaying work."
     }
   }
 }

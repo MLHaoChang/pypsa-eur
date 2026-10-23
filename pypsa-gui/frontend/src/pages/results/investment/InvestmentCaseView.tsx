@@ -274,6 +274,9 @@ function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload 
             : `${c.illustrative} of ${c.rows.length} campus costs are`} assumed in the campus asset
           {' '}library, not quotes.</p>
       )}
+      {c.lifeNotes.map((t, i) => (
+        <p key={i} className="text-muted" data-testid="ic-campus-life">{t}</p>
+      ))}
       {n > 0 && (
         <div role="note" className="text-warn" data-testid="ic-campus-unresolved">
           <p>The grid study found no equipment for {n === 1 ? '1 need' : `${n} needs`}, so by this

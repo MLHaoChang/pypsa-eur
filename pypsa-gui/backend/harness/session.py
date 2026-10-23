@@ -158,6 +158,8 @@ class ChatSession:
     # shown on its cards in the panel; None for an in-app chat.
     mcp_client: str | None = None
     task_id: str | None = None
+    # Selection only; discovered names grant no authority.
+    discovered_tools: tuple[str, ...] = ()
     experiment_id: str | None = None
     experiment_project_id: str | None = None
     job_wait_progress: dict[str, Any] | None = None

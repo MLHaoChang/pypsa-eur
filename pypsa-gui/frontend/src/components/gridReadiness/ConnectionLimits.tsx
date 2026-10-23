@@ -4,7 +4,9 @@
 // its unit, where it comes from (only "assumed" leaves it to check), a note,
 // Save per line, and a reset that names what it resets to. The rows say where
 // each value is set. Energization stays read-only here; its schedule is edited
-// on the connection link. Guided and Expert get the same control: here in
+// on the connection link. The fault level's value lives here too (one editor,
+// written to the PoC bus's `eh_sk_mva`); Properties and the site form show it
+// read-only and route here. Guided and Expert get the same control: here in
 // Expert, and in Guided the field drawer a to-check item opens (App.tsx).
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -14,6 +16,7 @@ import {
   campusApi, type GridLimitItem, type GridLimitSetting, type GridLimitSource, type GridReadinessRow,
 } from '../../api/campusElectrical'
 import { networkApi } from '../../api/network'
+import { updateAsset } from '../../utils/assetWrite'
 import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { blockerMessage } from '../../utils/blockerMessage'
@@ -60,7 +63,12 @@ export function resetTarget(s: GridLimitSetting, unit: string): string {
   return `the generic placeholder${v ? ` ${v}` : ''}, assumed`
 }
 
-function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: GridLimitSetting; label: string }) {
+/** A PoC bus whose fault level this line edits, and its value. */
+interface FaultBus { name: string; value: number | null }
+
+function LimitEditor({ row, setting, label, faultBuses }: {
+  row: GridReadinessRow; setting: GridLimitSetting; label: string; faultBuses?: FaultBus[]
+}) {
   const project = useUIStore(s => s.currentProject) ?? ''
   const qc = useQueryClient()
   const kind = kindOf(row)
@@ -71,19 +79,36 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
   const [source, setSource] = useState<GridLimitSource>(sourceOf(setting))
   const [note, setNote] = useState(setting.user?.note ?? '')
   const [error, setError] = useState<string | null>(null)
-
+  const buses = faultBuses ?? []
+  const [fault, setFault] = useState<Record<string, string>>(
+    () => Object.fromEntries(buses.map(b => [b.name, b.value != null ? String(b.value) : ''])))
+  // Per PoC bus: the entered value, whether it is valid, and whether it differs from what the bus holds.
+  const faults = buses.map(b => {
+    const text = fault[b.name] ?? ''
+    const n = Number(text)
+    return { bus: b, text, n,
+      ok: text.trim() === '' ? b.value == null : Number.isFinite(n) && n > 0,
+      changed: text.trim() !== '' && n !== b.value }
+  })
+  const faultOk = faults.every(f => f.ok)
+  const faultChanged = faults.some(f => f.changed)
   const num = Number(value)
-  const valueOk = !withValue || (value.trim() !== '' && Number.isFinite(num) && num > 0 && (max == null || num <= max))
-  const dirty = setting.user == null
+  const valueOk = faultOk && (!withValue || (value.trim() !== '' && Number.isFinite(num) && num > 0 && (max == null || num <= max)))
+  const limitDirty = setting.user == null
     || source !== setting.user.source || note !== setting.user.note
     || (withValue && num !== setting.user.value)
+  const dirty = limitDirty || faultChanged
   // Both reads move with a limit: the scorecard row and the project flow's to-check item.
   const refresh = () => Promise.all([
     qc.invalidateQueries({ queryKey: ['campusElectrical', 'grid_readiness', project] }),
     qc.invalidateQueries({ queryKey: nk(project, 'flow') }),
   ])
   const save = useMutation({
-    mutationFn: () => campusApi.setGridLimit(project, item, { ...(withValue ? { value: num } : {}), source, note }),
+    mutationFn: async () => {
+      // The value goes through the ordinary bus update (the Properties path); the limit holds only its source and note.
+      for (const f of faults) if (f.changed) await updateAsset(qc, project, 'buses', f.bus.name, { eh_sk_mva: f.n })
+      if (limitDirty) await campusApi.setGridLimit(project, item, { ...(withValue ? { value: num } : {}), source, note })
+    },
     onMutate: () => setError(null),
     onSuccess: refresh,
     onError: (e: unknown) => setError(blockerMessage(e)),
@@ -108,7 +133,21 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
           <span className="text-muted">{unit}</span>
         </div>
       ) : (
-        <span className="text-[11px] text-muted">The value is edited on the point-of-connection bus; here, where it comes from.</span>
+        faults.length ? (
+          <div className="flex flex-col gap-1">
+            {faults.map(f => (
+              <div key={f.bus.name} className="flex items-center gap-1 text-[11px]">
+                <input aria-label={faults.length > 1 ? `${label} value, bus ${f.bus.name}` : `${label} value`}
+                  type="number" inputMode="decimal" min={0} step="any" value={f.text}
+                  aria-invalid={!f.ok} onChange={e => setFault(p => ({ ...p, [f.bus.name]: e.target.value }))}
+                  className="w-24 rounded border border-border bg-bg px-1 py-0.5 tabular-nums" />
+                <span className="text-muted">MVA, on the point-of-connection bus {f.bus.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[11px] text-muted">Tag a bus as the point of connection to set its fault level.</span>
+        )
       )}
       <div className="flex flex-wrap items-center gap-1 text-[11px]">
         <span className="text-muted">Source:</span>
@@ -132,24 +171,29 @@ function LimitEditor({ row, setting, label }: { row: GridReadinessRow; setting: 
           </button>
         )}
       </div>
-      {!valueOk && <p className="text-[11px] text-warn">The value must be {hint} {unit}.</p>}
+      {!valueOk && <p className="text-[11px] text-warn">
+        {withValue ? `The value must be ${hint} ${unit}.` : 'The fault level must be above 0 MVA.'}</p>}
       {error && <p role="alert" className="text-[11px] text-warn" data-testid={`limit-error-${item}`}>{error}</p>}
     </div>
   )
 }
 
-/** `only` narrows the list to some row kinds: the Guided field drawer opens the one line a to-check item points at. */
-/** The fault level on the point-of-connection bus(es): the lowest, as the readiness check takes it. */
-function usePocFaultLevel(): number | null {
+/** The point-of-connection buses and their fault levels; the readiness check takes the lowest. */
+function usePocFaultBuses(): FaultBus[] {
   const project = useUIStore(s => s.currentProject)
   const q = useQuery({ queryKey: nk(project, 'buses'), queryFn: networkApi.getBuses, enabled: !!project, staleTime: 30_000 })
-  const vals = (q.data ?? []).filter(b => b.eh_poc).map(b => Number(b.eh_sk_mva)).filter(v => Number.isFinite(v) && v > 0)
-  return vals.length ? Math.min(...vals) : null
+  return (q.data ?? []).filter(b => b.eh_poc).map(b => {
+    const v = Number(b.eh_sk_mva)
+    return { name: b.name, value: Number.isFinite(v) && v > 0 ? v : null }
+  })
 }
 
+/** `only` narrows the list to some row kinds: the Guided field drawer opens the one line a to-check item points at. */
 export function ConnectionLimits({ only }: { only?: string[] } = {}) {
   const q = useGridReadiness()
-  const faultMva = usePocFaultLevel()
+  const faultBuses = usePocFaultBuses()
+  const set = faultBuses.map(b => b.value).filter((v): v is number => v != null)
+  const faultMva = set.length ? Math.min(...set) : null
   const expert = useUIStore(s => s.uiMode === 'expert')
   // Same button in both modes: Expert opens the Link's properties, Guided the field drawer over the card.
   const open = (t: FlowTarget) => (expert ? openFlowTarget(t) : openFlowTargetInPlace(t))
@@ -183,12 +227,8 @@ export function ConnectionLimits({ only }: { only?: string[] } = {}) {
                     {editable
                       // Keyed on what is stored, so a saved or reset limit reloads the fields.
                       ? (<>
-                          <LimitEditor key={JSON.stringify(lead.setting)} row={lead} setting={lead.setting!} label={SHOWN[k]} />
-                          {!only && k === 'scr' && lead.target.field && (
-                            <button type="button" className="underline text-[11px]" onClick={() => open(lead.target as FlowTarget)}>
-                              Edit the fault level ›
-                            </button>
-                          )}
+                          <LimitEditor key={`${JSON.stringify(lead.setting)}:${JSON.stringify(faultBuses)}`} row={lead}
+                            setting={lead.setting!} label={SHOWN[k]} faultBuses={k === 'scr' ? faultBuses : undefined} />
                           {!only && k === 'ramp_rate' && link && (
                             <span className="block text-[11px] text-muted">
                               Checked by Grid readiness; the optimisation's ramp is set on the connection link{' '}

@@ -13,7 +13,8 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `FinanceInputs.stage_capex_lead_years`; and the site-today baseline of
 2026-10-15: the `baseline` keyword of `build_finance_case`, `baseline_plan` and
 `FinanceInputs.island_outage`; and campus-IC 02/05 of 2026-10-22:
-`FinanceCase.campus`).
+`FinanceCase.campus`; and campus-IC 04 of 2026-10-23: `ExtraOwnerAsset.renewals`,
+`service_to` and `existing_renewal`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -63,7 +64,8 @@ SIGNATURES: dict[str, str] = {
     "services.finance.case.ExtraOwnerAsset":
         "(name: 'str', kind: 'str', basis: 'str', quantity: 'float', "
         "parts: 'tuple[ExtraAssetPart, ...]', build_year: 'int', source: 'str', "
-        "source_hash: 'str') -> None",
+        "source_hash: 'str', renewals: 'tuple[CampusRenewal, ...]' = (), "
+        "service_to: 'float | None' = None, existing_renewal: 'bool' = False) -> None",
     # Gate r1 note 2: the finance-side part the extra asset normalises its parts to.
     "services.finance.case.ExtraAssetPart":
         "(name: 'str', upfront_per_unit: 'float', lifetime: 'float', fom_share: 'float', "
@@ -254,7 +256,8 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.finance.replacements.Replacement": ("year", "asset", "part", "amount", "source"),
     # IC G2 (plan G-4, G-5): the extra asset and the case field that carries it.
     "services.finance.case.ExtraOwnerAsset": (
-        "name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash"),
+        "name", "kind", "basis", "quantity", "parts", "build_year", "source", "source_hash",
+        "renewals", "service_to", "existing_renewal"),
     "services.finance.case.ExtraAssetPart": (
         "name", "upfront_per_unit", "lifetime", "fom_share", "derived_from_capital_cost"),
     "services.library.series_store.SeriesPin": ("project_dir", "via"),
