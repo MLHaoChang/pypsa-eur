@@ -60,7 +60,7 @@ describe('asset library: the editor', () => {
     renderPanel()
     const section = await screen.findByTestId('asset-library')
     expect(section.textContent).toMatch(/the shipped library's costs are reference values, not quotes/i)
-    expect(section.textContent).toMatch(/cited public source \(tag\s+literature\) or assumed/i)
+    expect(section.textContent).toMatch(/cited public source\s+\(source: literature\) or assumed/i)
     expect(section.textContent).toMatch(/replace them with quotes/i)
   })
 
