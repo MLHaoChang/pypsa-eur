@@ -78,7 +78,7 @@ _STAMP_RE = re.compile(r"(?P<id>[a-z0-9_]+)@(?P<version>\d{4}-\d{2}-\d{2}(\+[a-z
                        r":sha256:(?P<hash>[0-9a-f]{64})")
 #: A regional version is `<YYYY-MM-DD>+<region>`; `available_versions` never lists it.
 _REGION_DIR_RE = re.compile(r"(?P<date>\d{4}-\d{2}-\d{2})\+(?P<region>[a-z][a-z0-9_]*)")
-_MONEY_UNIT_RE = re.compile(r"(?P<cur>[A-Z]{3})(/|$)")
+_MONEY_UNIT_RE = re.compile(r"(?:k|M)?(?P<cur>[A-Z]{3})(/|$)")    # kEUR, MEUR: EUR
 _NOTE_CODE_RE = re.compile(r"[a-z]+(_[a-z]+)*")
 _DAYTYPES = ("weekday", "weekend")
 
@@ -195,6 +195,12 @@ UNIT_CONVERSIONS: Mapping[tuple[str, str], float] = {
     ("EUR/km", "EUR/km"): 1.0,
     ("EUR/bay", "EUR/bay"): 1.0,
     ("share/year", "share/year"): 1.0,
+    # Electrified heat (refinery gap 2), transcribed from the DEA sheets: investment in MEUR per MW
+    # or kEUR per MWh, efficiencies and minimum loads in %, temperatures in degC.
+    ("MEUR/MW", "EUR/MW"): 1e6,
+    ("kEUR/MWh", "EUR/MWh"): 1000.0,
+    ("%", "per unit"): 0.01,
+    ("degC", "degC"): 1.0,
     # Regional sources (GS-2) state money in their own currency; a conversion never changes it.
     # Only the units the transcribed sources use are listed (per kW, to the pack's per MW).
     ("USD/kW", "USD/MW"): 1000.0,

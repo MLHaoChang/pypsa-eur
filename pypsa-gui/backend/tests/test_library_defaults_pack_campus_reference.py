@@ -90,7 +90,8 @@ def test_both_versions_load_and_are_pinned_and_the_new_one_is_the_latest(new, pr
     assert pinned[PREV] == "4f8b7ae8b86c5001f56b774b8e8c3962be027f107f18566bcbf0b8b0f211100a"
     assert prev.hash == pinned[PREV] and new.hash == pinned[NEW] and new.hash != prev.hash
     versions = loader.available_versions()
-    assert versions[-1] == NEW and versions[-2] == PREV
+    # A later EU version (2026-10-24, refinery gap 2) follows; NEW still directly succeeds PREV.
+    assert versions.index(NEW) == versions.index(PREV) + 1
     assert new.typed and NEW not in loader.LEGACY_VERSIONS
 
 
