@@ -191,6 +191,8 @@ def build_operating(case: FinanceCase, tl: Timeline) -> Operating:
             ln = line_by_year[i].get(key)
             if ln is None or ln.amount == 0.0:
                 continue
+            if ln.source == "extra_asset_fom" and y < cod_year_of(case, ln.source_id, tl.cod_year):
+                continue        # a later extra's fixed O&M starts in its COD year (P5; campus-IC 04)
             if ln.tenor_years is not None:
                 if k[i] > ln.tenor_years:
                     continue

@@ -1414,7 +1414,7 @@ function BusPanel({ name }: { name: string }) {
             <div className="flex-1"><SectionHdr title="Energy Hub" /></div>
             <GuideButton tourId="eh_tagging" testId="eh-bus-guide-button" label="How to tag" />
           </div>
-          <EhBusInputs fs={form} set={setForm} />
+          <EhBusInputs fs={form} set={setForm} poc={(bus as unknown as Record<string, unknown>).eh_poc === true} />
           <ExtrasSection
             componentClass="Bus"
             fs={form}

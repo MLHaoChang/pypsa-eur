@@ -327,6 +327,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
     recent = set(recent[-8:])
     from services import assistant_tasks, chat_tools
     session = chat_tools.chat_session()
+    discovered = getattr(session, "discovered_tools", ())
     task_tools = set()
     if getattr(session, "task_id", None):
         try:
@@ -340,7 +341,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         name = tool["name"]
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
-        return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(explicit), int(name in recent),
+        return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(name in discovered), int(explicit), int(name in recent),
                 4 * len(words & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]

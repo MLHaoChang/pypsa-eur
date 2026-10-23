@@ -808,11 +808,8 @@ export default function App() {
             <FieldDrawer>
               {t => LIMIT_FIELDS[t.field ?? '']
                 // The grid-readiness limits' one editor (DC 03 slice 6): a to-check ramp or oscillation
-                // limit opens its line; the fault level keeps its value on the bus, so its source line sits under it.
-                ? (<>
-                    {t.field === 'eh_sk_mva' && <PropertiesPanel />}
-                    <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
-                  </>)
+                // limit opens its line; the fault level's value and source are one line too.
+                ? <div className="px-3"><ConnectionLimits only={LIMIT_FIELDS[t.field ?? '']} /></div>
                 : t.component && t.entity
                 ? <PropertiesPanel />
                 : <FullPageTab panel={t.panel as SlidePanel} onClose={() => useUIStore.getState().setFieldDrawer(null)} />}

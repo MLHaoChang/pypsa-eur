@@ -1,6 +1,6 @@
 # The section 7 card and receipt name tariff and PPA values in words, with the currency
 
-Status: ready-for-agent
+Status: done (#644)
 
 ## What
 

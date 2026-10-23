@@ -117,6 +117,8 @@ Verify a session's facts before acting on them: re-run premerge rather than trus
 
 Each **work package** gets its own session: one feature or fix, ending when its last PR merges. Pass `model` on every `create_session`. A child left without it inherits the coordinator's model.
 
+Title and tag every session the way the owner's naming decision says (for example "<Team> · <role/package> — <current work>" plus a `team:<team>` tag), so the session list reads by team. Retitle a session when its current work changes.
+
 | Package | Model |
 |---|---|
 | Probes, key checks, link checks, summaries of logs or lists | `claude-haiku-5-5` |

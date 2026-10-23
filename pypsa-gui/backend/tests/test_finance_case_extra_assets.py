@@ -652,7 +652,7 @@ def _campus_shaped(build_year=2030):
 def _from_dicts(entries):
     from services.finance.case import ExtraOwnerAsset
 
-    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset) if f.default is dataclasses.MISSING]
     return tuple(ExtraOwnerAsset(**{k: d[k] for k in names}) for d in entries)
 
 

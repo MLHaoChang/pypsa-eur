@@ -2285,7 +2285,7 @@ def _run_turn_body(
         # A tool may change the catalogue view or bind a newly created study.
         # Refresh only AFTER this batch has been checked against the catalogue
         # it actually received. New tools are eligible on the next request.
-        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") in {"use_toolset", "start_task", "resume_task", "resolve_task_step"} or getattr(session, "task_id", None) for t in tool_uses):
+        if any(t.get("name") in PROJECT_REBINDING_TOOLS or t.get("name") in {"use_toolset", "start_task", "resume_task", "resolve_task_step", "find_capabilities"} or getattr(session, "task_id", None) for t in tool_uses):
             _chat_tools.set_chat_session(session)
             tools = _tools_payload_for_profile(profile, message, history=messages)
             offered_tool_names = {t["name"] for t in tools}

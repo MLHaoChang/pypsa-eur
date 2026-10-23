@@ -243,6 +243,11 @@ when given.
 **Additions (2026-10-22, campus-IC 02/05):** `FinanceCase` gains the field `campus: CampusSummary | None = None`
 (before `asset_cod`), the campus study's summary for the report; the report payload carries it as `campus_study`
 only when it is set, so a case without a campus study reports as before.
+**Additions (2026-10-23, campus-IC 04):** `ExtraOwnerAsset` gains three trailing keywords with defaults:
+`renewals: tuple[CampusRenewal, ...] = ()` (the lineage's later like-for-like purchases, folded into its first
+purchase so none becomes an asset of its own), `service_to: float | None = None` and `existing_renewal: bool = False`
+(the first entry is an existing asset's first renewal, a P5 stage that `staged_cod_not_active_period` exempts). With
+the defaults an extra asset behaves as before.
 
 ## 7. Coordination protocol
 

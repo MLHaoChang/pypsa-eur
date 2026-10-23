@@ -205,6 +205,16 @@ export function showGridReadiness(): void {
   })
 }
 
+/** The fault level's one editor: the Connection limits line in Connection & grid.
+ *  Expert opens the section's panel; Guided the field drawer over the card. */
+export const FAULT_LEVEL_TARGET: FlowTarget = {
+  section: 'connection', panel: 'campusElectrical', component: null, entity: null, field: 'eh_sk_mva',
+}
+export function openFaultLevelEditor(): void {
+  if (useUIStore.getState().uiMode === 'expert') openFlowTarget(FAULT_LEVEL_TARGET)
+  else openFlowTargetInPlace(FAULT_LEVEL_TARGET)
+}
+
 /** Show one flow item's field in Expert: its panel, or the component's own
  *  Properties. An item with no known field opens its section. */
 export function openFlowTarget(target: FlowTarget): void {
