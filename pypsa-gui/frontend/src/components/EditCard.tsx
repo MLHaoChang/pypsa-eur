@@ -89,6 +89,13 @@ function show(value: Scalar | undefined, known = true): string {
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
+/** A card cell's number without a display value: six significant digits, never fewer than its whole
+ * part, no grouping ("2030" stays a year); "no limit", "not set" and "Not read" stay `show`'s. */
+function cellValue(value: Scalar | undefined, known = true): string {
+  if (typeof value !== 'number' || !known || !Number.isFinite(value)) return show(value, known)
+  return String(Number(value.toPrecision(Math.max(6, Math.trunc(Math.abs(value)).toString().length))))
+}
+
 /** A quote as the card shows it: at most QUOTE_SHOWN characters, the rest in the tooltip. */
 const QUOTE_SHOWN = 60
 function clip(quote: string): string {
@@ -160,7 +167,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
             }
             const follows = r.role !== 'typed'
             const exists = r.field === 'exists'
-            const value = (v: Scalar | undefined, known = true) => exists ? (v ? 'present' : 'absent') : show(v, known)
+            const value = (v: Scalar | undefined, known = true) => exists ? (v ? 'present' : 'absent') : cellValue(v, known)
             return (
               <tr key={i} className={follows ? 'text-muted' : ''} data-testid={`chat-edit-row-${r.role}`}>
                 <td className="p-1 border-b border-border break-words">{asset(r)}</td>

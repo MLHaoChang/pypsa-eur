@@ -86,7 +86,8 @@ export default function CampusIslandCutsSection({ name, mode = 'all' }: { name: 
 
   return (
     <div className="mt-4" data-testid="cuts-section">
-      <h3 className="text-[13px] font-semibold mb-1">Frequency cuts</h3>
+      {/* The Control tab's section title already says "Frequency cuts". */}
+      {act && <h3 className="text-[13px] font-semibold mb-1">Frequency cuts</h3>}
       {cuts.isError && <p className="text-[12px] text-danger">{errorText(cuts.error)}</p>}
       {data && <p className="text-[11.5px] text-muted mb-2" data-testid="cuts-limit">{data.limit}</p>}
       {refusal && <p className="text-[12px] text-danger mb-2" data-testid="cuts-refusal">{refusal}</p>}

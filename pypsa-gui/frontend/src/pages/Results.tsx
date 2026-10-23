@@ -508,7 +508,9 @@ export default function Results() {
     const clampedTo = to16 > lastSnap16 ? lastSnap16 : to16
     const chartWindow = readableWindow(resultsWindowRequest.start, resultsWindowRequest.end)
     const horizon = readableWindow(firstSnap16, lastSnap16)
-    if (from16 > to16 || clampedFrom > clampedTo) {
+    if (from16 > to16) {
+      setWindowNote(`The chart's window (${chartWindow}) ends before it starts, so Results shows the horizon as loaded.`)
+    } else if (clampedFrom > clampedTo) {
       setWindowNote(`The chart's window (${chartWindow}) is outside this network's horizon (${horizon}), so Results shows the horizon as loaded.`)
     } else {
       setFromIso(clampedFrom)
@@ -917,7 +919,7 @@ export default function Results() {
                 type="datetime-local" value={toDisplay(fromIso)}
                 min={firstSnap16 ? toDisplay(firstSnap16) : undefined}
                 max={lastSnap16 ? toDisplay(lastSnap16) : undefined}
-                onChange={e => { manualNavigation(); setFromIso(toStore(e.target.value)) }}
+                onChange={e => { manualNavigation(); setWindowNote(null); setFromIso(toStore(e.target.value)) }}
                 className="px-2 py-1 border border-border rounded font-mono text-[11px] bg-bg"
               />
             </label>
@@ -927,7 +929,7 @@ export default function Results() {
                 type="datetime-local" value={toDisplay(toIso)}
                 min={firstSnap16 ? toDisplay(firstSnap16) : undefined}
                 max={lastSnap16 ? toDisplay(lastSnap16) : undefined}
-                onChange={e => { manualNavigation(); setToIso(toStore(e.target.value)) }}
+                onChange={e => { manualNavigation(); setWindowNote(null); setToIso(toStore(e.target.value)) }}
                 className="px-2 py-1 border border-border rounded font-mono text-[11px] bg-bg"
               />
             </label>

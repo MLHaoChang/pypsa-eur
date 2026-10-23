@@ -40,7 +40,7 @@ const REPORT: IslandReport = {
   tables: [
     { id: 'requirements', group: 'inputs', title: 'Island requirements', model: 'island sidecar', caveat: CAVEAT,
       columns: ['field', 'value', 'source'],
-      rows: [['bridge_s', 600, 'assumed'], ['sustained_h', 24, 'datasheet']], assumed_rows: [0] },
+      rows: [['bridge_s', 600, 'assumed'], ['sustained_h', 24, 'datasheet'], ['steady_island.f_max_hz', 51, 'datasheet']], assumed_rows: [0] },
     { id: 'costs', group: 'study', title: 'Cost of island capability', model: 'hub LP, plain LOPF (HiGHS)', caveat: CAVEAT,
       columns: ['scenario', 'status', 'objective', 'cost of island capability'],
       rows: [['ups_bridged', 'ok', 39810000, 2270000]], assumed_rows: [] },
@@ -82,6 +82,14 @@ describe('island section: the report', () => {
     }
     expect(within(screen.getByTestId('island-table-costs')).getByTestId('island-model').textContent)
       .toContain('hub LP')
+  })
+
+  it('starts every requirement row with a capital', async () => {
+    renderReport()
+    const table = await screen.findByTestId('island-table-requirements')
+    const first = [...table.querySelectorAll('tbody tr')].map(r => r.querySelector('td')?.textContent ?? '')
+    expect(first[2]).toBe('Steady island: highest frequency (Hz)')
+    for (const t of first) expect(t[0]).toBe(t[0].toUpperCase())
   })
 
   it('tags the assumed rows and only those', async () => {
