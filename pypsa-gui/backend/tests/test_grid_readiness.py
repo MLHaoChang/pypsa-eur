@@ -414,6 +414,51 @@ def test_a_battery_built_after_the_period_shaves_nothing_in_it():
     assert row["firm"][1]["mw"] == 0.0 and row["headroom_mw"] == pytest.approx(-10.0)
 
 
+def test_a_retired_battery_shaves_only_the_periods_it_is_still_in_service():
+    """Built in 2030 with a 5-year life: in service from 2030 through 2034, and
+    out in 2035, the year it reaches build + life. The peak check asks each
+    period on its own, so a 10 MW shortfall (50 MW load on a 40 MW import) is
+    shaved in 2030 and stands in 2035. A build year of 0 stays in service
+    after that same life."""
+    periods = [2030, 2035]
+    steps = pd.date_range("2030-01-01", periods=4, freq="h")
+    idx = pd.MultiIndex.from_product([periods, steps], names=["period", "timestep"])
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    n.add("Bus", "grid")
+    n.add("Bus", "site")
+    n.buses["eh_poc"] = [True, False]
+    n.add("Link", "grid_import", bus0="grid", bus1="site", p_nom=40.0, efficiency=1.0)
+    n.links["eh_role"] = "grid_import"
+    n.add("Load", "demand", bus="site")
+    n.loads_t.p_set = pd.DataFrame(
+        {"demand": np.tile(np.array([30.0, 50.0, 30.0, 30.0]), len(periods))}, index=idx)
+    n.add("StorageUnit", "rt", bus="site", p_nom=20.0, max_hours=1.0,
+          efficiency_dispatch=1.0, efficiency_store=1.0, build_year=2030, lifetime=5)
+    island = {"units": {"rt": {"kind": "bess"}},
+              "requirements": {"sustained_h": {"value": 1.0, "source": "assumed"},
+                               "ride_through_storage": ["rt"]}}
+
+    for year, names in ((2029, []), (2030, ["rt"]), (2034, ["rt"]), (2035, [])):
+        rt = SP.ride_through_batteries(n, island, year)
+        assert rt["names"] == names
+        if names:
+            assert rt["p_mw"] == 20.0 and rt["e_mwh"] == 20.0 and rt["reason"] is None
+        else:
+            assert rt["reason"] == "no committed ride-through battery"
+
+    rows = {r["period"]: r for r in SP.peak_check(n, island)}
+    assert rows["2030"]["firm"][1]["mw"] == pytest.approx(10.0)
+    assert rows["2030"]["headroom_mw"] == pytest.approx(0.0)
+    assert rows["2035"]["firm"][1]["mw"] == 0.0
+    assert rows["2035"]["headroom_mw"] == pytest.approx(-10.0)
+    assert rows["2035"]["firm"][1]["rule"] == "no committed ride-through battery"
+
+    n.storage_units.at["rt", "build_year"] = 0
+    still = SP.ride_through_batteries(n, island, 2099)
+    assert still["names"] == ["rt"] and still["p_mw"] == 20.0
+
+
 @pytest.mark.parametrize("tid, product", [("eh_h2_hub", "h2_offtake"), ("eh_h2_hub_staged", "h2_offtake"),
                                           ("eh_ammonia_staged", "nh3_delivery")])
 def test_a_product_offtake_is_not_electric_peak_load(tid, product):
