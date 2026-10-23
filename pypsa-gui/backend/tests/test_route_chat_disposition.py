@@ -8,8 +8,18 @@ from collections import defaultdict
 
 import main
 from harness.catalogue import TOOLS, TOOL_ROUTES
+from routers import network_library_reference as reference_routes
 from services.not_via_chat import NOT_VIA_CHAT
 from tests.test_write_surface_lock_policy import _walk_routes
+
+# D declares preview_router when moving this one known read route. Select the
+# expected contract from that declaration, never from live route discovery.
+# Both exact source states are supported; the identity tripwire below rejects
+# missing, duplicate, mis-mounted or unrelated handlers at these paths.
+_LIBRARY_PREVIEW_PATH = (
+    '/api/library_reference/preview' if hasattr(reference_routes, 'preview_router')
+    else '/api/network/library_reference/preview'
+)
 
 # Audited against chat_tools dispatchers and routers/gridspine.py: same service,
 # target project and arguments. Bundle delivery returns a link to the same file.
@@ -61,7 +71,7 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('POST', '/api/gridspine/{name}/connection'): 'gridspine_assess_connection',
     ('POST', '/api/gridspine/{name}/dispatch-source'): 'gridspine_set_dispatch_source',
     ('POST', '/api/gridspine/{name}/run'): 'gridspine_run_pipeline',
-    ('POST', '/api/network/library_reference/preview'): 'apply_library_reference',
+    ('POST', _LIBRARY_PREVIEW_PATH): 'apply_library_reference',
     ('PUT', '/api/campus-electrical/{name}/island'): 'campus_set_island_config',
     ('PUT', '/api/campus-electrical/{name}/library'): 'campus_set_library',
     ('PUT', '/api/gridspine/{name}/config'): 'gridspine_update_config',
@@ -346,3 +356,13 @@ def test_a_planted_route_is_reported():
     message = _classification_message(missing, routes)
     assert 'POST /api/planted/route' in message
     assert 'services/not_via_chat.py' in message and 'UI_INTERNAL' in message
+
+
+def test_library_preview_matches_the_declared_native_handler():
+    approved_paths = {'/api/network/library_reference/preview', '/api/library_reference/preview'}
+    # Inspect walker rows before a dict could collapse duplicate registrations.
+    candidates = [(path, endpoint) for path, methods, endpoint in _walk_routes(main.app.routes)
+                  if 'POST' in (methods or ()) and path in approved_paths]
+    assert len(candidates) == 1, 'Mount exactly one approved library-reference preview route'
+    assert candidates[0][0] == _LIBRARY_PREVIEW_PATH
+    assert candidates[0][1] is reference_routes.preview_library_reference
