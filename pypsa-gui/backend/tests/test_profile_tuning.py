@@ -247,6 +247,7 @@ def test_the_cap_and_losses_apply_after_any_source_before_aggregation():
             resolution="daily",
         )
         np.testing.assert_allclose(got.series, 0.36, rtol=1e-12, atol=0)
+        assert "tuning_not_applied" not in got.meta
     finally:
         engine._SOURCES.pop("tuning-test-weather")
 

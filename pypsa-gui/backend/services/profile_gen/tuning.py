@@ -224,7 +224,10 @@ def ignored_by_source(technology, tuning, source):
     return [
         f["key"]
         for f in _fields(technology)
-        if f["key"] in tuning and source not in f["sources"]
+        if f["key"] in tuning
+        and source not in f["sources"]
+        and f["key"]
+        not in ("losses", "derate")  # applied by the engine for every source
     ]
 
 
