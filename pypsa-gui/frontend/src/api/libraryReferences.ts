@@ -2,7 +2,8 @@ import client from './client'
 import type { EditCard, EditReceipt } from '../components/EditCard'
 
 // The shipped (common) cost references: `GET /api/library/references[/{technology}/{year}]`
-// (read-only) and their apply to one asset, `POST /api/network/library_reference/{preview,apply}`
+// (read-only), preview `POST /api/library_reference/preview` (a read), and apply
+// to one asset, `POST /api/network/library_reference/apply`
 // (backend: services/library/reference_catalogue.py, reference_apply.py).
 
 export type CapacityBasisCode =
@@ -121,7 +122,7 @@ export const libraryReferencesApi = {
     client.get<ReferenceDetail>(`/library/references/${encodeURIComponent(technology)}/${year}`,
       { params: packSource ? { pack_source: packSource } : undefined }).then(r => r.data),
   preview: (args: ReferenceApplyArgs) =>
-    client.post<ReferencePreview>('/network/library_reference/preview', args, QUIET).then(r => r.data),
+    client.post<ReferencePreview>('/library_reference/preview', args, QUIET).then(r => r.data),
   apply: (args: ReferenceApplyArgs & { digest: string }) =>
     client.post<ReferenceApplied>('/network/library_reference/apply', args, QUIET).then(r => r.data),
 }

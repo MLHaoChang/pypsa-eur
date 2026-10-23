@@ -144,6 +144,7 @@ GET     /api/library/series                                                     
 POST    /api/library/series                                                        -> put_series_api_library_series_post
 POST    /api/library/series/upload                                                 -> upload_series_api_library_series_upload_post
 GET     /api/library/series/{name}                                                 -> get_series_api_library_series__name__get
+POST    /api/library_reference/preview                                            -> preview_library_reference_api_library_reference_preview_post
 GET     /api/local-settings                                                        -> get_local_settings_api_local_settings_get
 PUT     /api/local-settings/anthropic-key                                          -> put_anthropic_key_api_local_settings_anthropic_key_put
 POST    /api/local-settings/reveal-log                                             -> reveal_log_api_local_settings_reveal_log_post
@@ -184,7 +185,6 @@ GET     /api/network/investment_periods                                         
 POST    /api/network/investment_periods                                            -> set_investment_periods_api_network_investment_periods_post
 POST    /api/network/lengths/from_geometry                                         -> lengths_from_geometry_api_network_lengths_from_geometry_post
 POST    /api/network/library_reference/apply                                       -> apply_library_reference_http_api_network_library_reference_apply_post
-POST    /api/network/library_reference/preview                                     -> preview_library_reference_api_network_library_reference_preview_post
 GET     /api/network/lines                                                         -> get_lines_api_network_lines_get
 POST    /api/network/lines                                                         -> create_line_api_network_lines_post
 POST    /api/network/lines/recalculate_lengths                                     -> recalculate_line_lengths_api_network_lines_recalculate_lengths_post
