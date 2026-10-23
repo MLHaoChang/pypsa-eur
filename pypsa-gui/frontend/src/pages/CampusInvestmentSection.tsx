@@ -6,7 +6,7 @@
 // electrical share of that sum.
 //
 // The cost is labelled honestly. The electrical cost is an annualised cost per
-// investment period at assumed placeholder prices. The hub's system cost is the
+// investment period at the asset library's reference prices, not quotes. The hub's system cost is the
 // solved project's, per year for a multi-period project; a single-period
 // project has only its total as solved, and a project whose cost cannot be
 // computed has none, which is said rather than shown as zero.
@@ -257,8 +257,8 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
         hint="what the study buys, at least cost, re-checked by AC load flow"
       >
         <p className="text-[11.5px] text-muted mb-2">
-          Prices come from the asset library; every cost in the shipped library is one of the assumed placeholders,
-          an order of magnitude and not a quote.
+          Prices come from the asset library; the shipped library's costs are reference values from cited public
+          sources (tag literature) or assumed where none was found, not quotes.
         </p>
         <IcSourceLine state={state} />
         <IcUnresolvedLine count={state.owner_assets_unresolved ?? 0} />
@@ -370,7 +370,7 @@ function MilpBlock({ milp, marginPct }: { milp: CampusMilp; marginPct: number })
         <p className="text-[11.5px] text-muted mb-2">
           The {marginPct} % design margin is the owner's rule: it is judged on the least-cost dispatch and is never met
           by extra inverter reactive power; the optimisation may use inverter Q only for the 100 % loading, the PCC band
-          and the voltages. Costs are the asset library's placeholders, not quotes.
+          and the voltages. Costs are the asset library's reference values, not quotes.
         </p>
         <TableScroll>
           <table data-testid="milp-comparison" className="w-full text-[12px] mb-3">

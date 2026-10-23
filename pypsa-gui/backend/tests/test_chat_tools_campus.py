@@ -148,7 +148,7 @@ def test_the_library_descriptions_say_what_the_model_must_not_do():
     assert "ask before" in desc["campus_set_library"] and "replac" in desc["campus_set_library"]
     assert "validated" in desc["campus_set_library"] and "422" in desc["campus_set_library"]
     inv = desc["campus_get_investment"]
-    assert "placeholder" in inv and "assumed" in inv
+    assert "reference values" in inv and "literature" in inv and "assumed" in inv
     # plan C15: the on-load taps act inside the re-check; what is left unresolved is what they could not fix
     assert "on-load taps" in inv and "not optimised" not in inv and "pcc_tap_control" in inv
     assert "unresolved" in inv and "stale" in inv
@@ -196,7 +196,7 @@ def test_the_milp_read_tool_is_registered_routed_and_read_tiered_and_there_is_no
     desc = {t["name"]: t["description"] for t in TOOLS}["campus_get_milp"]
     assert desc.rstrip().endswith("Safety: read.")
     assert "panel" in desc and "cannot start" in desc
-    assert "inverter" in desc and "placeholder" in desc and "stale" in desc and "fallback" in desc
+    assert "inverter" in desc and "not quotes" in desc and "stale" in desc and "fallback" in desc
 
 
 def test_the_milp_read_dispatcher_resolves_the_project_and_calls_get_milp(hub, monkeypatch):

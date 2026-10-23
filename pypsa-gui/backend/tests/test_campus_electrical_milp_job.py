@@ -473,4 +473,4 @@ def test_the_copilots_read_carries_the_status_the_summary_and_the_caveats(hub, m
     assert out["status"]["state"] == "done" and "thread" not in out["status"]
     assert out["summary"]["iterations"] == 1 and out["stop"] == "converged" and out["fallback"] is None
     assert out["comparison"][0]["milp_choice"] == "1 x B" and out["stale"] is False
-    assert any("inverter" in n for n in out["notes"]) and any("placeholder" in n for n in out["notes"])
+    assert any("inverter" in n for n in out["notes"]) and any("reference values, not quotes" in n for n in out["notes"])

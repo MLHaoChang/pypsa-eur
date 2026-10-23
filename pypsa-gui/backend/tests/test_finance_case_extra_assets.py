@@ -696,11 +696,11 @@ def test_the_real_campus_producer_feeds_the_case(solved, hub):  # noqa: F811 (a 
     assert all("meta" in d for d in entries)
     extras = _from_dicts(entries)
     n, cfg = solved
-    fin = _fin(currency_year=2026)
+    fin = _fin(currency_year=2025)
     r = run_case(_build(n, cfg, fin, extras=extras))
     base = run_case(_build(n, cfg, fin))
     want = sum(e.quantity * e.parts[0].upfront_per_unit for e in extras)
-    assert want == pytest.approx(1_800_000.0 + 2.5 * 90_000.0 + 3 * 450_000.0)
+    assert want == pytest.approx(1_453_600.0 + 2.5 * 123_700.0 + 3 * 343_600.0)
     assert float(r.op.capex.sum()) == pytest.approx(float(base.op.capex.sum()) + want)
 
 

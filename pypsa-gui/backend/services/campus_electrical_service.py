@@ -543,8 +543,9 @@ def get_state(project) -> dict:
 
 
 INVESTMENT_NOTES = (
-    "Every cost in the shipped asset library is an assumed order-of-magnitude placeholder, tagged assumed; "
-    "replace it with quotes before relying on any figure in euro.",
+    "The shipped asset library's costs are reference values, not quotes: a cost tagged literature is read from a "
+    "cited public source and converted to 2025 EUR (its note names the row), one tagged assumed is an "
+    "order-of-magnitude stand-in where no source fits; replace them with quotes before relying on any figure in euro.",
     "Voltage excursions are met first by the on-load taps of the campus transformers, set per critical hour and "
     "per case (an N-1 case after the tap changers act, the reactive dispatch held), parallel units together and "
     "nearest neutral; the PCC transformer's only when scope.pcc_tap_control is campus. Off-circuit taps stay where "

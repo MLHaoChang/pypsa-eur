@@ -26,7 +26,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "defaults_pack"
 REPO = Path(__file__).resolve().parents[3]
 PROPOSAL = REPO / "docs/superpowers/research/2026-10-12-campus-asset-reference-costs.yaml"
 # sha256 of the shipped library: the proposal with its header rewritten from "proposal" to "shipped"
-# (`.scratch/campus-ic-extra-owner-assets/campus_assets.shipped.yaml`, the bytes part B copies).
+# (shipped as `gridspine/templates/data/campus_assets.yaml` by part B; tests/gridspine pins the same sha).
 SHIPPED_SHA256 = "97ce51fbc297140e4a1946b1d56f9e715038652413a117d5f0e51fb623582c97"
 ASSUMED = "assumed (gridspine campus_assets.yaml)"
 URLS = {

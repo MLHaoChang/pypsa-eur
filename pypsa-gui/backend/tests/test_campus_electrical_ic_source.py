@@ -118,7 +118,7 @@ def test_a_fresh_milp_feeds_the_case_with_its_rows_and_says_so(hub, monkeypatch)
     assert [a["name"] for a in assets] == MILP_NAMES
     assert {a["meta"]["study_method"] for a in assets} == {"milp"}
     tr = assets[0]
-    assert tr["quantity"] == 2.0 and tr["parts"][0]["upfront_per_unit"] == 2_500_000.0 and tr["basis"] == "lump"
+    assert tr["quantity"] == 2.0 and tr["parts"][0]["upfront_per_unit"] == 1_652_200.0 and tr["basis"] == "lump"
     assert assets[1]["basis"] == "per_bay" and assets[1]["quantity"] == 3.0
     out = ce.owner_assets_response(hub)
     assert list(out) == ["assets", "source_hash", "stale", "study_method", "unresolved"]
@@ -132,7 +132,7 @@ def test_the_milp_assets_are_priced_from_the_library_the_milp_bought_from(hub, m
     run_milp(hub, monkeypatch)
     (milp_dir(hub) / ce.USED_LIBRARY_FILE).write_text(library_with(scaled_capex(2)))
     tr = ce.extra_owner_assets(hub)[0]
-    assert tr["meta"]["study_method"] == "milp" and tr["parts"][0]["upfront_per_unit"] == 5_000_000.0
+    assert tr["meta"]["study_method"] == "milp" and tr["parts"][0]["upfront_per_unit"] == 2 * 1_652_200.0
 
 
 def test_the_milp_hash_is_the_method_then_the_milp_runs_files_and_differs_from_the_least_cost_one(
