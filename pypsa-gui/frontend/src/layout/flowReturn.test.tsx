@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { act, fireEvent, render, screen } from '@testing-library/react'
 import { useUIStore } from '../store/uiStore'
 import { FlowReturnButton } from './FlowReturnButton'
-import { openFlowTarget, openFlowTargetInPlace, returnToOrigin, showGridReadiness } from './flowNavigation'
+import { openFlowTarget, openFlowTargetInPlace, returnToOrigin, showGridReadiness,
+  openEconomicAssumptions, openProfileStudio } from './flowNavigation'
 
 const prop = { section: 'connection', panel: null, component: 'Link', entity: 'grid_import', field: 'p_nom' } as const
 const issues = { section: 'readiness', panel: 'issues', component: null, entity: null, field: null } as const
@@ -104,8 +105,26 @@ describe('Grid readiness link return to origin', () => {
     act(() => showGridReadiness())
     expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
     expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().gridReadinessRequest).toBe(true)
     fireEvent.click(screen.getByTestId('flow-return'))
     expect(useUIStore.getState().activeSlidePanel).toBe('results')
     expect(useUIStore.getState().uiMode).toBe('guided')
+  })
+})
+
+describe('Economic assumptions and Profile Studio links', () => {
+  it('Guided: Economic assumptions opens in place and stays Guided', () => {
+    reset({ uiMode: 'guided', activeSlidePanel: null, activeSection: 'results' })
+    act(() => openEconomicAssumptions())
+    expect(useUIStore.getState().uiMode).toBe('guided')
+  })
+
+  it('Expert: Profile Studio opens with Back to the view it left', () => {
+    reset({ uiMode: 'expert', activeSlidePanel: 'results', activeSection: 'results' })
+    render(<FlowReturnButton />)
+    act(() => openProfileStudio())
+    expect(useUIStore.getState().activeSlidePanel).toBe('profiles')
+    fireEvent.click(screen.getByTestId('flow-return'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
   })
 })

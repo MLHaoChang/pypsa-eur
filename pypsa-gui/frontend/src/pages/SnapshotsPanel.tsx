@@ -227,12 +227,12 @@ function SnapshotRow({
           <span className="text-[13px] font-semibold text-text truncate">
             {snap.label || <span className="text-muted italic font-normal">unlabeled</span>}
           </span>
-          {isNewest ? <Tag tone="accent">Latest saved</Tag>
+          {isNewest ? <Tag tone="accent">latest saved</Tag>
             : type ? <Tag tone={SNAP_TYPE_TONE[type]}>{type}</Tag>
             : null}
           {snap.dispatch_status === 'stale' ? (
             <span title="Solver dispatch is for a different generator/bus set than this snapshot contains. Charts will be misleading until you re-run the solver after restoring.">
-              <Tag tone="warn">stale</Tag>
+              <Tag tone="warn">out of date</Tag>
             </span>
           ) : solved ? (
             <span title="Snapshot contains solver results consistent with its topology">

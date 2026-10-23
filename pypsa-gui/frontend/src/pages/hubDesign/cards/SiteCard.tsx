@@ -6,6 +6,8 @@
 // Off-grid (P24-BE gate N4): the pack islands the import, so a tagged tie is
 // "normally open", not a grid connection with a rating, and its missing
 // outage data is not a gap — the island is studied without it.
+import { useEffect, useRef } from 'react'
+import { useUIStore } from '../../../store/uiStore'
 import type { EhArchetype, EhReadiness, EhTemplateMeta } from '../../../api/simulation'
 import Kpi from '../../../components/Kpi'
 import Explain from '../../../components/Explain'
@@ -216,6 +218,14 @@ function SiteGridReadiness({ template }: { template: EhTemplateMeta | null }) {
   const { data } = useGridReadiness()
   const open = useScorecardOpen(s => s.open['guided:card'] ?? false)
   const toggle = useScorecardOpen(s => s.toggle)
+  // "Readiness › Grid readiness ›" asks for the scorecard: scroll to it once mounted.
+  const gridRequest = useUIStore(s => s.gridReadinessRequest)
+  const sectionRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    if (!gridRequest || !data) return
+    sectionRef.current?.scrollIntoView({ block: 'start' })
+    useUIStore.getState().clearGridReadinessRequest()
+  }, [gridRequest, data])
   if (!data) return null
   // The ledger's own labels for the fields a row points at (UX: no item ids).
   const fieldLabels: Record<string, string> = {}
@@ -223,7 +233,7 @@ function SiteGridReadiness({ template }: { template: EhTemplateMeta | null }) {
     if (r.label && r.field) fieldLabels[r.field] = r.label
   }
   return (
-    <section data-testid="hub-site-grid-readiness" className="flex flex-col rounded border border-border">
+    <section ref={sectionRef} data-testid="hub-site-grid-readiness" className="flex flex-col rounded border border-border">
       <button type="button" aria-expanded={open} data-testid="hub-site-grid-readiness-toggle"
         onClick={() => toggle('guided:card', false)}
         className="flex items-center gap-1 px-3 py-2 text-left text-[12px] text-text">

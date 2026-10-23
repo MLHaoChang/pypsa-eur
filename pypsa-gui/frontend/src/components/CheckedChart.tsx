@@ -21,6 +21,12 @@ function openNative(tab: string, window: Chart['window']) {
   if (window?.start && window.end) ui.requestResultsWindow({ start: window.start, end: window.end })
 }
 
+/** A series slot in plain words; a slot not listed reads as its id with spaces. */
+const SLOT_WORDS: Record<string, string> = {
+  p: 'power', p0: 'power', p1: 'power at the far end', e: 'stored energy', soc: 'state of charge',
+  p_set: 'load', p_max_pu: 'availability', p_min_pu: 'must-run floor', marginal_cost: 'marginal cost',
+}
+
 /** The checked chart's download and its footer (S10). Every line comes from the
  * receipt's series slots, never from the model's text. */
 /** `entity`: the one asset the chart is about (the receipt's request scope), named in the not-drawn lines. */
@@ -45,7 +51,7 @@ export function CheckedChart({ chart, profile, entity, compact = false }: {
       Chart drawn from checked evidence · {drawn.length} series · {readableWindow(chart.window.start, chart.window.end)}
     </p>}
     {notDrawn.length > 0 && <ul className="mt-1" aria-label="Not drawn">{notDrawn.map(s =>
-      <li key={s.series}>Not drawn: {entity ? `${entity} ` : ''}{s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
+      <li key={s.series}>Not drawn: {entity ? `${entity} ` : ''}{SLOT_WORDS[s.series] ?? s.series.replace(/_/g, ' ')} — {s.title}</li>)}</ul>}
     {native && <button type="button" className="mt-1 underline" data-testid="checked-chart-native"
       onClick={() => openNative(native.tab, chart.window)}>
       Open in Results › {native.label}</button>}

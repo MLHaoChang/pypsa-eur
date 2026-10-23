@@ -146,10 +146,22 @@ export function openTimeSeriesFor(
 }
 
 /** Show the Economic assumptions block of Solver Settings (default lifetime,
- *  CO₂ price): the section's panel, on the Dispatch tab, scrolled to the block. */
+ *  CO₂ price): the section's panel, on the Dispatch tab, scrolled to the block; in place in
+ *  Guided (never flips the mode). */
 export function openEconomicAssumptions(): void {
-  useUIStore.getState().requestSolverBlock('economic')
+  const ui = useUIStore.getState()
+  ui.requestSolverBlock('economic')
+  if (ui.uiMode === 'guided') {
+    openFlowTargetInPlace({ section: 'scenarios', panel: 'simparams', component: null,
+      entity: null, field: null })
+    return
+  }
   withReturn(null, () => openSectionInExpert('scenarios'))
+}
+
+/** Show the Profile Studio (Expert's renewable-profile generator); Back returns to the view it left. */
+export function openProfileStudio(): void {
+  withReturn(null, () => useUIStore.getState().setSlidePanel('profiles'))
 }
 
 /** Show the N-1 security branch selector (Solver settings › Network): the
@@ -183,6 +195,7 @@ export function showGridReadiness(): void {
     const ui = useUIStore.getState()
     if (ui.uiMode === 'guided') {
       useScorecardOpen.setState(s => ({ open: { ...s.open, 'guided:card': true } }))
+      ui.requestGridReadiness()
       openSectionInGuided('connection')
       return
     }
