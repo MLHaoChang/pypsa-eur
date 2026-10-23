@@ -3539,7 +3539,7 @@ TOOLS: list[dict[str, Any]] = [
         "tell the user to start it there. Say these with the numbers: the "
         "design margin is the owner's rule, judged on the least-cost dispatch "
         "and never met by extra inverter reactive power; costs are reference "
-        "values (literature or assumed), not quotes, unless replaced by quotes; a fallback keeps the "
+        "values (literature or assumed), not quotes, until the user replaces them with quotes; a fallback keeps the "
         "least-cost choice; a cancelled job keeps the best choice it had; when "
         "stale is true the least-cost run it was based on has changed. 409 for "
         "a project of another kind. Safety: read.",

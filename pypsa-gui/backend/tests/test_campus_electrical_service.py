@@ -897,7 +897,7 @@ def test_a_change_to_something_else_in_the_solver_config_is_not_a_change_of_the_
 
 def test_a_change_of_the_money_year_makes_the_results_stale_since_the_basis_is_shown(hub):
     ce.draft(hub)
-    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2026))
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2025))
     ce.run(hub, {"k": 1})
     assert not ce.get_state(hub)["stale"]
     save_solver_config(hub, discount_rate=0.05, finance=finance_with(2024))
