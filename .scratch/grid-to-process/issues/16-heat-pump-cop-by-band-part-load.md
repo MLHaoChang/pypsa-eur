@@ -3,7 +3,7 @@
 
 # Heat-pump COP against the served band's sink temperature, plus part-load
 
-Status: needs-info
+Status: ready-for-agent (owner 2026-10-23, Q16: demo eta + reach from the #679 rows; still blocked by 15)
 Type: task
 Blocked by: 15
 Gated: no

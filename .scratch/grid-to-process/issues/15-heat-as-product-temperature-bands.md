@@ -3,9 +3,9 @@
 
 # Heat as a modelled product: temperature bands and pressure levels
 
-Status: needs-info
+Status: needs-triage (owner 2026-10-23, Q15: wait for issue 10)
 Type: task
-Blocked by: 02, 03
+Blocked by: 02, 03, 10 (owner Q15)
 Gated: **yes** (schema and validator: send the gatekeeper the plan first)
 Model tier: opus
 Size: M–L

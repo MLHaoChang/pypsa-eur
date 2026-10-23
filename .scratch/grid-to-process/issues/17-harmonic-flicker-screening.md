@@ -3,7 +3,7 @@
 
 # Harmonic and flicker screening for large drives and thyristor heaters
 
-Status: needs-info
+Status: ready-for-agent (owner 2026-10-23, Q17: default spectrum per topology + optional vendor spectrum per unit)
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine, and the choice of standard)
