@@ -531,7 +531,8 @@ def _harmonic_row(inp: _Inputs) -> dict:
     by_thd = limits.thd_pct is not None
     limit = limits.thd_pct if by_thd else None
     unit = "% THD" if by_thd else "% of nominal"
-    source = f"{_profile_title(inp)}: " + "; ".join(c["clause"] for c in cited)
+    part = {"thd_limit_pct": "THD", "harmonic_limits_pct": "Individual orders"}
+    source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
     units = harmonic_units(inp.n, "PoC") if inp.n is not None else None
     if units is None or units.empty:
         return _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=None,
