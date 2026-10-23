@@ -10,6 +10,8 @@ index, as it always did.
 """
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 from fastapi import HTTPException
@@ -226,15 +228,33 @@ _CONVENTIONAL_KW = {'coal', 'lignite', 'gas', 'nuclear', 'oil', 'ccgt', 'ocgt', 
                     'dump', 'spill', 'sink', 'slack'}
 
 
-_DR_KW           = {'dr', 'dsm', 'flex', 'dsr', 'interruptible', 'demand_response', 'curtail'}
+_DR_KW           = {'dr', 'dsm', 'flex', 'dsr', 'interruptible', 'demand_response', 'curtail',
+                    'flexible', 'flexibility', 'curtailment'}
+
+
+def _carrier_words(carrier: str) -> list[str]:
+    """ASCII words, including camelCase splits; punctuation and digits separate."""
+    return re.findall(r'[a-z]+', re.sub(r'([a-z])([A-Z])', r'\1 \2', carrier or '').lower())
 
 
 def _gen_category(carrier: str) -> str:
-    """Return 'renewable' | 'conventional' | 'dr' | 'other' based on carrier keyword match."""
-    c = (carrier or '').lower()
-    if any(k in c for k in _DR_KW):           return 'dr'
-    if any(k in c for k in _RENEWABLE_KW):    return 'renewable'
-    if any(k in c for k in _CONVENTIONAL_KW): return 'conventional'
+    """Match demand-response whole words; other categories keep substring rules."""
+    words = _carrier_words(carrier)
+    for keyword in _DR_KW:
+        phrase = _carrier_words(keyword)
+        if any(words[i:i + len(phrase)] == phrase for i in range(len(words) - len(phrase) + 1)):
+            return 'dr'
+    # Mask hydrogen words without changing the other renewable substring matches.
+    renewable = re.sub(
+        r'[A-Za-z]+',
+        lambda m: ''.join(' ' if w.lower().startswith('hydrogen') else w
+                          for w in re.split(r'(?<=[a-z])(?=[A-Z])', m[0])),
+        carrier or '',
+    ).lower()
+    if any(k in renewable for k in _RENEWABLE_KW):
+        return 'renewable'
+    if any(k in (carrier or '').lower() for k in _CONVENTIONAL_KW):
+        return 'conventional'
     return 'other'
 
 
