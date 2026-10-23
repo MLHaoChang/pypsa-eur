@@ -3,7 +3,7 @@
 
 # LC-25 — A failing plan step stops after two retries
 
-Status: ready-for-agent
+Status: done (#662, 53fac298)
 Outsourced: Codex (2026-10-22) — branch outsource/task-step-retry-limit
 Type: task
 Baseline: master `514c8feede1177b520a4dde74a4dffaf12cf696a`
