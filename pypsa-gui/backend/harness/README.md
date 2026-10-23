@@ -513,7 +513,13 @@ explicit scope is never forwarded to silently discard new constraints.
 
 Immutable retained evidence and exact same-basis comparison IDs support replay
 without rerunning a model. Optional qualitative interpretations need one bounded
-read-only review; quantitative prose is withheld before review. The separately
+read-only review; quantitative prose is withheld before review. The reviewer
+admits a verdict only when provider usage includes nonnegative integer
+`input_tokens` and `output_tokens`. An omitted count is not zero, and
+cache-only usage cannot authorize an interpretation. Counts that are present
+and valid are charged before an incomplete receipt is withheld
+(`withheld_usage`). Withholding keeps the deterministic checked facts and
+does not repair the draft or start a second review. The separately
 opt-in effect adapter requires an exact confirmed static-input update contract,
 durable ID reservation and independent input read-back. Live/uncertain writes
 never silently retry. Supported navigation stays submitted until an issued,

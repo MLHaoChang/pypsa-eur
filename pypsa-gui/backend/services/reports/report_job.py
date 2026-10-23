@@ -359,10 +359,12 @@ def _generate_all(job: ReportJob) -> tuple[ReportDocument, bool]:
 
 def _write_generation_meta(job: ReportJob, *, aborted: bool) -> None:
     """
-    `meta.json` gains a `generation` object (repairs, prose failures, the
-    sections written). `ReportMeta` ignores unknown keys, so WP1's readers
-    are unaffected; a later `save_version` rewrites the meta from the model
-    and drops it, which is why the same facts also live in the job record.
+    Persist `generation` on `meta.json` before the caller publishes `done`
+    or `aborted`. The object is `{repairs, prose_failures, sections,
+    language, aborted}`. A later `save_version` carries the field
+    (`store._CARRIED_META_FIELDS`); the job record remains the authority
+    for its shape. An unreadable `meta.json` is logged and skipped, and
+    the caller may still publish the terminal status without a summary.
     """
     path = store.report_dir(job.project_dir, job.report_id) / "meta.json"
     try:
