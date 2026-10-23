@@ -1,0 +1,721 @@
+{
+ "draft": {
+  "id": "sagc_generic",
+  "yaml": "title: SAGC (generic example values)\nvoltage_bands:\n- kv_min: 0.0\n  kv_max: 10000.0\n  v_min: 0.9\n  v_max: 1.1\n  clause: 'generic placeholder until a real code is supplied: +/-10 % at every voltage'\n  source: assumed\nq_range_demand:\n  value: 0.329\n  clause: 'generic placeholder until a real code is supplied: power factor 0.95 at\n    the connection point, +/-tan(acos 0.95) of P_ref'\n  source: assumed\nrvc_limit_pct:\n  value: 3.0\n  clause: 'generic placeholder until a real code is supplied: 3 % rapid voltage change'\n  source: assumed\ncampus_voltage:\n  v_min: 0.95\n  v_max: 1.05\n  clause: 'generic placeholder until a real code is supplied: 0.95-1.05 pu design\n    band for buses inside the campus'\n  source: assumed\nrvc_limit_infrequent_pct:\n  value: 3\n  clause: Generic example, RVC infrequent\n  source: assumed\nq_capability_pq:\n  points:\n  - - 0\n    - -0.1\n    - 0.1\n  - - 1\n    - -0.3\n    - 0.3\n  clause: Generic example, Q-P band\n  source: assumed\npf_min_lagging:\n  value: 0.9\n  clause: Generic example, PF lagging\n  source: assumed\npf_min_leading:\n  value: 0.95\n  clause: Generic example, PF leading\n  source: assumed\ndynamic_requirements:\n- id: frt\n  requirement: Fault ride-through\n  value: generic example\n  clause: Generic example, FRT\n  source: assumed\n  applies_to: facility\n- id: rocof\n  requirement: RoCoF withstand\n  value: generic example\n  clause: Generic example, RoCoF\n  source: assumed\n  applies_to: facility\n",
+  "profile": {
+   "title": "SAGC (generic example values)",
+   "voltage_bands": [
+    {
+     "kv_min": 0.0,
+     "kv_max": 10000.0,
+     "v_min": 0.9,
+     "v_max": 1.1,
+     "clause": "generic placeholder until a real code is supplied: +/-10 % at every voltage",
+     "source": "assumed"
+    }
+   ],
+   "q_range_demand": {
+    "value": 0.329,
+    "clause": "generic placeholder until a real code is supplied: power factor 0.95 at the connection point, +/-tan(acos 0.95) of P_ref",
+    "source": "assumed"
+   },
+   "rvc_limit_pct": {
+    "value": 3.0,
+    "clause": "generic placeholder until a real code is supplied: 3 % rapid voltage change",
+    "source": "assumed"
+   },
+   "campus_voltage": {
+    "v_min": 0.95,
+    "v_max": 1.05,
+    "clause": "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus",
+    "source": "assumed"
+   },
+   "rvc_limit_infrequent_pct": {
+    "value": 3,
+    "clause": "Generic example, RVC infrequent",
+    "source": "assumed"
+   },
+   "q_capability_pq": {
+    "points": [
+     [
+      0,
+      -0.1,
+      0.1
+     ],
+     [
+      1,
+      -0.3,
+      0.3
+     ]
+    ],
+    "clause": "Generic example, Q-P band",
+    "source": "assumed"
+   },
+   "pf_min_lagging": {
+    "value": 0.9,
+    "clause": "Generic example, PF lagging",
+    "source": "assumed"
+   },
+   "pf_min_leading": {
+    "value": 0.95,
+    "clause": "Generic example, PF leading",
+    "source": "assumed"
+   },
+   "dynamic_requirements": [
+    {
+     "id": "frt",
+     "requirement": "Fault ride-through",
+     "value": "generic example",
+     "clause": "Generic example, FRT",
+     "source": "assumed",
+     "applies_to": "facility"
+    },
+    {
+     "id": "rocof",
+     "requirement": "RoCoF withstand",
+     "value": "generic example",
+     "clause": "Generic example, RoCoF",
+     "source": "assumed",
+     "applies_to": "facility"
+    }
+   ]
+  },
+  "review": null,
+  "unconfirmed": [],
+  "document": null
+ },
+ "list": {
+  "shipped": {
+   "eu_rfg_dcc_ce": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+   "generic_assumed": "Generic assumed limits (placeholder until a real grid code is supplied)",
+   "us_ieee2800_nerc": "US: IEEE 2800-2022 (on-site IBR) and NERC PRC-029-1 / PRC-024-3, with the site's own range assumed"
+  },
+  "published": [
+   {
+    "id": "sagc_study",
+    "title": "SAGC (generic example values)",
+    "unconfirmed": [],
+    "document": null
+   }
+  ],
+  "drafts": [
+   {
+    "id": "sagc_generic",
+    "title": "SAGC (generic example values)",
+    "unconfirmed": [],
+    "document": null
+   },
+   {
+    "id": "sagc_study",
+    "title": "SAGC (generic example values)",
+    "unconfirmed": [],
+    "document": null
+   }
+  ],
+  "documents": [],
+  "extraction_available": false
+ },
+ "state": {
+  "owner_assets_count": 3,
+  "owner_assets_unresolved": 0,
+  "owner_assets_method": "least_cost",
+  "campus_yaml": "campus:\n  name: UNNAMED_NETW\n  f_hz: 50\n  pcc:\n    bus: GRID\n    vn_kv: 110.0\n    pypsa_name: grid\n    vm_pu:\n      value: 1.0\n      source: assumed\n    sk_max_mva:\n      value: 2000.0\n      source: assumed\n    sk_min_mva:\n      value: 2000.0\n      source: assumed\n    rx_max:\n      value: 0.1\n      source: assumed\n    rx_min:\n      value: 0.1\n      source: assumed\n  buses:\n    MV:\n      vn_kv: 20.0\n      pypsa_name: mv\n  transformers:\n    GRID_IMPORT:\n      hv_bus: GRID\n      lv_bus: MV\n      pypsa_name: grid_import\n      sn_mva:\n        value: 80.0\n        source: assumed\n      vn_hv_kv:\n        value: 110.0\n        source: assumed\n      vn_lv_kv:\n        value: 20.0\n        source: assumed\n      vk_percent:\n        value: 12.5\n        source: assumed\n      vkr_percent:\n        value: 0.35\n        source: assumed\n      pfe_kw:\n        value: 80.0\n        source: assumed\n      i0_percent:\n        value: 0.1\n        source: assumed\n  units:\n    PV:\n      kind: pv\n      bus: MV\n      pypsa_name: pv\n      p_mw:\n        value: 20.0\n        source: assumed\n      s_mva:\n        value: 21.05263157894737\n        source: assumed\n      k_sc:\n        value: 1.2\n        source: assumed\n      rx_sc:\n        value: 0.1\n        source: assumed\n    BESS:\n      kind: bess\n      bus: MV\n      pypsa_name: bess\n      p_mw:\n        value: 10.0\n        source: assumed\n      e_mwh:\n        value: 20.0\n        source: assumed\n      s_mva:\n        value: 10.526315789473685\n        source: assumed\n      k_sc:\n        value: 1.2\n        source: assumed\n      rx_sc:\n        value: 0.1\n        source: assumed\n    DC_LOAD:\n      kind: load\n      bus: MV\n      pypsa_name: dc_load\n      p_mw:\n        value: 40.0\n        source: assumed\n      pf:\n        value: 0.98\n        source: assumed\n",
+  "skipped": [],
+  "profiles": {
+   "eu_rfg_dcc_ce": "EU RfG (2016/631) and DCC (2016/1388), Continental Europe",
+   "generic_assumed": "Generic assumed limits (placeholder until a real grid code is supplied)",
+   "us_ieee2800_nerc": "US: IEEE 2800-2022 (on-site IBR) and NERC PRC-029-1 / PRC-024-3, with the site's own range assumed",
+   "sagc_study": "SAGC (generic example values)"
+  },
+  "settings": {
+   "k": 1,
+   "pf": 0.95,
+   "profile": "sagc_study",
+   "margin": 0.1,
+   "n_minus_1": true,
+   "invest": true,
+   "pcc_switchgear_by_operator": false,
+   "pcc_tap_control": "campus"
+  },
+  "results": {
+   "selection": [
+    {
+     "period": 2030,
+     "hour": 0,
+     "reasons": [
+      "max_import_mw",
+      "max_consumption_mw",
+      "max_trafo_GRID_IMPORT_mw"
+     ]
+    },
+    {
+     "period": 2030,
+     "hour": 6,
+     "reasons": [
+      "max_renewable_mw"
+     ]
+    }
+   ],
+   "transformers": [
+    {
+     "group": "GRID_IMPORT",
+     "units": 1,
+     "unit_rating_mva": 80.0,
+     "max_s_intact_mva": 46.6169452259751,
+     "max_s_n1_mva": 0.0,
+     "required_unit_mva": 51.278639748572616,
+     "recommended_unit_mva": 63.0,
+     "adequate": true,
+     "utilisation": 0.6409829968571576,
+     "worst_unit": "GRID_IMPORT",
+     "worst_period": 2030,
+     "worst_hour": 0,
+     "unconverged_hours": 0,
+     "margin": 0.1,
+     "n_minus_1": false
+    }
+   ],
+   "compensation": [
+    {
+     "direction": "capacitive",
+     "required_mvar": 0.0,
+     "recommended_mvar": 0.0,
+     "worst_period": null,
+     "worst_hour": null,
+     "margin": 0.1
+    },
+    {
+     "direction": "inductive",
+     "required_mvar": 0.0,
+     "recommended_mvar": 0.0,
+     "worst_period": null,
+     "worst_hour": null,
+     "margin": 0.1
+    }
+   ],
+   "short_circuit": [
+    {
+     "bus": "GRID",
+     "vn_kv": 110.0,
+     "ikss_max_ka": 10.696173408144643,
+     "ip_max_ka": 26.201363772176745,
+     "ikss_min_ka": 10.497277621629555,
+     "rated_ka": null,
+     "rating_source": null,
+     "adequate": null,
+     "detail": "no switchgear rating given",
+     "period": 2030
+    },
+    {
+     "bus": "MV",
+     "vn_kv": 20.0,
+     "ikss_max_ka": 16.44972841103293,
+     "ip_max_ka": 42.17633663900085,
+     "ikss_min_ka": 14.30521653518814,
+     "rated_ka": null,
+     "rating_source": null,
+     "adequate": null,
+     "detail": "no switchgear rating given",
+     "period": 2030
+    }
+   ],
+   "compliance": [
+    {
+     "check": "pcc_reactive",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 11.510912093930756,
+     "limit": 14.940186599039237,
+     "unit": "Mvar",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "study connection agreement: power factor 0.95 at the connection capacity",
+     "source": "assumed",
+     "detail": "inverters supply up to 0.0 Mvar; compensation recommended: 0 Mvar capacitive, 0 Mvar inductive",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null
+    },
+    {
+     "check": "pcc_voltage",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 1.0,
+     "limit": 0.9,
+     "unit": "pu",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "generic placeholder until a real code is supplied: +/-10 % at every voltage",
+     "source": "assumed",
+     "detail": "worst at GRID (intact); code band at the connection point; band 0.9-1.1 pu",
+     "worst_case": "intact",
+     "limit_min": 0.9,
+     "limit_max": 1.1
+    },
+    {
+     "check": "campus_voltage",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 0.9825448472529834,
+     "limit": 0.95,
+     "unit": "pu",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus",
+     "source": "assumed",
+     "detail": "worst at MV (intact); the profile's campus design band; band 0.95-1.05 pu",
+     "worst_case": "intact",
+     "limit_min": 0.95,
+     "limit_max": 1.05
+    },
+    {
+     "check": "transformer_loading",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 58.27118153246887,
+     "limit": 100.0,
+     "unit": "%",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "equipment rating (not a grid-code clause)",
+     "source": "assumed",
+     "detail": "worst GRID_IMPORT (intact)",
+     "worst_case": "intact",
+     "limit_min": null,
+     "limit_max": null
+    },
+    {
+     "check": "switchgear",
+     "status_as_is": "not_rated",
+     "status_with_measures": "not_rated",
+     "value": 16.44972841103293,
+     "limit": null,
+     "unit": "kA",
+     "worst_period": 2030.0,
+     "worst_hour": null,
+     "clause": "equipment rating (IEC 62271-1 peak ratio, assumed)",
+     "source": "assumed",
+     "detail": "no rating for ['GRID', 'MV']",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null
+    },
+    {
+     "check": "pcc_q_band",
+     "status_as_is": "fail",
+     "status_with_measures": "fail",
+     "value": 11.510912093930756,
+     "limit": 0.0454545454545454,
+     "unit": "Mvar",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "Generic example, Q-P band",
+     "source": "assumed",
+     "detail": "worst at P 45.17 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "worst_case": null,
+     "limit_min": -0.0454545454545454,
+     "limit_max": 0.0454545454545454
+    },
+    {
+     "check": "pcc_power_factor",
+     "status_as_is": "unknown",
+     "status_with_measures": "unknown",
+     "value": null,
+     "limit": null,
+     "unit": null,
+     "worst_period": null,
+     "worst_hour": null,
+     "clause": null,
+     "source": "assumed",
+     "detail": "The grid code sets no limit for this.",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null
+    }
+   ],
+   "reactive": [
+    {
+     "period": 2030,
+     "hour": 0,
+     "converged": true,
+     "q0_mvar": 11.510912093930756,
+     "q_final_mvar": 11.510912093930756,
+     "q_inverters_mvar": 0.0,
+     "q_comp_mvar": 0.0,
+     "compliant_without": true
+    },
+    {
+     "period": 2030,
+     "hour": 6,
+     "converged": true,
+     "q0_mvar": 9.23727813804362,
+     "q_final_mvar": 9.23727813804362,
+     "q_inverters_mvar": 0.0,
+     "q_comp_mvar": 0.0,
+     "compliant_without": true
+    }
+   ],
+   "requirement": {
+    "q_limit_mvar": 14.940186599039237,
+    "clause": "study connection agreement: power factor 0.95 at the connection capacity",
+    "source": "assumed",
+    "profile": "sagc_study",
+    "pf": 0.95,
+    "p_ref_mw": 45.45454545454545,
+    "p_ref_from": "peak |import| over every hour of the prepared periods"
+   },
+   "reported_requirements": [
+    {
+     "id": "frt",
+     "requirement": "Fault ride-through",
+     "value": "generic example",
+     "clause": "Generic example, FRT",
+     "source": "assumed",
+     "applies_to": "facility",
+     "status": "reported",
+     "detail": "Fault ride-through: generic example (needs RMS study)"
+    },
+    {
+     "id": "rocof",
+     "requirement": "RoCoF withstand",
+     "value": "generic example",
+     "clause": "Generic example, RoCoF",
+     "source": "assumed",
+     "applies_to": "facility",
+     "status": "reported",
+     "detail": "RoCoF withstand: generic example (needs RMS study)"
+    }
+   ],
+   "investment": [
+    {
+     "need": "transformer GRID_IMPORT",
+     "library_id": "TR_110_20_63",
+     "kind": "transformer",
+     "units": 1,
+     "length_km": null,
+     "invest_period": 2030,
+     "capex_eur": 1510100.0,
+     "opex_eur_per_a": 22651.5,
+     "annualised_eur_per_a": 135922.80061303894,
+     "existing": false,
+     "status": "chosen",
+     "reason": null,
+     "action": "buy",
+     "purchase": 1.0,
+     "build_year": 2030.0,
+     "service_to": 2031.0,
+     "replaces": null,
+     "lineage": "transformer GRID_IMPORT|TR_110_20_63",
+     "commissioned": null,
+     "commissioned_source": null
+    },
+    {
+     "need": "reactive",
+     "library_id": null,
+     "kind": "none",
+     "units": 0,
+     "length_km": null,
+     "invest_period": 2030,
+     "capex_eur": 0.0,
+     "opex_eur_per_a": 0.0,
+     "annualised_eur_per_a": 0.0,
+     "existing": false,
+     "status": "not_needed",
+     "reason": null,
+     "action": null,
+     "purchase": null,
+     "build_year": null,
+     "service_to": null,
+     "replaces": null,
+     "lineage": null,
+     "commissioned": null,
+     "commissioned_source": null
+    },
+    {
+     "need": "switchgear GRID",
+     "library_id": "SG_110_31p5",
+     "kind": "switchgear",
+     "units": 2,
+     "length_km": null,
+     "invest_period": 2030,
+     "capex_eur": 687200.0,
+     "opex_eur_per_a": 10308.0,
+     "annualised_eur_per_a": 61854.280233945006,
+     "existing": false,
+     "status": "chosen",
+     "reason": null,
+     "action": "buy",
+     "purchase": 1.0,
+     "build_year": 2030.0,
+     "service_to": 2031.0,
+     "replaces": null,
+     "lineage": "switchgear GRID|SG_110_31p5",
+     "commissioned": null,
+     "commissioned_source": null
+    },
+    {
+     "need": "switchgear MV",
+     "library_id": "SG_20_25p0",
+     "kind": "switchgear",
+     "units": 4,
+     "length_km": null,
+     "invest_period": 2030,
+     "capex_eur": 183200.0,
+     "opex_eur_per_a": 2748.0,
+     "annualised_eur_per_a": 16489.674241645407,
+     "existing": false,
+     "status": "chosen",
+     "reason": null,
+     "action": "buy",
+     "purchase": 1.0,
+     "build_year": 2030.0,
+     "service_to": 2031.0,
+     "replaces": null,
+     "lineage": "switchgear MV|SG_20_25p0",
+     "commissioned": null,
+     "commissioned_source": null
+    }
+   ],
+   "cost": [
+    {
+     "period": 2030,
+     "capex_eur": 2380500.0,
+     "capex_replacement_eur": 0.0,
+     "annualised_eur_per_a": 214266.75508862932
+    }
+   ],
+   "compliance_invested": [
+    {
+     "check": "pcc_reactive",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 11.510912093930756,
+     "limit": 14.940186599039237,
+     "unit": "Mvar",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "study connection agreement: power factor 0.95 at the connection capacity",
+     "source": "assumed",
+     "detail": "inverters supply up to 0.0 Mvar; compensation recommended: 0 Mvar capacitive, 0 Mvar inductive",
+     "value_with_measures": 11.930637718079195,
+     "detail_with_measures": "inverters supply up to 0.0 Mvar; compensation recommended: 0 Mvar capacitive, 0 Mvar inductive",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": 0.0,
+     "worst_case_with_measures": null
+    },
+    {
+     "check": "pcc_voltage",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 1.0,
+     "limit": 0.9,
+     "unit": "pu",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "generic placeholder until a real code is supplied: +/-10 % at every voltage",
+     "source": "assumed",
+     "detail": "worst at GRID (intact); code band at the connection point; band 0.9-1.1 pu",
+     "value_with_measures": 1.0,
+     "detail_with_measures": "worst at GRID (intact); code band at the connection point; band 0.9-1.1 pu",
+     "worst_case": "intact",
+     "limit_min": 0.9,
+     "limit_max": 1.1,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": 0.0,
+     "worst_case_with_measures": "intact"
+    },
+    {
+     "check": "campus_voltage",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 0.9825448472529834,
+     "limit": 0.95,
+     "unit": "pu",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "generic placeholder until a real code is supplied: 0.95-1.05 pu design band for buses inside the campus",
+     "source": "assumed",
+     "detail": "worst at MV (intact); the profile's campus design band; band 0.95-1.05 pu",
+     "value_with_measures": 0.9794321543234152,
+     "detail_with_measures": "worst at MV (intact); the profile's campus design band; band 0.95-1.05 pu",
+     "worst_case": "intact",
+     "limit_min": 0.95,
+     "limit_max": 1.05,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": 0.0,
+     "worst_case_with_measures": "intact"
+    },
+    {
+     "check": "transformer_loading",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": 58.27118153246887,
+     "limit": 100.0,
+     "unit": "%",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "equipment rating (not a grid-code clause)",
+     "source": "assumed",
+     "detail": "worst GRID_IMPORT (intact)",
+     "value_with_measures": 74.20354082617156,
+     "detail_with_measures": "worst GRID_IMPORT (intact)",
+     "worst_case": "intact",
+     "limit_min": null,
+     "limit_max": null,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": 0.0,
+     "worst_case_with_measures": "intact"
+    },
+    {
+     "check": "switchgear",
+     "status_as_is": "not_rated",
+     "status_with_measures": "pass",
+     "value": 16.44972841103293,
+     "limit": null,
+     "unit": "kA",
+     "worst_period": 2030.0,
+     "worst_hour": null,
+     "clause": "equipment rating (IEC 62271-1 peak ratio, assumed)",
+     "source": "assumed",
+     "detail": "no rating for ['GRID', 'MV']",
+     "value_with_measures": 15.139069731245437,
+     "detail_with_measures": "every rated bus within its rating",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": null,
+     "worst_case_with_measures": null
+    },
+    {
+     "check": "pcc_q_band",
+     "status_as_is": "fail",
+     "status_with_measures": "fail",
+     "value": 11.510912093930756,
+     "limit": 0.0454545454545454,
+     "unit": "Mvar",
+     "worst_period": 2030.0,
+     "worst_hour": 0.0,
+     "clause": "Generic example, Q-P band",
+     "source": "assumed",
+     "detail": "worst at P 45.17 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "value_with_measures": 11.930637718079195,
+     "detail_with_measures": "worst at P 45.20 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "worst_case": null,
+     "limit_min": -0.0454545454545454,
+     "limit_max": 0.0454545454545454,
+     "worst_period_with_measures": 2030.0,
+     "worst_hour_with_measures": 0.0,
+     "worst_case_with_measures": null
+    },
+    {
+     "check": "pcc_power_factor",
+     "status_as_is": "unknown",
+     "status_with_measures": "unknown",
+     "value": null,
+     "limit": null,
+     "unit": null,
+     "worst_period": null,
+     "worst_hour": null,
+     "clause": null,
+     "source": "assumed",
+     "detail": "The grid code sets no limit for this.",
+     "value_with_measures": null,
+     "detail_with_measures": "The grid code sets no limit for this.",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null,
+     "worst_period_with_measures": null,
+     "worst_hour_with_measures": null,
+     "worst_case_with_measures": null
+    },
+    {
+     "check": "cable_loading",
+     "status_as_is": "pass",
+     "status_with_measures": "pass",
+     "value": null,
+     "limit": 100.0,
+     "unit": "%",
+     "worst_period": null,
+     "worst_hour": null,
+     "clause": "equipment rating (not a grid-code clause)",
+     "source": "assumed",
+     "detail": "no cable",
+     "value_with_measures": null,
+     "detail_with_measures": "no cable",
+     "worst_case": null,
+     "limit_min": null,
+     "limit_max": null,
+     "worst_period_with_measures": null,
+     "worst_hour_with_measures": null,
+     "worst_case_with_measures": null
+    }
+   ],
+   "history": [],
+   "unresolved": [],
+   "taps": [],
+   "tap_hours_moved": 0,
+   "scope": {
+    "pcc_switchgear": "campus",
+    "parallel": {
+     "ratio_tol": {
+      "value": 0.005,
+      "source": "assumed",
+      "note": "no-load ratio, at the current taps; A transformer vendor's application note on paralleling (Rex Power Magnetics, read 2026-10-12); IEC 60076-8 not read: within about 0.5 %"
+     },
+     "uk_tol": {
+      "value": 0.1,
+      "source": "assumed",
+      "note": "impedance against each existing unit's; owner 2026-10-12: 10 %; A transformer vendor's application note on paralleling (Rex Power Magnetics, read 2026-10-12); IEC 60076-8 not read: typically within 7.5 %"
+     },
+     "step_tol_pct": {
+      "value": 0.1,
+      "source": "assumed",
+      "note": "tap step, percentage points; assumed"
+     },
+     "unknown_vector_group": "assume_compatible",
+     "rating_ratio": "not limited"
+    },
+    "pcc_tap_control": "campus",
+    "horizon": {
+     "period_years": {
+      "2030": 1
+     },
+     "source": {
+      "2030": "single period: one year"
+     },
+     "horizon_end": 2031,
+     "notes": [
+      "Replacements are reported, not ranked: candidates are ranked by annualised cost, which a like-for-like replacement leaves the same, and keeping an existing unit is ranked at zero although its replacement is costed later."
+     ]
+    }
+   },
+   "cost_basis": {
+    "discount_rate": 0.07,
+    "discount_rate_from": "asset library",
+    "price_year": 2025,
+    "price_year_from": "asset library",
+    "library_price_year": 2025,
+    "price_year_mismatch": false,
+    "currency": "EUR"
+   }
+  },
+  "stale": false,
+  "hub_cost": {
+   "basis": "single_period",
+   "per_period": null,
+   "total": 16404.24589
+  },
+  "hub_cost_reason": null,
+  "milp": {
+   "status": null,
+   "results": null,
+   "stale": false
+  },
+  "run_in_progress": false,
+  "run_job": null
+ }
+}
