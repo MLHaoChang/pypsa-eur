@@ -93,16 +93,17 @@ Separately, the RP-12 remainder: a test proves that an Energy Hub template's rep
     - wind: `hub_height` (m, 20–200, atlite), `cut_out` (m/s, 15–35, atlite), `derate` (fraction 0–0.5, both sources), `losses` (fraction 0–0.5, both sources);
     - solar: `tilt` (°, 0–90, atlite → `orientation.slope`), `azimuth` (°, 0–360, atlite → `orientation.azimuth`), `tracking` (`none` | `horizontal`, atlite → `tracking`), `inverter_efficiency` (0.8–1.0, atlite → `panel.inverter_efficiency`), `losses` (0–0.5, both sources).
   - **Functions:**
-    - `schema(technology, preset)`: the field list with each field's `preset_value` and `provenance`. These are read from the preset's params and provenance; a missing value is `null` with the provenance "not used by the synthetic source", and `losses`/`derate` default to 0 with "tool default: none applied". Never copy values by hand;
+    - `schema(technology, preset)`: the field list with each field's `preset_value` and `provenance`. These are read from the preset's params and provenance; a missing value is `null` with the provenance "not used by the synthetic source", and `losses`/`derate` default to 0 with "tool default: none applied". The YAML has no `cut_out` key: its `preset_value` is the largest `V` in the preset's power curve with `POW > 0` (25.0 for `vestas-v90-3mw`, whose curve ends `(25.0, 3.0), (25.01, 0)`). Never copy values by hand;
     - `validate(technology, params)`: raises `InvalidTuningError(ProfileGenError)` for an out-of-range or wrong-type tuning key. It names the key, the value and the bounds;
-    - `apply_to_params(technology, params)`: moves `hub_height` into a copy of `turbine`. For `cut_out`, it drops the curve points at or above the value and appends `(cut_out, last POW)` and `(cut_out + 0.01, 0)`. It sets `orientation` and `panel` the same way. It leaves `losses`/`derate` top-level for the engine, and records the flat keys as `tuning` and the atlite-only keys a synthetic preset cannot take as `tuning_not_applied`;
-    - `post_source(frame, technology, params)`: `cf = min(cf, 1 − derate) × (1 − losses)`, column-wise, for every source.
+    - `apply_to_params(technology, params)`: moves `hub_height` into a copy of `turbine`. For `cut_out`, it keeps the curve points with `V < cut_out` **and** `V ≤` the preset's cut-out (the largest `V` with `POW > 0`), then appends `(cut_out, POW of the last kept point)` and `(cut_out + 0.01, 0)`. The second condition matters when `cut_out` is above the preset's: without it the preset's own `(25.01, 0)` would be the last kept point, and `cut_out: 30` would append POW 0. It sets `orientation` and `panel` the same way. It leaves `losses`/`derate` top-level for the engine, and records the flat keys as `tuning` and the atlite-only keys a synthetic preset cannot take as `tuning_not_applied`;
+    - `post_source(frame, technology, params)`: `cf = min(cf, 1 − derate) × (1 − losses)`, column-wise, for every source. It is not called at all when neither `losses` nor `derate` is set (not even with 0), so untuned output is byte-identical (B-T8).
 - `services/profile_gen/presets.py`: in `resolve_params`, after the merge, call `tuning.validate` and `tuning.apply_to_params`. Keys that are not tuning keys pass through unchanged, as today: the chat's `params` overrides keep working. Never mutate the shipped preset (`test_resolve_params_applies_overrides_without_mutating_preset` must still pass).
-- `services/profile_gen/engine.py`: call `tuning.post_source` on `frame` directly after `source_fn(...)` (l.259), before aggregation, for the renewable family only. Record `tuning` and `tuning_not_applied` in `meta` when present.
+- `services/profile_gen/engine.py`: call `tuning.post_source` on `frame` directly after `source_fn(...)` (l.259), before aggregation, for the renewable family only. Skip the call entirely when neither `losses` nor `derate` is in the params. Record `tuning` and `tuning_not_applied` in `meta` only when present; untuned meta keeps exactly today's keys.
 - `services/profile_gen/synthetic.py`: no change. The engine applies losses and derate after any source, so the synthetic source honours them (RP-05's "visible offline").
 - `services/profile_gen/compare.py` (new):
   - `side_series(ctx, proj_dir, side, component)` resolves each side onto the model's snapshot clock:
-    - `current:<generator>`: `ctx.user_ts[("generators","p_max_pu",g)]`, else the network's `generators_t.p_max_pu[g]`, else `CurrentSeriesError` (existing kind `no_current_series`);
+    - `current:<generator>`: `ctx.user_ts[("generators","p_max_pu",g)]`, else the network's `generators_t.p_max_pu[g]`, else `CurrentSeriesError` (existing kind `no_current_series`). Read these directly; do **not** reuse `current.series_from_current`, which reads `user_ts` only and refuses a MultiIndex series;
+    - **multi-period models:** both sides stay on the network's `(period, timestep)` snapshots. Monthly means group by the timestep level's month across periods; `flh` is the weighted mean over all snapshots × the hours of the first period's timestep year; the `week` block stays inside one period and carries its `period`. Test B-C9 pins this;
     - `pending:<job>[:<point>]`: the artifact via the router's `_pending_artifact`/`_read_point_series`, aligned by `apply.prepare_profile(ctx, component, series, meta)`. The point defaults to the component; the component defaults to the current side's generator, else the point id;
     - `shaped:<job>[:<point>]`: the same, but the record must carry `calibrated: true`.
   - `compare(a, b, weights)`:
@@ -145,17 +146,17 @@ Separately, the RP-12 remainder: a test proves that an Energy Hub template's rep
   - It holds the edited values, and the "changed" set is computed against `preset_value`.
   - Generate sends `params` with only the changed keys, plus the parsed Advanced JSON merged under them.
   - It then renders `ProfileCompare` for `a = current:<g>` (omitted when `row.profile === 'none'`) and `b = pending:<job>:<g>`, with Apply calling `profilesApi.apply(project, job, g)`.
-  - It shows a refusal in place with `errorText`, as `PendingCard` does.
+  - It shows a refusal in place with `errorText`, as `SeriesKit.tsx`'s `PendingCard` does (l.357).
 - `components/series/ProfileCompare.tsx` (new):
   - the week overlay, copied from `WeekChart` (two `Line`s; current faint `strokeOpacity 0.3`, new `var(--color-accent)`);
   - a duration-curve `LineChart` (x = share of hours 0–100 %, y = per-unit);
   - the stats table with Δ;
-  - a `figcaption` and a `sr-only` text alternative as `WeekChart` has (l.252-270). Follow the dataviz skill for axis labels and the legend.
+  - a `figcaption` and a `sr-only` text alternative as `WeekChart` has (`SeriesKit.tsx` l.246-272). Follow the dataviz skill for axis labels and the legend.
 
   No new colours: use the tokens in `index.css`.
 - `pages/TimeSeriesManager.tsx`:
   - extend the `seriesEditor` union (l.981-986) with `{ family: 'tune'; component: string }`, `EDITOR_TITLE` with `tune: 'Tune the profile'`, and render `RenewableTuner` in the existing `Dialog` host;
-  - add an optional `onTune` prop to `GenItem`, shown next to Generate as "Tune…" only when `uiMode === 'expert'` and the row has a location (`coord_source !== 'missing'`);
+  - add an optional `onTune` prop to `GenItem`, rendered next to Generate as "Tune…" (`data-testid="tune-<generator>"`) whenever it is passed. `GenItem` has no `uiMode`; the parent passes `onTune` only when `uiMode === 'expert'` (l.976) and the readiness row has a location (`coord_source !== 'missing'`);
   - change nothing else in the file.
 - `components/series/WeatherBar.tsx`: the window line under the time-basis line (l.54-60), with `data-testid="weather-window"`. Reuse `weekDates`-style formatting from `SeriesKit.tsx` (UTC, `en-GB`).
 
@@ -166,7 +167,7 @@ Separately, the RP-12 remainder: a test proves that an Energy Hub template's rep
 ### Stretch (only after the core is green)
 
 - **S1. A staged template case for T-R1.** Add `eh_h2_hub_staged` as a third case: per-period windows, each period's 168 values equal to the same weather-year hours.
-- **S2. Compare in Profile Studio.** Each `PendingCard` (`ProfileStudioSection.tsx` l.61-120) gets "Compare with current ›", which opens `ProfileCompare` for `current:<component>` vs `pending:<job>:<component>` in a `Dialog`.
+- **S2. Compare in Profile Studio.** Each `PendingCard` (`pages/ProfileStudioSection.tsx` l.61-120, its own local `PendingCard`, not `SeriesKit.tsx`'s) gets "Compare with current ›", which opens `ProfileCompare` for `current:<component>` vs `pending:<job>:<component>` in a `Dialog`.
 - **S3. "Upload instead" in the missing-location banner** (RP-04's last item). Next to "Set the bus coordinates ›" (`RenewableReadiness.tsx` l.64-68), add "or upload a profile ›". It selects that generator's row and opens its existing per-row upload picker (`GenItem`'s `onUpload` input). The banner then needs a callback prop from `TimeSeriesManager.tsx`.
 - **S4. A scripted Playwright walk** for the screenshots (Chromium at `/opt/pw-browsers`, synthetic source), kept under `.scratch/renewable-profiles/evidence/` with the PNGs. Not a committed test suite: the frontend has none.
 
@@ -185,7 +186,7 @@ Separately, the RP-12 remainder: a test proves that an Energy Hub template's rep
 ## The assistant's path
 
 - `compare_profiles` is a read: `safety_tier_for("compare_profiles") == "read"`, so it needs no confirmation card.
-- It calls the same handler as the route, so the payloads are equal (test B-C6). The name contains "profile", so `harness/toolsets.py` l.44 files it with the other profile tools; no toolset edit.
+- It calls the same handler as the route, so the payloads are equal (test B-C6). The name contains "profile", so `harness/toolsets.py` l.44 files it with the other profile tools in "network". It contains "compare" too, so l.47 also files it in "results". Both are intended; no toolset edit.
 - `generate_renewable_profile` and `preview_renewable_profile` accept tuning keys through their existing `params` argument, because the tuning lives in `resolve_params`. Out-of-range keys now come back as `invalid_params`. Do not change their schemas or descriptions. RP-08 rewrites the workflow and adds `shape_generated_profile`; that is not this task.
 
 ## Tests
@@ -205,10 +206,11 @@ Every new test must fail on `master`; say in the PR body which line fails there.
 5. **B-T5** `test_derate_caps_the_series`: with `derate: 0.2`, the max is ≤ 0.8 and equals `min(baseline, 0.8)` hour by hour.
 6. **B-T6** `test_atlite_fields_map_into_the_preset_params` (pure, no atlite):
    - `resolve_params("vestas-v90-3mw", "wind", {"hub_height": 120, "cut_out": 22})` gives `turbine.hub_height == 120`; every `V >= 22` point is replaced; the curve ends `(22, 3.0), (22.01, 0.0)`;
+   - `cut_out: 30` (above the preset's 25.0) keeps the preset's points up to `(25.0, 3.0)`, drops `(25.01, 0)`, and the curve ends `(30, 3.0), (30.01, 0.0)`;
    - the solar preset with `tilt: 20, tracking: "horizontal", inverter_efficiency: 0.95` sets `orientation.slope`, `tracking` and `panel.inverter_efficiency`;
    - the shipped preset is unchanged afterwards.
 7. **B-T7** `test_meta_records_tuning_and_what_the_source_ignored`: synthetic with `hub_height` and `losses` gives `meta["tuning"] == {...both}` and `meta["tuning_not_applied"] == ["hub_height"]`.
-8. **B-T8** `test_untuned_generation_is_byte_identical`: `generate_profile` with no tuning keys returns the same series as before this change. Compare against a frozen digest you record on `master` first.
+8. **B-T8** `test_untuned_generation_is_byte_identical`: `generate_profile` with no tuning keys returns the same series **and the same meta keys** as before this change. Compare against a frozen digest you record on `master` first.
 
 ### Backend: `pypsa-gui/backend/tests/test_profile_compare.py` (new)
 
@@ -229,6 +231,7 @@ Use a project fixture like `test_profile_batch_apply.py` l.27-46 (hourly 2025 ye
    - the dispatcher's output under `bound_ctx` equals the route's JSON.
 7. **B-C7** `test_compare_writes_nothing`: the undo depth (`/api/network/undo/info`), `session_ctx(client).network_revision`, `user_ts` keys and the sorted pending folder listing are unchanged after two compares.
 8. **B-C8** `test_a_sampled_week_compares_on_its_own_snapshots`: on a 168 h week network with weightings 8760/168, the `week` block has 168 snapshots, `duration` has 100 points, and `flh` uses the weighted mean.
+9. **B-C9** `test_a_multi_period_model_compares_on_its_own_snapshots`: on a two-period model (2030, 2040; one 168 h week each, weightings 8760/168), `g_a` carrying a MultiIndex `p_max_pu` of constant 0.30 in 2030 and 0.50 in 2040. `current:g_a` against itself gives zero deltas; `flh == 0.40 × 8760`; the `week` block's snapshots all lie in one period, and the block names it.
 
 ### Backend: `pypsa-gui/backend/tests/test_profile_template_week.py` (new, RP-12)
 
@@ -377,3 +380,12 @@ Each has my recommended answer. Answer before handing this out.
 - **G13. "Upload instead"** is the last missing RP-04 item. *Recommended:* stretch S3 here (small, same tab). If it is not done, leave RP-04 `ready-for-agent` with only that item.
 - **G14. Size.** *Recommended:* one PR as the owner asked, with core = RP-05 + RP-07 + the RP-12 tests and copy, and stretch S1–S4.
   - If the gatekeeper wants it smaller, the clean cut is RP-05 alone (schema, tuning, Tune dialog without compare) and then RP-07 + RP-12 as a second outsourced task. The compare view would then land after the Tune dialog it opens from.
+
+## Gatekeeper answers
+
+- **G1–G13:** take the recommended answer each time. G4's cut-out bounds rely on the cut-out mapping above, which handles a value above the preset's. G7 adds the multi-period rule above (B-C9). G11 needs a follow-up ticket for "Replace with a weather profile" on `network_native` rows.
+- **G14:** the owner decides; the gatekeeper recommends a backend/frontend split, not the RP-05-first cut.
+  - The RP-05-first cut would ship a Tune dialog with nothing to show before Apply. A renewable pending record (`PendingProfile`) carries no stats and no preview week, so G6's "compare before Apply" would wait for the second PR.
+  - **G-a (backend):** `tuning.py`, the `presets`/`engine` hooks, the schema route, `compare.py`, the compare route, `compare_profiles`, the error kinds, the inventory, the route line, `window` in `_weather_answer`, `CONTEXT.md`, and tests B-T*, B-C* and T-R*.
+  - **G-b (frontend, after G-a merges):** the `api/profiles.ts` types, `generatePending`, `RenewableTuner`, `ProfileCompare`, the `TimeSeriesManager` wiring, the `WeatherBar` window line, F1–F5, the screenshots and S2–S4. S1 rides with G-a.
+  - Each half then has one reviewer: the engine gatekeeper takes G-a, the UX reviewer G-b. The chat gets tuning and compare as soon as G-a lands.
