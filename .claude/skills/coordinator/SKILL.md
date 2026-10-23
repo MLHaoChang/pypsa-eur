@@ -85,6 +85,8 @@ Done when every package is running, queued with a named reason, or merged.
 
 Each **work package** gets its own session: one feature or fix, ending when its last PR merges. Pass `model` on every `create_session`. A child left without it inherits the coordinator's model.
 
+Title and tag every session per owner decision NAMING: pass `title` as "<Team> · <role/package> — <current work>" (teams Lead, Review, Assurance, Build) and set the matching `team:<team>` tag with `set_session_tags`. Retitle a session when its current work changes.
+
 | Package | Model |
 |---|---|
 | Probes, key checks, link checks, summaries of logs or lists | `claude-haiku-5-5` |
