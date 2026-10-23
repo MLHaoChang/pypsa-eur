@@ -342,6 +342,16 @@ def test_a_p_outside_the_band_fails_naming_the_hour_and_p():
     assert "80.00 MW" in row["detail"] and "(2030, 2)" in row["detail"] and "outside" in row["detail"]
 
 
+def test_a_p_outside_the_band_still_reports_the_worst_q_excursion_inside_it():
+    # hour 1: P 50 MW inside the P range, Q 10 Mvar against +-5 Mvar; hour 2: P 80 MW outside it
+    narrow = _lim(points=[[0.0, -0.05, 0.05], [0.6, -0.05, 0.05]])
+    row = sagc(profile=_with(q_capability_pq=narrow)).loc["pcc_q_band"]
+    assert row["status_as_is"] == "fail" and "(2030, 2)" in row["detail"]
+    assert "worst inside the P range: Q 10.00 Mvar at (2030, 1), band -5.00 to 5.00 Mvar" in row["detail"]
+    wide = _lim(points=[[0.0, -0.3, 0.3], [0.6, -0.3, 0.3]])
+    assert "worst inside" not in sagc(profile=_with(q_capability_pq=wide)).loc["pcc_q_band", "detail"]
+
+
 def test_an_exporting_hour_reads_the_band_below_zero_p():
     band = _lim(points=[[-1.0, -0.1, 0.1], [0.0, -0.3, 0.3], [1.0, -0.3, 0.3]])
     row = sagc(profile=_with(q_capability_pq=band), pcc=_pcc(p1=-50.0, p2=-80.0)).loc["pcc_q_band"]
@@ -362,8 +372,9 @@ def test_a_lagging_hour_is_held_to_pf_min_lagging():
 def test_a_leading_hour_is_held_to_pf_min_leading_only():
     reactive = inputs()["reactive"].assign(q0_mvar=[-10.0, -25.0], q_final_mvar=[-10.0, -25.0])
     lagging_only = sagc(profile=_with(pf_min_lagging=_lim(value=0.99)), reactive=reactive).loc["pcc_power_factor"]
-    assert lagging_only["status_as_is"] == "pass" and pd.isna(lagging_only["value"])   # no leading limit to fail
-    assert "no leading limit set" in lagging_only["detail"]
+    # no hour on a side with a limit: nothing was judged, so unknown, never pass
+    assert lagging_only["status_as_is"] == lagging_only["status_with_measures"] == "unknown"
+    assert pd.isna(lagging_only["value"]) and "no leading limit set" in lagging_only["detail"]
     row = sagc(profile=_with(pf_min_lagging=_lim(value=0.8), pf_min_leading=_lim(value=0.96)),
                reactive=reactive).loc["pcc_power_factor"]
     assert row["status_as_is"] == "fail" and row["limit"] == 0.96 and "leading" in row["detail"]

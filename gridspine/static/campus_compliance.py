@@ -33,7 +33,8 @@ check (``CHECKS``):
     The PCC power factor of every converged hour against ``pf_min_lagging``
     (Q > 0) or ``pf_min_leading`` (Q < 0). Hours with ``|P|`` below
     ``PF_MIN_P_SHARE`` of ``p_ref`` are left out: the power factor of a site
-    near zero exchange says nothing about its reactive behaviour.
+    near zero exchange says nothing about its reactive behaviour. When no
+    hour falls on a side with a limit, nothing is judged: ``unknown``.
 
 Both read ``requirement["p_ref_mw"]`` (the connection capacity the profile's
 per-unit values scale by) and the intact rows of ``pcc``. Without the
@@ -63,6 +64,7 @@ Every row carries:
 pandas only, plus the profile's band lookup.
 """
 import math
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -157,9 +159,18 @@ def _unknown(check, unit, clause, source, detail):
     return _row(check, "unknown", "unknown", math.nan, math.nan, unit, None, clause, source, detail)
 
 
+class _Hour(NamedTuple):
+    """One converged hour at the PCC: P from ``pcc``'s intact case, Q as is
+    (``q0``) and with measures (``q_final``), MW and Mvar."""
+    period: int
+    hour: int
+    p: float
+    q0: float
+    q_final: float
+
+
 def _pcc_hours(reactive, pcc, p_ref):
-    """``(period, hour, p_mw, q0_mvar, q_final_mvar)`` of every converged
-    hour, P from ``pcc``'s intact case; None when P cannot be read."""
+    """The ``_Hour`` of every converged hour; None when P cannot be read."""
     if pcc is None or p_ref is None or not len(pcc):
         return None
     intact = pcc[pcc["case"].astype(str) == "intact"]
@@ -168,7 +179,7 @@ def _pcc_hours(reactive, pcc, p_ref):
     for r in reactive[reactive["converged"].astype(bool)].itertuples(index=False):
         key = (int(r.period), int(r.hour))
         if key in p and math.isfinite(p[key]):
-            out.append((*key, p[key], float(r.q0_mvar), float(r.q_final_mvar)))
+            out.append(_Hour(*key, p[key], float(r.q0_mvar), float(r.q_final_mvar)))
     return out or None
 
 
@@ -182,17 +193,18 @@ def _why_unknown(lim, hours, p_ref):
     return None
 
 
-def _q_band_status(lim, hours, p_ref, col):
-    """``(status, worst, out_of_range)`` of the Q band for Q column ``col``
-    (3: as-is, 4: with measures). ``worst`` is ``(key, period, hour, p, q,
-    lo, hi, limit)`` in MW/Mvar; ``out_of_range`` the first hour whose P lies
-    outside the band's P range."""
+def _q_band_status(lim, hours, p_ref, q_col):
+    """``(status, worst, out_of_range)`` of the Q band for the ``_Hour`` Q
+    field ``q_col`` (``"q0"`` as is, ``"q_final"`` with measures). ``worst``
+    is ``(key, period, hour, p, q, lo, hi, limit)`` in MW/Mvar over the hours
+    inside the band's P range; ``out_of_range`` the first ``_Hour`` outside
+    it."""
     worst, outside = None, None
     for h in hours:
-        period, hour, p, q = h[0], h[1], h[2], h[col]
+        period, hour, p, q = h.period, h.hour, h.p, getattr(h, q_col)
         band = q_band_at(lim, p / p_ref)
         if band is None:
-            outside = outside or (period, hour, p)
+            outside = outside or h
             continue
         lo, hi = band[0] * p_ref, band[1] * p_ref
         over, under = q - hi, lo - q
@@ -208,14 +220,17 @@ def _q_band_row(profile, hours, p_ref):
     why = _why_unknown(lim, hours, p_ref)
     if why:
         return _unknown("pcc_q_band", "Mvar", lim["clause"] if lim else "", lim["source"] if lim else "assumed", why)
-    as_is, worst, outside = _q_band_status(lim, hours, p_ref, 3)
-    after = _q_band_status(lim, hours, p_ref, 4)[0]
+    as_is, worst, outside = _q_band_status(lim, hours, p_ref, "q0")
+    after = _q_band_status(lim, hours, p_ref, "q_final")[0]
     if outside is not None:
-        period, hour, p = outside
-        row = _row("pcc_q_band", as_is, after, p, math.nan, "MW", (period, hour), lim["clause"], lim["source"],
-                   f"P {p:.2f} MW ({p / p_ref:.3f} pu) at ({period}, {hour}) is outside the band's P range "
-                   f"{lim['points'][0][0]:g} to {lim['points'][-1][0]:g} pu")
-        return row
+        p = outside.p
+        detail = (f"P {p:.2f} MW ({p / p_ref:.3f} pu) at ({outside.period}, {outside.hour}) is outside the band's "
+                  f"P range {lim['points'][0][0]:g} to {lim['points'][-1][0]:g} pu")
+        if worst is not None and worst[0] > Q_TOL:
+            _, period, hour, _, q, lo, hi, _ = worst
+            detail += f"; worst inside the P range: Q {q:.2f} Mvar at ({period}, {hour}), band {lo:.2f} to {hi:.2f} Mvar"
+        return _row("pcc_q_band", as_is, after, p, math.nan, "MW", (outside.period, outside.hour), lim["clause"],
+                    lim["source"], detail)
     key, period, hour, p, q, lo, hi, limit = worst
     detail = f"worst at P {p:.2f} MW ({p / p_ref:.3f} pu); band {lo:.2f} to {hi:.2f} Mvar there"
     if as_is == "pass" and key > 0:
@@ -225,22 +240,22 @@ def _q_band_row(profile, hours, p_ref):
     return row
 
 
-def _pf_status(profile, hours, col):
-    """``(status, worst)`` of the power factor for Q column ``col``; ``worst``
-    is ``(margin, period, hour, p, q, pf, limit, side)``, None when no hour
-    has a limit on its side."""
+def _pf_status(profile, hours, q_col):
+    """``(status, worst)`` of the power factor for the ``_Hour`` Q field
+    ``q_col``; ``worst`` is ``(margin, period, hour, p, q, pf, limit, side)``.
+    When no hour has a limit on its side nothing was judged: ``unknown``."""
     worst = None
     for h in hours:
-        period, hour, p, q = h[0], h[1], h[2], h[col]
+        period, hour, p, q = h.period, h.hour, h.p, getattr(h, q_col)
         side = "pf_min_lagging" if q > 0 else "pf_min_leading" if q < 0 else None
-        pf = abs(p) / math.hypot(p, q)
         if side is None or side not in profile:
             continue
+        pf = abs(p) / math.hypot(p, q)
         limit = float(profile[side]["value"])
         if worst is None or pf - limit < worst[0]:
             worst = (pf - limit, period, hour, p, q, pf, limit, side)
     if worst is None:
-        return "pass", None
+        return "unknown", None
     return ("fail" if worst[0] < -1e-9 else "pass"), worst
 
 
@@ -252,13 +267,13 @@ def _pf_row(profile, hours, p_ref):
         return _unknown("pcc_power_factor", "", lim["clause"] if lim else "", lim["source"] if lim else "assumed",
                         why)
     floor = PF_MIN_P_SHARE * p_ref
-    kept = [h for h in hours if abs(h[2]) >= floor]
+    kept = [h for h in hours if abs(h.p) >= floor]
     note = (f"{len(hours) - len(kept)} hour(s) with |P| below {PF_MIN_P_SHARE:.0%} of p_ref ({floor:.2f} MW) "
             "left out") if len(kept) < len(hours) else ""
     if not kept:
         return _unknown("pcc_power_factor", "", lim["clause"], lim["source"], note)
-    as_is, worst = _pf_status(profile, kept, 3)
-    after = _pf_status(profile, kept, 4)[0]
+    as_is, worst = _pf_status(profile, kept, "q0")
+    after = _pf_status(profile, kept, "q_final")[0]
     unset = [k.removeprefix("pf_min_") for k in ("pf_min_lagging", "pf_min_leading") if k not in profile]
     extra = [x for x in (note, f"no {unset[0]} limit set" if unset else "") if x]
     if worst is None:
