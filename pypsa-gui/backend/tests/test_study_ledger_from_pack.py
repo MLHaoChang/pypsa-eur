@@ -356,6 +356,23 @@ _READ_FINANCE_FIELDS = ("currency", "currency_year", "basis", "perspective", "di
                         "sizing_limit", "horizon_rule", "replacement_rules")
 
 
+#: Changes a newer vendored pack may make to what the study reads without a
+#: bump, each acknowledged exactly (key, field, pinned value -> new value), as
+#: `_bump_changes` writes it. Any other field of these rows, any other value,
+#: or any other row still blocks.
+_ACKNOWLEDGED_BUMP_CHANGES = frozenset(
+    f"{key}.currency_year: 2020 -> 2025"
+    for key in ("battery.power.overnight", "battery.energy.overnight",
+                "solar-utility.investment.overnight", "solar-rooftop.investment.overnight"))
+_ACKNOWLEDGED_BUMP_REASON = (
+    "MONEY-YEAR-1: pack 2026-10-25 relabels these rows' money year 2020 -> 2025 (the "
+    "values were 2025 EUR all along) and moves no value. Bumping PACK_VERSION past "
+    "2026-10-24 would then hit `currency_year_mixed` against the 2020 tariffs "
+    "(services/study/compile.py `currency_year_of`), so the follow-up "
+    ".scratch/money-year/issues/01-templates-case-year-and-repin.md must move the "
+    "study's or the tariffs' currency year together with the pin.")
+
+
 def _dump(x):
     return x.model_dump(mode="json") if hasattr(x, "model_dump") else (
         [_dump(v) for v in x] if isinstance(x, (list, tuple)) else x)
@@ -379,8 +396,9 @@ def _bump_changes(pinned, newer) -> tuple[list[str], list[str]]:
             changes.append(f"{key}: missing")
             continue
         a, b = old[key].model_dump(mode="json"), new[key].model_dump(mode="json")
-        changes += [f"{key}.{f}: {a.get(f)!r} -> {b.get(f)!r}"
-                    for f in _READ_ROW_FIELDS if a.get(f) != b.get(f)]
+        changes += [c for f in _READ_ROW_FIELDS if a.get(f) != b.get(f)
+                    if (c := f"{key}.{f}: {a.get(f)!r} -> {b.get(f)!r}")
+                    not in _ACKNOWLEDGED_BUMP_CHANGES]
     for f in _READ_FINANCE_FIELDS:
         a, b = _dump(getattr(pinned.finance, f)), _dump(getattr(newer.finance, f))
         if a != b:
@@ -472,6 +490,45 @@ def test_the_bump_tripwire_guards_only_what_the_study_reads():
     # Unchanged, and the pin itself (refused at load by the strict loader).
     assert _bump_blocker(newer, pack, pack) is None
     assert _bump_blocker(_L().PACK_VERSION, added, pack) is None
+
+
+def test_the_money_year_relabel_is_acknowledged_change_by_change():
+    """
+    The acknowledgement (see `_ACKNOWLEDGED_BUMP_REASON`) passes exactly the
+    four rows' currency_year 2020 -> 2025; a value change on the same rows, or
+    another currency year, still blocks.
+    """
+    from services.library.defaults_pack.loader import load_defaults_pack
+
+    assert "01-templates-case-year-and-repin.md" in _ACKNOWLEDGED_BUMP_REASON
+    assert "currency_year_mixed" in _ACKNOWLEDGED_BUMP_REASON
+    pack = load_defaults_pack(_L().PACK_VERSION)
+    newer = "2026-10-07"
+    keys = {c.split(".currency_year:")[0] for c in _ACKNOWLEDGED_BUMP_CHANGES}
+    assert pack.cost_values and all(
+        v.currency_year == 2020 for v in pack.cost_values if v.key in keys)
+
+    def relabel(year, scale=1.0):
+        rows = [v.model_copy(update={"currency_year": year, "value": v.value * scale})
+                if v.key in keys else v for v in pack.cost_values]
+        return pack.model_copy(update={"cost_values": rows})
+
+    assert _bump_blocker(newer, relabel(2025), pack) is None
+    message = _bump_blocker(newer, relabel(2024), pack)
+    assert message and "battery.power.overnight.currency_year: 2020 -> 2024" in message
+    message = _bump_blocker(newer, relabel(2025, 1.1), pack)
+    assert message and "battery.power.overnight.value" in message
+    assert "currency_year" not in message
+    # Another row's identical relabel is not acknowledged.
+    other = next(k for k, _ in _L()._PACK_TECH_ROWS if k not in keys)
+
+    def other_in(year):
+        rows = [v.model_copy(update={"currency_year": year}) if v.key == other else v
+                for v in pack.cost_values]
+        return pack.model_copy(update={"cost_values": rows})
+
+    message = _bump_blocker(newer, other_in(2025), other_in(2020))
+    assert message and f"{other}.currency_year: 2020 -> 2025" in message
 
 
 # ── gate U2-WP8a Y3: every compared field is pinned, one at a time ───────

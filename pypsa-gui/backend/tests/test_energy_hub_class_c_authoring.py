@@ -196,7 +196,8 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
                     "2026-10-22", "2026-10-22+ca_federal", "2026-10-22+uk",   # GS-2b typed cost units
                     "2026-10-22+us_federal",
                     "2026-10-23",                                            # campus-IC 03A
-                    "2026-10-24"):                                           # refinery gap 2
+                    "2026-10-24",                                            # refinery gap 2
+                    "2026-10-25"):                                           # MONEY-YEAR-1 relabel
         pack = root / "services" / "library" / "defaults_pack" / "versions" / version
         pack.mkdir(parents=True)
         (pack / "manifest.json").write_text("{}")

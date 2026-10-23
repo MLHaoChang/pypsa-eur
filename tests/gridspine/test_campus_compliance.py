@@ -13,7 +13,7 @@ re-solve).
 import pandas as pd
 import pytest
 
-from gridspine.static.campus_compliance import CHECKS, campus_compliance
+from gridspine.static.campus_compliance import CHECKS, NO_LIMIT, campus_compliance
 from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
 
 PROFILE = load_grid_code("eu_rfg_dcc_ce")
@@ -269,3 +269,128 @@ def test_an_overloaded_open_tie_fails_with_measures_too():
     row = report(**_tie_inputs(tie_pct=120.0, inner_pct=50.0)).loc["transformer_loading"]
     assert row["status_as_is"] == "fail" and row["status_with_measures"] == "fail"   # nothing resizes the tie
     assert TIE_LABEL in row["clause"] and "no measure resizes it" in row["detail"]
+
+
+# --------------------------------------------------------------------------
+# P-dependent Q band and asymmetric power factor at the PCC (DC 10a)
+# --------------------------------------------------------------------------
+# Signs: pcc p_mw > 0 is import (res_ext_grid); Q > 0 is the grid supplying
+# reactive power into the site, a lagging power factor. Generic test values.
+
+P_REF = 100.0
+
+
+def _pcc(p1=50.0, p2=80.0):
+    return pd.DataFrame([
+        {"period": 2030, "hour": 1, "case": "intact", "converged": True, "p_mw": p1, "q_mvar": 0.0},
+        {"period": 2030, "hour": 2, "case": "intact", "converged": True, "p_mw": p2, "q_mvar": 0.0},
+        {"period": 2030, "hour": 2, "case": "N-1:TR1", "converged": True, "p_mw": 999.0, "q_mvar": 0.0},
+    ])
+
+
+def _lim(**kw):
+    return {"clause": "generic test clause", "source": "code", **kw}
+
+
+def _with(**limits):
+    return {**PROFILE, **limits}
+
+
+def sagc(profile=None, pcc=None, p_ref=P_REF, tie_open=False, **over):
+    req = {**inputs()["requirement"], **({"p_ref_mw": p_ref} if p_ref is not None else {}),
+           **({"tie_open": True} if tie_open else {})}
+    return report(profile=profile or PROFILE, pcc=_pcc() if pcc is None else pcc, requirement=req, **over)
+
+
+BAND = _lim(points=[[0.0, -0.1, 0.1], [1.0, -0.2, 0.2]])     # +-18 Mvar at 0.8 pu
+
+
+@pytest.mark.parametrize("profile, pcc, p_ref, why", [
+    (PROFILE, None, P_REF, NO_LIMIT),
+    (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), None, None, "P_ref"),
+    (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), pd.DataFrame(), P_REF, "no PCC active power"),
+])
+def test_an_unset_limit_or_unknown_base_is_unknown_never_pass_or_fail(profile, pcc, p_ref, why):
+    r = sagc(profile=profile, pcc=pcc, p_ref=p_ref)
+    for check in ("pcc_q_band", "pcc_power_factor"):
+        row = r.loc[check]
+        assert row["status_as_is"] == row["status_with_measures"] == "unknown", check
+        assert why in row["detail"] and pd.isna(row["value"])
+
+
+def test_the_existing_call_without_pcc_still_reports_every_check():
+    r = report()
+    assert list(r.index) == list(CHECKS)
+    assert set(r.loc[["pcc_q_band", "pcc_power_factor"], "status_as_is"]) == {"unknown"}
+
+
+def test_the_q_band_is_interpolated_at_the_intact_pcc_p():
+    row = sagc(profile=_with(q_capability_pq=BAND)).loc["pcc_q_band"]
+    # hour 2: P 80 MW = 0.8 pu, band +-0.18 pu = +-18 Mvar; Q 25 as is, 19.2 with measures
+    assert row["status_as_is"] == "fail" and row["status_with_measures"] == "fail"
+    assert row["value"] == 25.0 and row["limit"] == pytest.approx(18.0) and row["unit"] == "Mvar"
+    assert (row["limit_min"], row["limit_max"]) == (pytest.approx(-18.0), pytest.approx(18.0))
+    assert (row["worst_period"], row["worst_hour"]) == (2030, 2) and row["clause"] == "generic test clause"
+    wide = _lim(points=[[0.0, -0.1, 0.1], [1.0, -0.3, 0.3]])  # +-26 Mvar at 0.8 pu
+    assert sagc(profile=_with(q_capability_pq=wide)).loc["pcc_q_band", "status_as_is"] == "pass"
+
+
+def test_a_p_outside_the_band_fails_naming_the_hour_and_p():
+    narrow = _lim(points=[[0.0, -0.3, 0.3], [0.6, -0.3, 0.3]])
+    row = sagc(profile=_with(q_capability_pq=narrow)).loc["pcc_q_band"]
+    assert row["status_as_is"] == row["status_with_measures"] == "fail"
+    assert "80.00 MW" in row["detail"] and "(2030, 2)" in row["detail"] and "outside" in row["detail"]
+
+
+def test_a_p_outside_the_band_still_reports_the_worst_q_excursion_inside_it():
+    # hour 1: P 50 MW inside the P range, Q 10 Mvar against +-5 Mvar; hour 2: P 80 MW outside it
+    narrow = _lim(points=[[0.0, -0.05, 0.05], [0.6, -0.05, 0.05]])
+    row = sagc(profile=_with(q_capability_pq=narrow)).loc["pcc_q_band"]
+    assert row["status_as_is"] == "fail" and "(2030, 2)" in row["detail"]
+    assert "worst inside the P range: Q 10.000 Mvar at (2030, 1), band \u22125.000 to 5.000 Mvar" in row["detail"]
+    wide = _lim(points=[[0.0, -0.3, 0.3], [0.6, -0.3, 0.3]])
+    assert "worst inside" not in sagc(profile=_with(q_capability_pq=wide)).loc["pcc_q_band", "detail"]
+
+
+def test_an_exporting_hour_reads_the_band_below_zero_p():
+    band = _lim(points=[[-1.0, -0.1, 0.1], [0.0, -0.3, 0.3], [1.0, -0.3, 0.3]])
+    row = sagc(profile=_with(q_capability_pq=band), pcc=_pcc(p1=-50.0, p2=-80.0)).loc["pcc_q_band"]
+    assert row["status_as_is"] == "fail" and row["limit"] == pytest.approx(14.0)   # -0.8 pu: +-0.14 pu
+
+
+def test_a_lagging_hour_is_held_to_pf_min_lagging():
+    # hour 2: P 80, Q +25 (grid supplies Q, lagging): pf 0.9545
+    ok = sagc(profile=_with(pf_min_lagging=_lim(value=0.95), pf_min_leading=_lim(value=0.99))).loc["pcc_power_factor"]
+    assert ok["status_as_is"] == "pass" and ok["value"] == pytest.approx(80 / (80 ** 2 + 25 ** 2) ** 0.5)
+    assert ok["limit"] == 0.95 and "lagging" in ok["detail"]
+    bad = sagc(profile=_with(pf_min_lagging=_lim(value=0.96))).loc["pcc_power_factor"]
+    assert bad["status_as_is"] == "fail" and (bad["worst_period"], bad["worst_hour"]) == (2030, 2)
+    assert bad["status_with_measures"] == "pass"           # Q 19.2 with measures: pf 0.972
+    assert "no leading limit set" in bad["detail"]
+
+
+def test_a_leading_hour_is_held_to_pf_min_leading_only():
+    reactive = inputs()["reactive"].assign(q0_mvar=[-10.0, -25.0], q_final_mvar=[-10.0, -25.0])
+    lagging_only = sagc(profile=_with(pf_min_lagging=_lim(value=0.99)), reactive=reactive).loc["pcc_power_factor"]
+    # no hour on a side with a limit: nothing was judged, so unknown, never pass
+    assert lagging_only["status_as_is"] == lagging_only["status_with_measures"] == "unknown"
+    assert pd.isna(lagging_only["value"]) and "no leading limit set" in lagging_only["detail"]
+    row = sagc(profile=_with(pf_min_lagging=_lim(value=0.8), pf_min_leading=_lim(value=0.96)),
+               reactive=reactive).loc["pcc_power_factor"]
+    assert row["status_as_is"] == "fail" and row["limit"] == 0.96 and "leading" in row["detail"]
+
+
+def test_hours_near_zero_p_are_left_out_of_the_power_factor():
+    profile = _with(pf_min_lagging=_lim(value=0.95))
+    # hour 1: |P| 5 MW < 10 % of 100 MW with Q 10: pf 0.45, left out; hour 2 still checked
+    row = sagc(profile=profile, pcc=_pcc(p1=5.0, p2=200.0)).loc["pcc_power_factor"]
+    assert row["status_as_is"] == "pass" and row["worst_hour"] == 2
+    assert "1 hour(s) with |P| below 10% of p_ref (10.00 MW) left out" in row["detail"]
+    none = sagc(profile=profile, pcc=_pcc(p1=5.0, p2=-9.0)).loc["pcc_power_factor"]
+    assert none["status_as_is"] == "unknown" and "2 hour(s)" in none["detail"]
+
+
+def test_the_new_pcc_rows_carry_the_open_tie_clause():
+    r = sagc(profile=_with(q_capability_pq=BAND), tie_open=True)
+    assert TIE_LABEL in r.loc["pcc_q_band", "clause"]
+    assert r.loc["pcc_power_factor", "clause"] == ""                   # unknown: no clause to qualify

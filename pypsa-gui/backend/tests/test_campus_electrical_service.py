@@ -165,7 +165,11 @@ def test_a_run_sizes_the_campus_and_its_results_read_back(hub):
     out = ce.run(hub, {"k": 1, "pf": 0.95, "margin": 0.1, "n_minus_1": True})
     res = out["results"]
     assert [r["check"] for r in res["compliance"]] == [
-        "pcc_reactive", "pcc_voltage", "campus_voltage", "transformer_loading", "switchgear"]
+        "pcc_reactive", "pcc_voltage", "campus_voltage", "transformer_loading", "switchgear", "pcc_q_band",
+        "pcc_power_factor"]
+    # what no steady-state check can show, for the app's "Needs an RMS study" line
+    assert isinstance(res["reported_requirements"], list)
+    assert all(r["status"] == "reported" and r["requirement"] for r in res["reported_requirements"])
     assert res["transformers"][0]["margin"] == 0.1
     assert res["requirement"]["pf"] == 0.95 and res["requirement"]["source"] == "assumed"
     assert res["selection"] and {"period", "hour", "reasons"} <= set(res["selection"][0])

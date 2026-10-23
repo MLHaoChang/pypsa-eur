@@ -744,7 +744,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         sizing=sizing, compensation=comp, short_circuit=short_circuit, requirement=requirement,
         profile=code, pcc_bus=str(net.bus.at[int(net.ext_grid["bus"].iloc[0]), "name"]),
         bus_kv=dict(zip(net.bus["name"].astype(str), net.bus["vn_kv"].astype(float))),
-        held=held_transformers(campus),
+        held=held_transformers(campus), pcc=pd.DataFrame(pcc_rows),
     )
     _write_text_atomic(run_dir / COMPLIANCE_CSV, compliance.to_csv(index=False))
     # Beside the compliance table, never in it (the measure loop reads that):
