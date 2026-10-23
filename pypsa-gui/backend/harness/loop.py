@@ -3192,6 +3192,12 @@ def _dispatch_real_tool_call(
             "compare_a": ui_event_payload.get("compare_a"),
             "compare_b": ui_event_payload.get("compare_b"),
             "compare_tab": ui_event_payload.get("compare_tab"),
+            "component_class": ui_event_payload.get("component_class"),
+            "name": ui_event_payload.get("name"),
+            "snapshot_iso": ui_event_payload.get("snapshot_iso"),
+            "period": ui_event_payload.get("period"),
+            "snapshot_index": ui_event_payload.get("snapshot_index"),
+            "canvas_view": ui_event_payload.get("canvas_view"),
             # Issue 06 — open_run_result acknowledges the discussed run id.
             "run_id": ui_event_payload.get("run_id"),
             "section": ui_event_payload.get("section"),
