@@ -121,6 +121,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "profile_gen/shape.py": (2, "FLH = mean CF x the WEATHER year's hours (8760 or 8784) and "
                                 "peak_shift's hourly-axis check — both about the generated "
                                 "artifact's own calendar, before alignment to any network"),
+    "profile_gen/compare.py": (1, "FLH = generator-weighted mean CF times the calendar year's "
+                                  "8760 or 8784 hours — an annual unit conversion, not a "
+                                  "snapshot-step assumption"),
 }
 
 
@@ -152,6 +155,7 @@ def test_the_inventory_is_pinned():
     # TS 02: profile_gen/availability.py (1) added.
     # TS 01 B3: profile_gen/load_upload.py (1) added.
     # TS 01 B1: profile_gen/load_archetypes.py (1) added.
-    assert sum(c for c, _ in ALLOWED.values()) == 85
-    assert len(ALLOWED) == 44
+    # G-a: profile_gen/compare.py (1) annualises weighted CF in calendar-year hours.
+    assert sum(c for c, _ in ALLOWED.values()) == 86
+    assert len(ALLOWED) == 45
     assert all(reason for _, reason in ALLOWED.values())

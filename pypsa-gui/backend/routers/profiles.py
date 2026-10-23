@@ -1479,7 +1479,7 @@ def _weather_answer(proj: AuthorizedProject) -> dict[str, Any]:
     if isinstance(snapshots, pd.MultiIndex) and len(snapshots):
         stamps = stamps[snapshots.get_level_values(0) == snapshots.get_level_values(0)[0]]
     try:
-        window = _hourly_window(pd.DatetimeIndex(stamps), what="the model's snapshots")
+        window = _hourly_window(stamps, what="the model's snapshots")
     except ProfileGenError as exc:
         window = {"unsupported": public_message(exc, route="weather")}
     return {**weather_prefs.resolved(proj.directory, snapshots), "window": window,

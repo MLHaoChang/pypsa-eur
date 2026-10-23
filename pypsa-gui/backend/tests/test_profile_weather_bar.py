@@ -140,3 +140,27 @@ def test_saving_a_year_leaves_existing_series_alone(client, install_network, ses
     assert after.equals(before)
     rows = client.get(f"/api/projects/{project}/profiles/readiness").json()["generators"]
     assert rows[0]["profile"] == "generated" and "stale_reason" not in rows[0]
+
+@pytest.mark.parametrize("axis", ["default", "integer"])
+def test_non_datetime_weather_window_refusal_is_stable(client, install_network, axis):
+    """A model's native non-date axis must never become wall time or epoch dates."""
+    import re
+
+    import pypsa
+
+    n = pypsa.Network()
+    if axis == "integer":
+        n.set_snapshots(pd.Index(range(24)))
+    install_network(n)
+    project = "Non-date weather axis"
+    assert client.post(f"/api/projects/{project}",
+                       params={"force": True, "rebind": True}).status_code == 200
+    answers = [client.get(f"/api/projects/{project}/profiles/weather") for _ in range(2)]
+    assert [answer.status_code for answer in answers] == [200, 200]
+    first, second = [answer.json()["window"] for answer in answers]
+    assert first == second
+    assert set(first) == {"unsupported"}
+    reason = first["unsupported"]
+    assert "expected a DatetimeIndex" in reason
+    assert not re.search(r"\d{4}-\d{2}-\d{2}", reason)
+    assert "nanosecond" not in reason and "00:00:00.000000001" not in reason
