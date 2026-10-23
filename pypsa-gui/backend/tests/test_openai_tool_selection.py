@@ -69,3 +69,74 @@ def test_actual_selected_set_drives_metadata_and_dispatch_allowlist(monkeypatch)
     assert "solve_ppa_price" not in {t["name"] for t in fake.requests[0].tools}
     assert next(d for e, d in frames if e == "tool_error")["error_kind"] == "tool_not_offered"
     assert called == []
+
+
+@pytest.fixture
+def discovery_session():
+    from harness.session import ChatSession
+    from services import chat_tools
+    previous = chat_tools.chat_session()
+    session = ChatSession()
+    chat_tools.set_chat_session(session)
+    try:
+        yield session
+    finally:
+        chat_tools.set_chat_session(previous)
+
+
+def test_discovered_tools_outrank_generic_matches(discovery_session):
+    initial = {t['name'] for t in wiring._bounded_tools(TOOLS, 'hello')}
+    name = next(t['name'] for t in TOOLS if t['name'] not in initial)
+    discovery_session.discovered_tools = (name,)
+    selected = wiring._bounded_tools(TOOLS, 'hello')
+    names = {t['name'] for t in selected}
+    assert name in names
+    assert len(selected) == 128
+    assert wiring._HARNESS_TOOL_NAMES <= names
+    assert selected == [t for t in TOOLS if t['name'] in names]
+
+
+def test_discovery_replaces_not_accumulates(discovery_session):
+    from services import chat_tools
+    first = chat_tools.find_capabilities('create_component')
+    assert discovery_session.discovered_tools == tuple(t['name'] for t in first['items'])
+    second = chat_tools.find_capabilities('get_results', limit=1)
+    expected = tuple(t['name'] for t in second['items'])
+    assert expected and expected != tuple(t['name'] for t in first['items'])
+    assert discovery_session.discovered_tools == expected
+    chat_tools.find_capabilities(overview=True)
+    assert discovery_session.discovered_tools == expected
+
+
+def test_a_discovered_tool_is_callable_in_the_same_turn(monkeypatch, discovery_session):
+    from harness.catalogue import safety_tier_for
+    from harness.providers.fake import FakeProvider
+    from services import chat_service, chat_tools, llm_config
+    official = profile()
+    llm_config.save_profiles([official], official.id)
+    discovery_session.model = official.model
+    discovery_session.profile_id, discovery_session.bound_wire = official.id, official.wire
+    eligible = wiring._tools_payload()
+    initial = {t['name'] for t in wiring._bounded_tools(eligible, 'Hello')}
+    tool = next(t for t in eligible if t['name'] not in initial
+                and safety_tier_for(t['name']) == 'read' and not t['input_schema']['required'])
+    name = tool['name']
+    called = []
+    monkeypatch.setitem(chat_tools.DISPATCHERS, name, lambda **args: called.append(args) or {'ok': True})
+    fake = FakeProvider([
+        {'blocks': [{'type': 'tool_use', 'id': 'discover', 'name': 'find_capabilities',
+                     'input': {'goal': name, 'limit': 1}}]},
+        {'blocks': [{'type': 'tool_use', 'id': 'use-found-tool', 'name': name, 'input': {}}]},
+        {'blocks': [{'type': 'text', 'text': 'Done.'}]},
+    ])
+    frames = list(chat_service.run_turn(discovery_session, 'Hello', provider=fake))
+    assert name not in {t['name'] for t in fake.requests[0].tools}
+    assert not any(e == 'tool_error' and d.get('error_kind') == 'tool_not_offered' for e, d in frames)
+    assert called == [{}]
+    assert name in {t['name'] for t in fake.requests[1].tools}
+
+
+def test_discovery_never_bypasses_the_toolset(discovery_session):
+    discovery_session.toolset = 'simulation'
+    discovery_session.discovered_tools = ('create_component',)
+    assert 'create_component' not in {t['name'] for t in wiring._tools_payload_for_profile(profile())}
