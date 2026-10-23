@@ -7,7 +7,7 @@ import { useUIStore } from '../../store/uiStore'
 import { ConnectionLimits } from './ConnectionLimits'
 
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
-  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]) } }))
+  { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn() } }))
 vi.mock('../../api/campusElectrical', async (orig) => {
   const actual = await orig<typeof import('../../api/campusElectrical')>()
   return { ...actual, campusApi: { ...actual.campusApi, gridReadiness: vi.fn(), setGridLimit: vi.fn(), resetGridLimit: vi.fn() } }
@@ -153,7 +153,29 @@ describe('ConnectionLimits', () => {
     mount()
     expect((await screen.findByTestId('connection-limit-scr')).textContent).toMatch(/Fault level: 250 MVA/)
     expect(screen.getByTestId('connection-limit-ramp_rate').textContent).toMatch(/optimisation's ramp is set on the connection link/)
-    fireEvent.click(screen.getByRole('button', { name: 'Edit the fault level ›' }))
-    expect(useUIStore.getState().selectedComponent).toMatchObject({ type: 'Bus', name: 'grid' })
+    // The value is edited on this line; no hop to the bus.
+    expect(screen.queryByRole('button', { name: 'Edit the fault level ›' })).toBeNull()
+  })
+
+  it('the fault level value is edited beside its source and written to the PoC bus', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level') })] } as never)
+    vi.mocked(campusApi.setGridLimit).mockResolvedValue({})
+    vi.mocked(networkApi.updateBus).mockResolvedValue({ name: 'grid' } as never)
+    mount()
+    const input = await screen.findByLabelText('Fault level value')
+    expect(input).toHaveProperty('value', '250')
+    fireEvent.change(input, { target: { value: '400' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save fault level' }))
+    await waitFor(() => expect(networkApi.updateBus).toHaveBeenCalledWith('grid', expect.objectContaining({ name: 'grid', eh_sk_mva: 400 })))
+    // A first save also records the limit's source and note.
+    expect(campusApi.setGridLimit).toHaveBeenCalledWith('Demo', 'fault_level', { source: 'assumed', note: '' })
+  })
+
+  it('a fault level of 0 or less is refused and nothing is written', async () => {
+    vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [row('scr', { setting: setting('fault_level') })] } as never)
+    mount()
+    fireEvent.change(await screen.findByLabelText('Fault level value'), { target: { value: '0' } })
+    expect(screen.getByText(/must be above 0 MVA/)).toBeTruthy()
+    expect((screen.getByRole('button', { name: 'Save fault level' }) as HTMLButtonElement).disabled).toBe(true)
   })
 })

@@ -1,6 +1,6 @@
 # Fault level: edit the value and its source in one place
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: 02 (slice 6 UI, PR #596)
 Gated: no (frontend)
@@ -19,3 +19,7 @@ UX reviewer follow-up on #596. Today the fault level's value is edited on the Po
 
 - One place edits the value and source; the other two show it read-only with the route.
 - Tests cover the line, both read-only spots, and the routes.
+
+## Outcome
+
+Connection limits edits the PoC bus `eh_sk_mva` with its source; bus Properties is read-only with the route (Expert: panel, Guided: field drawer). GenericSiteForm stays editable: it is the create-time input and no bus exists to route to (question sent to the coordinator).
