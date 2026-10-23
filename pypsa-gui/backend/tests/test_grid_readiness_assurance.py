@@ -10,7 +10,7 @@ from services.adequacy import grid_readiness as G
 from tests.assurance_acceptance.support import approval, public_text
 from tests.test_answer_assurance import checked  # noqa: F401
 from tests.test_assurance_metrics import NumericalProvider
-from tests.test_grid_readiness import PROFILE, T, _project, _rows
+from tests.test_grid_readiness import PROFILE, T, _harmonic_site, _project, _rows
 from tests.test_workflow_tools import baseline  # noqa: F401
 
 
@@ -75,6 +75,13 @@ def test_unknown_not_scalar_and_categorical_are_named(tmp_path):
     text = "\n".join(R.notes(raw_for(rows), str))
     assert "not checked; its verdict rests on inputs the scorecard does not store" in text
     assert "not checked; a yes-or-no requirement" in text and "not checked; an input is missing" in text
+
+
+@pytest.mark.parametrize("source", ["6-pulse", "12-pulse"])
+def test_the_harmonic_row_is_not_scalar_since_its_verdict_reads_each_order(tmp_path, source):
+    row = _rows(G.grid_readiness(tmp_path, _harmonic_site(source), PROFILE))["harmonic_distortion"]
+    assert row["project_value"] is not None
+    assert R.disposition(row)[0] == "not_scalar"
 
 
 def test_a_rule_that_is_not_the_codes_rule_is_withheld(tmp_path):

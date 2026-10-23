@@ -153,7 +153,8 @@ def parse_spectrum(text) -> dict:
 
 def unit_spectrum(topology, vendor) -> tuple[dict | None, str]:
     """(spectrum, its source): the vendor's when given, else the topology's
-    demo default; (None, reason) when neither is."""
+    demo default (none for a declared ``linear`` unit); (None, reason) when
+    neither is."""
     spectrum = parse_spectrum(vendor)
     topology = "" if topology is None or (isinstance(topology, float) and math.isnan(topology)) \
         else str(topology).strip()
@@ -161,6 +162,8 @@ def unit_spectrum(topology, vendor) -> tuple[dict | None, str]:
         raise ContractError(f"Harmonic source: {topology!r} is not one of {', '.join(TOPOLOGIES)}.")
     if spectrum:
         return spectrum, "vendor"
+    if topology == "linear":
+        return {}, "declared linear"
     if topology:
         return dict(DEFAULT_SPECTRA[topology]), f"demo default ({topology})"
     return None, "no harmonic_source and no spectrum"

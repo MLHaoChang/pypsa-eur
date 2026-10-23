@@ -708,6 +708,18 @@ export interface GridReadinessRow {
   /** The ramp, oscillation and SCR rows only (DC 03 slice 6): the user's own
    *  limit (null when not set) and what a reset returns to. */
   setting?: GridLimitSetting
+  /** The harmonic row only (grid-to-process issue 17): the screen's figures at the PoC. */
+  harmonics?: GridReadinessHarmonics
+}
+
+export interface GridReadinessHarmonics {
+  sk_mva: number
+  thd_pct: number | null
+  worst_order: number | null
+  worst_u_h_pct: number | null
+  failing_orders: number[]
+  no_input_units: string[]
+  demo_spectrum_units: string[]
 }
 
 export type GridLimitItem = 'connection_ramp' | 'oscillation' | 'fault_level'

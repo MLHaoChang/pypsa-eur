@@ -43,7 +43,7 @@ def test_default_spectrum_is_pinned_and_labelled_demo(topology):
     assert hm.DEFAULT_SPECTRA[topology] == PINNED[topology]
     spectrum, source = hm.unit_spectrum(topology, None)
     assert spectrum == PINNED[topology]
-    assert source == f"demo default ({topology})"
+    assert source == ("declared linear" if topology == "linear" else f"demo default ({topology})")
 
 
 def test_every_topology_has_a_pinned_default():
