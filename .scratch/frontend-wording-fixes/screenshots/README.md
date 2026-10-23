@@ -1,0 +1,1 @@
+Screenshots for PR #653. To rerun: copy harness.html and harness.vite.config.ts to pypsa-gui/frontend/ and harness.tsx to pypsa-gui/frontend/src/, run `npx vite --config harness.vite.config.ts`, then `node shoot.mjs`. Delete the copies afterwards.
