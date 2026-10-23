@@ -26,6 +26,7 @@
 // shows as the new run's: it re-reads the state, warns while the backend says a
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
+import { assetLabel } from './results/investment/financeModel'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
@@ -597,7 +598,7 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
     <span className="whitespace-nowrap">
       <Tag tone="accent">planned</Tag>{' '}
       <span className="text-muted">
-        (drafted rating {verdict}; bought as {bought.units} × {bought.library_id}{t.n_minus_1 ? ' for N-1' : ''})
+        (drafted rating {verdict}; bought as {bought.units} × <span title={bought.library_id ?? undefined}>{bought.library_id ? assetLabel(bought.library_id) : '—'}</span>{t.n_minus_1 ? ' for N-1' : ''})
       </span>
     </span>
   )

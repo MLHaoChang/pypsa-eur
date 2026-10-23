@@ -393,11 +393,11 @@ describe('CampusElectricalPanel', () => {
     const v = await screen.findByTestId('trafo-verdict-SITE_TRANSFO')
     expect(v.textContent).toMatch(/planned/i)
     expect(v.textContent).toContain('drafted rating adequate')
-    expect(v.textContent).toContain('bought as 3 × TR_33_11_25 for N-1')
+    expect(v.textContent).toContain('bought as 3 × TR 33 11 25 for N-1')
     const g = screen.getByTestId('trafo-verdict-GRID_IMPORT')
     expect(g.textContent).toMatch(/planned/i)
     expect(g.textContent).toContain('drafted rating undersized')
-    expect(g.textContent).toContain('bought as 1 × TR_132_33_63')
+    expect(g.textContent).toContain('bought as 1 × TR 132 33 63')
     expect(g.textContent).not.toContain('N-1')
   })
 
@@ -775,4 +775,17 @@ describe('the study split over three panels (3 → 8 → 10)', () => {
     expect(await screen.findByTestId('campus-no-results')).toBeTruthy()
     expect(screen.queryByLabelText('Hours per criterion')).toBeNull()
   })
+})
+
+
+it('words the bought transformer id and retains its raw identity in the tooltip', async () => {
+  const state = sized()
+  state.results!.investment = [{ need: 'transformer GRID_IMPORT', library_id: 'campus:TR_110_20_63',
+    kind: 'transformer', units: 1, length_km: null, invest_period: 2030,
+    capex_eur: 0, opex_eur_per_a: 0, annualised_eur_per_a: 0, existing: false, status: 'chosen', reason: null }]
+  api.state.mockResolvedValue(state)
+  renderPanel()
+  const verdict = await screen.findByTestId('trafo-verdict-GRID_IMPORT')
+  const asset = within(verdict).getByTitle('campus:TR_110_20_63')
+  expect(asset.textContent).toBe('TR 110 20 63')
 })
