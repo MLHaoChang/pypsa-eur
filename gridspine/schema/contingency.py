@@ -56,6 +56,7 @@ NON_CONVERGED_SEVERITY = 1.0e6
 #: with a plain one and its parts are recovered by one split.
 COMPOUND_SEPARATORS = {"n_m_1": "|", "n_1_1": ">"}
 CONTINGENCY_KINDS = frozenset({"branch", "unit", "bus_section", *COMPOUND_SEPARATORS})
+_COMPOUND_SPLIT = re.compile("|".join(re.escape(sep) for sep in COMPOUND_SEPARATORS.values()))
 FAULT_CASES = frozenset({"max", "min"})
 
 CONTINGENCY_SET_COLUMNS = {
@@ -105,7 +106,7 @@ def _check_contingency_ids(values, what: str) -> None:
     """``_check_ids``, except that one compound separator may join two canonical parts."""
     for v in values:
         if isinstance(v, str) and any(sep in v for sep in COMPOUND_SEPARATORS.values()):
-            parts = re.split(r"[|>]", v)
+            parts = _COMPOUND_SPLIT.split(v)
             if len(parts) != 2:
                 raise ContractError(f"{what} id has more than one compound separator: {v!r}")
             _check_ids(parts, what)

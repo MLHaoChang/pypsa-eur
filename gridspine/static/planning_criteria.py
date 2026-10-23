@@ -113,11 +113,14 @@ PLANNING_LEDGER = (
     "goes out, the named controls re-adjust, then the second goes out; they "
     "differ only in which branches may go out first (a maintenance list or any)",
     "max_compound keeps the first rows of each compound kind in contingency_id "
-    "order; the rest are skipped, counted in the report, and the kind's summary "
-    "is then incomplete, never pass",
+    "order, so a small cap covers the lexically first outages only; the rest "
+    "are skipped, counted in the report, and the kind's summary is then "
+    "incomplete, never pass",
     "the angle check is judged on the stage-1 state (taps and shunts barely "
-    "move angles); a pair with a bus out of service is skipped and named in "
-    "the note; no limit set gives unknown, never pass",
+    "move angles); a branch pair includes the outaged branch, whose angle is "
+    "the standing angle across its open breaker; a pair with a bus out of "
+    "service is skipped and named in the note; no limit set gives unknown, "
+    "never pass",
 )
 
 ANGLE_BASES = frozenset({"assumed", "sagc"})
@@ -130,6 +133,12 @@ class Controls:
     names them) and switched shunts by ``net.shunt`` name."""
     oltc: tuple = ()
     switched_shunts: tuple = ()
+
+
+def _finite_number(v) -> bool:
+    """A real, finite number; bool and strings are not."""
+    return not isinstance(v, bool) and isinstance(v, (int, float, np.integer, np.floating)) \
+        and math.isfinite(float(v))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -145,8 +154,7 @@ class AngleLimit:
 
     def __post_init__(self):
         d = self.deg
-        if isinstance(d, bool) or not isinstance(d, (int, float, np.integer, np.floating)) \
-                or not math.isfinite(float(d)):
+        if not _finite_number(d):
             raise ContractError(f"angle limit must be a finite number of degrees, got {d!r}")
         if float(d) <= 0.0:
             raise ContractError(f"angle limit must be > 0 degrees, got {d!r}")
@@ -314,8 +322,7 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
         i = shunt_idx[name]
         for col in ("step", "max_step"):
             v = work.shunt.at[i, col]
-            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)) \
-                    or not math.isfinite(float(v)):
+            if not _finite_number(v):
                 raise ContractError(f"switched shunt {name!r} has no finite {col} (got {v!r})")
         knobs.append(_Knob(name, "shunt", i, "step", 0, int(work.shunt.at[i, "max_step"])))
     return knobs
@@ -607,9 +614,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             _apply_branches(work, r.contingency_id, [first], handles)
             _, cut = cut_off(work)
             if cut:
+                load_lost, gen_lost = _lost(base, work, cut)
                 names = ", ".join(sorted(str(base.bus.at[b, "name"]) for b in cut))
-                rows.append(_row(r, hour, islanded=True, note=f"islanded at the first outage ({first}): "
-                                 f"disconnects {names}"))
+                rows.append(_row(r, hour, islanded=True, load_lost_mw=load_lost, gen_lost_mw=gen_lost,
+                                 note=f"islanded at the first outage ({first}): disconnects {names}"))
                 continue
             judged = live(work)
             s0 = _solve(work, judged)

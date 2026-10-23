@@ -503,6 +503,7 @@ def test_first_outage_islanding_is_not_solved_at_the_first_outage():
     assert bool(row["islanded"]) and not bool(row["converged"])
     assert row["stage1_verdict"] == row["stage2_verdict"] == row["angle_verdict"] == "not_solved"
     assert f"islanded at the first outage ({SPUR}): disconnects BUS_S" in row["note"]
+    assert row["load_lost_mw"] == pytest.approx(10.0)       # the spur's load goes with the first outage
 
 
 def test_first_outage_divergence_is_not_solved_at_the_first_outage(monkeypatch):
