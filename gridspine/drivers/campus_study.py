@@ -589,12 +589,12 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
         if key in seen:
             continue
         seen.add(key)
-        built_ = F._event_run(campus, hourly, iu, r, ctx, (1e-3, 20.0), (5e-3, 10.0), f0)
+        built_ = F._event_run(campus, hourly, iu, r, ctx, (1e-3, 20.0), (5e-3, 10.0), f0=f0)
         if built_ is None:
             continue
 
         def run(us, dt, t_end, r=r):
-            return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end), f0)[1](us, t_end)
+            return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end), f0=f0)[1](us, t_end)
         cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
     rec = T.recommend_gfm_settings(cases, limits, f0=f0, equipment_=eq, window_ms=window, margin=margin,
                                    allow_i_max=allow_i_max, max_sims=max_sims, should_stop=should_stop)

@@ -134,37 +134,49 @@ def test_a_60_hz_campus_writes_60_hz_in_the_raw_header(tmp_path):
     assert header.split(",")[5].strip() == "60.00"
 
 
-#: A 50 Hz literal, 100π or 2π·50.
-FIFTY = re.compile(r"(?<![\w.])50\.0*(?![\w.])|314\.1|pi\s*\*\s*50\b|\b2\s*\*\s*50\b")
-#: Lines where a 50 Hz value is a stated default or a table keyed by frequency, not an assumption.
+#: A 50 Hz literal (50, 50.0), 100π or 2π·50.
+FIFTY = re.compile(r"(?<![\w.])50(\.0*)?(?![\w.])|314\.1|pi\s*\*\s*50\b")
+#: Lines where a 50 Hz value is the stated default or a table keyed by frequency, not an assumption.
 ALLOWED = (
     re.compile(r"^F0 = 50\.0$"),                                   # frequency.py: the default for callers that state nothing
     re.compile(r"^PEAK_FACTOR = \{50: 2\.5, 60: 2\.6\}$"),         # campus_sc.py: IEC 62271's peak factor by frequency
 )
+#: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.
+DEFAULT = re.compile(r"\w+\s*(:\s*\w+\s*)?=\s*50(\.0*)?\s*[,)]")
 
 
-def _code(line):
-    """``line`` without its comment (no '#' sits inside a string in these lines)."""
-    return line.split("#", 1)[0].strip()
+def _code_lines(path):
+    """``(line number, code, in a def signature)`` of ``path``, docstrings
+    and comments dropped (no '#' sits inside a string beside a 50 here)."""
+    in_doc, in_sig = False, False
+    for i, line in enumerate(path.read_text().splitlines(), 1):
+        parts = line.split('"""')
+        code = "".join(part for j, part in enumerate(parts) if (j % 2 == 0) != in_doc)
+        if len(parts) % 2 == 0:
+            in_doc = not in_doc
+        code = code.split("#", 1)[0].strip()
+        in_sig = in_sig or code.startswith(("def ", "async def "))
+        yield i, code, in_sig
+        if in_sig and code.endswith(":"):
+            in_sig = False
+
+
+def _fifty(path):
+    """``[(line number, code)]`` of ``path`` carrying a 50 Hz value outside a default argument."""
+    return [(i, code) for i, code, in_sig in _code_lines(path)
+            if FIFTY.search(code) and not any(a.match(code) for a in ALLOWED)
+            and not (in_sig and not FIFTY.search(DEFAULT.sub("", code)))]
 
 
 def test_no_study_path_carries_a_50_hz_constant_outside_a_default():
-    hits = []
-    for folder in ("gridspine/static", "gridspine/drivers"):
-        for path in sorted((ROOT / folder).glob("*.py")):
-            in_doc = False
-            for i, line in enumerate(path.read_text().splitlines(), 1):
-                stripped = line.strip()
-                quotes = stripped.count('"""')
-                if in_doc or quotes:
-                    if quotes % 2:
-                        in_doc = not in_doc
-                    continue
-                code = _code(line)
-                if not FIFTY.search(code) or any(a.match(code) for a in ALLOWED):
-                    continue
-                # a default argument: ``name=50.0`` or ``name: float = 50.0`` in a signature
-                if re.search(r"\w+\s*(:\s*\w+\s*)?=\s*50\.0*\s*[,)]", code):
-                    continue
-                hits.append(f"{path.relative_to(ROOT)}:{i}: {code}")
+    hits = [f"{path.relative_to(ROOT)}:{i}: {code}"
+            for folder in ("gridspine/static", "gridspine/drivers")
+            for path in sorted((ROOT / folder).rglob("*.py")) for i, code in _fifty(path)]
     assert not hits, "\n".join(hits)
+
+
+def test_the_scan_catches_what_it_should(tmp_path):
+    p = tmp_path / "m.py"
+    p.write_text('def f(x, f0=50.0,\n      y=1):\n    """at 50 Hz"""\n    return simulate(x, f0=50.0) + 2 * math.pi * 50\n'
+                 'w = 2.0 * math.pi * 50  # 50 Hz\nk = p / (r * 50)\n')
+    assert [i for i, _ in _fifty(p)] == [4, 5, 6]
