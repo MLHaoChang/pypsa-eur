@@ -30,3 +30,13 @@ reachability defect, not a new capability.
 
 Each PR: a Tier A test that the chat action shows the target, the inventory and
 control-matrix regenerated, and no new authority (all read tier).
+
+Outsourced: items 1, 2, 3 and 6 are outsourced to Codex as task I
+(`.scratch/live-copilot/outsource/I-navigation-reach.md`, branch
+`outsource/navigation-reach`). Items 4 and 5 wait for PR #691.
+
+Follow-up (GK condition 8, 2026-10-23): plain `ui_select_component` (without
+`open_editor`) still has no existence check, so selecting a component that is
+not in the network emits a `select_component` event that shows nothing. Task I
+adds the check only for `open_editor=true`; a later small PR gives plain
+selection the same `component_not_found` refusal.

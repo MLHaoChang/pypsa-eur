@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: needs-triage — awaiting GK decisions
+Status: ready-for-agent — GK triage 2026-10-23: G1–G7 (a); UX 2026-10-23: G2 (a), G3 (a), G6 (a)
 
 # Outsourced task I: chat reaches the snapshot, the Properties panel, the edit card and every canvas view
 
@@ -20,6 +20,7 @@ Source issue: `.scratch/live-copilot/issues/14-navigation-reach.md` (LC-14), ite
 7. `pypsa-gui/backend/tests/test_oj05_selected_line_edit_journey.py` and `tests/journey_wire.py`. Your Tier A test follows them. Tier A is defined in `.scratch/live-copilot/owner-journeys.md` l.18-26.
 8. `pypsa-gui/frontend/src/components/ChatPanel.applicationNavigation.test.tsx`. Your vitest file follows its shape: `APPLY_UI_NAVIGATE_FOR_TEST`, then assertions on `useUIStore` state.
 9. `docs/agents/review-ux.md`. The UX reviewer reviews this PR against it.
+10. `pypsa-gui/frontend/src/layout/flowNavigation.ts:1-107` (`currentOrigin`, `withReturn`, `returnToOrigin`) and `layout/flowReturn.test.tsx`. Every panel the assistant closes must leave a "Back to <origin>" behind (UX condition).
 
 ## Goal in plain words
 
@@ -38,6 +39,7 @@ Each fix is a navigation fix. None adds authority: every tool stays `Safety: rea
 - "Select L2" brings the Properties panel into view (G3).
 - "Open the edit form for L2" selects L2, shows Properties and opens its Edit Parameters form. Nothing is saved; the user saves it as usual.
 - "Show the hybrid map" or "open the 3D site view" switches the canvas the same way the map-mode switcher does.
+- Whenever one of these actions closes a panel, the existing "Back to <origin>" button appears and reopens it. In Guided it also restores the drawer.
 - **No new buttons, labels, panels, settings or UI copy.** The only visible text this task may add is an error message the assistant reads; app-visible strings are unchanged. Any wording you do write follows `docs/agents/review-ux.md` ("Wording and layout"). The app's 9-11px text and Inter font are deliberate (owner decision DENSITY-1), so do not restyle anything.
 
 ## Exact behaviour per item
@@ -52,15 +54,30 @@ Backend: `chat_tools.ui_set_snapshot` (`chat_tools.py:5013-5015`).
   - On a flat index, the target is the position of the equal timestamp.
   - On a MultiIndex (period, timestep), `period` picks the level-0 value. For backward compatibility, also accept the form that the old description told models to use: `snapshot_iso="<period>|<iso>"`. Split on the first `|`. If that period disagrees with a `period` argument, refuse.
   - With no period on a multi-period network, a timestep that occurs in exactly one period resolves. One that occurs in more than one period is refused, and the message lists the periods.
+- **Time zones (GK condition 2).** The time-axis route's own snapshot keys do not convert time zones. `update_snapshot_weightings` (`PATCH /api/network/snapshots/weightings`, `routers/network_time_axis.py:376-486`) builds `ts.isoformat()` keys from the axis (l.424-436) and matches the caller's key as an exact string. A key with `Z` or an offset never matches a tz-naive axis, so the route answers 400 "Unknown snapshot key". Follow that rule and refuse, but with a reason of its own rather than "not on the axis":
+  - If the parsed timestamp's awareness (`ts.tzinfo is None`) differs from the axis's, refuse. Read the axis's awareness from `n.snapshots.tz`, or from the timestep level's `.tz` on a MultiIndex.
+  - The message for a tz-naive axis (the usual case) reads: "The time axis has no time zone. Send the time without an offset, between 2026-06-01T00:00:00 … 2026-06-01T23:00:00." It uses the network's real first and last timesteps.
+  - Never convert, and never compare naive with aware. A pandas comparison across the two either raises or silently mismatches.
+  - Two aware sides compare as instants (pandas equality).
 - Refuse with `HTTPException(400, detail={"error_kind": "invalid_navigation", "field": "snapshot_iso", "message": ...})` (G1, G7) in these cases:
   - the timestamp cannot be parsed;
+  - a time-zone mismatch (above);
   - it is not on the axis;
   - it is ambiguous;
   - the network has no snapshots.
 
-  The message names the first and last snapshot (and the periods, when multi-period) so the model can retry. No event is emitted.
+  No event is emitted.
+- **Message wording (UX).**
+  - Every message starts with a capital letter.
+  - A range is written as "first … last" with the network's real ISO timesteps, e.g. "2026-06-01T12:30:00 is not on the time axis (2026-06-01T00:00:00 … 2026-06-01T23:00:00)."
+  - Multi-period messages also list the periods, e.g. "Periods: 2030, 2040."
+  - The model relays these words, so they are user-facing.
 - On success return `{"_ui_event": True, "kind": "set_snapshot", "snapshot_iso": <the matched timestep, ISO>, "period": <int or None>, "snapshot_index": <int>}`.
-  - `snapshot_index` is the position in `n.snapshots`. That is the same order as the `snapshots` array of `GET /api/network/snapshots` (`routers/network_time_axis.py:140-185`), which is what the picker indexes.
+  - `snapshot_index` is the position in `n.snapshots`. It is only right if that order is the order of the `snapshots` array the picker indexes (GK condition 1). That array comes from `get_snapshots` (`GET /api/network/snapshots`, `routers/network_time_axis.py:140-185`):
+    - flat: `[s.isoformat() for s in sns]`;
+    - MultiIndex: `get_level_values(1)` with a parallel `periods` array.
+
+    Both walk `n.snapshots` in order. Tests 3 and 8 prove it by reading that route.
 
 Catalogue: rewrite the `ui_set_snapshot` description (`catalogue.py:2202-2211`).
 
@@ -69,11 +86,11 @@ Catalogue: rewrite the `ui_set_snapshot` description (`catalogue.py:2202-2211`).
 
 Frontend, `uiNavigate.ts:127-132`: replace the branch. When `d.kind === 'set_snapshot'` and `typeof d.snapshot_index === 'number'`:
 
-- call `ui.setSlidePanel(null)`;
+- close any open slide panel through `closePanelWithReturn` (see "Back to the closed panel" below);
 - call `ui.setResultsSnapshotIdx(d.snapshot_index)`;
 - call `ui.setResultsOverlay(true)` (G2).
 
-An event without a numeric `snapshot_index` (an old backend) does nothing. Add `snapshot_index?: number` to `NavigationRequest` (`uiNavigate.ts:64-87`) and to the `ui_event` frame type in `ChatPanel.tsx:2367-2392`.
+An event without a numeric `snapshot_index`, from an old backend, is a no-op: no panel closes and no state changes (GK condition 7). All new event fields are optional. Add `snapshot_index?: number` to `NavigationRequest` (`uiNavigate.ts:64-87`) and to the `ui_event` frame type in `ChatPanel.tsx:2367-2392`.
 
 Frontend, `components/SnapshotPicker.tsx`. Today the picker's period is local state (l.83-91). The clamp effect (l.104-110) pulls any index outside the selected period back into it, so an index in the second period would be undone. Change the clamp effect:
 
@@ -84,10 +101,10 @@ The period `<select>` (l.209-224) and playback keep their current behaviour.
 
 ### Item 2: a selection is never hidden behind a slide panel (G3)
 
-Frontend only, `uiNavigate.ts:98-102`. In the `select_component` branch, before `setSelectedComponent`:
+Frontend only, `uiNavigate.ts:98-102`. In the `select_component` branch, before `setSelectedComponent`, close any open slide panel except Issues through `closePanelWithReturn` (below):
 
 ```ts
-if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') ui.setSlidePanel(null)
+if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
 ```
 
 This is what a user's click on the canvas does: the click-outside listener closes the slide panel (`App.tsx:653-674`). Issues stays open because Properties already renders beside it (`App.tsx:793-797`). In Guided the hub-design auto-open fires once per project (`App.tsx:276-287`), so closing it here is respected and it does not reopen.
@@ -96,17 +113,21 @@ Catalogue: extend the `ui_select_component` description (`catalogue.py:2153-2162
 
 ### Item 3: chat opens a component's edit card (G4, G5)
 
-Backend (G4 option a): add an optional `open_editor: boolean` to `ui_select_component`. Update its catalogue schema (`catalogue.py:2158-2161`) and its dispatcher (`chat_tools.py:4950-4952`). With `open_editor` true:
+Backend (G4 option a): add an optional `open_editor` to `ui_select_component`. Update its catalogue schema (`catalogue.py:2158-2161`) and its dispatcher (`chat_tools.py:4950-4952`).
+
+- **Strict boolean (GK condition 3).** The schema declares it as `{"type": "boolean"}`, so a non-bool (`"true"`, `1`) fails schema validation. The dispatcher also checks `type(open_editor) is bool` when it is not `None`, as `ui_open_panel` does for `compare_rail` (`chat_tools.py:~4989-4999`). On failure it raises `invalid_navigation` with `field: "open_editor"`.
+
+With `open_editor` true:
 
 - Refuse with `invalid_navigation` (field `component_class`) unless the class is one of the cards that take an edit request (G5 option a): `Bus`, `Line`, `Transformer`, `Link`, `Generator`, `StorageUnit`, `Store`, `Load`.
-- Refuse with `HTTPException(404, detail={"error_kind": "component_not_found", ...})` when the active network has no such component. Check `n.static(cls)` or `n.df(cls)`, whichever the installed PyPSA uses elsewhere in `chat_tools.py`.
+- **Existence check (GK condition 4).** Use the accessor `chat_tools.get_component` already uses (`chat_tools.py:379-393`): `attr = _GENERIC_CRUD_ATTRS.get(component_class)`, then `df = getattr(PyPSAService.get_network(), attr)`, then `name in df.index`. When the name is missing, raise `HTTPException(404, detail={"error_kind": "component_not_found", "component_class": ..., "name": ..., "message": "Line 'L9' is not in the network."})`. The detail names the class and the name, and the message starts with a capital.
 - Return `{"_ui_event": True, "kind": "open_properties", "component_class": ..., "name": ...}`.
 
-Without `open_editor`, or with it false, the dispatcher returns exactly today's `select_component` event. Do not add an existence check to it; that is outside this task.
+Without `open_editor`, or with it `False`, the dispatcher returns today's `select_component` event byte for byte: the same keys, in the same order, with no `open_editor` key (GK condition 3). Plain `ui_select_component` still gets no existence check. That gap is recorded as a follow-up in the LC-14 issue file; do not fix it here.
 
 Description: add one sentence: with `open_editor=true` it also opens the component's Edit form in Properties for the user to change and save; nothing is saved by this tool. Keep `Safety: read.`
 
-Frontend, `uiNavigate.ts`. Add an `open_properties` branch next to `select_component`. It does the same slide-panel close as item 2, then:
+Frontend, `uiNavigate.ts`. Add an `open_properties` branch next to `select_component`. It does the same slide-panel close as item 2, through `closePanelWithReturn`, then:
 
 1. `ui.setSelectedComponent({ type, name })`;
 2. `ui.openRightPanel()`;
@@ -144,8 +165,50 @@ Backend (G6 option a): add an optional `canvas_view` to `ui_open_panel`.
 
   Any other combination raises `invalid_navigation` with `field: "canvas_view"`. Copy it into the event when given.
 - Description: add one clause: map with `canvas_view` hybrid (satellite with labels) or site (the 3D site view).
+- `canvas_view` is a `_UI_EVENT` argument only (GK condition 5):
+  - No `TOOL_ROUTES` entry changes (`catalogue.py:4253`, `4526-4528`).
+  - No `SERVED_BY_TOOL` entry changes in `tests/test_route_chat_disposition.py` (l.34).
+  - No route is added.
 
-Frontend, `uiNavigate.ts:135-141`. For `topology` and `map`, use `d.canvas_view` when it is one of the four `CanvasView` values; otherwise keep today's default (`blank`, `satellite`). Add `canvas_view?: string` to `NavigationRequest` and to the `ChatPanel.tsx` frame type.
+Frontend, `uiNavigate.ts:135-141`. For `topology` and `map`:
+
+- use `d.canvas_view` when it is one of the four `CanvasView` values; otherwise keep today's default (`blank`, `satellite`);
+- replace today's bare `ui.setSlidePanel(null)` with `closePanelWithReturn()`.
+
+Add `canvas_view?: string` to `NavigationRequest` and to the `ChatPanel.tsx` frame type. The UX ruling names map/topology with `canvas_view`. Both go through the one branch, so plain `topology`/`map` also get the Back button when they close a panel; say so in the PR body.
+
+### Back to the closed panel (UX condition, items 1, 2, 3 and 6)
+
+Every panel the assistant closes must be closed through `layout/flowNavigation.ts`'s `withReturn`, so the existing "Back to <origin>" button (`layout/FlowReturnButton.tsx`, mounted at `App.tsx:820`) restores it. That covers:
+
+- the `set_snapshot` close (G2);
+- the `select_component` close (G3);
+- the `open_properties` close;
+- the `topology`/`map` close.
+
+`withReturn(target, jump)` is module-private today (`flowNavigation.ts:78-82`). It records `currentOrigin(null)` (l.56-75): the mode, section, panel, Guided drawer, selection and scroll. It runs the jump, and then sets `flowReturn`. `returnToOrigin` (l.85-101) puts it back:
+
+- Guided: the slide panel (`o.panel ?? 'hubDesign'`), the selection and the drawer;
+- Expert: the panel.
+
+The work:
+
+- In `flowNavigation.ts`, add one exported wrapper and change nothing else in that file:
+
+  ```ts
+  /** Run a programmatic jump (the assistant's) and remember the view it left. */
+  export function withReturnFrom(jump: () => void): void { withReturn(null, jump) }
+  ```
+
+- In `uiNavigate.ts`, add a local helper:
+
+  ```ts
+  const closePanelWithReturn = () => withReturnFrom(() => useUIStore.getState().setSlidePanel(null))
+  ```
+
+  Call it only when `activeSlidePanel` is non-null and is being closed. With no panel open, call nothing, so no Back button appears for a jump that left nothing.
+- `applyUiNavigate` runs the jump inside `withAssistantNavigation` (`uiNavigate.ts:89-94`). So `setSelectedComponent` and `setCanvasView` do not fire `navigationChanged` (`utils/navigationEpoch.ts:10-12`), and `flowReturn` survives the rest of the branch. A later manual navigation clears it, as today (`flowNavigation.ts:104-107`).
+- `flowNavigation.ts` imports `GridReadinessScorecard`. If importing it from `uiNavigate.ts` creates an import cycle that `tsc -b` or vitest reports, stop and say so in the PR. Do not restructure either module.
 
 - `site` without a chosen site behaves exactly as the switcher's Site 3D button: `SiteCanvas` picks the site itself (`pages/SiteCanvas.tsx:681`).
 - `harness/navigation.py::issue` only acknowledges `kind == "navigate"` for panels in its `PANELS` set (l.12-32, l.63-70), and `topology` and `map` are not in it. So no acknowledgement is issued for these, as today. Do not change `navigation.py`.
@@ -173,10 +236,11 @@ Add nothing else, and change nothing else in `loop.py`.
   - open a component's Edit form (`open_editor`, read tier);
   - switch to every canvas view.
 - `pypsa-gui/frontend/src/components/uiNavigate.ts`.
+- `pypsa-gui/frontend/src/layout/flowNavigation.ts`: the one exported `withReturnFrom` wrapper only.
 - `pypsa-gui/frontend/src/components/ChatPanel.tsx`: the `ui_event` frame type (l.2367-2392) only.
 - `pypsa-gui/frontend/src/components/SnapshotPicker.tsx`: the period-follows-index change (l.83-110) only.
 - `pypsa-gui/frontend/src/layout/PropertiesPanel.tsx`: the edit-request effect in `LinePanel` and `TransformerPanel` only.
-- `pypsa-gui/tool-error-kinds.json`: only the `why` text of `invalid_navigation` (l.750-753) and `component_not_found` (l.838-841), widened to name these tools (G7). Add no kind.
+- `pypsa-gui/tool-error-kinds.json`: only the `why` text of `invalid_navigation` (l.750-753) and `component_not_found` (l.838-841), widened to name these tools (G7, GK condition 6). The file keeps exactly its current set of kinds, with no kind added, removed or renamed and no `surface` changed. `tests/test_tool_error_kind_manifest.py` and the frontend manifest test (`src/components/ChatPanel.manifest.test.tsx`) pass unchanged.
 - `pypsa-gui/backend/tests/test_chat_tools_dispatch.py`: `test_ui_set_snapshot_returns_event_marker` (l.701-706) only. It pins the old, unchecked contract (an ISO on no network). Rewrite it to install a network with known snapshots and assert `snapshot_index`. This is the one existing test you may change; say so in the PR body.
 - New tests (below): `pypsa-gui/backend/tests/test_navigation_reach.py`, `pypsa-gui/backend/tests/test_lc14_navigation_reach_journey.py`, `pypsa-gui/frontend/src/components/ChatPanel.navigationReach.test.tsx`, plus new cases in `pypsa-gui/frontend/src/layout/PropertiesPanel.editRequest.test.tsx` and `pypsa-gui/frontend/src/components/SnapshotPicker.a11y.test.tsx` (add cases; change none).
 - `.scratch/live-voice/capability-inventory.json` and, only if its check says so, `.scratch/live-voice/capability-matrix.json`: **regenerated**, never hand-edited (below).
@@ -196,7 +260,10 @@ Every new test below must fail on `master`'s code; each says why. Use the mocked
 
 ### Backend unit tests, `tests/test_navigation_reach.py` (new)
 
-Use `install_network` from `tests/conftest.py`. One flat network has 24 hourly snapshots from `2026-06-01`. One multi-period network has periods 2030 and 2040, each with the same three hourly timesteps `2030-01-01T00:00` to `02:00`. Set them with `n.set_snapshots(pd.MultiIndex.from_product(...))` and set `n.investment_periods`.
+Use `install_network` from `tests/conftest.py`. Build two networks:
+
+- a flat one with 24 hourly snapshots from `2026-06-01`;
+- a multi-period one with periods 2030 and 2040, each with the same three hourly timesteps `2030-01-01T00:00` to `02:00`. Set them with `n.set_snapshots(pd.MultiIndex.from_product(...))` and set `n.investment_periods`.
 
 1. `test_set_snapshot_returns_the_picker_index`:
    - flat: `ui_set_snapshot("2026-06-01T12:00:00")` gives `snapshot_index == 12`;
@@ -205,7 +272,8 @@ Use `install_network` from `tests/conftest.py`. One flat network has 24 hourly s
    On master there is no `snapshot_index`.
 2. `test_set_snapshot_refuses_a_time_not_on_the_axis`:
    - `"2026-06-02T00:00:00"`, `"2026-06-01T12:30:00"` and `"not a date"` each raise `HTTPException` 400 with `error_kind == "invalid_navigation"` and `field == "snapshot_iso"`;
-   - the message contains the first and last snapshot.
+   - each message starts with a capital letter;
+   - each message contains `"2026-06-01T00:00:00 … 2026-06-01T23:00:00"`.
 
    On master these return an event.
 3. `test_set_snapshot_multi_period`:
@@ -213,19 +281,35 @@ Use `install_network` from `tests/conftest.py`. One flat network has 24 hourly s
    - `iso="2040|2030-01-01T01:00:00"` gives 4;
    - `(iso="2030-01-01T01:00:00")` with no period is refused as ambiguous, and the message names 2030 and 2040;
    - `iso="2030|..."` with `period=2040` is refused.
-4. `test_open_editor_emits_open_properties`:
+
+   It also proves the order (GK condition 1). Call `GET /api/network/snapshots` through the `client` fixture on the same network, or call `routers.network_time_axis.get_snapshots()` directly. Then assert:
+   - `body["snapshots"][4] == "2030-01-01T01:00:00"`;
+   - `body["periods"][4] == 2040`.
+4. `test_set_snapshot_time_zone_mismatch_is_refused` (GK condition 2): on the tz-naive flat network, `"2026-06-01T12:00:00Z"` and `"2026-06-01T14:00:00+02:00"` each raise `invalid_navigation` with:
+   - a message that says the time axis has no time zone;
+   - the range `"2026-06-01T00:00:00 … 2026-06-01T23:00:00"`;
+   - no `snapshot_index` anywhere: no event, no wrong index and no "not on the time axis" wording.
+
+   On master these return an event.
+5. `test_open_editor_emits_open_properties`:
    - `ui_select_component("Line", "L1", open_editor=True)` returns kind `open_properties`;
-   - without `open_editor` the event equals today's `select_component` event exactly.
+   - `ui_select_component("Line", "L1")` and `ui_select_component("Line", "L1", open_editor=False)` each satisfy `json.dumps(event) == json.dumps({"_ui_event": True, "kind": "select_component", "component_class": "Line", "name": "L1"})`. This is today's event byte for byte, with no `open_editor` key (GK condition 3).
 
    On master `open_editor` is an unexpected argument.
-5. `test_open_editor_refusals`:
-   - `("Carrier", "AC", open_editor=True)` raises `invalid_navigation`;
-   - `("Line", "nope", open_editor=True)` raises 404 `component_not_found`.
-6. `test_canvas_view_pairs`:
+6. `test_open_editor_refusals`:
+   - `("Carrier", "AC", open_editor=True)` raises `invalid_navigation` (field `component_class`);
+   - `("Line", "nope", open_editor=True)` raises 404 with `error_kind == "component_not_found"` and `detail["component_class"] == "Line"` and `detail["name"] == "nope"`, and a message that starts with a capital (GK condition 4);
+   - `open_editor="true"` and `open_editor=1` raise `invalid_navigation` with field `open_editor`.
+7. `test_canvas_view_pairs`:
    - `ui_open_panel("map", canvas_view="hybrid")` and `"site"` carry `canvas_view`;
    - `ui_open_panel("topology", canvas_view="blank")` is accepted;
    - `("topology", canvas_view="hybrid")`, `("results", canvas_view="site")` and `("map", canvas_view="nope")` raise `invalid_navigation` with `field == "canvas_view"`.
-7. `test_schema_matches_dispatchers`: with `tests.test_chat_tools_schema_panels._errors`, the new arguments validate against the catalogue schemas, and `canvas_view` is in `ui_open_panel`'s properties. Each of the three tools still ends in `Safety: read.` (`safety_tier_for(name) == "read"`).
+8. `test_schema_matches_dispatchers`. With `tests.test_chat_tools_schema_panels._errors`:
+   - the new arguments validate against the catalogue schemas;
+   - `canvas_view` is in `ui_open_panel`'s properties;
+   - `_errors(schema, {"component_class": "Line", "name": "L1", "open_editor": "true"})` is non-empty (strict boolean, GK condition 3);
+   - each of the three tools is still `safety_tier_for(name) == "read"`;
+   - `TOOL_ROUTES` for all three is still `_UI_EVENT` (GK condition 5).
 
 ### Tier A journey, `tests/test_lc14_navigation_reach_journey.py` (new)
 
@@ -235,47 +319,68 @@ Model it on OJ-05:
 - **Parametrisation.** Parametrise over `tests.test_workflow_provider_parity.PROVIDERS` and `mode` in `expert`/`guided`.
 - **Running.** Drive each case through `tests.journey_wire.run_journey`.
 
-8. `test_chat_sets_the_snapshot_it_names`. Steps `ui_set_snapshot({"snapshot_iso": "2026-06-01T12:00:00"})`, then end.
+9. `test_chat_sets_the_snapshot_it_names`. Steps `ui_set_snapshot({"snapshot_iso": "2026-06-01T12:00:00"})`, then end.
    - `calls == ["ui_set_snapshot", None]`.
    - Exactly one `ui_event` frame, with `kind == "set_snapshot"` and `snapshot_index == 12`.
    - `results[0]["snapshot_index"] == 12` (the model's acknowledgement).
    - No `tool_error` frame.
-9. `test_chat_refuses_a_snapshot_not_on_the_axis`. Steps `ui_set_snapshot({"snapshot_iso": "2026-06-02T00:00:00"})`, then end.
-   - One `tool_error` frame with `error_kind == "invalid_navigation"`.
-   - No `ui_event` frame.
-10. `test_chat_opens_the_edit_card`. Steps `ui_select_component({"component_class": "Line", "name": "L2", "open_editor": True})`, then end.
+   - GK condition 1: `client.get("/api/network/snapshots").json()["snapshots"][frame["snapshot_index"]] == frame["snapshot_iso"]`.
+10. `test_chat_refuses_a_snapshot_not_on_the_axis`. Steps `ui_set_snapshot({"snapshot_iso": "2026-06-02T00:00:00"})`, then end.
+    - One `tool_error` frame with `error_kind == "invalid_navigation"`.
+    - No `ui_event` frame.
+11. `test_chat_opens_the_edit_card`. Steps `ui_select_component({"component_class": "Line", "name": "L2", "open_editor": True})`, then end.
     - One `ui_event` frame with `kind == "open_properties"`, `component_class == "Line"` and `name == "L2"`.
     - `results[0]["name"] == "L2"`.
     - No `tool_pending_confirmation` frame (read tier: no card).
     - The network is unchanged: `s_nom` of L2 is the same before and after.
-11. `test_chat_switches_to_hybrid_and_site`. Two `ui_open_panel` steps (`map`/`hybrid`, then `map`/`site`), then end.
+12. `test_chat_switches_to_hybrid_and_site`. Two `ui_open_panel` steps (`map`/`hybrid`, then `map`/`site`), then end.
     - Two `ui_event` frames carrying those `canvas_view` values.
     - `results[i]["canvas_view"]` echoes them.
 
-Item 2 changes no backend contract, so its proof is the vitest below. The `select_component` frame stays byte-identical, and test 4 pins that.
+Item 2 changes no backend contract, so its proof is the vitest below. The `select_component` frame stays byte-identical, and test 5 pins that.
 
 ### Frontend vitest
 
-`src/components/ChatPanel.navigationReach.test.tsx` (new). Use `APPLY_UI_NAVIGATE_FOR_TEST` and reset `useUIStore` in `beforeEach`, as `ChatPanel.applicationNavigation.test.tsx` does.
+`src/components/ChatPanel.navigationReach.test.tsx` (new). Use `APPLY_UI_NAVIGATE_FOR_TEST` and reset `useUIStore` in `beforeEach`, including `flowReturn: null`, as `ChatPanel.applicationNavigation.test.tsx` does. Wrap tests 13-16 in `describe.each(['expert', 'guided'])`, setting `uiMode` in each case.
 
-12. **Snapshot.** With `activeSlidePanel: 'results'`, `resultsSnapshotIdx: 0` and `resultsOverlayEnabled: false`, applying `{kind: 'set_snapshot', snapshot_iso: '…', snapshot_index: 12}` gives:
+13. **Snapshot.** With `activeSlidePanel: 'results'`, `resultsSnapshotIdx: 0` and `resultsOverlayEnabled: false`, applying `{kind: 'set_snapshot', snapshot_iso: '…', snapshot_index: 12}` gives:
     - `activeSlidePanel === null`;
     - `resultsSnapshotIdx === 12`;
-    - `resultsOverlayEnabled === true`.
+    - `resultsOverlayEnabled === true`;
+    - `flowReturn.panel === 'results'`.
 
-    An event without `snapshot_index` changes none of them. On master the panel stays `'results'` and the index stays 0.
-13. **Selection behind a panel.** With `activeSlidePanel: 'timeseries'`, `select_component` Line L2 gives `activeSlidePanel === null`, the selection set and `rightPanelOpen === true`. With `'issues'` open, Issues stays open. Run it in `expert` and `guided` (`describe.each`). On master `'timeseries'` stays open.
-14. **Edit request.** With `'results'` open, `{kind: 'open_properties', component_class: 'Line', name: 'L2'}` gives:
+    On master the panel stays `'results'` and the index stays 0.
+14. **Old event is a no-op (GK condition 7).** With `'timeseries'` open, `{kind: 'set_snapshot', snapshot_iso: '2026-06-01T12:00:00'}` (no `snapshot_index`) leaves all of these unchanged:
+    - `activeSlidePanel` (still `'timeseries'`);
+    - `resultsSnapshotIdx`;
+    - `resultsOverlayEnabled`;
+    - `flowReturn` (still `null`).
+
+    On master it switches the panel to `'results'`.
+15. **Selection behind a panel.** With `activeSlidePanel: 'timeseries'`, `select_component` Line L2 gives:
+    - `activeSlidePanel === null`;
+    - the selection set;
+    - `rightPanelOpen === true`;
+    - `flowReturn.panel === 'timeseries'`.
+
+    Calling `returnToOrigin()` then reopens `'timeseries'` in Expert. In Guided it reopens the recorded panel, with `fieldDrawer` restored when one was set before. With `'issues'` open, Issues stays open and `flowReturn` stays `null`. With no panel open, `flowReturn` stays `null`. On master `'timeseries'` stays open.
+16. **Edit request.** With `'results'` open, `{kind: 'open_properties', component_class: 'Line', name: 'L2'}` gives:
     - the slide panel closed;
+    - `flowReturn.panel === 'results'`;
     - `selectedComponent` set to `{type: 'Line', name: 'L2'}`;
     - `propertiesEditRequest` set to `{type: 'Line', name: 'L2'}`.
 
     On master the unknown kind does nothing.
-15. **Canvas views.** `{kind: 'navigate', panel_id: 'map', canvas_view: 'hybrid'}` gives `canvasView === 'hybrid'`, and `'site'` gives `'site'`. With no `canvas_view`, `map` still gives `'satellite'` and `topology` still gives `'blank'`. On master hybrid gives `'satellite'`.
+17. **Canvas views.**
+    - `{kind: 'navigate', panel_id: 'map', canvas_view: 'hybrid'}` gives `canvasView === 'hybrid'`, and `'site'` gives `'site'`.
+    - With `'overview'` open beforehand, `flowReturn.panel === 'overview'`.
+    - With no `canvas_view`, `map` still gives `'satellite'` and `topology` still gives `'blank'`.
+
+    On master hybrid gives `'satellite'`.
 
 `src/components/SnapshotPicker.a11y.test.tsx` (add one case):
 
-16. Mock `getSnapshots` with a `periods` array of two periods, three snapshots each, and a solved status. Then `act(() => setResultsSnapshotIdx(4))`.
+18. Mock `getSnapshots` with a `periods` array of two periods, three snapshots each, and a solved status. Then `act(() => setResultsSnapshotIdx(4))`.
     - The period `<select>` (title "Investment period to display") shows the second period.
     - `resultsSnapshotIdx` stays 4.
 
@@ -283,7 +388,7 @@ Item 2 changes no backend contract, so its proof is the vitest below. The `selec
 
 `src/layout/PropertiesPanel.editRequest.test.tsx` (add cases, following its existing ones):
 
-17. A `requestPropertiesEdit` for a selected Line opens `LinePanel`'s Edit Parameters form and clears the request. The same holds for a Transformer. On master the request is never consumed.
+19. A `requestPropertiesEdit` for a selected Line opens `LinePanel`'s Edit Parameters form and clears the request. The same holds for a Transformer. On master the request is never consumed.
 
 ### Inventory and control matrix
 
@@ -295,7 +400,7 @@ python pypsa-gui/backend/smoke/assistant_inventory.py --check        # "Inventor
 python pypsa-gui/backend/smoke/assistant_control_matrix.py --check   # if it reports stale: --write, then --check again
 ```
 
-The tool count stays 287 under G4 option a. Review the regenerated diff. Only the two tools' `input_keys` and `schema_sha256` (and `generated_at`) should change.
+The tool count stays 287 under G4 option a. Review the regenerated diff: only the two tools' `input_keys` and `schema_sha256` (and `generated_at`) should change. Every `route` stays `["_ui_event_"]`, and `tests/test_route_chat_disposition.py` passes with no `SERVED_BY_TOOL` change (GK condition 5). If G-a merged first, merge `master` and run `--write` again; never hand-merge the JSON.
 
 ### Commands
 
@@ -303,9 +408,9 @@ From the repo root. Install once with `pixi install --frozen -e default -e test`
 
 ```bash
 pixi run gui-tests tests/test_navigation_reach.py tests/test_lc14_navigation_reach_journey.py tests/test_chat_tools_dispatch.py
-pixi run gui-tests tests/test_assistant_navigation_coverage.py tests/test_assistant_navigation_provider_parity.py tests/test_chat_tools_schema_panels.py tests/test_chat_compare_navigate.py tests/test_navigation_join.py tests/test_results_source_navigation.py tests/test_assistant_inventory.py tests/test_assistant_control_matrix.py tests/test_tool_error_kind_manifest.py tests/test_chat_profile_binding.py tests/test_project_route_acl_policy.py tests/test_oj05_selected_line_edit_journey.py
+pixi run gui-tests tests/test_assistant_navigation_coverage.py tests/test_assistant_navigation_provider_parity.py tests/test_chat_tools_schema_panels.py tests/test_chat_compare_navigate.py tests/test_navigation_join.py tests/test_results_source_navigation.py tests/test_assistant_inventory.py tests/test_assistant_control_matrix.py tests/test_tool_error_kind_manifest.py tests/test_chat_profile_binding.py tests/test_project_route_acl_policy.py tests/test_route_chat_disposition.py tests/test_oj05_selected_line_edit_journey.py
 pixi run gui-tests   # full backend suite before opening the PR
-cd pypsa-gui/frontend && npx vitest run src/components/ChatPanel.navigationReach.test.tsx src/components/ChatPanel.applicationNavigation.test.tsx src/components/ChatPanel.hubDesignPanel.test.tsx src/components/SnapshotPicker.a11y.test.tsx src/layout/PropertiesPanel.editRequest.test.tsx src/components/AssistantDock.eviction.test.tsx src/components/MapModeSwitcher.test.tsx && npx tsc -b
+cd pypsa-gui/frontend && npx vitest run src/components/ChatPanel.navigationReach.test.tsx src/components/ChatPanel.applicationNavigation.test.tsx src/components/ChatPanel.hubDesignPanel.test.tsx src/components/SnapshotPicker.a11y.test.tsx src/layout/PropertiesPanel.editRequest.test.tsx src/layout/flowReturn.test.tsx src/components/ChatPanel.manifest.test.tsx src/components/AssistantDock.eviction.test.tsx src/components/MapModeSwitcher.test.tsx && npx tsc -b
 cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 ```
 
@@ -318,33 +423,38 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 - **Other services:** `services/results/carrier_kpis.py`, `services/profile_shapes.py`, the renewable-profile files (`services/profile_gen/*`, `routers/profiles.py`, `pages/ProfileStudio*`, anything under `.scratch/renewable-profiles/`), and `gridspine/`.
 - **Other harness files:** `harness/navigation.py`, `harness/toolsets.py`, `harness/providers/*`, `harness/compose.py`, `harness/prompts/*`. Also `TOOL_ROUTES` and every catalogue entry other than the three UI-control tools.
 - **Other frontend files:** `components/MapModeSwitcher.tsx`, `pages/SiteCanvas.tsx`, `pages/MapCanvas.tsx`, `components/liveWalk.ts`, `layout/flowNavigation.ts`, the `KIND_COPY` / banner routing in `ChatPanel.tsx`, and any CSS or styling.
-- **No new tool, no new `error_kind`, no new panel id in `SAFETY_PANEL_ENUM`, and no new UI copy.**
+- **No new tool, no new `error_kind`, no new panel id in `SAFETY_PANEL_ENUM`, and no new UI copy.** The Back button and its "Back to <origin>" label already exist.
+- `layout/flowNavigation.ts` beyond the one `withReturnFrom` export, and `layout/FlowReturnButton.tsx`.
 - `docs/agents/*`, `scripts/coord/*` and `doc/release_notes.md`.
 
-## Gatekeeper decisions (answer before handing out)
+## Gatekeeper and UX decisions (2026-10-23)
 
-- **G1, a snapshot not on the axis (item 1).**
-  - (a) *Recommended:* refuse with `invalid_navigation`. The message names the first and last snapshot and the periods, and nothing changes on screen. The issue offers this; the model can retry with a real timestamp, and the answer never shows an hour the user did not ask for.
-  - (b) Snap to the nearest snapshot and report the matched timestamp in the acknowledgement. This is friendlier for "around noon", but the shown hour silently differs from the request.
-- **G2, what the screen shows after `set_snapshot` (item 1).**
-  - (a) *Recommended:* close the slide panel, set the index and switch the results overlay on, as the picker's Play button does (`SnapshotPicker.tsx:176-180`). The picker only renders on the canvas with no slide panel open.
-  - (b) Close the panel and set the index, but leave the overlay toggle as the user set it. The picker moves, but with the overlay off the canvas shows no values.
-  - (c) Keep Results open and only set the index. The picker stays hidden, which is the issue's own complaint.
-- **G3, selection behind an open slide panel (item 2).**
-  - (a) *Recommended:* close the slide panel, except Issues. This is what the user's own canvas click does (`App.tsx:653-674`), and Properties is then visible.
-  - (b) Leave the panel open; the tool result says that the selection is behind it. Nothing moves, but the backend only knows the turn-start panel (`ui_context.panel`, `compose.py:313`), so the note can be stale within a turn.
-- **G4, how chat opens the edit card (item 3).**
-  - (a) *Recommended:* add an optional `open_editor` to `ui_select_component`, which emits kind `open_properties`, `Safety: read`. It needs no new tool, so the count stays 287 and the 128-tool offer is unchanged, and it opens the form without saving anything.
-  - (b) A new tool `ui_open_properties`. It is more discoverable on its own, but it adds a tool (288). That also changes `toolsets.py`, the ACL tool list in `test_project_route_acl_policy.py` and the verbatim tool list in `test_chat_profile_binding.py`.
-- **G5, which components get an edit card (item 3).**
-  - (a) *Recommended:* the eight classes with an Edit form: Bus, Line, Transformer, Link, Generator, StorageUnit, Store and Load. `LinePanel` and `TransformerPanel` gain the same edit-request effect the other six already have. Other classes are refused.
-  - (b) Only the six cards that consume the request today. Lines and transformers, the most edited assets in OJ-05, would then be refused.
-- **G6, the shape of the canvas-view target (item 6).**
-  - (a) *Recommended:* an optional `canvas_view` on `ui_open_panel`, valid as `map` + satellite/hybrid/site or `topology` + blank. It leaves `SAFETY_PANEL_ENUM` and the panel inventory unchanged.
-  - (b) New panel ids `hybrid` and `site3d` in `SAFETY_PANEL_ENUM`. This is simpler for the model, but it mixes canvas views further into the panel list and changes the `tool_panel_enum` in the inventory.
-- **G7, error kinds.**
-  - (a) *Recommended:* reuse `invalid_navigation` (bad or missing snapshot, wrong class, bad pairing) and `component_not_found` (missing component). Widen only their `why` text in `tool-error-kinds.json`. No manifest kind and no frontend copy are added, and `test_tool_error_kind_manifest.py` passes unchanged.
-  - (b) A new `snapshot_not_found` kind. That needs a manifest entry and a decision on its surface.
+The gatekeeper ruled option (a) on G1-G7 with conditions 1-8. The UX reviewer ruled (a) on G2, G3 and G6, with the Back-to-origin and wording conditions. All of them are folded into the sections above; this list is the record.
+
+- **G1 (a).** A snapshot not on the axis is refused with `invalid_navigation` and nothing changes on screen. There is no nearest-snapshot fallback.
+- **G2 (a).** `set_snapshot` closes the slide panel, sets the index and switches the results overlay on.
+- **G3 (a).** `select_component` closes an open slide panel, except Issues, so Properties is visible.
+- **G4 (a).** `open_editor` on `ui_select_component` emits kind `open_properties`, at read tier. There is no new tool, and the count stays 287.
+- **G5 (a).** Eight classes get an edit card: Bus, Line, Transformer, Link, Generator, StorageUnit, Store and Load. `LinePanel` and `TransformerPanel` gain the edit-request effect, and other classes are refused.
+- **G6 (a).** `canvas_view` on `ui_open_panel` is valid as `map` + satellite/hybrid/site or `topology` + blank. No panel id is added.
+- **G7 (a).** `invalid_navigation` and `component_not_found` are reused; only their `why` text changes.
+
+GK conditions:
+
+1. **Index order.** `snapshot_index` must index the `GET /api/network/snapshots` array. Tests 3 and 9 prove it through that route.
+2. **Time zones.** An ISO with `Z` or an offset against a tz-naive axis is refused with its own message, never converted. This follows `update_snapshot_weightings`' exact-string match. Test 4 covers it.
+3. **`open_editor` is a strict boolean**, enforced by the schema and the dispatcher (tests 6 and 8). With it false or absent, the event is today's `select_component` event byte for byte (test 5).
+4. **Existence check.** It uses the `get_component` accessor (`_GENERIC_CRUD_ATTRS` → `getattr(n, attr)` → `.index`). The 404 detail names the class and the name.
+5. **No route changes for `canvas_view`.** No `TOOL_ROUTES` or `SERVED_BY_TOOL` change. `assistant_inventory.py --check` passes after `--write`. Whichever of G-a and I merges second regenerates; nobody hand-merges.
+6. **Manifest.** `tool-error-kinds.json` keeps exactly its kinds, and the manifest tests pass unchanged.
+7. **Optional event fields.** All new `ui_event` fields are optional. An old `set_snapshot` without `snapshot_index` is a no-op (test 14).
+8. **Follow-up.** Plain `ui_select_component` still has no existence check. This is recorded as a follow-up in `.scratch/live-copilot/issues/14-navigation-reach.md`.
+
+UX conditions:
+
+- **Back to the closed panel.** Every panel the assistant closes goes through `withReturn`, via the new `withReturnFrom` export, so "Back to <origin>" restores it: in Guided the slide panel and drawer, in Expert the panel. Tests 13-17 cover Expert and Guided.
+- **Wording.** No app-visible string changes. Refusal messages start with a capital letter and write ranges as "first … last" with real timestamps.
+- **Screenshots.** None are needed; the vitest covers Guided and Expert.
 
 ## Repo rules
 
@@ -352,8 +462,8 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 - The PR body starts with the line `Outsourced task I`, then follows `.github/pull_request_template.md`. Mark the body as AI-generated. In the body:
   - name the one existing test you rewrote (`test_ui_set_snapshot_returns_event_marker`);
   - give the regenerated inventory diff summary;
-  - give the GK options you implemented.
-- The UX reviewer reviews the UI half against `docs/agents/review-ux.md`. That file asks for screenshots of each state in Guided and Expert. Attach them if you can run the app (`pixi run gui`); otherwise say so and the reviewer takes them. Do not restyle anything: the dense 9-11px text and Inter are deliberate (DENSITY-1).
+  - say that plain `topology`/`map` also record a Back origin when they close a panel.
+- The UX reviewer reviews the UI half against `docs/agents/review-ux.md`. The UX ruling waives screenshots for this PR; the Guided and Expert vitest cases replace them. Do not restyle anything: the dense 9-11px text and Inter are deliberate (DENSITY-1).
 - If `master` moves before you open the PR (especially if G-a merges), merge `master` and regenerate the inventory as described under "Files to touch".
 - Add one release-note fragment, `doc/release-notes.d/outsource-navigation-reach.md`, containing one bullet in this form:
 
@@ -368,10 +478,14 @@ cd pypsa-gui/frontend && npm test   # full vitest suite before opening the PR
 
 ## Done when
 
-- [ ] The 17 new tests pass, and each of them fails against `master`'s code.
-- [ ] Every backend file in the second `gui-tests` command passes unchanged, and so do these frontend files: `ChatPanel.applicationNavigation.test.tsx`, `ChatPanel.hubDesignPanel.test.tsx`, `AssistantDock.eviction.test.tsx` and `MapModeSwitcher.test.tsx`.
+- [ ] The 19 new tests pass, and each of them fails against `master`'s code.
+- [ ] GK conditions 1-7 and the UX conditions under "Gatekeeper and UX decisions" each have their named test or check, and each holds.
+- [ ] Every panel closed by `set_snapshot`, `select_component`, `open_properties` or `topology`/`map` sets `flowReturn` through `withReturnFrom`, in Expert and Guided. No close happens without one, and none happens when no panel was open.
+- [ ] Refusal messages start with a capital letter and write ranges as "first … last" with real timestamps. No app-visible string changed.
+- [ ] Every backend file in the second `gui-tests` command passes unchanged, and so do these frontend files: `ChatPanel.applicationNavigation.test.tsx`, `ChatPanel.hubDesignPanel.test.tsx`, `flowReturn.test.tsx`, `ChatPanel.manifest.test.tsx`, `AssistantDock.eviction.test.tsx` and `MapModeSwitcher.test.tsx`.
 - [ ] `npx tsc -b` is clean.
-- [ ] `assistant_inventory.py --check` and `assistant_control_matrix.py --check` pass after `--write`, with no hand edits to either JSON.
+- [ ] `assistant_inventory.py --check` and `assistant_control_matrix.py --check` pass after `--write`, with no hand edits to either JSON. No `TOOL_ROUTES` or `SERVED_BY_TOOL` entry changed.
+- [ ] `tool-error-kinds.json` has exactly the kinds it had on `master`; only two `why` strings differ.
 - [ ] The full `pixi run gui-tests` and `npm test` are green locally, or the PR lists each failure that also fails on `master`.
 - [ ] `ui_select_component`, `ui_open_panel` and `ui_set_snapshot` all still classify as `Safety: read`. No tool, `error_kind` or panel id was added.
 - [ ] The diff touches only the files under "Files to touch".
