@@ -421,7 +421,8 @@ class ExtraOwnerAsset:
     is an existing asset's first renewal: a P5 stage at COD = `build_year` that
     P5-a's `staged_cod_not_active_period` exempts, since the kept asset serves
     until then). Refused as `extra_asset_invalid:<name>:renewals`,
-    `:service_to` (not a finite number after `build_year`) or
+    `:service_to` (not a finite number after `build_year`, or None beside
+    renewals: a lineage without it would be no lineage and lose them) or
     `:existing_renewal` (not a bool)."""
 
     name: str
@@ -493,6 +494,8 @@ class ExtraOwnerAsset:
             object.__setattr__(self, "service_to", to)
         if not isinstance(self.renewals, tuple):
             bad("renewals", "the renewals are a tuple of CampusRenewal")
+        if self.renewals and self.service_to is None:
+            bad("service_to", "renewals need the lineage's service_to (the first purchase's)")
         names = {p.name for p in self.parts}
         renewals, last = [], {}
         for r in self.renewals:

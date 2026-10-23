@@ -690,14 +690,24 @@ export interface CampusEquipment {
 const LIFE_ENDS = 'campus_life_ends_unreplaced:'
 const AFTER_HORIZON = 'campus_renewal_after_horizon:'
 
+/** What the case does after an unreplaced life ends, by its `replacement_rule`,
+ *  in the words of the finance inputs' Replacements setting. */
+const LIFE_ENDS_RULE: Record<string, string> = {
+  fixed: 'With Replacements set to the stated replacement entries, the case does not buy it again.',
+  part_lifetimes: 'With Replacements set to each part at the end of its lifetime, the case buys it '
+    + 'again at the end of its lifetime.',
+}
+
 /** The campus-IC 04 flags in words; an asset name may contain ':', so the
- *  year is the last segment. */
+ *  year (and the rule) are the last segments. */
 function campusLifeNotes(flags: string[]): string[] {
   return flags.flatMap(f => {
     if (f.startsWith(LIFE_ENDS)) {
-      return [`The grid study plans no replacement for ${f.slice(LIFE_ENDS.length)} after its life ends `
-        + "inside the case's horizon. Under the part-lifetimes replacement "
-        + 'rule the case buys it again on its own lifetime rule; under the fixed rule it is not bought again.']
+      const parts = f.slice(LIFE_ENDS.length).split(':')
+      const rule = parts.pop() ?? ''
+      const year = parts.pop()
+      return [`The grid study plans no replacement for ${parts.join(':')} after its life ends in ${year}, `
+        + `inside the case's horizon.${LIFE_ENDS_RULE[rule] ? ` ${LIFE_ENDS_RULE[rule]}` : ''}`]
     }
     if (f.startsWith(AFTER_HORIZON)) {
       const rest = f.slice(AFTER_HORIZON.length)

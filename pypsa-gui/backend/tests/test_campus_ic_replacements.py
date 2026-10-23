@@ -29,6 +29,7 @@ from tests.test_finance_case_extra_assets import HASH, _ext, _hash_fixture, _par
 
 AMOUNT = 2_000.0                        # 2 units × 1,000 a unit, unescalated
 R_CAPEX = 0.02
+PURCHASE_ROWS_HASH = "ddb1b7615306745c"   # master a27d8b67, before 04
 
 
 def _renewal(build_year, *, part="investment", amount=AMOUNT, name=None, service_to=None):
@@ -117,6 +118,7 @@ def test_an_invalid_renewal_is_refused_naming_renewals(renewals, why):
     ({"service_to": 2030}, "service_to"),            # not after the build year
     ({"service_to": float("nan")}, "service_to"),
     ({"service_to": "2043"}, "service_to"),
+    ({"service_to": None}, "service_to"),            # renewals need the lineage's service_to
     ({"existing_renewal": 1}, "existing_renewal"),
     ({"renewals": [_renewal(2043)]}, "renewals"),    # a tuple, as every other frozen field
 ])
@@ -247,7 +249,7 @@ def test_a_renewal_paid_before_the_asset_cod_is_refused():
 def test_under_fixed_a_lineage_ending_inside_the_horizon_is_flagged_and_not_bought():
     """f, issue test 4: the 2043 purchase (L 12.5) ends in 2055.5, before 2060."""
     r = _run(_case(_trf((_renewal(2043, service_to=2060),))))
-    assert "campus_life_ends_unreplaced:trf" in r.op.flags
+    assert "campus_life_ends_unreplaced:trf:2055:fixed" in r.op.flags
     assert [x[0] for x in _items(r)] == [2042]
     assert not any(f.startswith("part_not_replaced:trf") for f in r.op.flags)
 
@@ -259,7 +261,7 @@ def test_under_part_lifetimes_the_ic_rule_resumes_where_the_last_life_ends(lead)
     the lead, as a renewal; the terminal value takes that purchase."""
     r = _run(_case(_trf((_renewal(2043, service_to=2060),)), replacement_rule="part_lifetimes",
                    stage_capex_lead_years=lead))
-    assert "campus_life_ends_unreplaced:trf" in r.op.flags
+    assert "campus_life_ends_unreplaced:trf:2055:part_lifetimes" in r.op.flags
     assert [(x[0], x[2]) for x in _items(r)] == [(2043 - lead, "campus_study"),
                                                  (2056 - lead, "part_lifetimes")]
     assert _items(r)[1][3] == pytest.approx(_esc(2056 - lead))
@@ -280,7 +282,7 @@ def test_a_service_to_cut_by_the_study_horizon_is_not_the_end_of_life():
         == [(2042, pytest.approx(_esc(2042))), (2054, pytest.approx(_esc(2054)))]
     assert (_term(campus).start_year, _term(campus).base) == \
         (_term(plain).start_year, _term(plain).base)
-    assert "campus_life_ends_unreplaced:trf" in campus.op.flags
+    assert "campus_life_ends_unreplaced:trf:2042:part_lifetimes" in campus.op.flags
 
 
 # ── GK point 2: an existing asset's first renewal is a stage ─────────────────
@@ -463,8 +465,9 @@ def _c14_resp(hub, mutate):  # noqa: F811
     lambda by: by["campus:TR_132_33_63#2"]["meta"].update(replaces="campus:NOPE#1"),
     lambda by: by["campus:TR_132_33_63#2"]["meta"].update(lineage="another"),
     lambda by: by["campus:TR_132_33_63#2"]["meta"].update(replaces=None, action="buy"),
+    lambda by: by["campus:TR_132_33_63#1"]["meta"].update(service_to=None),
 ], ids=["quantity", "kind", "basis", "part names", "replaces no entry", "other lineage",
-        "two first purchases"])
+        "two first purchases", "renewed with no service_to"])
 def test_a_renewal_unlike_its_lineage_is_refused_with_its_label_only(hub, mutate):  # noqa: F811
     src = _fold(_c14_resp(hub, mutate))
     assert src.refusal == "campus_assets_invalid"
@@ -528,7 +531,7 @@ def test_a_last_purchase_whose_life_ends_inside_the_axis_is_flagged(rule):
     """The last purchase (2043) + L 12.5 = 2055.5 < 2060; its `service_to`
     (2060, the study horizon) is not read."""
     r = _run(_case(_trf((_renewal(2043, service_to=2060),)), replacement_rule=rule))
-    assert "campus_life_ends_unreplaced:trf" in r.op.flags
+    assert f"campus_life_ends_unreplaced:trf:2055:{rule}" in r.op.flags
 
 
 def test_the_existing_renewal_stage_carries_contingency_and_its_renewals_none():
@@ -566,3 +569,38 @@ def test_renewals_are_no_table_rows_but_cash_flow_lines():
     assert [ln.amount for ln in lines] == pytest.approx([-_esc(2042), -_esc(2054)])
     assert [(x.year, x.source) for x, _v in r.op.replacement_items] == \
         [(2042, "campus_study"), (2054, "campus_study")]
+
+
+# ── mp-code-review (R5): the scope of a campus lineage ───────────────────────
+
+
+def test_a_lineage_without_renewals_takes_a_replacement_capex_entry():
+    """Finding 1: the conflict is with the study's renewals; a lineage that has
+    none (a Data Center asset) keeps its stated `fixed` entry."""
+    r = _run(_case(_trf((), service_to=2031), replacement_capex=[(2042, "trf", 5.0)]))
+    assert [(x.year, x.source) for x, _v in r.op.replacement_items] == [(2042, "fixed")]
+
+
+def test_only_a_part_with_campus_renewals_skips_part_not_replaced():
+    """Finding 2, plan a: under `fixed`, a part the study does not renew is
+    flagged `part_not_replaced` as in any asset."""
+    from services.asset_schema.access import UpfrontPart
+
+    parts = (UpfrontPart("winding", 800.0, 12.5, 0.01), UpfrontPart("tank", 200.0, 20.0, 0.0))
+    e = _trf((_renewal(2043, part="winding", amount=1_600.0, service_to=2055),
+              _renewal(2055, part="winding", amount=1_600.0, service_to=2060)), parts=parts)
+    flags = _run(_case(e)).op.flags
+    assert "part_not_replaced:trf:tank" in flags
+    assert "part_not_replaced:trf:winding" not in flags
+
+
+def test_a_purchase_rows_case_keeps_its_hash(hub):  # noqa: F811
+    """Issue test 1: the case built from a pre-C14 table (`purchase_rows`) through
+    the route hashes as before 04 (the value master gave)."""
+    from services import campus_electrical_service as ce
+    from services.results.finance_case import finance_case_hash
+    from tests.test_campus_electrical_service import fake_investment, purchase_rows
+
+    fake_investment(hub, purchase_rows())
+    src = _fold(ce.owner_assets_response(hub, replacements=True))
+    assert finance_case_hash(_hash_fixture(extra_assets=tuple(src.extras))) == PURCHASE_ROWS_HASH

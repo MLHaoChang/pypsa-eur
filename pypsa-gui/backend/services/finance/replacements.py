@@ -39,10 +39,11 @@ stage's capex, so an existing asset's first renewal, a stage, and the renewals
 folded into it agree for any lead); one at or after the horizon is dropped and
 flagged `campus_renewal_after_horizon:<asset>:<year>`; one paid before the
 asset's COD year is refused `campus_renewal_before_cod:<asset>:<year>`; a
-`replacement_capex` entry naming it is refused `replacement_rule_conflict:<asset>`.
+`replacement_capex` entry naming an asset with renewals is refused
+`replacement_rule_conflict:<asset>`, and a renewed part gets no `part_not_replaced`.
 When the life of a part's last purchase (its build year, or the asset's COD for
 the first, + L) ends inside the horizon, the asset is flagged
-`campus_life_ends_unreplaced:<asset>`; under `fixed` nothing more is bought,
+`campus_life_ends_unreplaced:<asset>:<year>:<rule>`; under `fixed` nothing more is bought,
 under `part_lifetimes` the IC's own rule resumes there: a purchase serving from
 each `end + j·L` before the horizon, paid in its first service year (half up)
 less the lead. No `service_to` is read for timing. One that ends at a
@@ -183,9 +184,9 @@ def governed(a: AssetFinance) -> bool:
 def check(case: FinanceCase) -> None:
     """The refusals of S5 under `part_lifetimes` (`build_timeline` runs it):
     `replacement_rule_conflict:<asset>`, `part_lifetime_too_short:<asset>:<part>`."""
-    campus = lineages(case)
+    renewed = {n for n, e in lineages(case).items() if e.renewals}
     for year, asset, _amount in case.inputs.replacement_capex:
-        if asset in campus:
+        if asset in renewed:
             raise FinanceRefused(f"replacement_rule_conflict:{asset}",
                                  f"a replacement_capex entry ({year}) for {asset}: the grid "
                                  "study already replaces it (double counting)")
@@ -244,7 +245,10 @@ def notes(case: FinanceCase, tl: Timeline) -> tuple[list[str], list[str]]:
     """(capex reasons, flags) of the schedule (S5): `part_lifetime_missing:<a>:<p>`
     (not established); `part_lifetime_rounded:<a>:<p>`, `part_not_replaced:<a>:<p>`;
     for a campus lineage (campus-IC 04), under both rules,
-    `campus_renewal_after_horizon:<a>:<year>` and `campus_life_ends_unreplaced:<a>`."""
+    `campus_renewal_after_horizon:<a>:<year>` and
+    `campus_life_ends_unreplaced:<a>:<year>:<rule>` (<year> the last service year
+    of the earliest part life to end, <rule> the case's `replacement_rule`, so
+    the report can say what the case does then)."""
     reasons: list[str] = []
     flags: list[str] = []
     campus = lineages(case)
@@ -254,8 +258,11 @@ def notes(case: FinanceCase, tl: Timeline) -> tuple[list[str], list[str]]:
             continue
         flags += sorted({f"campus_renewal_after_horizon:{a.name}:{r.build_year}"
                          for r in e.renewals if r.build_year >= _horizon(tl)})
-        if any(_resumed(case, tl, e, a, p) for p in effective_parts(a)):
-            flags.append(f"campus_life_ends_unreplaced:{a.name}")
+        ends = [_resumed(case, tl, e, a, p) for p in effective_parts(a)]
+        if any(ends):
+            last = math.floor(min(s[0] for s in ends if s) + 0.5) - 1
+            flags.append(f"campus_life_ends_unreplaced:{a.name}:{last}:"
+                         f"{case.inputs.replacement_rule}")
     if case.inputs.replacement_rule == PART_LIFETIMES:
         for a in case.assets:
             _cod, years = _clock(case, tl, a.name)
@@ -269,12 +276,15 @@ def notes(case: FinanceCase, tl: Timeline) -> tuple[list[str], list[str]]:
                              else _repurchases(p.lifetime_years, years)):
                     flags.append(f"part_lifetime_rounded:{a.name}:{p.name}")
         return reasons, flags
-    named = {asset for _y, asset, _x in case.inputs.replacement_capex} | set(campus)
+    named = {asset for _y, asset, _x in case.inputs.replacement_capex}
     for a in case.assets:
         if a.name in named:
             continue
         _cod, years = _clock(case, tl, a.name)
+        renewed = {r.part for r in campus[a.name].renewals} if a.name in campus else set()
         for p in effective_parts(a):
+            if p.name in renewed:
+                continue                # the grid study renews it (campus-IC 04, plan a)
             if _finite(p.lifetime_years) and p.lifetime_years < years:
                 flags.append(f"part_not_replaced:{a.name}:{p.name}")
     return reasons, flags
