@@ -3,9 +3,9 @@
 
 # Power-quality screening additions: IEEE 519 TDD, unbalance, harmonic impedance scan
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
-Blocked by: 09; ships after grid-to-process issue 17 (harmonics, then flicker)
+Blocked by: part 1 (TDD): grid-to-process issue 17's harmonics PR; parts 2 and 3: none
 Gated: **yes** (gridspine)
 Model tier: opus
 Size: S + S + M (three PRs are fine)
@@ -35,3 +35,28 @@ Screening only: filter design stays in PowerFactory / PSCAD.
 - Each check returns rows with limit, margin and band, and is labelled screening.
 - Tests: TDD limit band chosen correctly at the Isc/IL boundaries; unbalance matches a hand
   calculation; the impedance scan shows the resonance of a fixture with a known shunt capacitor.
+
+## Triage (gatekeeper, 2026-10-23)
+
+**Status `ready-for-agent`, gated, three PRs, in this order:** 2 (unbalance, S), then 3 (impedance
+scan, M), then 1 (TDD, S).
+
+- **Part 1 waits on grid-to-process issue 17.** Issue 17 is still `needs-info` on its one owner
+  question (where the harmonic spectra come from). TDD needs the same per-unit current spectra and
+  the same "limits from the profile, no limit → unknown" rule. So TDD is a second check on 17's
+  spectra and summation, not a second spectrum path.
+  - The IEEE 519 exclusion in 17's triage was a scope cut for that ticket. SAGC-1 now puts TDD
+    here, which is consistent with it: 17 stays IEC 61000-3-6 voltage THD.
+  - **Band choice:** take the I_sc/I_L boundaries from IEEE 519's current-distortion table as the
+    profile's default bands. A row stores the band it chose. The test hits each boundary from both
+    sides.
+- **Part 2 (unbalance):** negative-sequence voltage u₂ ≈ S_unbalanced / S_sc2, where S_sc2 is the
+  negative-sequence short-circuit power at the PoC from `static/island_sc_seq.py`. The test is a
+  hand calculation on a fixture.
+- **Part 3 (impedance scan):** sweep h · f0 with `f0 = net.f_hz` (after 09 this is the only source
+  of the fundamental, so no constant). Use pandapower's line R, X and C scaled per harmonic, with a
+  √h skin-effect term on R.
+  - The test fixture has a shunt capacitor whose parallel resonance h_r = √(S_sc / Q_c) is known
+    analytically. The scan's peak must land within one harmonic step of it.
+  - Write the R(h) and X(h) CSV per short-circuit case (max, min, normal), plus the R–X envelope.
+- **Every row is labelled "screening".** Filter design stays out of scope.

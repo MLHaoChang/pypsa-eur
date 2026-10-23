@@ -3,7 +3,7 @@
 
 # 60 Hz throughout (nominal frequency carried, not assumed)
 
-Status: needs-triage
+Status: ready-for-agent
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine)
@@ -35,3 +35,28 @@ parts of Asia) gets wrong absolute frequency results. Examples: `F0 = 50.0` at
   deviation / f0, RoCoF / f0, droop response), with a test.
 - The RAW export writes the network's base frequency.
 - No study path reads a 50 Hz constant when the network states otherwise (test or grep check).
+
+## Triage (gatekeeper, 2026-10-23)
+
+**Status `ready-for-agent`, gated, size S.** It ships first because it is the owner's
+priority, not because the others depend on it (see their triage).
+
+What the code shows:
+
+- **`frequency.py` already takes `f0` as a parameter** that defaults to `F0 = 50.0` (l.63), and
+  so does `gfm_tuning.py` (`f0=F.F0`, l.146 and l.190). The bug is in the callers: they never pass
+  it. Thread the network's `f_hz` from the campus driver and the island path down to every
+  `simulate` / `judge` / `trip_floor` / `emt_flags` / `equipment` call. Keep `F0` only as the
+  default for callers that state nothing.
+- **The RAW export is already parameterised.** `raw_writer.write_raw(..., f_hz=50.0)` takes it,
+  `handoff/campus_bundle.py` passes `net.f_hz` and the year study passes `CASE39_F_HZ`. This
+  acceptance item becomes a test that a 60 Hz campus writes `60.00` in the RAW header. No rewrite.
+- **Watch these:** `ingest/campus.py` already accepts only 50 or 60 (l.463), and `handoff/bundle.py`
+  has `f_hz: float = 50.0` as a dataclass default. `producers/campus.py` writes `"f_hz": 50` into
+  demo campuses. That is fine as a default, but no study may re-read it in place of `net.f_hz`.
+- **Grep check for the acceptance.** No `50.0`, `314.15` or `2*pi*50` may sit in `gridspine/static`
+  or `gridspine/drivers` outside a default argument. A test can assert it by scanning those files
+  with the default-argument lines allowed.
+- **The per-unit equality test** runs the same island at 50 and 60 Hz and compares Δf/f0,
+  RoCoF/f0 and the droop response. Droop gain is P_n / (R · f0), so the two cases match only once
+  f0 is threaded through.
