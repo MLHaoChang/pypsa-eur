@@ -3,7 +3,7 @@
 
 # 21 — Error-kind manifest: derive `_refuse("<kind>", ...)` kinds
 
-Status: ready-for-agent
+Status: done (#661, 92453b35)
 Outsourced: Codex (2026-10-22) — branch outsource/refuse-kinds-manifest
 Type: task
 Baseline: master `514c8feede1177b520a4dde74a4dffaf12cf696a`

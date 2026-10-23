@@ -9,10 +9,13 @@ An outsourced app opens one PR from its `outsource/<slug>` branch, with a body t
 
 | ID | Task | App | Branch | Brief | Issue | State |
 |---|---|---|---|---|---|---|
-| A | A tool the assistant just discovered is offered on its next request | Codex | `outsource/discovered-tools-offered` | `.scratch/harness/outsource/A-discovered-tools-offered.md` | `.scratch/harness/issues/23-discovered-tools-offered.md` | handed out 2026-10-22 |
+| A | A tool the assistant just discovered is offered on its next request | Codex | `outsource/discovered-tools-offered` | `.scratch/harness/outsource/A-discovered-tools-offered.md` | `.scratch/harness/issues/23-discovered-tools-offered.md` | merged e8cb3f03 (#660) |
 | B | A failing plan step stops after two retries | Codex | `outsource/task-step-retry-limit` | `.scratch/harness/outsource/B-task-step-retry-limit.md` | `.scratch/live-copilot/issues/25-task-step-retry-limit.md` | handed out 2026-10-22 |
-| C | Classify the `_refuse(...)` error kinds in the tool-error manifest | Codex | `outsource/refuse-kinds-manifest` | `.scratch/harness/outsource/C-refuse-kinds-manifest.md` | `.scratch/harness/issues/21-refuse-kinds-in-error-manifest.md` | handed out 2026-10-22 |
+| C | Classify the `_refuse(...)` error kinds in the tool-error manifest | Codex | `outsource/refuse-kinds-manifest` | `.scratch/harness/outsource/C-refuse-kinds-manifest.md` | `.scratch/harness/issues/21-refuse-kinds-in-error-manifest.md` | merged 92453b35 (#661) |
+| D | Opening the cost-reference card no longer throws away a solve (read-only preview) | Codex | `outsource/library-reference-preview-read-only` | `.scratch/harness/outsource/D-library-reference-preview-read-only.md` | `.scratch/harness/issues/22-library-reference-preview-is-a-write.md` | ready to hand out (GK plan OK 2026-10-23) |
+| E | The assistant names what it cannot do from chat; every route has a chat disposition (LC-22) | Codex | `outsource/not-via-chat-list` | `.scratch/harness/outsource/E-not-via-chat-list.md` | `.scratch/live-copilot/issues/22-unsupported-by-chat.md` | ready to hand out (GK plan OK 2026-10-23) |
+| F | "hydro" and "hydrogen" generators stop filing under demand response | Codex | `outsource/gen-category-word-match` | `.scratch/timeseries-generators/outsource/F-gen-category-word-match.md` | `.scratch/timeseries-generators/issues/11-gen-category-word-match.md` | ready to hand out (GK triage + plan OK 2026-10-23) |
 
-Ordering: if C merges before B, B adds its one new kind (`task_step_retry_limit`) to the manifest; both briefs say so. LC-22 (the "not via chat" list) waits for A, because both edit `find_capabilities`.
+Ordering: if C merges before B, B adds its one new kind (`task_step_retry_limit`) to the manifest; both briefs say so. E (LC-22, the "not via chat" list) builds on A (merged), since both edit `find_capabilities`. Whichever of D and E merges second classifies the live preview path; both briefs say so.
 
 Source: the PR #567 assessment, `.scratch/harness/pr-567-assessment.md`.

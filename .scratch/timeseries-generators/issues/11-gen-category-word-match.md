@@ -1,6 +1,6 @@
 # Generator category: a word match, not a substring
 
-Status: needs-triage
+Status: ready-for-agent (GK triage 2026-10-23; outsourced task F, docs/agents/outsourced.md)
 Type: task
 Blocked by: ts-05 (#586)
 Gated: yes (adequacy reads it)
