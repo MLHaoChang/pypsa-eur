@@ -89,7 +89,7 @@ def test_post_filter_flag_is_carried_and_said():
     assert "post-filter" in row["note"]
 
 
-@pytest.mark.parametrize("mva", [None, math.nan])
+@pytest.mark.parametrize("mva", [None, math.nan, 0.0, -1.0])
 def test_missing_rated_mva_is_no_input_never_skipped(mva):
     t = hm.harmonic_table(_units(("U1", "PoC", mva, "6-pulse", "", False)), {"PoC": 1000.0}, LIMITS)
     assert list(t.units["unit"]) == ["U1"]

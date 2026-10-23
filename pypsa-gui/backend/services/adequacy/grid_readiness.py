@@ -935,8 +935,8 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
-            _lole_row(inp)]
+            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _reactive_row(inp), *_support_rows(inp),
+            *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),

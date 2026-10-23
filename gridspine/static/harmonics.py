@@ -263,7 +263,7 @@ def harmonic_table(units: pd.DataFrame, sk_mva_by_poc: dict, limits: Limits,
                "harmonic_source": rec["harmonic_source"] or "", "spectrum_source": source,
                "post_filter": post, "sk_mva": sk, "label": LABEL}
         missing = []
-        if not (math.isfinite(mva) and mva >= 0):
+        if not (math.isfinite(mva) and mva > 0):
             missing.append("rated_mva")
         if spectrum is None:
             missing.append(source)
