@@ -16,6 +16,7 @@ import type {
 } from '../api/types'
 import { appLog } from '../store/simulationStore'
 import { useUIStore } from '../store/uiStore'
+import { openProfileStudio } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { safeMax, safeMin } from '../utils/numeric'
 import toast from 'react-hot-toast'
@@ -1647,7 +1648,7 @@ export default function TimeSeriesManager() {
         ))}
         {activeTab === 'renewable' && uiMode === 'expert' && (
           <button type="button" data-testid="ts-open-profile-studio"
-            onClick={() => useUIStore.getState().setSlidePanel('profiles')}
+            onClick={openProfileStudio}
             className="ml-auto self-center px-3 text-[11px] text-accent hover:underline">
             Generate with Profile Studio ›
           </button>
