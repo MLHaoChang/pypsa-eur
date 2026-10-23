@@ -140,6 +140,7 @@ FIFTY = re.compile(r"(?<![\w.])50(\.0*)?(?![\w.])|314\.1|pi\s*\*\s*50\b")
 ALLOWED = (
     re.compile(r"^F0 = 50\.0$"),                                   # frequency.py: the default for callers that state nothing
     re.compile(r"^PEAK_FACTOR = \{50: 2\.5, 60: 2\.6\}$"),         # campus_sc.py: IEC 62271's peak factor by frequency
+    re.compile(r"^H_MIN, H_MAX = 2, 50$"),                          # harmonics.py: IEC 61000-3-6's orders 2..50, not a frequency
 )
 #: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.
 DEFAULT = re.compile(r"\w+\s*(:\s*\w+\s*)?=\s*50(\.0*)?\s*[,)]")

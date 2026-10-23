@@ -8,6 +8,10 @@ export const FIELD_LABELS: Record<string, string> = {
   eh_sk_mva: 'Short-circuit level (MVA)',
   target_lole_h: 'LOLE target',
   p_nom: 'Capacity',
+  eh_process: 'Process unit',
+  rated_mva: 'Rated apparent power',
+  harmonic_source: 'Harmonic source',
+  harmonic_spectrum: 'Harmonic spectrum',
 }
 
 /** The ledger's label for each field its rows point at (DC-02: the grid
