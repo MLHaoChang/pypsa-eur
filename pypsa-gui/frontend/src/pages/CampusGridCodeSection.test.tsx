@@ -123,6 +123,37 @@ describe('grid codes: upload', () => {
     expect(api.uploadGridCodeDocument.mock.calls[0][1]).toBe(file)
   })
 
+  it('sends the selected pages with the file', async () => {
+    api.uploadGridCodeDocument.mockResolvedValue(DOC)
+    renderPanel()
+    await userEvent.type(await screen.findByLabelText('Pages (optional)'), '1-40, 120-180')
+    const file = pdf()
+    await userEvent.upload(screen.getByLabelText('Grid-code document'), file)
+    await waitFor(() => expect(api.uploadGridCodeDocument).toHaveBeenCalledWith('Hub A', file, '1-40, 120-180'))
+  })
+
+  it('takes the same file again after a refusal, now with pages selected', async () => {
+    api.uploadGridCodeDocument.mockRejectedValueOnce(refuse(422, 'the PDF has 292 pages; the extraction reads at most 100. '
+      + 'Select the pages with the connection requirements as a page range, such as 1-40,120-180'))
+    api.uploadGridCodeDocument.mockResolvedValueOnce(DOC)
+    renderPanel()
+    const input = await screen.findByLabelText('Grid-code document')
+    const file = pdf()
+    await userEvent.upload(input, file)
+    expect(await screen.findByText(/such as 1-40,120-180/)).toBeTruthy()
+    await userEvent.type(screen.getByLabelText('Pages (optional)'), '1-40')
+    await userEvent.upload(input, file)
+    await waitFor(() => expect(api.uploadGridCodeDocument).toHaveBeenCalledTimes(2))
+    expect(api.uploadGridCodeDocument.mock.calls[1]).toEqual(['Hub A', file, '1-40'])
+  })
+
+  it('names the selected pages of a document read in part', async () => {
+    api.gridCodes.mockResolvedValue(list({ documents: [{ ...DOC, pages: 292, page_ranges: '1-40,120-180' }] }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    expect(row.textContent).toContain('pages 1–40, 120–180 of 292 · ')
+  })
+
   it('refreshes the lists after an upload', async () => {
     api.uploadGridCodeDocument.mockResolvedValue(DOC)
     renderPanel()

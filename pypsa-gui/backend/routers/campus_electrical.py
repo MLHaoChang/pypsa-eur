@@ -40,7 +40,7 @@ wrapping ``services/campus_grid_code_service.py``:
 
 * ``GET /grid-codes``: the shipped, published and draft profiles, the
   uploaded documents, and whether extraction is available;
-* ``POST /grid-codes/documents`` (multipart ``file``) and
+* ``POST /grid-codes/documents`` (multipart ``file``, optional ``page_ranges``) and
   ``DELETE /grid-codes/documents/{document_id}``;
 * ``POST /grid-codes/documents/{document_id}/extract``: the copilot's draft;
 * ``POST /grid-codes/drafts``: a blank draft to fill in by hand;
@@ -57,7 +57,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 from starlette.concurrency import run_in_threadpool
@@ -564,14 +564,17 @@ def list_grid_codes(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = 
 @router.post("/{name}/grid-codes/documents")
 async def upload_grid_code_document(
     file: UploadFile = File(...),
+    page_ranges: str | None = Form(None, max_length=200),
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
-    """Upload a grid code as a PDF; it is kept in the project by its hash."""
+    """Upload a grid code as a PDF; it is kept in the project by its hash.
+    ``page_ranges`` (``"1-40,120-180"``) selects the pages to read."""
     _check_lock(proj, db, user)
     data = await UploadBudget(gc.MAX_PDF_BYTES).read(file)
-    return await run_in_threadpool(gc.upload_document, _row(proj, db), data, file.filename, file.content_type)
+    return await run_in_threadpool(gc.upload_document, _row(proj, db), data, file.filename, file.content_type,
+                                   page_ranges)
 
 
 @router.delete("/{name}/grid-codes/documents/{document_id}")

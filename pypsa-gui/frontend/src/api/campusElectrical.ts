@@ -462,6 +462,8 @@ export interface GridCodeDocument {
   size: number
   uploaded_at: string
   pages: number
+  /** The pages the upload selected (`1-40,120-180`); absent when the whole file is read. */
+  page_ranges?: string
 }
 
 export interface GridCodeList {
@@ -884,9 +886,11 @@ export const campusApi = {
     client.get<GridCodeList>(`${codes(project)}`, quiet).then(r => r.data),
 
   /** Multipart field `file`. 415 not a PDF, 413 too big, 422 unreadable. */
-  uploadGridCodeDocument: (project: string, file: File) => {
+  /** `pageRanges` (`1-40,120-180`) selects the pages to read; the 100-page cap applies to them. */
+  uploadGridCodeDocument: (project: string, file: File, pageRanges?: string) => {
     const fd = new FormData()
     fd.append('file', file)
+    if (pageRanges?.trim()) fd.append('page_ranges', pageRanges.trim())
     return client.post<GridCodeDocument>(`${codes(project)}/documents`, fd, quiet).then(r => r.data)
   },
 

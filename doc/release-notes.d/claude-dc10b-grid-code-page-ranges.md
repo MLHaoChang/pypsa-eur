@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): A grid-code PDF longer than 100 pages uploads with a page selection such as `1-40,120-180`; the 100-page cap applies to the selected pages, the extraction reads only those, and cited pages map back to the file's own.
