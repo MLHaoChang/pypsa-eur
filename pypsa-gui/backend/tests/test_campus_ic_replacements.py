@@ -29,7 +29,8 @@ from tests.test_finance_case_extra_assets import HASH, _ext, _hash_fixture, _par
 
 AMOUNT = 2_000.0                        # 2 units × 1,000 a unit, unescalated
 R_CAPEX = 0.02
-PURCHASE_ROWS_HASH = "ddb1b7615306745c"   # master a27d8b67, before 04
+# master 8b4bae14 on the shipped 03B library (2025 EUR); was ddb1b7615306745c on the placeholders (a27d8b67, before 04)
+PURCHASE_ROWS_HASH = "eb24d85ef773ee4b"
 
 
 def _renewal(build_year, *, part="investment", amount=AMOUNT, name=None, service_to=None):
