@@ -207,12 +207,17 @@ it('a workbook row names its sheet, and a formula cell says its value was saved'
     .toBe('lines.xlsx \u203a Lines \u203a B3 (450 MVA, saved formula value)')
 })
 
-it('a row without a display value rounds a long number like one with it', () => {
+it('a row without a display value rounds a long number but keeps years, tiny values and no-limit', () => {
   const pending = useChatStore.getState().pending!
-  const long = { ...typed, field: 'capital_cost', old: 123456789012.3456, new: 0.123456789012, unit: 'EUR' }
-  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [long] } } })
+  const row = (field: string, old: number, nw: number) => ({ ...typed, field, old, new: nw, unit: 'x' })
+  const rows = [row('a', 0.1234567891, 123456789012.3456), row('b', 2030, 2035), row('c', 1e-5, Infinity)]
+  useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows } } })
   render(<ConfirmationCard />)
-  const cells = screen.getAllByTestId('chat-edit-row-typed')[0].textContent ?? ''
-  expect(cells).toContain('123,456,789,012.35')
-  expect(cells).toContain('0.1235')
+  const [long, year, tiny] = screen.getAllByTestId('chat-edit-row-typed').map(r => r.textContent ?? '')
+  expect(long).toContain('0.123457')
+  expect(long).toContain('123456789012')
+  expect(year).toContain('2030')
+  expect(year).not.toContain('2,030')
+  expect(tiny).toContain('0.00001')
+  expect(tiny).toContain('no limit')
 })

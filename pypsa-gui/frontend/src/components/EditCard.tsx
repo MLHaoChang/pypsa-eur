@@ -89,9 +89,11 @@ function show(value: Scalar | undefined, known = true): string {
   return typeof value === 'number' ? String(Number(value.toPrecision(12))) : String(value)
 }
 
-/** A card cell's number, rounded for reading like a display value; a stored note keeps `show`. */
+/** A card cell's number without a display value: six significant digits, never fewer than its whole
+ * part, no grouping ("2030" stays a year); "no limit", "not set" and "Not read" stay `show`'s. */
 function cellValue(value: Scalar | undefined, known = true): string {
-  return typeof value === 'number' && known ? showDisplay(value) : show(value, known)
+  if (typeof value !== 'number' || !known || !Number.isFinite(value)) return show(value, known)
+  return String(Number(value.toPrecision(Math.max(6, Math.trunc(Math.abs(value)).toString().length))))
 }
 
 /** A quote as the card shows it: at most QUOTE_SHOWN characters, the rest in the tooltip. */
