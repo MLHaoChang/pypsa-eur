@@ -45,7 +45,10 @@ class CapacityBasisMismatch(ValueError):
 #: which errs safe: a refusal, never a misprice), and the carrier of a product-priced technology's
 #: output.
 ELECTRIC_CARRIERS = frozenset({"AC", "DC", "electricity"})
-PRODUCT_CARRIER = {"haber-bosch": "NH3"}
+PRODUCT_CARRIER = {"haber-bosch": "NH3",
+                   # Electrified heat (refinery gap 2): priced per MW of heat output.
+                   "electric-boiler-steam": "heat", "industrial-heat-pump-ht": "heat",
+                   "electric-process-heater": "heat"}
 
 #: Component x row capacity basis -> how the overnight cost is scaled (or "refuse"). `_ac` / `_dc`
 #: bases follow `output_electric`. A battery is priced through its parts, not through this table.

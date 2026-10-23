@@ -17,6 +17,17 @@ two faces" §3 rule 4). The pack holds:
 - from version 2026-10-20, the ammonia technologies the `eh_ammonia_staged` template prices from: the
   Haber-Bosch loop (per MW of NH3 output), the liquid NH3 tank and the type 1 H2 tank, from
   technology-data v0.14.0 in 2020 EUR, one `investment` part each;
+- from version 2026-10-24, the electrified heat technologies (refinery electrification gap 2), one
+  `investment` part per MW of heat output (per MWh for the store): the electric steam boiler
+  (`electric-boiler-steam`, DEA 310.1) and the high-temperature heat pump up to 150 degC
+  (`industrial-heat-pump-ht`, DEA 302.b, its COP in the `efficiency` row) from technology-data
+  v0.14.0, which is built in 2025 EUR (`eur_year: 2025`); the electric process heater
+  (`electric-process-heater`, DEA 312.c "Direct firing, Electricity", 2019 EUR) and the molten-salt
+  heat store for industrial steam (`thermal-storage-molten-salt`, DEA storage 143b, 2020 EUR) from the
+  DEA workbooks technology-data ships. Each carries the operating range its sheet states (`min_load`,
+  the heat pump's `max_sink_temperature`, the store's `steam_temperature`); a range the sheet states
+  for 2030 is `source`, any other the assumed ±30 %. The build script is
+  `.scratch/grid-to-process/refinery-heat/make_pack_2026-10-24.py`;
 - finance defaults;
 - regional cost overlays (see [Regional versions](#regional-versions));
 - two illustrative tariffs;
