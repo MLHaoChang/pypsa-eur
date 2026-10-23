@@ -442,6 +442,10 @@ export interface GridCodeProfile {
   q_capability_pq?: GridLimit & { points: [number, number, number][] }
   pf_min_lagging?: GridLimit
   pf_min_leading?: GridLimit
+  /** Total harmonic voltage distortion at the PCC, % of the fundamental. */
+  thd_limit_pct?: GridLimit
+  /** Harmonic voltage limits per order at the PCC: `orders` {h: % of the fundamental}. */
+  harmonic_limits_pct?: GridLimit & { orders: Record<string, number> }
   document?: { sha256: string; filename: string; title: string }
 }
 

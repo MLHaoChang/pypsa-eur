@@ -222,13 +222,30 @@ describe('grid codes: extract', () => {
     expect(screen.getByTestId('limit-pf_min_leading').textContent).toContain('0.95')
   })
 
+  it('shows the harmonic limits a profile sets, orders in ascending order', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      thd_limit_pct: { value: 3, clause: 'generic clause', source: 'code' as const },
+      harmonic_limits_pct: { clause: 'generic clause', source: 'code' as const, orders: { 11: 1.5, 5: 2, 7: 2 } } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const thd = (await screen.findByTestId('limit-thd_limit_pct')).textContent
+    expect(thd).toContain('Total harmonic distortion at the PCC')
+    expect(thd).toContain('3 %')
+    const orders = screen.getByTestId('limit-harmonic_limits_pct').textContent
+    expect(orders).toContain('Harmonic voltage by order at the PCC')
+    expect(orders).toContain('h5 2 % · h7 2 % · h11 1.5 %')
+  })
+
   it('shows no SAGC-type row for a profile without those limits', async () => {
     api.extractGridCode.mockResolvedValue(draft())
     renderPanel()
     const row = await screen.findByTestId(`document-${DOC_ID}`)
     await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
     await screen.findByTestId('limit-rvc_limit_pct')
-    for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading']) {
+    for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
+      'thd_limit_pct', 'harmonic_limits_pct']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
     }
   })
