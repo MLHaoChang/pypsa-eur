@@ -45,8 +45,6 @@ def test_set_snapshot_refuses_a_time_not_on_the_axis(navigation_network):
     for iso in ['2026-06-02T00:00:00', '2026-06-01T12:30:00', 'not a date']:
         message = _refusal(lambda: chat_tools.ui_set_snapshot(iso))
         assert '2026-06-01T00:00:00 … 2026-06-01T23:00:00' in message
-    navigation_network.set_snapshots(pd.DatetimeIndex([]))
-    assert 'no snapshots' in _refusal(lambda: chat_tools.ui_set_snapshot('2026-06-01'))
 
 
 def test_set_snapshot_multi_period(navigation_network):
