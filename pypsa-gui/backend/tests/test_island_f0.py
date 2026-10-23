@@ -254,8 +254,11 @@ def _fifty(path):
 
 
 def test_island_py_carries_no_50_hz_outside_its_default():
-    hits = _fifty(pathlib.Path(island_mod.__file__))
+    path = pathlib.Path(island_mod.__file__)
+    hits = _fifty(path)
     assert not hits, "\n".join(f"island.py:{i}: {code}" for i, code in hits)
+    code = [c for _, c in _code_lines(path)]
+    assert {line: code.count(line) for line in ALLOWED + F0_READERS} == dict.fromkeys(ALLOWED + F0_READERS, 1)
 
 
 def test_the_scan_catches_what_it_should(tmp_path):

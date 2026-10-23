@@ -933,13 +933,18 @@ def _write_campus(project, text: str) -> None:
     frequency drops the island study, which read the old f0."""
     from services.solver.island import IslandRefusal, campus_f_hz
 
-    try:
-        f_hz_before = campus_f_hz(project_registry.project_dir(project))
-    except IslandRefusal:
-        f_hz_before = None
+    def f_hz():
+        try:
+            return campus_f_hz(project_registry.project_dir(project))
+        except IslandRefusal:
+            return None                       # unreadable: counts as changed
+
+    before = f_hz()
     (campus_dir(project) / CAMPUS_FILE).write_text(text)
-    if campus_f_hz(project_registry.project_dir(project)) != f_hz_before:
-        _island_paths(project)[1].unlink(missing_ok=True)
+    after = f_hz()
+    if after is None or after != before:
+        _, study_path = _island_paths(project)
+        study_path.unlink(missing_ok=True)
 
 
 # ── the asset library (plan C9) ──────────────────────────────────────────────
