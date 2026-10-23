@@ -19,6 +19,14 @@ The gatekeeper's plan review decided that the case year and the pins are one dec
 - Regional packs (2026-10-21+*, 2026-10-22+*) take their EU base from 2026-10-22, so their `eu_fallback`
   rows still carry the 2020 label. A regional rebuild on the 2026-10-25 base would carry the fix.
 
+- The guided study pin (`services/study/library.PACK_VERSION`, 2026-10-05) moves under the same rule. Pack
+  2026-10-25 relabels four rows it reads (battery.power/energy.overnight, solar-utility/rooftop.investment.overnight)
+  2020 -> 2025; the bump tripwire in `pypsa-gui/backend/tests/test_study_ledger_from_pack.py` acknowledges exactly
+  that change (`_ACKNOWLEDGED_BUMP_CHANGES`). Bumping `PACK_VERSION` past 2026-10-24 alone hits `currency_year_mixed`
+  against the 2020 tariffs (`services/study/compile.py` `currency_year_of`, which refuses a case whose money rows,
+  tariff and study state different years), so move the study's or the tariffs' currency year together with the pin,
+  and drop the acknowledgement in the same change.
+
 ## Why it was left out
 
 Nothing converts a pack cost by its money year, so the relabel moved no result. Repinning without moving the
