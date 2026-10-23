@@ -500,6 +500,30 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
       .toMatch(/^Generic default \(illustrative\): 1 of 2 campus costs are assumed/)
   })
 
+  it('says when a campus asset\'s life ends unreplaced or a renewal falls after the horizon (campus-IC 04)',
+     async () => {
+    await renderCampus({ extra_assets: [campusAsset('campus:TR_132_33_63#1')],
+                         campus_study: { study_method: 'least_cost', unresolved: [] } },
+                       ['campus_life_ends_unreplaced:campus:TR_132_33_63#1:2042:fixed',
+                        'campus_life_ends_unreplaced:campus:CB_33_AL240#1:2055:part_lifetimes',
+                        'campus_renewal_after_horizon:campus:TR_132_33_63#1:2055'])
+    const lines = screen.getAllByTestId('ic-campus-life').map(e => e.textContent)
+    expect(lines).toEqual([
+      'The grid study plans no replacement for campus:TR_132_33_63#1 after its life ends in 2042, '
+      + 'inside the case\'s horizon. With Replacements set to the stated replacement entries, the case '
+      + 'does not buy it again.',
+      'The grid study plans no replacement for campus:CB_33_AL240#1 after its life ends in 2055, '
+      + 'inside the case\'s horizon. With Replacements set to each part at the end of its lifetime, the '
+      + 'case buys it again at the end of its lifetime.',
+      'The grid study renews campus:TR_132_33_63#1 in 2055, after the case\'s horizon: the case leaves '
+      + 'that purchase out.',
+    ])
+    cleanup()
+    await renderCampus({ extra_assets: [campusAsset('campus:TR_132_33_63#1')],
+                         campus_study: { study_method: 'least_cost', unresolved: [] } })
+    expect(screen.queryByTestId('ic-campus-life')).toBeNull()
+  })
+
   it('a stale report naming the campus study says so in the report\'s one stale line', async () => {
     api.getInvestmentCase.mockResolvedValue({ status: 'done',
       report: { present: true, stale: true, changed: ['extra_assets'] } })

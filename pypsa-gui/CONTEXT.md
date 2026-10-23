@@ -119,6 +119,15 @@ word replaces the other: Site for the drawn plot and placements, campus study
 for the transformer, compensation, short-circuit and grid-code analysis.
 _Avoid_: campus (unqualified), plant, zone (a zone is the packer's placement band)
 
+**Lineage** (campus study, campus-IC 04):
+One piece of campus equipment across its purchases: the first purchase and the
+**renewals** the campus study plans when its life ends (C14 `meta.lineage`,
+`replaces`, `service_to`). The investment case folds a lineage into one extra
+asset (`ExtraOwnerAsset`) whose `renewals` it buys as replacements
+(`source="campus_study"`); a renewal is never an asset of its own.
+_Avoid_: vintage (that is a Decision study's build year), replacement (the IC's
+own word, for any purchase again)
+
 **Placement rule**:
 A library entry's statement of where its type stands relative to the others
 on a Site — anchor (in its yard, between its two buses' yards, beyond the far
