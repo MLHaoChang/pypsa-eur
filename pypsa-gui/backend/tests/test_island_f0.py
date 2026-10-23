@@ -168,6 +168,25 @@ def test_a_campus_that_states_no_valid_f_hz_is_refused(tmp_path, text, match):
         campus_f_hz(tmp_path)
 
 
+def test_a_build_without_gridspine_refuses_a_campus_rather_than_assume_50_hz(
+        tmp_path, monkeypatch):
+    import builtins
+
+    real = builtins.__import__
+
+    def no_gridspine(name, *args, **kwargs):
+        if name == "gridspine" or name.startswith("gridspine."):
+            raise ImportError(f"No module named {name!r}")
+        return real(name, *args, **kwargs)
+
+    _campus(tmp_path, "campus:\n  f_hz: 60\n")
+    monkeypatch.setattr(builtins, "__import__", no_gridspine)
+    with pytest.raises(IslandRefusal, match="gridspine is not available in this build"):
+        campus_f_hz(tmp_path)
+    # Without a campus file nothing needs gridspine: 50 Hz as before.
+    assert campus_f_hz(tmp_path / "no-campus") == 50.0
+
+
 def _bind(monkeypatch, storage):
     from services.pypsa_service import PyPSAService
 

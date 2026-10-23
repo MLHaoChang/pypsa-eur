@@ -193,14 +193,21 @@ def campus_f_hz(project_dir) -> float:
     file or the file states none. A file that is not YAML, or states another
     frequency, is refused by name."""
     import yaml
-    from gridspine.ingest.campus import campus_f_hz as rule
-    from gridspine.schema.contracts import ContractError
 
     from services.campus_electrical_service import CAMPUS_FILE, SUBDIR
 
     path = pathlib.Path(project_dir) / SUBDIR / CAMPUS_FILE
     if not path.is_file():
         return F0_HZ
+    try:
+        from gridspine.ingest.campus import campus_f_hz as rule
+        from gridspine.schema.contracts import ContractError
+    except ImportError as exc:
+        # The guarded seam (tests/test_packaging_requirements.py): a build
+        # without gridspine refuses by name rather than assume 50 Hz.
+        raise IslandRefusal(
+            f"{CAMPUS_FILE} states the campus, but gridspine is not available in "
+            f"this build, so its f_hz cannot be read") from exc
     try:
         spec = yaml.safe_load(path.read_text())
     except yaml.YAMLError as exc:
