@@ -12,7 +12,8 @@ the G2 additions of `2026-10-07-ic-g1-g2-campus-equipment.md` G-11:
 `2026-10-14-e2e-guided-demo.md` §7.1: `FinanceCase.asset_cod` and
 `FinanceInputs.stage_capex_lead_years`; and the site-today baseline of
 2026-10-15: the `baseline` keyword of `build_finance_case`, `baseline_plan` and
-`FinanceInputs.island_outage`).
+`FinanceInputs.island_outage`; and campus-IC 02/05 of 2026-10-22:
+`FinanceCase.campus`).
 
 Every facade name is imported and its call signature pinned with
 `inspect.signature` against the expectation below, so any change — a renamed
@@ -260,7 +261,8 @@ DATACLASS_FIELDS: dict[str, tuple[str, ...]] = {
     "services.library.series_store.SeriesDeleted": ("deleted_versions", "kept", "pinned_by"),
     "services.finance.case.FinanceCase": (
         "inputs", "owner", "base_year", "cod", "templates", "assets", "flags", "counterfactual",
-        "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets", "asset_cod"),
+        "lp_basis", "counterfactual_hash", "conservation_ok", "extra_assets", "campus",
+        "asset_cod"),
 }
 
 # The literal choices the guided study compiles to (IC S0b plan S7: C2 compiles

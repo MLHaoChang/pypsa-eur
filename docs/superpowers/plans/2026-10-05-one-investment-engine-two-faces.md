@@ -240,6 +240,9 @@ directory, so the latest stays the EU version). `defaults_pack.pricing.price_fro
 `annualised_cost_eur_per_mw_yr`, and raises `MissingRegionalRow` for a money row the region lacks (no EU fallback
 across currencies). `asset_schema.provenance.record` gains the optional `currency` and `fallback` keywords, written only
 when given.
+**Additions (2026-10-22, campus-IC 02/05):** `FinanceCase` gains the field `campus: CampusSummary | None = None`
+(before `asset_cod`), the campus study's summary for the report; the report payload carries it as `campus_study`
+only when it is set, so a case without a campus study reports as before.
 
 ## 7. Coordination protocol
 

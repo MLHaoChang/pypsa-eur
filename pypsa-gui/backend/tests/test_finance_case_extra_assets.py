@@ -512,6 +512,19 @@ def test_a_case_without_extras_keeps_its_master_hash_and_extras_enter_the_hash()
     assert more not in (with_one, other)
 
 
+def test_a_case_without_a_campus_summary_keeps_its_master_hash():
+    """campus-IC 02/05 (GK plan condition 4), beside the S0b and P5 omissions in
+    `_canon`: `campus=None` is left out of the hash; a summary enters it."""
+    from services.finance.case import CampusSummary
+    from services.results.finance_case import _canon, finance_case_hash
+
+    plain = _hash_fixture(campus=None)
+    assert "campus" not in _canon(plain)
+    assert finance_case_hash(plain) == "64e7a34307ea1af3"                  # master 546f2cb
+    summary = CampusSummary("least_cost", (("campus:x#1", "assumed", True),), ())
+    assert finance_case_hash(_hash_fixture(campus=summary)) != "64e7a34307ea1af3"
+
+
 @pytest.mark.live_solve
 def test_the_report_block_reads_the_case_assets_and_the_workbook_lists_them(solved):
     from openpyxl import load_workbook

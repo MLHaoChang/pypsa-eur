@@ -2464,6 +2464,9 @@ def _canon(o):
         # a case without extras keeps its S0b hash (no generic empty-tuple rule).
         if isinstance(o, FinanceCase) and o.extra_assets == ():
             del out["extra_assets"]
+        # campus-IC 02/05: no campus summary keeps the hash.
+        if isinstance(o, FinanceCase) and o.campus is None:
+            del out["campus"]
         # P5 (staged builds) likewise: a case without stages, at the default
         # lead, keeps its pre-P5 hash.
         if isinstance(o, FinanceCase):

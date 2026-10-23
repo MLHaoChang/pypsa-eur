@@ -10,6 +10,7 @@ import type {
   CashflowLine, FinanceInputs, InvestmentCaseReportPayload, InvestmentCaseStudy, IcSectionState,
 } from '../../../api/types'
 import type { CompletenessRow } from '../../../components/CompletenessChips'
+import type { FlowSectionId } from '../../../api/flow'
 import { fmtAmount } from './valueFlows'
 
 /** The form's draft: a stored object, or a new one the server will judge. */
@@ -662,4 +663,110 @@ export function studyFailure(s: InvestmentCaseStudy | null | undefined): string 
   const text = why ?? code ?? 'no reason given'
   return `${s.status === 'refused' ? 'The case was refused' : 'The run failed'}: ${text}`
     + (why && code && !why.includes(code) ? ` (${code})` : '')
+}
+
+// ── the campus equipment the case took (campus-IC issues 02 and 05) ─────
+
+export interface CampusEquipmentRow {
+  name: string; kind: string; quantity: string; overnight: number | null; buildYear: number | null
+  cod: string | null; illustrative: boolean | null
+}
+
+export interface CampusEquipment {
+  rows: CampusEquipmentRow[]
+  /** Which campus result fed the case, in words; null when the report does not say. */
+  method: string | null
+  /** How many rows the campus library tagged `assumed` (Generic defaults). */
+  illustrative: number
+  /** The report's money line (one for every row). */
+  money: string | null
+  /** The needs the campus study could not meet, one line per need and reason. */
+  unresolved: Array<{ need: string; reason: string }>
+}
+
+const CAMPUS_METHODS: Record<string, string> = {
+  milp: 'joint optimisation',
+  least_cost: 'least cost',
+}
+
+const BASIS_UNITS: Record<string, [string, string]> = {
+  lump: ['unit', 'units'], per_km: ['km', 'km'], per_bay: ['bay', 'bays'],
+}
+
+function quantityText(q: unknown, basis: unknown): string {
+  if (typeof q !== 'number' || !Number.isFinite(q)) return NOT_ESTABLISHED
+  const [one, many] = BASIS_UNITS[String(basis)] ?? ['', '']
+  const n = Number(q.toPrecision(6))
+  return many ? `${n} ${n === 1 ? one : many}` : String(n)
+}
+
+/** The report's campus equipment and its study's summary; null when the case
+ *  took no campus asset and the study left no need unmet. */
+export function campusEquipment(report: InvestmentCaseReportPayload | null | undefined): CampusEquipment | null {
+  const p = payloadOf(report, 'project')
+  const extras = Array.isArray(p.extra_assets) ? (p.extra_assets as unknown[]).filter(isObj) : []
+  const study = isObj(p.campus_study) ? p.campus_study : {}
+  const unresolved = (Array.isArray(study.unresolved) ? study.unresolved : [])
+    .filter((u): u is Obj => isObj(u) && typeof u.need === 'string' && typeof u.reason === 'string')
+    .map(u => ({ need: u.need as string, reason: u.reason as string }))
+  if (!extras.length && !unresolved.length) return null
+  const rows = extras.map(e => ({
+    name: String(e.name ?? NOT_ESTABLISHED), kind: String(e.kind ?? NOT_ESTABLISHED).replace(/_/g, ' '),
+    quantity: quantityText(e.quantity, e.basis), overnight: established(e.overnight_cost),
+    buildYear: typeof e.build_year === 'number' ? e.build_year : null,
+    cod: typeof e.cod === 'string' ? e.cod : null,
+    illustrative: typeof e.illustrative === 'boolean' ? e.illustrative : null,
+  }))
+  const money = extras.map(e => e.money_year).find((m): m is string => typeof m === 'string') ?? null
+  return {
+    rows, money, unresolved,
+    method: typeof study.study_method === 'string' ? CAMPUS_METHODS[study.study_method] ?? null : null,
+    illustrative: rows.filter(r => r.illustrative === true).length,
+  }
+}
+
+/** Where a campus line sends the user: a flow section's panel, opened with
+ *  `openPanel` (mode-aware); the label ends in "›" (review-ux.md). */
+export interface CampusLink {
+  label: string; section: FlowSectionId; panel: string; resultsTab?: string
+  /** Words before the link: what that panel fixes. */
+  lead?: string
+}
+
+/** What a campus study stops, with where the user fixes it. */
+export interface CampusRefusal { text: string; links: CampusLink[] }
+
+const GRID_STUDY: CampusLink = { label: 'Grid study ›', section: 'scenarios', panel: 'campusStudy' }
+
+export const CAMPUS_REFUSALS: Record<string, CampusRefusal> = {
+  // A flag, not a refusal: the case is built without the campus equipment.
+  campus_study_stale: {
+    text: 'The grid study no longer matches the campus file, the network or the asset library, so '
+      + 'the case leaves out its equipment.',
+    links: [{ ...GRID_STUDY, label: 'Run the grid study again in Grid study ›' }],
+  },
+  campus_assets_money_year_mismatch: {
+    text: 'Fix the money:',
+    links: [{ lead: "the asset library's costs in", label: 'Grid connection ›', section: 'connection',
+              panel: 'campusElectrical' },
+            { lead: "or the case's money year in", label: 'Commercial & finance ›', section: 'commercial',
+              panel: 'economics' }],
+  },
+}
+
+/** The campus line a run ended in: the refusal, else the report's (or the
+ *  run's) `campus_study_stale` flag; null otherwise. */
+export function campusRefusal(s: InvestmentCaseStudy | null | undefined,
+                              report?: InvestmentCaseReportPayload | null): CampusRefusal | null {
+  const code = s?.status === 'refused' ? (s.error_code ?? s.code ?? null) : null
+  if (code) return code in CAMPUS_REFUSALS ? CAMPUS_REFUSALS[code] : null
+  const flags = [...(s?.flags ?? []), ...(report ? reportFlags(report, 'project') : [])]
+  return flags.includes('campus_study_stale') ? CAMPUS_REFUSALS.campus_study_stale : null
+}
+
+/** Where the unmet-needs line points: the Results "Electrical design" tab
+ *  where it exists (Expert), else the Grid study panel. */
+export function unmetNeedsLink(expert: boolean): CampusLink {
+  return expert ? { label: 'See Electrical design ›', section: 'results', panel: 'results',
+                    resultsTab: 'electrical_design' } : GRID_STUDY
 }

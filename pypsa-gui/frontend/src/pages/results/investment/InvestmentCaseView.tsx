@@ -18,13 +18,16 @@ import {
   AVOIDED_PREFIX, basisStatement, cashflowPivot, cashTotals, completenessRows, missingLines, counterfactualStatement, fmtCell, fmtHeadline, gateLegs,
   baselineCaveats, counterfactualBasis, HEADLINE_KEYS, islandBreakeven, headlines, label, NOT_ESTABLISHED, perYearLists, progressFraction, progressText,
   reportFlags, reportYears, sectionOf, stalePartLabel, studyFailure, studyProgress, studyStale, toTable,
-  uncheckableReason, waccGate,
+  uncheckableReason, waccGate, campusEquipment, campusRefusal, unmetNeedsLink,
+  type CampusLink,
   type GateState, type Table,
 } from './financeModel'
 import { fmtAmount } from './valueFlows'
 import RevenueByStream from './RevenueByStream'
 import CaptureTable from './CaptureTable'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
+import { Tag } from '../../../components/PageKit'
+import { openPanel } from '../openPanel'
 
 type Obj = Record<string, unknown>
 const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -207,6 +210,85 @@ function Counterfactual({ report }: { report: InvestmentCaseReportPayload }) {
   )
 }
 
+/** A campus line's way to the panel that fixes it (UX: `openPanel`, never a
+ *  bare slide panel; Guided stays Guided). */
+function CampusLinkButton({ link }: { link: CampusLink }) {
+  const requestResultsTab = useUIStore(st => st.requestResultsTab)
+  return (
+    <button type="button" className="underline"
+            onClick={() => {
+              openPanel(link.section, link.panel)
+              if (link.resultsTab) requestResultsTab(link.resultsTab)
+            }}>{link.label}</button>
+  )
+}
+
+/** The campus equipment the case took as owner capex (campus-IC 02), which
+ *  campus result it came from, and the needs that study could not meet (05).
+ *  The costs are the report's own, in its money year; no total and no
+ *  freshness line of its own (the report's stale line names the campus study). */
+const MAX_NEEDS_LISTED = 20
+
+function CampusEquipmentBlock({ report }: { report: InvestmentCaseReportPayload }) {
+  const expert = useUIStore(st => st.uiMode) !== 'guided'
+  const c = campusEquipment(report)
+  if (!c) return null
+  const n = c.unresolved.length
+  return (
+    <section className="space-y-1" data-testid="ic-campus">
+      <h3 className="text-[11px] font-semibold">Campus electrical equipment</h3>
+      <p data-testid="ic-campus-method">
+        {c.method ? `From the grid study's ${c.method} result.`
+          : 'The report does not say which grid study result this came from.'}
+        {c.rows.length > 0 && ' Bought as owner capex, beside the network assets.'}</p>
+      {c.rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="text-[11px] w-full" data-testid="ic-campus-assets">
+            {c.money && <caption className="text-left text-muted">{c.money}</caption>}
+            <thead><tr>
+              <th scope="col" className="text-left">Item</th>
+              <th scope="col" className="text-left">Kind</th>
+              <th scope="col" className="text-right">Quantity</th>
+              <th scope="col" className="text-right">Overnight cost</th>
+              <th scope="col" className="text-right">Build year</th>
+              <th scope="col" className="text-left pl-3">COD</th>
+            </tr></thead>
+            <tbody>{c.rows.map(r => (
+              <tr key={r.name} data-testid={`ic-campus-asset-${r.name}`}>
+                <td className="text-left">{r.name}
+                  {r.illustrative && <> <Tag>assumed</Tag></>}</td>
+                <td className="text-left">{r.kind}</td>
+                <td className="text-right">{r.quantity}</td>
+                <td className="text-right" data-established={r.overnight !== null}>
+                  {r.overnight === null ? NOT_ESTABLISHED : fmtAmount(r.overnight)}</td>
+                <td className="text-right">{r.buildYear ?? NOT_ESTABLISHED}</td>
+                <td className="text-left pl-3 text-muted">{r.cod ?? NOT_ESTABLISHED}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+      {c.illustrative > 0 && (
+        <p className="text-muted" data-testid="ic-campus-illustrative">
+          Generic default (illustrative): {c.illustrative === c.rows.length ? 'the campus costs are'
+            : `${c.illustrative} of ${c.rows.length} campus costs are`} assumed in the campus asset
+          {' '}library, not quotes.</p>
+      )}
+      {n > 0 && (
+        <div role="note" className="text-warn" data-testid="ic-campus-unresolved">
+          <p>The grid study found no equipment for {n === 1 ? '1 need' : `${n} needs`}, so by this
+            {' '}screening the design does not meet the grid-code profile:</p>
+          <ul className="pl-3 list-disc">
+            {c.unresolved.slice(0, MAX_NEEDS_LISTED).map((u, i) => <li key={i}>{u.need}: {u.reason}</li>)}
+            {n > MAX_NEEDS_LISTED && <li>+{n - MAX_NEEDS_LISTED} more</li>}
+          </ul>
+          <p><CampusLinkButton link={unmetNeedsLink(expert)} /></p>
+        </div>
+      )}
+    </section>
+  )
+}
+
 function Cashflows({ report }: { report: InvestmentCaseReportPayload }) {
   const lines = report.cashflow_lines
   const projectPayload = sectionOf(report, 'project')?.payload as Record<string, unknown> | undefined
@@ -290,6 +372,7 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
         <Headlines report={report} />
       </section>
       <Counterfactual report={report} />
+      <CampusEquipmentBlock report={report} />
       <Cashflows report={report} />
       {/* Commercial & finance owns the revenue and capture tables (W4a; #515). */}
       <ScopeGate card="commercial" testId="ic-revenue-scope">
@@ -301,7 +384,8 @@ function Report({ report }: { report: InvestmentCaseReportPayload }) {
       <details>
         <summary className="text-[11px]">More from the project section</summary>
         <SectionBlock report={report} name="project" title="Project" testId="ic-project"
-                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement', 'revenue_streams'])} />
+                      omit={new Set([...HEADLINE_KEYS, 'flags', 'counterfactual_statement', 'revenue_streams',
+                                     'extra_assets', 'campus_study'])} />
       </details>
       {(report.case_id || report.assumptions_hash) && (
         <p className="text-[10px] text-muted">
@@ -358,6 +442,7 @@ export default function InvestmentCaseView() {
   const fraction = progressFraction(studyProgress(s))
   const progress = progressText(studyProgress(s))
   const failure = studyFailure(s)
+  const campusLine = running ? null : campusRefusal(s, r)
 
   return (
     <div className="space-y-3 text-[11px]" data-testid="investment-case">
@@ -382,6 +467,10 @@ export default function InvestmentCaseView() {
             Stopped: the run was aborted; the report below, if any, is from an earlier run.</span>
         )}
         {failure && <span className="text-danger" data-testid="ic-error">{failure}</span>}
+        {campusLine && (
+          <span className="text-warn" data-testid="ic-campus-refusal">{campusLine.text}
+            {campusLine.links.map(l => <span key={l.label}>{' '}{l.lead && `${l.lead} `}<CampusLinkButton link={l} /></span>)}</span>
+        )}
         {blocked && <span className="text-warn" data-testid="ic-blocked">Blocked: {blocked}</span>}
       </div>
       {stale && (

@@ -20,9 +20,12 @@ import dataclasses
 from contextlib import contextmanager
 import logging
 import re
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import threading as _threading
+
+if TYPE_CHECKING:
+    from services.finance.case import CampusSummary
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict
@@ -1614,6 +1617,7 @@ class CampusSource:
     refusal: str | None = None
     detail: str = ""
     digest: str | None = None
+    summary: CampusSummary | None = None    # the study's summary for the report (campus-IC 02/05)
 
     @property
     def run_flags(self) -> tuple[str, ...]:
@@ -1626,11 +1630,80 @@ class CampusSource:
         return cls(refusal=code, detail=detail, digest=json_digest({"error": code}))
 
 
-def _ic_campus_digest(source_hash, stale, flags, assets) -> str:
+def _ic_campus_digest(source_hash, stale, flags, assets, unresolved=(), summary=None) -> str:
+    """The `extra_assets` staleness part. The study's own statements (campus-IC
+    02/05: `unresolved` as given; the summary's `study_method` and each asset's
+    cost tag, after the cut) join only when stated, so a study that states none
+    of them keeps its digest from before (GK plan condition 1)."""
     from services.finance.investment_case_runner import json_digest
 
-    return json_digest({"source_hash": source_hash, "stale": stale, "flags": list(flags),
-                        "assets": assets})
+    parts = {"source_hash": source_hash, "stale": stale, "flags": list(flags), "assets": assets}
+    if unresolved:
+        parts["unresolved"] = [dict(u) for u in unresolved]
+    if summary is not None and summary.study_method is not None:
+        parts["study_method"] = summary.study_method
+    tags = [[n, p, i] for n, p, i in (summary.assets if summary is not None else ())
+            if (p, i) != (None, None)]
+    if tags:
+        parts["cost_tags"] = tags
+    return json_digest(parts)
+
+
+#: Lengths a campus string is cut to in the report (campus-IC 02/05): the
+#: producer's texts are data from the user's campus file, its library and the
+#: engine's checks.
+_IC_NEED_CUT, _IC_REASON_CUT, _IC_TAG_CUT = 120, 300, 40
+_IC_STUDY_METHODS = ("milp", "least_cost")
+
+
+def _ic_unresolved(resp: dict) -> list[dict] | None:
+    """campus-IC 05: the producer's `unresolved`, `[]` when the key is absent (an
+    older producer); None when it is not a list of `{"need": str, "reason": str}`."""
+    raw = resp.get("unresolved", [])
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for u in raw:
+        if not isinstance(u, dict) or not isinstance(u.get("need"), str) \
+                or not isinstance(u.get("reason"), str):
+            return None
+        out.append({"need": u["need"], "reason": u["reason"]})
+    return out
+
+
+def _ic_cost_tags(assets: list) -> list | str:
+    """campus-IC 02: each asset's `(name, provenance, illustrative)` from its
+    `meta`, a missing key as None; `provenance` is text (cut), `illustrative`
+    true or false. Any other value (or a `meta` that is no record) is the
+    refusal detail (fixed text and the asset's label only, GK plan condition 2)."""
+    tags = []
+    for i, a in enumerate(assets):
+        meta = a.get("meta", {})
+        prov, ill = (meta.get("provenance"), meta.get("illustrative")) if isinstance(meta, dict) \
+            else (None, None)
+        if not isinstance(meta, dict) or not (prov is None or isinstance(prov, str)) \
+                or not (ill is None or isinstance(ill, bool)):
+            return (f"{_ic_asset_label(a, i)} has a cost provenance that is not text or an "
+                    "illustrative mark that is not true or false")
+        tags.append((a.get("name"), None if prov is None else prov[:_IC_TAG_CUT], ill))
+    return tags
+
+
+def _ic_campus_summary(resp: dict, tags: list, unresolved: list):
+    """The report's view of the study (campus-IC 02/05): its method, each asset's
+    cost tag, its unmet needs (deduplicated, cut). A method the route does not
+    know reads as not stated (None), never as the producer's text. None when
+    the study states none of them (an older producer), so the case keeps its
+    hash (issue 05 test 3)."""
+    from services.finance.case import CampusSummary
+
+    method = resp.get("study_method")
+    method = method if method in _IC_STUDY_METHODS else None
+    needs = dict.fromkeys((u["need"][:_IC_NEED_CUT], u["reason"][:_IC_REASON_CUT])
+                          for u in unresolved)
+    if method is None and not needs and all((p, i) == (None, None) for _n, p, i in tags):
+        return None
+    return CampusSummary(study_method=method, assets=tuple(tags), unresolved=tuple(needs))
 
 
 def _ic_asset_label(a, i: int) -> str:
@@ -1687,24 +1760,39 @@ _IC_ONE_MONEY = ("no {conv} converts between them, so a case with the campus ass
 
 
 def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
-    """R-1 steps 5 … 7 on the producer's `{"assets", "source_hash", "stale"}`. A
-    run without a purchase or a hash (no investment run) is no study."""
+    """R-1 steps 5 … 7 on the producer's `{"assets", "source_hash", "stale",
+    "study_method", "unresolved"}`. A run without a purchase or a hash (no
+    investment run) is no study. Unmet needs (campus-IC 05, owner 2026-10-13)
+    flag an applying study `campus_needs_unresolved` and are listed in the
+    report; the case is still built. A stale study is not flagged for them (its
+    list is not the study the case would use)."""
     from services.finance.case import ExtraOwnerAsset
 
     assets, source_hash = resp.get("assets"), resp.get("source_hash")
     if not isinstance(assets, list) or not all(isinstance(a, dict) for a in assets):
         return CampusSource.refused("campus_assets_invalid",
                                     "the campus study's owner assets are not a list of entries")
+    unresolved = _ic_unresolved(resp)
+    if unresolved is None:
+        return CampusSource.refused("campus_assets_invalid",
+                                    "the campus study's unresolved needs are not a list of "
+                                    "entries with a need and a reason")
     if not assets and source_hash is None:
         return CampusSource()
+    # The money first: a `meta` that is no record states no money year (as before 02).
     problem = _ic_money_year_problem(assets, fin)
     if problem:
         return CampusSource.refused("campus_assets_money_year_mismatch", problem)
+    tags = _ic_cost_tags(assets)
+    if isinstance(tags, str):
+        return CampusSource.refused("campus_assets_invalid", tags)
     stale = bool(resp.get("stale"))
-    flags = ("campus_study_stale",) if stale else ()
+    flags = ("campus_study_stale",) if stale else \
+        (("campus_needs_unresolved",) if unresolved else ())
     bare = [{k: v for k, v in a.items() if k != "meta"} for a in assets]
-    digest = _ic_campus_digest(source_hash, stale, flags, bare)
-    if stale:
+    summary = _ic_campus_summary(resp, tags, unresolved)
+    digest = _ic_campus_digest(source_hash, stale, flags, bare, unresolved, summary)
+    if stale:                             # GK plan condition 5: no summary for a stale study
         return CampusSource(flags=flags, unsaved=unsaved, digest=digest)
     names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
     extras = []
@@ -1717,7 +1805,8 @@ def _ic_campus_from_response(resp: dict, fin, *, unsaved: bool) -> CampusSource:
             return CampusSource.refused(
                 "campus_assets_invalid",
                 f"{_ic_asset_label(a, i)} is not a valid extra owner asset")
-    return CampusSource(extras=tuple(extras), unsaved=unsaved, digest=digest)
+    return CampusSource(extras=tuple(extras), flags=flags, unsaved=unsaved, digest=digest,
+                        summary=summary)
 
 
 def _ic_campus_source(finance: dict | None) -> CampusSource:
@@ -1856,6 +1945,8 @@ def _ic_build_case(n, cfg, *, owner: str | None, lost_load, campus: CampusSource
                                       owner=owner,
                                       extra_assets=campus.extras if campus is not None else (),
                                       baseline=base)
+        if campus is not None and campus.summary is not None:
+            case = dataclasses.replace(case, campus=campus.summary)
         flags = (campus.run_flags if campus is not None else ()) + tuple(growth_flags)
         return dataclasses.replace(case, flags=case.flags + flags) if flags else case
     return build

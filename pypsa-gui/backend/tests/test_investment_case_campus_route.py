@@ -693,3 +693,275 @@ def test_solve_ppa_price_carries_the_cases_campus_flags(install_network, monkeyp
     assert out["status"] == "ok"
     assert out["flags"] == ["solve_ppa_flag_for_test", "campus_study_stale",
                             "campus_study_network_unsaved"]
+
+
+# ── campus-IC 05: unresolved needs flag the case; 02: the study's summary ────
+
+NEED = {"need": "reactive", "reason": "campus_voltage: 0.88 pu at MV; a reactive escalation did "
+                                      "not reduce the excursion."}
+
+
+def _with(resp, **over):
+    return {**resp, **over}
+
+
+def test_unresolved_needs_flag_the_case_list_the_needs_and_keep_the_assets(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_unresolved")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    real = ce.owner_assets_response
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    assert "campus_needs_unresolved" not in _run(client)["flags"]
+    without = [e.name for e in calls[0]["extra_assets"]]
+    monkeypatch.setattr(ce, "owner_assets_response",
+                        lambda p: _with(real(p), unresolved=[NEED, NEED]))
+    body = _run(client)
+    assert body["status"] == "done", body
+    assert [e.name for e in calls[1]["extra_assets"]] == without and len(without) == 3
+    assert calls[1]["extra_assets"] == calls[0]["extra_assets"]
+    assert "campus_needs_unresolved" in body["flags"]
+    payload = client.get(REPORT_URL, params={"detail": "full"}).json()["sections"]["project"]["payload"]
+    assert "campus_needs_unresolved" in payload["flags"]
+    # Listed once (a repeated need and reason is one line), with the method it came from.
+    assert payload["campus_study"] == {"study_method": "least_cost", "unresolved": [NEED]}
+
+
+def test_a_study_with_only_an_unresolved_need_builds_without_extras_and_is_flagged(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_only_need")
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: {
+        "assets": [], "source_hash": "0123456789abcdef", "stale": False, "study_method": None,
+        "unresolved": [NEED]})
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    _put_fin(client, _s2_inputs())
+    body = _run(client)
+    assert body["status"] == "done" and calls[0]["extra_assets"] == ()
+    assert "campus_needs_unresolved" in body["flags"]
+    payload = client.get(REPORT_URL, params={"detail": "full"}).json()["sections"]["project"]["payload"]
+    assert payload["campus_study"]["unresolved"] == [NEED]
+
+
+def test_a_study_that_states_nothing_new_keeps_the_digest_and_adds_no_flag():
+    """GK plan condition 1. A response with no `unresolved` (empty or absent),
+    no `study_method` and no cost tag keeps the `extra_assets` digest from
+    before campus-IC 02/05 (pinned to its old formula), and adds no flag. Each
+    statement then enters it: today's producer states a method and a tag for
+    every asset, so every stored campus report reads stale once."""
+    import routers.results as R
+    from services.finance.investment_case_runner import json_digest
+
+    untagged = _asset()
+    untagged["meta"] = {k: v for k, v in untagged["meta"].items()
+                        if k not in ("provenance", "illustrative")}
+    bare = [{k: v for k, v in untagged.items() if k != "meta"}]
+    before = json_digest({"source_hash": "0123456789abcdef", "stale": False, "flags": [],
+                          "assets": bare})
+    old = _response([untagged])
+    old.pop("study_method", None)
+    for resp in (old, _with(old, unresolved=[])):
+        src = R._ic_campus_from_response(resp, None, unsaved=False)
+        assert src.refusal is None and src.flags == ()
+        assert src.digest == before
+        assert src.summary is None          # so the case keeps its hash (issue 05 test 3)
+    # The same statements give the same digest; each one changes it.
+    seen = {before}
+    for resp in (_with(old, unresolved=[NEED]), _with(old, study_method="milp"),
+                 _with(old, study_method="least_cost"), _response([_asset()])):
+        a = R._ic_campus_from_response(resp, None, unsaved=False)
+        assert a.digest == R._ic_campus_from_response(resp, None, unsaved=False).digest
+        assert a.digest not in seen
+        seen.add(a.digest)
+    with_need = R._ic_campus_from_response(_with(old, unresolved=[NEED]), None, unsaved=False)
+    assert with_need.flags == ("campus_needs_unresolved",)
+    lit = _asset()
+    lit["meta"] = {**lit["meta"], "provenance": "literature", "illustrative": False}
+    assert R._ic_campus_from_response(_response([lit]), None, unsaved=False).digest \
+        != R._ic_campus_from_response(_response([_asset()]), None, unsaved=False).digest
+
+
+@pytest.mark.parametrize("meta", [
+    {"provenance": 7},
+    {"provenance": ["assumed"]},
+    {"illustrative": "yes"},
+    {"illustrative": 1},
+    {"illustrative": SECRET},
+])
+def test_a_cost_tag_of_the_wrong_type_is_refused_naming_the_asset_only(meta):
+    """GK plan condition 2: `provenance` text, `illustrative` true or false, a
+    missing key None; anything else refused with fixed text and the label."""
+    import routers.results as R
+
+    a = _asset()
+    a["meta"] = {**a["meta"], **meta}
+    src = R._ic_campus_from_response(_response([a]), None, unsaved=False)
+    assert src.refusal == "campus_assets_invalid"
+    assert src.summary is None and src.extras == ()
+    assert src.detail.startswith("'campus:TR_132_33_40#1' has a cost provenance")
+    assert SECRET not in src.detail and "yes" not in src.detail
+
+
+def test_a_meta_that_is_no_record_is_refused():
+    """It states no money year, so it is the money refusal, as before 02
+    (`test_a_money_year_refusal_names_data_not_exception_text`); no summary."""
+    import routers.results as R
+
+    a = {**_asset(), "meta": SECRET}
+    src = R._ic_campus_from_response(_response([a]), None, unsaved=False)
+    assert src.refusal == "campus_assets_money_year_mismatch" and SECRET not in src.detail
+    assert src.summary is None and src.extras == ()
+
+
+def test_a_stale_or_refused_study_has_no_summary():
+    """GK plan condition 5: only an applying study carries a summary, so the
+    tab's staleness and refusal lines never read one."""
+    import routers.results as R
+
+    resp = _with(_response([_asset()]), study_method="milp", unresolved=[NEED])
+    assert R._ic_campus_from_response(resp, None, unsaved=False).summary is not None
+    stale = R._ic_campus_from_response(_with(resp, stale=True), None, unsaved=False)
+    assert stale.flags == ("campus_study_stale",) and stale.summary is None
+    for bad in (_with(resp, unresolved=SECRET), _with(resp, assets=SECRET)):
+        refused = R._ic_campus_from_response(bad, None, unsaved=False)
+        assert refused.refusal == "campus_assets_invalid" and refused.summary is None
+
+
+@pytest.mark.parametrize("unresolved", [
+    SECRET,                                         # not a list
+    [{"need": SECRET}],                             # no reason
+    [{"need": 7, "reason": SECRET}],                # a need that is not a string
+    [SECRET],                                       # an entry that is not a record
+])
+def test_a_malformed_unresolved_list_is_refused_without_its_values(
+        unresolved, client, install_network, session_ctx, _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_bad_need")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    monkeypatch.setattr(ce, "owner_assets_response",
+                        lambda p: _with(_response([_asset()]), unresolved=unresolved))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
+    _no_secret(client, body)
+
+
+def test_a_stale_study_with_unresolved_needs_is_only_stale(client, install_network, session_ctx,
+                                                           _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_stale_need")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    real = ce.owner_assets_response
+    monkeypatch.setattr(ce, "owner_assets_response",
+                        lambda p: _with(real(p), stale=True, unresolved=[NEED]))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["status"] == "done" and calls[0]["extra_assets"] == ()
+    assert "campus_study_stale" in body["flags"]
+    assert "campus_needs_unresolved" not in body["flags"]
+    payload = client.get(REPORT_URL, params={"detail": "full"}).json()["sections"]["project"]["payload"]
+    assert "campus_study" not in payload
+
+
+def test_a_changed_unresolved_list_alone_marks_the_report_stale(client, install_network,
+                                                               session_ctx, _auth_db, monkeypatch):
+    from services import campus_electrical_service as ce
+
+    _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_need_stale")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    real = ce.owner_assets_response
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[NEED]))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    assert _run(client)["report"]["stale"] is False
+    other = {**NEED, "reason": "another reason"}
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[other]))
+    rep = client.get(STUDY_URL).json()["report"]
+    assert rep["stale"] is True and rep["changed"] == ["extra_assets"]
+    monkeypatch.setattr(ce, "owner_assets_response", lambda p: _with(real(p), unresolved=[NEED]))
+    assert client.get(STUDY_URL).json()["report"]["stale"] is False
+
+
+def test_solve_ppa_price_carries_campus_needs_unresolved(install_network, monkeypatch):
+    import routers.results as R
+    import routers.simulation as SIM
+    from services import chat_tools
+    from services.finance import engine as E
+    from services.results import finance_case as FC
+
+    source = R._ic_campus_from_response(_with(_response([]), unresolved=[NEED]), None,
+                                        unsaved=False)
+    monkeypatch.setattr(R, "_ic_campus_source", lambda finance: source)
+    monkeypatch.setattr(FC, "build_finance_case",
+                        lambda n, cfg, fin, *, result_df, lost_load=None, owner=None,
+                        extra_assets=(), baseline=None: S.to_finance_case("s1b", solve=True))
+    monkeypatch.setattr(E, "solve_ppa", lambda case, pack=None, layers=None: {
+        "solved_ppa_price": 55.0, "solve_ppa_status": "ok", "solved_ppa_price_money_year": 2026,
+        "solve_ppa_flags": []})
+    install_network(build_network(solve=True))
+    SIM.put_finance(SIM.FinanceIn(finance=_s2_inputs()), if_match=None)
+    try:
+        out = chat_tools.DISPATCHERS["solve_ppa_price"](target_irr=0.1, target_year=10)
+    finally:
+        SIM.put_finance(SIM.FinanceIn(finance=None), if_match=None)
+    assert out["flags"] == ["campus_needs_unresolved"]
+
+
+def test_the_summary_states_the_method_and_each_assets_cost_tag_and_cuts_the_texts():
+    import routers.results as R
+
+    lit = _asset("campus:CB_33_AL95#1")
+    lit["meta"] = {**lit["meta"], "provenance": "literature", "illustrative": False}
+    odd = _asset("campus:SG_132_31p5#1")
+    odd["meta"] = {k: v for k, v in odd["meta"].items() if k not in ("provenance", "illustrative")}
+    cut = _asset("campus:CB_33_AL240#1")
+    cut["meta"] = {**cut["meta"], "provenance": "p" * 90, "illustrative": False}
+    long = {"need": "n" * 500, "reason": "r" * 900}
+    src = R._ic_campus_from_response(
+        _with(_response([_asset(), lit, odd, cut]), study_method="milp", unresolved=[long]), None,
+        unsaved=False)
+    s = src.summary
+    assert s.study_method == "milp"
+    assert s.assets == (("campus:TR_132_33_40#1", "assumed", True),
+                        ("campus:CB_33_AL95#1", "literature", False),
+                        ("campus:SG_132_31p5#1", None, None),
+                        ("campus:CB_33_AL240#1", "p" * 40, False))
+    assert s.unresolved == (("n" * 120, "r" * 300),)
+    unknown = R._ic_campus_from_response(_with(_response([_asset()]), study_method=SECRET), None,
+                                         unsaved=False)
+    assert unknown.summary.study_method is None
+
+
+def test_the_report_rows_carry_the_cost_tag_and_the_case_hash_ignores_no_summary():
+    """The report's `extra_assets` rows say the tag; a case without a summary keeps its hash."""
+    from services.finance.case import CampusSummary, ExtraOwnerAsset
+    from services.finance.report import _campus_study_block, _extra_assets_block
+    from services.results.finance_case import finance_case_hash
+
+    names = [f.name for f in dataclasses.fields(ExtraOwnerAsset)]
+    extra = ExtraOwnerAsset(**{k: _asset()[k] for k in names})
+    case = dataclasses.replace(S.to_finance_case("s2"), extra_assets=(extra,))
+    summary = CampusSummary("least_cost", (("campus:TR_132_33_40#1", "assumed", True),),
+                            (("reactive", "why"),))
+    rows = _extra_assets_block(dataclasses.replace(case, campus=summary))
+    assert (rows[0]["provenance"], rows[0]["illustrative"]) == ("assumed", True)
+    assert (_extra_assets_block(case)[0]["provenance"], _extra_assets_block(case)[0]["illustrative"]) \
+        == (None, None)
+    assert _campus_study_block(summary) == {"study_method": "least_cost",
+                                            "unresolved": [{"need": "reactive", "reason": "why"}]}
+    plain = S.to_finance_case("s2")
+    assert finance_case_hash(dataclasses.replace(plain, campus=None)) == finance_case_hash(plain)
+    assert finance_case_hash(dataclasses.replace(plain, campus=summary)) != finance_case_hash(plain)
