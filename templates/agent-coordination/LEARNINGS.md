@@ -186,3 +186,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-22: the owner had to approve blocked steps in each session's own window.** Auto mode decides per session, and the coordinator can't answer another session's prompt.
   - Fix (PERM-1): sessions send `PERMISSION <name>: <command> | why | reach` to the coordinator. The owner approves there, and the coordinator adds the exact pattern to `.claude/settings.json` `permissions.allow`.
   - Lives in: steward (Blocked steps), coordinator (Deciding or asking).
+- **2026-10-23: a rotated coordinator opened sessions without the owner's title convention.** The convention was an owner-decisions row only, and the coordinator skill's "Opening a session" didn't mention it.
+  - Fix: "Opening a session" now says to title and tag every session per the naming decision, and to retitle it when its work changes.
+  - Lives in: coordinator (Opening a session).
