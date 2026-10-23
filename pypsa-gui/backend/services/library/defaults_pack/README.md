@@ -3,7 +3,10 @@
 In-tree defaults the guided study seeds its assumptions ledger from (plan "one investment engine,
 two faces" §3 rule 4). The pack holds:
 
-- technology costs from technology-data v0.14.0 (DEA), in 2020 EUR;
+- technology costs from technology-data v0.14.0 (DEA), labelled 2020 EUR up to version 2026-10-24; from
+  version 2026-10-25 the same values are labelled 2025 EUR, the year technology-data v0.14.0 builds its
+  outputs in (`eur_year: 2025`; owner decision MONEY-YEAR-1). Nothing is converted with a price index. The
+  build script is `.scratch/money-year/make_pack_2026-10-25.py`;
 - from version 2026-10-07, the campus electrical equipment costs (transformers, cables, capacitor
   banks, shunt reactors, STATCOMs, switchgear), transcribed from
   `gridspine/templates/data/campus_assets.yaml`, in 2026 EUR, all illustrative placeholders;
