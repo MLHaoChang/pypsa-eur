@@ -656,6 +656,43 @@ def test_angle_matches_a_hand_computed_two_bus_case():
     assert res["angle_verdict"].iloc[0] == "pass"
 
 
+def _shifted_pair():
+    """Two parallel 110/20 kV transformers of a vector group with a 150 degree
+    phase shift, feeding a 10 MW load."""
+    n = pp.create_empty_network(sn_mva=100)
+    hv, lv = pp.create_bus(n, 110, name="BUS_H"), pp.create_bus(n, 20, name="BUS_L")
+    pp.create_ext_grid(n, hv, vm_pu=1.0, name="SLK")
+    for _ in range(2):
+        pp.create_transformer(n, hv, lv, "25 MVA 110/20 kV")
+    pp.create_load(n, lv, p_mw=10.0, q_mvar=2.0)
+    assert (n.trafo["shift_degree"] == 150.0).all()
+    return n
+
+
+def test_angle_across_a_shifted_transformer_excludes_its_phase_shift():
+    n = _shifted_pair()
+    cset = branch_contingencies(n)
+    first, second = (ids[0] for ids in cset["element_ids"])
+    res, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed"))
+    assert (res["angle_verdict"] == "pass").all()
+    assert (res["angle_deg"] < 10.0).all() and (res["angle_deg"] > 0.0).all()
+    named, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed", pairs=(first, second)))
+    assert (named["angle_verdict"] == "pass").all()
+    assert (named["angle_deg"] < 10.0).all()
+
+
+def test_angle_default_measures_in_service_branches_only():
+    n = _shifted_pair()
+    cset = branch_contingencies(n)
+    first, second = (ids[0] for ids in cset["element_ids"])
+    res, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed"))
+    assert dict(zip(res["contingency_id"], res["angle_pair"])) == {
+        cset["contingency_id"].iloc[0]: second, cset["contingency_id"].iloc[1]: first}
+    named, _ = _screen(n, cset.head(1), angle_limit=AngleLimit(10.0, "assumed", pairs=(first,)))
+    row = named.iloc[0]
+    assert row["angle_pair"] == first and math.isfinite(row["angle_deg"])
+
+
 def test_nan_or_inf_shunt_step_is_refused_naming_the_shunt():
     for col, value in (("max_step", np.nan), ("max_step", np.inf), ("step", np.nan), ("step", np.inf)):
         net = _net()

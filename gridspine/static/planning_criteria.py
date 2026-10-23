@@ -43,9 +43,10 @@ skipped, and a kind with skipped rows never summarises as ``pass``.
 
 **Angle limit** (``AngleLimit``, an argument, not a grid-code key): the
 largest voltage-angle difference across each named branch (its two
-terminals, the outaged branch included: the standing angle across its open
-breaker) or named bus pair, on the stage-1 state. No limit gives
-``unknown``, never ``pass``.
+terminals, net of a transformer's phase shift) or named bus pair (raw), on
+the stage-1 state. With no pairs named, every in-service branch is
+measured; the outaged branch (the standing angle across its open breaker)
+only when named. No limit gives ``unknown``, never ``pass``.
 
 An outage that leaves any other bus unsupplied is ISLANDED, as in
 ``static/contingency.py``: not solved, both stages ``not_solved``, and the
@@ -64,6 +65,7 @@ import time
 import numpy as np
 import pandapower as pp
 import pandas as pd
+from pandapower.pypower.idx_brch import SHIFT
 from pandapower.topology import unsupplied_buses
 
 from gridspine.schema.contingency import (
@@ -117,8 +119,11 @@ PLANNING_LEDGER = (
     "are skipped, counted in the report, and the kind's summary is then "
     "incomplete, never pass",
     "the angle check is judged on the stage-1 state (taps and shunts barely "
-    "move angles); a branch pair includes the outaged branch, whose angle is "
-    "the standing angle across its open breaker; a pair with a bus out of "
+    "move angles); with no pairs named, every in-service branch is measured, "
+    "and the outaged branch (the standing angle across its open breaker) only "
+    "when named; across a transformer the angle is net of its phase shift "
+    "(vector group and phase-shifting tap); a named (bus, bus) pair is measured "
+    "raw, since it may span several transformers; a pair with a bus out of "
     "service is skipped and named in the note; no limit set gives unknown, "
     "never pass",
 )
@@ -146,7 +151,10 @@ class AngleLimit:
     """The voltage-angle limit across a branch or bus pair, in degrees.
     ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
     SAGC clause in ``reference``. ``pairs`` holds branch ids and (bus, bus)
-    name pairs; empty means every branch on the net."""
+    name pairs; empty means every in-service branch on the net. A branch
+    pair is measured net of a transformer's phase shift; a (bus, bus) pair
+    is measured raw, since it may span several transformers, so name a
+    shifted transformer by its branch id."""
     deg: float
     basis: str
     reference: str = ""
@@ -470,38 +478,56 @@ def _row(r, hour, **kw):
 # ---------------------------------------------------------------------------
 
 def _angle_pairs(net, angle_limit: AngleLimit | None, keys, ids, h: _Handles) -> list:
-    """``[(label, bus index, bus index)]`` to measure: the limit's pairs, or
-    every branch when it names none (or no limit is set)."""
+    """``[(label, bus index, bus index, branch)]`` to measure: the limit's
+    pairs, or every branch when it names none (or no limit is set).
+    ``branch`` is ``(element type, index, default)`` for a branch pair, where
+    ``default`` marks one measured only while in service, and None for a
+    (bus, bus) pair."""
     ends = {}
     for bid, t, i in zip(ids, keys["element_type"], keys["element_index"]):
         a, b = ("from_bus", "to_bus") if t == "line" else ("hv_bus", "lv_bus")
         table = net.line if t == "line" else net.trafo
-        ends[bid] = (int(table.at[i, a]), int(table.at[i, b]))
-    named = angle_limit.pairs if angle_limit is not None and angle_limit.pairs else tuple(ids)
+        ends[bid] = (int(table.at[i, a]), int(table.at[i, b]), t, i)
+    default = angle_limit is None or not angle_limit.pairs
+    named = tuple(ids) if default else angle_limit.pairs
     out = []
     for p in named:
         if isinstance(p, str):
             if p not in ends:
                 raise ContractError(f"angle pair {p!r} is not a branch on the net")
-            out.append((p, *ends[p]))
+            a, b, t, i = ends[p]
+            out.append((p, a, b, (t, i, default)))
         else:
             unknown = [b for b in p if b not in h.bus]
             if unknown:
                 raise ContractError(f"angle pair {p!r} names bus(es) not on the net: {unknown}")
-            out.append((f"{p[0]}:{p[1]}", h.bus[p[0]], h.bus[p[1]]))
+            out.append((f"{p[0]}:{p[1]}", h.bus[p[0]], h.bus[p[1]], None))
     return out
+
+
+def _trafo_shift(work, i) -> float:
+    """The phase shift, in degrees, the last load flow applied across
+    transformer ``i`` (vector group and phase-shifting tap; 0 when the flow
+    ran without voltage angles), read from pandapower's branch matrix."""
+    start, _ = work._pd2ppc_lookups["branch"]["trafo"]
+    return float(work._ppc["branch"][start + work.trafo.index.get_loc(i), SHIFT].real)
 
 
 def _angle(work, pairs, live: set):
     """``(largest |angle difference| in degrees, its label, skipped labels)``
-    over ``pairs`` whose two buses are both in ``live``; NaN when none is."""
+    over ``pairs`` whose two buses are both in ``live``; NaN when none is.
+    Across a transformer the difference is net of its phase shift; a default
+    branch pair out of service is not measured."""
     va = work.res_bus["va_degree"]
     worst, label, skipped = np.nan, "", []
-    for name, a, b in pairs:
+    for name, a, b, branch in pairs:
+        if branch is not None and branch[2] and not bool(work[branch[0]].at[branch[1], "in_service"]):
+            continue
         if a not in live or b not in live:
             skipped.append(name)
             continue
-        d = abs((float(va.at[a]) - float(va.at[b]) + 180.0) % 360.0 - 180.0)
+        shift = _trafo_shift(work, branch[1]) if branch is not None and branch[0] == "trafo" else 0.0
+        d = abs((float(va.at[a]) - float(va.at[b]) - shift + 180.0) % 360.0 - 180.0)
         if not d <= worst:   # NaN worst takes the first
             worst, label = d, name
     return worst, label, skipped
