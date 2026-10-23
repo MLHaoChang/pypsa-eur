@@ -71,21 +71,21 @@ def matches(words: set[str], limit: int = 2) -> list[dict]:
 - `panel` is `None` or a value from `harness.catalogue.SAFETY_PANEL_ENUM` (l.57), so the model can pass it to `ui_open_panel`.
 - `NOTE` text: "not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; if panel is set you may open it with ui_open_panel. Do not look for another tool or an API for them."
 
-The entries are below. Keep the ids, dispositions, panels and routes exactly. You may reword titles, reasons and pages within the limits the tests set (title ≤ 80 characters, reason 40–200, page ≤ 80). The one exception is `project_members`: its reason is pinned. Keywords are lowercase `[a-z0-9]+` tokens. Never use these generic words as keywords: `create get list run project projects result results network component settings data file change set show load flow`.
+The entries are below. Keep the ids, dispositions, panels and routes exactly. You may reword titles, reasons and pages within the limits the tests set (title ≤ 80 characters, reason 40–200, page ≤ 80). The one exception is `project_members`: its reason is pinned. Keywords are lowercase `[a-z0-9]+` tokens. Never use these generic words as keywords: `create get list run project projects result results network component settings data file change set show load flow user key keys token code pdf address coordinates`. (GK: the last eight collide with goals chat can do, e.g. a PDF datasheet's values, bus coordinates, a "user-defined" carrier, "key results".)
 
 | id | disposition | page / panel | keywords (proposal) | routes |
 |---|---|---|---|---|
-| `admin_users_and_orgs` | out of chat | "Admin page (/admin), super-admins only" / `None` | user users account accounts colleague colleagues organisation organisations organization organizations org admin invite smtp | all 9 routes of `routers/admin.py` (`/api/admin/...`) |
+| `admin_users_and_orgs` | out of chat | "Admin page (/admin), super-admins only" / `None` | users account accounts colleague colleagues organisation organisations organization organizations org admin invite smtp | all 9 routes of `routers/admin.py` (`/api/admin/...`) |
 | `legacy_project_import` ‡ | out of chat | "Projects page (/projects)" / `None` | legacy unclaimed folder claim | `GET /api/projects/unclaimed`, `POST /api/projects/unclaimed/{legacy_name}/import`, `POST /api/projects/import-folder` |
 | `sign_in_and_password` | out of chat | "Sign-in page" / `None` | password passwords login logout signin sign | the 6 routes of `routers/auth.py` other than `org-members` |
 | `project_members` | unbuilt; owner to decide later | "Workspace panel, project members" / `"workspace"` | share sharing shared member members collaborator collaborators colleague colleagues | `GET` and `PUT /api/projects/{name}/members`, `GET /api/auth/org-members` |
-| `assistant_keys_and_profiles` | out of chat | "Settings panel" / `"settings"` | api key keys apikey secret secrets token anthropic openai reveal | the 3 routes of `routers/local_settings.py`, and every `/api/chat/settings/...` route **except** `POST /api/chat/settings/llm/active` (9 routes) |
+| `assistant_keys_and_profiles` | out of chat | "Settings panel" / `"settings"` | api apikey secret secrets anthropic openai reveal | the 3 routes of `routers/local_settings.py`, and every `/api/chat/settings/...` route **except** `POST /api/chat/settings/llm/active` (9 routes) |
 | `assistant_access_rule` ‡ | out of chat | "Chat panel, access settings" / `"chat"` | permission permissions restriction restrictions readonly autoapprove | `PUT /api/chat/restrictions` |
 | `solve_queue_instance_controls` | out of chat | "Solve queue panel" / `"solveQueue"` | pause paused unpause halt | `POST /api/simulation/queue/pause`, `POST /api/simulation/queue/resume` |
-| `map_layout_and_sites` | manual | "Map" / `"map"` | layout geocode geocoding address osm openstreetmap thumbnail thumbnails coordinates latitude longitude | the 13 routes under `/api/projects/{name}/map_layout…` and `/api/projects/{name}/sites…`, plus `GET /api/geocode` and `GET /api/geocode/status` |
+| `map_layout_and_sites` | manual | "Map" / `"map"` | layout geocode geocoding osm openstreetmap thumbnail thumbnails | the 13 routes under `/api/projects/{name}/map_layout…` and `/api/projects/{name}/sites…`, plus `GET /api/geocode` and `GET /api/geocode/status` |
 | `library_uploads_and_tariff_edit` | manual | "Commercial library" / `"library"` | meter metering tariff upload uploads | the 6 routes of `routers/library.py` that are not in `TOOL_ROUTES` (`PUT /api/library/items/{kind}/{name}`, `POST /api/library/meter_data`, `GET`/`POST /api/library/series`, `POST /api/library/series/upload`, `GET /api/library/series/{name}`) |
 | `series_file_upload` ‡ | manual | "Time series panel" / `"timeseries"` | upload uploads | `POST /api/network/timeseries/upload`, `POST /api/projects/{name}/profiles/loads/upload`, `POST /api/projects/{name}/profiles/series/upload` |
-| `grid_code_publish` | manual | "Campus electrical, Grid codes" / `"campusElectrical"` | publish published pdf code | the 10 `/api/campus-electrical/{name}/grid-codes/...` routes other than `GET …/grid-codes` and `POST …/documents/{document_id}/extract` (those two are reached by `campus_list_grid_codes` and `campus_extract_grid_code`) |
+| `grid_code_publish` | manual | "Campus electrical, Grid codes" / `"campusElectrical"` | publish published | the 10 `/api/campus-electrical/{name}/grid-codes/...` routes other than `GET …/grid-codes` and `POST …/documents/{document_id}/extract` (those two are reached by `campus_list_grid_codes` and `campus_extract_grid_code`) |
 
 ‡ = not in the issue's table. Each one is needed so that every route gets a disposition. The gatekeeper may move them; see Open questions.
 
@@ -93,7 +93,7 @@ Reasons:
 
 - Write each reason from the issue's table: admin = security; sign-in and keys = secrets; queue = instance-wide and super-admin.
 - For the `manual` rows, the reason says what chat *can* do, e.g. "From chat the assistant can list library items, import a URDB tariff and attach a tariff."
-- `project_members` uses exactly the issue's text: `"Unbuilt: candidate destructive-tier tool; owner to decide later."`
+- `project_members` uses exactly this text (GK: the issue's wording was internal, and the assistant relays the reason to the user; the disposition still records that the owner decides later): `"Sharing a project is not available from chat yet. Add or remove its members in the Workspace panel."`
 
 The issue's "Dictation" row ("Input path, LC-07") becomes UI-internal (below), not an entry: nobody asks chat to dictate.
 
@@ -157,7 +157,7 @@ The route test (tests 9–15). Model it on `test_write_surface_lock_policy.py`:
 
   These stay out of `find_capabilities`: a route without a tool does not mean the capability is missing (another tool may cover it).
 
-Expected totals on today's `master`: 493 = 259 (`TOOL_ROUTES`) + 68 (`NOT_VIA_CHAT`) + 51 (`UI_INTERNAL`) + 115 (`SERVED_BY_TOOL` + `KNOWN_GAPS`, about 44 + 71). If outsourced task D merges first, `POST /api/network/library_reference/preview` becomes `POST /api/library_reference/preview`. Classify whichever path is live; the stale-entry test catches the other.
+Expected totals on today's `master`: 493 = 259 (`TOOL_ROUTES`) + 68 (`NOT_VIA_CHAT`) + 51 (`UI_INTERNAL`) + 115 (`SERVED_BY_TOOL` + `KNOWN_GAPS`, about 44 + 71). If outsourced task D merges first, `POST /api/network/library_reference/preview` becomes `POST /api/library_reference/preview`. Classify whichever path is live; the stale-entry test catches the other. Either path goes in `SERVED_BY_TOOL` as `apply_library_reference`: its confirmation card comes from the same `edit_card.preview` (`_library_reference_preview`).
 
 ### `pypsa-gui/backend/tests/test_oj46_feature_chat_must_refuse_journey.py` (new)
 
@@ -205,7 +205,7 @@ In `tests/test_not_via_chat.py`. Use the `client` and `helpers_state` fixtures a
    - `"Set my Anthropic API key"` → `assistant_keys_and_profiles`;
    - `"Pause the solve queue"` → `solve_queue_instance_controls`;
    - `"Geocode the site address"` → `map_layout_and_sites`.
-5. `test_ordinary_goals_get_no_refusal` (parametrised): `"get_component_schema"`, `"run the simulation"`, `"show the load flow results"`, `"parameter changes chart delivery"` and `"Change the storage cost to 150"` return no `not_via_chat` key.
+5. `test_ordinary_goals_get_no_refusal` (parametrised): `"get_component_schema"`, `"run the simulation"`, `"show the load flow results"`, `"parameter changes chart delivery"` and `"Change the storage cost to 150"`, plus the collision guards `"Read the capex from this PDF datasheet"`, `"Set the coordinates of bus 3"`, `"What are the key cost drivers"` and `"Add a user-defined carrier"`, return no `not_via_chat` key.
 6. `test_entries_never_become_discovered_tools`: after the OJ-46 goal,
    - `session.discovered_tools == tuple(i["name"] for i in out["items"])`;
    - every name is in `TOOLS`;

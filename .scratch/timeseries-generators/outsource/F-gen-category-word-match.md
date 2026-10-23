@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-Status: draft — needs gatekeeper triage (issue 11 is needs-triage; adequacy reads this function)
+Status: ready-for-agent — GK triage 2026-10-23: G1 (a), G2 accept, G3 'other', G4 accept
 
 # Outsourced task F: "hydro" and "hydrogen" generators stop filing under demand response
 
@@ -58,6 +58,8 @@ I ran the old rule and this rule over every carrier we ship or write:
 | `solar_hydrogen` | dr | renewable | user-coined |
 | `hydrogen CHP`, `hydrogen_gas_turbine`, `drill_diesel` | dr | conventional | user-coined (see G2) |
 | `drain`, `dryer`, `hydraulic` | dr | other | user-coined |
+| `flexload`, `drload`, `dsmload` (one word, no separator) | dr | other | user-coined (GK: disclosed collateral of the word rule) |
+| `curtailed_wind` | dr | renewable | user-coined (GK: `curtail` no longer matches inside `curtailed`) |
 | `demand response`, `demand-response` | other | dr | user-coined (see G4) |
 
 Every other carrier listed above keeps its bucket. Of the shipped ones, only `hydro` moves.
@@ -105,7 +107,7 @@ A user's existing hydro profile stays attached to the generator; it now appears 
    - `demand_response`, `demand response`, `demand-response`, `DemandResponse`.
 
    It fails on master for `demand response` and `demand-response`.
-4. `test_dr_inside_a_word_is_not_demand_response`: `drain`, `dryer` and `hydraulic` give `'other'` (on master: `'dr'`).
+4. `test_dr_inside_a_word_is_not_demand_response`: `drain`, `dryer` and `hydraulic` give `'other'` (on master: `'dr'`). Also pin the disclosed collateral: `flexload`, `drload` and `dsmload` give `'other'`, and `curtailed_wind` gives `'renewable'`.
 5. `test_shipped_carriers_keep_their_category`: one table holding every carrier in "Carriers checked" with its expected bucket from the "New" column; carriers not in the change table keep their old bucket. It fails on master only because of `hydro`. This guards against collateral moves.
 6. `test_generator_profiles_report_the_word_category` (endpoint, `client` + `install_network` from `tests/conftest.py`):
    - build a network with Generators whose carriers are `hydro`, `hydrogen`, `dsm` and `gas`;
