@@ -7,7 +7,7 @@ because ``astype`` launders a fractional hour into an integer and the string
 
 Contingency set
     One row per outage to study: ``contingency_id``, ``kind`` in {branch,
-    unit}, ``element_ids`` (a list of canonical element ids) and ``order`` in
+    unit, bus_section}, ``element_ids`` (a list of canonical element ids) and ``order`` in
     {1, 2}. The set is engine-free data — whether every element id names a
     real element is the CALLER's check against the registry, so this module
     stays importable without pandapower.
@@ -47,7 +47,7 @@ from .network import NAME_CHARSET
 #: and survives a CSV round-trip, which ``inf`` does not reliably do.
 NON_CONVERGED_SEVERITY = 1.0e6
 
-CONTINGENCY_KINDS = frozenset({"branch", "unit"})
+CONTINGENCY_KINDS = frozenset({"branch", "unit", "bus_section"})
 FAULT_CASES = frozenset({"max", "min"})
 
 CONTINGENCY_SET_COLUMNS = {
@@ -145,11 +145,14 @@ def validate_contingency_set(df: pd.DataFrame) -> pd.DataFrame:
     except (ValueError, TypeError) as exc:
         raise ContractError(f"contingency set dtype coercion failed: {exc}") from exc
 
-    dup = out["contingency_id"].duplicated()
+    dup = out["contingency_id"].duplicated(keep=False)
     if dup.any():
-        raise ContractError(
-            f"duplicate contingency_id: {sorted(out.loc[dup, 'contingency_id'].unique())}"
-        )
+        # Name the kinds too: a unit and a bus section may share a bare name.
+        said = [
+            f"{cid} (kinds: {', '.join(sorted(set(out.loc[out['contingency_id'] == cid, 'kind'])))})"
+            for cid in sorted(out.loc[dup, "contingency_id"].unique())
+        ]
+        raise ContractError(f"duplicate contingency_id: {'; '.join(said)}")
     return out
 
 
@@ -278,4 +281,88 @@ def validate_fault_levels(df: pd.DataFrame) -> pd.DataFrame:
         raise ContractError(
             f"duplicate (bus, case) rows: {out.loc[dup, 'bus'].tolist()}"
         )
+    return out
+
+
+#: The verdicts of the planning-criteria check (``static/planning_criteria``).
+#: ``not_solved`` is an islanded or non-converged contingency: no flow to judge.
+PLANNING_VERDICTS = frozenset({"pass", "fail", "not_solved"})
+
+PLANNING_RESULT_COLUMNS = {
+    "contingency_id": "object",
+    "kind": "object",
+    "hour": "int64",
+    "converged": "bool",
+    "islanded": "bool",
+    "load_lost_mw": "float64",
+    "gen_lost_mw": "float64",
+    "stage1_loading_pct": "float64",
+    "stage1_branch": "object",
+    "stage1_verdict": "object",
+    "stage2_loading_pct": "float64",
+    "stage2_branch": "object",
+    "stage2_min_vm_pu": "float64",
+    "stage2_max_vm_pu": "float64",
+    "stage2_verdict": "object",
+    "remedial": "object",
+    "note": "object",
+}
+_STAGE2_PHYSICS = ("stage2_loading_pct", "stage2_min_vm_pu", "stage2_max_vm_pu")
+
+
+def validate_planning_results(df: pd.DataFrame) -> pd.DataFrame:
+    """One row per (contingency, hour) of the two-stage check. A stage that is
+    not solved reads ``not_solved`` with NaN figures, never a benign number;
+    stage 2 is never solved when stage 1 is not."""
+    missing = set(PLANNING_RESULT_COLUMNS) - set(df.columns)
+    if missing:
+        raise ContractError(f"planning results missing columns: {sorted(missing)}")
+    out = df.copy()
+
+    # --- guards on the values as supplied; coercion below would hide these ---
+    _check_ids(out["contingency_id"], "contingency_id")
+    bad_kind = ~out["kind"].isin(CONTINGENCY_KINDS)
+    if bad_kind.any():
+        raise ContractError(f"kind must be one of {sorted(CONTINGENCY_KINDS)}, got "
+                            f"{out.loc[bad_kind, 'kind'].unique().tolist()}")
+    for col in ("converged", "islanded"):
+        bad = [v for v in out[col] if not isinstance(v, (bool, np.bool_))]
+        if bad:
+            raise ContractError(f"{col} must be exactly True or False, got {bad[:5]!r}")
+    _integral(out["hour"], "hour")
+    for col in ("stage1_verdict", "stage2_verdict"):
+        bad = ~out[col].isin(PLANNING_VERDICTS)
+        if bad.any():
+            raise ContractError(f"{col} must be one of {sorted(PLANNING_VERDICTS)}, got "
+                                f"{out.loc[bad, col].unique().tolist()}")
+
+    try:
+        out = out.astype(PLANNING_RESULT_COLUMNS)
+    except (ValueError, TypeError) as exc:
+        raise ContractError(f"planning results dtype coercion failed: {exc}") from exc
+
+    for col in ("load_lost_mw", "gen_lost_mw"):
+        v = out[col]
+        if v.isna().any() or np.isinf(v).any() or (v < 0).any():
+            raise ContractError(f"{col} must be finite and >= 0")
+    ids = out["contingency_id"]
+    if (out["islanded"] & out["converged"]).any():
+        raise ContractError(f"islanded rows cannot be converged: {ids[out['islanded'] & out['converged']].tolist()}")
+    s1_solved = out["stage1_verdict"] != "not_solved"
+    if (s1_solved != out["converged"]).any():
+        raise ContractError("stage1_verdict is not_solved exactly when the row is not converged: "
+                            f"{ids[s1_solved != out['converged']].tolist()}")
+    s2_solved = out["stage2_verdict"] != "not_solved"
+    if (s2_solved & ~s1_solved).any():
+        raise ContractError(f"stage 2 solved where stage 1 is not: {ids[s2_solved & ~s1_solved].tolist()}")
+    s1 = out["stage1_loading_pct"]
+    if (s1.isna() == s1_solved).any() or np.isinf(s1.fillna(0.0)).any():
+        raise ContractError("stage1_loading_pct must be finite where stage 1 is solved and NaN elsewhere")
+    s2 = out[list(_STAGE2_PHYSICS)]
+    if (s2.isna().any(axis=1) & s2_solved).any() or (s2.notna().any(axis=1) & ~s2_solved).any() \
+            or np.isinf(s2.fillna(0.0)).any(axis=None):
+        raise ContractError("stage-2 figures must be finite where stage 2 is solved and NaN elsewhere")
+    dup = out.duplicated(subset=["contingency_id", "hour"])
+    if dup.any():
+        raise ContractError(f"duplicate (contingency_id, hour) rows: {ids[dup].tolist()}")
     return out
