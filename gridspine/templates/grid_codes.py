@@ -63,11 +63,12 @@ A profile may carry these optional keys:
     and optionally a ``kind`` (``DYNAMIC_KINDS``) and a ``unit``.
     ``reported_requirements`` lists them with status ``reported``, as
     "needs RMS study"; they are never passed and never counted in a verdict.
-
-Each of these is optional and has no default: a profile without one sets
-no such limit, and a check against it reports "no limit set".
 ``notes``
     Text the report carries with the profile (scope, what is unverified).
+
+Each of these is optional and has no default: a profile without one sets
+no such limit, and a check against it reports "no limit set" with status
+``unknown`` (``campus_compliance``), never pass or fail.
 
 Any other key is loaded and logged as a warning: a project or extracted
 profile may carry extras, but a misspelt key would otherwise switch a check

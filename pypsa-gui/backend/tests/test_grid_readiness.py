@@ -821,3 +821,46 @@ def test_the_after_value_survives_every_consumer(tmp_path, monkeypatch):
     assert [r["verdict"] for r in payload["rows"]] == [r["verdict"] for r in out["rows"]]
     C.grid_readiness_table(payload, "/sections/grid_readiness/payload")
     C.grid_readiness_disclosures(payload)
+
+
+# ── two-tier rapid voltage change and RMS-study wording (DC 10a) ───────────
+
+
+def _two_tier_profile(tmp_path, infrequent_pct):
+    """A project profile: the EU one plus an infrequent RVC tier (generic value)."""
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code(PROFILE, raw=True)
+    p["rvc_limit_infrequent_pct"] = {"value": infrequent_pct, "clause": "generic test clause", "source": "code"}
+    d = tmp_path / "codes"
+    d.mkdir()
+    (d / "two_tier.yaml").write_text(json.dumps(p))
+    return d
+
+
+def test_without_an_infrequent_tier_its_row_is_unknown_with_no_limit_set(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    row = _rows(G.grid_readiness(d, n, PROFILE))["rapid_voltage_change_infrequent"]
+    assert row["verdict"] == "unknown" and row["limit"] is None and row["project_value"] is None
+    assert "no limit set" in row["note"].lower()
+
+
+@pytest.mark.parametrize("pct, verdict", [(100.0, "pass"), (5.0, "warn")])
+def test_the_infrequent_tier_is_the_connection_over_the_fault_level(tmp_path, pct, verdict):
+    d, n = _project(tmp_path, "eh_datacenter")
+    out = G.grid_readiness(d, n, "two_tier", profile_dirs=(_two_tier_profile(tmp_path, pct),))
+    rows = _rows(out)
+    row = rows["rapid_voltage_change_infrequent"]
+    conn = sum(float(n.links.at[link, "p_nom"]) for link in SP.import_links(n))
+    assert conn / 250.0 * 100.0 > 5.0                                     # so the 5 % tier warns
+    assert row["project_value"] == pytest.approx(conn / 250.0 * 100.0, rel=1e-4)    # Sk 250 MVA
+    assert row["verdict"] == verdict and row["limit"] == pct
+    assert "connection capacity / fault level × 100" in row["note"]
+    # the frequent tier is the profile's rvc_limit_pct, unchanged
+    assert rows["rapid_voltage_change"]["limit"] == 3.0
+
+
+def test_the_dynamic_requirements_need_an_rms_study(tmp_path):
+    d, n = _project(tmp_path, "eh_datacenter")
+    dyn = [r for r in G.grid_readiness(d, n, PROFILE)["rows"] if r["id"].startswith("dynamic:")]
+    assert dyn and all(r["note"].startswith("Needs RMS study") and r["verdict"] == "unknown" for r in dyn)
