@@ -33,6 +33,8 @@ import ast
 import json
 import pathlib
 
+import pytest
+
 BACKEND = pathlib.Path(__file__).resolve().parent.parent
 MANIFEST = BACKEND.parent / "tool-error-kinds.json"
 
@@ -42,6 +44,13 @@ MANIFEST = BACKEND.parent / "tool-error-kinds.json"
 _FORWARDER_FALLBACKS = frozenset({"tool_error", "validation_error"})
 
 _SKIP_DIRS = frozenset({"tests", "__pycache__", "smoke", ".pixi", "alembic"})
+
+_REFUSE_HELPER_MODULES: tuple[str, ...] = (
+    "services/assistant_tasks.py",
+    "services/experiments.py",
+    "services/run_evidence.py",
+)
+_NON_LITERAL_REFUSE_CALLS: list[tuple[int, str]] = []
 
 
 def _source_files() -> list[pathlib.Path]:
@@ -100,9 +109,25 @@ def _error_kind_dict_kinds(tree: ast.AST) -> set[str]:
     return found
 
 
+def _refuse_helper_kinds(tree: ast.AST) -> set[str]:
+    """Literal bare-helper calls only; dynamic kinds must be reviewed explicitly."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_refuse"):
+            continue
+        arg = node.args[0] if node.args else None
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            found.add(arg.value)
+        else:
+            _NON_LITERAL_REFUSE_CALLS.append((node.lineno, ast.unparse(node)))
+    return found
+
+
 def derive_tool_error_kinds() -> set[str]:
     """Every `error_kind` that can reach the client on a `tool_error` frame."""
     kinds: set[str] = set(_FORWARDER_FALLBACKS)
+    _NON_LITERAL_REFUSE_CALLS.clear()
     for path in _source_files():
         try:
             tree = ast.parse(path.read_text(encoding="utf-8"))
@@ -110,6 +135,8 @@ def derive_tool_error_kinds() -> set[str]:
             continue
         kinds |= _yielded_tool_error_kinds(tree)
         kinds |= _error_kind_dict_kinds(tree)
+        if path.relative_to(BACKEND).as_posix() in _REFUSE_HELPER_MODULES:
+            kinds |= _refuse_helper_kinds(tree)
     return kinds
 
 
@@ -189,4 +216,41 @@ def test_the_derivation_finds_the_kinds_it_is_supposed_to_find():
     # the first version of this derivation under-approximate.
     assert "study_in_flight" in derived
     assert "validation_error" in derived        # forwarder fallback
+    assert "task_paused_at_card" in derived      # assistant plan helper
+    assert "experiment_not_found" in derived     # experiment helper
+    assert "evidence_unavailable" in derived     # run evidence helper
     assert len(derived) > 40, f"suspiciously few kinds derived: {len(derived)}"
+
+
+@pytest.mark.parametrize("module", _REFUSE_HELPER_MODULES)
+def test_each_refuse_helper_module_still_raises_its_kind(module):
+    tree = ast.parse((BACKEND / module).read_text(encoding="utf-8"))
+    helper = next((n for n in tree.body
+                   if isinstance(n, ast.FunctionDef) and n.name == "_refuse"), None)
+    assert helper is not None, f"{module}: _refuse helper removed or renamed"
+    assert helper.args.args and helper.args.args[0].arg == "kind", module
+    assert any(
+        isinstance(node, ast.Dict) and any(
+            isinstance(key, ast.Constant) and key.value == "error_kind"
+            and isinstance(value, ast.Name) and value.id == "kind"
+            for key, value in zip(node.keys, node.values)
+        ) for node in ast.walk(helper)
+    ), f"{module}: _refuse no longer forwards kind to error_kind"
+
+
+def test_refuse_helper_calls_use_literal_kinds():
+    failures = []
+    for module in _REFUSE_HELPER_MODULES:
+        _NON_LITERAL_REFUSE_CALLS.clear()
+        _refuse_helper_kinds(ast.parse((BACKEND / module).read_text(encoding="utf-8")))
+        failures.extend((module, line, call) for line, call in _NON_LITERAL_REFUSE_CALLS)
+    assert not failures, f"Unclassified dynamic _refuse calls: {failures}"
+
+
+def test_refuse_helper_extraction_reports_dynamic_calls_and_ignores_attributes():
+    _NON_LITERAL_REFUSE_CALLS.clear()
+    tree = ast.parse('_refuse("literal", "reason"); _refuse(kind, "reason"); other._refuse("outside", "reason")')
+    assert _refuse_helper_kinds(tree) == {"literal"}
+    assert len(_NON_LITERAL_REFUSE_CALLS) == 1
+    assert '_refuse(kind,' in _NON_LITERAL_REFUSE_CALLS[0][1]
+    _NON_LITERAL_REFUSE_CALLS.clear()
