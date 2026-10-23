@@ -21,7 +21,7 @@ import {
   type IslandConfig, type IslandGroup, type IslandReport, type IslandScenario, type IslandSource, type IslandTable,
 } from '../api/campusElectrical'
 import { Btn, PageSection, Tag } from '../components/PageKit'
-import CampusIslandCutsSection from './CampusIslandCutsSection'
+import CampusIslandCutsSection, { scenarioWords } from './CampusIslandCutsSection'
 import { showResultsTab } from '../layout/flowNavigation'
 
 export const ISLAND_KEY = (name: string) => ['campusElectrical', 'island', name] as const
@@ -107,14 +107,11 @@ const fieldWords = (f: string) => {
   return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`.replace(/^./, c => c.toUpperCase())
 }
 
-/** Scenario ids in the user's words, as the Scenarios checkboxes name them. */
-const SCENARIO_WORDS: Record<string, string> = {
-  ups_bridged: 'UPS-bridged', seamless: 'Seamless', planned: 'Planned',
-}
 /** Report tables whose title the report words in solver terms. */
 const TITLE_WORDS: Record<string, string> = {
   binding: 'Island limits that were reached, and what each costs',
 }
+const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 const intFmt = (v: number) => Math.round(v).toLocaleString('en-US')
 
 /** A cell longer than this stays on one line, its full text on hover. */
@@ -149,8 +146,9 @@ function ReportTable({ table }: { table: IslandTable }) {
                 {row.map((v, j) => {
                   const col = table.columns[j]
                   const text = table.id === 'requirements' && j === 0 && typeof v === 'string' ? fieldWords(v)
-                    : col === 'scenario' && typeof v === 'string' ? (SCENARIO_WORDS[v] ?? v.replace(/_/g, ' '))
-                    : table.id === 'costs' && typeof v === 'number' && col !== 'status' ? intFmt(v)
+                    : col === 'scenario' && typeof v === 'string' ? scenarioWords(v)
+                    : col === 'row' && typeof v === 'string' ? sentence(v.replace(/_/g, ' '))
+                    : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? intFmt(v)
                     : cell(v)
                   return text.length > LONG
                     ? <td key={j} className="px-2 max-w-[320px] truncate" title={text}>{text}</td>
