@@ -311,7 +311,7 @@
      "worst_hour": 0.0,
      "clause": "Generic example, Q-P band",
      "source": "assumed",
-     "detail": "worst at P 45.17 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "detail": "worst at P 45.17 MW (0.994 pu); band −0.045 to 0.045 Mvar there",
      "worst_case": null,
      "limit_min": -0.0454545454545454,
      "limit_max": 0.0454545454545454
@@ -373,7 +373,7 @@
      "source": "assumed",
      "applies_to": "facility",
      "status": "reported",
-     "detail": "Fault ride-through: generic example (needs RMS study)"
+     "detail": "Fault ride-through: generic example (needs an RMS study)"
     },
     {
      "id": "rocof",
@@ -383,7 +383,7 @@
      "source": "assumed",
      "applies_to": "facility",
      "status": "reported",
-     "detail": "RoCoF withstand: generic example (needs RMS study)"
+     "detail": "RoCoF withstand: generic example (needs an RMS study)"
     }
    ],
    "investment": [
@@ -601,9 +601,9 @@
      "worst_hour": 0.0,
      "clause": "Generic example, Q-P band",
      "source": "assumed",
-     "detail": "worst at P 45.17 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "detail": "worst at P 45.17 MW (0.994 pu); band −0.045 to 0.045 Mvar there",
      "value_with_measures": 11.930637718079195,
-     "detail_with_measures": "worst at P 45.20 MW (0.994 pu); band -0.05 to 0.05 Mvar there",
+     "detail_with_measures": "worst at P 45.20 MW (0.994 pu); band −0.045 to 0.045 Mvar there",
      "worst_case": null,
      "limit_min": -0.0454545454545454,
      "limit_max": 0.0454545454545454,
