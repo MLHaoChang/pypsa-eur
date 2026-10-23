@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Campus wording on the investment case and island report. Campus assets read by name instead of raw id, the project flag list is in plain words (a life that ends unreplaced is said once), the library note reads "source: literature", and the island report's backend title matches the screen's.

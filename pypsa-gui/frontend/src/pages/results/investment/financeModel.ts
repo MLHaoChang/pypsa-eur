@@ -668,7 +668,7 @@ export function studyFailure(s: InvestmentCaseStudy | null | undefined): string 
 // ── the campus equipment the case took (campus-IC issues 02 and 05) ─────
 
 export interface CampusEquipmentRow {
-  name: string; kind: string; quantity: string; overnight: number | null; buildYear: number | null
+  id: string; name: string; kind: string; quantity: string; overnight: number | null; buildYear: number | null
   cod: string | null; illustrative: boolean | null
 }
 
@@ -688,6 +688,15 @@ export interface CampusEquipment {
 }
 
 const LIFE_ENDS = 'campus_life_ends_unreplaced:'
+const NOT_REPLACED = 'part_not_replaced:'
+
+/** A campus asset as the user reads it: its display name when the report
+ *  carries one, else its id (`campus:TR_132_33_63#1`) with the `campus:` prefix
+ *  dropped and underscores as spaces. */
+export function assetLabel(name: string, displayName?: unknown): string {
+  if (typeof displayName === 'string' && displayName.trim()) return displayName.trim()
+  return name.replace(/^campus:/, '').replace(/_/g, ' ').replace(/#/g, ' #')
+}
 const AFTER_HORIZON = 'campus_renewal_after_horizon:'
 
 /** What the case does after an unreplaced life ends, by its `replacement_rule`,
@@ -706,16 +715,37 @@ function campusLifeNotes(flags: string[]): string[] {
       const parts = f.slice(LIFE_ENDS.length).split(':')
       const rule = parts.pop() ?? ''
       const year = parts.pop()
-      return [`The grid study plans no replacement for ${parts.join(':')} after its life ends in ${year}, `
+      return [`The grid study plans no replacement for ${assetLabel(parts.join(':'))} after its life ends in ${year}, `
         + `inside the case's horizon.${LIFE_ENDS_RULE[rule] ? ` ${LIFE_ENDS_RULE[rule]}` : ''}`]
     }
     if (f.startsWith(AFTER_HORIZON)) {
       const rest = f.slice(AFTER_HORIZON.length)
       const at = rest.lastIndexOf(':')
-      return [`The grid study renews ${rest.slice(0, at)} in ${rest.slice(at + 1)}, after the case's `
+      return [`The grid study renews ${assetLabel(rest.slice(0, at))} in ${rest.slice(at + 1)}, after the case's `
         + 'horizon: the case leaves that purchase out.']
     }
     return []
+  })
+}
+
+/** The project flag list in words. A campus asset's life-end and later-renewal
+ *  flags are worded in the campus equipment block, so they are not repeated;
+ *  `part_not_replaced` for an asset that has a life-end flag states the same fact
+ *  and is left out. Any other flag keeps its code as plain words. */
+export function projectFlagWords(flags: string[]): string[] {
+  const lifeEnds = flags.filter(f => f.startsWith(LIFE_ENDS))
+    .map(f => f.slice(LIFE_ENDS.length).split(':').slice(0, -2).join(':'))
+  return flags.flatMap(f => {
+    if (f.startsWith(LIFE_ENDS) || f.startsWith(AFTER_HORIZON)) return []
+    if (f.startsWith(NOT_REPLACED)) {
+      const segs = f.slice(NOT_REPLACED.length).split(':')      // an asset name may contain ':'
+      const partName = (segs.pop() ?? '').replace(/_/g, ' ')
+      const asset = segs.join(':')
+      if (lifeEnds.includes(asset)) return []
+      return [`${assetLabel(asset)}${partName ? `, ${partName}` : ''}: its life ends inside the case's `
+        + 'horizon and no replacement is planned.']
+    }
+    return [f]
   })
 }
 
@@ -746,7 +776,8 @@ export function campusEquipment(report: InvestmentCaseReportPayload | null | und
     .map(u => ({ need: u.need as string, reason: u.reason as string }))
   if (!extras.length && !unresolved.length) return null
   const rows = extras.map(e => ({
-    name: String(e.name ?? NOT_ESTABLISHED), kind: String(e.kind ?? NOT_ESTABLISHED).replace(/_/g, ' '),
+    id: String(e.name ?? NOT_ESTABLISHED),
+    name: assetLabel(String(e.name ?? NOT_ESTABLISHED), e.display_name), kind: String(e.kind ?? NOT_ESTABLISHED).replace(/_/g, ' '),
     quantity: quantityText(e.quantity, e.basis), overnight: established(e.overnight_cost),
     buildYear: typeof e.build_year === 'number' ? e.build_year : null,
     cod: typeof e.cod === 'string' ? e.cod : null,

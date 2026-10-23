@@ -107,10 +107,6 @@ const fieldWords = (f: string) => {
   return `${head.replace(/_/g, ' ')}: ${(FIELD_WORDS[field] ?? field.replace(/_/g, ' ')).replace(/^./, c => c.toLowerCase())}`.replace(/^./, c => c.toUpperCase())
 }
 
-/** Report tables whose title the report words in solver terms. */
-const TITLE_WORDS: Record<string, string> = {
-  binding: 'Island limits that were reached, and what each costs',
-}
 const sentence = (t: string) => t.charAt(0).toUpperCase() + t.slice(1)
 const intFmt = (v: number) => Math.round(v).toLocaleString('en-US')
 
@@ -129,7 +125,7 @@ function ReportTable({ table }: { table: IslandTable }) {
   const assumed = new Set(table.assumed_rows)
   return (
     <div data-testid={`island-table-${table.id}`} className="mb-4">
-      <h4 className="text-[12.5px] font-semibold">{TITLE_WORDS[table.id] ?? table.title}</h4>
+      <h4 className="text-[12.5px] font-semibold">{table.title}</h4>
       <p className="text-[11px] text-muted" data-testid="island-model">Model: {table.model}</p>
       <p className="text-[11px] text-muted italic mb-1" data-testid="island-caveat">{table.caveat}</p>
       {/* A table scrolls in its own box, and a long cell (a list of assumed
@@ -147,6 +143,7 @@ function ReportTable({ table }: { table: IslandTable }) {
                   const col = table.columns[j]
                   const text = table.id === 'requirements' && j === 0 && typeof v === 'string' ? fieldWords(v)
                     : col === 'scenario' && typeof v === 'string' ? scenarioWords(v)
+                    : col === 'status' && v === 'ok' ? 'OK'
                     : col === 'row' && typeof v === 'string' ? sentence(v.replace(/_/g, ' '))
                     : (table.id === 'costs' || (table.id === 'binding' && col === 'sum of duals')) && typeof v === 'number' ? intFmt(v)
                     : cell(v)

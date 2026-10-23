@@ -1,6 +1,7 @@
 // The finance form and report mappings (IC P4 WP4.7a/b), without a DOM.
 import { describe, expect, it } from 'vitest'
 import {
+  assetLabel, projectFlagWords,
   baselineCaveats, basisStatement, cashflowPivot, cashTotals, counterfactualStatement, errorKey, errorsFor, established, financeErrors, fmtCell,
   fmtHeadline, headlines, numOrNull, parseRateOrList, perYearLists, progressFraction, progressText,
   rateOrListText, studyFailure, studyProgress, studyStale, toTable, waccGate, withKey,
@@ -295,5 +296,27 @@ describe('headlines: of which avoided CO2 cost (H2e)', () => {
       .find(h => h.id === 'avoided_co2')!
     expect(unknown.value).toBeNull()
     expect(headlines(rep({ co2_priced: false })).some(h => h.id === 'avoided_co2')).toBe(false)
+  })
+})
+
+describe('campus wording', () => {
+  it('names an asset by its display name, else by its id in words', () => {
+    expect(assetLabel('campus:TR_132_33_40#1', 'Main transformer')).toBe('Main transformer')
+    expect(assetLabel('campus:TR_132_33_40#1')).toBe('TR 132 33 40 #1')
+    expect(assetLabel('campus:TR_132_33_40#1', '  ')).toBe('TR 132 33 40 #1')
+  })
+
+  it('says an unreplaced life once and keeps no raw codes for the campus flags', () => {
+    const out = projectFlagWords([
+      'campus_life_ends_unreplaced:campus:TR_132_33_40#1:2042:fixed',
+      'part_not_replaced:campus:TR_132_33_40#1:investment',
+      'part_not_replaced:bess:power',
+      'campus_renewal_after_horizon:campus:CB_33_AL95#1:2060',
+      'load_shed_excluded',
+    ])
+    expect(out).toEqual([
+      "bess, power: its life ends inside the case's horizon and no replacement is planned.",
+      'load_shed_excluded',
+    ])
   })
 })

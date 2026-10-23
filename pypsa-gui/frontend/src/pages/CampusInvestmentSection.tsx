@@ -258,7 +258,7 @@ export default function CampusInvestmentSection({ state }: { state: CampusState 
       >
         <p className="text-[11.5px] text-muted mb-2">
           Prices come from the asset library; the shipped library's costs are reference values from cited public
-          sources (tag literature) or assumed where none was found, not quotes.
+          sources (source: literature) or assumed where none was found, not quotes.
         </p>
         <IcSourceLine state={state} />
         <IcUnresolvedLine count={state.owner_assets_unresolved ?? 0} />

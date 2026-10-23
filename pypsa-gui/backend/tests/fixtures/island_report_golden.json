@@ -235,7 +235,7 @@
           100.0
         ]
       ],
-      "title": "Binding island rows and their duals"
+      "title": "Island limits that were reached, and what each costs"
     },
     {
       "assumed_rows": [],
