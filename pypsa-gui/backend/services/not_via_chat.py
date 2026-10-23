@@ -13,7 +13,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'title': 'Admin accounts and organizations',
         'disposition': 'out of chat',
         'reason': 'Account and organization administration is outside chat for security. An authorized administrator must use the Admin page.',
-        'page': 'Admin page (/admin), super-admins only',
+        'page': 'Admin page (/admin)',
         'panel': None,
         'keywords': frozenset({
             'account',
