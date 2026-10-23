@@ -232,6 +232,16 @@ it.each(['project', 'chat'])('hides a late save acknowledgement after %s changes
   expect(screen.queryByText('Restriction saved.')).toBeNull()
   expect((screen.getByRole('combobox', { name: 'Your saved rule' }) as HTMLSelectElement).value).toBe('standard')
 })
+it('names a lock the caller holds without treating it as someone else\'s', async () => {
+  const data = snapshot()
+  data.project_lock = 'yours'
+  data.blockers = []
+  get.mockResolvedValue(data)
+  mount()
+  fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
+  expect(await screen.findByText('You hold the project write lock.')).toBeTruthy()
+  expect(screen.queryByText('Project writes are locked by another user. Reads remain available.')).toBeNull()
+})
 it('cannot save rules for an unsaved draft', async () => {
   const data = snapshot()
   data.scope = { project_id: null, project_name: null }
