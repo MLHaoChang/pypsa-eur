@@ -3,7 +3,7 @@
 
 # The library-reference preview is routed as a write
 
-Status: ready-for-agent (outsourced task D, docs/agents/outsourced.md)
+Status: done (#674, a52fadff; outsourced task D)
 Type: task
 
 `POST /api/network/library_reference/preview` (`routers/network_library_reference.py`)
