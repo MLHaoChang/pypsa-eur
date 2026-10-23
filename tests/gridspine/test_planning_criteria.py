@@ -1,4 +1,5 @@
-"""DC issue 13 (PR a): emergency ratings, the two-stage check, bus-section loss.
+"""DC issue 13: emergency ratings, the two-stage check, bus-section loss (PR a);
+N-M-1 / N-1-1 with the user cap, and the angle-limit check (PR b).
 
 The hand-built net is generic and meshed (not radial): a 110 kV ring A-B-C
 with two parallel lines A-B, a spur B-S, and two 110/20 kV transformers T1
@@ -27,11 +28,14 @@ from gridspine.schema.contingency import (
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.static.capacity import capacity_ac
-from gridspine.static.contingency import branch_loading_pct, screen_n1
+from gridspine.static.contingency import branch_loading_pct, screen_n1, screen_n2
 from gridspine.static.contingency_set import (
     BUS_SECTION_LEDGER,
     branch_contingencies,
     bus_section_contingencies,
+    n2_candidates,
+    n_1_1_contingencies,
+    n_m_1_contingencies,
     unit_contingencies,
 )
 from gridspine.static.loadflow import apply_snapshot
@@ -40,6 +44,7 @@ from gridspine.static.planning_criteria import (
     NO_CONTROLS_ON,
     NO_REDISPATCH,
     PLANNING_LEDGER,
+    AngleLimit,
     Controls,
     emergency_loading_pct,
     screen_planning,
@@ -406,6 +411,284 @@ def test_results_contract_refuses_a_solved_stage_2_after_an_unsolved_stage_1():
 
 
 # --------------------------------------------------------------------------
+# N-M-1 and N-1-1
+# --------------------------------------------------------------------------
+
+AC, CB, T1_T2 = "BUS_A-BUS_C-1", "BUS_C-BUS_B-1", "BUS_D1-BUS_D2-1"
+SPUR = "BUS_B-BUS_S-1"
+BOTH = Controls(oltc=(T1,), switched_shunts=("SH1",))
+
+
+def test_compound_ids_are_ordered_pairs_sorted_and_stable():
+    net = _net()
+    n1 = branch_contingencies(net)
+    n11 = n_1_1_contingencies(n1)
+    assert len(n11) == 8 * 7
+    assert list(n11["contingency_id"]) == sorted(n11["contingency_id"])
+    assert f"{AC}>{CB}" in set(n11["contingency_id"]) and f"{CB}>{AC}" in set(n11["contingency_id"])
+    assert (n11["kind"] == "n_1_1").all() and (n11["order"] == 2).all()
+    row = n11.set_index("contingency_id").loc[f"{AC}>{CB}"]
+    assert list(row["element_ids"]) == [AC, CB]
+    pd.testing.assert_frame_equal(n11, n_1_1_contingencies(n1.iloc[::-1]))
+    nm1 = n_m_1_contingencies(n1, maintenance=[CB, AC])
+    assert len(nm1) == 2 * 7
+    assert list(nm1["contingency_id"]) == sorted(f"{m}|{f}" for m in (AC, CB) for f in n1["contingency_id"] if f != m)
+    assert (nm1["kind"] == "n_m_1").all()
+    assert len(n_m_1_contingencies(n1)) == 8 * 7
+
+
+def test_compound_enumeration_refuses_bad_input():
+    net = _net()
+    n1 = branch_contingencies(net)
+    with pytest.raises(ContractError, match="maintenance outage.*not in the N-1 branch set.*BUS_X"):
+        n_m_1_contingencies(n1, maintenance=["BUS_X"])
+    for build in (n_1_1_contingencies, n_m_1_contingencies):
+        with pytest.raises(ContractError, match="non-branch rows"):
+            build(_set(net, ("branch", "unit")))
+        with pytest.raises(ContractError, match="order != 1"):
+            build(n2_candidates(n1))
+
+
+def test_contingency_set_contract_ties_a_compound_id_to_its_elements():
+    net = _net()
+    nm1 = n_m_1_contingencies(branch_contingencies(net), maintenance=[AC])
+    bad = nm1.head(1).copy()
+    bad.at[0, "contingency_id"] = f"{CB}|{AC}"
+    with pytest.raises(ContractError, match="joined on '\\|'"):
+        validate_contingency_set(bad)
+    bad = nm1.head(1).copy()
+    bad.at[0, "kind"] = "branch"
+    with pytest.raises(ContractError, match="compound separator on kind 'branch'"):
+        validate_contingency_set(bad)
+    bad = nm1.head(1).copy()
+    bad.at[0, "contingency_id"] = f"{AC}|{CB}>{T1}"
+    with pytest.raises(ContractError, match="more than one compound separator"):
+        validate_contingency_set(bad)
+    bad = nm1.head(1).copy()
+    bad.at[0, "contingency_id"], bad.at[0, "element_ids"], bad.at[0, "order"] = AC, [AC], 1
+    with pytest.raises(ContractError, match="n_m_1 contingency is order 2"):
+        validate_contingency_set(bad)
+
+
+def test_n_1_1_re_adjusts_after_the_first_outage():
+    net = _rated(_net())
+    one, other = f"{CB}>{T2}", f"{T2}>{CB}"
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"].isin([one, other])].reset_index(drop=True)
+    res, _ = _screen(net, cset, controls=BOTH)
+    a, b = _one(res, one), _one(res, other)
+    # losing T2 first: SH1 re-adjusts before the second fault, so it has nothing left to do after it
+    assert f"re-adjusted after the first outage ({T2}): SH1 +3" in b["note"]
+    assert "SH1" in a["remedial"] and "SH1" not in b["remedial"]
+    assert a["stage2_verdict"] == b["stage2_verdict"] == "pass"
+    assert NO_REDISPATCH in a["note"]
+
+
+def test_n_m_1_judges_the_maintenance_outage_then_the_fault():
+    net = _rated(_net())
+    nm1 = n_m_1_contingencies(branch_contingencies(net), maintenance=[PARALLEL[0]])
+    res, report = _screen(net, nm1)
+    row = _one(res, f"{PARALLEL[0]}|{PARALLEL[1]}")
+    assert row["stage1_verdict"] == "fail"          # both parallel lines gone: A-B rides on A-C and C-B
+    assert report["counts"] == {"n_m_1": 7}
+    assert report["summary"]["n_m_1"]["verdict"] == "fail"
+
+
+def test_first_outage_islanding_is_not_solved_at_the_first_outage():
+    net = _net()
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"] == f"{SPUR}>{AC}"].reset_index(drop=True)
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed"))
+    row = _one(res, f"{SPUR}>{AC}")
+    assert bool(row["islanded"]) and not bool(row["converged"])
+    assert row["stage1_verdict"] == row["stage2_verdict"] == row["angle_verdict"] == "not_solved"
+    assert f"islanded at the first outage ({SPUR}): disconnects BUS_S" in row["note"]
+
+
+def test_first_outage_divergence_is_not_solved_at_the_first_outage(monkeypatch):
+    net = _net()
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"] == f"{AC}>{CB}"].reset_index(drop=True)
+    monkeypatch.setattr(planning_criteria, "_solve", lambda work, judged: None)
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed"))
+    row = _one(res, f"{AC}>{CB}")
+    assert not bool(row["islanded"]) and not bool(row["converged"])
+    assert row["stage1_verdict"] == row["angle_verdict"] == "not_solved"
+    assert row["note"] == f"load flow does not converge at the first outage ({AC})"
+
+
+def test_the_cap_keeps_the_first_rows_by_id_and_counts_the_rest():
+    net = _net()
+    n1 = branch_contingencies(net)
+    cset = pd.concat([n1, n_1_1_contingencies(n1), n_m_1_contingencies(n1, maintenance=[AC])], ignore_index=True)
+    res, report = _screen(net, cset, max_compound=3)
+    assert report["counts"] == {"branch": 8, "n_1_1": 3, "n_m_1": 3}
+    assert report["skipped"] == {"n_1_1": 56 - 3, "n_m_1": 7 - 3}
+    kept = res.loc[res["kind"] == "n_1_1", "contingency_id"]
+    assert list(kept) == sorted(n_1_1_contingencies(n1)["contingency_id"])[:3]
+    assert "53 of 56 n_1_1 rows skipped" in report["summary"]["n_1_1"]["note"]
+    _, uncapped = _screen(net, n1)
+    assert uncapped["skipped"] == {"n_1_1": 0, "n_m_1": 0}
+    for bad in (-1, 1.5, True, "3"):
+        with pytest.raises(ContractError, match="max_compound"):
+            _screen(net, n1, max_compound=bad)
+
+
+def test_a_capped_kind_whose_judged_rows_all_pass_is_not_a_pass():
+    net = _rated(_net())
+    nm1 = n_m_1_contingencies(branch_contingencies(net), maintenance=[CB])
+    nm1 = nm1[nm1["contingency_id"].isin([f"{CB}|{AC}", f"{CB}|{T1_T2}"])].reset_index(drop=True)
+    res, report = _screen(net, nm1, max_compound=1, angle_limit=AngleLimit(30.0, "assumed"))
+    assert len(res) == 1
+    assert (res["stage1_verdict"] == "pass").all() and (res["stage2_verdict"] == "pass").all()
+    assert (res["angle_verdict"] == "pass").all()
+    summary = report["summary"]["n_m_1"]
+    assert summary["verdict"] == summary["angle_verdict"] == "incomplete"
+    assert summary["note"] == "1 of 2 n_m_1 rows skipped by max_compound"
+    _, full = _screen(net, nm1, angle_limit=AngleLimit(30.0, "assumed"))
+    assert full["summary"]["n_m_1"]["verdict"] == "pass"
+
+
+def test_screen_n1_capacity_and_n2_refuse_compound_rows_instead_of_dropping_them():
+    net = _net()
+    n1 = branch_contingencies(net)
+    dispatch, loads, reg = _tables(net)
+    for compound in (n_1_1_contingencies(n1).head(2), n_m_1_contingencies(n1, maintenance=[AC]).head(2)):
+        cset = pd.concat([n1, compound], ignore_index=True)
+        with pytest.raises(ContractError, match="screen_n1 takes an N-1 set"):
+            screen_n1(net, cset, dispatch, loads, 0, reg)
+        with pytest.raises(ContractError, match="order != 1"):
+            capacity_ac(net, "BUS_B", "load", cset)
+        with pytest.raises(ContractError, match="n2_candidates takes an N-1 set"):
+            n2_candidates(cset)
+        with pytest.raises(ContractError, match="kind != branch"):
+            screen_n2(net, compound, dispatch, loads, 0, reg, 50.0)
+
+
+def test_capacity_evaluate_refuses_compound_rows():
+    from gridspine.static.capacity import _evaluate
+    net = _net()
+    compound = n_1_1_contingencies(branch_contingencies(net)).head(1)
+    with pytest.raises(ContractError, match="kind not judged here.*n_1_1"):
+        _evaluate(copy.deepcopy(net), compound)
+
+
+# --------------------------------------------------------------------------
+# the angle limit
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("deg, match", [
+    (float("nan"), "finite"), (float("inf"), "finite"), (0.0, "> 0"), (-5.0, "> 0"),
+    (True, "finite"), ("30", "finite"), (None, "finite"),
+])
+def test_angle_limit_refuses_a_bad_figure(deg, match):
+    with pytest.raises(ContractError, match=match):
+        AngleLimit(deg, "assumed")
+
+
+def test_angle_limit_needs_a_basis_and_a_reference_for_sagc():
+    with pytest.raises(ContractError, match="basis"):
+        AngleLimit(30.0, "grid code")
+    with pytest.raises(ContractError, match="SAGC clause"):
+        AngleLimit(30.0, "sagc")
+    with pytest.raises(ContractError, match="angle pair"):
+        AngleLimit(30.0, "assumed", pairs=(("BUS_A",),))
+    lim = AngleLimit(30, "sagc", reference="SAGC (May 2026), planning criteria")
+    assert lim.ledger() == {"deg": 30.0, "basis": "sagc", "reference": "SAGC (May 2026), planning criteria"}
+
+
+def test_angle_unset_is_unknown_on_every_row_never_pass():
+    net = _net()
+    res, report = _screen(net, _set(net, ("branch", "unit", "bus_section")))
+    solved = res["stage1_verdict"] != "not_solved"
+    assert (res.loc[solved, "angle_verdict"] == "unknown").all()
+    assert (res.loc[~solved, "angle_verdict"] == "not_solved").all()
+    assert report["angle_limit"] == "unset"
+    assert all(s["angle_verdict"] != "pass" for s in report["summary"].values())
+
+
+def test_angle_limit_pass_and_fail_across_a_branch_and_a_bus_pair():
+    net = _net()
+    cset = _set(net)
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(60.0, "assumed", pairs=(AC, ("BUS_B", "BUS_D2"))))
+    solved = res[res["stage1_verdict"] != "not_solved"]
+    assert (solved["angle_verdict"] == "pass").all()
+    assert set(solved["angle_pair"]) <= {AC, "BUS_B:BUS_D2"}
+    worst = float(solved["angle_deg"].max())
+    res, report = _screen(net, cset, angle_limit=AngleLimit(worst - 1e-6, "assumed",
+                                                                pairs=(AC, ("BUS_B", "BUS_D2"))))
+    assert (res["angle_verdict"] == "fail").sum() >= 1
+    assert report["angle_limit"] == {"deg": worst - 1e-6, "basis": "assumed", "reference": ""}
+    with pytest.raises(ContractError, match="not a branch on the net"):
+        _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed", pairs=("BUS_X-BUS_Y-1",)))
+    with pytest.raises(ContractError, match="not on the net"):
+        _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed", pairs=(("BUS_A", "BUS_X"),)))
+
+
+def test_angle_pair_on_a_lost_bus_is_skipped_and_named():
+    net = _net()
+    cset = bus_section_contingencies(net, ["BUS_D2"])
+    lim = AngleLimit(60.0, "assumed", pairs=(AC, T2))
+    res, _ = _screen(net, cset, angle_limit=lim)
+    row = _one(res, "BUS_D2")
+    assert row["angle_verdict"] == "pass" and row["angle_pair"] == AC
+    assert f"angle pairs skipped, a bus out of service: {T2}" in row["note"]
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(60.0, "assumed", pairs=(T2,)))
+    row = _one(res, "BUS_D2")
+    assert row["angle_verdict"] == "unknown" and math.isnan(row["angle_deg"])
+    assert "no angle pair measurable" in row["note"]
+
+
+def test_angle_matches_a_hand_computed_two_bus_case():
+    """Lossless, uncharged A-B link, both ends held at 110 kV: P = V^2 sin(d) / X."""
+    n = pp.create_empty_network(sn_mva=100)
+    a, b = pp.create_bus(n, 110, name="BUS_A"), pp.create_bus(n, 110, name="BUS_B")
+    pp.create_ext_grid(n, a, vm_pu=1.0, name="SLK")
+    lt = dict(r_ohm_per_km=0.0, x_ohm_per_km=0.4, c_nf_per_km=0.0, max_i_ka=2.0)
+    pp.create_line_from_parameters(n, a, b, 50, **lt)
+    pp.create_line_from_parameters(n, a, b, 50, **lt)
+    pp.create_gen(n, b, p_mw=80.0, vm_pu=1.0, name="G1")
+    pp.create_load(n, a, p_mw=1.0, q_mvar=0.0)
+    res, _ = _screen(n, branch_contingencies(n).head(1), angle_limit=AngleLimit(30.0, "assumed"))
+    expected = math.degrees(math.asin(80.0 * 0.4 * 50 / 110.0**2))
+    assert res["angle_deg"].iloc[0] == pytest.approx(expected, rel=1e-9)
+    assert res["angle_verdict"].iloc[0] == "pass"
+
+
+def test_nan_or_inf_shunt_step_is_refused_naming_the_shunt():
+    for col, value in (("max_step", np.nan), ("max_step", np.inf), ("step", np.nan), ("step", np.inf)):
+        net = _net()
+        net.shunt[col] = net.shunt[col].astype(float)
+        net.shunt.at[0, col] = value
+        with pytest.raises(ContractError, match=f"switched shunt 'SH1' has no finite {col}"):
+            _screen(net, _set(net), controls=Controls(switched_shunts=("SH1",)))
+
+
+def test_results_contract_ties_the_angle_verdict_to_stage_1():
+    net = _net()
+    res, _ = _screen(net, _set(net), angle_limit=AngleLimit(60.0, "assumed"))
+    i = res.index[res["stage1_verdict"] == "pass"][0]
+    bad = res.copy()
+    bad.at[i, "angle_verdict"] = "not_solved"
+    with pytest.raises(ContractError, match="angle_verdict is not_solved exactly where stage 1 is"):
+        validate_planning_results(bad)
+    bad = res.copy()
+    bad.at[i, "angle_deg"] = np.nan
+    with pytest.raises(ContractError, match="angle_deg"):
+        validate_planning_results(bad)
+    bad = res.copy()
+    bad.at[i, "angle_verdict"] = "ok"
+    with pytest.raises(ContractError, match="angle_verdict must be one of"):
+        validate_planning_results(bad)
+
+
+def test_ledger_states_the_compound_cap_and_angle_assumptions():
+    assert any("share mechanics" in s for s in PLANNING_LEDGER)
+    assert any("max_compound" in s and "never pass" in s for s in PLANNING_LEDGER)
+    assert any("stage-1 state" in s for s in PLANNING_LEDGER)
+
+
+# --------------------------------------------------------------------------
 # case39
 # --------------------------------------------------------------------------
 
@@ -429,6 +712,15 @@ def test_case39_every_kind_is_judged_counted_and_timed(case39_hour):
     assert report["counts"] == {"branch": 46, "bus_section": 38, "unit": 14}
     assert report["seconds"] > 0.0
     print(f"case39 planning check, {len(cset)} contingencies: {report['seconds']} s")
+    n1 = branch_contingencies(net)
+    compound = pd.concat([n_m_1_contingencies(n1), n_1_1_contingencies(n1)], ignore_index=True)
+    cres, creport = screen_planning(net, compound, dispatch, loads, HOUR, reg, max_compound=10,
+                                    angle_limit=AngleLimit(30.0, "assumed"))
+    assert creport["counts"] == {"n_1_1": 10, "n_m_1": 10}
+    assert creport["skipped"] == {"n_1_1": 46 * 45 - 10, "n_m_1": 46 * 45 - 10}
+    assert creport["summary"]["n_1_1"]["verdict"] in ("fail", "incomplete")
+    assert creport["seconds"] > 0.0
+    print(f"case39 compound check, 20 of {len(compound)} contingencies: {creport['seconds']} s")
     # the same islanding outages screen_n1 finds
     branch = res[res["kind"] == "branch"]
     assert set(branch.loc[branch["islanded"], "contingency_id"]) == ISLANDING
