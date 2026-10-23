@@ -118,7 +118,7 @@ def _binding(study) -> dict:
             hours = b["hours"]
             rows.append([sc, b["row"], len(hours) if hours is not None else "static",
                          float(sum(b["duals"]))])
-    return _table("binding", "Binding island rows and their duals", study.get("model", "hub LP"),
+    return _table("binding", "Island limits that were reached, and what each costs", study.get("model", "hub LP"),
                   ("scenario", "row", "hours binding", "sum of duals"), rows, group="study")
 
 

@@ -143,7 +143,7 @@ describe('investment: what was bought', () => {
   it('says costs are cited or assumed reference values, not quotes', async () => {
     renderPanel()
     const section = await screen.findByTestId('campus-investment')
-    expect(section.textContent).toMatch(/reference values from cited public\s+sources \(tag literature\) or assumed/i)
+    expect(section.textContent).toMatch(/reference values from cited public\s+sources \(source: literature\) or assumed/i)
     expect(section.textContent).toMatch(/not quotes/i)
   })
 

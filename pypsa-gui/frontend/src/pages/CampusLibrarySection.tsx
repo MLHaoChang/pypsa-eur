@@ -55,8 +55,8 @@ export default function CampusLibrarySection({ name, onChanged }: {
         )}
       >
         <p className="text-[12px] text-muted mb-2">
-          The shipped library's costs are reference values, not quotes: each is read from a cited public source (tag
-          literature) or assumed where none was found. Replace them with quotes. Saving keeps a copy for this project,
+          The shipped library's costs are reference values, not quotes: each is read from a cited public source
+          (source: literature) or assumed where none was found. Replace them with quotes. Saving keeps a copy for this project,
           validated before it is kept.
         </p>
         {library.isError && <p className="text-[12px] text-danger mb-2">{errorText(library.error)}</p>}

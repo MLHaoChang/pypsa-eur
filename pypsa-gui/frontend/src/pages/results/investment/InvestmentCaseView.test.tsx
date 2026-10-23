@@ -509,13 +509,13 @@ describe('InvestmentCaseView: campus electrical equipment (campus-IC 02/05)', ()
                         'campus_renewal_after_horizon:campus:TR_132_33_63#1:2055'])
     const lines = screen.getAllByTestId('ic-campus-life').map(e => e.textContent)
     expect(lines).toEqual([
-      'The grid study plans no replacement for campus:TR_132_33_63#1 after its life ends in 2042, '
+      'The grid study plans no replacement for TR 132 33 63 #1 after its life ends in 2042, '
       + 'inside the case\'s horizon. With Replacements set to the stated replacement entries, the case '
       + 'does not buy it again.',
-      'The grid study plans no replacement for campus:CB_33_AL240#1 after its life ends in 2055, '
+      'The grid study plans no replacement for CB 33 AL240 #1 after its life ends in 2055, '
       + 'inside the case\'s horizon. With Replacements set to each part at the end of its lifetime, the '
       + 'case buys it again at the end of its lifetime.',
-      'The grid study renews campus:TR_132_33_63#1 in 2055, after the case\'s horizon: the case leaves '
+      'The grid study renews TR 132 33 63 #1 in 2055, after the case\'s horizon: the case leaves '
       + 'that purchase out.',
     ])
     cleanup()
