@@ -4,6 +4,7 @@
 // technology. The weather source and year are the weather bar's, saved in the
 // project; the request leaves them out so the backend reads the same value the
 // assistant does.
+import { useUIStore } from '../../store/uiStore'
 import { errorText, profilesApi, type ReadinessRow } from '../../api/profiles'
 
 export interface GenerationOutcome {
@@ -38,6 +39,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
 /** Wait until the job's artifact is pending, or fail when it left the queue without one. */
 export async function waitForJob(project: string, jobId: string, pollMs = 1500, maxPolls = 400): Promise<void> {
+  const expert = useUIStore.getState().uiMode === 'expert'
   for (let i = 0; i < maxPolls; i++) {
     const p = await profilesApi.pending(project)
     if (p.pending.some(x => x.job_id === jobId)) return
@@ -46,7 +48,7 @@ export async function waitForJob(project: string, jobId: string, pollMs = 1500, 
     }
     await sleep(pollMs)
   }
-  throw new Error('The generation is still running: it will appear in Profile Studio’s pending list when it finishes.')
+  throw new Error(`The generation is still running: it will appear ${expert ? 'in Profile Studio’s pending list' : 'as a pending profile you can apply'} when it finishes.`)
 }
 
 export async function generateAndApply(

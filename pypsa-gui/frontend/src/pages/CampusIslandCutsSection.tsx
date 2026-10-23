@@ -190,8 +190,8 @@ function ProposedTable({ rows }: { rows: ProposedCut[] }) {
       <table className="text-[12px] whitespace-nowrap" data-testid="cuts-proposed">
         <thead className="sticky top-0 bg-bg-2 z-10">
           <tr>
-            {['hour', 'scenario', 'event', 'cut', 'current', 'required', 'binding', 'cheapest unit', 'added MW',
-              'estimate'].map(h => <th key={h} className={TH}>{h}</th>)}
+            {['Hour', 'Scenario', 'Event', 'Cut', 'Now', 'Needed', 'Limit reached', 'Cheapest unit', 'Added (MW)',
+              'Estimated cost'].map(h => <th key={h} className={TH}>{h}</th>)}
             <th />
           </tr>
         </thead>
@@ -199,7 +199,7 @@ function ProposedTable({ rows }: { rows: ProposedCut[] }) {
           {rows.map(c => (
             <tr key={`${c.period}-${c.hour}-${c.scenario}-${c.kind}`} data-applicable={c.applicable ? 'yes' : 'no'}>
               <td className={TD}>p{c.period} h{c.hour}</td>
-              <td className={TD}>{c.scenario}</td>
+              <td className={TD}>{c.scenario.replace(/_/g, ' ')}</td>
               <td className={TD}>{c.event}</td>
               <td className={TD}>{c.kind} ({c.unit})</td>
               <td className={TD}>{num(c.current)}</td>
