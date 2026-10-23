@@ -302,3 +302,16 @@ def test_invalid_model_weights_are_refused(client, project, session_ctx, weight)
     )
     assert res.status_code == 422, res.text
     assert "weight" in res.json()["detail"]["message"]
+
+
+def test_two_pending_sides_default_to_their_own_target_generators(
+    client, project, session_ctx
+):
+    ctx = session_ctx(client)
+    ctx.network.add("Carrier", "solar")
+    ctx.network.add("Generator", "g_solar", bus="B", carrier="solar", p_nom=10)
+    wind = _pending(ctx, 0.3, point="g_a")
+    solar = _pending(ctx, 0.4, point="g_solar", technology="solar")
+    out = _compare(client, project, f"pending:{wind}:g_a", f"pending:{solar}:g_solar")
+    assert out["a"]["flh"] == 2628.0 and out["b"]["flh"] == 3504.0
+    assert out["delta"]["flh"] == 876.0

@@ -264,3 +264,26 @@ def test_an_untuned_native_tracking_preset_does_not_claim_user_tuning():
         }
     tuned = resolve_params("cdte-horizontal-tracking", "solar", {"losses": 0.1})
     assert tuned["tuning"] == {"losses": 0.1}
+
+
+def test_tuning_receipts_come_from_flat_settings_not_caller_metadata():
+    for fabricated in (None, {"losses": 0.9}):
+        got = _generate(
+            params={
+                "tuning": fabricated,
+                "tuning_not_applied": ["losses"],
+                "custom_source_param": 42,
+            }
+        )
+        assert "tuning" not in got.meta and "tuning_not_applied" not in got.meta
+        assert got.meta["params"]["custom_source_param"] == 42
+        assert got.series.equals(_generate().series)
+    got = _generate(
+        params={
+            "losses": 0.1,
+            "tuning": {"losses": 0.9},
+            "tuning_not_applied": ["losses"],
+        }
+    )
+    assert got.meta["tuning"] == {"losses": 0.1}
+    assert "tuning_not_applied" not in got.meta

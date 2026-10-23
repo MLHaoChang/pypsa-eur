@@ -175,6 +175,9 @@ def apply_to_params(
 ) -> dict[str, Any]:
     """Map flat settings onto fresh embedded atlite configs without mutation."""
     out = copy.deepcopy(dict(params))
+    # These are derived receipts, never source overrides or caller authority.
+    out.pop("tuning", None)
+    out.pop("tuning_not_applied", None)
     selected = set(params) if keys is None else set(keys)
     tuned = {
         f["key"]: out[f["key"]]

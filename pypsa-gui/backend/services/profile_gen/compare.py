@@ -43,8 +43,6 @@ def resolve_sides(ctx, proj_dir, a, b, component=None):
     parsed = [_parse_side(a), _parse_side(b)]
     if component is None:
         component = next((name for kind, name, _ in parsed if kind == "current"), None)
-    if component is None:
-        component = next((point for _, _, point in parsed if point), None)
     return (
         side_series(ctx, proj_dir, a, component),
         side_series(ctx, proj_dir, b, component),
