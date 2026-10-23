@@ -3,7 +3,7 @@
 
 # RP-07 — before/after comparison
 
-Status: ready-for-agent
+Status: ready-for-agent (outsourced tasks G-a then G-b, docs/agents/outsourced.md)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: RP-06 (works without it for current vs pending)

@@ -3,7 +3,7 @@
 
 # RP-12 — representative-week templates (Energy Hub)
 
-Status: ready-for-agent (RP-Q5 = A: calendar dates)
+Status: ready-for-agent (RP-Q5 = A: calendar dates; remainder in outsourced tasks G-a/G-b, docs/agents/outsourced.md)
 Type: task
 Baseline: master `5d5bf26b83aa18c9a2a0a3418d3beeecccc8d086`
 Blocked by: RP-03
