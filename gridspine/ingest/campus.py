@@ -447,6 +447,14 @@ def _connected_from(start, edges, buses):
     return seen
 
 
+def campus_f_hz(c) -> int:
+    """The campus's nominal frequency: ``campus.f_hz``, 50 or 60, 50 when unstated."""
+    f_hz = c.get("f_hz", 50)
+    if f_hz not in (50, 60):
+        raise ContractError(f"campus.f_hz must be 50 or 60, got {f_hz!r}")
+    return f_hz
+
+
 def build_campus(spec) -> Campus:
     """Validate a campus description (the mapping, see the module docstring)
     and build its pandapower net."""
@@ -460,9 +468,7 @@ def build_campus(spec) -> Campus:
         if key not in c:
             raise ContractError(f"campus: missing {key!r}")
     name = str(c.get("name") or "CAMPUS")
-    f_hz = c.get("f_hz", 50)
-    if f_hz not in (50, 60):
-        raise ContractError(f"campus.f_hz must be 50 or 60, got {f_hz!r}")
+    f_hz = campus_f_hz(c)
     rows = []
 
     # buses: the PCC first, then the rest in file order

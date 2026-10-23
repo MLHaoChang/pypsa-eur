@@ -3,7 +3,7 @@
 
 # 60 Hz throughout (nominal frequency carried, not assumed)
 
-Status: done
+Status: done (09a gridspine: #686; 09b island MILP f0: claude/dc-09b-island-sixty-hz)
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine)
