@@ -20,7 +20,7 @@ import { H2Icon } from '../../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { openEconomicAssumptions } from '../flowNavigation'
+import { openEconomicAssumptions, openFaultLevelEditor } from '../flowNavigation'
 import { isRenewableCarrier } from '../../utils/carriers'
 import { networkApi } from '../../api/network'
 import { simulationApi } from '../../api/simulation'
@@ -1023,6 +1023,8 @@ export function ehBusPayload(fs: FS, current: object): Record<string, unknown> {
     if (fs[k] === 'true' || k in row) out[k] = fs[k] === 'true'
   }
   for (const k of EH_BUS_NUMS) {
+    // A PoC bus's fault level is edited in Connection & grid, never from this form.
+    if (k === 'eh_sk_mva' && row.eh_poc === true) continue
     const v = no(fs, k)
     if (v !== null || k in row) out[k] = v
   }
@@ -1040,7 +1042,8 @@ export function ehLinkPayload(fs: FS, current: object): Record<string, unknown> 
   return role !== '' || 'eh_role' in cur ? { eh_role: role } : {}
 }
 
-export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {
+/** `poc`: the bus is saved as a point of connection, so its fault level is edited in Connection & grid. */
+export function EhBusInputs({ fs, set, poc = false }: { fs: FS; set: SetFS; poc?: boolean }) {
   // Hover text comes from the guide catalogue (P21) — the same wording the
   // tour and the assistant use; the literals are the offline fallback.
   const tip = {
@@ -1053,7 +1056,18 @@ export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {
     <div data-testid="eh-bus-fields" className="col-span-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
       <ChkInput label="Grid point of connection (PoC)" k="eh_poc" fs={fs} set={set} tip={tip.poc} />
       <ChkInput label="Critical bus" k="eh_critical" fs={fs} set={set} tip={tip.crit} />
-      <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA" tip={tip.sk} />
+      {poc ? (
+        // One editor per value: a PoC bus's fault level is set in Connection & grid, beside its source.
+        <div data-testid="eh-sk-readonly" className="flex flex-col gap-0.5">
+          <span className="text-[9px] text-muted truncate"><InfoTip text={tip.sk}>Short-circuit level (MVA)</InfoTip></span>
+          <span className="text-[10px] font-mono">{fs.eh_sk_mva ? fs.eh_sk_mva : 'not set'}</span>
+          <button type="button" onClick={openFaultLevelEditor} className="self-start text-[10px] text-accent underline">
+            Edit in Connection &amp; grid ›
+          </button>
+        </div>
+      ) : (
+        <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA" tip={tip.sk} />
+      )}
       <NumInput label="IBR capacity" k="eh_ibr_mva" fs={fs} set={set} unit="MVA" tip={tip.ibr} />
     </div>
   )
