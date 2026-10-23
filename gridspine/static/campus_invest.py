@@ -179,8 +179,9 @@ The re-check's taps are returned as ``taps`` (``campus_taps.TAP_COLUMNS``),
 and the compliance detail of the campus voltage names the taps at its
 worst hour when any moved.
 
-Steady state only: no dynamics, no harmonics, no tap-changer dynamics or
-wear, no off-circuit tap optimisation.
+Steady state only: no dynamics, no harmonics (the separate screen is
+``static/harmonics.py``), no tap-changer dynamics or wear, no off-circuit tap
+optimisation.
 Allowed to import pandapower (``static/``); never pypsa.
 """
 import copy
