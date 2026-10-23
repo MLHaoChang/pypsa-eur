@@ -312,6 +312,21 @@ describe('CampusElectricalPanel', () => {
     expect(row.textContent).not.toMatch(/pass|fail/)
   })
 
+  it('shows an unknown check that lacks an input as "not checked", not "no limit"', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_q_band', status_as_is: 'unknown', status_with_measures: 'unknown', value: NaN, limit: NaN,
+      unit: 'Mvar', worst_period: null, worst_hour: null, clause: 'generic clause', source: 'code',
+      detail: 'no PCC active power for the studied hours',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_q_band')
+    expect(row.textContent).toContain('not checked')
+    expect(row.textContent).toContain('no PCC active power')
+    expect(row.textContent).not.toContain('no limit')
+  })
+
   it('names what needs an RMS study under the compliance table, and says nothing when nothing does', async () => {
     const state = sized()
     state.results!.reported_requirements = [

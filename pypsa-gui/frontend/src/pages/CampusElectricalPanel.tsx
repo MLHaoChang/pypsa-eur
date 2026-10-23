@@ -30,7 +30,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
 import {
-  campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind,
+  campusApi, errorText, isActiveRun, isNoAnswer, isOtherKind, NO_LIMIT_DETAIL,
   type CampusRunJob, type CampusSettings, type CampusState, type CheckStatus, type ComplianceRow,
   type InvestedComplianceRow, type InvestmentRow, type MilpJobRecord, type TransformerSizing,
 } from '../api/campusElectrical'
@@ -75,7 +75,7 @@ const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   pcc_power_factor: 'Minimum power factor at the PCC',
 }
 const STATUS_TEXT: Record<CheckStatus, string> = {
-  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'no limit',
+  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'not checked',
 }
 const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
   pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn', unknown: 'neutral',
@@ -603,8 +603,10 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
   )
 }
 
-function StatusTag({ s }: { s: CheckStatus }) {
-  return <Tag tone={STATUS_TONE[s]}>{STATUS_TEXT[s]}</Tag>
+function StatusTag({ s, detail }: { s: CheckStatus; detail?: string | null }) {
+  // unknown is "no limit" only when the profile sets none; a missing input is "not checked", its detail says which
+  const text = s === 'unknown' && detail === NO_LIMIT_DETAIL ? 'no limit' : STATUS_TEXT[s]
+  return <Tag tone={STATUS_TONE[s]}>{text}</Tag>
 }
 
 /** `show` picks the part of the results a Results tab mounts: the grid-code compliance
@@ -667,8 +669,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                 return (
                   <tr key={c.check} data-testid={`compliance-${c.check}`} className="border-t border-border">
                     <td className="py-1 pr-3 whitespace-nowrap align-top">{CHECK_LABEL[c.check] ?? c.check}</td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} /></td>
-                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_as_is} detail={c.detail} /></td>
+                    <td className="pr-3 align-top"><StatusTag s={c.status_with_measures} detail={detail} /></td>
                     <td data-testid={`compliance-worst-${c.check}`} className="pr-3 whitespace-nowrap align-top tabular-nums">
                       {num(value, 3)} {c.unit} <span className="block text-muted">{at}</span>
                     </td>

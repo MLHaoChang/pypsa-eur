@@ -233,6 +233,10 @@ export interface CostBasis {
   currency: string
 }
 
+/** The detail of an `unknown` row whose limit the profile does not set (gridspine `NO_LIMIT`). Any other
+ *  `unknown` row lacks an input (P_ref, the PCC P, an hour on a side with a limit). */
+export const NO_LIMIT_DETAIL = 'The grid code sets no limit for this.'
+
 /** What the grid code requires that no steady-state check can show (status `reported`, never a verdict). */
 export interface ReportedRequirement {
   id: string
