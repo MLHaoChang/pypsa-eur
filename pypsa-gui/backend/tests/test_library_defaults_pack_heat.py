@@ -138,3 +138,35 @@ def test_a_scaled_money_unit_keeps_its_currency():
         ["EUR", "EUR", "EUR", "GBP", None, None]
     assert D.UNIT_CONVERSIONS[("MEUR/MW", "EUR/MW")] == 1e6
     assert D.UNIT_CONVERSIONS[("kEUR/MWh", "EUR/MWh")] == 1000.0
+
+
+@pytest.mark.parametrize("tech,eff", [("electric-boiler-steam", 0.99), ("electric-process-heater", 1.0),
+                                      ("industrial-heat-pump-ht", 3.05)])
+def test_a_heat_link_is_priced_per_mw_of_heat_out(new, tech, eff):
+    """p_nom is the electrical input (bus0); the row is per MW of heat, so it scales by the heat bus's
+    efficiency (the heat pump's COP, with its low-grade source drawn on bus2)."""
+    import pypsa
+
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = pypsa.Network()
+    n.add("Bus", "ac", carrier="AC")
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Bus", "low", carrier="low-grade heat")
+    n.add("Link", "u", bus0="ac", bus1="heat", bus2="low", efficiency=eff,
+          efficiency2=-(eff - 1) if eff > 1 else 0.0, p_nom_extendable=True)
+    out = price_from_pack(n, "links", "u", tech, version=NEW)
+    assert out["scale"] == pytest.approx(eff) and out["capacity_basis"] == "output_product"
+    assert n.links.at["u", "overnight_cost"] == pytest.approx(eff * new.value(f"{tech}.investment.overnight").value)
+
+
+def test_the_heat_store_is_priced_per_mwh():
+    import pypsa
+
+    from services.library.defaults_pack.pricing import price_from_pack
+
+    n = pypsa.Network()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Store", "tes", bus="heat", carrier="heat", e_nom_extendable=True)
+    out = price_from_pack(n, "stores", "tes", "thermal-storage-molten-salt", version=NEW)
+    assert out["scale"] == 1.0 and out["includes_grid_connection"] is False
