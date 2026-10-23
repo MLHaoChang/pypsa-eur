@@ -42,6 +42,9 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   const paths = (profile.voltage_bands ?? []).map((_, i) => `voltage_bands[${i}]`)
   paths.push('q_range_demand', 'rvc_limit_pct')
   if (profile.campus_voltage) paths.push('campus_voltage')
+  for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading'] as const) {
+    if (profile[key]) paths.push(key)
+  }
   return paths
 }
 
@@ -57,13 +60,22 @@ function limitLabel(path: string): string {
     q_range_demand: 'Reactive range at the PCC',
     rvc_limit_pct: 'Rapid voltage change',
     campus_voltage: 'Voltage inside the campus',
+    rvc_limit_infrequent_pct: 'Rapid voltage change, infrequent',
+    q_capability_pq: 'Q band against P at the PCC',
+    pf_min_lagging: 'Minimum power factor, lagging',
+    pf_min_leading: 'Minimum power factor, leading',
   }[path] ?? path
 }
 
 function limitValue(path: string, lim: GridLimit): string {
   if (path.startsWith('voltage_bands')) return `${lim.kv_min}–${lim.kv_max} kV: ${lim.v_min}–${lim.v_max} pu`
   if (path === 'q_range_demand') return `${lim.value} × P_ref`
-  if (path === 'rvc_limit_pct') return `${lim.value} %`
+  if (path === 'rvc_limit_pct' || path === 'rvc_limit_infrequent_pct') return `${lim.value} %`
+  if (path === 'pf_min_lagging' || path === 'pf_min_leading') return `${lim.value}`
+  if (path === 'q_capability_pq') {
+    const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
+    return points.map(([p, lo, hi]) => `P ${p}: ${lo}…${hi}`).join('; ') + ' pu'
+  }
   return `${lim.v_min}–${lim.v_max} pu`
 }
 

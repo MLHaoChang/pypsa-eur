@@ -296,6 +296,21 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-pcc_voltage').textContent).toContain('not re-checked')
   })
 
+  it('shows a check whose limit the profile does not set as unknown, never pass or fail', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_power_factor', status_as_is: 'unknown', status_with_measures: 'unknown', value: NaN, limit: NaN,
+      unit: '', worst_period: null, worst_hour: null, clause: '', source: 'assumed', detail: 'no limit set',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_power_factor')
+    expect(row.textContent).toContain('Power factor at the PCC')
+    expect(row.textContent).toContain('unknown')
+    expect(row.textContent).toContain('no limit set')
+    expect(row.textContent).not.toMatch(/pass|fail/)
+  })
+
   it('labels a transformer group the investment buys as planned, not as a bare verdict', async () => {
     // A drafted rating can pass while the investment still buys the group
     // (a placeholder 1 x 100 MVA beside 3 x 25 MVA bought for N-1): the verdict

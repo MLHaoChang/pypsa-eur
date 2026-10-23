@@ -118,9 +118,11 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
     return { label, value: '', state: 'not_run', open,
       reason: 'The grid checks (voltage, loading, reactive power) have not run.' }
   }
-  const pass = rows.filter(r => r.status_with_measures === 'pass').length
+  // a check whose limit the profile does not set is unknown: it is neither passed nor counted
+  const judged = rows.filter(r => r.status_with_measures !== 'unknown')
+  const pass = judged.filter(r => r.status_with_measures === 'pass').length
   return {
-    label, value: `${pass} of ${rows.length}`, unit: 'checks pass', open,
+    label, value: `${pass} of ${judged.length}`, unit: 'checks pass', open,
     state: campus?.stale ? 'stale' : 'ready',
     basis: 'Grid checks, with the proposed measures',
     reason: campus?.stale ? 'The network changed since the checks ran.' : undefined,

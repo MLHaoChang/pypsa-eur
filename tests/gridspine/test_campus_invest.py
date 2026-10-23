@@ -34,6 +34,15 @@ WIDE = ReactiveRequirement(100.0, "test band", "assumed")
 RATE = 0.05
 
 
+def _judged(comp):
+    """The rows a profile without SAGC-type limits judges. Its new PCC rows
+    (no Q band, no power-factor limit set) are unknown, never pass or fail."""
+    checks = comp.index if comp.index.name == "check" else comp["check"]
+    new = checks.isin(("pcc_q_band", "pcc_power_factor"))
+    assert set(comp[new]["status_with_measures"]) == {"unknown"}
+    return comp[~new]
+
+
 def crf(r, n):
     """Capital recovery factor, restated here: r / (1 - (1 + r)^-n)."""
     return r / (1 - (1 + r) ** -n)
@@ -174,7 +183,7 @@ def test_the_chosen_transformers_are_the_cheapest_combination_that_passes_an_ind
     comp = out["compliance"].set_index("check")
     assert list(comp.index) == list(INVEST_CHECKS)
     assert comp.at["transformer_loading", "status_as_is"] == "fail"
-    assert set(comp["status_with_measures"]) <= {"pass", "not_rated"}
+    assert set(_judged(comp)["status_with_measures"]) <= {"pass", "not_rated"}
     assert "not_rechecked" not in set(comp["status_with_measures"])
     assert out["history"].empty and out["unresolved"] == []
 
@@ -235,7 +244,7 @@ def test_a_transformer_that_meets_the_rule_but_fails_the_ac_recheck_is_escalated
     first = h.iloc[0]
     assert (first["iteration"], first["need"], first["from"], first["to"], first["check"]) == (
         1, "transformer TR1", "1 x T_CHEAP", "1 x T_OK", "transformer_loading")
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert set(_judged(out["compliance"])["status_with_measures"]) <= {"pass", "not_rated"}
 
 
 def dark_hours(*loads):
@@ -798,7 +807,7 @@ def test_the_choice_is_the_least_cost_of_every_replacement_and_addition_by_brute
     assert (chosen["action"], chosen["library_id"], chosen["units"]) == best[1:4]
     assert chosen["annualised_eur_per_a"] == pytest.approx(best[0])
     assert out["history"].empty                                               # the estimate agreed with AC
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert set(_judged(out["compliance"])["status_with_measures"]) <= {"pass", "not_rated"}
 
 
 def test_units_are_added_next_to_an_existing_pair_short_of_the_margin(tmp_path):

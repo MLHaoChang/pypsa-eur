@@ -71,12 +71,14 @@ const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   transformer_loading: 'Transformer loading',
   switchgear: 'Switchgear short circuit',
   cable_loading: 'Cable loading',
+  pcc_q_band: 'Q band against P at the PCC',
+  pcc_power_factor: 'Power factor at the PCC',
 }
 const STATUS_TEXT: Record<CheckStatus, string> = {
-  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked',
+  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'unknown',
 }
 const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
-  pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn',
+  pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn', unknown: 'neutral',
 }
 
 function num(v: number | null | undefined, digits = 2): string {

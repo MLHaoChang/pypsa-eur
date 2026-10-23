@@ -416,7 +416,8 @@ def _limits(profile: dict):
     bands = profile.get("voltage_bands")
     for i, b in enumerate(bands if isinstance(bands, list) else []):
         yield f"voltage_bands[{i}]", b
-    for key in ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr"):
+    for key in ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
+                "q_capability_pq", "pf_min_lagging", "pf_min_leading"):
         if isinstance(profile.get(key), dict):
             yield key, profile[key]
 
