@@ -3,7 +3,7 @@
 
 # Durable prolonged conversations and authoritative deployment ownership
 
-Status: claimed
+Status: ready-for-agent
 Type: task
 
 Implement persistence/deployment in steps 1, 3 and 5 of

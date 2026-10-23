@@ -3,7 +3,7 @@
 
 # Whole-application capability, parameter and navigation coverage
 
-Status: claimed
+Status: ready-for-agent
 Type: task
 
 Read [the plan](../../../docs/superpowers/plans/2026-10-10-live-voice-conversation.md)

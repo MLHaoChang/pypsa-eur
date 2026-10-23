@@ -1,6 +1,6 @@
 # The investment case flags a campus study with unresolved needs
 
-Status: ready-for-agent
+Status: done (#647, f3de776c)
 Type: task
 Blocked by: none. The producer side is on `feat/gridspine-campus-unresolved` (merge it first; it is additive, and
 the IC route on master ignores the new key until this issue lands). Numbered 05 after 01 (resolved) and 02-04.

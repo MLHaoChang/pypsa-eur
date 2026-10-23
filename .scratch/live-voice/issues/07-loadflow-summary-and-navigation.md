@@ -3,7 +3,7 @@
 
 # Fast critical-line evidence and precise assistant navigation
 
-Status: claimed
+Status: ready-for-agent
 Type: task
 
 This is one illustrative domain fixture under the mandatory

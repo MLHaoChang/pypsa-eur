@@ -3,7 +3,7 @@
 
 # CP-02 — canonical companion answers and checked evidence
 
-Status: ready-for-human
+Status: done (#241, ebbc66d4)
 Type: task
 Implementation baseline: master `d2b9f57b24aa755c71486512ab106c6543dc67c5`
 Branch: `claude/chat-companion-outcomes`
