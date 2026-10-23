@@ -1,0 +1,269 @@
+{
+  "baseline": "525b2587a1db0ebbb9ee3cfbc8adc0dc9c278a7c",
+  "scope": "workflow source review, primary-document research and existing mocked component/helper tests; not live UX or engine validation",
+  "native_files": [
+    {
+      "path": ".scratch/project-workflow/design.md",
+      "sha256": "1ec6cacaa0879cf0815a9683af8a9bc9c42273f2cf90e7dc2e6995d8cd586510",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/flowSections.ts",
+      "sha256": "ea0f60b8b8ee116cdeb80ed901726b4d87dd9c898df4ee63195708b4493a4fc1",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/flowNavigation.ts",
+      "sha256": "81f23a8c8fdb0c72affec46ea96a420a274add5bc2fbd3f68dbaf9a6fba2045f",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/HubDesignPanel.tsx",
+      "sha256": "a99ab9ab5f1b9593bcac3e78270752793ff5f75193df53949bb69eb5b9937625",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/SectionView.tsx",
+      "sha256": "f950ea3b2756f9a4e5d82aa188a34feea33151e0e7a10c438484073c7ca5140a",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/cards/GenericSiteForm.tsx",
+      "sha256": "8ff7acd37fb3a4141baaa27d75f5e052e1f47839557fe1f8403823681fd4c8d7",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/ChaptersSection.tsx",
+      "sha256": "fe75ea8d7c10a32cda00245229c73d1013a3f2d96b97f821e73b9ac6199c2d91",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/chapters.ts",
+      "sha256": "4de0b9497082819eeae90928ffede31a05ea5288928d9db7a3799673dcf750ef",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/gridReadiness/GridReadinessScorecard.tsx",
+      "sha256": "61b6576691c1561a5c7f3db65427d422162d7046ff4762454b4a0db0c397f82c",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/CampusElectricalPanel.tsx",
+      "sha256": "bd70d39f4356609f5255a0f11d4fdd1bff10691956c24c1bf8c9de4cfcf8c0a4",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/CampusIslandSection.tsx",
+      "sha256": "c8eedb6011675f52d149a9ee5689a5883036d881a80f40b1d64996303efaa2bd",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/backend/services/flow_sections.py",
+      "sha256": "e95c54240e3eec6ab20e13c11fc414d3989ee5c3f6bbf70d3ac86f5db74d44d8",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/backend/services/flow_service.py",
+      "sha256": "914fdf1c7f3f7e9fa029a130bc48fe13b186c191278d352023a5fbc1e223691a",
+      "review_kind": "source_review"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/flowSections.test.ts",
+      "sha256": "a681c95cc8b666b9663cc801987e7828ae35fdc5855fb1169454231c4933f177",
+      "review_kind": "executed_existing_test"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/layout/sidebar/FlowSectionBlock.test.tsx",
+      "sha256": "2c932640192d9aa7826e92819827dcf2eedee1b4bd53497987a4ede4c7ab2f3e",
+      "review_kind": "executed_existing_test"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/HubDesignPanel.flow.test.tsx",
+      "sha256": "abaf59f2736c920f240744c36f788dccd87d1ab2b44e14c965cf945d7c451abe",
+      "review_kind": "executed_existing_test"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/components/gridReadiness/GridReadinessScorecard.test.tsx",
+      "sha256": "df79c2393ab34a342d5beadc184a5dab2322b7633a6ad3ddb6a97fa86ab07de5",
+      "review_kind": "executed_existing_test"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/pages/hubDesign/ChaptersSection.test.tsx",
+      "sha256": "e75b4bb96071158af9d063d6c8fb8ab5c9e743ab6d12f6293879656b8e672dae",
+      "review_kind": "executed_existing_test"
+    },
+    {
+      "path": "pypsa-gui/frontend/src/App.guidedBack.test.tsx",
+      "sha256": "9c0501ce107a0e458e11960dcec57fb540646a839247713f9fa7b38d68472b4b",
+      "review_kind": "executed_existing_test"
+    }
+  ],
+  "section_contract": [
+    {
+      "id": "project",
+      "label": "Project & site"
+    },
+    {
+      "id": "carriers",
+      "label": "Carriers & processes"
+    },
+    {
+      "id": "connection",
+      "label": "Connection & grid"
+    },
+    {
+      "id": "loads",
+      "label": "Loads & demand"
+    },
+    {
+      "id": "assets",
+      "label": "Assets & sizing"
+    },
+    {
+      "id": "profiles",
+      "label": "Time series & profiles"
+    },
+    {
+      "id": "commercial",
+      "label": "Commercial & parties"
+    },
+    {
+      "id": "scenarios",
+      "label": "Scenarios & optimisation"
+    },
+    {
+      "id": "readiness",
+      "label": "Readiness \u2192 run"
+    },
+    {
+      "id": "results",
+      "label": "Results \u2192 reports"
+    }
+  ],
+  "frontend_section_ids": [
+    "project",
+    "carriers",
+    "connection",
+    "loads",
+    "assets",
+    "profiles",
+    "commercial",
+    "scenarios",
+    "readiness",
+    "results"
+  ],
+  "section_contract_match": true,
+  "new_page_observations": [
+    {
+      "id": "fit_nn_disclosure",
+      "url": "https://www.nngroup.com/articles/progressive-disclosure/",
+      "final_url": "https://www.nngroup.com/articles/progressive-disclosure/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 128515,
+      "sha256": "21e01be8c7db7ed127f58580ef841714bbc0766417789c002d82e98b894dd680"
+    },
+    {
+      "id": "fit_nn_complex",
+      "url": "https://www.nngroup.com/articles/strategies-complex-application-design/",
+      "final_url": "https://www.nngroup.com/articles/strategies-complex-application-design/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 127329,
+      "sha256": "b5eb1fb8b8b73edbe500657677e10d886607a9fa9db6964b3974348570c08cb1"
+    },
+    {
+      "id": "fit_etap_dc",
+      "url": "https://etap.com/case-study/how-etap-helps-in-the-data-center-power-system-studies",
+      "final_url": "https://etap.com/case-study/how-etap-helps-in-the-data-center-power-system-studies",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 92092,
+      "sha256": "46036906dbffbff5391a485c4c9d4a4d4c7eadb79d5a701a206af70c3e408729"
+    },
+    {
+      "id": "fit_etap_step",
+      "url": "https://etap.com/case-study/how-etap-helps-in-modeling-and-analyzing-generator-stability-during-step-loading",
+      "final_url": "https://etap.com/case-study/how-etap-helps-in-modeling-and-analyzing-generator-stability-during-step-loading",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 87672,
+      "sha256": "7f3deec6ac8af2b305b38d5640ff5c7dd2882ea8d214343ce628de04c7a0f818"
+    },
+    {
+      "id": "fit_g2g_data",
+      "url": "https://gpu2grid.io/openg2g/guide/data-pipeline/",
+      "final_url": "https://gpu2grid.io/openg2g/guide/data-pipeline/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 60610,
+      "sha256": "501845f878363fb47e84f465868f9ef12991cca7a0726db4b3aa40ff0402fcd8"
+    },
+    {
+      "id": "fit_g2g_models",
+      "url": "https://gpu2grid.io/openg2g/guide/building-simulators/",
+      "final_url": "https://gpu2grid.io/openg2g/guide/building-simulators/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 156029,
+      "sha256": "92046fc4aee19c676f1b9322312940f7f2c868402fd0257c1ffaeb2561441ead"
+    },
+    {
+      "id": "fit_dpsim_models",
+      "url": "https://sogno.energy/dpsim/docs/developer-guide/writing-a-model/add-model/",
+      "final_url": "https://sogno.energy/dpsim/docs/developer-guide/writing-a-model/add-model/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 56903,
+      "sha256": "a32195b471934bba9769578e21672e41f4973ce28b8ccc7f0d8be27ad83cb26c"
+    },
+    {
+      "id": "fit_vessim_opt",
+      "url": "https://vessim.readthedocs.io/en/latest/concepts/optimization/",
+      "final_url": "https://vessim.readthedocs.io/en/latest/concepts/optimization/",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 32727,
+      "sha256": "4c15695ded95cd79b9633b86dfb9eca5bf37f8a8989adc8c067f11c7812d39b5"
+    },
+    {
+      "id": "fit_nerc_guideline",
+      "url": "https://www.nerc.com/globalassets/our-work/guidelines/reliability/RG_Risk-Mitigation-For-Emerging-Large-Loads.pdf",
+      "final_url": "https://www.nerc.com/globalassets/our-work/guidelines/reliability/RG_Risk-Mitigation-For-Emerging-Large-Loads.pdf",
+      "status": 200,
+      "content_type": "application/pdf",
+      "bytes": 1593461,
+      "sha256": "dd8d6bef708decf72e060df1b3aff75e9db3091f4a4218f7da30b553c256f32f"
+    },
+    {
+      "id": "fit_nerc_alert",
+      "url": "https://www.nerc.com/newsroom/nerc-issues-level-3-alert-reliability-guideline-focused-on-large-load-challenges",
+      "final_url": "https://www.nerc.com/newsroom/nerc-issues-level-3-alert-reliability-guideline-focused-on-large-load-challenges",
+      "status": 200,
+      "content_type": "text/html; charset=utf-8",
+      "bytes": 52001,
+      "sha256": "59095fee0dec273346a8c13b0db42f192760896e92ddce61779bda5ed281f956",
+      "semantic_note": "Static extraction captured limited article content; detailed modeling/requirements reasoning uses the retrieved guideline PDF, not an inferred complete alert text."
+    }
+  ],
+  "prior_source_evidence": "source-observations.json",
+  "existing_frontend_tests": {
+    "command": "node node_modules/vitest/vitest.mjs run src/layout/flowSections.test.ts src/layout/sidebar/FlowSectionBlock.test.tsx src/pages/hubDesign/HubDesignPanel.flow.test.tsx src/components/gridReadiness/GridReadinessScorecard.test.tsx src/pages/hubDesign/ChaptersSection.test.tsx src/App.guidedBack.test.tsx --maxWorkers=2",
+    "files": [
+      "src/layout/flowSections.test.ts",
+      "src/layout/sidebar/FlowSectionBlock.test.tsx",
+      "src/pages/hubDesign/HubDesignPanel.flow.test.tsx",
+      "src/components/gridReadiness/GridReadinessScorecard.test.tsx",
+      "src/pages/hubDesign/ChaptersSection.test.tsx",
+      "src/App.guidedBack.test.tsx"
+    ],
+    "files_passed": 6,
+    "tests_passed": 76,
+    "tests_failed": 0,
+    "duration_seconds": 13.12,
+    "classification": "existing component/helper tests with fixtures/mocks",
+    "new_feature_usability_validation": false,
+    "live_browser_validation": false,
+    "external_engine_execution": false
+  }
+}
