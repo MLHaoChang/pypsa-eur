@@ -779,6 +779,16 @@ Discovery is advisory: dispatch still checks the exact catalogue offered to
 that model request. Metadata searches cache the catalogue index; normal tool
 selection keeps original catalogue order for prefix reuse.
 
+Goal-mode discovery can also carry matching `not_via_chat` entries (title,
+disposition, reason, page, panel) from `services/not_via_chat.py`. They are
+advisory, never offered, dispatched or added to `discovered_tools`, and use
+only space left by tools under the 3800-character budget. Guidance may therefore
+be absent; native access checks still enforce permissions. Provider names alone
+do not imply secret editing, and pausing a plan/goal is distinct from pausing
+the instance queue. `tests/test_route_chat_disposition.py` assigns every live
+method/path exactly one chat disposition; service coverage does not promise
+identical tool arguments, output size or access policy.
+
 `start_experiment` persists bounded version-2 plans without executing cases.
 `prepare_experiment` checks current static network targets, schema units/ranges,
 private candidate validity and authorized baseline evidence, then stores an exact

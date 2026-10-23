@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Capability discovery explains unsupported chat operations such as admin, sign-in, API credentials, project sharing and manual map or meter-library edits, naming the appropriate page; a backend guard detects routes with no declared chat disposition.
