@@ -1,0 +1,670 @@
+{
+  "baseline": "151fdc934d739bb790d0bd1237d85e7ac40e3719",
+  "meaning": "All48 requirements assessed; mapped does not mean satisfied or implemented. Named unknowns are retained.",
+  "mapping": [
+    {
+      "requirement_id": "T01",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T02",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T03",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T04",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T05",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T06",
+      "source_ids": [
+        "us_urdb",
+        "us_dominion",
+        "us_pge",
+        "ca_bc",
+        "ca_aeso",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Ratchet history, minimum billing demand and contracted capacity need exact account facts and supported-rule checks."
+    },
+    {
+      "requirement_id": "T07",
+      "source_ids": [
+        "us_urdb",
+        "us_dominion",
+        "us_pge",
+        "ca_bc",
+        "ca_aeso",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Ratchet history, minimum billing demand and contracted capacity need exact account facts and supported-rule checks."
+    },
+    {
+      "requirement_id": "T08",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T09",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "T10",
+      "source_ids": [
+        "ca_ieso_ga",
+        "us_urdb",
+        "us_pge"
+      ],
+      "assessment": "unsupported_calculation",
+      "remaining_gap": "System coincident-peak allocation requires distinct approved algorithm; do not substitute monthly site demand."
+    },
+    {
+      "requirement_id": "T11",
+      "source_ids": [
+        "us_urdb",
+        "us_dominion",
+        "us_pge",
+        "ca_bc",
+        "ca_hq",
+        "mx_cfe"
+      ],
+      "assessment": "unsupported_calculation",
+      "remaining_gap": "Reactive/kVA, minimum bill and standby conditions require refusal or separately tested supported implementation."
+    },
+    {
+      "requirement_id": "T12",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_hydroone",
+        "ca_ieso",
+        "ca_ieso_ga",
+        "ca_bc",
+        "mx_cfe",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Export/netting and variable riders need exact scheme and no double counting of spot supply."
+    },
+    {
+      "requirement_id": "T13",
+      "source_ids": [
+        "us_dominion",
+        "us_bpa",
+        "ca_bc",
+        "ca_aeso",
+        "mx_cfe"
+      ],
+      "assessment": "customer_input_required",
+      "remaining_gap": "Public general terms cannot supply customer connection quote, security, non-firm envelope or import entitlement."
+    },
+    {
+      "requirement_id": "T14",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_hydroone",
+        "ca_ieso",
+        "ca_ieso_ga",
+        "ca_bc",
+        "mx_cfe",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Export/netting and variable riders need exact scheme and no double counting of spot supply."
+    },
+    {
+      "requirement_id": "T15",
+      "source_ids": [
+        "us_urdb",
+        "us_pge",
+        "us_sce",
+        "us_dominion",
+        "ca_oeb",
+        "ca_hydroone",
+        "ca_aeso",
+        "ca_hq",
+        "ca_bc",
+        "mx_cfe"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Approved exact schedule/class/riders and current complete source bill required; not all fields supported."
+    },
+    {
+      "requirement_id": "W01",
+      "source_ids": [
+        "us_caiso",
+        "us_ercot",
+        "us_nyiso",
+        "us_miso",
+        "us_pjm",
+        "us_isone",
+        "us_spp",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Actual samples inspected for CAISO/NYISO/MISO/IESO/CENACE only; calendar/product/finality/rights gates still apply."
+    },
+    {
+      "requirement_id": "W02",
+      "source_ids": [
+        "us_caiso",
+        "us_ercot",
+        "us_nyiso",
+        "us_miso",
+        "us_pjm",
+        "us_isone",
+        "us_spp",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Actual samples inspected for CAISO/NYISO/MISO/IESO/CENACE only; calendar/product/finality/rights gates still apply."
+    },
+    {
+      "requirement_id": "W03",
+      "source_ids": [
+        "us_caiso",
+        "us_ercot",
+        "us_nyiso",
+        "us_miso",
+        "us_pjm",
+        "us_isone",
+        "us_spp",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Actual samples inspected for CAISO/NYISO/MISO/IESO/CENACE only; calendar/product/finality/rights gates still apply."
+    },
+    {
+      "requirement_id": "W04",
+      "source_ids": [
+        "ca_boc_fx",
+        "us_macro",
+        "mx_banxico"
+      ],
+      "assessment": "semantic_gap",
+      "remaining_gap": "Some native metadata exists; prove end-to-end USD/CAD/MXN semantics, inverse FX and valuation-date pinning."
+    },
+    {
+      "requirement_id": "W05",
+      "source_ids": [
+        "us_caiso",
+        "us_ercot",
+        "us_nyiso",
+        "us_miso",
+        "us_pjm",
+        "us_isone",
+        "us_spp",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Actual samples inspected for CAISO/NYISO/MISO/IESO/CENACE only; calendar/product/finality/rights gates still apply."
+    },
+    {
+      "requirement_id": "W06",
+      "source_ids": [
+        "us_caiso",
+        "us_ercot",
+        "us_nyiso",
+        "us_miso",
+        "us_pjm",
+        "us_isone",
+        "us_spp",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Actual samples inspected for CAISO/NYISO/MISO/IESO/CENACE only; calendar/product/finality/rights gates still apply."
+    },
+    {
+      "requirement_id": "W07",
+      "source_ids": [
+        "us_eia_ice",
+        "us_cme",
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "ca_cer"
+      ],
+      "assessment": "private_or_benchmark_only",
+      "remaining_gap": "Historical spot and scenarios are not live tradable forward curves; no unrestricted forward-price source established."
+    },
+    {
+      "requirement_id": "W08",
+      "source_ids": [
+        "us_ercot",
+        "us_caiso",
+        "us_pjm",
+        "us_isone",
+        "ca_ieso",
+        "ca_aeso",
+        "mx_cenace"
+      ],
+      "assessment": "separate_product_validation",
+      "remaining_gap": "Product-specific access, accreditation, performance and co-optimisation required; no ancillary/capacity execution inferred from LMP sample."
+    },
+    {
+      "requirement_id": "W09",
+      "source_ids": [
+        "ca_ieso",
+        "ca_ieso_ga",
+        "ca_hydroone"
+      ],
+      "assessment": "market_regime_gap",
+      "remaining_gap": "Keep renewed market and legacy HOEP separate; systempeak GA not supported by ordinary site demand model."
+    },
+    {
+      "requirement_id": "W10",
+      "source_ids": [
+        "mx_cenace",
+        "mx_cfe",
+        "mx_banxico"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Historic original-file schema inspected; current final corrected data, MXN basis and regional time conventions not certified."
+    },
+    {
+      "requirement_id": "W11",
+      "source_ids": [
+        "us_eia_fuel",
+        "us_epa_attributes",
+        "us_lbl_wind",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_with_gaps",
+      "remaining_gap": "Fuel hub/delivered heat basis and certificate scheme required; no complete free REC/CEL/carbon forward-price dataset established."
+    },
+    {
+      "requirement_id": "P01",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P02",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P03",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P04",
+      "source_ids": [
+        "us_ferc_eqr",
+        "us_eei",
+        "us_swaps",
+        "us_sec"
+      ],
+      "assessment": "native_subset_only",
+      "remaining_gap": "Fixed financial pay-as-produced native subset; no generic commodity swap/physical nomination engine."
+    },
+    {
+      "requirement_id": "P05",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P06",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P07",
+      "source_ids": [
+        "us_eei",
+        "us_sec",
+        "us_ferc_eqr",
+        "ca_bc_ppa"
+      ],
+      "assessment": "private_terms_and_engine_gap",
+      "remaining_gap": "Public legal forms give taxonomy, not complete negotiated fees, collateral or curtailment rights; unsupported forms refuse."
+    },
+    {
+      "requirement_id": "P08",
+      "source_ids": [
+        "us_eei",
+        "us_sec",
+        "us_ferc_eqr",
+        "ca_bc_ppa"
+      ],
+      "assessment": "private_terms_and_engine_gap",
+      "remaining_gap": "Public legal forms give taxonomy, not complete negotiated fees, collateral or curtailment rights; unsupported forms refuse."
+    },
+    {
+      "requirement_id": "P09",
+      "source_ids": [
+        "us_epa_attributes",
+        "us_lbl_wind",
+        "us_lbl_solar",
+        "mx_auctions"
+      ],
+      "assessment": "attribute_rights_gap",
+      "remaining_gap": "Energy/PPA price may bundle certificates; attribute ownership and matching certification require independent evidence."
+    },
+    {
+      "requirement_id": "P10",
+      "source_ids": [
+        "us_eei",
+        "us_sec",
+        "us_ferc_eqr",
+        "ca_bc_ppa"
+      ],
+      "assessment": "private_terms_and_engine_gap",
+      "remaining_gap": "Public legal forms give taxonomy, not complete negotiated fees, collateral or curtailment rights; unsupported forms refuse."
+    },
+    {
+      "requirement_id": "P11",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_ferc_eqr",
+        "us_sec",
+        "ca_ieso_procurement",
+        "ca_bc_ppa",
+        "ca_brc",
+        "mx_auctions"
+      ],
+      "assessment": "benchmark_or_reported_transaction",
+      "remaining_gap": "Coverage selection/redaction and price definition required; not complete signed private contract data."
+    },
+    {
+      "requirement_id": "P12",
+      "source_ids": [
+        "us_h2a",
+        "ca_itc",
+        "us_tax",
+        "ca_cer"
+      ],
+      "assessment": "private_or_modelled_only",
+      "remaining_gap": "Modelled break-even H2 price is not actual H2/NH3 off-take contract, product support premium or green certification."
+    },
+    {
+      "requirement_id": "F01",
+      "source_ids": [
+        "us_eia_cost",
+        "ca_cer",
+        "us_atb",
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_h2a"
+      ],
+      "assessment": "existing_subset_plus_candidates",
+      "remaining_gap": "Reuse merged PR499 overlays first; explicit source boundaries and no currency fallback for missing money rows."
+    },
+    {
+      "requirement_id": "F02",
+      "source_ids": [
+        "us_lbl_solar",
+        "us_lbl_wind",
+        "us_h2a",
+        "us_eia_cost",
+        "ca_cer"
+      ],
+      "assessment": "benchmark_not_asset_history",
+      "remaining_gap": "Selected O&M/performance data do not establish component failures, outage/restoration distribution, OEM warranty or site CMMS law."
+    },
+    {
+      "requirement_id": "F03",
+      "source_ids": [
+        "us_macro",
+        "ca_statcan",
+        "mx_inegi"
+      ],
+      "assessment": "candidate_subset",
+      "remaining_gap": "Inflation indices require series/base/observation date; CPI is not universal technology cost escalation."
+    },
+    {
+      "requirement_id": "F04",
+      "source_ids": [
+        "ca_boc_fx",
+        "us_macro",
+        "mx_banxico"
+      ],
+      "assessment": "semantic_gap",
+      "remaining_gap": "Some native metadata exists; prove end-to-end USD/CAD/MXN semantics, inverse FX and valuation-date pinning."
+    },
+    {
+      "requirement_id": "F05",
+      "source_ids": [
+        "us_macro",
+        "ca_boc_rates",
+        "mx_banxico"
+      ],
+      "assessment": "reference_not_project_quote",
+      "remaining_gap": "Observed short/long risk-free benchmarks do not supply WACC, lending spreads, debt fees or private credit terms."
+    },
+    {
+      "requirement_id": "F06",
+      "source_ids": [
+        "us_tax",
+        "ca_itc",
+        "us_h2a"
+      ],
+      "assessment": "legal_eligibility_gap",
+      "remaining_gap": "Project-specific current-law eligibility; legacy model tax assumptions do not override current IRS/CRA rules."
+    },
+    {
+      "requirement_id": "X01",
+      "source_ids": [
+        "us_urdb",
+        "us_lbl_solar",
+        "us_pjm",
+        "ca_ieso",
+        "ca_aeso",
+        "ca_bc",
+        "mx_cenace",
+        "ca_boc_fx"
+      ],
+      "assessment": "cross_cutting_gate",
+      "remaining_gap": "These illustrate provenance/rights/security policies for every source, not exclusive source coverage; apply gates to all49 families."
+    },
+    {
+      "requirement_id": "X02",
+      "source_ids": [
+        "us_urdb",
+        "us_lbl_solar",
+        "us_pjm",
+        "ca_ieso",
+        "ca_aeso",
+        "ca_bc",
+        "mx_cenace",
+        "ca_boc_fx"
+      ],
+      "assessment": "cross_cutting_gate",
+      "remaining_gap": "These illustrate provenance/rights/security policies for every source, not exclusive source coverage; apply gates to all49 families."
+    },
+    {
+      "requirement_id": "X03",
+      "source_ids": [
+        "us_urdb",
+        "us_lbl_solar",
+        "us_pjm",
+        "ca_ieso",
+        "ca_aeso",
+        "ca_bc",
+        "mx_cenace",
+        "ca_boc_fx"
+      ],
+      "assessment": "cross_cutting_gate",
+      "remaining_gap": "These illustrate provenance/rights/security policies for every source, not exclusive source coverage; apply gates to all49 families."
+    },
+    {
+      "requirement_id": "X04",
+      "source_ids": [
+        "us_urdb",
+        "us_lbl_solar",
+        "us_pjm",
+        "ca_ieso",
+        "ca_aeso",
+        "ca_bc",
+        "mx_cenace",
+        "ca_boc_fx"
+      ],
+      "assessment": "cross_cutting_gate",
+      "remaining_gap": "These illustrate provenance/rights/security policies for every source, not exclusive source coverage; apply gates to all49 families."
+    }
+  ]
+}

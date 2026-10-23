@@ -1,0 +1,72 @@
+{
+  "scope": "bounded offline source-schema inspection, not application validation",
+  "raw_records_published": false,
+  "results": {
+    "nyiso_sample": {
+      "data_rows": 360,
+      "locations": 15,
+      "hours": 24,
+      "offset_in_timestamp": false
+    },
+    "miso_sample": {
+      "data_rows": 7884,
+      "component_rows": {
+        "LMP": 2628,
+        "MCC": 2628,
+        "MLC": 2628
+      },
+      "hours_per_row": 24,
+      "time_standard": "fixed EST (source preamble)"
+    },
+    "caiso_oasis_download": {
+      "data_rows": 120,
+      "hours": 24,
+      "component_rows": {
+        "LMP": 24,
+        "MCC": 24,
+        "MCE": 24,
+        "MCL": 24,
+        "MGHG": 24
+      },
+      "value_column": "MW in PRC_LMP CSV; price semantics require query/schema context"
+    },
+    "ieso_da_csv": {
+      "data_rows": 25632,
+      "locations": 1068,
+      "delivery_date": "2026/10/21",
+      "timestamp_rule": "delivery date and delivery hour, not creation date"
+    },
+    "ieso_ozp_xml": {
+      "delivery_date": "2026-10-20",
+      "hours": 24,
+      "flags": [
+        "DSO-RD"
+      ],
+      "schema_namespace": "http://www.ieso.ca/schema"
+    },
+    "cenace_original_sample": {
+      "operating_date": "2024-03-23",
+      "status": "original historical publications, not final corrected values",
+      "versions": [
+        {
+          "entry": "PreciosMargLocales SIN MDA Dia 2024-03-23 v2024 03 22_17 15 30.csv",
+          "data_rows": 57936,
+          "nodes": 2414,
+          "header_row_1based": 8
+        },
+        {
+          "entry": "PreciosMargLocales SIN MDA Dia 2024-03-23 v2024 03 22_17 35 42.csv",
+          "data_rows": 57936,
+          "nodes": 2414,
+          "header_row_1based": 8
+        }
+      ]
+    },
+    "boc_fx": {
+      "observations": 2,
+      "series": "FXUSDCAD",
+      "unit": "CAD per USD",
+      "description": "Daily average exchange rate of the US dollar in Canadian dollars."
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "scope": "selected workbook metadata, not formula recalculation or price-history validation",
+  "raw_price_records_published": false,
+  "results": {
+    "lbl_solar_xlsx": {
+      "sha256": "b17720b13f9da9d5cf0661ac3862c992fb5d5047f3d5f628e5baa4bc3fccd087",
+      "metadata_cells_checked": {
+        "PPA Price by Project (PV only)": [
+          "A23",
+          "A25",
+          "B25",
+          "C25"
+        ],
+        "LevelTen Solar PPA Prices": [
+          "B23",
+          "B24"
+        ],
+        "Trio Solar PPA Prices": [
+          "B23",
+          "B24"
+        ],
+        "O&M Cost Time Trend": [
+          "A23"
+        ],
+        "Degradation": [
+          "A1"
+        ]
+      },
+      "executed_price_basis": "full-term levelized, real2023 dollars, 4% real discount",
+      "offered_indices_basis": "first-year nominal offers; separate third-party sources",
+      "om_scope": "includes and excludes named cost categories; not all-in site O&M",
+      "age_performance_model": "fixed-effects performance with project age"
+    },
+    "lbl_wind_xlsx": {
+      "sha256": "e8a8e72af7fb8feb52776a05b0a4d15828dd84883a6404387d190f3b4c9fed5e",
+      "metadata_cells_checked": {
+        "Wind PPAs by Plant": [
+          "A25",
+          "B25",
+          "C25",
+          "D25",
+          "E25",
+          "F25"
+        ],
+        "REC Prices": [
+          "A21",
+          "A23",
+          "A24"
+        ]
+      },
+      "executed_price_header": "Real 2025$/MWh",
+      "rec_sheet_source": "Marex Spectron; third-party rights assessment required"
+    }
+  }
+}

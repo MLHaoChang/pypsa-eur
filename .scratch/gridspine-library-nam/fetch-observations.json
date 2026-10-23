@@ -1,0 +1,1126 @@
+[
+  {
+    "id": "urdb_docs",
+    "url": "https://apps.openei.org/services/doc/rest/util_rates/",
+    "final_url": "https://apps.openei.org/services/doc/rest/util_rates/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 47744,
+    "sha256": "8e5aed22ed234a76f52ad94929deab581f221d3664f80a39bf72994f476ce248"
+  },
+  {
+    "id": "urdb_home",
+    "url": "https://apps.openei.org/USURDB/",
+    "final_url": "https://apps.openei.org/USURDB/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 49729,
+    "sha256": "d1e000cc12cadc66b80ccedd282ee66c56676fc0612e30ce1fc36cfbc0dbd78d"
+  },
+  {
+    "id": "nrel_rate_api",
+    "url": "https://developer.nrel.gov/docs/electricity/utility-rates-v3/",
+    "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+  },
+  {
+    "id": "pge_book",
+    "url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+    "final_url": "https://www.pge.com/tariffs/en/rate-information/electric-rates.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 484941,
+    "sha256": "8ff355ad1ea4507ecbef543d3ab6c557b179115d27ab40c9a3de6a65fa8ab76a"
+  },
+  {
+    "id": "pge_b20",
+    "url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_B-20.pdf",
+    "final_url": "https://www.pge.com/tariffs/assets/pdf/tariffbook/ELEC_SCHEDS_B-20.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 1957263,
+    "sha256": "99507054d39db7d21b7f8abde73f6e7c1a97558cb9feb0a960b115c90db272db"
+  },
+  {
+    "id": "sce_rates",
+    "url": "https://www.sce.com/regulatory/tariff-books/rates-pricing-choices",
+    "final_url": "https://www.sce.com/regulatory/regulatory-information/tariff-books/rates-pricing-choices",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 224667,
+    "sha256": "2d6d7ad8566fd7fed24203166b27669e2b74d17ea87382f2a64a5dd98feda4a4"
+  },
+  {
+    "id": "dominion_rates",
+    "url": "https://www.dominionenergy.com/virginia/rates-and-tariffs/business-rates",
+    "final_url": "https://www.dominionenergy.com/virginia/rates-and-tariffs/business-rates",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 219015,
+    "sha256": "bd2a1274761760ef9fb35bd0d67bc3d79167e4eeab6002bf1331e72481ea8b8a"
+  },
+  {
+    "id": "coned_rates",
+    "url": "https://www.coned.com/en/accounts-billing/your-bill/your-electric-bill/electric-rates",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "bpa_rates",
+    "url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+    "final_url": "https://www.bpa.gov/energy-and-services/rate-and-tariff-proceedings/power-rates",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 103943,
+    "sha256": "43c4f9147df3619f03df84ebd835b129c69d6f2cc2e6e8e990d03f9a6595761e"
+  },
+  {
+    "id": "eia_wholesale",
+    "url": "https://www.eia.gov/electricity/wholesale/",
+    "final_url": "https://www.eia.gov/electricity/wholesale/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 63372,
+    "sha256": "a89624b63ca1f7386944d7a4e6b8e09a8390e912c32a078ce4f6532ea1267a03"
+  },
+  {
+    "id": "eia_retail",
+    "url": "https://www.eia.gov/electricity/sales_revenue_price/pdf/table4.pdf",
+    "final_url": "https://www.eia.gov/electricity/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 55941,
+    "sha256": "a6275983b240a1035d1430b507f56ca64a6d2d00bf8bfbf1c95886a42044b0bd"
+  },
+  {
+    "id": "eia_copyright",
+    "url": "https://www.eia.gov/about/copyrights_reuse.php",
+    "final_url": "https://www.eia.gov/about/copyrights_reuse.php",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 52515,
+    "sha256": "821ec2732035327f4df9e116780a7e1a3e93afa2c885067acb192d27b2d60df3"
+  },
+  {
+    "id": "ercot_portal",
+    "url": "https://www.ercot.com/services/mdt/data-portal",
+    "final_url": "https://www.ercot.com/services/mdt/data-portal",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 67759,
+    "sha256": "9975681daac58e521df0d46b16f0fbd9f8c6cfa51254cc5bdd6990084f73b9b8"
+  },
+  {
+    "id": "ercot_da",
+    "url": "https://www.ercot.com/mp/data-products/data-product-details?id=NP4-190-CD",
+    "final_url": "https://www.ercot.com/mp/data-products/data-product-details?id=NP4-190-CD",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 64819,
+    "sha256": "0d56c392fd71b4166d93b3ca700fe8afae0c165b073a2af36aaee90cd5ec856e"
+  },
+  {
+    "id": "ercot_rt",
+    "url": "https://www.ercot.com/mp/data-products/data-product-details?id=NP6-905-CD",
+    "final_url": "https://www.ercot.com/mp/data-products/data-product-details?id=NP6-905-CD",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 65011,
+    "sha256": "4b8ef5160f63b5b67ebe75d352db1b522a3a90e444d3f6a953bf524f217f2915"
+  },
+  {
+    "id": "ercot_legal",
+    "url": "https://www.ercot.com/about/governance/legal",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "caiso_portal",
+    "url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+    "final_url": "https://www.caiso.com/systems-applications/portals-applications/open-access-same-time-information-system-oasis",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 51678,
+    "sha256": "f3e577ca7b9b4c2a7f2cf4042ad9c7d6434634926359bc70817bd9543c75b7fd"
+  },
+  {
+    "id": "miso_reports",
+    "url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+    "final_url": "https://www.misoenergy.org/markets-and-operations/real-time--market-data/market-reports/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 84930,
+    "sha256": "09b6fc266a522d69b3a0fba74e00c9b1d408e9f79fc7fe0ca54f2b2eb25c5d36"
+  },
+  {
+    "id": "miso_sample",
+    "url": "https://docs.misoenergy.org/marketreports/20261020_da_expost_lmp.csv",
+    "final_url": "https://docs.misoenergy.org/marketreports/20261020_da_expost_lmp.csv",
+    "status": 200,
+    "content_type": "application/octet-stream",
+    "bytes": 1242460,
+    "sha256": "5a1ef7504dcf5856b56df809ab24eb8715a8d809d857a2b9a76919b97b0fac06"
+  },
+  {
+    "id": "nyiso_portal",
+    "url": "https://www.nyiso.com/energy-market-operational-data",
+    "final_url": "https://www.nyiso.com/energy-market-operational-data",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 158290,
+    "sha256": "1783301771b9ccbcbeaa642d6b6901d5f19cd56a3cc33b7c9f981e6215244e8f"
+  },
+  {
+    "id": "nyiso_sample",
+    "url": "https://mis.nyiso.com/public/csv/damlbmp/20261020damlbmp_zone.csv",
+    "final_url": "https://mis.nyiso.com/public/csv/damlbmp/20261020damlbmp_zone.csv",
+    "status": 200,
+    "content_type": "text/csv",
+    "bytes": 16868,
+    "sha256": "3dabdc99fcf8afb5e6ebce19f5fb4fbc3e6c22b6f8023e92d71fee00674156ba"
+  },
+  {
+    "id": "isone_webservices",
+    "url": "https://www.iso-ne.com/participate/support/web-services-data",
+    "final_url": "https://www.iso-ne.com/participate/support/web-services-data",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 93800,
+    "sha256": "253336af8f0faf293f0b8b93375a7e9e3ce1cefd2a260fcd4759e04d375cb442"
+  },
+  {
+    "id": "spp_portal",
+    "url": "https://portal.spp.org/groups/day-ahead-market",
+    "final_url": "https://portal.spp.org/groups/day-ahead-market",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 609,
+    "sha256": "07034429e703a2a4ed7989f1b108d2e7860166460c7b46a9222564a93a5701a8"
+  },
+  {
+    "id": "pjm_dataminer",
+    "url": "https://dataminer2.pjm.com/",
+    "final_url": "https://dataminer2.pjm.com/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 1467,
+    "sha256": "6a1a478eeccd405290efea5e144d8e77da569a36736d9e2c35e583ca2feac90f"
+  },
+  {
+    "id": "pjm_terms",
+    "url": "https://www.pjm.com/legal/disclaimer.aspx",
+    "final_url": "https://www.pjm.com/not-found",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 24826,
+    "sha256": "57ca00d774b8e0ecce7d899df33f0f8ab6a1f3ba88975ef0bb0a94cdc43b425e"
+  },
+  {
+    "id": "ferc_eqr",
+    "url": "https://www.ferc.gov/power-sales-and-markets/electric-quarterly-reports-eqr",
+    "final_url": "https://www.ferc.gov/power-sales-and-markets/electric-quarterly-reports-eqr",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 291760,
+    "sha256": "1ca85e7d57df7726e55ba8508089d9cc9c4bf4c73b5628e92dfacd0cce9dcd02"
+  },
+  {
+    "id": "lbl_solar",
+    "url": "https://emp.lbl.gov/utility-scale-solar",
+    "final_url": "https://emp.lbl.gov/utility-scale-solar",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 56769,
+    "sha256": "199cccce0bdbf6646ba24f2d45caf9089317491005673fd84bc0689391421e8b"
+  },
+  {
+    "id": "lbl_solar2025",
+    "url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+    "final_url": "https://eta.lbl.gov/publications/us-utility-scale-solar-2025-data",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 29324,
+    "sha256": "3e6ad79b9c9fb706b8fab20d1617bcb2874f2b0067a0afe14e50ed25b17b1d7d"
+  },
+  {
+    "id": "lbl_wind",
+    "url": "https://emp.lbl.gov/wind-technologies-market-report",
+    "final_url": "https://emp.lbl.gov/wind-technologies-market-report",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 52311,
+    "sha256": "2d50c575937dc946eedb875e9c96312937adb20bda3e32df137fd53d5b11e68e"
+  },
+  {
+    "id": "ppa_sec_api",
+    "url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+    "final_url": "https://www.sec.gov/search-filings/edgar-application-programming-interfaces",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 69021,
+    "sha256": "4f37a626319446cac5db30282caadb70d741c8cf21054b048d4635b26733e9bd"
+  },
+  {
+    "id": "gridstatus_repo",
+    "url": "https://api.github.com/repos/gridstatus/gridstatus",
+    "final_url": "https://api.github.com/repos/gridstatus/gridstatus",
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "bytes": 6572,
+    "sha256": "7d082b9cab18c56461bed24294672cbac1164bbf9ea8a33f3d22c3656837339e"
+  },
+  {
+    "id": "irs_itc",
+    "url": "https://www.irs.gov/credits-deductions/clean-electricity-investment-credit",
+    "final_url": "https://www.irs.gov/credits-deductions/clean-electricity-investment-credit",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 104306,
+    "sha256": "7e12709d7207c22c4455bbb7e3a51d0608301e0bf4b9664ba6e476626a2f3586"
+  },
+  {
+    "id": "irs_ptc",
+    "url": "https://www.irs.gov/credits-deductions/clean-electricity-production-credit",
+    "final_url": "https://www.irs.gov/credits-deductions/clean-electricity-production-credit",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 106711,
+    "sha256": "b44625ed21a2a700a1665a39eab59fb404a0af3ba668e45042c7432dc45c88fe"
+  },
+  {
+    "id": "ust_yields",
+    "url": "https://home.treasury.gov/resource-center-data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2026",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "nrel_atb",
+    "url": "https://atb.nrel.gov/electricity/2025/data",
+    "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+  },
+  {
+    "id": "oeb_rates",
+    "url": "https://www.oeb.ca/open-data/electricity-distribution-rates-databases",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "oeb_ogl",
+    "url": "https://www.oeb.ca/open-data",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "ieso_directory",
+    "url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+    "final_url": "https://www.ieso.ca/en/Power-Data/Data-Directory",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 257689,
+    "sha256": "5f37b8158d5de70e57f8ba675e9cc694ccd821697c18c77a6c97189b0ac99d53"
+  },
+  {
+    "id": "ieso_renewal",
+    "url": "https://www.ieso.ca/Sector-Participants/Market-Renewal-Program",
+    "final_url": "https://www.ieso.ca/Error-404?item=%2fsector-participants%2fmarket-renewal-program&user=extranet%5cAnonymous&site=IESO",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 38510,
+    "sha256": "785192284f47d0fc787e3a88716cfa4b9a268ba44b58a6bf258aa2683a6366ef"
+  },
+  {
+    "id": "ieso_reports",
+    "url": "https://reports-public.ieso.ca/public/",
+    "final_url": "https://reports-public.ieso.ca/public/",
+    "status": 200,
+    "content_type": "text/html;charset=ISO-8859-1",
+    "bytes": 26331,
+    "sha256": "aba89448cc0999dc3711c7d46b4a05d3965c07a8e06d92765732bfa23d83b50a"
+  },
+  {
+    "id": "ieso_lmp",
+    "url": "https://reports-public.ieso.ca/public/DAHourlyEnergyLMP/",
+    "final_url": "https://reports-public.ieso.ca/public/DAHourlyEnergyLMP/",
+    "status": 200,
+    "content_type": "text/html;charset=ISO-8859-1",
+    "bytes": 33224,
+    "sha256": "c6d82a0371728471a61a400aa986e99e8a919cfa193872ef5942ae61ff0a933a"
+  },
+  {
+    "id": "ieso_ga",
+    "url": "https://www.ieso.ca/en/Power-Data/Price-Overview/Global-Adjustment",
+    "final_url": "https://www.ieso.ca/en/Power-Data/Price-Overview/Global-Adjustment",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 65486,
+    "sha256": "c8e5fe7285a040208b70460da2393444f90028f3647a01ae5cb09d01a4a487f4"
+  },
+  {
+    "id": "ieso_ici",
+    "url": "https://www.ieso.ca/Sector-Participants/Settlements/Global-Adjustment-and-Peak-Demand-Factor",
+    "final_url": "https://www.ieso.ca/Sector-Participants/Settlements/Global-Adjustment-and-Peak-Demand-Factor",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 51956,
+    "sha256": "d7c8da97e13cf451a2191b82e6fbf80aa723dc8eead61ae6cde4eed5ff9c55e9"
+  },
+  {
+    "id": "ieso_terms",
+    "url": "https://www.ieso.ca/Corporate-IESO/Legal-Notice",
+    "final_url": "https://www.ieso.ca/Error-404?item=%2fcorporate-ieso%2flegal-notice&user=extranet%5cAnonymous&site=IESO",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 38510,
+    "sha256": "b4e54382b255159671ab75d743e6d3e8de7cad9ee7e562ae18337335f6bba6a5"
+  },
+  {
+    "id": "hq_rates",
+    "url": "https://www.hydroquebec.com/business/customer-space/rates/",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "hq_book",
+    "url": "https://www.hydroquebec.com/data/documents-donnees/pdf/electricity-rates.pdf",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "bchydro_tariff",
+    "url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+    "final_url": "https://www.bchydro.com/toolbar/about/strategies-plans-regulatory/tariffs-terms-conditions/electric-tariff.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 477484,
+    "sha256": "cdf928abb8aee671cceeb4babe67cec2c41d90665b98b053ea1a988ba0be87f8"
+  },
+  {
+    "id": "bc_call",
+    "url": "https://www.bchydro.com/work-with-us/selling-clean-energy/2024-call-for-power.html",
+    "final_url": "https://www.bchydro.com/work-with-us/selling-clean-energy/2024-call-for-power.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 479658,
+    "sha256": "6b18212be054577dc1e4dd676e1fcec8e675638e3fafed4ea0007b1ea4681bcb"
+  },
+  {
+    "id": "aeso_api",
+    "url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+    "final_url": "https://www.aeso.ca/market/market-and-system-reporting/aeso-application-programming-interface-api/",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 68709,
+    "sha256": "168d39f2689d8e34bd54e1e2c76828f4cc8bbe696d0da1fdcef5631c081a5a10"
+  },
+  {
+    "id": "aeso_tariff",
+    "url": "https://www.aeso.ca/rules-standards-and-tariff/tariff/",
+    "final_url": "https://www.aeso.ca/rules-standards-and-tariff/tariff/",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 103349,
+    "sha256": "8e17db884c8f38e1e22ebcfcf7a464172f0aee341d37cbc4ced2818d0edf5e6b"
+  },
+  {
+    "id": "aeso_terms",
+    "url": "https://www.aeso.ca/legal/",
+    "final_url": "https://www.aeso.ca/legal/",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 74123,
+    "sha256": "c24d47b615f0197e36434027df3869685b5222d75ad918c55ad4950454240f14"
+  },
+  {
+    "id": "brc_canada",
+    "url": "https://businessrenewables.ca/",
+    "final_url": "https://businessrenewables.ca/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 55861,
+    "sha256": "a765a9b92bbaacbb6cfbb6184cda7958b8a0910102ccc35420b1cb24680cfcea"
+  },
+  {
+    "id": "boc_fx",
+    "url": "https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=2026-10-19&end_date=2026-10-20",
+    "final_url": "https://www.bankofcanada.ca/valet/observations/FXUSDCAD/json?start_date=2026-10-19&end_date=2026-10-20",
+    "status": 200,
+    "content_type": "application/json; charset=utf-8",
+    "bytes": 817,
+    "sha256": "38e44a9857dcd0bb3a3de1d1aa1c7b6a9952d0f09caa194e9503d36eb87fe2fb"
+  },
+  {
+    "id": "boc_terms",
+    "url": "https://www.bankofcanada.ca/terms/",
+    "final_url": "https://www.bankofcanada.ca/terms/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 144688,
+    "sha256": "5edbcf269dd1efa0830ed4389142c77ba3219bd600e6b34795012f90df91cfa8"
+  },
+  {
+    "id": "canada_itc",
+    "url": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/business-tax-credits/clean-economy-itc.html",
+    "final_url": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/corporations/business-tax-credits/clean-economy-itc.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 24935,
+    "sha256": "42893df6c112c3bb3487d48c68af3273f057c624fdf1de6e7980b9a3384e4032"
+  },
+  {
+    "id": "cfe_gdmth",
+    "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTH.aspx",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "cfe_gdmto",
+    "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCRENegocio/Tarifas/GranDemandaMTO.aspx",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "cenace_prices",
+    "url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+    "final_url": "https://www.cenace.gob.mx/Paginas/SIM/Reportes/PreEnerServConMDA.aspx",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 66585,
+    "sha256": "d3122af98278af6fdeeaa6d83d88901cbd41a0433d66a99a93a4b62f92b25fdb"
+  },
+  {
+    "id": "cenace_auctions",
+    "url": "https://www.cenace.gob.mx/Paginas/SIM/SubastasLP.aspx",
+    "final_url": "https://www.cenace.gob.mx/Paginas/SIM/SubastasLP.aspx",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 34901,
+    "sha256": "f61e73c3169f4f83223d9954a067152b59b0a49712e81eeccdd02e8ff1889682"
+  },
+  {
+    "id": "cenace_gov",
+    "url": "https://www.gob.mx/cenace/acciones-y-programas/subastas-de-largo-plazo",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "banxico_api",
+    "url": "https://www.banxico.org.mx/SieAPIRest/service/v1/",
+    "final_url": "https://www.banxico.org.mx/SieAPIRest/service/v1/",
+    "status": 200,
+    "content_type": "application/json;charset=UTF-8",
+    "bytes": 2,
+    "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+  },
+  {
+    "id": "inegi_inpc",
+    "url": "https://www.inegi.org.mx/temas/inpc/",
+    "final_url": "https://www.inegi.org.mx/temas/inpc/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 4399,
+    "sha256": "58b48de4b21dcef1632e59ae8cdff5a7c22e818bb483038eed30286b0340e811"
+  },
+  {
+    "id": "inegi_terms",
+    "url": "https://www.inegi.org.mx/inegi/terminos.html",
+    "final_url": "https://www.inegi.org.mx/inegi/terminos.html",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 10442,
+    "sha256": "97e97599169f75f455877e85edffcf941d512f56c5c00197ebfec783d802c67a"
+  },
+  {
+    "id": "cer_energy",
+    "url": "https://www.cer-rec.gc.ca/en/data-analysis/canada-energy-future/",
+    "final_url": "https://www.cer-rec.gc.ca/en/data-analysis/canada-energy-future/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 31393,
+    "sha256": "1465ad4295750dd859f91c3e1e481d13cac03aabbd7d57cabd4ee7ff19c819ba"
+  },
+  {
+    "id": "canada_ogl",
+    "url": "https://open.canada.ca/en/open-government-licence-canada",
+    "final_url": "https://open.canada.ca/en/open-government-licence-canada",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 23079,
+    "sha256": "d7648d6d694d66a0891502f85c3383f9263d5e541b47e14fbf33450974af158f"
+  },
+  {
+    "id": "lbl_oedi",
+    "url": "https://data.openei.org/submissions/8541",
+    "final_url": "https://data.openei.org/submissions/8541",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 89884,
+    "sha256": "9e59a7a1a5143df5d03f6b17070d753169f1b3a723d0fb040d679374faa9015b"
+  },
+  {
+    "id": "urdb_download",
+    "url": "https://apps.openei.org/USURDB/download",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "ferc_917",
+    "url": "https://www.ferc.gov/eqr-order-917",
+    "final_url": "https://www.ferc.gov/order-917",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 257184,
+    "sha256": "a9ac6fa16a0d6881b01420f861da3fd43564bcc5757a6db4aa1512d439e10eba"
+  },
+  {
+    "id": "ferc_dictionary",
+    "url": "https://www.ferc.gov/sites/default/files/2020-11/Data_Dictionary_V3_5.pdf",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "ferc_viewer",
+    "url": "https://eqrreportviewer.ferc.gov/",
+    "final_url": "https://eqrreportviewer.ferc.gov/",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 379894,
+    "sha256": "660130b93e9988e3e559b158e16560e38b208d1469faaf01cb8ec3eec5bcef47"
+  },
+  {
+    "id": "pjm_terms2",
+    "url": "https://www.pjm.com/legal/terms-of-use",
+    "final_url": "https://www.pjm.com/not-found",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 24826,
+    "sha256": "3acc0f99cb0ec96c43b6545ce5eef8ab9e20d73bda2e5a11c14e37b9f0701277"
+  },
+  {
+    "id": "pjm_data_policy",
+    "url": "https://www.pjm.com/markets-and-operations/etools/data-miner-2",
+    "final_url": "https://www.pjm.com/markets-and-operations/etools/data-miner-2",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 78269,
+    "sha256": "da8fbbf7182e795b7d12b763229376bd9eeffb04b9cfe54c700be7b81773167c"
+  },
+  {
+    "id": "caiso_legal",
+    "url": "https://www.caiso.com/about/legal-and-regulatory",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "miso_legal",
+    "url": "https://www.misoenergy.org/legal/",
+    "final_url": "https://www.misoenergy.org/legal/overview/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 40957,
+    "sha256": "277f871f2b5d05ec47c5493fbc2baa0736883d5b66f5443dd623f4f3992ab257"
+  },
+  {
+    "id": "nyiso_legal",
+    "url": "https://www.nyiso.com/legal",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "iso_terms",
+    "url": "https://www.iso-ne.com/participate/support/website-terms-of-use",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "ieso_terms2",
+    "url": "https://www.ieso.ca/Terms-of-Use",
+    "final_url": "https://www.ieso.ca/Terms-of-Use",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 49567,
+    "sha256": "28a566bed069c9b8c0f1708b1e3db20dbc9eaf397f22633724ba107b8b66b5fa"
+  },
+  {
+    "id": "cenace_pml_manual",
+    "url": "https://www.cenace.gob.mx/DocsMEM/2022-06-24%20Manual%20T%C3%A9cnico%20SW-PML.pdf",
+    "final_url": "https://www.cenace.gob.mx/DocsMEM/2022-06-24%20Manual%20T%C3%A9cnico%20SW-PML.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 188898,
+    "sha256": "f2e6270f60b76deb145cf039f6331915e97ba70ca0e9b23afa0394a341bab972"
+  },
+  {
+    "id": "cenace_auction17",
+    "url": "https://www.cenace.gob.mx/Paginas/SIM/SubastasLP12017.aspx",
+    "final_url": "https://www.cenace.gob.mx/Paginas/SIM/SubastasLP12017.aspx",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 68502,
+    "sha256": "376ffbb1d83b24c04d3bae1e974c45f50794c79b0764da0c2f96e09523e76cc8"
+  },
+  {
+    "id": "banxico_doc",
+    "url": "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/consultaDatosSerie",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "oeb_catalog",
+    "url": "https://data.ontario.ca/api/3/action/package_search?q=electricity-distribution-rates&rows=5",
+    "final_url": "https://data.ontario.ca/api/3/action/package_search?q=electricity-distribution-rates&rows=5",
+    "status": 200,
+    "content_type": "application/json;charset=utf-8",
+    "bytes": 18065,
+    "sha256": "c64bda6563855244b7a5f8482a48bbd002e119662ab0cf6caadaa44239af9455"
+  },
+  {
+    "id": "eia_retail_data",
+    "url": "https://www.eia.gov/electricity/data.php#sales",
+    "final_url": "https://www.eia.gov/electricity/data.php#sales",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 157820,
+    "sha256": "a8aa3ef6134d064189654cd47b53534176942f73494ee031a86953ad2c32e4a1"
+  },
+  {
+    "id": "bls_cpi",
+    "url": "https://www.bls.gov/cpi/data.htm",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "statcan_cpi",
+    "url": "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1810000401",
+    "final_url": "https://www150.statcan.gc.ca/t1/tbl1/en/tv.action?pid=1810000401",
+    "status": 200,
+    "content_type": "text/html;charset=UTF-8",
+    "bytes": 95100,
+    "sha256": "cef66c3bb8c73536303533bcc4683a2f2c7b61ceb5455084053e667d3271f92e"
+  },
+  {
+    "id": "ust_yields2",
+    "url": "https://home.treasury.gov/resource-center-data-chart-center/interest-rates/pages/textview.aspx?data=yieldYear&year=2026",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "dominion_gs4",
+    "url": "https://cdn-dominionenergy-prd-001.azureedge.net/-/media/content/rates-and-tariffs/pdfs/virginia/large-business/schedule-gs4.pdf?rev=455480cb8074465f9f963ee9438d74bd&hash=8b4d0ef71c0ac4ab2e5775852fdf6eb1",
+    "final_url": "https://cdn-dominionenergy-prd-001.azureedge.net/-/media/content/rates-and-tariffs/pdfs/virginia/large-business/schedule-gs4.pdf?rev=455480cb8074465f9f963ee9438d74bd&hash=8b4d0ef71c0ac4ab2e5775852fdf6eb1",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 168637,
+    "sha256": "a589dd649f40eb6168866051918640ae0a04448ece2d4207967a677b82137c6b"
+  },
+  {
+    "id": "dominion_gs3",
+    "url": "https://cdn-dominionenergy-prd-001.azureedge.net/-/media/content/rates-and-tariffs/pdfs/virginia/large-business/schedule-gs3.pdf?rev=116652eee88b4a358d7d8d77230ebde8&hash=bf87394d7e84653924490e068deef43a",
+    "final_url": "https://cdn-dominionenergy-prd-001.azureedge.net/-/media/content/rates-and-tariffs/pdfs/virginia/large-business/schedule-gs3.pdf?rev=116652eee88b4a358d7d8d77230ebde8&hash=bf87394d7e84653924490e068deef43a",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 301899,
+    "sha256": "a3535122888e03d4311e00e369199af503905d354317f7855fae4f62823cfea4"
+  },
+  {
+    "id": "ieso_da_csv",
+    "url": "https://reports-public.ieso.ca/public/DAHourlyEnergyLMP/PUB_DAHourlyEnergyLMP.csv",
+    "final_url": "https://reports-public.ieso.ca/public/DAHourlyEnergyLMP/PUB_DAHourlyEnergyLMP.csv",
+    "status": 200,
+    "content_type": "text/csv",
+    "bytes": 1007532,
+    "sha256": "eea73d2c6358d672665d6e554964d60da9148cdf3f61a4fdd2ebcdbd5bb3c4ab"
+  },
+  {
+    "id": "eia_ice2026",
+    "url": "https://www.eia.gov/electricity/wholesale/xls/ice_electric-2026.xlsx",
+    "final_url": "https://www.eia.gov/electricity/wholesale/xls/ice_electric-2026.xlsx",
+    "status": 200,
+    "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "bytes": 78207,
+    "sha256": "ab763449aa997c3ee6e845f65b06a9919d5e68c071b6cba9e6479110d14472de"
+  },
+  {
+    "id": "urdb_record",
+    "url": "https://apps.openei.org/USURDB/rate/view/539fb812ec4f024bc1dc1321",
+    "final_url": "https://apps.openei.org/USURDB/rate/view/539fb812ec4f024bc1dc1321",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 156695,
+    "sha256": "3f776e6b658ea9c1198250642dc441ac3a84ad433745533e3f21aed80b00a8bc"
+  },
+  {
+    "id": "cfe_business",
+    "url": "https://www.cfe.mx/negocio/tarifas/Pages/default.aspx",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "cfe_industrial",
+    "url": "https://www.cfe.mx/industria/tarifas/Pages/default.aspx",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "mx_data_catalog",
+    "url": "https://datos.gob.mx/busca/api/3/action/package_search?q=tarifas-electricidad&rows=5",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "mx_cne",
+    "url": "https://www.gob.mx/cne",
+    "error": "HTTP Error 403: Forbidden"
+  },
+  {
+    "id": "cme_market_data",
+    "url": "https://www.cmegroup.com/market-data.html",
+    "final_url": "https://www.cmegroup.com/market-data.html",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 256807,
+    "sha256": "752510aa3262dd28e27b0811a71ac78a2c810dc0db3ee964dd49bfc53795f643"
+  },
+  {
+    "id": "epa_recs",
+    "url": "https://www.epa.gov/green-power-markets/renewable-energy-certificates-recs",
+    "final_url": "https://www.epa.gov/green-power-markets/renewable-energy-certificates-recs",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 73185,
+    "sha256": "6c6bd688115f8ab81d489b7ca2f2655174767f65b58de18be5bfe87b1533ba91"
+  },
+  {
+    "id": "caiso_oasis_download",
+    "url": "https://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP&startdatetime=20261020T07:00-0000&enddatetime=20261021T07:00-0000&version=1&market_run_id=DAM&node=TH_NP15_GEN-APND&resultformat=6",
+    "final_url": "https://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP&startdatetime=20261020T07:00-0000&enddatetime=20261021T07:00-0000&version=1&market_run_id=DAM&node=TH_NP15_GEN-APND&resultformat=6",
+    "status": 200,
+    "content_type": "application/x-zip-compressed",
+    "bytes": 1674,
+    "sha256": "309506ef6ddf21d6894eeaae8d574d6e299d0fcbd8640c1968621a6c4e21d814"
+  },
+  {
+    "id": "ercot_terms2",
+    "url": "https://www.ercot.com/help/terms-and-conditions",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "iesodataguide",
+    "url": "https://reports-public.ieso.ca/docrefs/helpfile/DAHourlyEnergyLMP_h1.pdf",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "bc_legal",
+    "url": "https://www.bchydro.com/siteinfo/legal.html",
+    "final_url": "https://www.bchydro.com/siteinfo/legal.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 468390,
+    "sha256": "a4b729076600e573d54ec72b43a30a856e9a06c60ee1b9a8c95a79fd76530e66"
+  },
+  {
+    "id": "bc_epa",
+    "url": "https://www.bchydro.com/work-with-us/selling-clean-energy/electricity-purchase-agreements.html",
+    "final_url": "https://www.bchydro.com/work-with-us/selling-clean-energy/electricity-purchase-agreements.html",
+    "status": 200,
+    "content_type": "text/html;charset=utf-8",
+    "bytes": 481452,
+    "sha256": "a01acae1a93ebf132389c6e7ba52f71f93a745d12b1eb16bbcffde6ced0072a4"
+  },
+  {
+    "id": "aeso_dts",
+    "url": "https://www.aeso.ca/assets/documents/Rate-DTS-effective-2026-01-01.pdf",
+    "final_url": "https://www.aeso.ca/assets/documents/Rate-DTS-effective-2026-01-01.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 106953,
+    "sha256": "32af4c99bb9aba05eab75da02a868486808070bfc604c5f4fdf1877df95ba2d6"
+  },
+  {
+    "id": "eia_retail_xlsx",
+    "url": "https://www.eia.gov/electricity/sales_revenue_price/xls/table_6.xlsx",
+    "final_url": "https://www.eia.gov/electricity/sales_revenue_price/xls/table_6.xlsx",
+    "status": 200,
+    "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "bytes": 109818,
+    "sha256": "925e336bb8fb88982f8428e17de752fe7279546c1dd36c9e157f2a041a7dca9e"
+  },
+  {
+    "id": "oedi_licence",
+    "url": "https://creativecommons.org/licenses/by/4.0/",
+    "final_url": "https://creativecommons.org/licenses/by/4.0/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 31950,
+    "sha256": "8dda1ccec4be91fc80821d4e4fd5c568072b9a3a74b2fdc07c249a27e920ef01"
+  },
+  {
+    "id": "urdb_commercial",
+    "url": "https://apps.openei.org/USURDB/rate/view/6a4590848cec9bee0e03c3cb",
+    "final_url": "https://apps.openei.org/USURDB/rate/view/6a4590848cec9bee0e03c3cb",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 158733,
+    "sha256": "4f3aee2aabd8b3ccb192c15e8074efa5ef5b9a718ec872e97c918263b9161161"
+  },
+  {
+    "id": "ferc_dictionary_clean",
+    "url": "https://www.ferc.gov/sites/default/files/2020-11/Data_Dictionary_V3_5_Clean.pdf",
+    "final_url": "https://www.ferc.gov/sites/default/files/2020-11/Data_Dictionary_V3_5_Clean.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 336219,
+    "sha256": "8b2a7db70712869854a63aaef2db0e8f97257f133b0b351b6ce13b8dc58aaaf9"
+  },
+  {
+    "id": "ieso_ozp_xml",
+    "url": "https://reports-public.ieso.ca/public/DAHourlyOntarioZonalPrice/PUB_DAHourlyOntarioZonalPrice_20261020.xml",
+    "final_url": "https://reports-public.ieso.ca/public/DAHourlyOntarioZonalPrice/PUB_DAHourlyOntarioZonalPrice_20261020.xml",
+    "status": 200,
+    "content_type": "text/xml",
+    "bytes": 6008,
+    "sha256": "3dac4800d4a77f2ca7cd7abf1cc60ae10360d67ef8678d7debd76ccd529c36c2"
+  },
+  {
+    "id": "ieso_lmp_guide",
+    "url": "https://reports-public.ieso.ca/docrefs/helpfile/DAHourlyEnergyLMP.pdf",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "ieso_ozp_guide",
+    "url": "https://reports-public.ieso.ca/docrefs/helpfile/DAHourlyOntarioZonalPrice.pdf",
+    "final_url": "https://reports-public.ieso.ca/docrefs/helpfile/DAHourlyOntarioZonalPrice.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 118278,
+    "sha256": "e79a8c452ecc41b6eec95a610009081e94a7cc52fb25125bca2264fc365e9f3b"
+  },
+  {
+    "id": "banxico_docs2",
+    "url": "https://www.banxico.org.mx/SieAPIRest/service/v1/doc/",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "boc_corra",
+    "url": "https://www.bankofcanada.ca/rates/interest-rates/corra/",
+    "final_url": "https://www.bankofcanada.ca/rates/interest-rates/corra/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 157550,
+    "sha256": "d91631616eaa7fac57137d9d6a23d3e3d32e60943d57f0bbf2ec9369114b3fa0"
+  },
+  {
+    "id": "irs_obbb",
+    "url": "https://www.irs.gov/newsroom/one-big-beautiful-bill-provisions",
+    "final_url": "https://www.irs.gov/newsroom/working-families-tax-cuts",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 175041,
+    "sha256": "2fc7df53c5362c8abc187b4679ebed4ac3a2343bd6814dc118634a50d26e5595"
+  },
+  {
+    "id": "statcan_licence",
+    "url": "https://www.statcan.gc.ca/en/reference/licence",
+    "final_url": "https://www.statcan.gc.ca/en/terms-conditions/open-licence",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 27005,
+    "sha256": "9f33841df97c0304c7493ba058f81f953caae3ddc1323126093615cacb2ce658"
+  },
+  {
+    "id": "eia_price_monthly",
+    "url": "https://www.eia.gov/electricity/monthly/epm_table_grapher.php?t=epmt_5_6_a",
+    "final_url": "https://www.eia.gov/electricity/monthly/epm_table_grapher.php?t=epmt_5_6_a",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 105635,
+    "sha256": "9fac1f22fcfc223a784050d74264a7b6298d8108fe5ce9bc914754b644dbeb8f"
+  },
+  {
+    "id": "canada_ppa_procurement",
+    "url": "https://www.ieso.ca/Sector-Participants/Resource-Acquisition-and-Contracts/Long-Term-RFP-and-Expedited-Process",
+    "final_url": "https://www.ieso.ca/Sector-Participants/Resource-Acquisition-and-Contracts/Long-Term-RFP-and-Expedited-Process",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 77270,
+    "sha256": "37e15ee45e9bb4d6bfc3939e7a38e110b9545130783b36e5409d4f757ec8182c"
+  },
+  {
+    "id": "bc_fulltariff",
+    "url": "https://www.bchydro.com/content/dam/BCHydro/customer-portal/documents/corporate/tariff-filings/electric-tariff/bchydro-electric-tariff.pdf",
+    "final_url": "https://www.bchydro.com/content/dam/BCHydro/customer-portal/documents/corporate/tariff-filings/electric-tariff/bchydro-electric-tariff.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 7144878,
+    "sha256": "2cf0b95466601a9d24e38c85b0e4ff2318101718ca739ef8f74ff6caaa3a6454"
+  },
+  {
+    "id": "bc_sample_epa",
+    "url": "https://www.bchydro.com/content/dam/BCHydro/customer-portal/documents/corporate/independent-power-producers-calls-for-power/independent-power-producers/epa-renewal-program-rules.pdf",
+    "final_url": "https://www.bchydro.com/content/dam/BCHydro/customer-portal/documents/corporate/independent-power-producers-calls-for-power/independent-power-producers/epa-renewal-program-rules.pdf",
+    "status": 200,
+    "content_type": "application/pdf",
+    "bytes": 223431,
+    "sha256": "b6be00a90e2c9b191a3e41d6f0d14396e5ebc9d2a556516b0016ad1377369ffa"
+  },
+  {
+    "id": "brc_deals",
+    "url": "https://businessrenewables.ca/deal-tracker",
+    "final_url": "https://businessrenewables.ca/deal-tracker",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 34106,
+    "sha256": "a7daa3ac8922b7f8561984bbba3d183cb411042e370557ef20c8c319efa6c62a"
+  },
+  {
+    "id": "cenace_original_sample",
+    "url": "https://www.cenace.gob.mx/Docs/01_MECP/PreciosOriginalesMDA/2024-MAR-22%20Pub%20Original%20MDA%20SIN%20D%c3%ada%20de%20Operaci%c3%b3n%202024%20MAR-23.zip",
+    "final_url": "https://www.cenace.gob.mx/Docs/01_MECP/PreciosOriginalesMDA/2024-MAR-22%20Pub%20Original%20MDA%20SIN%20D%c3%ada%20de%20Operaci%c3%b3n%202024%20MAR-23.zip",
+    "status": 200,
+    "content_type": "application/x-zip-compressed",
+    "bytes": 1579883,
+    "sha256": "9f62004634426d13ad229b5f17de946724d88fc3fa818c422516a5976d8a746c"
+  },
+  {
+    "id": "cenace_award2017",
+    "url": "https://www.cenace.gob.mx/Docs/05_SLP/2017/26%20Resultados%20de%20Evaluaci\u00f3n%20a%20Solicitudes%20de%20Registro%20como%20Comprador%20Potencial%20SLP2017%20v13%2007%202017.pdf",
+    "error": "'ascii' codec can't encode character '\\xf3' in position 53: ordinal not in range(128)"
+  },
+  {
+    "id": "cftc_sdr",
+    "url": "https://www.cftc.gov/IndustryOversight/DataRepositories/index.htm",
+    "final_url": "https://www.cftc.gov/IndustryOversight/DataRepositories/index.htm",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 39851,
+    "sha256": "4c32d64863a69097bc0da6ce1551c59089e7974a79803bfc6adaa16d36f1cea6"
+  },
+  {
+    "id": "dtcc_public",
+    "url": "https://pddata.dtcc.com/ppd/cftcdashboard",
+    "final_url": "https://pddata.dtcc.com/ppd/cftcdashboard",
+    "status": 200,
+    "content_type": "text/html;charset=ISO-8859-1",
+    "bytes": 7000,
+    "sha256": "ec99c8c25f659aa320aa48b16d5d4f23db5b5dcb4e07b3a8469a7564a609b9ac"
+  },
+  {
+    "id": "eei_master",
+    "url": "https://www.eei.org/resources-and-media/master-contract",
+    "final_url": "https://www.eei.org/resources-and-media/master-contract",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 102604,
+    "sha256": "55124a6edc288ac56c16857faf890d0b4065f691b4ff4348be4fbb280b5d67df"
+  },
+  {
+    "id": "hydroone_rates",
+    "url": "https://www.hydroone.com/rates-and-billing/rates-and-charges/electricity-pricing-and-costs",
+    "final_url": "https://www.hydroone.com/rates-and-billing/rates-and-charges/electricity-pricing-and-costs",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 197028,
+    "sha256": "f61ed245f7fdc0719238041cd93f0df56cb38042785bba1bfd57446d12c6a986"
+  },
+  {
+    "id": "cfe_legacy_industry",
+    "url": "https://app.cfe.mx/Aplicaciones/CCFE/Tarifas/TarifasCREIndustria/Tarifas/GranDemandaMTH.aspx",
+    "error": "HTTP Error 503: Service Unavailable"
+  },
+  {
+    "id": "energy_atb",
+    "url": "https://atb.nrel.gov/",
+    "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+  },
+  {
+    "id": "doe_h2a",
+    "url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis",
+    "final_url": "https://www.hydrogen.energy.gov/program-areas/systems-analysis/h2a-analysis",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 49272,
+    "sha256": "9969f8ab29d5fdebe6bbc28392fb9386795e127b040f39d4a23e344c3b9bae50"
+  },
+  {
+    "id": "doe_h2fast",
+    "url": "https://www.nrel.gov/hydrogen/h2fast",
+    "error": "<urlopen error Tunnel connection failed: 403 Forbidden>"
+  },
+  {
+    "id": "eia_cost",
+    "url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+    "final_url": "https://www.eia.gov/analysis/studies/powerplants/capitalcost/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 51262,
+    "sha256": "ca9e99976987256064289ae0eae69043820d801e880483280380fa9a7845c53a"
+  },
+  {
+    "id": "eia_923",
+    "url": "https://www.eia.gov/electricity/data/eia923/",
+    "final_url": "https://www.eia.gov/electricity/data/eia923/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 65728,
+    "sha256": "64d60aee3113e661b138e7681f3e2ae75aa96eaf432a8de0240d1792587c80b6"
+  },
+  {
+    "id": "eia_860",
+    "url": "https://www.eia.gov/electricity/data/eia860/",
+    "final_url": "https://www.eia.gov/electricity/data/eia860/",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 67577,
+    "sha256": "da2949fcdf834987f158b8b8c6da158e4f6ee2236f314674194614f1b0bb86ee"
+  },
+  {
+    "id": "fed_h15",
+    "url": "https://www.federalreserve.gov/releases/h15/",
+    "final_url": "https://www.federalreserve.gov/releases/h15/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 105012,
+    "sha256": "216a79c07b7c7525047512fc1b6e79919dc6f91fb0f57451676c68963b9f0417"
+  },
+  {
+    "id": "fed_h10",
+    "url": "https://www.federalreserve.gov/releases/h10/",
+    "final_url": "https://www.federalreserve.gov/releases/h10/",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 78386,
+    "sha256": "50acd7cafcf536961ff8cdfc22fcfdf94fda2cbfad904e1d5b5fea2522baaf49"
+  },
+  {
+    "id": "nlr_atb_repo",
+    "url": "https://api.github.com/repos/NREL/ATB-data",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "id": "doe_hyblend",
+    "url": "https://www.energy.gov/cmei/fuels/hyblend-opportunities-hydrogen-blending-natural-gas-pipelines",
+    "final_url": "https://www.energy.gov/cmei/fuels/hyblend-opportunities-hydrogen-blending-natural-gas-pipelines",
+    "status": 200,
+    "content_type": "text/html; charset=utf-8",
+    "bytes": 129247,
+    "sha256": "4c161dec2d39136a129b05e1e19234cd8fa67109dad861b2a209739fce82d65a"
+  },
+  {
+    "id": "eia_gas",
+    "url": "https://www.eia.gov/dnav/ng/ng_pri_sum_dcu_nus_m.htm",
+    "final_url": "https://www.eia.gov/dnav/ng/ng_pri_sum_dcu_nus_m.htm",
+    "status": 200,
+    "content_type": "text/html",
+    "bytes": 22455,
+    "sha256": "bbcf218cefd7a9a0f6a176bc6531bdca5e263d88e5f7642b18dc2e0ac5a50b5a"
+  },
+  {
+    "id": "lbl_wind_pub",
+    "url": "https://emp.lbl.gov/wind-technologies-market-report",
+    "final_url": "https://emp.lbl.gov/wind-technologies-market-report",
+    "status": 200,
+    "content_type": "text/html; charset=UTF-8",
+    "bytes": 52311,
+    "sha256": "2d50c575937dc946eedb875e9c96312937adb20bda3e32df137fd53d5b11e68e"
+  },
+  {
+    "id": "cenace_fallo2017",
+    "url": "https://www.cenace.gob.mx/Docs/05_SLP/2017/53_Fallo%20de%20la%20Subasta%20de%20Largo%20Plazo%20SLP%20No.1%202017%20v%2022%2011%202017.zip",
+    "error": "15 MB response cap"
+  },
+  {
+    "id": "lbl_solar_xlsx",
+    "url": "https://emp.lbl.gov/sites/default/files/2025-10/2025%20Utility-Scale%20Solar%20Data%20Update.xlsx",
+    "final_url": "https://emp.lbl.gov/sites/default/files/2025-10/2025%20Utility-Scale%20Solar%20Data%20Update.xlsx",
+    "status": 200,
+    "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "bytes": 56943952,
+    "sha256": "b17720b13f9da9d5cf0661ac3862c992fb5d5047f3d5f628e5baa4bc3fccd087"
+  },
+  {
+    "id": "lbl_wind_xlsx",
+    "url": "https://emp.lbl.gov/sites/default/files/2026-08/DATA%20FILE_Land-Based%20Wind%20Energy%20Technology%20Update_2026%20Edition_PUBLIC_0.xlsx",
+    "final_url": "https://emp.lbl.gov/sites/default/files/2026-08/DATA%20FILE_Land-Based%20Wind%20Energy%20Technology%20Update_2026%20Edition_PUBLIC_0.xlsx",
+    "status": 200,
+    "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "bytes": 33764384,
+    "sha256": "e8a8e72af7fb8feb52776a05b0a4d15828dd84883a6404387d190f3b4c9fed5e"
+  }
+]
