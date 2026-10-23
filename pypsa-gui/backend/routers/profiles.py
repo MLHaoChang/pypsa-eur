@@ -44,7 +44,8 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import solve_queue as sq
-from services.profile_gen import engine, presets, shape, weather_prefs
+from services.profile_gen import engine, presets, shape, tuning, weather_prefs
+from services.profile_gen.tuning import InvalidTuningError
 from services.profile_gen.apply import (
     ComponentNotFoundError,
     CurrentChangedError,
@@ -519,6 +520,21 @@ def list_profile_presets(technology: str | None = None):
     }
 
 
+@router.get("/schema")
+def profile_tuning_schema(technology: str, preset: str = "default"):
+    """Preset values, units, bounds and provenance for the Tune dialog."""
+    try:
+        _validate_technology(technology)
+        selected = presets.get_preset(preset, technology)
+        return {"technology": technology, "preset": preset,
+                "fields": tuning.schema(technology, selected)}
+    except ProfileGenError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": _error_kind(exc),
+            "message": public_message(exc, route="schema"),
+        }) from exc
+
+
 @router.get("/load-archetypes")
 def list_load_archetypes():
     """The load archetypes with their parameter defaults, and the presets."""
@@ -547,6 +563,11 @@ def estimate_profile(body: EstimateRequest):
         )
     except HTTPException:
         raise
+    except InvalidTuningError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_params",
+            "message": public_message(exc, route="estimate"),
+        }) from exc
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
@@ -651,6 +672,11 @@ def generate_profiles(
             detail={"error_kind": "cds_credential",
                     "message": public_message(exc, route="generate")},
         ) from exc
+    except InvalidTuningError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_params",
+            "message": public_message(exc, route="generate"),
+        }) from exc
     except ProfileGenError as exc:
         raise HTTPException(
             status_code=422,
@@ -1446,7 +1472,17 @@ def _weather_answer(proj: AuthorizedProject) -> dict[str, Any]:
 
     ctx = _foreground_ctx(proj, "read the weather choice")
     _mapping, recorded, _warnings = resolve_time_basis(None, commercial_timezone(ctx))
-    return {**weather_prefs.resolved(proj.directory, ctx.network.snapshots),
+    from services.profile_gen.apply import _hourly_window
+
+    snapshots = ctx.network.snapshots
+    stamps = snapshots.get_level_values(-1)
+    if isinstance(snapshots, pd.MultiIndex) and len(snapshots):
+        stamps = stamps[snapshots.get_level_values(0) == snapshots.get_level_values(0)[0]]
+    try:
+        window = _hourly_window(pd.DatetimeIndex(stamps), what="the model's snapshots")
+    except ProfileGenError as exc:
+        window = {"unsupported": public_message(exc, route="weather")}
+    return {**weather_prefs.resolved(proj.directory, snapshots), "window": window,
             "time_basis": {"value": recorded, "assumed": "assumed" in recorded}}
 
 
@@ -1485,6 +1521,30 @@ def clear_weather_choice(
     _check_lock(proj, db, user)
     weather_prefs.clear_choice(proj.directory)
     return _weather_answer(proj)
+
+
+@project_router.get("/{name}/profiles/compare")
+def compare_profiles(a: str, b: str, component: str | None = None,
+                     proj: AuthorizedProject = ProjectAccessDep):
+    """Read before/after statistics on the model clock without changing it."""
+    from services.profile_gen import compare
+
+    ctx = _foreground_ctx(proj, "compare profiles")
+    try:
+        left, right = compare.resolve_sides(ctx, proj.directory, a, b, component)
+        return compare.compare(left, right, ctx.network.snapshot_weightings.generators)
+    except compare.InvalidCompareSideError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_compare_side", "message": public_message(exc, route="compare"),
+        }) from exc
+    except compare.NotAShapedProfileError as exc:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "not_a_shaped_profile", "message": public_message(exc, route="compare"),
+        }) from exc
+    except ProfileGenError as exc:
+        raise HTTPException(status_code=422, detail={
+            **_apply_refusal_kind(exc), "message": public_message(exc, route="compare"),
+        }) from exc
 
 
 @project_router.get("/{name}/profiles/readiness")

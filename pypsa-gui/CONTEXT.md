@@ -197,6 +197,23 @@ panel/orientation — that the generator resolves into engine params
 overrides merge on top via `resolve_params`.
 _Avoid_: template (that's network profiles), turbine type, config
 
+**Profile tuning**:
+Per-technology settings layered over a profile preset, exposed with units,
+bounds, preset values and provenance by `GET /api/profiles/schema`.
+Flat overrides travel in `params` through `resolve_params`. Losses and wind
+derate act after every weather source; hub height, cut-out, orientation,
+tracking and inverter efficiency affect ERA5/atlite only. Synthetic runs
+record the settings they cannot apply. Tuning is per run, not saved per generator.
+_Avoid_: shaping (post-generation calibration), generator defaults
+
+**Profile comparison**:
+A read-only comparison of two current, pending or shaped profiles on the
+model's snapshot clock (`GET /api/projects/{name}/profiles/compare` and
+`compare_profiles`). The server computes weighted capacity factor and
+full-load hours, quantiles, peak and peak hour, monthly means, duration
+curves, a peak week and deltas. The assistant cites these returned numbers.
+_Avoid_: model comparison (whole scenarios), apply preview (the write card)
+
 **AI-training load profile**:
 The opt-in hourly load of a data-center template built from a
 `DataCentreLoadSpec` with an `AiWorkloadSpec`: IT MW × hourly mean
