@@ -32,7 +32,11 @@ Everything lives under ``<project dir>/campus_electrical/grid_codes/``:
 declared type. At most ``MAX_PDF_BYTES`` (20 MiB: the API takes 32 MB per
 request, and base64 grows the file by 4/3) and ``MAX_PDF_PAGES`` (100, the
 API's page limit for a PDF). The pages are counted with pypdf; an encrypted
-or unreadable file is a 422.
+or unreadable file is a 422. A longer code is uploaded with a page selection,
+``"1-40,120-180"`` (``parse_page_ranges``): the whole file is kept, the cap
+applies to the pages selected, and the metadata's ``page_ranges`` records
+them. The extraction then reads only those pages, and the pages it cites are
+mapped back to the file's own, so a quote is checked where it really is.
 
 **Extraction.** ONE Messages API call: the PDF as a base64 ``document``
 block, ``EXTRACTION_SYSTEM_PROMPT``, and one tool, ``record_grid_code``, whose
@@ -97,6 +101,9 @@ logger = logging.getLogger(__name__)
 MAX_PDF_BYTES = 20 * 1024 * 1024
 #: The API reads at most 100 pages of a PDF on every model.
 MAX_PDF_PAGES = 100
+#: The page-selection syntax, as an error message names it.
+PAGE_RANGES_EXAMPLE = "1-40,120-180"
+_PAGE_RANGE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 MAX_PROFILE_BYTES = ce.MAX_CAMPUS_BYTES
 _PDF_MAGIC = b"%PDF-"
 _PDF_TYPES = frozenset({"", "application/pdf", "application/x-pdf", "application/octet-stream"})
@@ -317,6 +324,60 @@ def _count_pages(data: bytes) -> int:
     return pages
 
 
+def parse_page_ranges(text: str, pages: int) -> list:
+    """The pages ``text`` selects, ascending and each once: comma-separated
+    pages and ``first-last`` ranges, counting the file's first page as 1
+    (``"1-40,120-180"``). Every page must be in the file; a 422 says which
+    part is wrong."""
+    parts = [part.replace(" ", "") for part in str(text).split(",")]
+    if not any(parts):
+        raise HTTPException(status_code=422, detail=f"the page selection is empty; write it as {PAGE_RANGES_EXAMPLE}")
+    selected = set()
+    for part in parts:
+        m = _PAGE_RANGE.fullmatch(part)
+        if m is None:
+            raise HTTPException(status_code=422, detail=f"the page selection {part!r} is not a page or a range; "
+                                                        f"write it as {PAGE_RANGES_EXAMPLE}")
+        first, last = int(m.group(1)), int(m.group(2) or m.group(1))
+        if first > last:
+            raise HTTPException(status_code=422, detail=f"the page range {part} runs backwards; write it as "
+                                                        f"{last}-{first}")
+        if last > pages:
+            raise HTTPException(status_code=422, detail=f"the page selection {part} goes past the PDF's last page "
+                                                        f"({pages})")
+        selected.update(range(first, last + 1))
+    return sorted(selected)
+
+
+def _format_ranges(selected: list) -> str:
+    """``[1, 2, 3, 7]`` as ``"1-3,7"``: the selection's canonical text."""
+    runs = []
+    for page in selected:
+        if runs and page == runs[-1][1] + 1:
+            runs[-1][1] = page
+        else:
+            runs.append([page, page])
+    return ",".join(f"{a}-{b}" if a != b else f"{a}" for a, b in runs)
+
+
+def _selected_pages(doc: dict) -> list | None:
+    """The pages an upload selected, or None for the whole file."""
+    ranges = doc.get("page_ranges")
+    return parse_page_ranges(ranges, doc["pages"]) if ranges else None
+
+
+def _pdf_of_pages(data: bytes, selected: list) -> bytes:
+    """A PDF of ``selected`` pages of ``data``, in that order."""
+    reader = _pdf_reader(data)
+    from pypdf import PdfWriter
+    writer = PdfWriter()
+    for page in selected:
+        writer.add_page(reader.pages[page - 1])
+    buf = BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
 def _doc_meta(project, document_id: str) -> dict:
     meta = _inside(_docs(project), f"{document_id}.json")
     if not meta.is_file() or not _inside(_docs(project), f"{document_id}.pdf").is_file():
@@ -324,10 +385,13 @@ def _doc_meta(project, document_id: str) -> dict:
     return json.loads(meta.read_text())
 
 
-def upload_document(project, data: bytes, filename: str | None, content_type: str | None = None) -> dict:
+def upload_document(project, data: bytes, filename: str | None, content_type: str | None = None,
+                    page_ranges: str | None = None) -> dict:
     """Keep an uploaded grid code: PDF only, by hash. Returns its metadata
-    ``{id, sha256, filename, size, uploaded_at, pages}``; the same file again
-    returns the first upload's."""
+    ``{id, sha256, filename, size, uploaded_at, pages}``, plus
+    ``page_ranges`` when the upload selected pages (``parse_page_ranges``);
+    the same file again returns the first upload's, with this upload's page
+    selection."""
     _require(project)
     if len(data) > MAX_PDF_BYTES:
         raise HTTPException(status_code=413,
@@ -338,20 +402,39 @@ def upload_document(project, data: bytes, filename: str | None, content_type: st
     if not data.startswith(_PDF_MAGIC):
         raise HTTPException(status_code=415, detail="the file is not a PDF (it does not start with %PDF-)")
     pages = _count_pages(data)
-    if pages > MAX_PDF_PAGES:
+    ranges = None
+    if page_ranges is not None and str(page_ranges).strip():
+        selected = parse_page_ranges(page_ranges, pages)
+        if len(selected) > MAX_PDF_PAGES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"the page selection has {len(selected)} pages; the extraction reads at most "
+                       f"{MAX_PDF_PAGES}. Select fewer pages",
+            )
+        ranges = _format_ranges(selected)
+    elif pages > MAX_PDF_PAGES:
         raise HTTPException(
             status_code=422,
-            detail=f"the PDF has {pages} pages; the extraction reads at most {MAX_PDF_PAGES}. "
-                   "Upload the chapters with the connection requirements",
+            detail=f"the PDF has {pages} pages; the extraction reads at most {MAX_PDF_PAGES}. Select the pages "
+                   f"with the connection requirements as a page range, such as {PAGE_RANGES_EXAMPLE} "
+                   f"(at most {MAX_PDF_PAGES} pages in all)",
         )
     sha = hashlib.sha256(data).hexdigest()
     docs = _docs(project)
     with _lock(project):
         existing = _inside(docs, f"{sha}.json")
         if existing.is_file() and _inside(docs, f"{sha}.pdf").is_file():
-            return json.loads(existing.read_text())
+            meta = json.loads(existing.read_text())
+            if meta.get("page_ranges") != ranges:
+                meta.pop("page_ranges", None)
+                if ranges:
+                    meta["page_ranges"] = ranges
+                _write_atomic(existing, json.dumps(meta, indent=2))
+            return meta
         meta = {"id": sha, "sha256": sha, "filename": _clean_filename(filename), "size": len(data),
                 "uploaded_at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "pages": pages}
+        if ranges:
+            meta["page_ranges"] = ranges
         _write_atomic(_inside(docs, f"{sha}.pdf"), data)
         _write_atomic(existing, json.dumps(meta, indent=2))
     return meta
@@ -589,6 +672,25 @@ def _fill_voltage_gaps(bands: list, template: dict) -> tuple:
     return merged, [i for i, b in enumerate(merged) if any(b is f for f in fills)]
 
 
+def _to_file_pages(inp: dict, selected: list) -> dict:
+    """``inp`` with each cited ``page`` of the selection's PDF turned into the
+    uploaded file's page. A page outside the selection is left as it is, for
+    the quote check to flag."""
+    def remap(lim):
+        if isinstance(lim, dict):
+            page = lim.get("page")
+            if isinstance(page, int) and not isinstance(page, bool) and 1 <= page <= len(selected):
+                lim["page"] = selected[page - 1]
+    inp = copy.deepcopy(inp)
+    bands = inp.get("voltage_bands")
+    for b in bands if isinstance(bands, list) else []:
+        remap(b)
+    for key, lim in inp.items():
+        if key != "voltage_bands":
+            remap(lim)
+    return inp
+
+
 def _draft_from(inp: dict, doc: dict):
     """The profile from the tool's input, and the limits the template filled."""
     template, filled = _template(), []
@@ -636,9 +738,12 @@ def extract(project, document_id: str, profile_id: str | None = None, overwrite:
         raise HTTPException(status_code=409, detail=f"a draft {profile_id!r} already exists; extract again with "
                                                     "overwrite to replace it, or choose another id")
     pdf = _inside(_docs(project), f"{document_id}.pdf").read_bytes()
+    selected = _selected_pages(doc)
     client = _client()
     model = _extraction_model()
-    inp = _tool_input(_call(client, model, pdf))
+    inp = _tool_input(_call(client, model, _pdf_of_pages(pdf, selected) if selected else pdf))
+    if selected:
+        inp = _to_file_pages(inp, selected)
     profile, filled = _draft_from(inp, doc)
     validated = _validate(profile_id, profile)
     review = {

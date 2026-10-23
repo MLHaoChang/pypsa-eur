@@ -71,8 +71,18 @@ def test_a_multipart_upload_reaches_the_service_with_its_bytes_name_and_type(cli
     monkeypatch.setattr(gc, "upload_document", lambda *a: calls.append(a) or {"ok": True})
     resp = client.post(BASE + "/documents", files={"file": ("tso.pdf", PDF, "application/pdf")})
     assert resp.status_code == 200, resp.text
-    (_, data, filename, content_type), = calls
-    assert data == PDF and filename == "tso.pdf" and content_type == "application/pdf"
+    (_, data, filename, content_type, page_ranges), = calls
+    assert data == PDF and filename == "tso.pdf" and content_type == "application/pdf" and page_ranges is None
+
+
+def test_an_upload_carries_its_page_selection(client, hub):
+    resp = client.post(BASE + "/documents", files={"file": ("tso.pdf", PDF, "application/pdf")},
+                       data={"page_ranges": "2"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["page_ranges"] == "2"
+    resp = client.post(BASE + "/documents", files={"file": ("tso.pdf", PDF, "application/pdf")},
+                       data={"page_ranges": "2-9"})
+    assert resp.status_code == 422 and "last page (2)" in resp.json()["detail"]
 
 
 def test_a_real_upload_is_stored_and_listed(client, hub):
