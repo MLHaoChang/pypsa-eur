@@ -608,7 +608,7 @@ def test_the_investment_summary_for_the_copilot_carries_the_caveats_with_the_num
     assert h["period_years"] == {"2030": 1} and h["source"] == {"2030": "single period: one year"}
     assert any("not ranked" in n for n in h["notes"])
     text = " ".join(out["notes"])
-    assert "placeholder" in text and "assumed" in text and "tap" in text
+    assert "reference values, not quotes" in text and "literature" in text and "assumed" in text and "tap" in text
     # plan C15: the taps act inside the re-check, per hour and case, and the notes say how
     assert "on-load taps" in text and "pcc_tap_control" in text and "not optimised" not in text
     assert out["taps"] == [] and out["tap_hours_moved"] == 0
@@ -750,8 +750,8 @@ def test_without_a_saved_solver_config_the_library_keeps_its_rate_and_year(hub):
     out = ce.run(hub, {"k": 1})
     basis = out["results"]["cost_basis"]
     assert basis["discount_rate"] == 0.07 and basis["discount_rate_from"] == "asset library"
-    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
-    assert basis["library_price_year"] == 2026 and basis["price_year_mismatch"] is False
+    assert basis["price_year"] == 2025 and basis["price_year_from"] == "asset library"
+    assert basis["library_price_year"] == 2025 and basis["price_year_mismatch"] is False
     assert basis["currency"] == "EUR"
     assert (ce.campus_dir(hub) / "run" / ce.USED_LIBRARY_FILE).read_text() == default_library_text()
 
@@ -808,15 +808,24 @@ def test_the_price_year_is_the_projects_when_it_has_finance_inputs(hub):
     save_solver_config(hub, discount_rate=0.07, finance=finance_with(2024))
     basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
     assert basis["price_year"] == 2024 and basis["price_year_from"] == "project finance inputs"
-    assert basis["library_price_year"] == 2026
+    assert basis["library_price_year"] == 2025
     assert basis["price_year_mismatch"] is True                       # flagged; no money is converted
+
+
+def test_a_project_in_2026_money_is_a_mismatch_with_the_2025_library(hub):
+    """The shipped library moved from 2026 to 2025 money: a project stated in 2026 money is flagged."""
+    ce.draft(hub)
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2026))
+    basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
+    assert basis["price_year"] == 2026 and basis["library_price_year"] == 2025
+    assert basis["price_year_mismatch"] is True
 
 
 def test_a_project_money_year_equal_to_the_librarys_is_not_a_mismatch(hub):
     ce.draft(hub)
-    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2026))
+    save_solver_config(hub, discount_rate=0.07, finance=finance_with(2025))
     basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
-    assert basis["price_year"] == 2026 and basis["price_year_from"] == "project finance inputs"
+    assert basis["price_year"] == 2025 and basis["price_year_from"] == "project finance inputs"
     assert basis["price_year_mismatch"] is False
 
 
@@ -825,7 +834,7 @@ def test_finance_inputs_without_a_money_year_leave_the_librarys(hub, finance):
     ce.draft(hub)
     save_solver_config(hub, discount_rate=0.05, finance=finance)
     basis = ce.run(hub, {"k": 1})["results"]["cost_basis"]
-    assert basis["price_year"] == 2026 and basis["price_year_from"] == "asset library"
+    assert basis["price_year"] == 2025 and basis["price_year_from"] == "asset library"
     assert basis["price_year_mismatch"] is False
     assert basis["discount_rate"] == 0.05 and basis["discount_rate_from"] == "project solver config"
 
@@ -888,7 +897,7 @@ def test_a_change_to_something_else_in_the_solver_config_is_not_a_change_of_the_
 
 def test_a_change_of_the_money_year_makes_the_results_stale_since_the_basis_is_shown(hub):
     ce.draft(hub)
-    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2026))
+    save_solver_config(hub, discount_rate=0.05, finance=finance_with(2025))
     ce.run(hub, {"k": 1})
     assert not ce.get_state(hub)["stale"]
     save_solver_config(hub, discount_rate=0.05, finance=finance_with(2024))
@@ -977,10 +986,10 @@ def test_each_purchased_item_is_one_owner_asset_in_the_ic_shape(hub):
     digest = ce.campus_study_hash(hub)
     assert assets[0] == {
         "name": "campus:TR_132_33_63#1", "kind": "transformer", "basis": "lump", "quantity": 2.0,
-        "parts": [{"name": "investment", "upfront_per_unit": 2_500_000.0, "lifetime": 40.0, "fom_share": 0.015}],
+        "parts": [{"name": "investment", "upfront_per_unit": 1_652_200.0, "lifetime": 40.0, "fom_share": 0.015}],
         "build_year": 2030, "source": "campus_study", "source_hash": digest,
         "meta": {"need": "transformer GRID_IMPORT", "library_id": "TR_132_33_63", "units": 2, "length_km": None,
-                 "currency": "EUR", "price_year": 2026, "provenance": "assumed", "illustrative": True,
+                 "currency": "EUR", "price_year": 2025, "provenance": "literature", "illustrative": False,
                  "study_method": "least_cost",
                  "action": None,                          # a table from before plan C13 has no action column
                  # nor the purchase columns of plan C14: one first purchase, no lineage
@@ -1025,15 +1034,15 @@ def test_a_transformer_is_a_lump_of_its_units(hub):
     fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 3, capex=-1.0)])
     (a,) = ce.extra_owner_assets(hub)
     assert (a["kind"], a["basis"], a["quantity"]) == ("transformer", "lump", 3.0)
-    assert a["parts"][0]["upfront_per_unit"] == 2_500_000.0          # one transformer, not the three
+    assert a["parts"][0]["upfront_per_unit"] == 1_652_200.0          # one transformer, not the three
 
 
 def test_a_cable_is_per_km_with_units_times_length_as_the_quantity(hub):
     fake_investment(hub, [inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5, capex=-1.0)])
     (a,) = ce.extra_owner_assets(hub)
     assert (a["kind"], a["basis"], a["quantity"]) == ("cable", "per_km", 3.0)
-    assert a["parts"][0]["upfront_per_unit"] == 140_000.0            # EUR per km
-    assert a["parts"][0]["lifetime"] == 40.0 and a["parts"][0]["fom_share"] == 0.005
+    assert a["parts"][0]["upfront_per_unit"] == 137_100.0            # EUR per km
+    assert a["parts"][0]["lifetime"] == 40.0 and a["parts"][0]["fom_share"] == 0.0051
     assert a["meta"]["units"] == 2 and a["meta"]["length_km"] == 1.5
 
 
@@ -1041,8 +1050,8 @@ def test_switchgear_is_per_bay_with_the_bays_as_the_quantity(hub):
     fake_investment(hub, [inv_row("switchgear MV", "SG_20_25p0", "switchgear", 4, capex=-1.0)])
     (a,) = ce.extra_owner_assets(hub)
     assert (a["kind"], a["basis"], a["quantity"]) == ("switchgear", "per_bay", 4.0)
-    assert a["parts"][0]["upfront_per_unit"] == 54_000.0             # one bay
-    assert a["parts"][0]["fom_share"] == 0.01
+    assert a["parts"][0]["upfront_per_unit"] == 45_800.0             # one bay
+    assert a["parts"][0]["fom_share"] == 0.015
 
 
 def test_reactive_equipment_is_a_lump_of_its_units(hub):
@@ -1057,7 +1066,7 @@ def test_quantity_times_the_unit_cost_is_the_old_total_overnight_cost(hub):
     fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 3),
                           inv_row("cable CBL_1", "CB_33_AL240", "cable", 2, length_km=1.5),
                           inv_row("switchgear MV", "SG_20_25p0", "switchgear", 4)])
-    assert [total_of(a) for a in ce.extra_owner_assets(hub)] == [3 * 2_500_000.0, 2 * 140_000.0 * 1.5, 4 * 54_000.0]
+    assert [total_of(a) for a in ce.extra_owner_assets(hub)] == [3 * 1_652_200.0, 2 * 137_100.0 * 1.5, 4 * 45_800.0]
 
 
 def test_the_build_year_is_the_invest_period_and_the_source_is_the_campus_study(hub):
@@ -1165,6 +1174,9 @@ def test_the_cost_tag_of_the_library_is_the_provenance_and_assumed_alone_is_illu
         for e in data["transformers"]:
             if e["id"] == "TR_132_33_63":
                 e["capex_eur"]["source"] = "datasheet"
+        for e in data["cables"]:
+            if e["id"] == "CB_33_AL240":
+                e["capex_eur_per_km"] = {"value": 140_000, "source": "assumed"}
     fake_investment(hub, purchase_rows(), library_text=library_with(measured))
     by_id = {a["meta"]["library_id"]: a["meta"] for a in ce.extra_owner_assets(hub)}
     assert by_id["TR_132_33_63"]["provenance"] == "datasheet" and by_id["TR_132_33_63"]["illustrative"] is False
@@ -1183,6 +1195,9 @@ def test_a_literature_cost_is_cited_so_it_is_not_illustrative(hub):
         for e in data["cables"]:
             if e["id"] == "CB_33_AL240":
                 e["capex_eur_per_km"]["source"] = "literature"
+        for e in data["switchgear"]:
+            if e["id"] == "SG_132_31p5":
+                e["capex_eur"] = {"value": 350_000, "source": "assumed"}
     fake_investment(hub, purchase_rows(), library_text=library_with(cited))
     by_id = {a["meta"]["library_id"]: a for a in ce.extra_owner_assets(hub)}
     assert by_id["TR_132_33_63"]["meta"]["provenance"] == "literature"
@@ -1216,7 +1231,7 @@ def test_the_owner_assets_come_from_the_library_the_run_used_not_the_one_saved_s
     fake_investment(hub, [inv_row("transformer T", "TR_132_33_63", "transformer", 1)])
     ce.save_library(hub, library_with(scaled_capex(5)))                 # saved after the run
     (asset,) = ce.extra_owner_assets(hub)
-    assert asset["parts"][0]["upfront_per_unit"] == 2_500_000.0
+    assert asset["parts"][0]["upfront_per_unit"] == 1_652_200.0
 
 
 def test_a_real_run_gives_owner_assets_that_add_up_to_its_cost_table(hub):
@@ -1228,7 +1243,8 @@ def test_a_real_run_gives_owner_assets_that_add_up_to_its_cost_table(hub):
     assert sum(total_of(a) for a in assets) == pytest.approx(sum(r["capex_eur"] for r in chosen))
     assert sum(total_of(a) for a in assets) == pytest.approx(out["results"]["cost"][0]["capex_eur"])
     assert out["owner_assets_count"] == len(assets)
-    assert all(a["meta"]["illustrative"] and a["meta"]["provenance"] == "assumed" for a in assets)
+    assert all(a["meta"]["provenance"] in ("literature", "assumed") for a in assets)
+    assert all(a["meta"]["illustrative"] is (a["meta"]["provenance"] == "assumed") for a in assets)
     assert len({a["name"] for a in assets}) == len(assets)
     assert {a["kind"] for a in assets} <= {"transformer", "cable", "capacitor_bank", "shunt_reactor", "statcom",
                                            "switchgear"}

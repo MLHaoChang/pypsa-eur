@@ -93,7 +93,9 @@ The chat tool `apply_library_reference` never calls the HTTP preview. Its confir
 
 Add a small helper next to `_net()`, e.g. `_solved_net()`: `_net()` plus seeded dispatch, with `generators_t.p` for `["wind", "pv"]` and `links_t.p0` for `["electrolyser", "poc"]` on `n.snapshots`, so that `services.dispatch_status.dispatch_status(n) == "fresh"`. Copy the pattern from `tests/test_dispatch_status_transient.py::_solved_net` (l.21).
 
-1. `test_the_preview_is_a_read_outside_the_network_prefixes(client, anon_client, install_network, session_ctx)`, modelled on `test_et19`:
+Tests 1 and 2 take `monkeypatch` and set `undo_service.claim_push_slot` to `lambda *a, **k: True` (`from services import undo_service`), as `tests/test_project_switch_isolation.py` l.224 does. Without it the middleware skips a snapshot that falls within 0.5 s of the previous one (`COALESCE_WINDOW_S`). Test 2's `depth + 1` would then depend on timing, and test 1 could miss an unwanted snapshot.
+
+1. `test_the_preview_is_a_read_outside_the_network_prefixes(client, anon_client, install_network, session_ctx, monkeypatch)`, modelled on `test_et19`:
    - `PREVIEW` starts with none of `main._UNDO_PREFIXES`, `main._DISPATCH_INVALIDATE_PREFIXES`, `main._STUDY_EDIT_PREFIXES`;
    - `n = install_network(_solved_net())`; assert `dispatch_status(n) == "fresh"`. Keep a copy of `n.generators_t.p` and `n.links.at["electrolyser", "overnight_cost"]`;
    - read `depth = client.get("/api/network/undo/info").json()["depth"]`, then `revision = session_ctx(client).network_revision`;
@@ -104,15 +106,15 @@ Add a small helper next to `_net()`, e.g. `_solved_net()`: `_net()` plus seeded 
      - `dispatch_status(n) == "fresh"`, and `n.generators_t.p` equals the copy (`pd.testing.assert_frame_equal`);
      - `overnight_cost` is unchanged;
    - `anon_client.post(PREVIEW, json=AEC).status_code == 401`;
-   - the old path is gone: `client.post(f"{ROUTE}/preview", json=AEC).status_code in (404, 405)`.
+   - the old path is gone: `client.post(f"{ROUTE}/preview", json=AEC).status_code in (404, 405)`. Make this the test's last request: it still runs through the `/api/network` middleware.
 
    It fails on `master`: the new path does not exist there, and through the old path the revision bumps and dispatch is cleared.
-2. `test_the_apply_is_still_an_edit_that_clears_results(client, install_network, session_ctx)`:
+2. `test_the_apply_is_still_an_edit_that_clears_results(client, install_network, session_ctx, monkeypatch)`:
    - same setup;
    - preview through `PREVIEW`, then `client.post(f"{ROUTE}/apply", json={**AEC, "digest": card["digest"]})` is 200 with `receipt.outcome == "verified"`;
    - after it, the undo depth is `depth + 1`, `network_revision > revision`, and `dispatch_status(n) == "none"`.
 
-   This pins that only the preview moved. It fails on `master` because `PREVIEW` 405s there.
+   This pins that only the preview moved. It fails on `master` because `PREVIEW` is not a route there (404 or 405).
 3. The three existing route tests (l.216, 236, 254) pass with `PREVIEW` in place of the old path, assertions unchanged.
 
 ### Frontend: `pypsa-gui/frontend/src/api/libraryReferences.test.ts` (new)
@@ -155,7 +157,12 @@ cd pypsa-gui/frontend && npx vitest run src/api/libraryReferences.test.ts src/pa
   ```
 
   Never edit `doc/release_notes.md`. See `doc/release-notes.d/README.md`.
-- Tests and docs go in the same PR. Do not skip, loosen or delete any existing test; the only edit to an existing test is the path swap above.
+- Tests and docs go in the same PR. Do not skip, loosen or delete any existing test. Existing test files change in these places only:
+  - `tests/test_library_reference_apply.py`: the `PREVIEW` constant, the four path swaps, the `_solved_net()` helper and tests 1–2. Make no other change to its existing tests.
+  - `tests/test_write_surface_lock_policy.py`: the one `ROUTE_POLICY` entry.
+  - `tests/fixtures/route_inventory_phase0.txt`: the one removed row and the one added row.
+
+  Every other existing test file, including `test_equipment_table.py`, `test_document_values.py`, `test_live_network_untouched.py`, `test_chat_tools_endpoint_map.py`, `test_project_route_acl_policy.py` and `LibraryReferences.test.tsx`, stays byte-for-byte unchanged.
 - Do not commit credentials or `.env` files. Make no paid model calls.
 
 ## Done when

@@ -140,10 +140,11 @@ describe('investment: what was bought', () => {
     expect(none.textContent).toContain('—')
   })
 
-  it('says costs are assumed placeholders', async () => {
+  it('says costs are cited or assumed reference values, not quotes', async () => {
     renderPanel()
     const section = await screen.findByTestId('campus-investment')
-    expect(section.textContent).toMatch(/assumed placeholders/i)
+    expect(section.textContent).toMatch(/reference values from cited public\s+sources \(tag literature\) or assumed/i)
+    expect(section.textContent).toMatch(/not quotes/i)
   })
 
   it('says who owns the PCC switchgear: the campus', async () => {
@@ -467,13 +468,13 @@ describe('the joint optimisation beside the least-cost choice', () => {
     expect(within(block).queryByTestId('milp-cancelled')).toBeNull()
   })
 
-  it("says the margin rule is the owner's, never met by inverter Q, and that costs are placeholders", async () => {
+  it("says the margin rule is the owner's, never met by inverter Q, and that costs are not quotes", async () => {
     api.state.mockResolvedValue(withMilp({ results: milpResults() }))
     renderPanel()
     const block = await screen.findByTestId('campus-milp')
     expect(block.textContent).toMatch(/20 % design margin is the owner's rule/)
     expect(block.textContent).toMatch(/never met\s+by extra inverter reactive power/)
-    expect(block.textContent).toMatch(/placeholders/)
+    expect(block.textContent).toMatch(/reference values, not quotes/)
   })
 
   it('labels a fallback to the least-cost choice with its reason', async () => {

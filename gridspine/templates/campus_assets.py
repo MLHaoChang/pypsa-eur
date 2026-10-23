@@ -12,8 +12,9 @@ annualised, plus opex.
 ``datasheet`` or ``assumed`` (optionally a ``note``), as in a campus file
 (``ingest/campus.py``) and for the same reason: a report must say how sure it
 is of each figure. An untagged number is refused rather than defaulted.
-The shipped file tags every figure ``assumed``; its costs are
-order-of-magnitude placeholders.
+The shipped file tags every rating ``assumed``; its costs are reference
+values, not quotes: ``literature`` (a cited public source, 2025 EUR) or
+``assumed`` where none was found.
 
 A **cost** (``capex_eur``, ``capex_eur_per_km``, ``opex_frac``,
 ``lifetime_a``) and the ``discount_rate`` may also be tagged ``literature``: a
