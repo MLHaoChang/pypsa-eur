@@ -696,7 +696,7 @@ function campusLifeNotes(flags: string[]): string[] {
   return flags.flatMap(f => {
     if (f.startsWith(LIFE_ENDS)) {
       return [`The grid study plans no replacement for ${f.slice(LIFE_ENDS.length)} after its life ends `
-        + "inside the case's horizon (campus_life_ends_unreplaced). Under the part-lifetimes replacement "
+        + "inside the case's horizon. Under the part-lifetimes replacement "
         + 'rule the case buys it again on its own lifetime rule; under the fixed rule it is not bought again.']
     }
     if (f.startsWith(AFTER_HORIZON)) {
