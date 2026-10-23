@@ -1,0 +1,1 @@
+* Test(pypsa-gui): A load-flow read bound to a run with no recorded fingerprint stays unknown and does not stand in for the current results. Switching project mid-turn forgets the load flow just read, so the new project is not described as showing it.

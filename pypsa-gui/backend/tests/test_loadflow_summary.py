@@ -462,6 +462,22 @@ def test_historical_run_without_a_loadflow_section_is_typed_unavailable(solved, 
     assert 'top' not in out
 
 
+def test_a_run_without_a_fingerprint_is_not_the_current_result(solved, tmp_path, monkeypatch):
+    """A missing fingerprint is unknown, not 'unchanged'. The live load flow
+    must not be reported as that run, and the reply must not point at the
+    current results as a stand-in."""
+    monkeypatch.setattr(re_, '_authority', lambda: (tmp_path, PROJECT, OWNER))
+    solved['network'].meta.pop('assistant_solve_input_fingerprint', None)
+    re_.publish_run(tmp_path, PROJECT, run_id='run-unmarked', kind='simulation', status='completed',
+                    started_at='2026-10-01T10:00:00+00:00', finished_at='2026-10-01T10:05:00+00:00',
+                    mode='lopf', metrics={'objective': {'value': 1.0, 'unit': 'EUR'}})
+    out = lf.get_loadflow_summary(run_id='run-unmarked')
+    assert out['status'] == 'unavailable' and out['run_is_current'] is False
+    assert out['inputs_changed_since_run'] is None
+    assert 'top' not in out and 'current_results_hint' not in out
+    assert out['next_step'] == 'Say this run is not the current result and offer to re-run.'
+
+
 def test_historical_unknown_run_is_unavailable_not_current_results(solved, tmp_path, monkeypatch):
     monkeypatch.setattr(re_, '_authority', lambda: (tmp_path, PROJECT, OWNER))
     out = lf.get_loadflow_summary(run_id='nope')
