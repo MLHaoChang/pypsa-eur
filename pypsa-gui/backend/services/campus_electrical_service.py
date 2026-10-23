@@ -245,6 +245,10 @@ def _results(run: Path):
         "compliance": _read_csv(run / cs.COMPLIANCE_CSV),
         "reactive": _read_csv(run / cs.REACTIVE_CSV),
         "requirement": json.loads((run / cs.REQUIREMENT_JSON).read_text()),
+        # What the grid code requires that no steady-state check can show ("needs an RMS study"); [] for a run
+        # from before it was kept.
+        "reported_requirements": (json.loads((run / cs.REPORTED_REQUIREMENTS_JSON).read_text())
+                                  if (run / cs.REPORTED_REQUIREMENTS_JSON).is_file() else []),
         # Part two: what the library was drawn on. All None when the run did not invest.
         "investment": investment,
         "cost": _read_csv(run / cs.COST_CSV),
@@ -906,7 +910,7 @@ def draft(project, overwrite: bool = False) -> dict:
         except ContractError as exc:
             raise _unprocessable(exc)
     text = yaml.safe_dump(result.spec, sort_keys=False)
-    (d / CAMPUS_FILE).write_text(text)
+    _write_campus(project, text)
     (d / NOTES_FILE).write_text(json.dumps(result.skipped))
     return {"campus_yaml": text, "skipped": result.skipped}
 
@@ -924,8 +928,27 @@ def save_campus(project, text: str) -> dict:
         cs.check_campus(spec)
     except ContractError as exc:
         raise _unprocessable(exc)
-    (campus_dir(project) / CAMPUS_FILE).write_text(text)
+    _write_campus(project, text)
     return {"campus_yaml": text}
+
+
+def _write_campus(project, text: str) -> None:
+    """Keep a validated campus file; one that changes the campus's nominal
+    frequency drops the island study, which read the old f0."""
+    from services.solver.island import IslandRefusal, campus_f_hz
+
+    def f_hz():
+        try:
+            return campus_f_hz(project_registry.project_dir(project))
+        except IslandRefusal:
+            return None                       # unreadable: counts as changed
+
+    before = f_hz()
+    (campus_dir(project) / CAMPUS_FILE).write_text(text)
+    after = f_hz()
+    if after is None or after != before:
+        _, study_path = _island_paths(project)
+        study_path.unlink(missing_ok=True)
 
 
 # ── the asset library (plan C9) ──────────────────────────────────────────────
@@ -1136,7 +1159,7 @@ def run_island_study(project, scenarios=None) -> dict:
 
     from services.adequacy.island_config import load_island_config
     from services.atomic_io import atomic_write_text
-    from services.solver.island import IslandRefusal, island_study
+    from services.solver.island import IslandRefusal, campus_f_hz, island_study
 
     require_capacity_expansion(project)
     sidecar, study_path = _island_paths(project)
@@ -1148,6 +1171,10 @@ def run_island_study(project, scenarios=None) -> dict:
     if island is None:
         raise HTTPException(status_code=422, detail="the project has no island_config.json; "
                                                     "save the island requirements first")
+    try:
+        island["f_hz"] = campus_f_hz(project_registry.project_dir(project))
+    except IslandRefusal as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     with _netcdf_lock():
         n = pypsa.Network(str(nc))
     try:
@@ -1174,7 +1201,7 @@ def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
         SIDECAR_NAME,
         load_island_config,
     )
-    from services.solver.island import IslandRefusal, island_hourly
+    from services.solver.island import IslandRefusal, campus_f_hz, island_hourly
 
     paths = (run_dir / ISLAND_UNIT_HOURLY_CSV, run_dir / ISLAND_HOURLY_CSV)
     island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
@@ -1185,6 +1212,7 @@ def _write_island_tables(project, run_dir: Path, spec: dict, nc: Path) -> None:
     ids = {u["pypsa_name"]: uid for uid, u in (spec.get("campus") or {}).get("units", {}).items()
            if u.get("pypsa_name")}
     try:
+        island["f_hz"] = campus_f_hz(project_registry.project_dir(project))
         tables = island_hourly(cs.load_solved_network(nc), island, unit_ids=ids)
     except IslandRefusal as exc:
         raise ContractError(str(exc)) from exc

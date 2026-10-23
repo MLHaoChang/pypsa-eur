@@ -50,6 +50,15 @@ def project(tmp_path):
     return path
 
 
+def _judged(comp):
+    """The rows a profile without SAGC-type limits judges. Its new PCC rows
+    (no Q band, no power-factor limit set) are unknown, never pass or fail."""
+    checks = comp.index if comp.index.name == "check" else comp["check"]
+    new = checks.isin(("pcc_q_band", "pcc_power_factor"))
+    assert set(comp[new]["status_with_measures"]) == {"unknown"}
+    return comp[~new]
+
+
 def test_a_draft_comes_from_the_saved_project(project):
     draft = draft_from_project(project)
     assert draft.spec["campus"]["pcc"]["pypsa_name"] == "grid"
@@ -283,7 +292,11 @@ def test_sizing_ends_with_the_compliance_report(tmp_path, project):
     out = size_campus(run)
     stored = pd.read_csv(run / "campus_compliance.csv")
     assert list(stored["check"]) == list(CHECKS) == list(out["compliance"]["check"])
-    assert set(stored["status_as_is"]) <= {"pass", "fail", "not_rated"}
+    assert set(stored["status_as_is"]) <= {"pass", "fail", "not_rated", "unknown"}
+    # the EU profile sets no P-dependent Q band and no power-factor limit: unknown, never pass or fail
+    new = stored.set_index("check").loc[["pcc_q_band", "pcc_power_factor"]]
+    assert set(new["status_as_is"]) == set(new["status_with_measures"]) == {"unknown"}
+    assert (new["detail"] == "The grid code sets no limit for this.").all()
 
 
 def test_an_unsolved_project_cannot_be_drafted(tmp_path):
@@ -313,7 +326,7 @@ def test_investing_a_sized_run_buys_from_the_library_and_re_solves_the_complianc
         assert (run / name).is_file(), name
     comp = pd.read_csv(run / COMPLIANCE_INVESTED_CSV)
     assert list(comp["check"]) == list(INVEST_CHECKS)
-    assert set(comp["status_with_measures"]) <= {"pass", "not_rated"}
+    assert set(_judged(comp)["status_with_measures"]) <= {"pass", "not_rated"}
     inv = pd.read_csv(run / INVESTMENT_CSV)
     assert set(inv["status"]) <= {"chosen", "kept", "not_needed"}
     assert inv["library_id"].dropna().str.len().gt(0).all()
@@ -433,7 +446,7 @@ def test_investing_by_milp_writes_c8s_files_and_the_milp_history(tmp_path, proje
     assert hist["iteration"].iloc[0] == 0 and len(hist) >= 2
     comp = pd.read_csv(run / COMPLIANCE_INVESTED_CSV)
     assert list(comp["check"]) == list(INVEST_CHECKS)
-    assert set(comp["status_with_measures"]) <= {"pass", "not_rated"}
+    assert set(_judged(comp)["status_with_measures"]) <= {"pass", "not_rated"}
     s = out["summary"]
     assert s["milp_cost"] <= s["c8_cost"] + 1e-6
     cost = pd.read_csv(run / COST_CSV)

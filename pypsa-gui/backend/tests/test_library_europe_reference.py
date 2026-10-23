@@ -144,7 +144,11 @@ def test_comparison_shows_reference_and_pack_with_their_own_money_years():
     rows = {r.parameter: r for r in R.compare_europe_reference_with_pack(ref, pack)}
     overnight = rows["overnight"]
     assert overnight.differs
-    assert overnight.reference.currency_year == 2025 and overnight.pack.currency_year == 2020
+    # both 2025 EUR since pack 2026-10-25 (MONEY-YEAR-1); onwind's DEA reference stays 2020 EUR beside it
+    assert overnight.reference.currency_year == 2025 and overnight.pack.currency_year == 2025
+    wind = next(r for r in R.compare_europe_reference_with_pack(
+        R.load_europe_technology_reference("onwind", 2030), pack) if r.parameter == "overnight")
+    assert wind.reference.currency_year == 2020 and wind.pack.currency_year == 2025
     assert overnight.reference.value == pytest.approx(556_220.8489115281)
     assert overnight.pack.key == overnight.reference.key == "solar-utility.investment.overnight"
     assert overnight.reference.source != overnight.pack.source

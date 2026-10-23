@@ -28,7 +28,7 @@ from gridspine.drivers.campus_study import (
     size_campus,
 )
 from gridspine.schema.contracts import ContractError
-from gridspine.static.campus_compliance import campus_compliance
+from gridspine.static.campus_compliance import NO_LIMIT, campus_compliance
 from gridspine.static.campus_reactive import requirement_from
 from gridspine.templates.grid_codes import (
     PROFILE_ID,
@@ -397,6 +397,27 @@ def test_a_study_run_against_a_project_profile_reports_its_unconfirmed_limits(tm
     assert stored.at["pcc_reactive", "source"] == "extracted"
     with pytest.raises(ContractError, match="tso"):
         size_campus(run, profile="tso")
+
+
+def test_a_study_run_against_a_profile_with_a_q_band_and_power_factor_judges_both(tmp_path, project):  # noqa: F811
+    """End to end (DC 10a): a profile that sets the P-dependent Q band and the
+    power factor floors gets those rows judged from the study's own PCC P.
+    Generic values, wide enough that the campus meets them."""
+    wide = {"clause": "generic test clause", "source": "code"}
+    p = load_grid_code("generic_assumed", raw=True)
+    p.update(title="Generic with a Q band", q_capability_pq={**wide, "points": [[-2.0, -2.0, 2.0], [2.0, -2.0, 2.0]]},
+             pf_min_lagging={**wide, "value": 0.05}, pf_min_leading={**wide, "value": 0.05})
+    codes = tmp_path / "codes"
+    _write(codes, "wide", p)
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    rows = size_campus(run, profile="wide", profile_dirs=[codes])["compliance"].set_index("check")
+    band = rows.loc["pcc_q_band"]
+    assert band["status_as_is"] == band["status_with_measures"] == "pass" and band["detail"] != NO_LIMIT
+    assert band["limit_min"] < band["value"] < band["limit_max"]
+    pf = rows.loc["pcc_power_factor"]
+    assert pf["status_as_is"] == "pass" and 0.05 <= pf["value"] <= 1.0
 
 
 def test_the_investment_step_takes_project_profiles_too(tmp_path, project):  # noqa: F811
