@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
+from pathlib import Path
 import json
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from services.profile_gen.engine import generate_profile
@@ -30,18 +31,22 @@ def test_synthetic_losses_scale_the_mean_exactly():
     assert tuned["g"].mean() == pytest.approx(0.9 * baseline["g"].mean(), rel=1e-12)
 
 
-@pytest.mark.parametrize(
-    "technology,digest",
-    [
-        ("wind", "36bdfa9946fd2440cdb56bc0dc4365263fb7593cd5c44b817186bec69f995b0b"),
-        ("solar", "269467b9299a19eea1d7391e61ce39262b43a7665d366b66ec991a88692faa5c"),
-    ],
-)
-def test_untuned_generation_is_byte_identical(technology, digest):
-    # Captured on master1871073 before implementation; this compatibility
-    # guard is intentionally already green on that baseline.
+@pytest.mark.parametrize("technology", ["wind", "solar"])
+def test_untuned_generation_matches_master(technology):
+    # Full-year float64 values captured on unchanged master1871073. Comparing
+    # numbers avoids treating platform-level math/CSV last bits as a regression;
+    # atol=0 keeps the baseline's exact night/clipping zeros exact.
     result = _generate(technology)
-    assert hashlib.sha256(result.series.to_csv().encode()).hexdigest() == digest
+    fixture = Path(__file__).parent / "fixtures/profile_gen/untuned_master_1871073.npz"
+    with np.load(fixture, allow_pickle=False) as baseline:
+        np.testing.assert_allclose(
+            result.series.to_numpy(), baseline[technology],
+            rtol=1e-12, atol=0, equal_nan=False,
+        )
+    pd.testing.assert_index_equal(
+        result.series.index, pd.date_range("2023-01-01", periods=8760, freq="h"),
+    )
+    assert result.series.columns.tolist() == ["g"]
     assert result.meta == {
         "source": "synthetic",
         "technology": technology,
