@@ -165,6 +165,13 @@ CAP = ("CAP4", 4.0, 2, 0.30e6)              # 4 Mvar in two 2 Mvar steps, 25 yea
 DARK25 = {"DC_LOAD": -25.0, "BESS1": 0.0, "PV1": 0.0, "GEN1": 0.0}
 
 
+def assert_judged_rows_pass(comp):
+    """Every judged row passes; the Q-band and power-factor rows are unknown, as PROFILE sets neither limit."""
+    new = comp[comp["check"].isin(["pcc_q_band", "pcc_power_factor"])]
+    assert len(new) == 2 and set(new["status_with_measures"]) == {"unknown"}
+    assert set(comp.drop(new.index)["status_with_measures"]) <= {"pass", "not_rated"}
+
+
 def crf(r, n):
     return r / (1 - (1 + r) ** -n)
 
@@ -266,7 +273,7 @@ def test_the_milp_finds_the_joint_optimum_that_c8s_greedy_choice_misses(tmp_path
     assert inv.at["transformer TR1", "library_id"] == "T_B" and inv.at["reactive", "status"] == "not_needed"
     assert out["cost"]["annualised_eur_per_a"].sum() == pytest.approx(best[0])
     comp_ = out["compliance"].set_index("check")
-    assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
     h = out["milp_history"]
     assert h.iloc[0]["note"].startswith("the least-cost choice") and h.iloc[0]["cost"] == pytest.approx(c8_cost)
     assert bool(h["feasible"].iloc[-1]) and h["cost"].iloc[-1] == pytest.approx(best[0])
@@ -483,7 +490,7 @@ def test_the_returned_compliance_is_an_ac_re_solve_not_the_linear_prediction(tmp
         min(float(c.res_bus["vm_pu"].iloc[1:].min()) for c in cases), abs=1e-6)
     assert out["pcc"].set_index("case").at["intact", "q_mvar"] == pytest.approx(
         float(cases[0].res_ext_grid["q_mvar"].sum()), abs=1e-6)
-    assert set(comp_["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
     # the margin was judged on C8's dispatch (none: the band is wide), not on the battery's Q
     ref = pair_net(0.0)
     sizing = out["sizing"].set_index("group").loc["TR1+TR2"]
@@ -584,7 +591,7 @@ def test_bays_a_choice_adds_are_priced_in_the_milp(tmp_path):
     assert out["investment"].set_index("need").at["switchgear MV1", "units"] == 5    # T100, cable, battery, PV, bank
     want = 1.5e6 * (crf(RATE, 40) + 0.01) + bank(160e3) + (5 + 3) * bay
     assert out["summary"]["milp_cost"] == pytest.approx(want)
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
     # priced right, the MILP never proposes the two small banks: no rejected
     # step, and the loop converges instead of shrinking Delta to its floor
     h = out["milp_history"]
@@ -688,7 +695,7 @@ def test_a_stop_after_the_first_iteration_keeps_the_best_ac_feasible_point(tmp_p
     assert out["fallback"] is None
     inv = out["investment"].set_index("need")
     assert inv.at["transformer TR1", "library_id"] == "T_B" and inv.at["reactive", "status"] == "not_needed"
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
     assert out["summary"]["milp_cost"] < out["summary"]["c8_cost"]
 
 
@@ -706,7 +713,7 @@ def test_a_stop_before_any_iteration_returns_c8s_result_flagged(tmp_path):
     assert list(h["iteration"]) == [0] and h.iloc[0]["fd_solves"] == 0      # stopped between the FD solves
     assert out["comparison"].set_index("need").at["transformer TR1", "milp_choice"] == "1 x T_A"
     assert out["investment"].set_index("need").at["transformer TR1", "library_id"] == "T_A"
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
 
 
 def test_progress_reports_the_best_ac_feasible_cost_so_far_not_the_trials(tmp_path):
@@ -832,7 +839,7 @@ def test_the_milp_finds_the_addition_that_c8s_greedy_choice_misses(tmp_path):
     rows = inv[inv["need"] == "transformer TR1+TR2"].set_index("action")
     assert rows.at["keep", "units"] == 2 and rows.at["add", "library_id"] == "T_B"
     assert sorted(out["spec"]["campus"]["transformers"]) == ["TR1", "TR1_2", "TR2"]
-    assert set(out["compliance"]["status_with_measures"]) <= {"pass", "not_rated"}
+    assert_judged_rows_pass(out["compliance"])
 
 
 def test_the_loading_and_margin_scales_are_one_percent_of_the_groups_smallest_unit(tmp_path):
