@@ -1,0 +1,2274 @@
+[
+  {
+    "family_id": "E01",
+    "title": "Technology overnight CapEx",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "overnight_cost",
+      "investment",
+      "power and energy parts",
+      "equipment and balance-of-system scope"
+    ],
+    "units": "currency/MW, currency/MWh, currency/unit",
+    "library_kind": "technology_cost (proposed; shipped defaults pack exists)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "gridspine/templates/data/campus_assets.yaml"
+    ],
+    "native_support": "Native cost fields and pack rows",
+    "source_requirements": [
+      "Separate technology, size, installed vs factory, projection year, money year and real/nominal basis",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual EPC/vendor tender, project contingency and site works",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E02",
+    "title": "Fixed O&M",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "fom_cost",
+      "fom_share",
+      "opex_frac"
+    ],
+    "units": "currency/MW-year; share/year; currency/unit-year",
+    "library_kind": "technology_cost (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "gridspine/templates/data/campus_assets.yaml"
+    ],
+    "native_support": "Native FOM and pack rows",
+    "source_requirements": [
+      "Do not confuse percent/year with fraction/year or include replacement twice",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Site staffing, insurance and maintenance contract",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E03",
+    "title": "Variable O&M and consumables",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "marginal_cost",
+      "variable O&M",
+      "consumables per throughput"
+    ],
+    "units": "currency/MWh_input or output; currency/t",
+    "library_kind": "technology_cost (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/attribute_catalog.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Native marginal costs; disaggregation may require extension",
+    "source_requirements": [
+      "State input/output basis and exclude fuel/carbon if separately priced",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual fuel contract and utilization",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E04",
+    "title": "Technical/economic lifetime",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "lifetime",
+      "lifetime_a",
+      "component part lifetime"
+    ],
+    "units": "years; hours; cycles",
+    "library_kind": "technology_lifecycle (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "gridspine/templates/data/campus_assets.yaml",
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Native lifetime and replacement rules",
+    "source_requirements": [
+      "Keep design, tax, warranty, physical and financial life distinct",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual COD, age, remaining useful life and project horizon",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E05",
+    "title": "Construction duration and lead time",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "construction_months_by_asset",
+      "capex_phasing",
+      "stage_capex_lead_years"
+    ],
+    "units": "months; years; share",
+    "library_kind": "technology_lifecycle (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Native finance fields",
+    "source_requirements": [
+      "Benchmark by technology/size/region and supply-chain vintage",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Permits, project procurement schedule and actual energization dates",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E06",
+    "title": "Replacement and refurbishment",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "replacement_capex",
+      "replacement_rule",
+      "part_lifetimes",
+      "replacement share"
+    ],
+    "units": "currency; year; share of original cost",
+    "library_kind": "technology_lifecycle (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Native replacement input/rules",
+    "source_requirements": [
+      "Track replaced component scope and reset assumptions",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual replacement quote, dates and warranty",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E07",
+    "title": "PV/wind annual degradation",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "degradation_by_asset",
+      "annual output fade",
+      "performance loss distribution"
+    ],
+    "units": "share/year; efficiency curve",
+    "library_kind": "technology_lifecycle (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Finance degradation exists; physical dispatch feedback separate",
+    "source_requirements": [
+      "Technology/cohort/climate-specific distribution; distinguish economic scaling from physical availability",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual inspection/performance history",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E08",
+    "title": "Battery calendar ageing",
+    "card_ids": [
+      "energy",
+      "reliability",
+      "commercial"
+    ],
+    "parameters": [
+      "degradation_calendar",
+      "SOC/temperature calendar fade",
+      "resistance growth"
+    ],
+    "units": "share/year; empirical model coefficients",
+    "library_kind": "degradation_model (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Pack placeholder explicitly not modeled; physical model adapter pending",
+    "source_requirements": [
+      "Chemistry/cell/pack basis, temperature/SOC domain, calendar time and calibration",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual cell provenance, thermal history, pack health",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E09",
+    "title": "Battery cycle ageing",
+    "card_ids": [
+      "energy",
+      "reliability",
+      "commercial"
+    ],
+    "parameters": [
+      "degradation_cycling",
+      "cycle life vs DoD",
+      "C-rate",
+      "EOL threshold"
+    ],
+    "units": "share/cycle; cycles; C; curve",
+    "library_kind": "degradation_model (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Pack placeholder; physical dispatch model pending",
+    "source_requirements": [
+      "Calendar/cycle coupling and duty chronology; cannot infer power fade from energy fade",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Measured duty cycle, cell vendor/warranty and replacement policy",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E10",
+    "title": "Generator/converter efficiency",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "efficiency",
+      "efficiency2",
+      "efficiency3",
+      "part-load efficiency"
+    ],
+    "units": "per unit; heat rate; curve",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/attribute_catalog.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Native static/time-varying efficiencies",
+    "source_requirements": [
+      "Input/output port basis and LHV/HHV; auxiliaries boundary",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual asset condition and calibrated vendor map",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E11",
+    "title": "Dispatchable operating constraints",
+    "card_ids": [
+      "energy",
+      "control"
+    ],
+    "parameters": [
+      "p_min_pu",
+      "ramp_limit_up",
+      "ramp_limit_down",
+      "min_up_time",
+      "min_down_time",
+      "start_up_cost"
+    ],
+    "units": "pu; pu/interval; h; currency/start",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/attribute_catalog.py",
+      "pypsa-gui/backend/models/process_unit.py"
+    ],
+    "native_support": "Native fields; committable/weighted restrictions apply",
+    "source_requirements": [
+      "Timestep, unit size and supported commitment formulation",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual dispatch schedule, unit status and startup state",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E12",
+    "title": "Renewable performance and derates",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "wind power curve",
+      "PV module/inverter derates",
+      "temperature coefficients",
+      "availability factors"
+    ],
+    "units": "kW; pu; per-degree coefficient",
+    "library_kind": "equipment/profile_generator (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native profile generators/presets; detailed catalog adapter may extend",
+    "source_requirements": [
+      "Weather/equipment-specific basis; separate mechanical outages and resource profile",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual installed layout, curtailment and fault history",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E13",
+    "title": "Renewable resource time series",
+    "card_ids": [
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "solar irradiance",
+      "wind speed",
+      "temperature",
+      "capacity-factor series"
+    ],
+    "units": "W/m2; m/s; degC; pu",
+    "library_kind": "series/profile_generator (series exists; generator kind proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Native profile-generation and series stores",
+    "source_requirements": [
+      "Coordinates/weather-year, height, coverage, bias correction and source rights",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual coordinates and measured resource series",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E14",
+    "title": "Electrical demand archetypes",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "office/two-shift/load-shape archetypes",
+      "annual energy normalization",
+      "peak and load factor"
+    ],
+    "units": "pu shape; kWh/year; kW",
+    "library_kind": "load_shape (proposed; shipped CSVs exist)",
+    "native_paths": [
+      "pypsa-gui/backend/study_library/load_profiles/index.csv",
+      "pypsa-gui/backend/services/library/series_store.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Shipped archetypes/series exist",
+    "source_requirements": [
+      "Synthetic vs measured vs fitted; regional/calendar and normalization basis",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual meter data, annual energy and peak",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E15",
+    "title": "Thermal demand and temperature dependence",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "space/process heat shapes",
+      "cooling/heating degree dependence",
+      "COP series"
+    ],
+    "units": "MW_th; degC; pu; COP",
+    "library_kind": "load_shape/profile_generator (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/profile_gen/data/profile_presets.yaml",
+      "pypsa-gui/backend/services/library/series_store.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Time-series/Link support; calibrated thermal model pending",
+    "source_requirements": [
+      "Weather/building/process archetype and thermal boundary",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual building/process envelope and measured heat demand",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E16",
+    "title": "Data-center IT/cooling archetypes",
+    "card_ids": [
+      "energy",
+      "control"
+    ],
+    "parameters": [
+      "utilization",
+      "PUE temperature slope",
+      "AI workload/checkpoint/ramp envelope",
+      "idle/critical fractions"
+    ],
+    "units": "MW; pu; PUE; MW/s; seconds",
+    "library_kind": "load_shape/equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/dc_load_profile.py",
+      "gridspine/schema/dc.py"
+    ],
+    "native_support": "Native assumed DC profile/envelope; calibrated cooling pending",
+    "source_requirements": [
+      "Critical vs deferrable IT; IT-side vs facility-side; cooling counted once",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual IT job deadlines, cooling plant, measured PUE and rack allocation",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E17",
+    "title": "Process conversion recipes",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "throughput_unit",
+      "specific_energy_kwh_per_t",
+      "multiport recipe",
+      "mass yield/recovery",
+      "efficiency2/3"
+    ],
+    "units": "kWh/t; kg/kg; t/h; MWh_product",
+    "library_kind": "process_recipe (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/project_templates/eh_ammonia.py"
+    ],
+    "native_support": "Native custom process columns/multiport links",
+    "source_requirements": [
+      "Mass/species/energy ports, feedstock quality and operating envelope",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Customer flowsheet, ore grade, catalyst condition and production commitments",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E18",
+    "title": "Hydrogen/electrolyser performance",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "kg H2/kWh",
+      "part-load yield",
+      "compression/water auxiliaries",
+      "stack life",
+      "minimum load"
+    ],
+    "units": "kg/h; kWh/kg; L/kg; h",
+    "library_kind": "equipment/process_recipe (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "pypsa-gui/backend/project_templates/eh_h2_hub/eh_template.json"
+    ],
+    "native_support": "Native H2 hub; detailed component model pending",
+    "source_requirements": [
+      "LHV/HHV, pressure, water quality and auxiliaries; model-specific conservation",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual vendor map, water source, output pressure/quality",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E19",
+    "title": "Ammonia synthesis performance",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "H2 and N2 consumption",
+      "ASU load",
+      "NH3 energy content",
+      "turndown/startup",
+      "heat recovery"
+    ],
+    "units": "t/day; kg/kg; MWh/t; h",
+    "library_kind": "process_recipe (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      "pypsa-gui/backend/project_templates/eh_ammonia.py"
+    ],
+    "native_support": "Merged native tracer; ASU excluded there; deeper model pending",
+    "source_requirements": [
+      "Annual reference vs feedstock-constrained chronology; no free nitrogen/standby energy",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual synthesis-loop design, startup energy and delivery schedule",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E20",
+    "title": "Product physical properties",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "mwh_per_t",
+      "LHV/HHV",
+      "density",
+      "purity",
+      "temperature-pressure basis"
+    ],
+    "units": "MWh/t; kWh/kg; kg/m3; percent",
+    "library_kind": "commodity_properties (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native product tonne factors/reference purchase LHV; richer properties extend",
+    "source_requirements": [
+      "Standard-state vs actual-state and product quality source",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual mixture composition and specification",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E21",
+    "title": "Fuel physical/emissions factors",
+    "card_ids": [
+      "energy",
+      "commercial"
+    ],
+    "parameters": [
+      "co2_emissions",
+      "LHV/HHV",
+      "heat rate",
+      "fuel density",
+      "upstream emissions factor"
+    ],
+    "units": "tCO2/MWh_fuel; kWh/kg; kg/l",
+    "library_kind": "commodity_properties (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native carrier emissions; upstream boundary may extend",
+    "source_requirements": [
+      "Combustion vs lifecycle emissions, energy basis and geography",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual supplier fuel quality and certification",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E22",
+    "title": "Storage efficiency/self-discharge",
+    "card_ids": [
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "efficiency_store",
+      "efficiency_dispatch",
+      "standing_loss",
+      "max_hours",
+      "charge/discharge limit"
+    ],
+    "units": "pu; share/hour; hours; MW/MWh",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/attribute_catalog.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Native storage attributes/pack",
+    "source_requirements": [
+      "Power/energy split and timestep; SOC/temperature range",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual sizing, SOC reserve and measured health",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E23",
+    "title": "H2/thermal/product storage performance",
+    "card_ids": [
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "storage losses",
+      "pressure/temperature operating envelope",
+      "compressor/liquefaction energy",
+      "usable inventory"
+    ],
+    "units": "kg; MWh; bar; degC; kWh/kg",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv",
+      "pypsa-gui/backend/project_templates/eh_ammonia.py"
+    ],
+    "native_support": "Native Store/losses; pressure/vessel safety not implied",
+    "source_requirements": [
+      "Usable vs nameplate, storage chemistry/state and boundary",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual vessel approval, inventory, pressure and safety design",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E24",
+    "title": "Water/treatment auxiliaries",
+    "card_ids": [
+      "energy"
+    ],
+    "parameters": [
+      "water required by process",
+      "recovery",
+      "purity",
+      "desalination/treatment electricity"
+    ],
+    "units": "m3/t; kWh/m3; percent",
+    "library_kind": "process_recipe (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/process_unit.py"
+    ],
+    "native_support": "Representable conversion; detailed treatment schema/adapter pending",
+    "source_requirements": [
+      "Water withdrawal vs consumption, source salinity, quality and treatment boundary",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual water permit/source quality and supply constraints",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E25",
+    "title": "Mining throughput/flexibility archetypes",
+    "card_ids": [
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "crusher/mill/flotation electricity",
+      "recovery",
+      "stockpile bounds",
+      "restart",
+      "ore/product yield"
+    ],
+    "units": "kWh/t; t/h; tonnes; h",
+    "library_kind": "process_recipe (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      ".scratch/grid-to-process/issues/10-b-tracer-concentrator-template.md"
+    ],
+    "native_support": "Existing process schema and planned concentrator; not generic mine engine",
+    "source_requirements": [
+      "Mineral/ore grade, regional vintage, validated energy breakdown; no AI-assisted generic default",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual mine geology, CMMS, production plan, recovery and fleet routes",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "E26",
+    "title": "Flexible demand archetypes",
+    "card_ids": [
+      "energy",
+      "control"
+    ],
+    "parameters": [
+      "shiftable vs curtailable load",
+      "notice",
+      "maximum interruption",
+      "rebound",
+      "deadline"
+    ],
+    "units": "MW; h; MWh; events/year",
+    "library_kind": "flexibility_archetype (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/flex_archetypes.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native flex/DR fields; shifting vs curtailment semantics differ",
+    "source_requirements": [
+      "Service constraints and recoverable energy; no flexibility double-count",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual customer consent, workload deadlines and production restrictions",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G01",
+    "title": "Voltage/frequency and grid standard context",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "nominal voltage class",
+      "system frequency",
+      "per-unit base",
+      "phase convention"
+    ],
+    "units": "kV; Hz; MVA base",
+    "library_kind": "equipment/grid_code_profile (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/campus_assets.yaml",
+      "gridspine/templates/data/grid_codes.yaml",
+      "gridspine/schema/network.py"
+    ],
+    "native_support": "Native network fields/grid profiles",
+    "source_requirements": [
+      "50/60 Hz, AC/DC, voltage level and jurisdiction; per-unit conversion once",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual site voltage/base and earthing arrangement",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G02",
+    "title": "Overhead conductor/line types",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "type",
+      "r",
+      "x",
+      "b",
+      "s_nom",
+      "thermal current",
+      "temperature and length basis"
+    ],
+    "units": "ohm/km; S/km; A; MVA",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/attribute_catalog.py",
+      "gridspine/templates/data/campus_assets.yaml"
+    ],
+    "native_support": "Native PyPSA types/explicit params and campus library",
+    "source_requirements": [
+      "Standard type OR explicit electrical fields; ambient/sag/thermal rating basis",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual route, length, installation and clearance",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G03",
+    "title": "Cable types and ampacity",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "conductor material/size",
+      "R/X/C",
+      "ampacity",
+      "installation derating",
+      "voltage"
+    ],
+    "units": "mm2; ohm/km; nF/km; A; kV",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/campus_assets.yaml",
+      "pypsa-gui/backend/models/schemas.py",
+      "gridspine/schema/campus.py"
+    ],
+    "native_support": "Campus cable library/native lines",
+    "source_requirements": [
+      "Buried/duct/air, soil/temperature/grouping/voltage-frequency source",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual installation, route, soil and thermal study",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G04",
+    "title": "Transformer ratings and impedance",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "s_mva",
+      "hv_kv",
+      "lv_kv",
+      "vk_percent",
+      "vkr_percent",
+      "pfe_kw",
+      "i0_percent",
+      "tap data"
+    ],
+    "units": "MVA; kV; percent; kW; tap steps",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/campus_assets.yaml",
+      "pypsa-gui/backend/models/schemas.py",
+      "gridspine/schema/transformer.py"
+    ],
+    "native_support": "Native transformer/campus fields",
+    "source_requirements": [
+      "Vector group, frequency, impedance test base and loading class; placeholder vs datasheet",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual factory test certificate and tap state",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G05",
+    "title": "Switchgear and breaker ratings",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "voltage class",
+      "continuous current",
+      "short-time and peak withstand",
+      "breaking duty"
+    ],
+    "units": "kV; A; kA RMS; kA peak; s",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/campus_assets.yaml",
+      "gridspine/schema/campus.py",
+      "gridspine/static/campus_sc.py"
+    ],
+    "native_support": "Native screening/library fields",
+    "source_requirements": [
+      "RMS vs peak, asymmetry factor, duration, applicable equipment standard",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual protection study, installed serial/nameplate and duty",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G06",
+    "title": "Shunt/STATCOM/reactive support equipment",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "q_mvar",
+      "voltage",
+      "reactive range",
+      "losses",
+      "response capability"
+    ],
+    "units": "MVAr; kV; pu; seconds",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/campus_assets.yaml",
+      "gridspine/static/campus_reactive.py"
+    ],
+    "native_support": "Native campus shunt/reactive sizing",
+    "source_requirements": [
+      "Continuous vs temporary range, voltage dependence, vendor dynamics separate",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual switching schedule/control tuning",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G07",
+    "title": "Converter/UPS/inverter electrical limits",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "rated MW/MVA",
+      "Q range",
+      "i_max",
+      "overload duration",
+      "fault contribution",
+      "UPS transfer"
+    ],
+    "units": "MW; MVA; pu current; s/ms",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/schema/dc.py"
+    ],
+    "native_support": "Native island/converter parameters; detailed vendor model varies",
+    "source_requirements": [
+      "Vendor/model/firmware, temperature/SOC and current-priority boundary",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual inverter firmware/settings and UPS acceptance tests",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G08",
+    "title": "Network benchmark/topology examples",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "standard topology",
+      "component type references",
+      "benchmark impedance"
+    ],
+    "units": "network/model artifact with explicit base",
+    "library_kind": "example_model (proposed; not parameter replacement)",
+    "native_paths": [
+      "gridspine/templates/data/case39_units.yaml",
+      "gridspine/producers/pypsa_nodal.py"
+    ],
+    "native_support": "Native benchmark support",
+    "source_requirements": [
+      "Teaching/validation topology, never customer network; license and base conventions",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual site topology and asset identities",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G09",
+    "title": "Connection agreement archetypes",
+    "card_ids": [
+      "grid",
+      "commercial"
+    ],
+    "parameters": [
+      "import_cap_mw",
+      "export_cap_mw",
+      "envelope",
+      "available_from",
+      "capacity_fee"
+    ],
+    "units": "MW; datetime; currency/capacity-year",
+    "library_kind": "connection_agreement (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Existing typed item kind and connection object",
+    "source_requirements": [
+      "Published generic product terms vs site-specific offer; firmness and date",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual negotiated import/export cap and energization offer",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G10",
+    "title": "Grid-code/compliance limit profiles",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "voltage_bands",
+      "q_range_demand",
+      "rvc_limit_pct",
+      "frequency/FRT/RoCoF requirements"
+    ],
+    "units": "pu; percent; Hz; Hz/s; voltage-time curve",
+    "library_kind": "grid_code_profile (proposed)",
+    "native_paths": [
+      "gridspine/templates/data/grid_codes.yaml",
+      "pypsa-gui/backend/services/campus_grid_code_service.py"
+    ],
+    "native_support": "Native profiles/upload extraction; library-kind extension pending",
+    "source_requirements": [
+      "Exact clause/version/adoption/operator/connection category and assessed phenomenon",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual applicable connection agreement and confirmed extracted profile",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G11",
+    "title": "Protection/interconnection device settings",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "trip thresholds/delays",
+      "relay curve",
+      "voltage-frequency ride-through",
+      "reconnection window"
+    ],
+    "units": "pu; Hz; seconds; curve",
+    "library_kind": "equipment/control_preset (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/templates/data/grid_codes.yaml"
+    ],
+    "native_support": "Some island requirements exist; full protection coordination not implied",
+    "source_requirements": [
+      "Settings vs certified limits vs screening model; jurisdiction and device class",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual approved protection settings and coordination",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G12",
+    "title": "Fault-level and source-strength scenarios",
+    "card_ids": [
+      "grid"
+    ],
+    "parameters": [
+      "fault MVA",
+      "SCR",
+      "X/R",
+      "sequence impedance",
+      "grounding assumption"
+    ],
+    "units": "MVA; ratio; ohm/pu",
+    "library_kind": "grid_scenario (proposed; scenario benchmark only)",
+    "native_paths": [
+      "gridspine/schema/campus.py",
+      "gridspine/static/strength.py",
+      "gridspine/static/campus_sc.py"
+    ],
+    "native_support": "Native strength/SC screening",
+    "source_requirements": [
+      "Boundary/location/voltage/source type and normal/contingency state",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual operator-provided short-circuit level; public benchmark cannot replace it",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "G13",
+    "title": "Motor/start method performance",
+    "card_ids": [
+      "grid",
+      "control"
+    ],
+    "parameters": [
+      "motor power",
+      "start current multiple",
+      "DOL/soft/VFD",
+      "acceleration",
+      "power factor"
+    ],
+    "units": "kW; pu current; s; pu PF",
+    "library_kind": "equipment (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      ".scratch/grid-to-process/issues/12-minutes-scale-motor-start-restart.md"
+    ],
+    "native_support": "Process fields exist; richer motor/restart schema planned",
+    "source_requirements": [
+      "Load torque/inertia, starting method, terminal voltage; approximate dip vs dynamic trace",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual motor/load test and startup sequence",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R01",
+    "title": "Generation forced unavailability",
+    "card_ids": [
+      "reliability"
+    ],
+    "parameters": [
+      "outage_rate_value",
+      "outage_rate_basis",
+      "FOR",
+      "EFORd"
+    ],
+    "units": "unavailability fraction; denominator/service/demand basis",
+    "library_kind": "reliability_set (proposed; CARRIER_DEFAULTS exists)",
+    "native_paths": [
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native per-asset override and carrier screening defaults",
+    "source_requirements": [
+      "Technology/size/age/region/sample years; exact FOR vs EFORd; never silently convert",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual unit outage log and demand-factor/service/reserve-shutdown hours",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R02",
+    "title": "Partial derating and availability states",
+    "card_ids": [
+      "reliability",
+      "energy"
+    ],
+    "parameters": [
+      "partial outage states",
+      "derated MW",
+      "availability factors",
+      "includes-outages flag"
+    ],
+    "units": "MW; pu; state probability",
+    "library_kind": "reliability_set/series (proposed/series exists)",
+    "native_paths": [
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/adequacy/copt.py"
+    ],
+    "native_support": "Native availability/outage flag; richer distributions may extend",
+    "source_requirements": [
+      "Full failure vs derating; avoid applying forced outage atop already-inclusive profile",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual measured availability and derating causes",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R03",
+    "title": "Repair duration and failure frequency",
+    "card_ids": [
+      "reliability"
+    ],
+    "parameters": [
+      "mttr_hours",
+      "MTTF",
+      "events/year",
+      "repair-duration distribution"
+    ],
+    "units": "hours; events/year",
+    "library_kind": "reliability_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "pypsa-gui/backend/services/adequacy/mc.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native MTTR/Markov model; nongeometric repair not assumed",
+    "source_requirements": [
+      "Exposure/sample count/censoring and consistency of unavailability/MTTR/event rate",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual spare-parts/crew response and CMMS records",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R04",
+    "title": "Planned maintenance archetypes",
+    "card_ids": [
+      "reliability",
+      "energy"
+    ],
+    "parameters": [
+      "planned outage frequency/duration",
+      "maintenance interval",
+      "inspection task",
+      "seasonal scheduling"
+    ],
+    "units": "hours/year; events/year; running-hours/cycles",
+    "library_kind": "maintenance_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Planned calendars explicitly deferred in occurrence scope; time-series can carry availability",
+    "source_requirements": [
+      "Planned vs forced vs reserve shutdown and simultaneous work; safety interval not guess",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual maintenance calendar, vendor warranty tasks and staffing",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R05",
+    "title": "Transmission/distribution branch exposure failures",
+    "card_ids": [
+      "reliability",
+      "grid"
+    ],
+    "parameters": [
+      "line/cable outage events per length-year",
+      "repair",
+      "circuit outages",
+      "weather class"
+    ],
+    "units": "events/(km-year); h/event; fraction",
+    "library_kind": "reliability_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "gridspine/static/contingency.py"
+    ],
+    "native_support": "Per-asset columns exist; full branch stochastic scope varies",
+    "source_requirements": [
+      "Circuit/route/length/voltage/overhead/underground basis; not generation FOR",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual route exposure, joint circuits and operator interruption records",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R06",
+    "title": "Transformer/switchgear equipment failures",
+    "card_ids": [
+      "reliability",
+      "grid"
+    ],
+    "parameters": [
+      "failure frequency",
+      "repair/replacement duration",
+      "failure-mode fractions",
+      "spare availability"
+    ],
+    "units": "events/unit-year; hours; probability",
+    "library_kind": "reliability_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "gridspine/templates/data/campus_assets.yaml",
+      "pypsa-gui/backend/services/adequacy/fmea_sweep_runner.py"
+    ],
+    "native_support": "Native occurrence/FMEA inputs; equipment-model mapping required",
+    "source_requirements": [
+      "Major vs minor events, population age, units, censoring and replacement lead time",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual equipment age/health, spare transformer and protection record",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R07",
+    "title": "UPS/BESS/genset start and service availability",
+    "card_ids": [
+      "reliability",
+      "control"
+    ],
+    "parameters": [
+      "failure to start",
+      "failure while running",
+      "UPS transfer failure",
+      "BESS availability"
+    ],
+    "units": "probability/demand; events/h; repair h",
+    "library_kind": "reliability_set (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "pypsa-gui/backend/services/adequacy/occurrence.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Generic occurrence/island inputs; demand-event model needs admission",
+    "source_requirements": [
+      "Demand probability distinct from time unavailability; common dependencies and test conditions",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual test-run log, battery health, fuel/UPS architecture",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R08",
+    "title": "Fuel supply/logistics interruptions",
+    "card_ids": [
+      "reliability",
+      "energy"
+    ],
+    "parameters": [
+      "delivery disruption duration",
+      "fuel-stock replenishment",
+      "pipeline curtailment",
+      "weather correlation"
+    ],
+    "units": "hours; days; probabilities; usable energy",
+    "library_kind": "stress_set/reliability_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/energy_hub.py",
+      "gridspine/schema/island.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Native stress/island context; probabilistic logistics extensions needed",
+    "source_requirements": [
+      "Physical stock/delivery scenarios and common-cause dependence",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual tank level, delivery contract and replenishment schedule",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R09",
+    "title": "Common-cause/correlated outages",
+    "card_ids": [
+      "reliability"
+    ],
+    "parameters": [
+      "common-mode group",
+      "weather/fuel dependence",
+      "conditional failure probabilities"
+    ],
+    "units": "group IDs; probability; scenario weights",
+    "library_kind": "reliability_set/stress_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/adequacy/mc.py",
+      "pypsa-gui/backend/services/adequacy/mc_zonal.py"
+    ],
+    "native_support": "Some native models explicitly limited; correlated support must be admitted",
+    "source_requirements": [
+      "Model method/estimation/covariates and overlap; independent priors not proof of common cause",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual shared substations, routes, cooling and control systems",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R10",
+    "title": "Weather/hazard/stress scenario libraries",
+    "card_ids": [
+      "reliability",
+      "energy",
+      "grid"
+    ],
+    "parameters": [
+      "heatwave",
+      "low-wind/dark week",
+      "flood/storm/cold",
+      "hazard fragility"
+    ],
+    "units": "weather series; exceedance probability; fragility curve",
+    "library_kind": "stress_set (proposed; per-template sets exist)",
+    "native_paths": [
+      "pypsa-gui/backend/services/library/series_store.py",
+      "pypsa-gui/backend/models/energy_hub.py",
+      "pypsa-gui/backend/project_templates/eh_microgrid/adequacy_stress_scenarios.json"
+    ],
+    "native_support": "Native stress sets; calibrated fragility may extend",
+    "source_requirements": [
+      "Historic event vs synthetic sensitivity; climate year/model, probability and geography",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual site exposure/flood elevation and approved climate scenario",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R11",
+    "title": "Utility service interruption benchmarks",
+    "card_ids": [
+      "reliability"
+    ],
+    "parameters": [
+      "SAIDI",
+      "SAIFI",
+      "CAIDI",
+      "major-event exclusion",
+      "customer class"
+    ],
+    "units": "minutes/customer-year; interruptions/customer-year",
+    "library_kind": "reliability_benchmark (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/models/energy_hub.py"
+    ],
+    "native_support": "Can inform declared site-outage assumption; not a direct generation-rate mapping",
+    "source_requirements": [
+      "Utility territory/reporting standard/major-event rule; benchmark not site promise",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual feeder/service and customer interruption history",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R12",
+    "title": "Interruption and lost-production valuation",
+    "card_ids": [
+      "reliability",
+      "commercial"
+    ],
+    "parameters": [
+      "voll",
+      "VoLL by segment",
+      "lost product value",
+      "restart lost revenue"
+    ],
+    "units": "currency/MWh unserved; currency/t; currency/event",
+    "library_kind": "valuation_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/process_unit.py",
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/services/adequacy/fmea_sweep_runner.py"
+    ],
+    "native_support": "Native VoLL/product value; richer tier coupling planned",
+    "source_requirements": [
+      "Survey/class/region/price year and interruption duration; avoid double-valuing loss",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual safety consequences, production margin, customer contracts",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R13",
+    "title": "Reliability criteria and accreditation references",
+    "card_ids": [
+      "reliability"
+    ],
+    "parameters": [
+      "target_lole_h",
+      "ens_cap_permyriad",
+      "reserve margin",
+      "capacity-credit methodology"
+    ],
+    "units": "h/year; fraction; MW credit",
+    "library_kind": "reliability_policy (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/energy_hub.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/adequacy.py"
+    ],
+    "native_support": "Native user-set goals; formal accreditation separate",
+    "source_requirements": [
+      "Operator/regulator method/version/time basis and eligibility",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual owner risk tolerance, capacity accreditation and binding SLA",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "R14",
+    "title": "Criticality and restoration archetypes",
+    "card_ids": [
+      "reliability",
+      "control"
+    ],
+    "parameters": [
+      "safety/process_critical/process_flexible/deferrable",
+      "pickup order",
+      "restart duration"
+    ],
+    "units": "tier; order; h; service boundary",
+    "library_kind": "control_preset/stress_set (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/process_unit.py",
+      "gridspine/schema/island.py"
+    ],
+    "native_support": "Native process tiers/island context; generic templating possible",
+    "source_requirements": [
+      "Example priority vs actual safety classification; dependency/restart model",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual hospital/IT/process critical loads and safe restart procedure",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C01",
+    "title": "Wholesale electricity price history",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "day-ahead/intraday/real-time",
+      "nodal/zonal price",
+      "negative prices"
+    ],
+    "units": "currency/MWh; interval/timezone",
+    "library_kind": "series (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Native price refs/market packs",
+    "source_requirements": [
+      "Market/zone/node, product, settlement interval, timezone/DST, historic vs forecast",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual bidding zone/node and commercial market access",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C02",
+    "title": "Retail/DSO energy tariff schedules",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "TariffItem.kind",
+      "TariffPeriod.rate",
+      "TOU months/weekdays/hours",
+      "tier rates"
+    ],
+    "units": "currency/kWh or MWh; tariff-local clock",
+    "library_kind": "tariff (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/services/library/urdb.py"
+    ],
+    "native_support": "Native tariff/URDB importer",
+    "source_requirements": [
+      "Official operator tariff class, voltage, customer eligibility, valid dates; unsupported terms explicit",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual contracted tariff, meter and account eligibility",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C03",
+    "title": "Demand/capacity tariffs and ratchets",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "measured_on",
+      "settlement",
+      "Tier.threshold",
+      "Ratchet.lookback_months/share",
+      "coincident peak"
+    ],
+    "units": "currency/kW-month; currency/kVA; fraction",
+    "library_kind": "tariff (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native demand/tiers/ratchets; unsupported complex structures refused",
+    "source_requirements": [
+      "Demand integration interval, season/month, kW/kVA/PF and ratchet basis",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual meter peak history/power factor and subscribed demand",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C04",
+    "title": "Fixed/customer/minimum bill charges",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "fixed charge",
+      "minimum bill",
+      "customer-service item"
+    ],
+    "units": "currency/account-month; currency/year",
+    "library_kind": "tariff (existing where supported)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Existing tariff item schema; exact term mapping checked",
+    "source_requirements": [
+      "Billing period, account class, tax/netting and supported item semantics",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual account counts and service contract",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C05",
+    "title": "Network levies/taxes/pass-throughs",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "network energy charge",
+      "policy levy",
+      "VAT",
+      "tax",
+      "eligibility exemption"
+    ],
+    "units": "currency/MWh; percentage; currency/month",
+    "library_kind": "tariff/finance_set (existing/proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Native supported tariff/finance subset",
+    "source_requirements": [
+      "Commodity vs network split, date/jurisdiction, gross/net VAT and eligibility",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual tax exemption/account status; not legal advice or inferred eligibility",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C06",
+    "title": "Export compensation and injection tariffs",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "export_price_ref",
+      "TariffItem measured_on export",
+      "feed-in/net-metering rules"
+    ],
+    "units": "currency/MWh; capacity charge",
+    "library_kind": "tariff/series (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native export price/tariff supported subset",
+    "source_requirements": [
+      "Physical export vs credit, netting window, eligibility/version; negative prices",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual interconnection/net-metering enrollment and export limits",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C07",
+    "title": "Connection cost and access products",
+    "card_ids": [
+      "commercial",
+      "grid"
+    ],
+    "parameters": [
+      "capacity_fee",
+      "connection upfront fee",
+      "non-firm/firm access",
+      "curtailment compensation"
+    ],
+    "units": "currency/MW-year; currency upfront; currency/MWh",
+    "library_kind": "connection_agreement/tariff (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native connection agreement/capacity fee",
+    "source_requirements": [
+      "Published schedule/product vs bespoke reinforcement quote; availability date",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual queue position, reinforcement cost, negotiated offer and energized MW",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C08",
+    "title": "PPA contract archetypes and pricing benchmarks",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "PpaContract.kind",
+      "price",
+      "tenor",
+      "indexation",
+      "premium",
+      "volume_cap",
+      "negative-price clause",
+      "reference"
+    ],
+    "units": "currency/MWh; years; percent/year; MWh/year",
+    "library_kind": "contract (existing); benchmark metadata extension",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native contracts; seller/share gaps identified by IPP spec",
+    "source_requirements": [
+      "As-produced/baseload/shaped/financial/sleeved; date/zone/capture/credit basis; quote vs index",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Confidential negotiated price, parties, credit terms and actual volumes",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C09",
+    "title": "CfD/auction award references",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "CfdContract.strike",
+      "tenor",
+      "reference",
+      "indexation",
+      "suspend_on_negative_price"
+    ],
+    "units": "currency/MWh; years",
+    "library_kind": "contract/series (existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native CfD; official awards can seed benchmarks",
+    "source_requirements": [
+      "Award year vs COD/money year, technology, bid/award vs traded PPA price",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual eligibility/award and private contract deviations",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C10",
+    "title": "Ancillary/DR/capacity market products",
+    "card_ids": [
+      "commercial",
+      "control"
+    ],
+    "parameters": [
+      "capacity_price",
+      "activation_price",
+      "min_bid_mw",
+      "DR availability/activation/events/notice"
+    ],
+    "units": "currency/MW-hour/year; currency/MWh; MW; h",
+    "library_kind": "market_pack/contract (native objects; library expansion needed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native market/DR objects; exact dispatch/reserve coverage limited",
+    "source_requirements": [
+      "Product definition, prequalification, duration/baseline/stacking and price time basis",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual market access, qualified capacity and aggregator contract",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C11",
+    "title": "Gas/diesel/coal/biomass fuel prices",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "commodity price",
+      "delivery/tax split",
+      "fuel escalation scenarios"
+    ],
+    "units": "currency/MWh_LHV; currency/MMBtu; currency/l or t",
+    "library_kind": "series/commodity_price (series exists; scalar kind proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Native marginal costs/ref purchase; commodity-source mapping needed",
+    "source_requirements": [
+      "Hub/wholesale vs delivered; units/calorific basis, currency/year and taxes",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual delivered fuel contract and transport/logistics",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C12",
+    "title": "Carbon allowance/tax price",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "Co2Price.eur_per_t_by_year",
+      "co2_price_per_period",
+      "carbon-price scenarios"
+    ],
+    "units": "currency/tCO2",
+    "library_kind": "series/policy_set (series exists; policy kind proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native period CO2 prices",
+    "source_requirements": [
+      "ETS allowance vs tax, compliance period/jurisdiction and forecast vs historic",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual facility coverage, free allocation and compliance obligation",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C13",
+    "title": "Exchange-rate history and conversion policy",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "currency conversion rate",
+      "base/quote pair",
+      "observation/average date"
+    ],
+    "units": "currency pair ratio",
+    "library_kind": "series/economic_index (series exists; scalar kind proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Currency fields exist; explicit conversion adapter required",
+    "source_requirements": [
+      "Daily vs annual average, source date and conversion chain",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Project functional currency and hedging policy",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C14",
+    "title": "Inflation/escalation/cost indices",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "inflation",
+      "escalation",
+      "cost-index series",
+      "currency_year",
+      "price_basis"
+    ],
+    "units": "index; share/year; real/nominal money basis",
+    "library_kind": "series/finance_set (series exists; set proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/services/library/defaults_pack/versions/2026-10-20/values.csv"
+    ],
+    "native_support": "Native inflation/escalation/bases; cost indexing must be explicit",
+    "source_requirements": [
+      "CPI vs PPI/construction/technology cost index, country/base year; no generic automatic deflator",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Project inflation assumptions and actual contract indexation",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C15",
+    "title": "Discount/WACC/debt benchmarks",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "discount_rate",
+      "wacc_nominal",
+      "cost_of_equity",
+      "DebtTranche.rate/gearing/tenor/DSCR"
+    ],
+    "units": "rate; years; gearing fraction; ratio",
+    "library_kind": "finance_set (proposed; finance pack exists)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native finance/solver fields",
+    "source_requirements": [
+      "Nominal/real pre/post-tax, market date, sector/risk and debt vs equity; benchmark not financing offer",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual lender quote, credit spread, leverage and owner hurdle rate",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C16",
+    "title": "Tax/depreciation rules",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "TaxPack.corporate_rate",
+      "DepreciationSchedule",
+      "loss carryforward",
+      "interest deductibility"
+    ],
+    "units": "rate; years; dated tax rule",
+    "library_kind": "finance_set/tax_pack (proposed/native TaxPack model)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Native supported tax model",
+    "source_requirements": [
+      "Exact jurisdiction/entity/date and eligibility; maintain rule version and limitations",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual taxpayer status, losses and legal interpretation",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C17",
+    "title": "Incentives/grants/credits",
+    "card_ids": [
+      "commercial"
+    ],
+    "parameters": [
+      "Incentive.kind/rate/amount",
+      "eligibility",
+      "phase_out",
+      "grant_tax_treatment"
+    ],
+    "units": "currency; currency/MWh; share; dates",
+    "library_kind": "finance_set/incentive_pack (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/finance.py"
+    ],
+    "native_support": "Native incentive subset; policy support is not eligibility certification",
+    "source_requirements": [
+      "Law/program version, dates, wage/content/ownership/geographic criteria and stacking",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual eligibility evidence, award/registration and legal review",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C18",
+    "title": "Grid and product emissions intensity",
+    "card_ids": [
+      "commercial",
+      "energy"
+    ],
+    "parameters": [
+      "grid_t_per_mwh",
+      "grid_cfe_share_ref",
+      "ReferencePurchase.co2_t_per_kg",
+      "emissions series"
+    ],
+    "units": "tCO2/MWh; kgCO2/kg; CFE share",
+    "library_kind": "series/commodity_properties (series exists; kind proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/models/schemas.py",
+      "pypsa-gui/backend/services/library/series_store.py"
+    ],
+    "native_support": "Native carbon/CFE refs; broader lifecycle method may extend",
+    "source_requirements": [
+      "Average vs marginal, location vs market-based, lifecycle boundary and matching interval",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual certificates/cancellation, supplier emissions and regulatory green status",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "C19",
+    "title": "H2/NH3/product/offtake value benchmarks",
+    "card_ids": [
+      "commercial",
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "ReferencePurchase.price_eur_per_kg",
+      "Bus.product_value",
+      "product shortfall value",
+      "offtake schedule"
+    ],
+    "units": "currency/kg; currency/t; currency/MWh_product",
+    "library_kind": "commodity_price/contract (proposed/existing)",
+    "native_paths": [
+      "pypsa-gui/backend/models/commercial.py",
+      "pypsa-gui/backend/models/process_unit.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native product value/reference purchase; real quotes commonly private",
+    "source_requirements": [
+      "Spot vs delivered/purity/green premium, geography/quality/time/currency, price vs net contribution margin",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual offtake price/volume/penalty and lost-production margin",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O01",
+    "title": "Grid-forming control presets",
+    "card_ids": [
+      "control",
+      "grid"
+    ],
+    "parameters": [
+      "control mode",
+      "droop",
+      "equivalent inertia H_v",
+      "tau_f",
+      "i_max",
+      "service flags"
+    ],
+    "units": "pu; percent; seconds; current pu",
+    "library_kind": "control_preset (proposed; native PRESETS exists)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/static/gfm_tuning.py"
+    ],
+    "native_support": "Native screened presets/search, not universal dynamics",
+    "source_requirements": [
+      "Device model/firmware, rating/headroom/SOC/reserve and precise screened phenomena",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual validated vendor controller and applied tuning",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O02",
+    "title": "Reactive/voltage control presets",
+    "card_ids": [
+      "control",
+      "grid"
+    ],
+    "parameters": [
+      "Q-V droop",
+      "voltage target",
+      "Q capability",
+      "deadband",
+      "limit priority"
+    ],
+    "units": "pu; MVAr; percent",
+    "library_kind": "control_preset (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/templates/data/grid_codes.yaml",
+      "gridspine/static/campus_reactive.py"
+    ],
+    "native_support": "Native reactive/island fields; detailed loop may extend",
+    "source_requirements": [
+      "Control hierarchy, line impedance, voltage class and vendor limits",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual operator setting and site dynamic model",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O03",
+    "title": "Frequency/governor/FFR parameters",
+    "card_ids": [
+      "control"
+    ],
+    "parameters": [
+      "frequency droop",
+      "governor response",
+      "inertia",
+      "FFR delay/duration",
+      "reserve headroom"
+    ],
+    "units": "seconds; percent; MW; Hz",
+    "library_kind": "control_preset (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/static/frequency.py"
+    ],
+    "native_support": "Native reduced frequency/island models",
+    "source_requirements": [
+      "Turbine/converter model and applicable event; data/model completeness",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual tested governor/turbine/inverter response and reserve policy",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O04",
+    "title": "Ride-through/load response presets",
+    "card_ids": [
+      "control",
+      "grid",
+      "reliability"
+    ],
+    "parameters": [
+      "voltage-frequency ride-through curves",
+      "UPS bridge",
+      "critical load response",
+      "trip delays"
+    ],
+    "units": "pu/Hz against time; seconds; MW",
+    "library_kind": "control_preset/equipment (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/templates/data/grid_codes.yaml",
+      "gridspine/schema/dc.py"
+    ],
+    "native_support": "Native island requirements/UPS response; eligibility scoped",
+    "source_requirements": [
+      "Device curve vs connection requirement; tested phenomenon/timestep",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual device settings/acceptance and load-side immunity",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O05",
+    "title": "Motor and process restart sequencing",
+    "card_ids": [
+      "control",
+      "reliability",
+      "grid"
+    ],
+    "parameters": [
+      "pickup order",
+      "restart delay",
+      "motor method",
+      "process ramp and standby"
+    ],
+    "units": "seconds/hours; sequence; pu current",
+    "library_kind": "control_preset/process_recipe (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "pypsa-gui/backend/models/process_unit.py",
+      ".scratch/grid-to-process/issues/12-minutes-scale-motor-start-restart.md"
+    ],
+    "native_support": "Native island context; detailed process restart planned",
+    "source_requirements": [
+      "Coupled process dependency, buffer/inventory and safe restart; no additive loss double-count",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual safe operating procedure and protection coordination",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O06",
+    "title": "Black-start/reconnection/protection scenario references",
+    "card_ids": [
+      "control",
+      "grid"
+    ],
+    "parameters": [
+      "black-start sequence",
+      "synchronism window",
+      "protection coordination",
+      "voltage/frequency permissives"
+    ],
+    "units": "scenario artifact; Hz; deg; pu; seconds",
+    "library_kind": "control_scenario (proposed; reference only)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "gridspine/templates/data/grid_codes.yaml"
+    ],
+    "native_support": "Separate detailed model/admission required; GFM does not imply support",
+    "source_requirements": [
+      "Explicit model/plant validity and operator requirements; no generic certified recipe",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual approved energization, relay settings and switching authority",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O07",
+    "title": "EMS/storage dispatch policy presets",
+    "card_ids": [
+      "control",
+      "energy",
+      "reliability"
+    ],
+    "parameters": [
+      "reserve-SOC policy",
+      "rule thresholds",
+      "forecast horizon",
+      "constraint/fallback policy"
+    ],
+    "units": "pu SOC; MW; h; model/policy artifact",
+    "library_kind": "control_preset (proposed)",
+    "native_paths": [
+      "gridspine/schema/island.py",
+      "pypsa-gui/backend/models/schemas.py"
+    ],
+    "native_support": "Native optimization/island context; general controller adapter pending",
+    "source_requirements": [
+      "Nonanticipative information, forecast error and calibration; compare on matched disturbances",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual operating policy, forecast/data access and plant actuation authorization",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  },
+  {
+    "family_id": "O08",
+    "title": "Workload/industrial scheduling policies",
+    "card_ids": [
+      "control",
+      "energy"
+    ],
+    "parameters": [
+      "training deferral limits",
+      "deadlines",
+      "temperature constraints",
+      "production shifts",
+      "DR activation"
+    ],
+    "units": "hours; MW; degC; product throughput",
+    "library_kind": "control_preset/flexibility_archetype (proposed)",
+    "native_paths": [
+      "pypsa-gui/backend/services/dc_load_profile.py",
+      "pypsa-gui/backend/models/flex_archetypes.py",
+      "pypsa-gui/backend/models/commercial.py"
+    ],
+    "native_support": "Native DC/flex contracts; advanced policy evaluation pending",
+    "source_requirements": [
+      "Critical vs deferrable work and rebound/production constraints; no unconstrained shifting",
+      "Versioned source; publication/retrieval/effective date; geography; data rights; unit/basis; technology class; uncertainty/assumed status; no silent application"
+    ],
+    "excluded_site_specific": "Actual job/production commitments, operator consent and safety limits",
+    "region_scope": "EU/UK/EEA/CH and US/Canada/Mexico; coverage must be tagged, never presumed universal",
+    "source_baseline_sha": "46035b4d853df2db8500d2fc1784da02d38bf539"
+  }
+]
