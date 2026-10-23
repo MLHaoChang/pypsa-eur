@@ -20,7 +20,7 @@ def test_carrier_table_keeps_its_renewable_answer():
         'onwind', 'offwind-ac', 'offwind-dc', 'offwind-float', 'solar',
         'solar-hsat', 'solar-rooftop', 'ror', 'hydro', 'geothermal', 'biomass',
         'wave', 'tidal', 'pv', 'biogas', 'wind', 'Onshore Wind',
-        'Offshore Wind (AC)', 'Offshore Wind (DC)', 'Solar PV (utility)',
+        'Offshore Wind (AC)', 'Offshore Wind (DC)', 'Offshore Wind (Floating)', 'Solar PV (utility)',
         'Solar PV (rooftop)', 'Run-of-River', 'Hydro Reservoir', 'Geothermal',
         'Biomass', 'Wave', 'Pumped Hydro', 'Pumped Hydro Storage',
         'Hydro', 'hydropower', 'hydroelectric', 'HydroPlant', 'hydro-reservoir',
@@ -37,6 +37,7 @@ def test_carrier_table_keeps_its_renewable_answer():
         'NH3', 'N2', 'ore', 'concentrate', 'Ammonia', 'Nitrogen', 'Ore',
         'Concentrate', 'battery', 'Battery', 'CCGT (Gas)', 'OCGT (Gas)',
         'Hard Coal', 'Lignite', 'Oil', 'Nuclear', 'Natural Gas', 'Diesel',
+        'Open-Cycle Gas', 'Combined-Cycle Gas',
         'Run of River', 'Reservoir & Dam', 'Load Shedding', 'load_shedding',
         'product_shortfall', 'GAS',
     ]
