@@ -2,7 +2,7 @@
 
 Current coordinator session: `session_018bNQmSoFykybUMsEgXPTkq`
 
-Engine gatekeeper (gridspine, IC and engine reviews): `session_015Up3Zsa8kauvtgEWoEEwAf`
+Engine gatekeeper (gridspine, IC and engine reviews): `session_0136pAVirDsu29VKsDCjpP2h`
 
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_016g8Pbr2CXirJF3hYm5uvdQ`
 
