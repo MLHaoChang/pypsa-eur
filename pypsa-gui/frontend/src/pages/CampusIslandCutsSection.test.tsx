@@ -78,6 +78,16 @@ describe('frequency cuts: the preview', () => {
     expect((await screen.findByTestId('cuts-limit')).textContent).toContain('get no cut')
   })
 
+  it('names the scenarios and columns in plain words', async () => {
+    api.islandCuts.mockResolvedValue({ ...CUTS, proposed: [cut({ scenario: 'ups_bridged' }), cut({ hour: 5 })] })
+    renderSection()
+    const table = await screen.findByTestId('cuts-proposed')
+    const rows = table.querySelectorAll('tbody tr')
+    expect(rows[0].querySelectorAll('td')[1].textContent).toBe('UPS-bridged')
+    expect(rows[1].querySelectorAll('td')[1].textContent).toBe('Seamless')
+    expect([...table.querySelectorAll('thead th')].map(h => h.textContent).slice(0, 3)).toEqual(['Hour', 'Scenario', 'Event'])
+  })
+
   it('shows each cut with its estimate labelled, and why one has no row', async () => {
     renderSection()
     const rows = (await screen.findByTestId('cuts-proposed')).querySelectorAll('tbody tr')
