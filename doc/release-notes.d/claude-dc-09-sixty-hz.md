@@ -1,0 +1,1 @@
+* Fix(gridspine): The campus island frequency check, its cuts and the recommended GFM settings now run at the network's nominal frequency (`f_hz`, 50 or 60 Hz) instead of assuming 50 Hz; the droop gain P_n / (R·f0) behind the cuts and the E4 pickup reads it too.

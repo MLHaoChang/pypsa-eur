@@ -453,9 +453,10 @@ def island_frequency_campus(run_dir, every_hour: bool = True, workers=1, should_
     hourly, _ = campus_tables(run_dir)
     hours = island_hours(run_dir)
     scenarios = campus.island["requirements"]["scenarios"]
-    sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit)
+    f0 = float(campus.net.f_hz)
+    sweep = (F.e1_every_hour(campus, hourly, hourly_island, unit, f0=f0)
              if every_hour and "seamless" in scenarios else pd.DataFrame(columns=list(F.E1_HOURLY_COLUMNS)))
-    study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit, workers=workers,
+    study = F.campus_frequency_study(campus, hourly, hours, island_unit_hourly=unit, f0=f0, workers=workers,
                                      should_stop=should_stop)
     _record_workers(run_dir, "island_frequency", parallel.used(workers, len(hours)), fresh=True)
     for name, df in ((FREQ_E1_HOURLY_CSV, sweep), (FREQ_EVENTS_CSV, study.events), (FREQ_LOSSES_CSV, study.losses),
@@ -538,7 +539,7 @@ def cuts_campus(run_dir, workers=1, should_stop=None) -> pd.DataFrame:
     cuts = F.propose_cuts(campus, hourly, events, sweep,
                           island_hourly=tables[1] if tables is not None else None,
                           island_unit_hourly=tables[0] if tables is not None else None,
-                          workers=workers, should_stop=should_stop)
+                          f0=float(campus.net.f_hz), workers=workers, should_stop=should_stop)
     _record_workers(run_dir, "cuts", parallel.used(workers, len(F.cut_events(events, sweep))))
     _write_text_atomic(run_dir / FREQ_CUTS_CSV, cuts.to_csv(index=False))
     return cuts
@@ -573,7 +574,8 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
     iu = tables[0] if tables is not None else None
     limits, req = F._limits(campus)
     values = req["values"]
-    window, eq = values["rocof_window_ms"], F.equipment(campus)
+    f0 = float(campus.net.f_hz)
+    window, eq = values["rocof_window_ms"], F.equipment(campus, f0)
     if margin is None:
         margin = float(values.get("gfm_tuning_margin", 0.1))
     events = pd.read_csv(events_path)
@@ -587,14 +589,14 @@ def gfm_settings_campus(run_dir, *, allow_i_max: bool = False, max_sims: int = 4
         if key in seen:
             continue
         seen.add(key)
-        built_ = F._event_run(campus, hourly, iu, r, ctx, (1e-3, 20.0), (5e-3, 10.0))
+        built_ = F._event_run(campus, hourly, iu, r, ctx, (1e-3, 20.0), (5e-3, 10.0), f0)
         if built_ is None:
             continue
 
         def run(us, dt, t_end, r=r):
-            return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end))[1](us, t_end)
+            return F._event_run(campus, hourly, iu, r, ctx, (dt, t_end), (dt, t_end), f0)[1](us, t_end)
         cases.append(T.Case(f"{key[0]} h{key[1]} {key[2]} {key[3]}", built_[0], run))
-    rec = T.recommend_gfm_settings(cases, limits, equipment_=eq, window_ms=window, margin=margin,
+    rec = T.recommend_gfm_settings(cases, limits, f0=f0, equipment_=eq, window_ms=window, margin=margin,
                                    allow_i_max=allow_i_max, max_sims=max_sims, should_stop=should_stop)
     out = {"label": rec.label, "ledger": T.ledger(rec.bounds), "status": rec.status, "achievable": rec.achievable, "changed": rec.changed,
            "settings": rec.settings,
