@@ -71,11 +71,11 @@ const CHECK_LABEL: Record<ComplianceRow['check'], string> = {
   transformer_loading: 'Transformer loading',
   switchgear: 'Switchgear short circuit',
   cable_loading: 'Cable loading',
-  pcc_q_band: 'Q band against P at the PCC',
-  pcc_power_factor: 'Power factor at the PCC',
+  pcc_q_band: 'Reactive power band against active power at the PCC',
+  pcc_power_factor: 'Minimum power factor at the PCC',
 }
 const STATUS_TEXT: Record<CheckStatus, string> = {
-  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'unknown',
+  pass: 'pass', fail: 'fail', not_rated: 'not rated', not_rechecked: 'not re-checked', unknown: 'no limit',
 }
 const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
   pass: 'ok', fail: 'err', not_rated: 'neutral', not_rechecked: 'warn', unknown: 'neutral',
@@ -621,6 +621,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
   // the "with measures" column is part one's recommendation, and some checks are not re-checked.
   const invested = r.compliance_invested != null
   const rows: ComplianceRow[] = r.compliance_invested ?? r.compliance
+  // What the grid code asks that no steady-state check here can show, each named once.
+  const rms = [...new Set((r.reported_requirements ?? []).map(q => q.requirement))]
   return (
     <>
       {pending && (
@@ -690,6 +692,11 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
         <p className="text-[11px] text-muted mt-2">
           PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
         </p>
+        {rms.length > 0 && (
+          <p data-testid="compliance-rms" className="text-[11px] text-muted mt-1">
+            Needs an RMS study (not checked here): {rms.join(' · ')}
+          </p>
+        )}
       </PageSection>}
 
       {design && <>

@@ -122,7 +122,8 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
   const judged = rows.filter(r => r.status_with_measures !== 'unknown')
   const pass = judged.filter(r => r.status_with_measures === 'pass').length
   return {
-    label, value: `${pass} of ${judged.length}`, unit: 'checks pass', open,
+    label, value: `${pass} of ${judged.length}`, open,
+    unit: rows.length > judged.length ? `checks pass · ${rows.length - judged.length} without a limit` : 'checks pass',
     state: campus?.stale ? 'stale' : 'ready',
     basis: 'Grid checks, with the proposed measures',
     reason: campus?.stale ? 'The network changed since the checks ran.' : undefined,

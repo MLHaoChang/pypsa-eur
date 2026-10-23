@@ -296,19 +296,37 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-pcc_voltage').textContent).toContain('not re-checked')
   })
 
-  it('shows a check whose limit the profile does not set as unknown, never pass or fail', async () => {
+  it('shows a check whose limit the profile does not set as "no limit", never pass or fail', async () => {
     const state = sized()
     state.results!.compliance = [...state.results!.compliance, {
       check: 'pcc_power_factor', status_as_is: 'unknown', status_with_measures: 'unknown', value: NaN, limit: NaN,
-      unit: '', worst_period: null, worst_hour: null, clause: '', source: 'assumed', detail: 'no limit set',
+      unit: '', worst_period: null, worst_hour: null, clause: '', source: 'assumed', detail: 'The grid code sets no limit for this.',
     } as never]
     api.state.mockResolvedValue(state)
     renderPanel()
     const row = await screen.findByTestId('compliance-pcc_power_factor')
-    expect(row.textContent).toContain('Power factor at the PCC')
-    expect(row.textContent).toContain('unknown')
-    expect(row.textContent).toContain('no limit set')
+    expect(row.textContent).toContain('Minimum power factor at the PCC')
+    expect(row.textContent).toContain('no limit')
+    expect(row.textContent).not.toContain('unknown')
+    expect(row.textContent).toContain('The grid code sets no limit for this.')
     expect(row.textContent).not.toMatch(/pass|fail/)
+  })
+
+  it('names what needs an RMS study under the compliance table, and says nothing when nothing does', async () => {
+    const state = sized()
+    state.results!.reported_requirements = [
+      { id: 'frt', requirement: 'Fault ride-through', value: 'generic', status: 'reported', detail: '', clause: '', source: 'code' },
+      { id: 'fsm', requirement: 'Frequency sensitive mode', value: 'generic', status: 'reported', detail: '', clause: '', source: 'code' },
+    ] as never
+    api.state.mockResolvedValue(state)
+    const { unmount } = renderPanel()
+    expect((await screen.findByTestId('compliance-rms')).textContent)
+      .toBe('Needs an RMS study (not checked here): Fault ride-through · Frequency sensitive mode')
+    unmount()
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    await screen.findByTestId('compliance-pcc_reactive')
+    expect(screen.queryByTestId('compliance-rms')).toBeNull()
   })
 
   it('labels a transformer group the investment buys as planned, not as a bare verdict', async () => {

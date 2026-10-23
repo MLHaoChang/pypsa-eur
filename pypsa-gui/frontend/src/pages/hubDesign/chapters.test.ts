@@ -113,9 +113,9 @@ describe('chapterTiles', () => {
     let t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('pass'), row('fail')]), notHub: false } })
     expect(t.grid_plan).toMatchObject({ state: 'ready', value: '2 of 3', unit: 'checks pass',
       basis: 'Grid checks, with the proposed measures' })
-    // a check with no limit set is unknown: neither passed nor counted
+    // a check with no limit set is unknown: neither passed nor counted, and the tile says how many were left out
     t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('unknown'), row('fail'), row('unknown')]), notHub: false } })
-    expect(t.grid_plan.value).toBe('1 of 2')
+    expect(t.grid_plan).toMatchObject({ value: '1 of 2', unit: 'checks pass · 2 without a limit' })
     t = byId({ ...NONE, grid: { campus: campus([row('pass')], true), notHub: false } })
     expect(t.grid_plan.state).toBe('stale')
     t = byId({ ...NONE, grid: { campus: { results: null, stale: false } as never, notHub: false } })

@@ -233,6 +233,17 @@ export interface CostBasis {
   currency: string
 }
 
+/** What the grid code requires that no steady-state check can show (status `reported`, never a verdict). */
+export interface ReportedRequirement {
+  id: string
+  requirement: string
+  value: string
+  status: 'reported'
+  detail: string
+  clause: string
+  source: GridLimit['source']
+}
+
 export interface CampusResults {
   selection: SelectedHour[]
   transformers: TransformerSizing[]
@@ -240,6 +251,8 @@ export interface CampusResults {
   short_circuit: FaultLevel[]
   compliance: ComplianceRow[]
   requirement: Requirement
+  /** Needs an RMS study; empty for a run from before it was kept. */
+  reported_requirements?: ReportedRequirement[]
   /** Null throughout when the run did not invest. */
   investment: InvestmentRow[] | null
   cost: CostRow[] | null

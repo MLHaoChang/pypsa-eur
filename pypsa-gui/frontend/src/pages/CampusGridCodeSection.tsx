@@ -61,7 +61,7 @@ function limitLabel(path: string): string {
     rvc_limit_pct: 'Rapid voltage change',
     campus_voltage: 'Voltage inside the campus',
     rvc_limit_infrequent_pct: 'Rapid voltage change, infrequent',
-    q_capability_pq: 'Q band against P at the PCC',
+    q_capability_pq: 'Reactive power band against active power at the PCC',
     pf_min_lagging: 'Minimum power factor, lagging',
     pf_min_leading: 'Minimum power factor, leading',
   }[path] ?? path
@@ -74,7 +74,8 @@ function limitValue(path: string, lim: GridLimit): string {
   if (path === 'pf_min_lagging' || path === 'pf_min_leading') return `${lim.value}`
   if (path === 'q_capability_pq') {
     const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
-    return points.map(([p, lo, hi]) => `P ${p}: ${lo}…${hi}`).join('; ') + ' pu'
+    const pu = (v: number) => `${v}`.replace('-', '−')
+    return points.map(([p, lo, hi]) => `P ${pu(p)} pu: Q ${pu(lo)} to ${pu(hi)} pu`).join(' · ')
   }
   return `${lim.v_min}–${lim.v_max} pu`
 }

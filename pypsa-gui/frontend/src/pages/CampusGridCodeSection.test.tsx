@@ -183,7 +183,10 @@ describe('grid codes: extract', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
     expect((await screen.findByTestId('limit-rvc_limit_infrequent_pct')).textContent).toContain('Rapid voltage change, infrequent')
     expect(screen.getByTestId('limit-rvc_limit_infrequent_pct').textContent).toContain('3 %')
-    expect(screen.getByTestId('limit-q_capability_pq').textContent).toContain('P 0: -0.1…0.1; P 1: -0.3…0.3 pu')
+    const band = screen.getByTestId('limit-q_capability_pq').textContent
+    expect(band).toContain('Reactive power band against active power at the PCC')
+    expect(band).toContain('P 0 pu: Q −0.1 to 0.1 pu · P 1 pu: Q −0.3 to 0.3 pu')
+    expect(band).not.toContain('…')
     expect(screen.getByTestId('limit-pf_min_lagging').textContent).toContain('Minimum power factor, lagging')
     expect(screen.getByTestId('limit-pf_min_leading').textContent).toContain('0.95')
   })

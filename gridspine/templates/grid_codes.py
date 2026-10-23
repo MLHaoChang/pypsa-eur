@@ -67,8 +67,8 @@ A profile may carry these optional keys:
     Text the report carries with the profile (scope, what is unverified).
 
 Each of these is optional and has no default: a profile without one sets
-no such limit, and a check against it reports "no limit set" with status
-``unknown`` (``campus_compliance``), never pass or fail.
+no such limit, and a check against it says the grid code sets no limit,
+with status ``unknown`` (``campus_compliance.NO_LIMIT``), never pass or fail.
 
 Any other key is loaded and logged as a warning: a project or extracted
 profile may carry extras, but a misspelt key would otherwise switch a check

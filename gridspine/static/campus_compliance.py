@@ -39,7 +39,7 @@ check (``CHECKS``):
 Both read ``requirement["p_ref_mw"]`` (the connection capacity the profile's
 per-unit values scale by) and the intact rows of ``pcc``. Without the
 profile's limit, without ``p_ref_mw`` or without ``pcc``, the row is
-``unknown`` (detail "no limit set" for a missing limit): never pass, never
+``unknown`` (detail ``NO_LIMIT`` for a missing limit): never pass, never
 fail.
 
 Signs are the study's at the connection point: ``p_mw`` is the ``ext_grid``
@@ -86,7 +86,7 @@ Q_TOL = 0.011
 #: factor check: near zero exchange the ratio is undefined or meaningless.
 PF_MIN_P_SHARE = 0.1
 #: The detail of a row whose limit the profile does not set.
-NO_LIMIT = "no limit set"
+NO_LIMIT = "The grid code sets no limit for this."
 
 
 def _true(flag) -> bool:

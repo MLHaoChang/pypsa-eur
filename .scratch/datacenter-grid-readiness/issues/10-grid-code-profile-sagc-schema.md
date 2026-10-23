@@ -3,7 +3,7 @@
 
 # Grid-code profile schema for SAGC-type codes, and page-range PDF upload
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none (09 is the owner's priority, not a dependency)
 Gated: **yes** (gridspine; UX reviewer for the profile UI)

@@ -13,7 +13,7 @@ re-solve).
 import pandas as pd
 import pytest
 
-from gridspine.static.campus_compliance import CHECKS, campus_compliance
+from gridspine.static.campus_compliance import CHECKS, NO_LIMIT, campus_compliance
 from gridspine.templates.grid_codes import list_grid_codes, load_grid_code
 
 PROFILE = load_grid_code("eu_rfg_dcc_ce")
@@ -306,7 +306,7 @@ BAND = _lim(points=[[0.0, -0.1, 0.1], [1.0, -0.2, 0.2]])     # +-18 Mvar at 0.8 
 
 
 @pytest.mark.parametrize("profile, pcc, p_ref, why", [
-    (PROFILE, None, P_REF, "no limit set"),
+    (PROFILE, None, P_REF, NO_LIMIT),
     (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), None, None, "p_ref"),
     (_with(q_capability_pq=BAND, pf_min_lagging=_lim(value=0.9)), pd.DataFrame(), P_REF, "no PCC active power"),
 ])

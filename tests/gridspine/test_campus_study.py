@@ -296,7 +296,7 @@ def test_sizing_ends_with_the_compliance_report(tmp_path, project):
     # the EU profile sets no P-dependent Q band and no power-factor limit: unknown, never pass or fail
     new = stored.set_index("check").loc[["pcc_q_band", "pcc_power_factor"]]
     assert set(new["status_as_is"]) == set(new["status_with_measures"]) == {"unknown"}
-    assert (new["detail"] == "no limit set").all()
+    assert (new["detail"] == "The grid code sets no limit for this.").all()
 
 
 def test_an_unsolved_project_cannot_be_drafted(tmp_path):

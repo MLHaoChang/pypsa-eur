@@ -28,7 +28,7 @@ from gridspine.drivers.campus_study import (
     size_campus,
 )
 from gridspine.schema.contracts import ContractError
-from gridspine.static.campus_compliance import campus_compliance
+from gridspine.static.campus_compliance import NO_LIMIT, campus_compliance
 from gridspine.static.campus_reactive import requirement_from
 from gridspine.templates.grid_codes import (
     PROFILE_ID,
@@ -414,7 +414,7 @@ def test_a_study_run_against_a_profile_with_a_q_band_and_power_factor_judges_bot
     rank_campus(run, k=1)
     rows = size_campus(run, profile="wide", profile_dirs=[codes])["compliance"].set_index("check")
     band = rows.loc["pcc_q_band"]
-    assert band["status_as_is"] == band["status_with_measures"] == "pass" and band["detail"] != "no limit set"
+    assert band["status_as_is"] == band["status_with_measures"] == "pass" and band["detail"] != NO_LIMIT
     assert band["limit_min"] < band["value"] < band["limit_max"]
     pf = rows.loc["pcc_power_factor"]
     assert pf["status_as_is"] == "pass" and 0.05 <= pf["value"] <= 1.0
