@@ -126,7 +126,7 @@ def parse_spectrum(text) -> dict:
         items = []
         for part in str(text).split(","):
             if ":" not in part:
-                raise ContractError(f"harmonic spectrum: expected order:% pairs, got {part.strip()!r}")
+                raise ContractError(f"Harmonic spectrum: expected order:% pairs such as 5:20, got {part.strip()!r}.")
             k, v = part.split(":", 1)
             items.append((k.strip(), v.strip()))
     out = {}
@@ -134,17 +134,19 @@ def parse_spectrum(text) -> dict:
         try:
             h = int(k)
         except ValueError:
-            raise ContractError(f"harmonic spectrum: order must be an integer, got {k!r}") from None
-        if not H_MIN <= h <= H_MAX:
-            raise ContractError(f"harmonic spectrum: order {h} is outside {H_MIN}..{H_MAX}")
+            raise ContractError(f"Harmonic spectrum: order {k!r} is not a whole number.") from None
+        if h < H_MIN:
+            raise ContractError(f"Harmonic spectrum: order {h} is below {H_MIN}.")
+        if h > H_MAX:
+            raise ContractError(f"Harmonic spectrum: order {h} is above {H_MAX}.")
         if h in out:
-            raise ContractError(f"harmonic spectrum: duplicate order {h}")
+            raise ContractError(f"Harmonic spectrum: order {h} appears twice.")
         try:
             pct = float(v)
         except ValueError:
             pct = math.nan
         if not math.isfinite(pct) or pct < 0:
-            raise ContractError(f"harmonic spectrum: order {h} % must be finite and >= 0, got {v!r}")
+            raise ContractError(f"Harmonic spectrum: order {h} needs a percentage of 0 or more, got {v!r}.")
         out[h] = pct
     return out
 
@@ -156,7 +158,7 @@ def unit_spectrum(topology, vendor) -> tuple[dict | None, str]:
     topology = "" if topology is None or (isinstance(topology, float) and math.isnan(topology)) \
         else str(topology).strip()
     if topology and topology not in TOPOLOGIES:
-        raise ContractError(f"harmonic_source must be one of {list(TOPOLOGIES)}, got {topology!r}")
+        raise ContractError(f"Harmonic source: {topology!r} is not one of {', '.join(TOPOLOGIES)}.")
     if spectrum:
         return spectrum, "vendor"
     if topology:

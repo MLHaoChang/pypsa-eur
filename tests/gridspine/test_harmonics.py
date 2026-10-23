@@ -190,17 +190,18 @@ def test_no_fault_level_is_unknown():
 # --- spectrum validation ---------------------------------------------------------
 
 @pytest.mark.parametrize("text, match", [
-    ("5:20, 5:10", "duplicate"),
-    ("1:20", "2..50"),
-    ("51:1", "2..50"),
-    ("5.5:1", "integer"),
-    ("5:-1", ">= 0"),
-    ("5:nan", ">= 0"),
+    ("5:20, 5:10", "order 5 appears twice"),
+    ("1:20", "order 1 is below 2"),
+    ("51:1", "order 51 is above 50"),
+    ("5.5:1", "'5.5' is not a whole number"),
+    ("5:-1", "0 or more"),
+    ("5:nan", "0 or more"),
     ("5", "order:%"),
-    ("five:1", "integer"),
+    ("five:1", "'five' is not a whole number"),
 ])
 def test_bad_spectrum_is_refused(text, match):
-    with pytest.raises(ContractError, match=match):
+    """UX: a refusal starts capitalised and names the field by its label."""
+    with pytest.raises(ContractError, match=r"^Harmonic spectrum: .*" + match):
         hm.parse_spectrum(text)
 
 
@@ -210,5 +211,5 @@ def test_spectrum_parses():
 
 
 def test_unknown_topology_is_refused():
-    with pytest.raises(ContractError, match="harmonic_source"):
+    with pytest.raises(ContractError, match="^Harmonic source: '24-pulse' is not one of linear, 6-pulse"):
         _one("24-pulse")

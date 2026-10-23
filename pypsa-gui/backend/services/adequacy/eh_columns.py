@@ -97,8 +97,7 @@ def coerce_eh_value(component_class: str, col: str, value):
     if kind == "harmonic_source":
         v = "" if value is None else str(value).strip()
         if v and v not in HARMONIC_SOURCES:
-            raise ValueError(
-                f"{col}: {v!r} is not a harmonic source; expected one of {list(HARMONIC_SOURCES)} (or empty)")
+            raise ValueError(f"Harmonic source: {v!r} is not one of {', '.join(HARMONIC_SOURCES)}.")
         return v
     if kind == "harmonic_spectrum":
         from gridspine.schema.contracts import ContractError
@@ -107,8 +106,8 @@ def coerce_eh_value(component_class: str, col: str, value):
         v = "" if value is None else str(value).strip()
         try:
             parse_spectrum(v)
-        except ContractError as exc:
-            raise ValueError(f"{col}: {exc}") from None
+        except ContractError as exc:  # already names the field by its label
+            raise ValueError(str(exc)) from None
         return v
     if kind == "text":
         return "" if value is None else str(value).strip()

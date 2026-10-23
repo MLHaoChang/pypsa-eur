@@ -67,3 +67,14 @@ def test_bad_harmonic_inputs_are_refused(client, install_network, patch):
     install_network(_net())
     r = client.post("/api/network/links", json={**DRIVE, **patch})
     assert r.status_code == 422, r.text
+
+
+@pytest.mark.parametrize("patch, message", [
+    ({"harmonic_spectrum": "51:1"}, "Harmonic spectrum: order 51 is above 50."),
+    ({"harmonic_source": "24-pulse"}, "Harmonic source: '24-pulse' is not one of linear, 6-pulse"),
+])
+def test_refusals_name_the_field_by_its_label(client, install_network, patch, message):
+    """UX: a refusal starts capitalised and names the field by its label, not its column."""
+    install_network(_net())
+    r = client.post("/api/network/links", json={**DRIVE, **patch})
+    assert r.status_code == 422 and message in r.text, r.text
