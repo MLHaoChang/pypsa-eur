@@ -1,14 +1,16 @@
 """
 Apply one shipped (`common`) cost reference to one asset of the active network.
 
-Under `/api/network`, so the write takes the undo snapshot and invalidates results
-like every other network edit. Both routes go through the edit card
-(`harness/edit_card.py`, tool `apply_library_reference`): `preview` returns the
-old → new card with the reference and the pack value beside each row; `apply`
-re-previews, refuses a card whose digest moved (`edit_preview_stale`), writes,
-and returns the card's receipt. The assistant's `apply_library_reference` runs
-the same handler after its own confirmation. Nothing is written to a pack or a
-Library item. See `services/library/reference_apply.py`.
+Both paths use the edit card (`harness/edit_card.py`, tool
+`apply_library_reference`): preview returns the old → new card; apply re-previews,
+refuses a moved digest, writes and returns the receipt. The assistant uses the
+same handler after its confirmation. No pack or Library item is written.
+
+The apply stays under `/api/network` (undo snapshot, foreign-lock gate, results
+invalidated). The read-only `preview_router`, mounted at `/api/library_reference`,
+is outside `/api/network` and `/api/io`: it plans on a copy, takes no undo snapshot,
+leaves the edit counter and results alone, and needs no `_UNDO_EXCLUDE` entry.
+See `services/library/reference_apply.py`.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from db.models import User
 from deps import require_user
 
 router = APIRouter()
+preview_router = APIRouter()
 
 TOOL = "apply_library_reference"
 
@@ -46,7 +49,7 @@ def _args(body: ReferenceApplyIn) -> dict:
     return body.model_dump(include={"component_class", "name", "technology", "projection_year", "confirm"})
 
 
-@router.post("/library_reference/preview")
+@preview_router.post("/preview")
 def preview_library_reference(body: ReferenceApplyIn, user: User = Depends(require_user)) -> dict:
     """`{card, needs, missing}`. While a confirmation is missing there is no card yet:
     `needs` says what each confirmation means, and the caller previews again with it."""

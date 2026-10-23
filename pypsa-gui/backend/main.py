@@ -1295,6 +1295,10 @@ app.include_router(_equipment_table_preview, prefix="/api/equipment_table", tags
 from routers.network_document_values import preview_router as _document_values_preview  # noqa: E402
 
 app.include_router(_document_values_preview, prefix="/api/document_values", tags=["network"])
+# The cost-reference card's preview of one shipped reference on one asset: a read too.
+from routers.network_library_reference import preview_router as _library_reference_preview  # noqa: E402
+
+app.include_router(_library_reference_preview, prefix="/api/library_reference", tags=["network"])
 # Its import tariff and PPA write: a solver-config write, so under the gated `/api/simulation/`.
 from routers.network_document_values import commercial_router as _document_values_commercial  # noqa: E402
 

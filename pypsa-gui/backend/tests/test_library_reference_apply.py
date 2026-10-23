@@ -209,13 +209,14 @@ def test_wrong_class_unknown_asset_and_storage_are_refused():
 # ── routes and the assistant tool, on the active network ──────────────────
 
 ROUTE = "/api/network/library_reference"
+PREVIEW = "/api/library_reference/preview"
 AEC = {"component_class": "Link", "name": "electrolyser",
        "technology": "electrolysis-aec-100mw", "projection_year": 2030}
 
 
 def test_preview_card_then_apply_writes_and_stamps(client, install_network):
     n = install_network(_net())
-    r = client.post(f"{ROUTE}/preview", json=AEC)
+    r = client.post(PREVIEW, json=AEC)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["missing"] == [] and body["card"]["tool"] == "apply_library_reference"
@@ -236,13 +237,13 @@ def test_preview_card_then_apply_writes_and_stamps(client, install_network):
 def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client, install_network):
     install_network(_net())
     pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility", "projection_year": 2030}
-    body = client.post(f"{ROUTE}/preview", json=pv).json()
+    body = client.post(PREVIEW, json=pv).json()
     # AC basis undeclared, and 2025 EUR beside the generic pack's 2020 EUR
     assert body["card"] is None and body["missing"] == ["dc_ac", "money_year"]
     assert "AC output" in body["needs"][0]["text"] and "not adjusted" in body["needs"][1]["text"]
     r = client.post(f"{ROUTE}/apply", json={**pv, "digest": "never-shown"})
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
-    card = client.post(f"{ROUTE}/preview", json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
+    card = client.post(PREVIEW, json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
     confirmed = [row for row in card["rows"] if row.get("confirmed")]
     assert {row["field"] for row in confirmed} == {"dc_ac", "money_year"}
     assert all(row["note"].startswith("Confirmed: ") and "unticked" not in row["note"] for row in confirmed)
@@ -253,7 +254,7 @@ def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client,
 
 def test_a_stale_digest_refuses_and_writes_nothing(client, install_network):
     n = install_network(_net())
-    card = client.post(f"{ROUTE}/preview", json=AEC).json()["card"]
+    card = client.post(PREVIEW, json=AEC).json()["card"]
     n.links.at["electrolyser", "lifetime"] = 7.0  # the asset moved after the card was shown
     r = client.post(f"{ROUTE}/apply", json={**AEC, "digest": card["digest"]})
     assert r.status_code == 409 and r.json()["detail"]["error_kind"] == "edit_preview_stale"
@@ -384,3 +385,67 @@ def test_an_asset_priced_from_a_real_regional_pack_is_compared_with_it_and_refus
         A.plan(n, {}, "Generator", "wind", "onwind", 2030)
     assert exc.value.detail["error_kind"] == "currency_mismatch"
     assert n.generators.equals(before)
+
+
+def _solved_net():
+    import pandas as pd
+
+    n = _net()
+    n.links.at["electrolyser", "overnight_cost"] = 123.0
+    n.generators_t.p = pd.DataFrame({"wind": [1.0, 1.0], "pv": [1.0, 1.0]}, index=n.snapshots)
+    n.links_t.p0 = pd.DataFrame({"electrolyser": [1.0, 1.0], "poc": [1.0, 1.0]}, index=n.snapshots)
+    return n
+
+
+def test_the_preview_is_a_read_outside_the_network_prefixes(
+    client, anon_client, install_network, session_ctx, monkeypatch,
+):
+    import pandas as pd
+
+    import main
+    from services import undo_service
+    from services.dispatch_status import dispatch_status
+
+    monkeypatch.setattr(undo_service, "claim_push_slot", lambda *a, **k: True)
+    for prefixes in (main._UNDO_PREFIXES, main._DISPATCH_INVALIDATE_PREFIXES, main._STUDY_EDIT_PREFIXES):
+        assert not any(PREVIEW.startswith(p) for p in prefixes)
+    n = install_network(_solved_net())
+    assert dispatch_status(n) == "fresh"
+    dispatch = n.generators_t.p.copy(deep=True)
+    cost = n.links.at["electrolyser", "overnight_cost"]
+    depth = client.get("/api/network/undo/info").json()["depth"]
+    revision = session_ctx(client).network_revision
+    r = client.post(PREVIEW, json=AEC)
+    assert r.status_code == 200, r.text
+    assert r.json()["card"]["tool"] == "apply_library_reference"
+    pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility", "projection_year": 2030}
+    r = client.post(PREVIEW, json=pv)
+    assert r.status_code == 200, r.text
+    assert r.json()["needs"] and r.json()["card"] is None
+    assert client.get("/api/network/undo/info").json()["depth"] == depth
+    assert session_ctx(client).network_revision == revision
+    assert dispatch_status(n) == "fresh"
+    pd.testing.assert_frame_equal(n.generators_t.p, dispatch)
+    assert n.links.at["electrolyser", "overnight_cost"] == cost
+    assert anon_client.post(PREVIEW, json=AEC).status_code == 401
+    # Last: even an absent route under /api/network still traverses write middleware.
+    assert client.post(f"{ROUTE}/preview", json=AEC).status_code in (404, 405)
+
+
+def test_the_apply_is_still_an_edit_that_clears_results(client, install_network, session_ctx, monkeypatch):
+    from services import undo_service
+    from services.dispatch_status import dispatch_status
+
+    monkeypatch.setattr(undo_service, "claim_push_slot", lambda *a, **k: True)
+    n = install_network(_solved_net())
+    assert dispatch_status(n) == "fresh"
+    depth = client.get("/api/network/undo/info").json()["depth"]
+    revision = session_ctx(client).network_revision
+    r = client.post(PREVIEW, json=AEC)
+    assert r.status_code == 200, r.text
+    r = client.post(f"{ROUTE}/apply", json={**AEC, "digest": r.json()["card"]["digest"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["receipt"]["outcome"] == "verified"
+    assert client.get("/api/network/undo/info").json()["depth"] == depth + 1
+    assert session_ctx(client).network_revision > revision
+    assert dispatch_status(n) == "none"

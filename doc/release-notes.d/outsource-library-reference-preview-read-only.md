@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Previewing a shipped cost reference on an asset no longer clears solve results, adds an undo step or marks the network edited; the preview moved to `POST /api/library_reference/preview`, and the apply stays at `/api/network/library_reference/apply`.
