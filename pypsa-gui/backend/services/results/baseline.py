@@ -275,16 +275,25 @@ def _key(n, cfg, plan: BaselinePlan, island=None, supplies=()) -> str:
     return hashlib.sha256(json.dumps(blob, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
-def _island_sidecar(storage) -> str | None:
-    """The project's island sidecar as text (the solve reads it), for the key."""
+def _island_sidecar(storage) -> dict | None:
+    """What the solve's island rows read, for the key: the project's island
+    sidecar as text and its campus's nominal frequency (a file the solve
+    refuses keys on the refusal)."""
     if not storage:
         return None
     from pathlib import Path
 
     from services.adequacy.island_config import SIDECAR_NAME
+    from services.solver.island import IslandRefusal, campus_f_hz
 
     path = Path(storage) / SIDECAR_NAME
-    return path.read_text() if path.is_file() else None
+    if not path.is_file():
+        return None
+    try:
+        f_hz = campus_f_hz(storage)
+    except IslandRefusal as exc:
+        f_hz = str(exc)
+    return {"sidecar": path.read_text(), "f_hz": f_hz}
 
 
 def solve_baseline(n, cfg, plan: BaselinePlan, *, solve=None) -> Baseline:
