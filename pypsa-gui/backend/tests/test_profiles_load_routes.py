@@ -89,6 +89,21 @@ def test_generate_refuses_an_unknown_archetype(client, load_project):
     assert resp.json()["detail"]["error_kind"] == "unknown_archetype"
 
 
+@pytest.mark.parametrize("resolution", ["daily", "weekly"])
+def test_generate_refuses_a_resolution_other_than_hourly(
+    client, load_project, resolution,
+):
+    """Load archetypes are hourly shapes. Daily and weekly are valid for a
+    renewable profile; here they must be refused before a pending artifact
+    exists, or apply would upsample a shape the archetype never drew."""
+    resp = _generate(client, load_project, resolution=resolution)
+    assert resp.status_code == 422, resp.text
+    assert "hourly" in resp.text
+    pending = client.get(
+        f"/api/projects/{load_project}/profiles/pending").json()["pending"]
+    assert pending == []
+
+
 def test_generate_refuses_bad_parameters(client, load_project):
     resp = _generate(client, load_project, params={"shfits": 3, "peak_mw": 1.0})
     assert resp.status_code == 422, resp.text
@@ -221,6 +236,57 @@ def test_an_upload_naming_no_load_is_refused(client, load_project):
     )
     assert resp.status_code == 422, resp.text
     assert resp.json()["detail"]["error_kind"] == "unknown_load"
+
+
+def test_a_closed_project_cannot_generate_upload_or_apply_a_load_profile(
+    client, load_project, session_ctx,
+):
+    """These routes read or write the foreground network. Asked about a
+    project that is no longer open, they refuse and leave both the closed
+    project's pending store and the open project's loads untouched."""
+    job = _generate(client, load_project)
+    assert job.status_code == 200, job.text
+    job_id = job.json()["job_id"]
+    before = client.get(
+        f"/api/projects/{load_project}/profiles/pending").json()["pending"]
+
+    other = client.post("/api/projects/Other Site",
+                        params={"force": True, "rebind": True})
+    assert other.status_code == 200, other.text
+
+    generated = _generate(client, load_project)
+    assert generated.status_code == 409, generated.text
+    detail = generated.json()["detail"]
+    assert detail["error_kind"] == "project_not_open"
+    assert detail["message"].startswith("'Load Site' is not the open project")
+    assert "Other Site" in detail["message"]
+
+    uploaded = client.post(
+        f"/api/projects/{load_project}/profiles/loads/upload",
+        files={"file": ("meter.csv", _meter_csv({"plant": 2.0}), "text/csv")},
+        data={"unit": "MW"},
+    )
+    assert uploaded.status_code == 409, uploaded.text
+    assert uploaded.json()["detail"]["error_kind"] == "project_not_open"
+
+    applied = client.post(
+        f"/api/projects/{load_project}/profiles/apply",
+        json={"job_id": job_id, "component": "plant", "time_basis": "UTC"},
+    )
+    assert applied.status_code == 409, applied.text
+    assert str(applied.json()["detail"]).startswith(
+        "'Load Site' is not the open project")
+
+    pending = client.get(
+        f"/api/projects/{load_project}/profiles/pending").json()["pending"]
+    assert [p["job_id"] for p in pending] == [p["job_id"] for p in before]
+
+    ctx = session_ctx(client)
+    assert ctx.loaded_project == "Other Site"
+    assert ("loads", "p_set", "plant") not in ctx.user_ts
+    assert "plant" not in ctx.network.loads_t.p_set.columns
+
+
 def test_generate_previews_the_modelled_energy_and_the_time_basis(client,
                                                                 load_project):
     body = _generate(client, load_project).json()
