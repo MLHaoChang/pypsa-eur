@@ -516,12 +516,17 @@ def _harmonic_row(inp: _Inputs) -> dict:
     of ``thd_limit_pct`` and ``harmonic_limits_pct`` the profile sets."""
     import pandas as pd
 
-    from gridspine.drivers.campus_study import harmonic_units
-    from gridspine.schema.contracts import ContractError
-    from gridspine.static import harmonics as hm
-
     rid, req = "harmonic_distortion", "Harmonic voltage distortion at the PoC from the site's drives and heaters"
     unit_target = _target("assets", "Link", None, "harmonic_source")
+    try:
+        from gridspine.drivers.campus_study import harmonic_units
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import harmonics as hm
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The harmonic screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_HARMONIC, limit=None, unit="% of nominal", source=note,
+                    project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
+                    target=unit_target)
     limits, cited = hm.limits_from_profile(inp.profile)
     if not cited:
         return _row(rid, req, rule=RULE_HARMONIC, limit=None, unit="% of nominal",

@@ -100,8 +100,11 @@ def coerce_eh_value(component_class: str, col: str, value):
             raise ValueError(f"Harmonic source: {v!r} is not one of {', '.join(HARMONIC_SOURCES)}.")
         return v
     if kind == "harmonic_spectrum":
-        from gridspine.schema.contracts import ContractError
-        from gridspine.static.harmonics import parse_spectrum
+        try:
+            from gridspine.schema.contracts import ContractError
+            from gridspine.static.harmonics import parse_spectrum
+        except ImportError as exc:  # pragma: no cover - build-shape branch
+            raise ValueError(f"Harmonic spectrum: the check needs gridspine ({exc}).") from None
 
         v = "" if value is None else str(value).strip()
         try:
