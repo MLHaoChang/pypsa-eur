@@ -1,6 +1,6 @@
 # E1 follow-up. The template ledger in the reports' assumptions appendix
 
-Status: ready-for-agent
+Status: ready-for-agent — plan-only draft; awaiting engine gatekeeper plan approval before code (Outsourced task L)
 Type: task
 Blocked by: E1a merged (`claude/e1a-planning-years-staged-dc`)
 Gated: yes, gatekeeper (a new report seam). Send the plan first.
