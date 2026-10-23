@@ -29,7 +29,7 @@ COLUMNS = [
     "contingency_id", "kind", "order", "element_ids",
     # branch (order 1) identity — names, numbers, pandapower element type
     "from_bus", "to_bus", "ckt", "from_bus_number", "to_bus_number", "element_type",
-    # unit identity — the RAW's (I, ID)
+    # unit identity — the RAW's (I, ID); a bus section fills bus and bus_number only
     "bus", "bus_number", "machine_id",
 ]
 _FLOAT_COLS = ("from_bus_number", "to_bus_number", "bus_number")
@@ -64,6 +64,11 @@ def write_contingencies(contingency_set: pd.DataFrame, net, path) -> pd.DataFram
                 )
             num, mid = machine[uid]
             row.update(bus=name_of_num[num], bus_number=float(num), machine_id=mid)
+        elif r.kind == "bus_section":
+            bus = r.element_ids[0]
+            if bus not in nums:
+                raise ContractError(f"contingency {r.contingency_id}: bus {bus} is not a bus on the net")
+            row.update(bus=bus, bus_number=float(nums[bus]))
         rows.append(row)
 
     out = pd.DataFrame(rows, columns=COLUMNS)
