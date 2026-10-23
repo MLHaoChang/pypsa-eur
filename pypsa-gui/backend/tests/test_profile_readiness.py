@@ -97,6 +97,39 @@ def test_a_generated_profile_carries_its_provenance(client, project, ctx_of):
     assert "stale_reason" not in row
 
 
+def test_half_a_degree_is_still_the_same_bus_and_past_it_the_other_way_is_stale(
+        client, project, ctx_of):
+    """The apply route's bound is strict: 0.5° is not a move, and a shift west
+    counts the same as one east."""
+    ctx = ctx_of()
+    _generated(ctx)
+    ctx.network.buses.loc["B_ok", "x"] = 7.5
+    assert "stale_reason" not in _rows(client, project)["g_ok"]
+    ctx.network.buses.loc["B_ok", "y"] = 50.5
+    assert "stale_reason" not in _rows(client, project)["g_ok"]
+    ctx.network.buses.loc["B_ok", "x"] = 7.4
+    assert _rows(client, project)["g_ok"]["stale_reason"] == "bus_moved"
+
+
+def test_one_unmatched_point_is_the_series_and_two_stay_unchecked(
+        client, project, ctx_of):
+    """No recorded point id: the only stored point is the one the series was
+    made for. Two stored points, neither the generator's name, stay unchecked."""
+    ctx = ctx_of()
+    key = ("generators", "p_max_pu", "g_ok")
+    ctx.user_ts[key] = pd.Series(0.4, index=SNAPS)
+    ctx.user_ts_meta[key] = {
+        "source": "synthetic", "technology": "wind", "family": "renewable",
+        "weather_year": 2019, "provenance": "synthetic/assumed",
+        "points": ["site"], "point_coords": {"site": [8.0, 50.0]},
+    }
+    assert "stale_reason" not in _rows(client, project)["g_ok"]
+    ctx.network.buses.loc["B_ok", ["x", "y"]] = [15.0, 45.0]
+    assert _rows(client, project)["g_ok"]["stale_reason"] == "bus_moved"
+    ctx.user_ts_meta[key]["point_coords"] = {"site_a": [8.0, 50.0], "site_b": [1.0, 1.0]}
+    assert "stale_reason" not in _rows(client, project)["g_ok"]
+
+
 def test_moving_the_bus_after_generation_marks_it_stale(client, project, ctx_of):
     ctx = ctx_of()
     _generated(ctx)

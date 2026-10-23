@@ -665,6 +665,30 @@ def test_a_closed_project_without_a_saved_config_refuses_by_name(tmp_path, monke
                                                     "run_ac_pf_after_lopf": False}
 
 
+@pytest.mark.parametrize("text", ["{", "[1]", "null"])
+def test_a_closed_project_with_a_damaged_solver_config_refuses_and_leaves_the_file(
+        tmp_path, monkeypatch, text):
+    """A saved solver config that is not an object is the same as none: a change
+    is refused by name, and neither the refusal nor a no-op rewrite replaces
+    the damaged bytes."""
+    from routers import flow as flow_router
+    import services.network_lengths as nl
+
+    project = type("P", (), {"directory": tmp_path})()
+    monkeypatch.setattr(nl, "active_project_dir", lambda: None)
+    path = tmp_path / "solver_config.json"
+    path.write_text(text)
+    before = path.read_bytes()
+    with pytest.raises(S.ScopeError) as exc:
+        flow_router._store_owned(project, {"fixed_sizes": False}, None, None)
+    assert exc.value.error_kind == "solver_config_unavailable"
+    assert path.read_bytes() == before
+    assert flow_router._store_owned(
+        project, {"fixed_sizes": True, "run_ac_pf_after_lopf": False}, None, None,
+    ) == {"fixed_sizes": "off", "run_ac_pf_after_lopf": False}
+    assert path.read_bytes() == before
+
+
 def test_a_scope_put_refuses_by_name_while_a_calculation_runs(client, tmp_projects_dir, monkeypatch):
     import routers.simulation as sim
 
