@@ -4,7 +4,7 @@
 through ``shortcircuit.apply_fault_state`` (the same state
 ``shortcircuit.fault_levels`` solves), takes the converter units at the
 assessed PoC buses out, and runs the IEC 60909 MINIMUM case at those buses:
-once intact, then once per outage. ``strength.strength_table`` turns the
+once per outage, then intact. ``strength.strength_table`` turns the
 result into SCR, ESCR and WSCR.
 
 The outages are ``contingency_set.branch_contingencies`` (N-1) and, when
@@ -128,7 +128,6 @@ def outage_fault_levels(net, dispatch, loads, hour, registry, templates, buses,
     if sgen is not None and len(sgen):
         sgen.loc[sgen["bus"].isin(bus_idx), "in_service"] = False
 
-    intact = _solve(copy.deepcopy(faulted), bus_idx, buses, "the intact network")
     n1 = branch_contingencies(net)
     handle = {c: (t, int(i)) for c, t, i in
               zip(n1["contingency_id"], n1["element_type"], n1["element_index"])}
@@ -164,6 +163,9 @@ def outage_fault_levels(net, dispatch, loads, hour, registry, templates, buses,
             etype, eidx = handle[e]
             getattr(work, etype).at[eidx, "in_service"] = False
         rows[cid] = _solve(work, bus_idx, buses, f"outage {cid}")
+    # Solved after the outages: equal to fault_levels' minimum case only if no
+    # outage leaked into the shared faulted net (pinned by the tests).
+    intact = _solve(copy.deepcopy(faulted), bus_idx, buses, "the intact network")
     table = pd.DataFrame.from_dict(rows, orient="index", columns=buses, dtype=float)
     table.index.name = "outage"
     return OutageFaultLevels(intact=intact, outages=table, method="; ".join(methods))

@@ -240,7 +240,7 @@ def _check_inputs(pocs, stages, q_c):
 
 def _islanding_note(n: int, what: str = "this PoC") -> str:
     return (f"{n} outage(s) disconnect {what}; see islanding_outages; radial "
-            "loss is issue 13")
+            "loss is the planning-criteria contingency check")
 
 
 def _worst(sk_by_outage: pd.Series):
@@ -253,6 +253,10 @@ def _worst(sk_by_outage: pd.Series):
     finite = finite.sort_index(kind="mergesort")
     outage = finite.idxmin()
     return outage, float(finite[outage]), islanding
+
+
+def _method_notes(outage_method: str) -> list:
+    return ["pre-screen used: not every outage was solved"] if "pre-screen" in outage_method else []
 
 
 def _band_or_none(value):
@@ -299,6 +303,7 @@ def strength_table(pocs: pd.DataFrame, stages: pd.DataFrame, intact_sk: pd.Serie
             outage, sk_w, islanding = _worst(outage_sk[bus])
             notes = [] if q > 0 else [NO_COMPENSATION]
             notes.append(NO_FILTERS)
+            notes += _method_notes(outage_method)
             row = {"stage": stage, "poc": poc, "bus": bus, "group": group, "p_mw": p,
                    "q_c_mvar": q, "sk_intact_mva": sk, "worst_outage": outage,
                    "sk_worst_mva": sk_w, "islanding_outages": islanding,
@@ -330,7 +335,7 @@ def strength_table(pocs: pd.DataFrame, stages: pd.DataFrame, intact_sk: pd.Serie
                    "p_mw": sum(p), "wscr_intact": None, "worst_outage": None,
                    "wscr_worst": None, "islanding_outages": [],
                    "outage_method": outage_method, "label": STUDY_LABEL}
-            notes = []
+            notes = _method_notes(outage_method)
             if not weights:
                 notes.append(NOT_CONNECTED)
             else:

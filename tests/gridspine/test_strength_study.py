@@ -199,7 +199,9 @@ def full(case39):
 
 def test_intact_sk_equals_fault_levels_min(case39, full):
     """Load PoCs and the RES PoC alike: the minimum case has no converter
-    contribution, so switching the PoC's own converter off changes nothing."""
+    contribution, so switching the PoC's own converter off changes nothing.
+    The intact case is solved after every outage, so this also pins intact ->
+    outages -> intact: no outage leaks into the next solve."""
     net, reg, t, d, l = case39
     fl = fault_levels(net, d, l, HOUR, reg, t, case="min").set_index("bus")["sk_mva"]
     for bus in ("BUS_04", "BUS_08", "BUS_33"):
@@ -299,6 +301,28 @@ def test_islanding_outage_is_nan_and_listed(case39, spur_net):
     assert row["islanding_outages"] == [feeder]
     assert row["worst_outage"] != feeder and math.isfinite(row["scr_worst"])
     assert "1 outage(s) disconnect this PoC" in row["note"]
+
+
+def test_prescreen_is_said_in_the_row_note():
+    out = strength_table(POCS, STAGES, INTACT, OUTAGES, PRESCREEN_N1)
+    assert out.pocs["note"].str.contains("pre-screen used").all()
+    assert out.groups["note"].str.contains("pre-screen used").all()
+    assert "pre-screen" not in "".join(_study().pocs["note"])
+
+
+def test_a_solver_failure_names_the_outage_not_islanding(case39, monkeypatch):
+    import gridspine.static.strength_outages as so
+    net, reg, t, d, l = case39
+    real = so.sc.calc_sc
+
+    def failing(work, **kw):
+        if not work.line["in_service"].all():
+            raise RuntimeError("singular")
+        return real(work, **kw)
+
+    monkeypatch.setattr(so.sc, "calc_sc", failing)
+    with pytest.raises(ContractError, match=r"outage BUS_\d+-BUS_\d+-1.*singular"):
+        outage_fault_levels(net, d, l, HOUR, reg, t, ["BUS_04"], cap=100)
 
 
 def test_unknown_poc_bus_and_bad_cap_are_refused(case39):
