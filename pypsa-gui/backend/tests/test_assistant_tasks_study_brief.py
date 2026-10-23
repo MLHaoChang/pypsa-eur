@@ -621,3 +621,78 @@ def test_sc10_a_direct_sweep_step_is_held_to_the_same_rule(session, baseline):
     cases = [sweep_case(f'Case {n}', 20 + n) for n in range(3)]
     steps = [{'id': 'sweep', 'tool': 'run_sensitivity_sweep', 'args': {'baseline_project_id': project_id, 'cases': cases}}]
     refused('brief_cases_not_runnable', chat_tools.start_task, title='Three', request_id='sweep-3', steps=steps, brief=brief(steps))
+
+
+def test_a_step_is_retried_at_most_twice(session):
+    task = chat_tools.start_task(title='Export', request_id='retry-bound', steps=[
+        {'id': 'export', 'tool': 'export_network_nc', 'args': {}}])
+    for attempt in range(3):
+        tasks.finish_step(tasks.begin_step(session, 'export_network_nc', {}), error='x')
+        if attempt < 2:
+            view = chat_tools.resolve_task_step(task['task_id'], 'retry')
+            assert view['next_step']['status'] == 'pending'
+    path, _ = tasks._read(task['task_id'])
+    before = path.read_bytes()
+    refused('task_step_retry_limit', chat_tools.resolve_task_step, task['task_id'], 'retry')
+    assert path.read_bytes() == before
+    view = chat_tools.get_task(task['task_id'])
+    assert view['next_step']['retries'] == 2
+    assert 'correction' not in view['next_step']
+
+
+def test_a_refused_retry_does_not_count(session):
+    task = chat_tools.start_task(title='Export', request_id='retry-worker', steps=[
+        {'id': 'export', 'tool': 'export_network_nc', 'args': {}}])
+    ticket = tasks.begin_step(session, 'export_network_nc', {})
+    worker = Future()
+    tasks.register_worker(ticket, worker)
+    tasks.finish_step(ticket, error='tool_timeout')
+    refused('task_step_running', chat_tools.resolve_task_step, task['task_id'], 'retry')
+    assert tasks._read(task['task_id'])[1]['steps'][0].get('retries', 0) == 0
+    worker.set_result(None)
+    for count in (1, 2):
+        view = chat_tools.resolve_task_step(task['task_id'], 'retry')
+        assert view['next_step']['retries'] == count
+        tasks.finish_step(tasks.begin_step(session, 'export_network_nc', {}), error='x')
+
+
+def test_retry_limit_correction_stops_instead_of_triage(session):
+    steps = [{'id': 'solve', 'tool': 'run_simulation', 'args': {}}]
+    task = chat_tools.start_task(title='Solve', request_id='retry-triage', steps=steps, brief=brief(steps))
+    for attempt in range(3):
+        ticket = tasks.begin_step(session, 'run_simulation', {})
+        job_id = 'fg:' + uuid.uuid4().hex
+        path = tasks.await_job(ticket, job_id, session.session_id)
+        view = tasks.settle_job(path, ticket, job_id, 'failed', 'failed')
+        if attempt < 2:
+            chat_tools.resolve_task_step(task['task_id'], 'retry')
+    assert view['next_step']['correction'] == {
+        'stop': 'retry_limit',
+        'then': 'explain what failed; the user decides: fix the inputs, or cancel_task',
+    }
+    assert view['next_step']['retries'] == 2
+    assert len(json.dumps(view)) <= 3800
+
+
+def test_cancel_still_works_at_the_retry_limit(session):
+    task = chat_tools.start_task(title='Export', request_id='retry-cancel', steps=[
+        {'id': 'export', 'tool': 'export_network_nc', 'args': {}}])
+    for attempt in range(3):
+        tasks.finish_step(tasks.begin_step(session, 'export_network_nc', {}), error='x')
+        if attempt < 2:
+            chat_tools.resolve_task_step(task['task_id'], 'retry')
+    assert chat_tools.cancel_task(task['task_id'])['status'] == 'cancelled'
+    assert chat_tools.get_task(task['task_id'])['status'] == 'cancelled'
+
+
+def test_old_task_files_without_retries_still_retry(session):
+    task = chat_tools.start_task(title='Export', request_id='retry-legacy', steps=[
+        {'id': 'export', 'tool': 'export_network_nc', 'args': {}}])
+    tasks.finish_step(tasks.begin_step(session, 'export_network_nc', {}), error='x')
+    path, saved = tasks._read(task['task_id'])
+    saved['steps'][0].pop('retries', None)
+    path.write_text(json.dumps(saved))
+    view = chat_tools.resolve_task_step(task['task_id'], 'retry')
+    assert view['next_step']['status'] == 'pending'
+    assert view['next_step']['retries'] == 1
+    assert tasks._read(task['task_id'])[1]['steps'][0]['retries'] == 1

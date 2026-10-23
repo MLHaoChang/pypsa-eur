@@ -1383,6 +1383,10 @@
       "surface": "inline",
       "why": "A brief's next effect is blocked because its step failed. The assistant uses the correction hints and asks for an explicitly confirmed reconciliation before any retry."
     },
+    "task_step_retry_limit": {
+      "surface": "inline",
+      "why": "resolve_task_step refuses a third retry of the same failed step. The assistant explains what failed and lets the user fix the inputs or cancel_task, instead of retrying again."
+    },
     "task_step_running": {
       "surface": "inline",
       "why": "Task resume or reconciliation finds the originating turn or worker still running. The assistant waits for it to stop before reconciling or retrying the step."

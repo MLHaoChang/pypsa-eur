@@ -15,6 +15,8 @@ from services.pypsa_service import PyPSAService
 
 _LOCK = threading.RLock()
 _WORKERS = {}
+TASK_STEP_RETRIES_MAX = 2
+
 _CONTROLS = frozenset({"start_task", "get_task", "resume_task", "cancel_task", "resolve_task_step", "list_tasks"})
 _REF = re.compile(r"^\$([A-Za-z][A-Za-z0-9_-]{0,31})\.([A-Za-z0-9_.-]+)$")
 # LC-23 study brief (owner decisions AI-567b, COP-1): a plan labelled with an
@@ -206,6 +208,8 @@ _TRIAGE = ("get_simulation_log_history", "diagnose_network", "validate_network")
 
 def _correction(step):
     """`next_step.correction` under a brief: proposes, runs nothing."""
+    if step.get("retries", 0) >= TASK_STEP_RETRIES_MAX:
+        return {"stop": "retry_limit", "then": "explain what failed; the user decides: fix the inputs, or cancel_task"}
     if step.get("job") or step["tool"] in _WAIT_TOOLS | QUEUE_WAIT_TOOLS:
         return {"triage": list(_TRIAGE), "then": "resolve_task_step(retry) after the user approves the fix"}
     if step.get("receipt"):
@@ -240,6 +244,8 @@ def _view(task, fresh=False, current=None):
             out["brief_stale"] = "inputs_changed_outside_plan"
     if step and state != "cancelled":
         out["next_step"] = {"id": step["id"], "tool": step["tool"], "status": step["status"]}
+        if step.get("retries", 0) > 0:
+            out["next_step"]["retries"] = step["retries"]
         if step["status"] == "waiting":
             out["next_step"]["job_id"] = step["job"]["job_id"]
         elif step["status"] != "uncertain":
@@ -432,6 +438,9 @@ def resolve_task_step(task_id: str, outcome: str, result: dict | None = None) ->
             step["result"] = evidence
             step["status"] = "completed"
         else:
+            if step.get("retries", 0) >= TASK_STEP_RETRIES_MAX:
+                _refuse("task_step_retry_limit", "This step has failed after 2 retries. Tell the user what failed and ask how to go on: they can fix the inputs, or cancel_task and start a new plan.")
+            step["retries"] = step.get("retries", 0) + 1
             step["status"] = "pending"
             step.pop("result", None)
         for key in ("error", "late_receipt", "receipt"):

@@ -801,7 +801,7 @@ IDs. Task views stay within the ordinary result budget.
 
 A denied confirmation leaves a step pending. An interrupted effectful call
 requires review; native exports count as effectful despite their legacy read
-tier. `resolve_task_step` requires ordinary destructive confirmation to
+tier. Each step can be retried at most twice; `resolve_task_step` requires ordinary destructive confirmation to
 record verified completion or an explicit retry; completion comes from native
 evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
 still-running originating session or detached timeout worker. `cancel_task`
@@ -1003,6 +1003,7 @@ brief grants nothing: every write or run step keeps its own card.
   (`get_simulation_log_history`, `diagnose_network`, `validate_network`) for
   a run step, the read-back for an edit. It runs nothing. A failed effectful
   step is refused (`task_step_needs_retry`) until `resolve_task_step(retry)`.
+  After two retries, `task_step_retry_limit` leaves the failed step unchanged and the correction tells the assistant to stop and let the user decide.
 
 ## Recorded runs, load flow, and experiment plans
 
