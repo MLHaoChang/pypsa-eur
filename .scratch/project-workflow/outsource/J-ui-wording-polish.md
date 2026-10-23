@@ -79,6 +79,8 @@ The pill is `layout/FlowReturnButton.tsx:8-14`. It already has an `ArrowLeft` ic
 
 It is a backend constant: `pypsa-gui/backend/services/campus_grid_code_service.py:105`, `"1-40,120-180"`. Change it to `"1-40, 120-180"`, which is how the UI hint already writes it (`pages/CampusGridCodeSection.tsx:150`, and `pageRangesText` at l.37). `parse_page_ranges` (l.327-349) strips spaces, so input is unaffected. Update the docstring at l.36 too. The backend test (`tests/test_campus_grid_code_service.py:244`) reads the constant. Update the two mocked server messages in `pages/CampusGridCodeSection.test.tsx:137, 143`. Add a backend assertion that the example parses with `parse_page_ranges`.
 
+Ordering: the g2p 17a harmonics PR (branch `claude/g2p-17a-harmonics`) also edits `campus_grid_code_service.py` (its `_limits`). Do this item last: merge the latest master first, and if that PR is still open, keep this to the one constant and its docstring line so the two merge cleanly.
+
 ### 8. A band with two negative edges reads "−a to -b"
 
 `pages/CampusElectricalPanel.tsx:680-684`: `num(c.limit_min, 3).replace('-', '−')`. A string `replace` with a string argument changes the first match only, and `limit_max` is not changed at all. Swap the minus sign in both edges. Make one small local helper and use it for both. Also check `pages/CampusGridCodeSection.tsx:82` (`pu`), which has the same first-match shape; there each call is one number, so it is fine, but use the same helper if it reads better. Test in `pages/CampusElectricalPanel.test.tsx`: the case at l.321-327 has one negative edge; add `limit_min: -0.2, limit_max: -0.1` and expect `−0.2 to −0.1 Mvar`.
