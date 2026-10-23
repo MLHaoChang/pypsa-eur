@@ -112,10 +112,9 @@ class Unit:
         """A cold genset's start plus synchronisation, s: when it can join."""
         return self.start_s + self.sync_s
 
-    @property
-    def k(self):
-        """The droop gain P_n / (R·f0), MW/Hz (at F0)."""
-        return self.p_n / (self.r * F0) if self.r == self.r and self.r else 0.0
+    def k(self, f0=F0):
+        """The droop gain P_n / (R·f0), MW/Hz."""
+        return self.p_n / (self.r * f0) if self.r == self.r and self.r else 0.0
 
     @property
     def hi(self):
@@ -832,7 +831,7 @@ def _e4_pickup(units, blocks, band_hz, settle_hz_per_s, window_ms, t_end, dt, f0
     """E4's blocks on the reset gensets: ``(trace, block times, metrics,
     complete)``."""
     iso = any(g.isochronous for g in units)
-    k_droop = sum(g.k for g in units if not g.isochronous)
+    k_droop = sum(g.k(f0) for g in units if not g.isochronous)
     times, per, parts, complete, clock = [], [], [], True, 0.0
     for i, block in enumerate(blocks):
         tr = (_block_run(units, block, t_end, dt, f0, floor=floor) if steady_stop
@@ -1390,12 +1389,12 @@ def _steady(label):
     return label.startswith("steady island")
 
 
-def _gain(u):
+def _gain(u, f0):
     """A unit's droop gain as I2b counts it, MW/Hz: a joined genset's (an
     isochronous one adds none) and a GFM's."""
     if u.model == "genset" and u.join_s <= 0.0:
-        return 0.0 if u.isochronous else u.k
-    return u.k if u.model in ("gfm_vsm", "gfm_droop") else 0.0
+        return 0.0 if u.isochronous else u.k(f0)
+    return u.k(f0) if u.model in ("gfm_vsm", "gfm_droop") else 0.0
 
 
 def _response(units, f0=F0):
@@ -1408,7 +1407,7 @@ def _response(units, f0=F0):
             m += u.h * u.s_n
         elif u.model == "gfm_droop":
             m += u.tau_f * u.p_n / (2.0 * u.r)
-    return m, sum(_gain(u) for u in units)
+    return m, sum(_gain(u, f0) for u in units)
 
 
 def _bisect(passes, cap, rel=1e-3, iters=60):
@@ -1515,7 +1514,7 @@ def _saturated_cuts(units, run, m, t_end, limits, f0, equipment_, window_ms):
     return out
 
 
-def _droop_cut(units, trace, m, allowed):
+def _droop_cut(units, trace, m, allowed, f0):
     """``(ΔK, clipped)``: the droop gain to add so the island settles within
     ``allowed`` (Hz), from each droop unit's settled ΔP_i in ``trace``. At
     the tighter settled value a unit gives min(ΔP_i, K_i Δf_allowed), so
@@ -1525,7 +1524,7 @@ def _droop_cut(units, trace, m, allowed):
     s = -1.0 if m.df_qss_hz < 0 else 1.0           # a deficit: the units raise their output
     need, clipped = 0.0, []
     for u in units:
-        k = _gain(u)
+        k = _gain(u, f0)
         if k <= 0.0:
             continue
         p = -s * float(trace.dp[u.name][-1])
@@ -1545,7 +1544,7 @@ def _response_cuts(units, run, trace, m, v, t_end, limits, f0, equipment_, windo
         steady = [f for f in v.failures if _steady(f)] or [f for f in v.failures if not f.startswith("transition RoCoF")]
         binding = steady[0] if steady else f"settled {m.df_qss_hz:.3f} Hz against {allowed:g} Hz allowed"
         if k_now > 0:
-            dk, clipped = _droop_cut(units, trace, m, allowed)
+            dk, clipped = _droop_cut(units, trace, m, allowed, f0)
             out.append(("droop_gain", dk, binding,
                         "Σ max(0, |ΔP_i| − K_i Δf_allowed) / Δf_allowed over the droop units' settled ΔP_i, "
                         "Δf_allowed the tightest of the qss band and the steady, transition and equipment limits",
