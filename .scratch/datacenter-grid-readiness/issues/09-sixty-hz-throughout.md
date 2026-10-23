@@ -3,7 +3,7 @@
 
 # 60 Hz throughout (nominal frequency carried, not assumed)
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine)
