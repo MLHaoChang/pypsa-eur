@@ -133,7 +133,7 @@ def _response(assets, *, source_hash="0123456789abcdef", stale=False):
     return {"assets": assets, "source_hash": source_hash, "stale": stale}
 
 
-def _asset(name="campus:TR_132_33_40#1", *, currency="EUR", price_year=2026, meta=True):
+def _asset(name="campus:TR_132_33_40#1", *, currency="EUR", price_year=2025, meta=True):
     a = {"name": name, "kind": "transformer", "basis": "lump", "quantity": 1.0,
          "parts": [{"name": "investment", "upfront_per_unit": 1_800_000.0, "lifetime": 40.0,
                     "fom_share": 0.015}],
@@ -166,7 +166,7 @@ def test_the_campus_study_assets_are_the_reports_extra_assets_and_its_capex(
         want_capex = sum(a["quantity"] * a["parts"][0]["upfront_per_unit"]
                          for a in ce.extra_owner_assets(row))
         campus_dir = _campus_dir(row)
-    _put_fin(client, _fin(currency_year=2026).model_dump(mode="json"))
+    _put_fin(client, _fin(currency_year=2025).model_dump(mode="json"))     # the shipped library's money
 
     body = _run(client)
     assert body["status"] == "done", (body["error_code"], body["error"])
@@ -321,7 +321,7 @@ def test_a_malformed_or_rejected_campus_response_is_refused_without_its_values(
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: resp)
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
     assert calls == []
@@ -341,7 +341,7 @@ def test_a_money_year_refusal_names_data_not_exception_text(client, install_netw
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "owner_assets_response",
                         lambda p, **kw: _response([{**_asset(), "meta": SECRET}]))
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["error_code"] == "campus_assets_money_year_mismatch", body
     _no_secret(client, body)
@@ -390,7 +390,7 @@ def test_a_campus_refusal_never_precedes_the_runners_finance_inputs_422(
 @pytest.mark.parametrize("assets,fin_over", [
     ([_asset(currency="USD")], {}),                                       # ≠ the case currency
     ([_asset(price_year=2024)], {"currency_year": 2026}),                 # ≠ the stated year
-    ([_asset(), _asset("campus:X#1", price_year=2025)], {}),              # assets disagree
+    ([_asset(), _asset("campus:X#1", price_year=2024)], {}),              # assets disagree
     ([_asset(), _asset("campus:X#1", currency="USD")], {}),
     ([_asset(meta=False)], {}),                                           # no meta
     ([{**_asset(), "meta": {"currency": "EUR"}}], {}),                    # no price year
@@ -430,6 +430,22 @@ def test_a_money_year_refusal_names_both_years_and_what_to_change(
     assert "no price index converts" in text and "reprice the campus asset library in 2020" in text
 
 
+def test_a_case_in_2026_money_is_refused_against_the_shipped_2025_library(
+        client, install_network, session_ctx, _auth_db, monkeypatch):
+    """The shipped library moved from 2026 to 2025 money (issue 03 part B): a case stated in 2026 money,
+    priced from the real library, is refused rather than mixed (R-3)."""
+    calls = _fake_adapter(monkeypatch)
+    _save(client, install_network, "campus_ic_money_2026")
+    with _row(_auth_db, session_ctx, client) as (_db, row):
+        fake_investment(row, _purchase())
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    body = _run(client)
+    assert body["status"] == "refused" and body["error_code"] == "campus_assets_money_year_mismatch", body
+    assert calls == []
+    assert "2025 money (the campus asset library's price_year)" in body["error"]
+    assert "the case's price data are 2026 (the finance inputs' currency_year)" in body["error"]
+
+
 def test_an_unstated_currency_year_takes_any_agreeing_price_year(
         client, install_network, session_ctx, _auth_db, monkeypatch):
     from services import campus_electrical_service as ce
@@ -454,7 +470,7 @@ def test_a_stale_study_gives_no_extras_and_is_flagged(client, install_network, s
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: {**real(p, **kw), "stale": True})
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["status"] == "done", body
     assert calls[0]["extra_assets"] == ()
@@ -497,7 +513,7 @@ def test_an_unsaved_network_is_flagged_on_the_run_and_never_in_the_key(
     _save(client, install_network, "campus_ic_unsaved")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     ctx = session_ctx(client)
     ctx.results_unsaved = True
     body = _run(client)
@@ -525,7 +541,7 @@ def test_a_new_source_hash_marks_the_report_stale(client, install_network, sessi
     _save(client, install_network, "campus_ic_rehash")
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     assert _run(client)["report"]["stale"] is False
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
@@ -714,7 +730,7 @@ def test_unresolved_needs_flag_the_case_list_the_needs_and_keep_the_assets(
     with _row(_auth_db, session_ctx, client) as (_db, row):
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     assert "campus_needs_unresolved" not in _run(client)["flags"]
     without = [e.name for e in calls[0]["extra_assets"]]
     monkeypatch.setattr(ce, "owner_assets_response",
@@ -849,7 +865,7 @@ def test_a_malformed_unresolved_list_is_refused_without_its_values(
         fake_investment(row, _purchase())
     monkeypatch.setattr(ce, "owner_assets_response",
                         lambda p, **kw: _with(_response([_asset()]), unresolved=unresolved))
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["status"] == "refused" and body["error_code"] == "campus_assets_invalid", body
     _no_secret(client, body)
@@ -866,7 +882,7 @@ def test_a_stale_study_with_unresolved_needs_is_only_stale(client, install_netwo
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
                         lambda p, **kw: _with(real(p, **kw), stale=True, unresolved=[NEED]))
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["status"] == "done" and calls[0]["extra_assets"] == ()
     assert "campus_study_stale" in body["flags"]
@@ -885,7 +901,7 @@ def test_a_changed_unresolved_list_alone_marks_the_report_stale(client, install_
         fake_investment(row, _purchase())
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _with(real(p, **kw), unresolved=[NEED]))
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     assert _run(client)["report"]["stale"] is False
     other = {**NEED, "reason": "another reason"}
     monkeypatch.setattr(ce, "owner_assets_response", lambda p, **kw: _with(real(p, **kw), unresolved=[other]))

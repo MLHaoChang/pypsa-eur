@@ -4,7 +4,7 @@
 //   is the shipped default or the project's copy;
 // - Save sends the edited text, shows a 422 inline, and refreshes the study's state;
 // - Reset asks first, then deletes the copy;
-// - the page says every shipped cost is an assumed placeholder.
+// - the page says the shipped costs are cited or assumed reference values, not quotes.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -56,11 +56,12 @@ describe('asset library: the editor', () => {
     expect(api.library).toHaveBeenCalledWith('Hub A')
   })
 
-  it('says plainly that every shipped cost is an assumed placeholder', async () => {
+  it('says plainly that the shipped costs are reference values, not quotes', async () => {
     renderPanel()
     const section = await screen.findByTestId('asset-library')
-    expect(section.textContent).toMatch(/every cost in the shipped library is an assumed placeholder/i)
-    expect(section.textContent).toMatch(/replace it with quotes/i)
+    expect(section.textContent).toMatch(/the shipped library's costs are reference values, not quotes/i)
+    expect(section.textContent).toMatch(/cited public source \(tag\s+literature\) or assumed/i)
+    expect(section.textContent).toMatch(/replace them with quotes/i)
   })
 
   it('badges a project copy', async () => {

@@ -3457,8 +3457,9 @@ TOOLS: list[dict[str, Any]] = [
         "its ratings, capex, fixed opex fraction and lifetime, every number "
         "tagged measured|datasheet|assumed, and a cost also literature: a "
         "reference value from a cited publication, not a quote), is_default}. is_default is true "
-        "until the user saves a copy for the project. Every cost in the shipped "
-        "library is an assumed placeholder. 409 for a project of another kind. "
+        "until the user saves a copy for the project. The shipped library's costs "
+        "are reference values, not quotes: literature (a cited public source, "
+        "2025 EUR) or assumed where none was found. 409 for a project of another kind. "
         "Safety: read.",
         {"project_id": {"type": "string"}},
         ["project_id"],
@@ -3505,10 +3506,10 @@ TOOLS: list[dict[str, Any]] = [
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
         "least-cost one; null when there are none), notes}. Say these with the numbers: costs "
-        "are placeholders tagged assumed unless the user replaced them with "
-        "quotes (datasheet or measured) or cited reference values "
-        "(literature, still not quotes), so quote assumed ones as orders of "
-        "magnitude; the on-load taps act "
+        "are reference values from cited public sources (tag literature) or "
+        "assumed where none was found, unless the user replaced them with "
+        "quotes (datasheet or measured); neither literature nor assumed is a "
+        "quote, so quote assumed ones as orders of magnitude; the on-load taps act "
         "inside the re-check (per hour and case, an N-1 case after the tap "
         "changers act), so a voltage excursion still unresolved is one neither "
         "the taps nor compensation could shrink, and its reason says why; and "
@@ -3537,8 +3538,8 @@ TOOLS: list[dict[str, Any]] = [
         "takes minutes and runs from the panel's Joint optimisation button, so "
         "tell the user to start it there. Say these with the numbers: the "
         "design margin is the owner's rule, judged on the least-cost dispatch "
-        "and never met by extra inverter reactive power; costs are placeholder "
-        "figures tagged assumed unless replaced by quotes; a fallback keeps the "
+        "and never met by extra inverter reactive power; costs are reference "
+        "values (literature or assumed), not quotes, unless replaced by quotes; a fallback keeps the "
         "least-cost choice; a cancelled job keeps the best choice it had; when "
         "stale is true the least-cost run it was based on has changed. 409 for "
         "a project of another kind. Safety: read.",

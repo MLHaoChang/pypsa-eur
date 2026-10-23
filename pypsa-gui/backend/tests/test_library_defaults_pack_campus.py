@@ -235,10 +235,13 @@ def test_the_parity_check_picks_the_latest_version_that_pins_the_yaml():
     assert _version_pinning("0" * 64) is None
 
 
-def test_the_parity_check_ignores_non_cost_edits_and_catches_a_price_change(new):
+def test_the_parity_check_ignores_non_cost_edits_and_catches_a_price_change():
     import copy
 
+    from services.library.defaults_pack.loader import load_defaults_pack
+
     lib = _yaml()
+    pack = load_defaults_pack(_version_pinning(_yaml_sha256()))     # the version the live YAML is checked against
     edited = copy.deepcopy(lib)
     for listing in KINDS:
         for e in edited[listing]:
@@ -246,14 +249,14 @@ def test_the_parity_check_ignores_non_cost_edits_and_catches_a_price_change(new)
             e.setdefault("note", "an edited note")
     edited["transformers"][0]["s_mva"] = {"value": 99.0, "source": "datasheet"}   # a rating
     edited["cables"].append({"id": "CB_NEW", "capex_eur_per_km": {"value": 1.0}})  # not in the pack
-    assert _cost_mismatches(new, edited) == []
+    assert _cost_mismatches(pack, edited) == []
     priced = copy.deepcopy(lib)
     tr = next(e for e in priced["transformers"] if e["id"] == "TR_132_33_40")
     tr["capex_eur"]["value"] = 1_900_000
-    assert _cost_mismatches(new, priced) == ["TR_132_33_40.capex: pack 1800000.0, YAML 1900000"]
+    assert _cost_mismatches(pack, priced) == ["TR_132_33_40.capex: pack 1453600.0, YAML 1900000"]
     gone = copy.deepcopy(lib)
     gone["switchgear"] = [e for e in gone["switchgear"] if e["id"] != "SG_132_31p5"]
-    assert _cost_mismatches(new, gone) == ["SG_132_31p5: missing from the YAML"]
+    assert _cost_mismatches(pack, gone) == ["SG_132_31p5: missing from the YAML"]
 
 
 def test_the_domains_of_the_campus_rows(new):

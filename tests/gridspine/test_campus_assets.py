@@ -4,10 +4,11 @@ cables, compensation and switchgear, each with capex, fixed opex and lifetime.
 The library is a *cost* input to the electrical investment, so the tests hold
 it to the rule of the campus file: every number is ``{value, source}``, and a
 broken or untagged library is refused with the entry and field named. Costs
-are order-of-magnitude placeholders, so a test pins that none of them claims
-to be anything else.
+are reference values, not quotes, so a test pins the tag rules: only a cost
+may be ``literature``, and each such value names its source row.
 """
 import copy
+import hashlib
 import math
 
 import pytest
@@ -82,15 +83,47 @@ def test_every_entry_carries_every_field_tagged():
                 assert set(e[f]) >= {"value", "source"}, (e["id"], f)
 
 
-def test_no_cost_claims_to_be_anything_but_assumed():
-    """Nothing here was checked against a price list or a datasheet."""
+#: sha256 of the shipped library: the defaults pack 2026-10-23 manifest pins the same bytes.
+SHIPPED_SHA256 = "97ce51fbc297140e4a1946b1d56f9e715038652413a117d5f0e51fb623582c97"
+#: How many cost fields of each kind are cited reference values (tag literature).
+LITERATURE_COUNTS = {
+    ("transformers", "capex_eur"): 24,
+    ("transformers", "opex_frac"): 29,
+    ("transformers", "lifetime_a"): 29,
+    ("cables", "capex_eur_per_km"): 11,
+    ("cables", "opex_frac"): 12,
+    ("cables", "lifetime_a"): 12,
+    ("capacitor_banks", "capex_eur"): 9,
+    ("capacitor_banks", "opex_frac"): 9,
+    ("shunt_reactors", "opex_frac"): 9,
+    ("switchgear", "capex_eur"): 5,
+    ("switchgear", "opex_frac"): 13,
+    ("switchgear", "lifetime_a"): 13,
+}
+
+
+def test_the_shipped_library_is_the_file_the_defaults_pack_pins():
+    assert hashlib.sha256(DEFAULT_PATH.read_bytes()).hexdigest() == SHIPPED_SHA256
+
+
+def test_only_a_cost_is_a_cited_reference_value_and_each_names_its_row():
+    """Ratings stay assumed; a cost is literature (with a note) or assumed; the money is 2025 EUR."""
     assert LIB["discount_rate"]["source"] == "assumed"
+    assert (LIB["currency"], LIB["price_year"]) == ("EUR", 2025)
+    counts = {}
     for kind in KINDS:
         for e in LIB[kind]:
-            for f in (*FIELDS[kind], *COST[kind]):
+            for f in FIELDS[kind]:
                 assert e[f]["source"] == "assumed", (e["id"], f)
+            for f in COST[kind]:
+                src = e[f]["source"]
+                assert src in ("literature", "assumed"), (e["id"], f, src)
+                if src == "literature":
+                    assert e[f].get("note", "").strip(), (e["id"], f)
+                    counts[(kind, f)] = counts.get((kind, f), 0) + 1
+    assert counts == LITERATURE_COUNTS
     header = DEFAULT_PATH.read_text().split("\n\n")[0].lower()
-    assert "order-of-magnitude" in header and "vendor quotes" in header
+    assert "reference values, not quotes" in header and "vendor quotes" in header
 
 
 def test_transformers_cover_the_four_voltage_pairs_in_r10_sizes():
