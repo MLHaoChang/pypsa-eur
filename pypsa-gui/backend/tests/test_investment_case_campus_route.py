@@ -1004,7 +1004,7 @@ def test_the_route_takes_the_studys_replacements_folded_into_their_lineage(
     real = ce.owner_assets_response
     monkeypatch.setattr(ce, "owner_assets_response",
                         lambda p, **kw: (seen.append(kw), real(p, **kw))[1])
-    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2026))
+    _put_fin(client, _s2_inputs(currency="EUR", currency_year=2025))
     body = _run(client)
     assert body["status"] == "done", body
     assert seen and all(kw == {"replacements": True} for kw in seen)
