@@ -90,6 +90,14 @@ The Standards review reports no hard violations and no actionable heuristic find
 
 Local documentation checks pass: all19Markdown files have SPDX headers, relative links resolve, tickets retain01–08, V01–V90 are unique and diff checks pass. These90cases are planned, not executed tests. No runtime code, dependency, paid model/media call, Blender/photo worker, reconstruction or new runtime test was introduced/run. Later publication-record edits update this verdict and README/HANDOFF status only.
 
-## Interactive copilot configuration clarification — delta review pending
+## Interactive copilot configuration clarification — review complete
 
-New example intent/effect contracts and V91–V98 make guided creation and iterative site/model/display adjustment explicit. The98-case extension is technical specification work beyond the recorded90-case head; earlier verdicts do not certify it. Delta review pending; runtime release remains gated on implementation and evidence.
+Reviewed technical head: `533616f015b09383d625f2f956d5da14667c4851`, against prior publication9d90d5e55c8cc483bcef0aa8b150ccc2e2b8dc10.
+
+The owner explicitly requires guided initial3Dconfiguration and later conversational adjustments, including Load/facility mapping, asset placement, supported native connections/parameters and process/result channels. ai-guided-project-flow.md now defines concrete intent/effect examples, and V91–V98 are assigned to existing SC-07 and native service slices. Complete package:19Markdown files, eight tickets,98proposed acceptance cases.
+
+**Spec:0unresolved findings.** The examples cover creation guidance, metric changes, exact multi-load/facility mapping, existing assets, native energy/process connections and settings, result channels and interrupted multi-effect tasks. Ambiguous output-link wording cannot silently become a topology edit. **Standards:0hard violations,0heuristic findings.** Existing native schemas, per-effect review/approval/read-back, task execution, source privacy, six-card flow, /flow authority and owning editors remain authoritative. No generic writer or bypass is introduced. Both agents confirmed the exact committed head above.
+
+**Advisory GO:** publish the extension and execute bounded SC-00 N contract/prototype work. Runtime/native release and Blender/photo enablement remain NO-GO until implementation, applicable validation and official review gates pass. No official GK/UX approval or conversational-quality certification is claimed.
+
+Documentation integrity checks pass; the98cases are planned, not executed tests. No runtime code, worker execution, paid model/media call or conversational evaluation was performed. Later publication edits only record this verdict and update README/HANDOFF status.
