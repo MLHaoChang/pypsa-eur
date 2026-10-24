@@ -198,7 +198,7 @@ def rename_component(doc: dict, component_class: str, old: str, new: str) -> boo
     old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
     changed = False
     footprints = doc.get("asset_footprints", {})
-    if old_key in footprints:
+    if isinstance(footprints, dict) and old_key in footprints:
         footprints[new_key] = footprints.pop(old_key)
         changed = True
     for site in doc.get("sites", []):
@@ -213,7 +213,7 @@ def remove_asset_footprint(doc: dict, component_class: str, name: str) -> bool:
     """A deleted component must not donate its envelope to same-name recreation."""
     footprints = doc.get("asset_footprints", {})
     key = f"{component_class}:{name}"
-    if key not in footprints:
+    if not isinstance(footprints, dict) or key not in footprints:
         return False
     del footprints[key]
     return True

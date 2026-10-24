@@ -91,3 +91,22 @@ def test_native_delete_and_recreate_does_not_inherit_dimensions(tmp_path, instal
         _delete_component('Generator', 'generators', 'G')
     n.add('Generator', 'G', bus='B', p_nom=50)
     assert ss.read_sites(tmp_path)['asset_footprints'] == {}
+
+
+@pytest.mark.parametrize('bad_table', [None, [], 'corrupt'])
+def test_corrupt_optional_metadata_never_turns_native_deletion_into_failure(tmp_path, install_network, monkeypatch, bad_table):
+    import pypsa
+
+    from services.network_crud import _delete_component
+    from services.pypsa_service import PyPSAService
+
+    n = pypsa.Network()
+    n.add('Bus', 'B')
+    n.add('Generator', 'G', bus='B', p_nom=10)
+    install_network(n)
+    monkeypatch.setattr(PyPSAService.get_active_context(), 'storage_dir', tmp_path)
+    doc = document({'width_m': 12, 'depth_m': 6})
+    doc['asset_footprints'] = bad_table
+    ss.write_sites(tmp_path, doc)
+    _delete_component('Generator', 'generators', 'G')
+    assert 'G' not in n.generators.index

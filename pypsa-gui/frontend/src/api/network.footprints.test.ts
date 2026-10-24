@@ -83,3 +83,16 @@ it('imports the exact native renamed footprint before unrelated dirty state is f
   await flushPendingSitesToServer('P')
   expect(sitesApi.putSites).toHaveBeenLastCalledWith('P', useSitesStore.getState().docFor('P'))
 })
+
+it('native rename preserves an unrelated same-class pending footprint', async () => {
+  useSitesStore.getState().setAssetFootprint('P', 'Generator:H', {width_m: 20, depth_m: 10})
+  vi.mocked(client.get).mockResolvedValue({data: [{name:'renamed'}, {name:'H'}]})
+  vi.mocked(sitesApi.getSites).mockResolvedValue({version:1,sites:[],asset_footprints:{
+    'Generator:renamed':{width_m:12,depth_m:6}, 'Generator:H':{width_m:4,depth_m:2},
+  }})
+  await networkApi.getGenerators()
+  expect(useSitesStore.getState().docFor('P').asset_footprints!['Generator:H']).toEqual({width_m:20,depth_m:10})
+  expect(useSitesStore.getState().docFor('P').asset_footprints!['Generator:renamed']).toEqual({width_m:12,depth_m:6})
+  await flushPendingSitesToServer('P')
+  expect(sitesApi.putSites).toHaveBeenLastCalledWith('P', useSitesStore.getState().docFor('P'))
+})
