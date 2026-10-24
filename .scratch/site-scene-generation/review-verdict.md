@@ -62,6 +62,15 @@ Final Standards review: no hard violations unresolved and no blocking heuristic 
 
 Summary: Spec 0 unresolved (five findings corrected); Standards 0 unresolved (three findings corrected). First implementation task is the independent Native milestone in issues/01-prototype-and-contracts.md.
 
-## Owner clarification extension — AI guidance (pending delta review)
+## Owner clarification extension — AI guidance (review complete)
 
-The owner requires the complete process to be part of the overall project flow with AI guidance. New ai-guided-project-flow.md, SC-07, V61–V72 and cross-cutting requirements in all slices specify that integration. This is a technical specification change beyond the reviewed head above; its independent delta verdict is pending. No previous exact-head review or CI result certifies the extension. Runtime release remains NO-GO pending implementation and evidence.
+Reviewed technical head: `5aa25514696274390c597e425bec21d1f8f79f96`.
+Scope: delta after publication head a129323cbffc3691757bdcec1e9e98cafcc4a63d; complete package now has eight tickets and 72 proposed acceptance cases.
+
+The owner requires the complete process to be part of the overall project flow with AI guidance. ai-guided-project-flow.md, SC-07, V61–V72 and cross-cutting requirements in all slices specify the existing ten-section mapping, six-card scope, bounded current context, confirmed actions, native receipts/read-back, interruption recovery, evidence-grounded explanation and manual fallback. Guidance develops alongside native slices rather than waiting for optional engines.
+
+Both independent agents reviewed the technical delta and confirmed the exact committed head above. Spec: zero unresolved findings. Standards: zero unresolved findings. A nonblocking Standards clarification is resolved: preserve the sixth Hand-off card, its Reports/Data exports/Specialist packet outputs and the three-sub-option limit under owner G1. The design explicitly reuses existing start_task/study-brief execution, step approvals, card-phase pauses, limits and uncertain-effect handling; it does not introduce a second executor or widen runnable engineering cases.
+
+**Advisory GO:** publish the revised specifications and begin the bounded SC-00 N prototype/contract validation, including the guidance contract. Subsequent implementation remains conditional on accepted prototype evidence and normal gates. **NO-GO:** runtime release or native/Blender/photo enablement until implementation and applicable validation pass. No official GK/UX approval is claimed. Scripted-provider tests do not prove conversational quality; a real-provider quality claim requires separately authorized evaluation.
+
+Documentation checks pass at the reviewed technical head: all 17 package Markdown files have SPDX headers, relative links resolve, eight tickets follow 01–08, V01–V72 are unique and diff checks pass. The 72 cases remain proposed; no new runtime tests, model calls or worker reconstruction were performed. Later publication-record edits only record this verdict and update README/HANDOFF status, not the technical design. Earlier CI on a129323 does not certify the new head.
