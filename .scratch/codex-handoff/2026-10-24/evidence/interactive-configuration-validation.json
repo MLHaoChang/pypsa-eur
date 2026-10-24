@@ -1,0 +1,13 @@
+{
+  "publication_head": "f3d8acabd57591f2f7406dd91df8f1f6f57931e9",
+  "reviewed_technical_head": "533616f015b09383d625f2f956d5da14667c4851",
+  "markdown_files": 19,
+  "tickets": 8,
+  "planned_cases": 98,
+  "links": "resolve",
+  "SPDX": "present",
+  "docs_only": true,
+  "runtime_tests_executed": false,
+  "spec_unresolved": 0,
+  "standards_unresolved": 0
+}
