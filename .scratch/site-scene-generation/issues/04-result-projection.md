@@ -8,6 +8,10 @@ Type: task
 Dependencies: SC-02
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Write a known-hour numerical oracle before projection code. Reuse the shared timeline and native generator/Load/storage/branch/Link/Store series, freshness gates and selected project/run. Hourly values, weighted energy/material totals and process summary data are distinct. Do not repeat process running-hours or horizon production as hourly throughput.

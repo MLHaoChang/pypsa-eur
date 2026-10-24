@@ -8,6 +8,10 @@ Type: prototype
 Dependencies: none
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Read spec.md, implementation-plan.md and validation-matrix.md. Do not modify the solver or install mandatory base-app dependencies. Complete independent N (Native), B (Blender) and P (Photo) milestones, each with its own evidence/status. N covers model-free native generation, canonical writes, private-media policy and server /flow. B covers a genuine GLB/manifest round trip on a supported pinned Blender. P covers a small genuine reconstruction on supported hardware. Completion of N alone unblocks native implementation; the parent issue need not wait for B/P to enable SC-01.

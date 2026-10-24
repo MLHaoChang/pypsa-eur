@@ -8,6 +8,10 @@ Type: task
 Dependencies: SC-01; SC-00 target-lifecycle contract
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Before code, obtain the required engine/UX plan review for native lifecycle/mutation seams. First prove rename/delete/same-name recreation behavior; do not use loose display-name matching or infer a stable UUID the model does not provide.

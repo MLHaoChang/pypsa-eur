@@ -8,6 +8,10 @@ Type: task
 Dependencies: SC-00 N/SC-01 for native export; SC-02 for bindings; SC-00 B before claiming tested Blender compatibility
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Write artifact round-trip tests first. Export a bounded GLB and canonical manifest carrying Site origin, axes/metres, scene/model revision, feature IDs, component bindings, source classifications and content hashes. This works without Blender installed. Source-verified equipment retains native scale, and supported library instances are not silently collapsed into ambiguous component identities.

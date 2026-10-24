@@ -8,6 +8,10 @@ Type: task
 Dependencies: accepted SC-00 N only; Blender/Photo not required
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Write a public scene HTTP/store red test before implementing its behavior. Preserve legacy sites.json authority for unadopted Sites and the fixed origin. For adopted Sites, implement the single canonical generation/pointer authority, compatibility projection and stale legacy-save refusal and manifest-closure export/copy in contracts.md. Add native building/zone proxies, source/geometry records and compare-and-swap save/apply. Render imported footprints with source-derived or visibly estimated heights; promoting context suppresses its duplicate background mesh.

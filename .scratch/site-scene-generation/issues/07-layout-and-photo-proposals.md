@@ -8,6 +8,10 @@ Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Implement source adapters independently. First accept a calibrated raster/GeoJSON layout reference and manual footprint correction through the common preview. PDF rasterization is bounded; it is not automatic CAD/vector understanding. DXF/IFC adapters have their own units/CRS/semantic tests before they are advertised.

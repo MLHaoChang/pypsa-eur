@@ -6,6 +6,8 @@
 Status: proposed acceptance cases — none of the new cases is implemented or passed
 Use the existing Site/model/results interfaces where possible. Exact new operation names are frozen by SC-00, before executable tests. Expected quantities use independent hand calculations or fixed native oracles, never an LLM or recomputation of the implementation.
 
+Executable traceability is indexed in [execution-manifest.yaml](execution-manifest.yaml): exactly one primary evidence owner for each row, additional affected-unit assertions and separate capability release gates. All rows are still planned; the manifest's ownership is not a coverage result. Mixed-engine rows must be split into individually recorded assertions and stay partial until all claimed assertions pass. Use [fixtures-and-oracles.md](fixtures-and-oracles.md) for independent expectations and [implementation-record-template.md](implementation-record-template.md) for actual test nodes, fixture hashes, source SHAs, commands and results.
+
 | ID | Slice / seam | Case and required observation |
 |---|---|---|
 | V01 | SC-01 owned scene | Legacy project reads without write/migration; sites.json and fixed origin unchanged. |

@@ -3,10 +3,16 @@
 
 # Continuation handoff
 
-Status: independent review complete — GO publication/Native prototype; implementation not started
+Status: execution-support extension prepared; historical advisory reviews recorded; prototype/runtime implementation not started
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
 Baseline: `aba252d2384f55116bbd15516a5b025951ba265e`
+
+## Implementer entry and current boundaries
+
+Start at [execution-guide.md](execution-guide.md); the first assignment is SC-00 N only. [execution-manifest.yaml](execution-manifest.yaml) divides the eight tickets into dependency-checked delivery units and assigns every V01–V98 row one primary evidence owner. [decision-register.md](decision-register.md) names the still-unresolved contracts and their downstream blockers. [fixtures-and-oracles.md](fixtures-and-oracles.md) supplies analytic/negative fixtures. Copy [implementation-record-template.md](implementation-record-template.md) into each bounded assignment's PR and successor handoff.
+
+No unit is accepted or implemented. Prototype decisions remain unresolved; all 98 acceptance rows remain planned. The new execution-support documents were not covered by the historical exact-head independent reviews below. No paid/provider/worker calls, deployment, reviewer contact or merge are authorized by this extension. Resolve actual source from PR #711, not this worktree path; until merged, another session can fetch `claude/site-scene-generation-spec` and read the docs without basing its implementation branch on it.
 
 ## Owner intent
 

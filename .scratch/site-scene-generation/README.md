@@ -5,6 +5,10 @@
 
 Status: independently reviewed specification — GO to publish and begin the Native prototype; no runtime release approval
 
+**Implementing agent: begin with [execution-guide.md](execution-guide.md).** It links the machine-readable [execution manifest](execution-manifest.yaml), [unresolved decision gates](decision-register.md), [independent fixtures/oracles](fixtures-and-oracles.md) and [assignment/evidence/handoff template](implementation-record-template.md). The next assignment is SC-00 N, not the whole feature. All units are not_started and all 98 acceptance cases remain planned. Current master and the actual spec head must be rechecked before implementation.
+
+This execution-support extension has documentation integrity checks only; earlier independent verdicts below certify their named historical technical heads, not this added material. Fresh applicable review remains required. No prototype decision has been accepted or runtime feature enabled.
+
 Read [spec.md](spec.md), [implementation-plan.md](implementation-plan.md), [validation-matrix.md](validation-matrix.md) [contracts.md](contracts.md), [ai-guided-project-flow.md](ai-guided-project-flow.md), [optional-site-workflow.md](optional-site-workflow.md), [workflow-assessment.md](workflow-assessment.md), [tools-and-experiments.md](tools-and-experiments.md) and [HANDOFF.md](HANDOFF.md).
 
 The design covers native campus generation, buildings associated with multi-energy Loads and process-unit complexes, equipment placement, native result playback, optional integrated Blender workers, Blender export/refinement, and reconstruction proposals from suitable layouts/photos. It reuses the existing Site 3D implementation; no new top-level workflow card is proposed.

@@ -7,6 +7,10 @@ Status: needs-triage — proposed slices; no implementation started
 Baseline: master `aba252d2384f55116bbd15516a5b025951ba265e`
 Read with: spec.md, validation-matrix.md, HANDOFF.md and issues/01–08.
 
+## Execution contract
+
+Use [execution-guide.md](execution-guide.md) and [execution-manifest.yaml](execution-manifest.yaml) to assign bounded work. The manifest partitions SC-00 into N/B/P, SC-06 into layout/photo and SC-07 into foundation/bindings/results without adding user-facing modes or changing the eight tickets. Runtime units require accepted prerequisites and the applicable closed decisions in [decision-register.md](decision-register.md). Prototype units close decisions for acceptance; they do not require their own experimental outcomes before beginning. [fixtures-and-oracles.md](fixtures-and-oracles.md) and [implementation-record-template.md](implementation-record-template.md) specify expected evidence and a durable successor handoff. Initial source paths below are candidates; freeze a reviewed per-assignment allowlist against actual master before code.
+
 ## Architecture and ownership
 
 Native model and results remain authoritative. A scene module owns physical features, groups, bindings and revisioned proposals. Adapters supply native geometry, optional Blender output or optional reconstructed reference geometry. The interactive Three.js viewer consumes the admitted scene and native result projection. No renderer calls a solver or grants permissions.

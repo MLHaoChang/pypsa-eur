@@ -101,3 +101,9 @@ The owner explicitly requires guided initial3Dconfiguration and later conversati
 **Advisory GO:** publish the extension and execute bounded SC-00 N contract/prototype work. Runtime/native release and Blender/photo enablement remain NO-GO until implementation, applicable validation and official review gates pass. No official GK/UX approval or conversational-quality certification is claimed.
 
 Documentation integrity checks pass; the98cases are planned, not executed tests. No runtime code, worker execution, paid model/media call or conversational evaluation was performed. Later publication edits only record this verdict and update README/HANDOFF status.
+
+## Implementation-agent execution support — current extension
+
+The owner requested an implementation package another agent can follow with less inference. The execution guide, dependency/test-owner manifest, unresolved decision register, independent fixture/oracle contract and assignment/evidence/successor template make implementation boundaries explicit. All eight tickets link to this contract. All 98 acceptance rows remain planned; no prototype, implementation, genuine optional-engine experiment or real-provider evaluation is certified by these additions.
+
+Earlier independent Spec/Standards verdicts apply only to the exact technical heads stated above. They do not certify this execution-support extension. Its local documentation-integrity validation is distinct from design review, runtime tests, current-head CI and official GK/UX approval. Fresh applicable review is still required before implementing/releasing gated work; no official reviewer has been contacted by this update.

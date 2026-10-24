@@ -8,6 +8,10 @@ Type: task
 Dependencies: SC-04; SC-00 worker/protocol/resource evidence
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
+## Implementation assignment
+
+Follow [execution-guide.md](../execution-guide.md) and the matching units in [execution-manifest.yaml](../execution-manifest.yaml). Freeze this assignment's actual-master file allowlist and public contracts; satisfy [decision gates](../decision-register.md) before dependent code, and record test-first evidence/unfinished work using [implementation-record-template.md](../implementation-record-template.md). Prototype N/B/P units close their own decisions through evidence; they do not require accepted experimental outcomes before starting. Primary V ownership does not remove cross-cutting obligations or authorize changes outside the frozen slice.
+
 ## Scope and acceptance
 
 Write readiness/job/apply tests before implementation. A configured pinned Blender executable/worker receives only normalized owned input and a trusted script in a bounded isolated job. Native generation remains available when it is absent. Reuse the agreed job persistence/cancellation contract; do not infer safe resource limits or add a kind that can execute the solve dispatcher accidentally.
