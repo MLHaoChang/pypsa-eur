@@ -128,6 +128,16 @@ describe('chapterTiles', () => {
     expect(t.grid_plan.state).toBe('not_applicable')
   })
 
+  it('grid plan counts the invested rows that its results table displays', () => {
+    const rows = (statuses: string[]) => statuses.map(status_with_measures => ({ status_with_measures, detail: '' }))
+    const tile = (compliance_invested: unknown, compliance = rows(['pass', 'fail'])) => byId({ ...NONE,
+      grid: { campus: { results: { compliance, compliance_invested }, stale: false } as never, notHub: false } }).grid_plan
+    expect(tile(rows(['pass', 'pass', 'pass']))).toMatchObject({ value: '3 of 3', open: { panel: 'campusResults' } })
+    expect(tile(null)).toMatchObject({ value: '1 of 2', open: { panel: 'campusResults' } })
+    expect(tile(rows(['pass']), [])).toMatchObject({ value: '1 of 1', open: { panel: 'campusResults' } })
+    expect(tile([], rows(['pass']))).toMatchObject({ state: 'not_run', open: { panel: 'campusStudy' } })
+  })
+
   it('operation: the dispatch solve, separate from the reliability study (G5)', () => {
     let t = byId({ ...NONE, operation: { status: { running: false, dispatch: 'none' } as never } })
     expect(t.operation.state).toBe('not_run')
