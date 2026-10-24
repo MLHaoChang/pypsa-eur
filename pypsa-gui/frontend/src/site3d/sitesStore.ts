@@ -89,6 +89,7 @@ interface SitesState {
   setBoundary: (project: string | null, siteId: string, boundary: LngLatTuple[]) => void
   setPlacement: (project: string | null, siteId: string, key: string, placement: Placement) => void
   removePlacement: (project: string | null, siteId: string, key: string) => void
+  dropCachedFootprints: (project: string | null, keys: string[]) => void
   setAssetFootprint: (project: string | null, key: string, value: AssetFootprint | null) => void
   renamePlacement: (project: string | null, cls: string, oldName: string, newName: string) => boolean
   /**
@@ -188,6 +189,15 @@ export const useSitesStore = create<SitesState>((set, get) => {
       delete rest[key]
       return { ...s, placements: rest }
     }),
+    // Native deletion already updated disk. Reconcile the cached/pending document
+    // without arming a new write or losing unrelated unsaved scene edits.
+    dropCachedFootprints: (project, keys) => {
+      const doc = get().docFor(project)
+      if (!keys.some(key => key in (doc.asset_footprints ?? {}))) return
+      const footprints = { ...doc.asset_footprints }
+      for (const key of keys) delete footprints[key]
+      set(s => ({ docs: { ...s.docs, [keyOf(project)]: { ...doc, asset_footprints: footprints } } }))
+    },
     setAssetFootprint: (project, key, value) => {
       if (value !== null) assertFootprintValid(key, value)
       write(project, doc => {

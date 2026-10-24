@@ -57,3 +57,23 @@ it('uses the same envelope for rotated boundary geometry', async () => {
   expect(Math.min(...corners.map(p => p.y))).toBeCloseTo(-6, 10)
   expect(Math.max(...corners.map(p => p.y))).toBeCloseTo(6, 10)
 })
+
+for (const heading of [0, 90]) it(`keeps an explicit PV proxy clear of rooftop plant at heading ${heading}`, () => {
+  const result = buildSiteLayout({ ...input,
+    loads: [{name: 'hall', bus: 'B', carrier: 'AC', p_set: 20} as never],
+    generators: [{name: 'roof', bus: 'B', carrier: 'solar-rooftop', p_nom: 1} as Generator],
+    placements: {'Load:hall': {x: 100, y: 200, heading}},
+    footprints: {'Generator:roof': {width_m: 12, depth_m: 60, height_m: 1}},
+  })
+  const hall = result.objects.find(o => o.name === 'hall')!
+  const pv = result.objects.find(o => o.name === 'roof')!
+  expect(hall.footprint).toEqual([160, 100])
+  expect(pv.elevation).toBeGreaterThan(0)
+  // Southern free roof spans y=-49..14 in the hall frame. A 60m proxy
+  // centered at -17.5 spans -47.5..12.5 and stays clear of plant y=15..35.
+  expect(pv.origin[0]).toBeCloseTo(heading === 0 ? 100 : 82.5, 10)
+  expect(pv.origin[1]).toBeCloseTo(heading === 0 ? 182.5 : 200, 10)
+  expect(pv.parts[0].pos).toEqual([0, 0, 0.5])
+  expect(pv.parts[0].size).toEqual([12, 60, 1])
+  expect(pv.areaM2).toBe(0)
+})

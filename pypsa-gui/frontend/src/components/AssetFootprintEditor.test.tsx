@@ -68,7 +68,7 @@ it('does not claim server persistence when the PUT fails', async () => {
   fireEvent.change(screen.getByLabelText('Width (m)'), { target: { value: '4' } })
   fireEvent.change(screen.getByLabelText('Depth (m)'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save footprint' }))
-  expect((await screen.findByRole('status')).textContent).toContain('Local draft')
+  expect((await screen.findByText(/Local draft/)).textContent).toContain('Local draft')
   expect(screen.queryByText('Saved to project')).toBeNull()
 })
 

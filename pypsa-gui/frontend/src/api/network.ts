@@ -1,4 +1,6 @@
 import client from './client'
+import { useUIStore } from '../store/uiStore'
+import { useSitesStore } from '../site3d/sitesStore'
 import type { Bus, Carrier, CatalogPayload, ShuntImpedance, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
 import type { LengthSource } from './mapLayout'
@@ -8,6 +10,57 @@ export interface LengthsFromGeometryResult {
   skipped: Array<{ key: string; reason: 'unknown' | 'no-length' | 'unplaced' | string }>
   rescale: RescalePreview[]
   sources: Record<string, LengthSource>
+}
+
+// Only these unfiltered native lists can reconcile equipment identities.
+const FOOTPRINT_RESOURCES = {
+  generators: 'Generator', storage_units: 'StorageUnit', stores: 'Store',
+  transformers: 'Transformer', links: 'Link',
+} as const
+
+type EquipmentResource = keyof typeof FOOTPRINT_RESOURCES
+
+function equipmentRows<T extends { name: string }>(resource: EquipmentResource): Promise<T[]> {
+  const project = useUIStore.getState().currentProject
+  const observed = useSitesStore.getState().docFor(project).asset_footprints ?? {}
+  return client.get<T[]>(`/network/${resource}`).then(r => {
+    if (project === useUIStore.getState().currentProject && Array.isArray(r.data)) {
+      const names = new Set(r.data.map(row => row.name))
+      const current = useSitesStore.getState().docFor(project).asset_footprints ?? {}
+      const prefix = FOOTPRINT_RESOURCES[resource] + ':'
+      // A late list cannot delete a footprint entered after that request began.
+      const missing = Object.keys(observed).filter(key => key.startsWith(prefix)
+        && !names.has(key.slice(prefix.length)) && current[key] === observed[key])
+      useSitesStore.getState().dropCachedFootprints(project, missing)
+    }
+    return r.data
+  })
+}
+
+function deleteEquipment(resource: EquipmentResource, name: string) {
+  const project = useUIStore.getState().currentProject
+  return client.delete(`/network/${resource}/${encodeURIComponent(name)}`).then(result => {
+    useSitesStore.getState().dropCachedFootprints(project, [`${FOOTPRINT_RESOURCES[resource]}:${name}`])
+    return result
+  })
+}
+
+async function deleteBusWithFootprints(name: string) {
+  const project = useUIStore.getState().currentProject
+  const footprints = useSitesStore.getState().docFor(project).asset_footprints ?? {}
+  const keys: string[] = []
+  // Capture exact connected native identities before the cascade. A failed
+  // read refuses submission; it must not turn a completed deletion into an error.
+  await Promise.all((Object.keys(FOOTPRINT_RESOURCES) as EquipmentResource[]).map(async resource => {
+    const cls = FOOTPRINT_RESOURCES[resource]
+    if (!Object.keys(footprints).some(key => key.startsWith(cls + ':'))) return
+    const rows = await equipmentRows<{ name: string; bus?: string; bus0?: string; bus1?: string }>(resource)
+    for (const row of rows) if (row.bus === name || row.bus0 === name || row.bus1 === name) keys.push(`${cls}:${row.name}`)
+  }))
+  if (project !== useUIStore.getState().currentProject) throw new Error('Project changed; refresh before deleting.')
+  const result = await client.delete(`/network/buses/${encodeURIComponent(name)}/cascade`)
+  useSitesStore.getState().dropCachedFootprints(project, keys)
+  return result
 }
 
 export const networkApi = {
@@ -27,7 +80,7 @@ export const networkApi = {
       `/network/buses/${encodeURIComponent(name)}`, b,
     ).then(r => r.data),
   deleteBus: (name: string) => client.delete(`/network/buses/${encodeURIComponent(name)}`),
-  deleteBusCascade: (name: string) => client.delete(`/network/buses/${encodeURIComponent(name)}/cascade`),
+  deleteBusCascade: deleteBusWithFootprints,
   renameBus: (oldName: string, newName: string) =>
     client.post<{ old_name: string; new_name: string }>(
       `/network/buses/${encodeURIComponent(oldName)}/rename`, { new_name: newName }
@@ -71,28 +124,28 @@ export const networkApi = {
     ).then(r => r.data),
 
   // Links
-  getLinks: () => client.get<Link[]>('/network/links').then(r => r.data),
+  getLinks: () => equipmentRows<Link>('links'),
   createLink: (l: Partial<Link>) => client.post('/network/links', l),
   updateLink: (name: string, l: Partial<Link>) => client.put(`/network/links/${encodeURIComponent(name)}`, l),
-  deleteLink: (name: string) => client.delete(`/network/links/${encodeURIComponent(name)}`),
+  deleteLink: (name: string) => deleteEquipment('links', name),
 
   // Generators
-  getGenerators: () => client.get<Generator[]>('/network/generators').then(r => r.data),
+  getGenerators: () => equipmentRows<Generator>('generators'),
   createGenerator: (g: Partial<Generator>) => client.post('/network/generators', g),
   updateGenerator: (name: string, g: Partial<Generator>) => client.put(`/network/generators/${encodeURIComponent(name)}`, g),
-  deleteGenerator: (name: string) => client.delete(`/network/generators/${encodeURIComponent(name)}`),
+  deleteGenerator: (name: string) => deleteEquipment('generators', name),
 
   // Storage Units
-  getStorageUnits: () => client.get<StorageUnit[]>('/network/storage_units').then(r => r.data),
+  getStorageUnits: () => equipmentRows<StorageUnit>('storage_units'),
   createStorageUnit: (s: Partial<StorageUnit>) => client.post('/network/storage_units', s),
   updateStorageUnit: (name: string, s: Partial<StorageUnit>) => client.put(`/network/storage_units/${encodeURIComponent(name)}`, s),
-  deleteStorageUnit: (name: string) => client.delete(`/network/storage_units/${encodeURIComponent(name)}`),
+  deleteStorageUnit: (name: string) => deleteEquipment('storage_units', name),
 
   // Stores
-  getStores: () => client.get<Store[]>('/network/stores').then(r => r.data),
+  getStores: () => equipmentRows<Store>('stores'),
   createStore: (s: Partial<Store>) => client.post('/network/stores', s),
   updateStore: (name: string, s: Partial<Store>) => client.put(`/network/stores/${encodeURIComponent(name)}`, s),
-  deleteStore: (name: string) => client.delete(`/network/stores/${encodeURIComponent(name)}`),
+  deleteStore: (name: string) => deleteEquipment('stores', name),
 
   // Loads
   getLoads: () => client.get<Load[]>('/network/loads').then(r => r.data),
@@ -101,12 +154,12 @@ export const networkApi = {
   deleteLoad: (name: string) => client.delete(`/network/loads/${encodeURIComponent(name)}`),
 
   // Transformers
-  getTransformers: () => client.get<Transformer[]>('/network/transformers').then(r => r.data),
+  getTransformers: () => equipmentRows<Transformer>('transformers'),
   getTransformerTypes: () => client.get<TransformerType[]>('/network/transformers/types').then(r => r.data),
   createTransformer: (t: Partial<Transformer>) => client.post('/network/transformers', t),
   updateTransformer: (name: string, t: Partial<Transformer>) =>
     client.put(`/network/transformers/${encodeURIComponent(name)}`, t),
-  deleteTransformer: (name: string) => client.delete(`/network/transformers/${encodeURIComponent(name)}`),
+  deleteTransformer: (name: string) => deleteEquipment('transformers', name),
 
   // Snapshots
   getSnapshots: () => client.get<SnapshotInfo>('/network/snapshots').then(r => r.data),

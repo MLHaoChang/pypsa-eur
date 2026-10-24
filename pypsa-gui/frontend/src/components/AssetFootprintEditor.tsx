@@ -10,10 +10,11 @@ interface Props { componentClass: string; name: string }
 /** The same optional editor in Guided/Expert properties and the Site view. */
 export default function AssetFootprintEditor({ componentClass, name }: Props) {
   const [open, setOpen] = useState(false)
+  const project = useUIStore(s => s.currentProject)
   if (!FOOTPRINT_CLASSES.has(componentClass)) return null
   return <details className="rounded border border-border bg-bg p-2 text-[11px] max-w-72" onToggle={e => setOpen(e.currentTarget.open)}>
     <summary className="cursor-pointer font-semibold text-text">Footprint (optional)</summary>
-    {open && <FootprintFields key={`${componentClass}:${name}`} componentClass={componentClass} name={name} />}
+    {open && <FootprintFields key={`${project}:${componentClass}:${name}`} componentClass={componentClass} name={name} />}
   </details>
 }
 
@@ -61,6 +62,9 @@ function FootprintFields({ componentClass, name }: Props) {
     <p className="text-muted">{value ? 'User-entered equipment envelope; simple 3D proxy.' : 'Library estimate — detailed footprint not provided; actual dimensions may differ.'}</p>
     <p className="text-muted">Total envelope for this asset, not per module. Geometry only; ratings and results stay unchanged. Review after capacity changes.</p>
     {loadFailed && <p role="alert">Could not load site metadata. <button type="button" className="underline" onClick={() => void useSitesStore.getState().ensureLoaded(project, true)}>Retry loading</button></p>}
+    {readOnly && <p role="status">{readOnlyMessage(reason) ?? 'Read-only: editing is unavailable.'}</p>}
+    {!loaded && <p role="status">Loading site metadata…</p>}
+    {busy && <p role="status">Saving footprint…</p>}
     <fieldset disabled={blocked} title={readOnly ? readOnlyMessage(reason) ?? 'Read-only' : undefined} className="space-y-1">
       {([['Width (m)', width, setWidth], ['Depth (m)', depth, setDepth], ['Height (m, optional)', height, setHeight]] as const).map(([label, v, setter]) =>
         <label key={label} className="flex items-center justify-between gap-2">{label}

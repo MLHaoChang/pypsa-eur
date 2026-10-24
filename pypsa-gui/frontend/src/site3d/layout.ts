@@ -410,7 +410,11 @@ function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readon
     if (!c) continue
     const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free }, sizing, footprints[objectKey(o)])
     if (out.fitsRoof) {
-      Object.assign(o, { parts: obj.parts, footprint: obj.footprint, ...(o.footprintSource ? { areaM2: obj.areaM2, anchors: obj.anchors } : {}), summary: obj.summary, origin: [...hall.origin], heading: hall.heading, elevation: free.h })
+      const angle = -hall.heading * Math.PI / 180
+      const origin = o.footprintSource
+        ? [hall.origin[0] - free.cy * Math.sin(angle), hall.origin[1] + free.cy * Math.cos(angle)]
+        : [...hall.origin]
+      Object.assign(o, { parts: obj.parts, footprint: obj.footprint, ...(o.footprintSource ? { areaM2: obj.areaM2, anchors: obj.anchors } : {}), summary: obj.summary, origin, heading: hall.heading, elevation: free.h })
     } else {
       // Not one table fits the roof: the canopy stands just south of the hall.
       o.origin = [hall.origin[0], hall.origin[1] - d / 2 - o.footprint[1] / 2 - 8]

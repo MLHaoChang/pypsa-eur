@@ -33,3 +33,9 @@ Reuse the existing library's type-specific unit counts and dimensions for now. F
 ## Review/handoff
 
 This implements optional footprint metadata/proxies only. PR #711 remains the separate campus/AI/Blender/photo specification. Current engine/UX gatekeeper references and actual master overlaps must be assessed before merge; coordinator owns merge. No broad engineering/domain approval or site reconstruction is claimed.
+
+## Advisory review corrections
+
+Two independent local review axes on initial implementation 0a36ec3815cc42b0ad9bc66cf9c188f268fc92f1 found a shared stale-cache deletion issue; Spec additionally found rooftop-proxy positioning, and Standards required visible disabled explanations. Corrections add exact successful-delete cache cleanup, guarded complete-list reconciliation preserving unrelated dirty edits and newly edited values, pre-cascade identity capture and project-change refusal, correct rotated free-roof positioning and visible loading/saving/read-only text. Public API/store and actual layout regressions cover the fixes. Initial verdicts do not certify a later head; renewed advisory review and official UX review remain separate gates.
+
+The legacy sites.json store retains its existing whole-document persistence/concurrency model; this PR does not claim revision/CAS or cross-session asset-generation identity guarantees. Those broader guarantees remain in PR #711's Native contracts/identity milestones. Native deletion undo restores the model through its ordinary path; deleted footprint metadata is not part of native network undo. Library fallback remains explicitly labelled and dimensions can be re-entered.
