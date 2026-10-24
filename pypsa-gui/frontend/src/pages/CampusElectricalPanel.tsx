@@ -132,7 +132,7 @@ function CampusPanel({ part }: { part: CampusPart }) {
 
 export default function CampusElectricalPanel() { return <CampusPanel part="inputs" /> }
 export function CampusStudyPanel() { return <CampusPanel part="study" /> }
-const bandEdge = (value: number) => num(value, 3).replace('-', '\u2212')
+const bandEdge = (value: number) => num(value, 3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('-', '\u2212')
 
 export function CampusResultsPanel() { return <CampusPanel part="results" /> }
 
