@@ -14,7 +14,7 @@ The companion offers a useful next action in context, explains missing informati
 
 ## Follow the existing project flow
 
-Use the current section IDs from `services/flow_sections.py` and the approved [.scratch/project-workflow/design.md](../project-workflow/design.md). Labels follow the current registry, including subsequent wording fixes. The five analysis scope cards (energy/capacity, grid/load flow, reliability, commercial, controls) select work within this flow; they are not a second ordered rail. Site geometry does not implicitly select every analysis or force grid/control studies on all templates.
+Use the current section IDs from `services/flow_sections.py` and the approved [.scratch/project-workflow/design.md](../project-workflow/design.md). Labels follow the current registry, including subsequent wording fixes. Preserve the approved six-card model in [modular-cards.md](../project-workflow/modular-cards.md) and owner decision G1: the five analysis cards (energy/capacity, grid/load flow, reliability, commercial, controls) plus the sixth Hand-off card (Reports, Data exports, Specialist packet), each with at most three sub-options. They select work within this flow; they are not a second ordered rail. Site geometry does not implicitly select every analysis or force grid/control studies on all templates.
 
 | Existing section ID | Integrated site work | Companion guidance and handoff |
 |---|---|---|
@@ -27,7 +27,7 @@ Use the current section IDs from `services/flow_sections.py` and the approved [.
 | commercial | Review tariffs/contracts, parties, cost and money-year assumptions in their established editors | Use native schemas/library provenance. Footprint/asset imagery cannot supply a price or contract term. |
 | scenarios | Choose the analyses, variants, reliability objectives and relevant control assessment | Explain dependencies, time-domain versus hourly limitations and missing engine support; changing scope requires an ordinary explicit change, not an AI choice. |
 | readiness | Show native preflight and scene-specific action verdicts with in-place fixes | Read `get_project_flow` and admitted scene context. Explain the first actionable blocker; do not mark complete or enable a run from conversation history. |
-| results | Use the shared snapshot/period/run selection for overlays, results and report explanations; return to an input's home for changes | Cite native evidence, units, freshness and limitations. Offer a proposed revision/re-run through ordinary controls; historical/current results are distinguished. Optional refinement returns to the same Site plan context. |
+| results | Use the shared snapshot/period/run selection for overlays, results and report explanations; return to an input's home for changes | Cite native evidence, units, freshness and limitations. Offer a proposed revision/re-run through ordinary controls; historical/current results are distinguished. The Hand-off card retains the native reports/data-export/specialist-packet paths, availability and evidence limits. Optional refinement returns to the same Site plan context. |
 
 Geometry is an optional visualization/enrichment activity in Project & site. Binding work is revisited at the model entity's owning section without leaving and returning through unrelated panels. A missing optional reconstruction or binding does not block an otherwise valid electrical study. `/flow` determines required work and `not_needed` for the selected scope. Unavailable/unknown state is not rendered as complete. Analysis applicability, thresholds and engineering verdicts remain native domain responsibilities.
 
@@ -45,7 +45,7 @@ Persist native scene/model/proposal receipts and use existing owner-scoped event
 
 Every action follows **inspect → explain/clarify → prepare → review/confirm → execute → read back → suggest next**. Read-only explanations need no mutation confirmation. Preparing persistent proposals or starting geometry/reconstruction workers is not classified as a free read: apply current access/restrictions, tool tier, resource/cost admission and bounded execution rules. Confirmation of a scene preview does not authorize a model edit, source-photo transfer, paid call or solve.
 
-Use existing `get_project_flow`, schema/component reads, native edit cards and navigation first. Freeze the following minimal candidate adapters in SC-00 N and deliver them in SC-07; these names are proposed, not current tools:
+Use existing `get_project_flow`, schema/component reads, native edit cards and navigation first. For a multi-action request, reuse the existing `start_task` / study-brief machinery in `services/assistant_tasks.py`, with reviewed typed scene-step support where needed, existing per-step approvals, card-phase pauses, limits and uncertain-effect behavior. Do not build a second plan executor or widen existing runnable engineering cases; unsupported scene-step kinds get a named refusal/manual fallback until their adapter is tested. Freeze the following minimal candidate adapters in SC-00 N and deliver them in SC-07; these names are proposed, not current tools:
 
 | Candidate | Allowed effect and required controls |
 |---|---|
