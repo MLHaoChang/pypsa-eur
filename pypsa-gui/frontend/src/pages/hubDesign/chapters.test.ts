@@ -107,12 +107,19 @@ describe('chapterTiles', () => {
   })
 
   it('grid plan: the campus checks that pass with the proposed measures', () => {
-    const row = (s: string) => ({ status_with_measures: s })
-    const campus = (rows: { status_with_measures: string }[], stale = false) =>
+    const row = (s: string, detail = 'The grid code sets no limit for this.') => ({ status_with_measures: s, detail })
+    const campus = (rows: { status_with_measures: string; detail: string }[], stale = false) =>
       ({ results: { compliance: rows }, stale }) as never
     let t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('pass'), row('fail')]), notHub: false } })
     expect(t.grid_plan).toMatchObject({ state: 'ready', value: '2 of 3', unit: 'checks pass',
       basis: 'Grid checks, with the proposed measures' })
+    // a check with no limit set is unknown: neither passed nor counted, and the tile says how many were left out
+    t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('unknown'), row('fail'), row('unknown')]), notHub: false } })
+    expect(t.grid_plan).toMatchObject({ value: '1 of 2', unit: 'checks pass · 2 without a limit' })
+    // an unknown check that lacks an input is not "without a limit": the tile names it apart
+    t = byId({ ...NONE, grid: { campus: campus([row('pass'), row('unknown'), row('unknown', 'no PCC active power')]),
+      notHub: false } })
+    expect(t.grid_plan).toMatchObject({ value: '1 of 1', unit: 'checks pass · 1 without a limit · 1 not checked' })
     t = byId({ ...NONE, grid: { campus: campus([row('pass')], true), notHub: false } })
     expect(t.grid_plan.state).toBe('stale')
     t = byId({ ...NONE, grid: { campus: { results: null, stale: false } as never, notHub: false } })

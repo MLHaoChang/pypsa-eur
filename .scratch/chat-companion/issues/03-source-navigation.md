@@ -1,6 +1,6 @@
 # CP-03 — source-bound navigation and load-flow agreement
 
-Status: ready-for-human
+Status: done (#268, 5711a6fa)
 Type: implementation
 
 The timed results tour forced Expert mode and raced an independently forwarded model request. A mounted tab did not prove its data source. Load-flow tables and charts separately calculated p0-only/unweighted loading and could display zero for unknown ratings; the shared chat oracle used different conventions. Discussed-run chrome left current charts underneath it.

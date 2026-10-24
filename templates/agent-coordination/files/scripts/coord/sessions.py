@@ -14,11 +14,16 @@ Each line shows the id suffix, status, last update, title, status category,
 status detail, context used (``context_usage.used_tokens``) and whether the
 session needs action. A session past 200k tokens of context is flagged
 ``ROTATE``: the coordinator asks it for a hand-off note and a fresh session.
-Archived sessions are left out. Fields a session lacks print as ``-``.
+``list_sessions`` does not report context reliably: ``?`` means unknown.
+Before deciding on rotation, the coordinator must read ``get_session``'s
+``context_usage``; this script reads a saved file and cannot call tools.
+Archived sessions are left out. Missing fields print as ``-``, except context,
+which prints ``?``.
 """
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -68,17 +73,18 @@ def load(text):
 
 
 def context_tokens(session):
-    """Used context tokens, or None when the record carries none."""
+    """Used context tokens, or None when missing or reported as zero."""
     for holder in (session, session.get("session_context") or {}):
         tokens = (holder.get("context_usage") or {}).get("used_tokens")
-        if isinstance(tokens, (int, float)):
+        if (isinstance(tokens, (int, float)) and not isinstance(tokens, bool)
+                and math.isfinite(tokens) and tokens > 0):
             return int(tokens)
     return None
 
 
 def fmt_context(tokens):
     if tokens is None:
-        return "-"
+        return "?"
     flag = " ROTATE" if tokens > ROTATE_TOKENS else ""
     return f"{round(tokens / 1000)}k{flag}"
 

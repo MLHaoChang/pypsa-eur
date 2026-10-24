@@ -3,7 +3,7 @@
 
 # SCR / ESCR study under outages and for several nearby connections
 
-Status: ready-for-agent
+Status: done (PR #693)
 Type: task
 Blocked by: none (09 is the owner's priority, not a dependency)
 Gated: **yes** (gridspine)

@@ -21,7 +21,8 @@ REFUSALS = frozenset({"network_scope_required", "no_saved_project", "unknown_gri
 NOT_SCALAR = ("energization_peak:", "lole", "oscillation")
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
-CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound"}
+CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",
+           "rapid_voltage_change_infrequent": "a screening upper bound"}
 METRICS = {
     "checked_pass": {"formula_id": "grid-readiness-checked-pass/1", "unit": "rows",
                      "label": "Scorecard rows checked as pass"},
@@ -51,7 +52,7 @@ def _registered():
     from services.adequacy import grid_readiness as G
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
-            "reactive_range": G.RULE_REACTIVE}
+            "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE}
 
 
 def _named(row_id, prefixes):

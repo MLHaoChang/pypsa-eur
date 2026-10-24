@@ -3,7 +3,7 @@
 
 # CP-01 — truthful companion mode and conversation state
 
-Status: ready-for-human
+Status: done (#235, 3175f4f9)
 Type: task
 Implementation baseline: master `f2b15c5b2caae8fc1259396158355007a670f531`
 Branch: `claude/chat-companion-truthful-state`

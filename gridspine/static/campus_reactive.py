@@ -84,6 +84,8 @@ class ReactiveRequirement:
     q_limit_mvar: float
     clause: str
     source: str
+    #: The connection capacity the band was scaled by (None when not known).
+    p_ref_mw: float | None = None
 
 
 @dataclasses.dataclass
@@ -121,13 +123,14 @@ def requirement_from(profile: dict, p_ref_mw: float, pf: float | None = None) ->
         raise ContractError(f"the connection capacity must be positive, got {p_ref_mw}")
     if pf is None:
         q = profile["q_range_demand"]
-        return ReactiveRequirement(q["value"] * p_ref_mw, q["clause"], q["source"])
+        return ReactiveRequirement(q["value"] * p_ref_mw, q["clause"], q["source"], p_ref_mw)
     if not 0 < pf <= 1:
         raise ContractError(f"pf must be in (0, 1], got {pf}")
     return ReactiveRequirement(
         p_ref_mw * math.tan(math.acos(pf)),
         f"study connection agreement: power factor {pf:g} at the connection capacity",
         "assumed",
+        p_ref_mw,
     )
 
 

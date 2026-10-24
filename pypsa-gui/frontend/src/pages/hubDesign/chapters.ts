@@ -5,6 +5,7 @@
 // and says where its detail lives. Pure: the hooks are in ChaptersSection.
 import type { ResultStateKind } from '../../components/ResultState'
 import type { CampusState, GfmSettingsState } from '../../api/campusElectrical'
+import { NO_LIMIT_DETAIL } from '../../api/campusElectrical'
 import type { InvestmentCaseReportPayload, InvestmentCaseStudy, SimulationStatus } from '../../api/types'
 import { RESULT_GROUPS, type ResultsGroup, type ResultsTab } from '../results/groups'
 import { fmtCurrency } from '../../utils/format'
@@ -118,9 +119,15 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
     return { label, value: '', state: 'not_run', open,
       reason: 'The grid checks (voltage, loading, reactive power) have not run.' }
   }
-  const pass = rows.filter(r => r.status_with_measures === 'pass').length
+  // an unknown check (no limit set, or an input missing) is neither passed nor counted; the tile says how many
+  const judged = rows.filter(r => r.status_with_measures !== 'unknown')
+  const noLimit = rows.filter(r => r.status_with_measures === 'unknown' && r.detail === NO_LIMIT_DETAIL).length
+  const left = [noLimit && `${noLimit} without a limit`, rows.length - judged.length - noLimit
+    && `${rows.length - judged.length - noLimit} not checked`].filter(Boolean)
+  const pass = judged.filter(r => r.status_with_measures === 'pass').length
   return {
-    label, value: `${pass} of ${rows.length}`, unit: 'checks pass', open,
+    label, value: `${pass} of ${judged.length}`, open,
+    unit: ['checks pass', ...left].join(' · '),
     state: campus?.stale ? 'stale' : 'ready',
     basis: 'Grid checks, with the proposed measures',
     reason: campus?.stale ? 'The network changed since the checks ran.' : undefined,

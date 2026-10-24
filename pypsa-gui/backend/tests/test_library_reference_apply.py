@@ -63,13 +63,14 @@ def test_input_priced_electrolyser_overnight_is_written_unscaled(efficiency):
 
 def test_changing_efficiency_after_apply_does_not_move_the_cost():
     n = _net()
-    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    # 2020 EUR beside the pack's 2025 EUR (MONEY-YEAR-1): confirmed, as the user would
+    p = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030, confirm=["money_year"])
     A.require_confirmed(p)
     _apply(n, p)
     cost = n.links.at["electrolyser", "overnight_cost"]
     n.links.at["electrolyser", "efficiency"] = 0.7
     assert n.links.at["electrolyser", "overnight_cost"] == cost
-    again = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030)
+    again = A.plan(n, {}, "Link", "electrolyser", "electrolysis-aec-100mw", 2030, confirm=["money_year"])
     assert again["attrs"]["overnight_cost"] == cost
 
 
@@ -154,14 +155,14 @@ def test_grid_connection_is_flagged_only_when_the_project_prices_its_connection(
 
 def test_a_different_money_year_needs_confirmation_and_is_never_adjusted():
     n = _net()
-    price_from_pack(n, "generators", "pv", "solar-utility", version=load_defaults_pack().version)
-    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac"])
+    price_from_pack(n, "generators", "wind", "onwind", version=load_defaults_pack().version)
+    p = A.plan(n, {}, "Generator", "wind", "onwind", 2030)
     assert p["missing"] == ["money_year"]
     assert p["attrs"]["overnight_cost"] == R.load_europe_technology_reference(
-        "solar-utility", 2030).cost_part.overnight.value
-    assert p["currency_year"] == 2025
+        "onwind", 2030).cost_part.overnight.value
+    assert p["currency_year"] == 2020
     overnight = next(r for r in p["rows"] if r["field"] == "overnight_cost")
-    assert overnight["pack"]["currency_year"] == 2020 and overnight["reference"]["currency_year"] == 2025
+    assert overnight["pack"]["currency_year"] == 2025 and overnight["reference"]["currency_year"] == 2020
 
 
 # ── provenance per field, and the projection-year note ────────────────────
@@ -210,8 +211,9 @@ def test_wrong_class_unknown_asset_and_storage_are_refused():
 
 ROUTE = "/api/network/library_reference"
 PREVIEW = "/api/library_reference/preview"
+# The DEA electrolyser is 2020 EUR beside the pack's 2025 EUR (MONEY-YEAR-1): confirmed up front.
 AEC = {"component_class": "Link", "name": "electrolyser",
-       "technology": "electrolysis-aec-100mw", "projection_year": 2030}
+       "technology": "electrolysis-aec-100mw", "projection_year": 2030, "confirm": ["money_year"]}
 
 
 def test_preview_card_then_apply_writes_and_stamps(client, install_network):
@@ -238,14 +240,21 @@ def test_preview_without_a_needed_confirmation_returns_needs_and_no_card(client,
     install_network(_net())
     pv = {"component_class": "Generator", "name": "pv", "technology": "solar-utility", "projection_year": 2030}
     body = client.post(PREVIEW, json=pv).json()
-    # AC basis undeclared, and 2025 EUR beside the generic pack's 2020 EUR
-    assert body["card"] is None and body["missing"] == ["dc_ac", "money_year"]
-    assert "AC output" in body["needs"][0]["text"] and "not adjusted" in body["needs"][1]["text"]
+    # AC basis undeclared; 2025 EUR beside the generic pack's 2025 EUR needs no money year
+    assert body["card"] is None and body["missing"] == ["dc_ac"]
+    assert "AC output" in body["needs"][0]["text"]
     r = client.post(f"{ROUTE}/apply", json={**pv, "digest": "never-shown"})
     assert r.status_code == 422 and r.json()["detail"]["error_kind"] == "reference_confirmation_needed"
-    card = client.post(PREVIEW, json={**pv, "confirm": ["dc_ac", "money_year"]}).json()["card"]
+    wind = {"component_class": "Generator", "name": "wind", "technology": "onwind", "projection_year": 2030}
+    body = client.post(PREVIEW, json=wind).json()
+    # 2020 EUR beside the generic pack's 2025 EUR
+    assert body["card"] is None and body["missing"] == ["money_year"]
+    assert "2020 EUR price data, read as 2025 money: not adjusted" in body["needs"][0]["text"]
+    card = client.post(PREVIEW, json={**wind, "confirm": ["money_year"]}).json()["card"]
+    assert [row["field"] for row in card["rows"] if row.get("confirmed")] == ["money_year"]
+    card = client.post(PREVIEW, json={**pv, "confirm": ["dc_ac"]}).json()["card"]
     confirmed = [row for row in card["rows"] if row.get("confirmed")]
-    assert {row["field"] for row in confirmed} == {"dc_ac", "money_year"}
+    assert {row["field"] for row in confirmed} == {"dc_ac"}
     assert all(row["note"].startswith("Confirmed: ") and "unticked" not in row["note"] for row in confirmed)
     money = [row["note"] for row in card["rows"] if row["role"] == "note" and row["field"] == "overnight_cost"]
     assert len(money) == 1 and "annualises this cost over the 40-year lifetime" in money[0]
@@ -298,15 +307,21 @@ def test_onwind_2020_eur_on_a_case_with_base_year_2026_needs_money_year():
     A.require_confirmed(ok)
     _apply(n, ok)
     assert P.get(n, "Generator", "wind")["overnight_cost"]["currency_year"] == 2020
-    # without a case, the same 2020 EUR beside the pack's 2020 EUR needs nothing
-    assert "money_year" not in A.plan(_net(), {}, "Generator", "wind", "onwind", 2030)["missing"]
+    # without a case, it is compared with the pack default it replaces: 2025 EUR since 2026-10-25
+    # (MONEY-YEAR-1), so 2020 EUR needs the confirmation; 2025 EUR beside it needs none
+    p = A.plan(_net(), {}, "Generator", "wind", "onwind", 2030)
+    need = next(x for x in p["needs"] if x["confirmation"] == "money_year")
+    assert (need["reference_year"], need["read_as_year"]) == (2020, 2025)
+    assert need["read_as_source"] == "the default it replaces (2025 EUR)"
+    assert need["disclosure"] == "2020 EUR price data, read as 2025 money: not adjusted for inflation."
+    assert "money_year" not in A.plan(_net(), {}, "Generator", "pv", "solar-utility", 2030)["missing"]
 
 
 def test_money_years_in_use_lists_each_recorded_cost_year():
     n = _net()
     assert A.money_years_in_use(n) == {}
-    price_from_pack(n, "generators", "wind", "onwind", version=load_defaults_pack().version)
-    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac", "money_year"])
+    price_from_pack(n, "generators", "wind", "onwind", version="2026-10-24")   # labels onwind 2020
+    p = A.plan(n, {}, "Generator", "pv", "solar-utility", 2030, confirm=["dc_ac"])
     _apply(n, p)
     years = A.money_years_in_use(n)
     assert sorted(years) == [2020, 2025]

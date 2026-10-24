@@ -208,6 +208,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-23/manifest.json",
     # Refinery gap 2: the electrified heat technologies.
     "services/library/defaults_pack/versions/2026-10-24/manifest.json",
+    # MONEY-YEAR-1: the technology-data rows relabelled to 2025 money.
+    "services/library/defaults_pack/versions/2026-10-25/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",

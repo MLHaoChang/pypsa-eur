@@ -33,6 +33,11 @@ const SOURCE_TONE: Record<GridLimit['source'], 'ok' | 'warn' | 'accent'> = {
   code: 'accent', assumed: 'warn', extracted: 'warn',
 }
 
+/** A stored selection (`1-40,120-180`) as shown: en dashes, a space after each comma. */
+function pageRangesText(ranges: string): string {
+  return ranges.split(',').map(r => r.trim().replace('-', '–')).join(', ')
+}
+
 function megabytes(bytes: number): string {
   return bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
@@ -42,6 +47,9 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   const paths = (profile.voltage_bands ?? []).map((_, i) => `voltage_bands[${i}]`)
   paths.push('q_range_demand', 'rvc_limit_pct')
   if (profile.campus_voltage) paths.push('campus_voltage')
+  for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading'] as const) {
+    if (profile[key]) paths.push(key)
+  }
   return paths
 }
 
@@ -57,13 +65,23 @@ function limitLabel(path: string): string {
     q_range_demand: 'Reactive range at the PCC',
     rvc_limit_pct: 'Rapid voltage change',
     campus_voltage: 'Voltage inside the campus',
+    rvc_limit_infrequent_pct: 'Rapid voltage change, infrequent',
+    q_capability_pq: 'Reactive power band against active power at the PCC',
+    pf_min_lagging: 'Minimum power factor, lagging',
+    pf_min_leading: 'Minimum power factor, leading',
   }[path] ?? path
 }
 
 function limitValue(path: string, lim: GridLimit): string {
   if (path.startsWith('voltage_bands')) return `${lim.kv_min}–${lim.kv_max} kV: ${lim.v_min}–${lim.v_max} pu`
   if (path === 'q_range_demand') return `${lim.value} × P_ref`
-  if (path === 'rvc_limit_pct') return `${lim.value} %`
+  if (path === 'rvc_limit_pct' || path === 'rvc_limit_infrequent_pct') return `${lim.value} %`
+  if (path === 'pf_min_lagging' || path === 'pf_min_leading') return `${lim.value}`
+  if (path === 'q_capability_pq') {
+    const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
+    const pu = (v: number) => `${v}`.replace('-', '−')
+    return points.map(([p, lo, hi]) => `P ${pu(p)} pu: Q ${pu(lo)} to ${pu(hi)} pu`).join(' · ')
+  }
   return `${lim.v_min}–${lim.v_max} pu`
 }
 
@@ -84,8 +102,9 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
     refreshList()
   }
 
+  const [pageRanges, setPageRanges] = useState('')
   const upload = useMutation({
-    mutationFn: (file: File) => campusApi.uploadGridCodeDocument(name, file),
+    mutationFn: (file: File) => campusApi.uploadGridCodeDocument(name, file, pageRanges),
     onMutate: () => setError(null),
     onSuccess: () => refreshList(),
     onError: e => setError(errorText(e)),
@@ -128,7 +147,18 @@ export default function CampusGridCodeSection({ name, onProfilesChanged }: {
         {error && <p className="text-[12px] text-danger mb-2">{error}</p>}
 
         <div className="flex items-end gap-3 flex-wrap mb-3">
-          <Field label="Upload a PDF" hint="at most 20 MB and 100 pages">
+          <Field label="Pages (optional)" hint="all pages, or ranges such as 1-40, 120-180; set before choosing the file">
+            <input
+              aria-label="Pages (optional)"
+              className={`${INPUT} w-[150px] font-mono`}
+              value={pageRanges}
+              placeholder="all"
+              spellCheck={false}
+              disabled={upload.isPending}
+              onChange={e => setPageRanges(e.target.value)}
+            />
+          </Field>
+          <Field label="Upload a PDF" hint="at most 20 MB; at most 100 pages, or up to 100 selected pages of a longer PDF">
             <span className="inline-flex items-center gap-2">
               <Upload size={13} className="text-muted" />
               <input
@@ -261,7 +291,9 @@ function DocumentRow({ name, doc, available, onDraft, onDelete }: {
       <div className="flex items-center gap-2 flex-wrap">
         <FileText size={13} className="text-muted shrink-0" />
         <span className="font-medium">{doc.filename}</span>
-        <span className="text-muted">{doc.pages} pages · {megabytes(doc.size)}</span>
+        <span className="text-muted">
+          {doc.page_ranges ? `pages ${pageRangesText(doc.page_ranges)} of ${doc.pages}` : `${doc.pages} pages`} · {megabytes(doc.size)}
+        </span>
         <span className="flex-1" />
         <Field label="Profile id" row>
           <input

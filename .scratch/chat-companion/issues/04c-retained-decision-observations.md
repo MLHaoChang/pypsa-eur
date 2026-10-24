@@ -1,6 +1,6 @@
 # CP-04c — Retained decision observations
 
-Status: ready-for-agent
+Status: done (#319, f0d2aa44)
 Type: implementation
 Baseline: master `76835bb3fcf3a66a949a8cca66099a83f545b8ae` (#311)
 

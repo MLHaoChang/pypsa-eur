@@ -456,7 +456,11 @@ def test_the_real_milp_runs_as_a_job_on_the_mini_hub(hub):
     assert res["stop"] in ("converged", "stalled", "delta_floor", "max_iter")
     assert res["history"][0]["iteration"] == 0 and status["iteration"] == res["history"][-1]["iteration"]
     assert res["summary"]["milp_cost"] <= res["summary"]["c8_cost"] + 1e-6
-    assert set(r["status_with_measures"] for r in res["compliance_invested"]) <= {"pass", "not_rated"}
+    # the default profile sets no Q band and no power-factor limit: those rows are unknown, never pass
+    new = [r for r in res["compliance_invested"] if r["check"] in ("pcc_q_band", "pcc_power_factor")]
+    assert len(new) == 2 and {r["status_with_measures"] for r in new} == {"unknown"}
+    judged = [r for r in res["compliance_invested"] if r not in new]
+    assert set(r["status_with_measures"] for r in judged) <= {"pass", "not_rated"}
     print(f"\nreal MILP job on the mini hub: {elapsed:.1f} s, {status['iteration']} iteration(s), stop {res['stop']}")
 
 

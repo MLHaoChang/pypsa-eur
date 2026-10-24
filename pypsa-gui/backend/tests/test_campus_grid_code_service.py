@@ -237,6 +237,90 @@ def test_a_pdf_with_too_many_pages_is_refused(hub, monkeypatch):
     assert _status(exc) == 422 and "2 pages" in exc.value.detail
 
 
+def test_a_pdf_over_the_page_cap_without_a_selection_is_told_the_range_syntax(hub, monkeypatch):
+    monkeypatch.setattr(gc, "MAX_PDF_PAGES", 1)
+    with pytest.raises(HTTPException) as exc:
+        _upload(hub)
+    assert _status(exc) == 422 and gc.PAGE_RANGES_EXAMPLE in exc.value.detail and "page range" in exc.value.detail
+
+
+def test_a_pdf_over_the_page_cap_uploads_with_a_selection_of_pages_within_it(hub, monkeypatch):
+    monkeypatch.setattr(gc, "MAX_PDF_PAGES", 3)
+    data = make_pdf(pages=("one", "two", "three", "four"))
+    doc = gc.upload_document(hub, data, "long.pdf", "application/pdf", " 1 , 3-4 ")
+    assert doc["pages"] == 4 and doc["page_ranges"] == "1,3-4"
+    assert gc.parse_page_ranges(doc["page_ranges"], 4) == [1, 3, 4]
+
+
+def test_the_page_cap_applies_to_the_selected_pages(hub, monkeypatch):
+    monkeypatch.setattr(gc, "MAX_PDF_PAGES", 2)
+    data = make_pdf(pages=("one", "two", "three", "four"))
+    assert gc.upload_document(hub, data, "long.pdf", "application/pdf", "2-3")["page_ranges"] == "2-3"
+    with pytest.raises(HTTPException) as exc:
+        gc.upload_document(hub, data, "long.pdf", "application/pdf", "1-3")
+    assert _status(exc) == 422 and "3 pages" in exc.value.detail
+
+
+@pytest.mark.parametrize("text, pages", [
+    ("1-40,120-180", list(range(1, 41)) + list(range(120, 181))),
+    ("5", [5]),
+    ("3-4,1-3", [1, 2, 3, 4]),                                   # overlaps and order do not matter
+    ("292", [292]),
+])
+def test_page_ranges_select_each_page_once_in_order(text, pages):
+    assert gc.parse_page_ranges(text, 292) == pages
+
+
+@pytest.mark.parametrize("text, words", [
+    ("", "empty"), (" , ", "empty"), ("0-4", "not a page"), ("a-b", "not a page"), ("1-", "not a page"),
+    ("1--3", "not a page"), ("-3", "not a page"), ("1.5", "not a page"), ("9-3", "backwards"),
+    ("290-293", "last page (292)"), ("300", "last page (292)"),
+])
+def test_a_bad_page_selection_is_refused_naming_its_part(text, words):
+    with pytest.raises(HTTPException) as exc:
+        gc.parse_page_ranges(text, 292)
+    assert _status(exc) == 422 and words in exc.value.detail
+
+
+def test_a_selection_past_the_real_page_count_is_refused_at_upload(hub):
+    with pytest.raises(HTTPException) as exc:
+        gc.upload_document(hub, PDF, "tso.pdf", "application/pdf", "1-3")
+    assert _status(exc) == 422 and "last page (2)" in exc.value.detail
+
+
+def test_the_size_and_type_checks_still_come_first_with_a_selection(hub, monkeypatch):
+    with pytest.raises(HTTPException) as exc:
+        gc.upload_document(hub, b"not a pdf", "x.pdf", "application/pdf", "1")
+    assert _status(exc) == 415
+    monkeypatch.setattr(gc, "MAX_PDF_BYTES", len(PDF) - 1)
+    with pytest.raises(HTTPException) as exc:
+        gc.upload_document(hub, PDF, "x.pdf", "application/pdf", "1")
+    assert _status(exc) == 413
+
+
+def test_the_same_file_again_keeps_the_latest_selection(hub):
+    first = gc.upload_document(hub, PDF, "tso.pdf", "application/pdf", "2")
+    assert first["page_ranges"] == "2"
+    again = gc.upload_document(hub, PDF, "tso.pdf", "application/pdf")
+    assert "page_ranges" not in again and again["uploaded_at"] == first["uploaded_at"]
+    assert "page_ranges" not in gc.list_grid_codes(hub)["documents"][0]
+
+
+def test_the_extraction_reads_only_the_selected_pages_and_cites_the_files_own(hub, fake_api):
+    data = make_pdf(pages=("cover page", PAGE_1, "table of contents", PAGE_2))
+    doc = gc.upload_document(hub, data, "tso.pdf", "application/pdf", "2,4")
+    client = fake_api(response(tool_input()))                    # pages 1 and 2 of the two-page selection
+    draft = gc.extract(hub, doc["id"], "tso")
+    sent = base64.b64decode(client.calls[0]["messages"][0]["content"][0]["source"]["data"])
+    from pypdf import PdfReader
+    assert [p.extract_text().splitlines()[0] for p in PdfReader(BytesIO(sent)).pages] == \
+        [PAGE_1.splitlines()[0], PAGE_2.splitlines()[0]]
+    p = draft["profile"]
+    assert p["voltage_bands"][0]["page"] == 2 and p["q_range_demand"]["page"] == 4
+    assert draft["review"]["limits"]["voltage_bands[0]"] == {"quote_found": True, "found_on_page": 2}
+    assert draft["review"]["limits"]["q_range_demand"] == {"quote_found": True, "found_on_page": 4}
+
+
 def test_an_encrypted_pdf_is_refused(hub):
     with pytest.raises(HTTPException) as exc:
         _upload(hub, make_pdf(password="secret"))

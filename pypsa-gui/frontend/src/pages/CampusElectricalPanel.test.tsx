@@ -296,6 +296,83 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-pcc_voltage').textContent).toContain('not re-checked')
   })
 
+  it('shows a check whose limit the profile does not set as "no limit", never pass or fail', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_power_factor', status_as_is: 'unknown', status_with_measures: 'unknown', value: NaN, limit: NaN,
+      unit: '', worst_period: null, worst_hour: null, clause: '', source: 'assumed', detail: 'The grid code sets no limit for this.',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_power_factor')
+    expect(row.textContent).toContain('Minimum power factor at the PCC')
+    expect(row.textContent).toContain('no limit')
+    expect(row.textContent).not.toContain('unknown')
+    expect(row.textContent).toContain('The grid code sets no limit for this.')
+    expect(row.textContent).not.toMatch(/pass|fail/)
+    // it assumes nothing, so it carries no source tag
+    expect(row.textContent).not.toContain('assumed')
+  })
+
+  it('prints a Q band with a negative edge as "−a to b", never with an en dash', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_q_band', status_as_is: 'fail', status_with_measures: 'fail', value: 0.05, limit: 0.045,
+      limit_min: -0.045, limit_max: 0.045, unit: 'Mvar', worst_period: 2030, worst_hour: 1, clause: 'generic clause',
+      source: 'code', detail: 'worst at P 1.00 MW (0.500 pu); band \u22120.045 to 0.045 Mvar there',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    await screen.findByTestId('compliance-pcc_q_band')
+    expect(screen.getByTestId('compliance-limit-pcc_q_band').textContent?.trim()).toBe('\u22120.045 to 0.045 Mvar')
+  })
+
+  it('never prints a unitless row\'s missing unit as "null"', async () => {
+    const state = sized()
+    // a CSV round trip turns the power factor's empty unit into null
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_power_factor', status_as_is: 'pass', status_with_measures: 'pass', value: 0.97, limit: 0.95,
+      unit: null, worst_period: 2030, worst_hour: 1, clause: 'generic clause', source: 'code', detail: 'lagging',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_power_factor')
+    expect(row.textContent).not.toContain('null')
+    expect(screen.getByTestId('compliance-limit-pcc_power_factor').textContent?.trim()).toBe('0.950')
+  })
+
+  it('shows an unknown check that lacks an input as "not checked", not "no limit"', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_q_band', status_as_is: 'unknown', status_with_measures: 'unknown', value: NaN, limit: NaN,
+      unit: 'Mvar', worst_period: null, worst_hour: null, clause: 'generic clause', source: 'code',
+      detail: 'no PCC active power for the studied hours',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    const row = await screen.findByTestId('compliance-pcc_q_band')
+    expect(row.textContent).toContain('not checked')
+    expect(row.textContent).toContain('no PCC active power')
+    expect(row.textContent).not.toContain('no limit')
+  })
+
+  it('names what needs an RMS study under the compliance table, and says nothing when nothing does', async () => {
+    const state = sized()
+    state.results!.reported_requirements = [
+      { id: 'frt', requirement: 'Fault ride-through', value: 'generic', status: 'reported', detail: '', clause: '', source: 'code' },
+      { id: 'fsm', requirement: 'Frequency sensitive mode', value: 'generic', status: 'reported', detail: '', clause: '', source: 'code' },
+    ] as never
+    api.state.mockResolvedValue(state)
+    const { unmount } = renderPanel()
+    expect((await screen.findByTestId('compliance-rms')).textContent)
+      .toBe('Needs an RMS study (not checked here): Fault ride-through · Frequency sensitive mode')
+    unmount()
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    await screen.findByTestId('compliance-pcc_reactive')
+    expect(screen.queryByTestId('compliance-rms')).toBeNull()
+  })
+
   it('labels a transformer group the investment buys as planned, not as a bare verdict', async () => {
     // A drafted rating can pass while the investment still buys the group
     // (a placeholder 1 x 100 MVA beside 3 x 25 MVA bought for N-1): the verdict

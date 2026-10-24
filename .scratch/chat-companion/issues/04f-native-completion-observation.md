@@ -1,6 +1,6 @@
 # CP-04f — Bounded native completion observation
 
-Status: ready-for-agent
+Status: done (#351, 31998501)
 Type: implementation
 Baseline: master `4eb4b5ef619b7cef549de95b5bea66f17df44d62`, includes #333.
 

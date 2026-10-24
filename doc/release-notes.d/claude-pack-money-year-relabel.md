@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Defaults pack version 2026-10-25 relabels the 12 cost rows taken from technology-data v0.14.0's `costs_2030.csv` (battery, solar, gensets, onshore wind, fuel cell, electrolysis, Haber-Bosch, NH3 and H2 tanks) from 2020 to 2025 money, the year the source builds them in. The values are unchanged, and rows transcribed from DEA workbooks keep their sheet's year.
