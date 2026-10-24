@@ -1,0 +1,1153 @@
+{
+  "recorded_at": "2026-10-24T18:18:39.082295+02:00",
+  "prs": [
+    {
+      "baseRefName": "master",
+      "headRefName": "outsource/profile-tuning-backend",
+      "headRefOid": "101e8745ca44eb45b20a8ebb1a1a076cf5edb2b8",
+      "isDraft": false,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 694,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:47Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891191/job/120803871504",
+          "name": "Run validation",
+          "startedAt": "2026-10-24T06:36:47Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:59Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891189/job/120803869923",
+          "name": "inventory",
+          "startedAt": "2026-10-24T06:36:48Z",
+          "status": "COMPLETED",
+          "workflowName": "Assistant capability inventory"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:57Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891256/job/120803870169",
+          "name": "control-matrix",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Assistant control matrix"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:38:14Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891456/job/120803871182",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:37:02Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891300/job/120803870620",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:38:00Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803871021",
+          "name": "Unit",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:47Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891191/job/120803872066",
+          "name": "Create report",
+          "startedAt": "2026-10-24T06:36:47Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:58Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803870988",
+          "name": "Gridspine",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:37:00Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803870836",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:57Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803871072",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:38:28Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803870968",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:37:02Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803871015",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-24T06:36:49Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:32:12Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914051",
+          "name": "GUI backend shard 1/4",
+          "startedAt": "2026-10-24T06:37:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:11:52Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914005",
+          "name": "GUI backend shard 2/4",
+          "startedAt": "2026-10-24T06:37:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:30:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914033",
+          "name": "GUI backend shard 3/4",
+          "startedAt": "2026-10-24T06:37:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:40:31Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914012",
+          "name": "GUI backend shard 4/4",
+          "startedAt": "2026-10-24T06:37:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:49:16Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914019",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-24T06:37:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:40:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120816548433",
+          "name": "GUI backend",
+          "startedAt": "2026-10-24T07:40:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:38:08Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120804122034",
+          "name": "CodeQL",
+          "startedAt": "2026-10-24T06:38:05Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "feat(profiles): add backend tuning and read-only comparisons",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/694",
+      "review_first_lines": [
+        {
+          "line": "GK NOT OK @0c87dbbfbe33c39f4d5b94e3d5daeea128e25b8e: one fix in `_weather_answer`'s new `window`. Everything else checks out.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/694#issuecomment-6370862499"
+        },
+        {
+          "line": "GK OK @2afe4c2693bfb15638d9e34bf7317d444361fad6: delta re-review of 0c87dbbf..2afe4c26.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/694#issuecomment-6372441588"
+        }
+      ]
+    },
+    {
+      "baseRefName": "master",
+      "headRefName": "outsource/carrier-kpis-hydrogen",
+      "headRefOid": "9418177a1f4e93c11948e6117e8731b9d05755c8",
+      "isDraft": false,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 699,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:05Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134807/job/120594400308",
+          "name": "Run validation",
+          "startedAt": "2026-10-23T18:47:05Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:48:54Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134860/job/120594395968",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-23T18:47:21Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134726/job/120594395454",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-23T18:47:19Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:48:23Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395349",
+          "name": "Unit",
+          "startedAt": "2026-10-23T18:47:07Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:05Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134807/job/120594400798",
+          "name": "Create report",
+          "startedAt": "2026-10-23T18:47:05Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:17Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395166",
+          "name": "Gridspine",
+          "startedAt": "2026-10-23T18:47:06Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:16Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395407",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-23T18:47:06Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:19Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395487",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-23T18:47:07Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:48:32Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395714",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-23T18:47:18Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:47:24Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594395338",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-23T18:47:07Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T19:46:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594490541",
+          "name": "GUI backend shard 1/4",
+          "startedAt": "2026-10-23T18:47:24Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T19:45:34Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594490553",
+          "name": "GUI backend shard 2/4",
+          "startedAt": "2026-10-23T18:47:25Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T20:06:32Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594490540",
+          "name": "GUI backend shard 3/4",
+          "startedAt": "2026-10-23T18:47:22Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T19:34:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594490766",
+          "name": "GUI backend shard 4/4",
+          "startedAt": "2026-10-23T18:47:35Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T19:03:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120594490591",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-23T18:48:25Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T20:06:38Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40006134710/job/120630289385",
+          "name": "GUI backend",
+          "startedAt": "2026-10-23T20:06:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-23T18:48:45Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120595162155",
+          "name": "CodeQL",
+          "startedAt": "2026-10-23T18:48:43Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "fix(results): exclude hydrogen from renewable curtailment KPIs",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/699",
+      "review_first_lines": [
+        {
+          "line": "GK OK @9418177a1f4e93c11948e6117e8731b9d05755c8: reviewed against the brief `.scratch/timeseries-generators/outsource/H-carrier-kpis-hydrogen.md` and the G1\u2013G4 rulings.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/699#issuecomment-6373211829"
+        }
+      ]
+    },
+    {
+      "baseRefName": "master",
+      "headRefName": "outsource/navigation-reach",
+      "headRefOid": "1d5cc8d0ae88547b0e97514fdf998c73479033fc",
+      "isDraft": true,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 700,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:31Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249760/job/120784029310",
+          "name": "Run validation",
+          "startedAt": "2026-10-24T04:55:32Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:44Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249746/job/120784028309",
+          "name": "inventory",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Assistant capability inventory"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249955/job/120784029288",
+          "name": "control-matrix",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Assistant control matrix"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:56:46Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249749/job/120784029060",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:44Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249742/job/120784028572",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:56:51Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028623",
+          "name": "Unit",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:31Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249760/job/120784029847",
+          "name": "Create report",
+          "startedAt": "2026-10-24T04:55:32Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028597",
+          "name": "Gridspine",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028611",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:02:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028678",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:58:11Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028609",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-24T04:55:33Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:55:51Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784028457",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-24T04:55:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:28:58Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784063061",
+          "name": "GUI backend shard 1/4",
+          "startedAt": "2026-10-24T04:55:44Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:31:49Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784063029",
+          "name": "GUI backend shard 2/4",
+          "startedAt": "2026-10-24T04:55:43Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:47:34Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784063016",
+          "name": "GUI backend shard 3/4",
+          "startedAt": "2026-10-24T04:55:43Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:27:44Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784063011",
+          "name": "GUI backend shard 4/4",
+          "startedAt": "2026-10-24T04:55:43Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:08:09Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120784062999",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-24T04:55:44Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:27:49Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40064249745/job/120802080608",
+          "name": "GUI backend",
+          "startedAt": "2026-10-24T06:27:46Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T04:56:40Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120784237345",
+          "name": "CodeQL",
+          "startedAt": "2026-10-24T04:56:37Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "fix(chat): reach canvas snapshots, Properties editors and all canvas views",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/700",
+      "review_first_lines": [
+        {
+          "line": "UX OK @7064038731bb475ef675304c8fde3451c1ec1cdb: navigation reach (LC-14) matches the plan answers G2 a, G3 a and G6 a, and meets the return condition I set.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/700#issuecomment-6373230353"
+        },
+        {
+          "line": "GK NOT OK @7064038731bb475ef675304c8fde3451c1ec1cdb: one regression to fix. Everything else checks out.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/700#issuecomment-6373537158"
+        }
+      ]
+    },
+    {
+      "baseRefName": "master",
+      "headRefName": "outsource/report-template-ledger",
+      "headRefOid": "d7dea035757ea8ba14c2861a0eb4f4f920a95f75",
+      "isDraft": true,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 704,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:04Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737201/job/120794418085",
+          "name": "Run validation",
+          "startedAt": "2026-10-24T05:49:04Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:50:29Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737162/job/120794417011",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-24T05:49:06Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737152/job/120794417095",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-24T05:49:06Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:50:55Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474141",
+          "name": "Unit",
+          "startedAt": "2026-10-24T05:49:23Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:04Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737201/job/120794449959",
+          "name": "Create report",
+          "startedAt": "2026-10-24T05:49:14Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:42Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474123",
+          "name": "Gridspine",
+          "startedAt": "2026-10-24T05:49:24Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:33Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474068",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-24T05:49:24Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:35Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474173",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-24T05:49:24Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:51:32Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474121",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-24T05:49:23Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:49:40Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794474151",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-24T05:49:24Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:36:00Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794509048",
+          "name": "GUI backend shard 1/4",
+          "startedAt": "2026-10-24T05:49:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:15:39Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794509088",
+          "name": "GUI backend shard 2/4",
+          "startedAt": "2026-10-24T05:49:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:45:51Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794509109",
+          "name": "GUI backend shard 3/4",
+          "startedAt": "2026-10-24T05:49:35Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:22:45Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794509055",
+          "name": "GUI backend shard 4/4",
+          "startedAt": "2026-10-24T05:49:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:59:22Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120794509037",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-24T05:49:34Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T07:15:44Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067737187/job/120811594330",
+          "name": "GUI backend",
+          "startedAt": "2026-10-24T07:15:41Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:50:22Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120794655400",
+          "name": "CodeQL",
+          "startedAt": "2026-10-24T05:50:19Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "Add a template-assumptions appendix to project reports",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/704",
+      "review_first_lines": [
+        {
+          "line": "GK plan OK @a1c9e5b41a19ac90d2ae367c381e786161ea8dd2: pipeline 1 as planned; pipeline 2 gets the scope note and no code.",
+          "url": "https://github.com/MLHaoChang/pypsa-eur/pull/704#issuecomment-6373836041"
+        }
+      ]
+    },
+    {
+      "baseRefName": "master",
+      "headRefName": "outsource/ui-wording-polish",
+      "headRefOid": "6afc428d84320ff0d034d84e63e6c6eae5972e5a",
+      "isDraft": false,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 706,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:41:55Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266453/job/120793027687",
+          "name": "Run validation",
+          "startedAt": "2026-10-24T05:41:55Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:43:27Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266451/job/120793026899",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:42:07Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266419/job/120793026864",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:43:18Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027141",
+          "name": "Unit",
+          "startedAt": "2026-10-24T05:41:57Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:41:55Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266453/job/120793050407",
+          "name": "Create report",
+          "startedAt": "2026-10-24T05:42:02Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:42:07Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027037",
+          "name": "Gridspine",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:42:08Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027238",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-24T05:41:57Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:50:49Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027158",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:44:16Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027159",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:42:12Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793027245",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-24T05:41:56Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:31:07Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793074319",
+          "name": "GUI backend shard 1/4",
+          "startedAt": "2026-10-24T05:42:10Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:26:56Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793074376",
+          "name": "GUI backend shard 2/4",
+          "startedAt": "2026-10-24T05:42:10Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:35:04Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793074340",
+          "name": "GUI backend shard 3/4",
+          "startedAt": "2026-10-24T05:42:11Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:34:15Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793074328",
+          "name": "GUI backend shard 4/4",
+          "startedAt": "2026-10-24T05:42:10Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:54:53Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120793074296",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-24T05:42:10Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T06:35:10Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40067266435/job/120803526639",
+          "name": "GUI backend",
+          "startedAt": "2026-10-24T06:35:06Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T05:43:21Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120793297749",
+          "name": "CodeQL",
+          "startedAt": "2026-10-24T05:43:18Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "Fix nine frontend wording and grid-result label inconsistencies",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/706",
+      "review_first_lines": []
+    },
+    {
+      "baseRefName": "master",
+      "headRefName": "claude/site-scene-generation-spec",
+      "headRefOid": "e508bcd5506f9d89f79d728fd773ecec6bb27027",
+      "isDraft": true,
+      "mergeCommit": null,
+      "mergedAt": null,
+      "number": 711,
+      "state": "OPEN",
+      "statusCheckRollup": [
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:27Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318754/job/120870305028",
+          "name": "Run validation",
+          "startedAt": "2026-10-24T12:17:28Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:19:03Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318856/job/120870303788",
+          "name": "Analyze (python)",
+          "startedAt": "2026-10-24T12:17:30Z",
+          "status": "COMPLETED",
+          "workflowName": "CodeQL"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:47Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318766/job/120870304021",
+          "name": "Release notes guard",
+          "startedAt": "2026-10-24T12:17:30Z",
+          "status": "COMPLETED",
+          "workflowName": "Release notes guard"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:19:06Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303515",
+          "name": "Unit",
+          "startedAt": "2026-10-24T12:17:29Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:27Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318754/job/120870330139",
+          "name": "Create report",
+          "startedAt": "2026-10-24T12:17:35Z",
+          "status": "COMPLETED",
+          "workflowName": "Validator Bot"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:40Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303632",
+          "name": "Gridspine",
+          "startedAt": "2026-10-24T12:17:29Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:38Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303655",
+          "name": "GUI backend changes",
+          "startedAt": "2026-10-24T12:17:29Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:41Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303603",
+          "name": "GUI frontend",
+          "startedAt": "2026-10-24T12:17:29Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:19:41Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303716",
+          "name": "Integration (ubuntu)",
+          "startedAt": "2026-10-24T12:17:29Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:46Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870303642",
+          "name": "Integration (macos)",
+          "startedAt": "2026-10-24T12:17:30Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:38Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870341816",
+          "name": "GUI backend shard ${{ matrix.shard }}/4",
+          "startedAt": "2026-10-24T12:17:39Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:38Z",
+          "conclusion": "SKIPPED",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870342128",
+          "name": "GUI backend pilot gate and QA drivers",
+          "startedAt": "2026-10-24T12:17:39Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:17:44Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40093318744/job/120870341161",
+          "name": "GUI backend",
+          "startedAt": "2026-10-24T12:17:41Z",
+          "status": "COMPLETED",
+          "workflowName": "Test"
+        },
+        {
+          "__typename": "CheckRun",
+          "completedAt": "2026-10-24T12:18:56Z",
+          "conclusion": "SUCCESS",
+          "detailsUrl": "https://github.com/MLHaoChang/pypsa-eur/runs/120870591106",
+          "name": "CodeQL",
+          "startedAt": "2026-10-24T12:18:53Z",
+          "status": "COMPLETED",
+          "workflowName": ""
+        }
+      ],
+      "title": "Docs(GridSpine): specify editable campuses and Blender exchange",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/pull/711",
+      "review_first_lines": []
+    }
+  ]
+}

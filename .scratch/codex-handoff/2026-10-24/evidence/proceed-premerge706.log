@@ -1,0 +1,27 @@
+PR #706
+head:       6afc428d84320ff0d034d84e63e6c6eae5972e5a
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: aba252d2384f55116bbd15516a5b025951ba265e
+behind:     0 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+not needed (no route, chat-tool, project-ACL or MCP-server change)
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+UX: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+
+== checks
+17 check run(s) on 6afc428d84320ff0d034d84e63e6c6eae5972e5a
+all success or skipped
+
+RESULT: ok to merge 6afc428d84320ff0d034d84e63e6c6eae5972e5a

@@ -1,0 +1,32 @@
+PR #704
+head:       d7dea035757ea8ba14c2861a0eb4f4f920a95f75
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: c9508d4c40fefab39ece792326eb2f8f4b96a9e8
+behind:     5 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+trial merge d87265e4c0572e5eb6f92bba318207e502594acf, python /workspace/pypsa-eur/.pixi/envs/test/bin/python
+........s............................................................... [ 25%]
+........................................................................ [ 51%]
+........................................................................ [ 77%]
+................................................................         [100%]
+semantic tests: pass
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+UX: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+
+== checks
+17 check run(s) on d7dea035757ea8ba14c2861a0eb4f4f920a95f75
+all success or skipped
+
+RESULT: ok to merge d7dea035757ea8ba14c2861a0eb4f4f920a95f75

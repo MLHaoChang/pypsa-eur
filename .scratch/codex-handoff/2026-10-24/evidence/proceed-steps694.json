@@ -1,0 +1,89 @@
+{
+  "pr": 694,
+  "run": "40070891343",
+  "jobs": [
+    {
+      "job": "GUI backend changes",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803870836",
+      "steps": []
+    },
+    {
+      "job": "GUI backend shard 2/4",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914005",
+      "steps": [
+        {
+          "name": "Run backend tests",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job": "GUI backend shard 4/4",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914012",
+      "steps": [
+        {
+          "name": "Run backend tests",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job": "GUI backend pilot gate and QA drivers",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914019",
+      "steps": [
+        {
+          "name": "Run checked pilot evaluation gate",
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "Run backend QA drivers",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job": "GUI backend shard 3/4",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914033",
+      "steps": [
+        {
+          "name": "Run backend tests",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job": "GUI backend shard 1/4",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120803914051",
+      "steps": [
+        {
+          "name": "Run backend tests",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "job": "GUI backend",
+      "conclusion": "success",
+      "url": "https://github.com/MLHaoChang/pypsa-eur/actions/runs/40070891343/job/120816548433",
+      "steps": [
+        {
+          "name": "Require every shard and the QA job",
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ]
+}

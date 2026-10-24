@@ -1,0 +1,27 @@
+PR #699
+head:       9418177a1f4e93c11948e6117e8731b9d05755c8
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: b3d071e3536b02ba8a69ace6e67b580514bd2166
+behind:     12 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+not needed (no route, chat-tool, project-ACL or MCP-server change)
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK OK @9418177a1f4e93c11948e6117e8731b9d05755c8: current
+UX: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+
+== checks
+17 check run(s) on 9418177a1f4e93c11948e6117e8731b9d05755c8
+all success or skipped
+
+RESULT: ok to merge 9418177a1f4e93c11948e6117e8731b9d05755c8

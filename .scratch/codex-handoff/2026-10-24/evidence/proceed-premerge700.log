@@ -1,0 +1,36 @@
+PR #700
+head:       1d5cc8d0ae88547b0e97514fdf998c73479033fc
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: abefdbd497d1086c9726fc4e08a30f328cf09af9
+behind:     6 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+trial merge 7834b90692fcfd0597ac40bf8a64692554a30415, python /workspace/pypsa-eur/.pixi/envs/test/bin/python
+........s............................................................... [ 25%]
+........................................................................ [ 51%]
+........................................................................ [ 77%]
+................................................................         [100%]
+semantic tests: pass
+
+== assistant inventory (harness/catalogue changed)
+Inventory and GUI navigation schemas match: 287 tools, 21 result tabs, 23 panels. Behavioral/GUI parameter coverage still pending.
+inventory: pass
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK NOT OK @7064038731bb475ef675304c8fde3451c1ec1cdb is newer than the last GK OK: blocks
+UX OK @7064038731bb475ef675304c8fde3451c1ec1cdb: stale: changed since: .scratch/live-voice/capability-inventory.json pypsa-gui/backend/harness/catalogue.py
+
+== checks
+19 check run(s) on 1d5cc8d0ae88547b0e97514fdf998c73479033fc
+all success or skipped
+
+RESULT: blocked (GK NOT OK)

@@ -1,0 +1,36 @@
+PR #694
+head:       101e8745ca44eb45b20a8ebb1a1a076cf5edb2b8
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: aba252d2384f55116bbd15516a5b025951ba265e
+behind:     0 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+trial merge d944a2c39983ccc17af18ee9f26d80432c5ad8b6, python /workspace/pypsa-eur/.pixi/envs/test/bin/python
+........s............................................................... [ 25%]
+........................................................................ [ 51%]
+........................................................................ [ 77%]
+................................................................         [100%]
+semantic tests: pass
+
+== assistant inventory (harness/catalogue changed)
+Inventory and GUI navigation schemas match: 288 tools, 21 result tabs, 23 panels. Behavioral/GUI parameter coverage still pending.
+inventory: pass
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK OK @2afe4c2693bfb15638d9e34bf7317d444361fad6: stale: changed since: .scratch/campus-ic-extra-owner-assets/issues/02-investment-tab-shows-campus-equipment.md .scratch/campus-ic-extra-owner-assets/issues/03-defaults-pack-with-cited-campus-costs.md .scratch/campus-ic-extra-owner-assets/issues/04-campus-replacements.md .scratch/campus-ic-extra-owner-assets/issues/05-campus-unresolved-needs.md .scratch/chat-companion/issues/01-truthful-state.md .scratch/chat-companion/issues/02-canonical-outcomes.md .scratch/chat-companion/issues/03-source-navigation.md .scratch/chat-companion/issues/04-activity-needs-you.md .scratch/chat-companion/issues/04b-retained-job-observations.md .scratch/chat-companion/issues/04c-retained-decision-observations.md .scratch/chat-companion/issues/04f-native-completion-observation.md .scratch/chat-companion/issues/05a-uncertain-case-reconciliation.md .scratch/coordination/outsource/M-coord-script-fixes.md .scratch/coordination/outsource/N-stale-status-lines.md .scratch/datacenter-grid-readiness/issues/09-sixty-hz-throughout.md
+UX: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+
+== checks
+19 check run(s) on 101e8745ca44eb45b20a8ebb1a1a076cf5edb2b8
+all success or skipped
+
+RESULT: ok to merge 101e8745ca44eb45b20a8ebb1a1a076cf5edb2b8

@@ -1,0 +1,35 @@
+{
+  "full_L_counts": {
+    "tests": 20297,
+    "failures": 2,
+    "errors": 0,
+    "skipped": 369,
+    "passed": 19926
+  },
+  "identical_relevant_source_blobs": {
+    "pypsa-gui/backend/tests/test_bulk_update.py": {
+      "origin/master": "1956a2a1893bfe9d5888518fea89f29ce8d54dce",
+      "d7dea035757ea8ba14c2861a0eb4f4f920a95f75": "1956a2a1893bfe9d5888518fea89f29ce8d54dce"
+    },
+    "pypsa-gui/backend/tests/conftest.py": {
+      "origin/master": "29b47fa64dcb4142a54b30d1bd3f05deeb53c3cf",
+      "d7dea035757ea8ba14c2861a0eb4f4f920a95f75": "29b47fa64dcb4142a54b30d1bd3f05deeb53c3cf"
+    },
+    "pypsa-gui/backend/services/change_log_service.py": {
+      "origin/master": "defae2efc11acb34d8205fa26543a29caeeb4d6d",
+      "d7dea035757ea8ba14c2861a0eb4f4f920a95f75": "defae2efc11acb34d8205fa26543a29caeeb4d6d"
+    },
+    "pypsa-gui/backend/routers/changelog.py": {
+      "origin/master": "08adef2a08142aa4cbadd1f38e95a0d506fb169a",
+      "d7dea035757ea8ba14c2861a0eb4f4f920a95f75": "08adef2a08142aa4cbadd1f38e95a0d506fb169a"
+    },
+    "pypsa-gui/backend/routers/network.py": {
+      "origin/master": "0d91d812186491a4452f27bd39061356157e58bb",
+      "d7dea035757ea8ba14c2861a0eb4f4f920a95f75": "0d91d812186491a4452f27bd39061356157e58bb"
+    }
+  },
+  "master_visible_cap_probe": "master-changelog-visible-cap-closeout: 2 expected unchanged assertion failures after proving500caller-visible entries",
+  "L_normal_file": "l-changelog-focused-network-closeout:40passed",
+  "master_normal_file": "master-changelog-focused-network-closeout:40passed",
+  "limits": "Controlled cap reproduction is not a full master suite pass. Original local L full run is not green. No assertion/source changed. Initial no-network probes were terminated incomplete; first cap probe used a UUID org_id and did not establish caller-visible saturation, so is excluded."
+}
