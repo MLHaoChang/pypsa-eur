@@ -189,3 +189,18 @@ def test_report_jobs_keep_the_template_appendix_when_reportable_worksheet_eviden
     evidence, _figures = _evidence_for(project)
     assert evidence.tables["template_ledger"].rows[0][:4] == ["reference", "12", "", "assumed"]
     assert evidence.sections[E.WORKSHEET_SECTION].status == "ok"
+
+
+def test_growth_without_any_ledger_discloses_each_missing_assumption_without_a_fabricated_value():
+    evidence = _collect(template_ledger={"growth_inputs": [
+        {"kind": "dc_load", "year": 2042, "set": False, "example_value": 999},
+    ]})
+    disclosures = " ".join(evidence.required_disclosures)
+    assert "dc_load 2042" in disclosures
+    assert "no template ledger for this project" in disclosures
+    assert evidence.sections["template_ledger"].status == "not_established"
+    assert "template_ledger" not in evidence.tables
+    section = next(s for s in _document(evidence).sections if s.section_id == "template_ledger")
+    text = " ".join(b.text for b in section.blocks)
+    assert "dc_load 2042" in text and "no template ledger for this project" in text
+    assert "999" not in text

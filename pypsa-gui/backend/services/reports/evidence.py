@@ -736,7 +736,9 @@ def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template
                                          source=source) \
             if payload is None else EvidenceSection(
                 section_id=C.TEMPLATE_LEDGER, title=SECTION_TITLES[C.TEMPLATE_LEDGER],
-                kind="template_ledger", status="ok", source=source, engine="template_metadata", payload=payload)
+                kind="template_ledger", status="not_established" if payload.get("missing_ledger") else "ok",
+                source=source, engine="template_metadata", payload=payload,
+                note=" ".join(C.template_ledger_disclosures(payload)) if payload.get("missing_ledger") else None)
     return out
 
 
@@ -772,7 +774,7 @@ def _chapter_disclosures(sections: dict[str, EvidenceSection]) -> list[str]:
     if gr is not None and gr.status == "ok" and gr.payload:
         out += C.grid_readiness_disclosures(gr.payload)
     ledger = sections.get(C.TEMPLATE_LEDGER)
-    if ledger is not None and ledger.status == "ok" and ledger.payload:
+    if ledger is not None and ledger.payload:
         out += C.template_ledger_disclosures(ledger.payload)
     return out
 

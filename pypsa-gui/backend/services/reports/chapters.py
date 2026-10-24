@@ -343,10 +343,11 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
 
 def template_ledger_payload(meta: dict | None) -> dict | None:
     """Read assumptions as stored; disclose damaged or inconsistent metadata."""
-    if not isinstance(meta, dict) or "ledger" not in meta:
+    if not isinstance(meta, dict) or ("ledger" not in meta and "growth_inputs" not in meta):
         return None
-    raw = meta["ledger"]
-    notices: list[str] = []
+    missing_ledger = "ledger" not in meta
+    raw = meta.get("ledger", [])
+    notices: list[str] = [NO_TEMPLATE_LEDGER] if missing_ledger else []
     if not isinstance(raw, list):
         raw = []
         notices.append("Template ledger integrity: invalid ledger list.")
@@ -385,7 +386,10 @@ def template_ledger_payload(meta: dict | None) -> dict | None:
             notices.append(f"Template ledger integrity: {row['item']} has no matching unresolved growth record; "
                            "the stored assumption is retained.")
     rows.sort(key=lambda row: row["item"] not in unresolved)
-    return {"rows": rows, "integrity": notices}
+    payload = {"rows": rows, "integrity": notices}
+    if missing_ledger:
+        payload["missing_ledger"] = True
+    return payload
 
 
 def template_ledger_table(payload: dict, source_path: str):
