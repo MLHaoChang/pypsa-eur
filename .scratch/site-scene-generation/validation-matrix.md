@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # Test and validation matrix
 
 Status: proposed acceptance cases — none of the new cases is implemented or passed
@@ -57,6 +60,13 @@ Use the existing Site/model/results interfaces where possible. Exact new operati
 | V50 | Route/harness parity | Every new method/path has a chat disposition; no phantom chat tool, unsupported autonomous geometry write or weakened approval path. |
 | V51 | Existing regression | Existing Site/layout/length/context/bundle/thumbnail/report and unrelated native model/results behavior remains unchanged. |
 | V52 | Native fallback | Offline/missing remote footprint or Blender/photo worker still permits manual/native generation with source/availability disclosure. |
+| V53 | SC-01 geometry first | Empty network with zero buses/branches/loads generates from coordinates/boundary; Site has buses=[]; native model and solve readiness remain unchanged. |
+| V54 | SC-01 authority races | Gizmo/debounce/legacy unload PUT races with adoption/Apply; one revision wins, stale writer gets conflict, local fallback cannot overwrite current generation. |
+| V55 | SC-01/06 private media | Marked original bytes/hash, EXIF/path and live source handles are excluded from scenario/Save-As/default bundles; same-project restore reauthorizes or shows unavailable; revocation/delete/expiry cleanup is checked. |
+| V56 | SC-01/05 flow authority | Server /flow alone determines native/layout/Blender/photo action states; UI agrees and cannot enable absent worker; submit/Apply reject a late lost capability; electrical run_ready unchanged. |
+| V57 | SC-03 exact null contract | Missing process series/factor/unsupported group total serializes value=null, available=false and reason; resolved zero serializes value=0, available=true; UI never substitutes 0.00. |
+| V58 | Independent milestone/feature gates | Native milestone and layout workflow complete with Blender/CUDA absent; optional actions remain explicitly unavailable without blocking native use. |
+| V59 | SC-01 atomic generation | Crash before pointer commit preserves old state; crash after commit reads the receipt; concurrent snapshot/export contains one complete generation and no mixed bindings/envelopes. |
 
 ## Domain acceptance fixtures
 

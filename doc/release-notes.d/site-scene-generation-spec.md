@@ -1,0 +1,1 @@
+* Docs(pypsa-gui): Add the staged implementation specification and validation plan for editable 3D campuses, building/process associations and optional Blender/photo-based scene workflows. This adds planning documents only; no runtime capability is enabled.

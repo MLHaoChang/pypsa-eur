@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # Editable campuses, processes and 3D exchange
 
 Status: needs-triage — concrete design proposal; no new capability implemented or independently approved
@@ -9,6 +12,8 @@ Baseline: master `aba252d2384f55116bbd15516a5b025951ba265e`, fetched 2026-10-24
 The user wants to start with a real location or an uploaded layout, generate a visually appealing approximate campus, associate buildings and areas with multi-energy loads and industrial processes, place equipment, and play native simulation results through the scene. They also want an integrated Blender option, external refinement, and exploration of reconstruction from site photographs.
 
 The ordinary workflow remains in GridSpine's existing Site plan view. It works without Blender. Blender can run behind a bounded generation/export job, or receive an exported scene for advanced editing. Photo reconstruction is a separate optional worker, because Blender alone does not infer a metrically reliable site from photographs.
+
+Geometry-first generation explicitly replaces the current electrical-model-first prerequisite for this new path. A confirmed coordinate/boundary and an authorized saved Project suffice: its network may contain zero buses, branches, Loads and process units. The new Site may have `buses: []`. No dummy Bus or branch is created. The old model-driven generation path remains available, but its `siteReadiness` checklist cannot gate the new geometry-only action. SC-01 must update SiteEmptyState, readiness and rendering to support this case, using the server verdict below.
 
 This request expands the earlier presentation-only scope. Project scene geometry and imported reference models are proposed here; the repo-owned equipment library is still the default. Earlier exclusion of per-project library overrides does not imply permission to overwrite that global catalogue. Photos and meshes never supply electrical ratings, process efficiencies, capacities or numerical results automatically.
 
@@ -41,7 +46,11 @@ Keep Site and campus study distinct. A Site owns geometry; the campus study rema
 
 ### Scene and feature records
 
-Preserve `sites.json` version 1 and existing placement behavior. Propose an additive, revisioned `sites/<site_id>/scene.json`, plus owned content-addressed assets. No rewriting old projects is required merely to open them. Existing `sites/` bundle carry is reused only after copy/snapshot/export quota and confidentiality tests pass.
+Preserve `sites.json` version 1 and existing behavior for unmigrated Sites. For a scene-enabled Site, use immutable scene generations under `sites/<site_id>/scene/` and one atomically replaced `current.json` pointer carrying revision and manifest hash. That pointed-to generation is the sole authority for the enabled Site's boundary, origin, membership and all transforms, including model-equipment placements. It is not a second independent placement store. Existing legacy records are captured on explicit adoption and retained as historical input; opening a project alone does not adopt it.
+
+GET sites composes a compatibility projection from the canonical generation for enabled Sites and the legacy document for other Sites. All new gizmo, Arrange, boundary, metadata and proposal writes for enabled Sites go through one project-scoped locked compare-and-swap write module. Legacy whole-document PUTs without the current revision may not change, delete or replace enabled Sites; the backend returns an explicit refresh/upgrade conflict rather than accepting a stale browser-unload write. The updated sitesStore cancels old debounces on adoption and routes enabled writes/flush/keepalive through that module. Do not dual-write scene transforms and legacy placements. The compatibility projection is regenerated, not independently committed. Snapshot/export captures the pointed generation under the same lock, never a mixture of generations. See contracts.md for races and crash behavior.
+
+Owned derived assets can use the existing `sites/` bundle carry only after quota and confidentiality tests pass. Original media is stored outside all recursively copied/exported project directories as specified below.
 
 The scene records its schema/revision, source Site-document digest, fixed WGS84 origin, local east/north/up frame in metres, horizontal/vertical datum information, source records, feature records, groups, bindings and reconstruction/export receipts. A changed boundary must not silently recenter existing placements.
 
@@ -63,11 +72,15 @@ A logical model asset may have multiple visible enclosures. Those instances coll
 
 All quantities come from native schemas/results and carry their units, time window, run/source and availability. MW, MWh, thermal energy, H2 LHV energy, tonnes, t/h and currency are not interchangeable. No MW-to-tonnes conversion without the native factor and declared basis. Annual or horizon process totals must never be repeated as hourly values.
 
+Every unresolvable numeric field serializes as `value: null`, `available: false` and a reason/availability flag. Resolved zero serializes as `value: 0`, `available: true`. Pin both shapes in the result contract and tests for missing process data, missing conversion factors and unsupported group totals, following ADR-0001; the UI renders unavailable, never a default 0.00.
+
 For group summaries, define a supported quantity and boundary before aggregating. Do not add internal and external flows or product and energy ports together. Unsupported group totals stay unavailable while individual native quantities remain inspectable.
 
 ## UX and behavior
 
 Use the existing Site plan workspace, selection/properties pattern and Guided/Expert vocabulary. Do not add a new top-level workflow card or palette. Guided shows the next relevant task; Expert exposes numeric dimensions, datum, source and binding details in the same scene.
+
+Per CODING_STANDARDS.md UI rule 1, extend the server's project `/flow` verdict with source/scene action readiness, blockers and what will be computed for native generation, layout/photo processing, Blender/export and Apply. These action verdicts do not change electrical `run_ready`. The UI renders this server projection only; no browser worker/platform/format table decides capability availability. Server admission rechecks capability, source/revision, permissions and current limits at submit and Apply, including loss of readiness after a previously green preview. Current client-only siteReadiness is legacy evidence to replace for the new action, not an approved availability authority.
 
 The sequence is Location -> Preview buildings -> Generate/review -> Associate model -> Place equipment -> Results. Users may stop after generation. Missing data is a correction task, not an automatic model guess. Show an in-place distinction between Place existing, Add model asset and Reference/decorative object.
 
@@ -117,11 +130,15 @@ Job states: queued, running, proposal_ready, applying, applied, failed, cancelle
 
 Authorize uploads, preview, jobs, apply, export and artifact download independently. Read-only collaborators cannot persist scene changes. Workers receive only the admitted input snapshot and owned output directory, no provider secrets or arbitrary paths. Restrict archive traversal, file/pixel/triangle/texture counts, external resource references, decoded size and runtime. Production quota values are set from SC-00 benchmarks and are a release gate, not silently unlimited defaults. Keep the native API responsive; do not overload the existing electrical solve queue with arbitrary kinds without a reviewed adapter and persistence tests.
 
-Keep semantic scene data separate from regenerable meshes and original private photos. Bundles/snapshots include the required scene manifest and selected owned derived assets under explicit export policy; no source-photo export by accident. A missing optional mesh retains semantic proxies and bindings. Restore never grants a former user's permissions.
+Keep original photos/layout uploads outside the project tree: an opaque app-data private-media store keyed by authorized organization, Project UUID and media UUID. Do not put originals or EXIF in `uploads/`, `sites/`, reports or history: current project routines recursively copy/export those directories. Scene records contain only opaque source handles and reviewed non-sensitive provenance, not original paths or EXIF.
+
+Scenario/Save-As receives a new Project UUID and copies only the semantic scene and selected sanitized derived assets; originals are not copied or implicitly shared. Same-Project snapshots may retain opaque original handles, but restore rechecks current ownership, existence and retention and can show Original unavailable. Cross-project bundle restore never resolves a source handle against another Project. Original download and deletion recheck native access. Project deletion marks its private media for bounded cleanup after live jobs release their references; operator-configured retention is visible at upload, and expiry produces an unavailable source, not a corrupt scene. No delete/copy job scans an arbitrary uploaded path.
+
+Bundles include only the pointed scene and selected derived assets. Derived thumbnails/meshes/textures are sanitized for EXIF/paths and source redistribution terms before becoming exportable; lack of rights produces named omission, not a hidden copy. Any future export of original photos is a separate explicit authorized action, outside the default bundle. A missing optional mesh retains semantic proxies and bindings. Restore never grants a former user's permissions. contracts.md pins this storage/export policy.
 
 ## Scope and sequencing
 
-SC-00 proves generation, exchange and photo feasibility. SC-01 ships editable native geometry; SC-02 adds building/process bindings and placement; SC-03 adds native result projection. SC-04 adds outbound Blender exchange; SC-05 adds optional worker/refinement import; SC-06 handles layout/photo proposals. Each has its own ticket, tests and evidence. SC-01 through SC-03 remain usable without external engines.
+SC-00 has independent Native, Blender and Photo milestones, each with its own evidence/status. Native contract completion alone unblocks SC-01; absent Blender/CUDA does not prevent that milestone being done. SC-01 ships editable native geometry; SC-02 adds building/process bindings and placement; SC-03 adds native result projection. SC-04 outbound artifact work depends on native scene contracts; advertising Blender compatibility additionally requires the Blender exchange milestone. SC-05 requires its Blender worker evidence. SC-06 layout/manual calibration depends on Native only; photo reconstruction depends separately on Photo evidence. No aggregate parent status may hold those independent native slices behind optional engines.
 
 This is an implementation specification proposal, not authorization to skip existing engine/UX review. No new engine physics, automatically discovered electrical networks, construction certification, rack-scale digital twin or live telemetry ingestion is included. Full BIM/IFC authoring remains a separate future capability.
 

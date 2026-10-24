@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # SC-02 — multi-energy buildings, process complexes and equipment
 
 Status: needs-triage — specification proposed; not implemented

@@ -1,8 +1,11 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # SC-04 — export an editable site snapshot for Blender
 
 Status: needs-triage — specification proposed; not implemented
 Type: task
-Dependencies: SC-01 scene contract; SC-02 if bound export is advertised; SC-00 real exchange evidence
+Dependencies: SC-00 N/SC-01 for native export; SC-02 for bindings; SC-00 B before claiming tested Blender compatibility
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
 ## Scope and acceptance

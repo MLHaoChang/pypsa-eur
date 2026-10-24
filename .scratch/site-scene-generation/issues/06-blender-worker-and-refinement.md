@@ -1,3 +1,6 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # SC-05 — optional integrated Blender generation and reviewed return
 
 Status: needs-triage — specification proposed; not implemented

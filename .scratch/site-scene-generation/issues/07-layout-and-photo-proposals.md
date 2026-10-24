@@ -1,8 +1,11 @@
+<!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
+<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+
 # SC-06 — layouts and photo-based campus reconstruction
 
 Status: needs-triage — specification proposed; not implemented
 Type: research/prototype then bounded task
-Dependencies: SC-01; SC-00 input/worker/resource evidence; SC-05 proposal lifecycle before external worker apply
+Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
 Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
 ## Scope and acceptance
@@ -13,13 +16,13 @@ For multi-view photos, compare a representative aerial set and a ground-level se
 
 A single photograph can support a proposed approximate building, not a measured 3D reconstruction. The output is a reference mesh until aligned and given semantic proxies. Without metric anchoring it cannot drive physical length/clearance claims. Do not infer loads, process units or equipment capacities from textures.
 
-Reject unsafe/oversized/remote-linked inputs before execution. Keep original photos private and out of bundles by default; external processing requires a separately configured authorized destination. Ready output is a preview proposal, never an automatic replacement of the site.
+Reject unsafe/oversized/remote-linked inputs before execution. Use contracts.md's private-original store outside all recursively copied/exported project directories, with explicit scenario/Save-As/snapshot/expiry/deletion behavior and V55 assertions. External processing requires a separately configured authorized destination. Ready output is a preview proposal, never an automatic replacement of the site.
 
-Done: V39–46 and actual engine evidence. Missing hardware or poor source data remains a disclosed unavailable/partial state. Native generation continues to work.
+Done independently: layout cases can close on Native evidence with no photo/Blender worker. Photo capability requires V39–46, V55–58 and actual engine evidence. Missing hardware or poor source data remains a disclosed unavailable/partial state. Native generation continues to work.
 
 ## Validation
 
-V39–46, V06, V08, V34–38, V48–49, V52; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
+V39–46, V06, V08, V34–38, V48–49, V52, V55–58; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
 
 ## Coordination
 
