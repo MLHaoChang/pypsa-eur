@@ -1,5 +1,5 @@
 // The Guided study's inputs and its start/abort, read in one place: the Goal
-// card edits the goal, section 9 (Readiness → run) runs the study. Both go
+// card edits the goal, section 9 (Readiness and run) runs the study. Both go
 // through the Expert panel's own `buildEhStudyBody`, so the same study starts
 // wherever it is started from.
 import { useEffect, useState } from 'react'

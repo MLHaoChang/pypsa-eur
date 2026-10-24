@@ -2,7 +2,7 @@ import { Play } from 'lucide-react'
 import { useRunGate } from '../hooks/useRunGate'
 import { useUIStore } from '../store/uiStore'
 
-/** The Run in section 9 (Readiness → run). Not a second Run: it asks the
+/** The Run in section 9 (Readiness and run). Not a second Run: it asks the
  *  header's gated Run to start (`requestRunSolve`), so the same gate, save and
  *  queue apply. Shown only when the gate lets a run through; a blocked project
  *  keeps the header's reason and the findings below. */
