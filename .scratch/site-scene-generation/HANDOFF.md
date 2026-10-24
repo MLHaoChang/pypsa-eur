@@ -3,7 +3,7 @@
 
 # Continuation handoff
 
-Status: revised after independent review; delta verdict pending; implementation not started
+Status: independent review complete — GO publication/Native prototype; implementation not started
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
 Baseline: `aba252d2384f55116bbd15516a5b025951ba265e`
@@ -15,16 +15,17 @@ Generate a visually appealing 3D site first; associate buildings and complexes w
 ## Read first
 
 1. AGENTS.md and current owner/outsourced register; fetch current master and rebaseline open PR overlaps.
-2. spec.md — requirements, semantics and integrity constraints.
+2. spec.md and contracts.md — requirements, canonical persistence/privacy/flow and integrity constraints.
 3. implementation-plan.md — records, candidate interfaces, build sequence and touch points.
 4. validation-matrix.md — 60 proposed acceptance cases plus domain fixtures.
-5. issues/01–07 — independent prototype/build slices and dependencies.
+5. tools-and-experiments.md and issues/01–07 — selected tools, independent prototype/build slices and dependencies.
+6. review-verdict.md — reviewed technical SHA, all findings/resolutions and scoped GO/NO-GO.
 
 ## Current evidence and state
 
 Existing PRs #93/#139 are merged; Site 3D, layout rules, results, thumbnails/report images and optional derived lengths already exist. A prior fresh assessment ran 45 files / 544 tests successfully on master-equivalent 3D source. This does not exercise any proposed new implementation. Initial research/assessment files remain under `/workspace/scratch/site3d-assessment-20261024/`.
 
-This work adds planning documents only. No new application code, runtime dependencies, jobs, endpoints, Blender installation, photo reconstruction, paid calls, official reviewer contact or deployment occurred. Two independent advisory review agents found four Spec issues and three Standards issues on initial head 8f49c179ad9a8a24f327b3676d34536705ba0d3a. Corrections are implemented in the documents; the delta verdict is pending. No official GK/UX approval is claimed. The owner has now authorized uploading the revised specs as a draft PR; publication is pending this review.
+This work adds planning documents only. No new application code, runtime dependencies, jobs, endpoints, Blender installation, photo reconstruction, paid calls, official reviewer contact or deployment occurred. Two independent advisory review agents found four Spec issues and three Standards issues on initial head 8f49c179ad9a8a24f327b3676d34536705ba0d3a. Corrections are implemented in the documents. At technical head 7cb8daac79ea86725cab184be9b8b246194eec60, both axes report zero unresolved findings (five Spec and three Standards corrections). GO to publish and start the bounded Native prototype; normal review/evidence gates remain for subsequent implementation and runtime release. See review-verdict.md. No official GK/UX approval is claimed. The owner authorized uploading as a draft PR; resolve it by this unique branch in MLHaoChang/pypsa-eur.
 
 ## Next concrete task
 
