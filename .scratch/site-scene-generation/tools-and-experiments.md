@@ -35,6 +35,8 @@ P1: reconstruct one redistributable aerial set with a known reference and one sp
 
 Each experiment stores its own actual GO/NO-GO and unavailable states. Select one photo worker only after P1; select no paid service by default. Native N can pass independently of B/P. Freeze finite measured limits before enabling the relevant production action; this spec does not invent benchmark numbers.
 
+N4: from no coordinate, prove disabled optional entry and intact2D/study use; confirm a real site anchor, map a boundary and generate/save buildings with an empty network; exit, configure native targets in their existing editors and return to map them. Prove a shared native graph feeds2D and3D, with unresolved physical routes visibly schematic. Play a fixed15-minute fixture and a representative-period fixture without extra observations. Freeze the staged DTOs and numeric expectations before implementation claims.
+
 ## Primary references
 
 - Blender export API: https://docs.blender.org/api/main/bpy.ops.export_scene.html

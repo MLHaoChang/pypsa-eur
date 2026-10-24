@@ -34,7 +34,7 @@ Imported OSM buildings currently form background meshes. The packer consumes mod
 7. Place an existing battery, electrolyser, transformer, genset or other supported model asset beside a building, on an eligible roof or within a service area.
 8. Choose Add model asset, use the normal model editor, then place the admitted asset. A decoration never silently creates a model component.
 9. Inspect boundary/obstacle/service-envelope findings before accepting a layout. Estimated rules are named as such.
-10. Select an hour and see native loads, dispatch, storage state or process quantities at the bound object; select it to open existing model/results controls.
+10. Select a native snapshot and see native loads, dispatch, storage state or process quantities at the bound object; select it to open existing model/results controls.
 11. Export an exact scene snapshot for Blender, refine its geometry there and return allowed visual edits through a preview.
 12. Submit overlapping photographs to a configured reconstruction worker, inspect registration/scale/coverage and adopt the resulting reference scene explicitly.
 13. Close, reload, copy a scenario, restore a snapshot or export/import a project without losing geometry, provenance or binding integrity.
@@ -43,6 +43,10 @@ Imported OSM buildings currently form background meshes. The packer consumes mod
 ## Integrated project flow with AI guidance
 
 The entire process is part of the existing project flow with the single GridSpine companion, as specified in [ai-guided-project-flow.md](ai-guided-project-flow.md). Guidance follows the current section, selected building/model target, planning period and study scope through site generation, parameterization, approved execution and native results. It explains blockers, prepares typed proposals and reads back outcomes; native /flow and receipts determine progress. Manual controls remain usable without a provider. This integration is a required native release deliverable, not an optional chat link or a separate 3D wizard.
+
+## Optional creation and staged availability
+
+[optional-site-workflow.md](optional-site-workflow.md) is normative for the owner's coordinate-gated optional action, campus mapping/review, buildings-only pause/resume, existing native2D/SLD associations and multi-carrier connections, followed by actual-cadence results playback. It does not make3D a study prerequisite. Read [workflow-assessment.md](workflow-assessment.md) for the source-based gaps and assigned slices.
 
 ## Domain model
 
@@ -86,7 +90,7 @@ Use the existing Site plan workspace, selection/properties pattern and Guided/Ex
 
 Per CODING_STANDARDS.md UI rule 1, extend the server's project `/flow` verdict with source/scene action readiness, blockers and what will be computed for native generation, layout/photo processing, Blender/export and Apply. These action verdicts do not change electrical `run_ready`. The UI renders this server projection only; no browser worker/platform/format table decides capability availability. Server admission rechecks capability, source/revision, permissions and current limits at submit and Apply, including loss of readiness after a previously green preview. Current client-only siteReadiness is legacy evidence to replace for the new action, not an approved availability authority.
 
-The sequence is Location -> Preview buildings -> Generate/review -> Associate model -> Place equipment -> Results. Users may stop after generation. Missing data is a correction task, not an automatic model guess. Show an in-place distinction between Place existing, Add model asset and Reference/decorative object.
+The optional sequence is confirmed site coordinate -> campus mapping/boundary -> native generation/review -> save buildings only or associate configured native targets -> native connection/route layers -> available results playback. Opening creation requires a coordinate; geometry submission additionally requires accepted mapping inputs. Users may stop after generation. Missing data is a correction task, not an automatic model guess. Show an in-place distinction between Place existing, Add model asset and Reference/decorative object.
 
 Numeric east/north/elevation/heading, metric dimensions, measurement/alignment tools and visible envelopes support precision placement. A rated catalogue model preserves physical scale/aspect; it must not use the current arbitrary per-axis fit. A stylized generic model may retain fitting but is labelled approximate.
 

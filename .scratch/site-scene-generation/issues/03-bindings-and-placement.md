@@ -31,3 +31,7 @@ One bounded implementation PR after applicable plan review; current master and o
 ## Cross-cutting AI guidance
 
 Deliver this slice's in-place explanation, typed proposed action or truthful UI fallback, native read-back and resume context under [ai-guided-project-flow.md](../ai-guided-project-flow.md), alongside SC-07. Server flow state and current approvals remain authoritative. Include the relevant V61–V72 assertions; optional engine absence cannot block the native/manual flow.
+
+## Optional coordinate-first workflow clarification
+
+Map existing native2D/SLD targets only, with per-target prerequisites and in-place parameterization/return. Resolve PoC from native Bus.eh_poc and existing role/config import/export Links (no new PoC class); preserve multiple/ambiguous PoCs and separate Transformer terminal references and typed multi-carrier connection projections; distinguish known logical edge, known physical route and available flow. Unknown routes stay explicitly schematic, buried layers hidden until requested, and no geometry supplies missing electrical/pipe parameters. Cover V80–V86 and applicable process fixtures. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).

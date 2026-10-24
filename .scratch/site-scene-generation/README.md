@@ -5,7 +5,7 @@
 
 Status: independently reviewed specification — GO to publish and begin the Native prototype; no runtime release approval
 
-Read [spec.md](spec.md), [implementation-plan.md](implementation-plan.md), [validation-matrix.md](validation-matrix.md) [contracts.md](contracts.md), [ai-guided-project-flow.md](ai-guided-project-flow.md), [tools-and-experiments.md](tools-and-experiments.md) and [HANDOFF.md](HANDOFF.md).
+Read [spec.md](spec.md), [implementation-plan.md](implementation-plan.md), [validation-matrix.md](validation-matrix.md) [contracts.md](contracts.md), [ai-guided-project-flow.md](ai-guided-project-flow.md), [optional-site-workflow.md](optional-site-workflow.md), [workflow-assessment.md](workflow-assessment.md), [tools-and-experiments.md](tools-and-experiments.md) and [HANDOFF.md](HANDOFF.md).
 
 The design covers native campus generation, buildings associated with multi-energy Loads and process-unit complexes, equipment placement, native result playback, optional integrated Blender workers, Blender export/refinement, and reconstruction proposals from suitable layouts/photos. It reuses the existing Site 3D implementation; no new top-level workflow card is proposed.
 
@@ -16,3 +16,5 @@ The owner authorized independent review, corrections and draft-PR publication. B
 Publication branch: `claude/site-scene-generation-spec`, repository MLHaoChang/pypsa-eur, base master. The draft PR is found by this unique branch. The next task is issues/01-prototype-and-contracts.md, Native milestone only; optional workers stay independently gated.
 
 Owner clarification: the complete process must live within the existing project flow with contextual AI guidance. ai-guided-project-flow.md and SC-07 make this a cross-cutting native release requirement; validation-matrix.md now contains 72 proposed cases. Both independent agents confirmed the extension at technical head 5aa25514696274390c597e425bec21d1f8f79f96 with zero unresolved findings. The advisory GO covers publication and the bounded Native prototype; runtime release remains gated. See review-verdict.md for the separate historical and extension records.
+
+Latest owner clarification:3D is optional and coordinate-gated, followed by campus mapping/review, buildings-only save/resume, existing native2D/SLD target/connectivity mapping and actual-cadence result playback. optional-site-workflow.md is normative; workflow-assessment.md maps gaps to the existing slices. Validation now contains90proposed cases; the earlier72-case review remains historical, pending a delta review of this clarification.

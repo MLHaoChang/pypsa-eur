@@ -8,6 +8,8 @@ Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
 
 ## 1. Geometry before an electrical model
 
+The optional action and stage-specific admission follow [optional-site-workflow.md](optional-site-workflow.md): a saved project and confirmed native site coordinate permit opening campus mapping; a valid confirmed boundary is required before creating the Site envelope/generating. The location is not inferred from a dummy Bus or unconfirmed0/0 placeholder. SC-00 N freezes the anchor settings/persistence/ACL seam before code. Creation, generation, target assignment, connectivity and result playback have separate server verdicts; missing later-stage data does not block buildings-only save/resume or ordinary studies.
+
 A saved, authorized Project is necessary for durable scene storage. Its network can be empty. Entering coordinates and confirming a boundary creates a Site envelope with `buses: []` through validated site persistence, not a dummy electrical model. Generation can then produce native buildings without any network write. The branch/Bus checklist remains relevant only to the existing model-driven generation action.
 
 The new scene render path must work without yard/bus objects. Later explicit associations add native model references; a scene alone does not satisfy any solve preflight requirement or fabricate energy inputs.
@@ -50,7 +52,7 @@ SC-00 N chooses and records an operator-visible retention period and measured pe
 
 ## 4. Server-owned availability
 
-Extend the existing project `/flow` projection additively with scene action verdicts: create_plot, generate_native, process_layout, reconstruct_photos, generate_blender, export_scene and apply_proposal. Each returns availability, a named blocker/fix where applicable, required inputs and a user-facing description of what will be computed. Electrical run_ready/verdicts retain their current meaning and value.
+Extend the existing project `/flow` projection additively with scene action verdicts: open_site_creation, create_plot, generate_native, assign_native, show_connectivity, play_results, process_layout, reconstruct_photos, generate_blender, export_scene and apply_proposal. Each returns availability, a named blocker/fix where applicable, required inputs and a user-facing description of what will be computed. Electrical run_ready/verdicts retain their current meaning and value.
 
 The UI displays this server verdict; it never derives enabled/blocked states from a browser/platform/source capability table. Model-free generate_native may be available with no electrical Bus/branch. Missing worker only blocks its action. Changing source, scope or scene revision refreshes the verdict. Submit and Apply both recheck the actual current conditions; a prior green /flow response is an observation, not admission authority.
 
@@ -95,3 +97,7 @@ SC-00 P: a supported genuine photo-reconstruction/registration experiment and me
 ## Companion integration contract
 
 [ai-guided-project-flow.md](ai-guided-project-flow.md) defines the normative per-turn scope, flow mapping, proposed read/prepare/apply adapters, ordinary audited approvals, exact receipt/read-back, privacy, recovery and manual fallback. Native scene services own the effects; no chat-specific writer or autonomous geometry execution bypass is introduced. SC-00 N freezes these contracts and SC-07 delivers them alongside the native slices; V61–V72 are required integrated acceptance cases.
+
+## Optional workflow and physical graph projection
+
+[optional-site-workflow.md](optional-site-workflow.md) defines the native2D/SLD graph as the single connectivity authority, distinct native PoC/transformer/port identities, per-carrier physical-route availability, explicitly schematic unknown routes, and cadence-aware native playback. Scene geometry never supplies missing network parameters or results. Follow V73–V90 for opt-in admission, regeneration/rebind and partial mapping semantics.

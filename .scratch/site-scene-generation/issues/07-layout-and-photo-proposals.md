@@ -31,3 +31,7 @@ One bounded implementation PR after applicable plan review; current master and o
 ## Cross-cutting AI guidance
 
 Deliver this slice's in-place explanation, typed proposed action or truthful UI fallback, native read-back and resume context under [ai-guided-project-flow.md](../ai-guided-project-flow.md), alongside SC-07. Server flow state and current approvals remain authoritative. Include the relevant V61–V72 assertions; optional engine absence cannot block the native/manual flow.
+
+## Optional coordinate-first workflow clarification
+
+Refine the optional coordinate-first campus workflow through the existing valid Site envelope; layout/photo sources do not bypass location, scale, ownership or worker gates. Keep manual/native mapping available. Pre-boundary media APIs are outside the first slice unless separately specified. Cover V77–V78/V90. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).

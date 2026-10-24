@@ -64,6 +64,8 @@ Do not combine all slices into one implementation PR. Each PR carries tests, the
 
 ## User-facing integration
 
+Follow optional-site-workflow.md and workflow-assessment.md. SC-00 N freezes the site-anchor service and separate action/target verdicts. SC-01 exposes optional Create/Open/Resume by the native site coordinates, campus mapping and saveable buildings-only state. SC-02 projects existing2D/SLD native edges/ports and physical locations without duplicating topology; source-dependent cable/pipe layers distinguish logical connectivity, route geometry and result availability. SC-03 uses the native snapshot cadence, including subhourly/representative/multi-period cases; no forced hourly animation. Add V73–V90 before code.
+
 Follow ai-guided-project-flow.md throughout: one project flow and one companion, server-derived completion, confirmed actions and durable read-back, manual/no-provider parity. Retain the existing Site plan destination. An initial source choice (Location, Layout or Photos when available) leads to a common building preview. A source-specific deficiency opens calibration/correction in place. Show observed/estimated/proposed distinctions and an inspectable source line.
 
 The backend `/flow` projection exclusively supplies action availability, blockers and the computation description. The frontend cannot enable Photos/Blender because a browser/device check says so. Loss of worker readiness, access or limits between verdict, submit and Apply is refused server-side, with an updated in-place state. Original input ingestion uses the private-media policy in contracts.md, not the generic project uploads directory.

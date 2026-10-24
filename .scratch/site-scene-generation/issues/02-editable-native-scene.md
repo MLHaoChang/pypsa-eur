@@ -29,3 +29,7 @@ One bounded implementation PR after applicable plan review; current master and o
 ## Cross-cutting AI guidance
 
 Deliver this slice's in-place explanation, typed proposed action or truthful UI fallback, native read-back and resume context under [ai-guided-project-flow.md](../ai-guided-project-flow.md), alongside SC-07. Server flow state and current approvals remain authoritative. Include the relevant V61–V72 assertions; optional engine absence cannot block the native/manual flow.
+
+## Optional coordinate-first workflow clarification
+
+Implement optional Create/Open/Resume in the existing coordinate/site-configuration context. Server admission needs a confirmed valid site anchor to open mapping and a valid confirmed boundary before generating/materializing a Site. No automatic creation on load/coordinate entry; no model component is required. Deliver campus review/correction/explicit regenerate, previous-scene preservation and buildings-only save/exit/resume. Cover V73–V79/V84 and relevant V89–V90. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).

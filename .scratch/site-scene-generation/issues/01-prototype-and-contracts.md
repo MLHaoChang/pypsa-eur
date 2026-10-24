@@ -27,3 +27,7 @@ V05–08, V14, V29–30, V41–43, V49, V53–60, V61–72; definitions in ../va
 ## Coordination
 
 One bounded implementation PR after applicable plan review; current master and open-PR overlap check first. Follow AGENTS and steward, add a release fragment for shipped behavior, never change compiled release notes or another task branch. Record exact tests, genuine worker evidence and unimplemented parts in the PR and handoff.
+
+## Optional coordinate-first workflow clarification
+
+Freeze the confirmed native site-anchor settings DTO/persistence/ACL seam, open-versus-generate action verdicts, saved buildings-only state, native graph/terminal projection and native cadence contract from optional-site-workflow.md. Prototype both geometry-first and already-configured-model entry orders. Unknown anchor persistence is an explicit prototype outcome, never permission to create a dummy Bus. V73–V90 are design cases to freeze, not all completed prototype evidence. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).

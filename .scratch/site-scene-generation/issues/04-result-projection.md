@@ -29,3 +29,7 @@ One bounded implementation PR after applicable plan review; current master and o
 ## Cross-cutting AI guidance
 
 Deliver this slice's in-place explanation, typed proposed action or truthful UI fallback, native read-back and resume context under [ai-guided-project-flow.md](../ai-guided-project-flow.md), alongside SC-07. Server flow state and current approvals remain authoritative. Include the relevant V61–V72 assertions; optional engine absence cannot block the native/manual flow.
+
+## Optional coordinate-first workflow clarification
+
+Playback uses the actual native snapshot cadence, including quarter-hourly, hourly, representative and multi-period data; the title's hourly case is an example, not a restriction. Project native edge/port quantities and units onto valid physical mappings. Keep stale/missing quantities unavailable and interpolation purely visual. Cover V87–V88 and prior freshness/numerical cases. Read [optional-site-workflow.md](../optional-site-workflow.md) and [workflow-assessment.md](../workflow-assessment.md).

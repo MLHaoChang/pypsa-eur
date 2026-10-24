@@ -74,3 +74,7 @@ Both independent agents reviewed the technical delta and confirmed the exact com
 **Advisory GO:** publish the revised specifications and begin the bounded SC-00 N prototype/contract validation, including the guidance contract. Subsequent implementation remains conditional on accepted prototype evidence and normal gates. **NO-GO:** runtime release or native/Blender/photo enablement until implementation and applicable validation pass. No official GK/UX approval is claimed. Scripted-provider tests do not prove conversational quality; a real-provider quality claim requires separately authorized evaluation.
 
 Documentation checks pass at the reviewed technical head: all 17 package Markdown files have SPDX headers, relative links resolve, eight tickets follow 01–08, V01–V72 are unique and diff checks pass. The 72 cases remain proposed; no new runtime tests, model calls or worker reconstruction were performed. Later publication-record edits only record this verdict and update README/HANDOFF status, not the technical design. Earlier CI on a129323 does not certify the new head.
+
+## Optional coordinate-first workflow clarification — delta review pending
+
+The latest owner clarification adds optional-site-workflow.md, source-based workflow-assessment.md and V73–V90, assigned to the existing slices. Earlier verdicts above apply only to their named technical heads. This90-case design requires a new delta review before claiming a current advisory GO. Runtime/engine enablement remains NO-GO pending actual implementation and applicable evidence.

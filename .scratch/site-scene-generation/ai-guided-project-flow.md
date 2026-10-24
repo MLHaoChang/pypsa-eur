@@ -31,6 +31,10 @@ Use the current section IDs from `services/flow_sections.py` and the approved [.
 
 Geometry is an optional visualization/enrichment activity in Project & site. Binding work is revisited at the model entity's owning section without leaving and returning through unrelated panels. A missing optional reconstruction or binding does not block an otherwise valid electrical study. `/flow` determines required work and `not_needed` for the selected scope. Unavailable/unknown state is not rendered as complete. Analysis applicability, thresholds and engineering verdicts remain native domain responsibilities.
 
+## Optional creation and pause/resume
+
+[optional-site-workflow.md](optional-site-workflow.md) defines separate Create, Generate, Assign and Play prerequisites. Guidance explains the missing native coordinate in place, follows campus mapping/review, saves buildings alone when model targets do not exist, returns from their existing owning editors, and maps configured native2D/SLD graph targets before results. It does not force3D, create model entities to unlock it, infer cable/pipe topology, or turn absent results into motion. All six study cards and ordinary run readiness are unaffected by declining3D. SC-07 includes V73–V90 stage/context assertions alongside V61–V72.
+
 ## Context and truthful progression
 
 The assistant's bounded per-turn context references owner/workspace/project identity, Site ID and scene revision, selected feature/group, model input revision/target identities, flow section and action verdicts, current analysis scope, investment period, exact run/snapshot window, and admitted pending proposal/job/receipt IDs. Only authorized, necessary summaries enter model context. Read current authoritative records at the start of an assisted action and again before admission; browser selection and client context are hints, not authorization or freshness evidence.
