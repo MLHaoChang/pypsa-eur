@@ -24,16 +24,20 @@ from services.reports import formatting as F
 INVESTMENT = "investment_case"
 ISLAND = "island"
 GRID_READINESS = "grid_readiness"
+TEMPLATE_LEDGER = "template_ledger"
 
 TITLES = {
     INVESTMENT: "Investment case",
     ISLAND: "Islanding and control",
     GRID_READINESS: "Grid readiness (screening)",
+    TEMPLATE_LEDGER: "Template assumptions",
 }
 
 #: The island report tables a chapter shows (the hourly and per-event ones
 #: stay in the campus panel and its export).
 ISLAND_TABLES = ("requirements", "costs", "static_summary", "freq_summary")
+
+NO_TEMPLATE_LEDGER = "no template ledger for this project"
 
 NO_INVESTMENT = ("no investment case has been stored for this project: run it from the "
                  "Investment tab")
@@ -332,3 +336,68 @@ def grid_readiness_disclosures(payload: dict) -> list[str]:
         out.append(f"{head} — assumed limits, to confirm with the network operator: "
                    + "; ".join(assumed) + ".")
     return out
+
+
+# ── template assumptions (metadata, never a measurement) ──────────────────
+
+
+def template_ledger_payload(meta: dict | None) -> dict | None:
+    """Read assumptions as stored; disclose damaged or inconsistent metadata."""
+    if not isinstance(meta, dict) or "ledger" not in meta:
+        return None
+    raw = meta["ledger"]
+    notices: list[str] = []
+    if not isinstance(raw, list):
+        raw = []
+        notices.append("Template ledger integrity: invalid ledger list.")
+    rows = []
+    seen = set()
+    for number, row in enumerate(raw, 1):
+        if not isinstance(row, dict) or not isinstance(row.get("item"), str) or not row["item"].strip():
+            notices.append(f"Template ledger integrity: invalid row {number}.")
+            continue
+        item = row["item"]
+        if item in seen:
+            notices.append(f"Template ledger integrity: duplicate item {item} (all rows retained).")
+        seen.add(item)
+        rows.append({key: row.get(key) for key in ("item", "label", "value", "unit", "source", "note")})
+    growth = meta.get("growth_inputs", [])
+    if not isinstance(growth, list):
+        notices.append("Template ledger integrity: invalid growth inputs list.")
+        growth = []
+    unresolved = set()
+    for number, record in enumerate(growth, 1):
+        if not isinstance(record, dict) or not isinstance(record.get("kind"), str) \
+                or not record["kind"].strip() or type(record.get("year")) is not int \
+                or type(record.get("set")) is not bool:
+            notices.append(f"Template ledger integrity: invalid growth record {number}.")
+            continue
+        if record["set"] is False:
+            item = f"placeholder {record['kind']} {record['year']}"
+            if item in unresolved:
+                notices.append(f"Template ledger integrity: duplicate growth record {record['kind']} {record['year']}.")
+            unresolved.add(item)
+            if item not in seen:
+                notices.append(f"Template ledger integrity: unresolved {record['kind']} {record['year']} has no ledger row; "
+                               "its value is not established.")
+    for row in rows:
+        if row["item"].startswith("placeholder ") and row["item"] not in unresolved:
+            notices.append(f"Template ledger integrity: {row['item']} has no matching unresolved growth record; "
+                           "the stored assumption is retained.")
+    rows.sort(key=lambda row: row["item"] not in unresolved)
+    return {"rows": rows, "integrity": notices}
+
+
+def template_ledger_table(payload: dict, source_path: str):
+    from services.reports.evidence import EvidenceTable
+
+    rows = [[F.fmt_text(row.get("label") or row.get("item")), F.fmt_text(row.get("value")),
+             str(row.get("unit") or ""), F.fmt_text(row.get("source")), F.fmt_text(row.get("note"))]
+            for row in payload["rows"]]
+    return EvidenceTable(table_id=TEMPLATE_LEDGER, columns=["Assumption", "Value", "Unit", "Source", "Note"],
+                         rows=rows, caption="Template assumptions (not measurements)", source_path=source_path)
+
+
+def template_ledger_disclosures(payload: dict) -> list[str]:
+    return ["Template assumptions are input metadata, not measured or validated results.",
+            *payload.get("integrity", [])]

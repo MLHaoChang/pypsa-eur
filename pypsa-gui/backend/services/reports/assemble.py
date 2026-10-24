@@ -102,7 +102,7 @@ def section_category(section_id: str) -> str | None:
     sections and the expert FMEA worksheet are reliability."""
     if section_id in _CATEGORY_OF_SECTION:
         return _CATEGORY_OF_SECTION[section_id]
-    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID):
+    if section_id in (EXECUTIVE_SUMMARY_ID, PIPELINE_ID, "template_ledger"):
         return None
     return "reliability"
 
@@ -372,7 +372,8 @@ def _chapter_section(evidence: Evidence, section_id: str) -> Section | None:
         return _not_established_section(section_id, heading, section)
     blocks: list[Block] = [TableRef(table_id=t) for t in _tables_for(evidence, section_id)]
     notes = {C.INVESTMENT: C.investment_disclosures, C.ISLAND: C.island_disclosures,
-             C.GRID_READINESS: C.grid_readiness_disclosures}[section_id](section.payload)
+             C.GRID_READINESS: C.grid_readiness_disclosures,
+             C.TEMPLATE_LEDGER: C.template_ledger_disclosures}[section_id](section.payload)
     blocks.extend(Callout(kind="disclosure", text=n) for n in notes)
     return Section(section_id=section_id, heading=heading, source="code", status="ok",
                    note=section.note, blocks=blocks)
@@ -422,6 +423,10 @@ def evidence_only_document(evidence: Evidence, *, title: str, report_id: str,
         sections.append(isl)
     if (gr := _chapter_section(evidence, C.GRID_READINESS)) is not None:
         sections.append(gr)
+    ledger = _chapter_section(evidence, C.TEMPLATE_LEDGER)
+    sections.append(ledger if ledger is not None else Section(
+        section_id=C.TEMPLATE_LEDGER, heading=C.TITLES[C.TEMPLATE_LEDGER], source="code",
+        status="not_established", blocks=[Callout(kind="not_established", text=C.NO_TEMPLATE_LEDGER)]))
     sections.append(_pipeline_section(evidence))
     sections = _grouped(sections)
 

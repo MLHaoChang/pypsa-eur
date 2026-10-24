@@ -66,7 +66,7 @@ def adequacy_section_id(study_id: str) -> str:
 ADEQUACY_SECTION_IDS: tuple[str, ...] = tuple(
     adequacy_section_id(s) for s in SECTION_ORDER)
 
-SectionKind = Literal["eh", "adequacy", "worksheet", "investment", "island", "grid_readiness"]
+SectionKind = Literal["eh", "adequacy", "worksheet", "investment", "island", "grid_readiness", "template_ledger"]
 SectionStatus = Literal["ok", "not_established", "skipped"]
 
 SECTION_TITLES: dict[str, str] = {
@@ -98,6 +98,7 @@ SECTION_TITLES: dict[str, str] = {
     "investment_case": "Investment case",
     "island": "Islanding and control",
     "grid_readiness": "Grid readiness (screening)",
+    "template_ledger": "Template assumptions",
 }
 
 # Why a surface can be empty — the sentences ``get_adequacy_results`` gives
@@ -698,7 +699,7 @@ def _tables(sections: dict[str, EvidenceSection], headline: dict[str, Any],
 # ── entry points ─────────────────────────────────────────────────────────
 
 
-def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None) -> dict[str, EvidenceSection]:
+def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None, template_ledger=None) -> dict[str, EvidenceSection]:
     """The investment-case, island and grid-readiness chapters
     (``services/reports/chapters``), each only when its source was passed."""
     from services.reports import chapters as C
@@ -728,6 +729,14 @@ def _chapter_sections(ic_report, ic_stale, island, grid_readiness=None) -> dict[
                 section_id=C.GRID_READINESS, title=SECTION_TITLES[C.GRID_READINESS],
                 kind="grid_readiness", status="ok", source=source, engine="grid_readiness",
                 payload=payload, note="advisory screening; never blocks a run")
+    if template_ledger is not None:
+        payload = C.template_ledger_payload(template_ledger)
+        source = "eh_template.json (template ledger)"
+        out[C.TEMPLATE_LEDGER] = _missing(C.TEMPLATE_LEDGER, "template_ledger", C.NO_TEMPLATE_LEDGER,
+                                         source=source) \
+            if payload is None else EvidenceSection(
+                section_id=C.TEMPLATE_LEDGER, title=SECTION_TITLES[C.TEMPLATE_LEDGER],
+                kind="template_ledger", status="ok", source=source, engine="template_metadata", payload=payload)
     return out
 
 
@@ -744,6 +753,9 @@ def _chapter_tables(sections: dict[str, EvidenceSection]) -> dict[str, EvidenceT
     gr = sections.get(C.GRID_READINESS)
     if gr is not None and gr.status == "ok" and gr.payload:
         out[C.GRID_READINESS] = C.grid_readiness_table(gr.payload, f"/sections/{C.GRID_READINESS}/payload")
+    ledger = sections.get(C.TEMPLATE_LEDGER)
+    if ledger is not None and ledger.status == "ok" and ledger.payload:
+        out[C.TEMPLATE_LEDGER] = C.template_ledger_table(ledger.payload, f"/sections/{C.TEMPLATE_LEDGER}/payload")
     return out
 
 
@@ -759,13 +771,16 @@ def _chapter_disclosures(sections: dict[str, EvidenceSection]) -> list[str]:
     gr = sections.get(C.GRID_READINESS)
     if gr is not None and gr.status == "ok" and gr.payload:
         out += C.grid_readiness_disclosures(gr.payload)
+    ledger = sections.get(C.TEMPLATE_LEDGER)
+    if ledger is not None and ledger.status == "ok" and ledger.payload:
+        out += C.template_ledger_disclosures(ledger.payload)
     return out
 
 
 def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
                      worksheet: dict | None, ic_report: dict | None = None,
                      ic_stale: bool | None = None, island: dict | None = None,
-                     grid_readiness: dict | None = None) -> Evidence:
+                     grid_readiness: dict | None = None, template_ledger: dict | None = None) -> Evidence:
     """
     Union the adequacy write-up, the EH reference design and the worksheet.
 
@@ -785,7 +800,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     sections.update(_eh_sections(eh_report))
     sections.update(_adequacy_sections(study_report))
     sections[WORKSHEET_SECTION] = _worksheet_section(worksheet)
-    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness))
+    sections.update(_chapter_sections(ic_report, ic_stale, island, grid_readiness, template_ledger))
 
     headline = _headline(eh_report)
     pipeline = copy.deepcopy(eh_report.get("pipeline")) if has_eh else None
@@ -797,7 +812,7 @@ def collect_evidence(*, study_report: dict | None, eh_report: dict | None,
     disclosures += _chapter_disclosures(sections)
     # The grid-readiness screening measures nothing (an advisory read of the inputs).
     if not any(s.status == "ok" for s in sections.values()
-               if s.kind not in ("worksheet", "grid_readiness")):
+               if s.kind not in ("worksheet", "grid_readiness", "template_ledger")):
         disclosures.insert(0, NOTHING_MEASURED_DISCLOSURE)
 
     not_established: list[str] = []
