@@ -327,6 +327,18 @@ describe('CampusElectricalPanel', () => {
     expect(screen.getByTestId('compliance-limit-pcc_q_band').textContent?.trim()).toBe('\u22120.045 to 0.045 Mvar')
   })
 
+  it('prints both negative Q-band edges with the same minus sign', async () => {
+    const state = sized()
+    state.results!.compliance = [...state.results!.compliance, {
+      check: 'pcc_q_band', status_as_is: 'fail', status_with_measures: 'fail', value: -0.05, limit: -0.1,
+      limit_min: -0.2, limit_max: -0.1, unit: 'Mvar', worst_period: 2030, worst_hour: 1, clause: 'generic clause',
+      source: 'code', detail: 'Q band',
+    } as never]
+    api.state.mockResolvedValue(state)
+    renderPanel()
+    expect((await screen.findByTestId('compliance-limit-pcc_q_band')).textContent?.trim()).toBe('−0.2 to −0.1 Mvar')
+  })
+
   it('never prints a unitless row\'s missing unit as "null"', async () => {
     const state = sized()
     // a CSV round trip turns the power factor's empty unit into null

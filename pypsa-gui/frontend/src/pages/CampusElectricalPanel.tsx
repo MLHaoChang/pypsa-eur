@@ -132,6 +132,8 @@ function CampusPanel({ part }: { part: CampusPart }) {
 
 export default function CampusElectricalPanel() { return <CampusPanel part="inputs" /> }
 export function CampusStudyPanel() { return <CampusPanel part="study" /> }
+const bandEdge = (value: number) => num(value, 3).replace('-', '\u2212')
+
 export function CampusResultsPanel() { return <CampusPanel part="results" /> }
 
 function CampusView({ name, part }: { name: string; part: CampusPart }) {
@@ -680,7 +682,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                     {/* a band with a negative edge reads "−a to b": an en dash beside a minus is hard to read */}
                     {c.limit_min != null && c.limit_max != null
                       ? (c.limit_min < 0
-                        ? `${num(c.limit_min, 3).replace('-', '\u2212')} to ${num(c.limit_max, 3)} ${c.unit ?? ''}`
+                        ? `${bandEdge(c.limit_min)} to ${bandEdge(c.limit_max)} ${c.unit ?? ''}`
                         : `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`).trim()
                       : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>
