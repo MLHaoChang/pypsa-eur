@@ -123,6 +123,7 @@ describe('Bus card — Energy Hub section', () => {
       await userEvent.click(await screen.findByRole('button', { name: /edit bus/i }))
       expect(screen.getByTestId('eh-sk-readonly').querySelector('input')).toBeNull()
       expect(screen.getByTestId('eh-sk-readonly').textContent).toContain('250')
+      expect(screen.getByRole('button', { name: 'Edit in Connection & grid ›' }).classList.contains('whitespace-nowrap')).toBe(true)
       await userEvent.click(screen.getByRole('button', { name: 'Edit in Connection & grid ›' }))
       const ui = useUIStore.getState()
       if (panel) expect(ui.activeSlidePanel).toBe(panel)

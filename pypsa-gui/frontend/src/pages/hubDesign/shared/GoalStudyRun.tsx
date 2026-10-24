@@ -1,4 +1,4 @@
-// The Guided Run (design §3.3: one Run): in section 9, Readiness → run. It
+// The Guided Run (design §3.3: one Run): in section 9, Readiness and run. It
 // starts the reliability study with the goal set on the Goal card, through the
 // same `buildEhStudyBody` the Expert panel uses. Disabled exactly when the
 // flow's verdict (`useRunGate('all')`) or the study's own inputs say it would

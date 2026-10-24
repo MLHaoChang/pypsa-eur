@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { campusApi } from '../../api/campusElectrical'
 import { networkApi } from '../../api/network'
 import { useUIStore } from '../../store/uiStore'
-import { ConnectionLimits } from './ConnectionLimits'
+import { ConnectionLimits, resetTarget } from './ConnectionLimits'
+
+vi.mock('../flowScope/useFlowScope', () => ({ useFlowScope: () => ({ registry: { preset_label: 'Data Center Energy Hub' } }) }))
 
 vi.mock('../../api/network', () => ({ networkApi: { getBuses: vi.fn().mockResolvedValue([
   { name: 'grid', eh_poc: true, eh_sk_mva: 250 }, { name: 'it', eh_poc: false, eh_sk_mva: 9 }]), updateBus: vi.fn() } }))
@@ -30,6 +32,11 @@ const setting = (item: string, over: Record<string, unknown> = {}) => ({
   item, user: null, default: { value: 5, source: 'assumed', origin: 'placeholder' }, ...over })
 
 describe('ConnectionLimits', () => {
+  it('names the starting template when its label is unavailable', () => {
+    expect(resetTarget({ item: 'fault_level', user: null,
+      default: { value: 25, source: 'assumed', origin: 'template' } }, '')).toBe("the starting template's 25, assumed")
+  })
+
   it('lists energization, ramp, oscillation and fault level with their source and assumed tag', async () => {
     vi.mocked(campusApi.gridReadiness).mockResolvedValue({ rows: [
       row('energization_peak', { unit: 'MW', limit: null, target: { section: 'connection', panel: null, component: 'Link', entity: 'import', field: 'eh_energization_mw' } }),
@@ -122,7 +129,7 @@ describe('ConnectionLimits', () => {
       default: { value: 5, source: 'code', origin: 'template' } }) })] } as never)
     vi.mocked(campusApi.resetGridLimit).mockResolvedValue({})
     mount()
-    fireEvent.click(await screen.findByRole('button', { name: "Reset to the template's 5 MW/min, grid code" }))
+    fireEvent.click(await screen.findByRole('button', { name: "Reset to the Data Center Energy Hub's 5 MW/min, grid code" }))
     await waitFor(() => expect(campusApi.resetGridLimit).toHaveBeenCalledWith('Demo', 'connection_ramp'))
   })
 
