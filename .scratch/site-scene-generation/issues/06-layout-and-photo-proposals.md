@@ -1,0 +1,26 @@
+# SC-06 — layouts and photo-based campus reconstruction
+
+Status: needs-triage — specification proposed; not implemented
+Type: research/prototype then bounded task
+Dependencies: SC-01; SC-00 input/worker/resource evidence; SC-05 proposal lifecycle before external worker apply
+Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+
+## Scope and acceptance
+
+Implement source adapters independently. First accept a calibrated raster/GeoJSON layout reference and manual footprint correction through the common preview. PDF rasterization is bounded; it is not automatic CAD/vector understanding. DXF/IFC adapters have their own units/CRS/semantic tests before they are advertised.
+
+For multi-view photos, compare a representative aerial set and a ground-level set on one selected reconstruction stack. OpenDroneMap is a candidate for geolocated aerial data; COLMAP-based dense reconstruction requires a demonstrated compatible GPU and texturing path. Do not ship several engines or imply sparse SfM is a textured campus. Record overlap/registration, control/scale source, residuals, missing surfaces and resource use.
+
+A single photograph can support a proposed approximate building, not a measured 3D reconstruction. The output is a reference mesh until aligned and given semantic proxies. Without metric anchoring it cannot drive physical length/clearance claims. Do not infer loads, process units or equipment capacities from textures.
+
+Reject unsafe/oversized/remote-linked inputs before execution. Keep original photos private and out of bundles by default; external processing requires a separately configured authorized destination. Ready output is a preview proposal, never an automatic replacement of the site.
+
+Done: V39–46 and actual engine evidence. Missing hardware or poor source data remains a disclosed unavailable/partial state. Native generation continues to work.
+
+## Validation
+
+V39–46, V06, V08, V34–38, V48–49, V52; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
+
+## Coordination
+
+One bounded implementation PR after applicable plan review; current master and open-PR overlap check first. Follow AGENTS and steward, add a release fragment for shipped behavior, never change compiled release notes or another task branch. Record exact tests, genuine worker evidence and unimplemented parts in the PR and handoff.

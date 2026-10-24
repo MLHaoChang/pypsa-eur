@@ -1,0 +1,24 @@
+# SC-03 — hourly native results on buildings and process groups
+
+Status: needs-triage — specification proposed; not implemented
+Type: task
+Dependencies: SC-02
+Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+
+## Scope and acceptance
+
+Write a known-hour numerical oracle before projection code. Reuse the shared timeline and native generator/Load/storage/branch/Link/Store series, freshness gates and selected project/run. Hourly values, weighted energy/material totals and process summary data are distinct. Do not repeat process running-hours or horizon production as hourly throughput.
+
+Use reviewed native adapters for multi-port process quantities and group boundary accounting. Preserve MWh LHV versus tonnes and native factors. Unknown conversions and invalid/missing mappings are unavailable, not zero. Explicit allocation stays labelled allocated, conserves the native aggregate and does not become measured building demand. Avoid counting internal transfers twice.
+
+A geometry edit keeps an otherwise valid native run; an electrical input mutation invalidates it normally. Test cancelled/failed/stale runs, multi-period/representative snapshots, absent source and wrong project. Animate only the rendering; smoothing does not add higher-time-resolution simulation.
+
+Done: V22–28 and applicable domain fixtures, with native numerical evidence at exact hours/periods. No solver, dynamic simulation, live telemetry or Blender-per-hour job is added.
+
+## Validation
+
+V22–28, V15–16, V38, V48, V51; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
+
+## Coordination
+
+One bounded implementation PR after applicable plan review; current master and open-PR overlap check first. Follow AGENTS and steward, add a release fragment for shipped behavior, never change compiled release notes or another task branch. Record exact tests, genuine worker evidence and unimplemented parts in the PR and handoff.
