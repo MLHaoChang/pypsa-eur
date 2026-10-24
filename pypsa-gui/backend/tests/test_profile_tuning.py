@@ -39,8 +39,12 @@ def test_untuned_generation_matches_master(technology):
     result = _generate(technology)
     fixture = Path(__file__).parent / "fixtures/profile_gen/untuned_master_1871073.npz"
     with np.load(fixture, allow_pickle=False) as baseline:
+        actual = result.series.to_numpy()
+        expected = baseline[technology]
+        assert actual.dtype == expected.dtype
+        np.testing.assert_array_equal(np.isnan(actual), np.isnan(expected))
         np.testing.assert_allclose(
-            result.series.to_numpy(), baseline[technology],
+            actual, expected,
             rtol=1e-12, atol=0, equal_nan=False,
         )
     pd.testing.assert_index_equal(
