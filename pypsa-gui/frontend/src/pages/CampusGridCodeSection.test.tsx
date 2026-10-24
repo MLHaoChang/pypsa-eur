@@ -140,7 +140,7 @@ describe('grid codes: upload', () => {
     const input = await screen.findByLabelText('Grid-code document')
     const file = pdf()
     await userEvent.upload(input, file)
-    expect(await screen.findByText(/such as 1-40, 120-180/)).toBeTruthy()
+    expect(await screen.findByText(/^the PDF has 292 pages;.*such as 1-40, 120-180$/)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('Pages (optional)'), '1-40')
     await userEvent.upload(input, file)
     await waitFor(() => expect(api.uploadGridCodeDocument).toHaveBeenCalledTimes(2))
