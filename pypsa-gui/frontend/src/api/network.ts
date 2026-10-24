@@ -1,6 +1,7 @@
 import client from './client'
 import { useUIStore } from '../store/uiStore'
 import { useSitesStore } from '../site3d/sitesStore'
+import { sitesApi } from './sites'
 import type { Bus, Carrier, CatalogPayload, ShuntImpedance, Generator, GeneratorProfileMeta, Line, Link, LinkProfileMeta, Load, LoadProfileMeta, LoadAggregate, LoadSection, StorageUnit, Store, Transformer, TransformerType, SnapshotInfo, NetworkMeta, TimeseriesData, TimeseriesInfo } from './types'
 import type { RescalePreview } from '../utils/rescale'
 import type { LengthSource } from './mapLayout'
@@ -23,7 +24,7 @@ type EquipmentResource = keyof typeof FOOTPRINT_RESOURCES
 function equipmentRows<T extends { name: string }>(resource: EquipmentResource): Promise<T[]> {
   const project = useUIStore.getState().currentProject
   const observed = useSitesStore.getState().docFor(project).asset_footprints ?? {}
-  return client.get<T[]>(`/network/${resource}`).then(r => {
+  return client.get<T[]>(`/network/${resource}`).then(async r => {
     if (project === useUIStore.getState().currentProject && Array.isArray(r.data)) {
       const names = new Set(r.data.map(row => row.name))
       const current = useSitesStore.getState().docFor(project).asset_footprints ?? {}
@@ -31,7 +32,16 @@ function equipmentRows<T extends { name: string }>(resource: EquipmentResource):
       // A late list cannot delete a footprint entered after that request began.
       const missing = Object.keys(observed).filter(key => key.startsWith(prefix)
         && !names.has(key.slice(prefix.length)) && current[key] === observed[key])
-      useSitesStore.getState().dropCachedFootprints(project, missing)
+      if (missing.length && project) {
+        // A missing old name may be a native/chat rename, not a deletion.
+        // Read the authorized canonical metadata; never guess by label.
+        const saved = await sitesApi.getSites(project)
+        if (project === useUIStore.getState().currentProject) {
+          useSitesStore.getState().reconcileCachedFootprints(project, prefix, observed, saved.asset_footprints ?? {}, names)
+        }
+      } else {
+        useSitesStore.getState().dropCachedFootprints(project, missing)
+      }
     }
     return r.data
   })

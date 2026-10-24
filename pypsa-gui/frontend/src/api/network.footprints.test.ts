@@ -14,6 +14,7 @@ beforeEach(() => {
   useSitesStore.getState().replaceDocument('P', { version: 1, sites: [], asset_footprints: {
     'Generator:G': { width_m: 12, depth_m: 6 }, 'Store:T': { width_m: 4, depth_m: 2 },
   } })
+  vi.mocked(sitesApi.getSites).mockResolvedValue({ version: 1, sites: [] })
   vi.mocked(client.delete).mockResolvedValue({ status: 204 })
   vi.mocked(sitesApi.putSites).mockResolvedValue({ saved: 'P', sites: 0 })
 })
@@ -67,4 +68,18 @@ it('a late list cannot drop a footprint edited after that read began', async () 
   resolve({data: []})
   await pending
   expect(useSitesStore.getState().docFor('P').asset_footprints!['Generator:G']).toEqual({width_m:20, depth_m:10})
+})
+
+
+it('imports the exact native renamed footprint before unrelated dirty state is flushed', async () => {
+  vi.mocked(client.get).mockResolvedValue({data: [{name: 'renamed'}]})
+  vi.mocked(sitesApi.getSites).mockResolvedValue({version: 1, sites: [], asset_footprints: {
+    'Generator:renamed': {width_m: 12, depth_m: 6}, 'Store:T': {width_m: 4, depth_m: 2},
+  }})
+  await networkApi.getGenerators()
+  expect(useSitesStore.getState().docFor('P').asset_footprints).toEqual({
+    'Generator:renamed': {width_m: 12, depth_m: 6}, 'Store:T': {width_m: 4, depth_m: 2},
+  })
+  await flushPendingSitesToServer('P')
+  expect(sitesApi.putSites).toHaveBeenLastCalledWith('P', useSitesStore.getState().docFor('P'))
 })
