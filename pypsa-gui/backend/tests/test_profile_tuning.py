@@ -50,7 +50,7 @@ def test_untuned_generation_matches_master(technology):
     pd.testing.assert_index_equal(
         result.series.index, pd.date_range("2023-01-01", periods=8760, freq="h"),
     )
-    assert result.series.columns.tolist() == ["g"]
+    pd.testing.assert_index_equal(result.series.columns, pd.Index(["g"], dtype=object))
     assert result.meta == {
         "source": "synthetic",
         "technology": technology,
