@@ -165,6 +165,10 @@ class _State:
 
 
 def _evaluate(work, cset):
+    # capacity_ac and assess_connection both judge through here; refuse rather than drop
+    unjudged = sorted(set(cset["kind"]) - {"branch", "unit"})
+    if unjudged:
+        raise ContractError(f"AC capacity judges branch and unit outages only; kind not judged here: {unjudged}")
     try:
         pp.runpp(work)
     except pp.LoadflowNotConverged:

@@ -15,6 +15,13 @@ across runs and platforms:
 * N-1 unit:   the canonical ``unit_id``.
 * N-2 pair:   ``"{a}--{b}"`` with ``a < b`` lexically, so ``(a, b)`` and
   ``(b, a)`` cannot both appear.
+* Bus section: the bus name, bare as a unit id is. A unit and a bus that
+  share a name collide, and the duplicate check names both kinds.
+* N-M-1: ``"{maint}|{fault}"``, a planned maintenance outage then a fault.
+* N-1-1: ``"{first}>{second}"``, a fault, re-adjustment, then a second fault.
+  Both are ORDERED pairs of N-1 branch ids (the first outage is the one the
+  controls re-adjust to), sorted by id; ``|`` and ``>`` are outside the
+  canonical charset, so the pair is recovered by one split.
 
 A hyphen is inside the canonical charset, so an id is a KEY and not a parse
 target: the triple travels alongside as columns (``from_bus``, ``to_bus``,
@@ -28,11 +35,11 @@ the writer still emits a dead branch (STAT=0) and its CKT counter still
 counts it, so filtering has to happen after the keys are assigned or every
 later circuit on that bus pair shifts by one.
 """
-from itertools import combinations
+from itertools import combinations, permutations
 
 import pandas as pd
 
-from gridspine.schema.contingency import validate_contingency_set
+from gridspine.schema.contingency import COMPOUND_SEPARATORS, validate_contingency_set
 from gridspine.schema.contracts import ContractError
 from gridspine.static.loadflow import branch_keys
 
@@ -44,6 +51,16 @@ EXT_GRID_EXCLUSION_LEDGER = (
     "unit contingencies exclude kind=ext_grid: outaging the slack leaves the "
     "pocket without a reference bus, which is an islanding study with its own "
     "frequency question, not an N-1 contingency (assumed scope)",
+)
+
+#: LEDGER — what a bus-section contingency is.
+BUS_SECTION_LEDGER = (
+    "a bus-section contingency is the loss of one model bus: every branch, "
+    "unit, load and shunt on it goes with it. One model bus is one bus "
+    "section, so a split busbar must be modelled as separate buses joined by "
+    "a coupler to be studied section by section (assumed scope)",
+    "bus-section contingencies exclude the ext_grid slack bus, for the reason "
+    "unit contingencies exclude kind=ext_grid",
 )
 
 _SET_COLUMNS = ["contingency_id", "kind", "element_ids", "order"]
@@ -118,3 +135,77 @@ def n2_candidates(n1: pd.DataFrame) -> pd.DataFrame:
     })
     out = out.sort_values("contingency_id", kind="mergesort").reset_index(drop=True)
     return validate_contingency_set(out)
+
+
+def bus_section_contingencies(net, buses=None) -> pd.DataFrame:
+    """One row per bus section (``BUS_SECTION_LEDGER``): every in-service bus
+    but the slack's, or the named ``buses``. A named bus that is out of
+    service is skipped; an unknown or slack bus is refused."""
+    names = net.bus["name"].astype(str)
+    if names.duplicated().any():
+        raise ContractError(f"bus names on the net are not unique: {sorted(set(names[names.duplicated()]))}")
+    slack = {names.at[b] for b in net.ext_grid["bus"]}
+    on = {names.at[b] for b in net.bus.index if bool(net.bus.at[b, "in_service"])}
+    if buses is None:
+        picked = sorted(on - slack)
+    else:
+        buses = [str(b) for b in buses]
+        unknown = sorted(set(buses) - set(names))
+        if unknown:
+            raise ContractError(f"bus section(s) not on the net: {unknown}")
+        at_slack = sorted(set(buses) & slack)
+        if at_slack:
+            raise ContractError(
+                f"bus section(s) {at_slack} hold the ext_grid slack: {EXT_GRID_EXCLUSION_LEDGER[0]}"
+            )
+        picked = sorted(set(buses) & on)
+    out = pd.DataFrame({
+        "contingency_id": picked,
+        "kind": "bus_section",
+        "element_ids": [[b] for b in picked],
+        "order": 1,
+        "bus": picked,
+    })
+    return validate_contingency_set(out)
+
+
+def _n1_branch_ids(n1: pd.DataFrame, who: str) -> list:
+    n1 = validate_contingency_set(n1)
+    if (n1["order"] != 1).any():
+        raise ContractError(f"{who} takes an N-1 set; got rows with order != 1")
+    if (n1["kind"] != "branch").any():
+        raise ContractError(f"{who} takes a branch set; got non-branch rows")
+    return sorted(n1["contingency_id"])
+
+
+def _ordered_pairs(pairs, kind: str) -> pd.DataFrame:
+    sep = COMPOUND_SEPARATORS[kind]
+    out = pd.DataFrame({
+        "contingency_id": [f"{a}{sep}{b}" for a, b in pairs],
+        "kind": kind,
+        "element_ids": [[a, b] for a, b in pairs],
+        "order": 2,
+    }, columns=_SET_COLUMNS)
+    out = out.sort_values("contingency_id", kind="mergesort").reset_index(drop=True)
+    return validate_contingency_set(out)
+
+
+def n_m_1_contingencies(n1: pd.DataFrame, maintenance=None) -> pd.DataFrame:
+    """N-M-1: every (maintenance, fault) pair of an N-1 BRANCH set, the
+    maintenance outage drawn from ``maintenance`` (branch ids of ``n1``;
+    default all of them). n x (n - 1) = 2070 on case39 with no list, which
+    is why ``screen_planning`` takes a cap."""
+    ids = _n1_branch_ids(n1, "n_m_1_contingencies")
+    if maintenance is None:
+        maint = ids
+    else:
+        maint = sorted({str(m) for m in maintenance})
+        unknown = sorted(set(maint) - set(ids))
+        if unknown:
+            raise ContractError(f"maintenance outage(s) not in the N-1 branch set: {unknown}")
+    return _ordered_pairs([(m, f) for m in maint for f in ids if f != m], "n_m_1")
+
+
+def n_1_1_contingencies(n1: pd.DataFrame) -> pd.DataFrame:
+    """N-1-1: every ordered (first, second) pair of an N-1 BRANCH set."""
+    return _ordered_pairs(list(permutations(_n1_branch_ids(n1, "n_1_1_contingencies"), 2)), "n_1_1")

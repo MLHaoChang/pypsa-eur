@@ -1,6 +1,6 @@
 # The investment case takes the campus study's replacements without buying them twice
 
-Status: ready-for-agent
+Status: done (#656, 8b4bae14)
 Type: task
 Blocked by: none. The IC route that passes the campus extra assets (issue 01) is on master (#148,
 `routers/results.py`, `tests/test_investment_case_campus_route.py`); it calls `owner_assets_response(project)`,

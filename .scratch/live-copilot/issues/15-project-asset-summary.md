@@ -3,7 +3,7 @@
 
 # LC-15 — "open project X and tell me what's in it"
 
-Status: implementation in progress (Claude, branch `claude/copilot-asset-summary`, stacked on LC-10 and PR #391)
+Status: done (#404, b176a76e)
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-01B (exact project names), LC-01A (schema discovery)

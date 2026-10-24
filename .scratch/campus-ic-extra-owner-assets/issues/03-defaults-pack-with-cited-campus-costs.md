@@ -1,6 +1,6 @@
 # Publish the cited campus reference costs: a new defaults-pack version, then the shipped library
 
-Status: ready-for-agent
+Status: done (part A #648, 839868e8; part B #665, 30b313be)
 Type: task
 Blocked by: none for part A (IC); part B (campus) lands with or right after part A. Coordinate with 01: the
 new library is in **2025 money**, so the IC route's money handling (01, step 5) starts to matter in practice.

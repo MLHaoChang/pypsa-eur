@@ -26,7 +26,12 @@ import yaml
 
 from gridspine.schema.contracts import ContractError
 from gridspine.static.connection import CHECKS, Facility, assess_connection
-from gridspine.static.contingency_set import branch_contingencies
+from gridspine.static.contingency_set import (
+    branch_contingencies,
+    bus_section_contingencies,
+    n_1_1_contingencies,
+    n_m_1_contingencies,
+)
 from gridspine.templates.grid_codes import band_for, list_grid_codes, load_grid_code
 
 KV = 110.0
@@ -180,6 +185,24 @@ def test_an_impossible_campus_voltage_band_is_refused(tmp_path, mutate, match):
 # --------------------------------------------------------------------------
 # voltage steps against pandapower solved directly
 # --------------------------------------------------------------------------
+
+def test_a_bus_section_row_is_refused_not_dropped():
+    net = _net()
+    cset = pd.concat([branch_contingencies(net), bus_section_contingencies(net)], ignore_index=True)
+    with pytest.raises(ContractError, match="kind not judged here.*bus_section"):
+        assess_connection(net, Facility(bus="BUS_02", load_mw=40.0), cset, PROFILE)
+
+
+@pytest.mark.parametrize("build", [n_m_1_contingencies, n_1_1_contingencies])
+def test_a_compound_row_is_refused_not_dropped(build):
+    net = _net(parallel=True)
+    n1 = branch_contingencies(net)
+    compound = build(n1)
+    assert len(compound) == 2
+    cset = pd.concat([n1, compound], ignore_index=True)
+    with pytest.raises(ContractError, match="kind not judged here.*n_"):
+        assess_connection(net, Facility(bus="BUS_02", load_mw=40.0), cset, PROFILE)
+
 
 def test_a_load_trip_step_is_the_voltage_rise_pandapower_computes():
     net = _net()

@@ -3,7 +3,7 @@
 
 # Nonblocking domain jobs, recoverable monitoring and results refresh
 
-Status: claimed
+Status: ready-for-agent
 Type: task
 Blocked by: 02, 08, 09
 
