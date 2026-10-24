@@ -95,3 +95,7 @@ Selection opens Building/Area associations or existing equipment properties. Car
 Use validation-matrix.md. Public seams are owned HTTP operations, Site plan user journeys, model mutation/result outputs and external exchange artifacts. Only external worker execution and remote acquisition are substituted in fast tests; algebra and native result projection stay real. Execute a separate genuine Blender/photo integration on supported resources before exposing those capabilities.
 
 Full applicable frontend/backend tests, inventory/control/route contracts and current-head CI remain required per repo rules. Existing 544-test evidence is baseline only. Performance/visual checks include a real packaged-device run, not jsdom alone. Plan approval and later independent review remain open; no approval is implied by this document.
+
+## Interactive configuration delivery
+
+SC-00 N freezes the supported scene/model/display intent map and SC-07 orchestrates it through existing task/dispatch/native edit cards and the shared scene prepare/apply path. SC-01 supplies geometry changes, SC-02 exact asset/Load/facility/port associations and SC-03 supported result-channel projections. V91–V98 exercise initial guidance and iterative adjustment with exact approvals and read-back. Model edits remain independently validated native commands; an unsupported field/port/tool is disclosed rather than routed through geometry or invented generic execution.

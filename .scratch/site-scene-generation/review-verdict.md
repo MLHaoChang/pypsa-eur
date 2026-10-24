@@ -89,3 +89,7 @@ The Standards review reports no hard violations and no actionable heuristic find
 **Advisory GO:** publish this design and begin the bounded SC-00 N prototype/contract validation. Subsequent implementation remains conditional on accepted prototype evidence and applicable engine/UX plan gates. **NO-GO:** release or enable new native/Blender/photo runtime features before actual implementation and required validation. No official GK/UX approval, construction accuracy, broad domain certification or completed conversational quality evaluation is claimed.
 
 Local documentation checks pass: all19Markdown files have SPDX headers, relative links resolve, tickets retain01–08, V01–V90 are unique and diff checks pass. These90cases are planned, not executed tests. No runtime code, dependency, paid model/media call, Blender/photo worker, reconstruction or new runtime test was introduced/run. Later publication-record edits update this verdict and README/HANDOFF status only.
+
+## Interactive copilot configuration clarification — delta review pending
+
+New example intent/effect contracts and V91–V98 make guided creation and iterative site/model/display adjustment explicit. The98-case extension is technical specification work beyond the recorded90-case head; earlier verdicts do not certify it. Delta review pending; runtime release remains gated on implementation and evidence.

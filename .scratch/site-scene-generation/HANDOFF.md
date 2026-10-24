@@ -17,7 +17,7 @@ Generate a visually appealing 3D site first; associate buildings and complexes w
 1. AGENTS.md and current owner/outsourced register; fetch current master and rebaseline open PR overlaps.
 2. spec.md and contracts.md — requirements, canonical persistence/privacy/flow and integrity constraints.
 3. implementation-plan.md and ai-guided-project-flow.md — build sequence and the required whole-process companion/context/approval/recovery integration.
-4. validation-matrix.md — 90 proposed acceptance cases plus domain fixtures.
+4. validation-matrix.md — 98 proposed acceptance cases plus domain fixtures.
 5. tools-and-experiments.md and issues/01–08 — selected tools, independent prototype/build slices and dependencies.
 6. review-verdict.md — reviewed technical SHA, all findings/resolutions and scoped GO/NO-GO.
 
@@ -44,3 +44,7 @@ The entire process is one project flow with contextual AI guidance, not a separa
 Owner requires optional Create/Open/Resume at native site coordinates, disabled before valid location; mapping and reviewing campus precedes model association. Buildings-only save/exit/resume is a valid stop. Existing configured2D/SLD targets and ports/carriers are mapped later, with logical/physical route availability kept distinct; native results play at actual cadence. Read optional-site-workflow.md and workflow-assessment.md, then V73–V90. No new top-level card or parallel model is introduced. The clarification was independently reviewed at exact technical head eb2f8f64f9b7402764c559fafd1034228165c4a0: Spec0unresolved, Standards0unresolved; advisory GO for publication/Native prototype only, normal implementation/release gates remain. No runtime code or engine integration implemented.
 
 Portable Claude implementation-PR handoff (separate package): https://github.com/MLHaoChang/pypsa-eur/blob/claude/codex-review-handoff-20261024/.scratch/codex-handoff/2026-10-24/README.md . Existing G-a/H/I/J/L official review/merge gates and G-b/K prerequisites remain on the coordinator side.
+
+## Interactive configuration clarification
+
+Owner explicitly requires conversational initial configuration and iterative adjustment of geometry, existing load/facility/asset/process associations, supported native connections/parameters and result channels. Read ai-guided-project-flow.md's example intent table and V91–V98, assigned to existing SC-00/01/02/03/07. Preserve separate scene/model/display effect paths and ordinary approvals; unsupported actions disclose a native editor fallback. This98-case technical delta requires its own review; no runtime configuration capability has been implemented by this docs update.

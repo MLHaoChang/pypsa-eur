@@ -161,3 +161,7 @@ This is an implementation specification proposal, not authorization to skip exis
 - IfcOpenShell: https://docs.ifcopenshell.org/ifcopenshell-python/geometry_processing.html — later IFC geometry adapter.
 
 The prior assessment's 544 existing unit/component tests passed on master-equivalent 3D files. They do not certify this proposed feature. No Blender/photogrammetry executable was installed or run, and no uploaded layout/photo was reconstructed in this specification task.
+
+## Required interactive copilot configuration
+
+The single companion supports guided initial configuration and subsequent adjustment, including geometry, asset placement, Load/facility mapping and supported native process/connection/parameter edits, through the existing native approval and scene proposal paths. It must distinguish model topology, scene association and result-display requests. The concrete conversation/action contract is in [ai-guided-project-flow.md](ai-guided-project-flow.md), with V91–V98; it is part of native release acceptance, not merely contextual explanations.
