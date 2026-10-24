@@ -1177,3 +1177,8 @@ def test_a_quoted_ibr_reactive_capability_is_quote_checked_like_the_other_limits
     edited["q_range_ibr"]["quote"] = "a sentence the document never says"
     out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
     assert out["review"]["limits"]["q_range_ibr"] == {"quote_found": False, "found_on_page": None}
+
+
+def test_the_page_range_hint_uses_spaces_and_selects_the_same_pages():
+    assert gc.PAGE_RANGES_EXAMPLE == "1-40, 120-180"
+    assert gc.parse_page_ranges(gc.PAGE_RANGES_EXAMPLE, 292) == list(range(1, 41)) + list(range(120, 181))
