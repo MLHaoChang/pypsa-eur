@@ -200,4 +200,7 @@ def resolve_params(name: str, technology: str | None = None,
     for k, v in (overrides or {}).items():
         params[k] = v
     params["preset"] = p.name
-    return params
+    from services.profile_gen import tuning
+
+    tuning.validate(p.technology, params)
+    return tuning.apply_to_params(p.technology, params, keys=overrides or {})
