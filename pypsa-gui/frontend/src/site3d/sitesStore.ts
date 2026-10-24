@@ -81,6 +81,7 @@ interface SitesState {
   dirty: Record<string, true>
   docFor: (project: string | null) => SitesDocument
   siteById: (project: string | null, siteId: string) => Site | null
+  footprintDrafts: Record<string, Record<string, true>>
   loadFailures: Record<string, true>
   ensureLoaded: (project: string | null, retry?: boolean) => Promise<void>
   upsertSite: (project: string | null, site: Site) => void
@@ -142,6 +143,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
     dirty: {},
     docFor: project => get().docs[keyOf(project)] ?? EMPTY_DOC,
     siteById: (project, siteId) => get().docFor(project).sites.find(s => s.id === siteId) ?? null,
+    footprintDrafts: {},
     loadFailures: {},
     ensureLoaded: async (project, retry = false) => {
       const k = keyOf(project)
@@ -199,7 +201,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
         if (key.startsWith(prefix) && footprints[key] === observed[key] && !names.has(key.slice(prefix.length))) delete footprints[key]
       }
       for (const [key, value] of Object.entries(saved)) {
-        if (key.startsWith(prefix) && names.has(key.slice(prefix.length)) && !footprints[key]) {
+        if (key.startsWith(prefix) && names.has(key.slice(prefix.length)) && !footprints[key] && !get().footprintDrafts[keyOf(project)]?.[key]) {
           assertFootprintValid(key, value)
           footprints[key] = value
         }
@@ -214,6 +216,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
       set(s => ({ docs: { ...s.docs, [keyOf(project)]: { ...doc, asset_footprints: footprints } } }))
     },
     setAssetFootprint: (project, key, value) => {
+      if (!canWrite()) return
       if (value !== null) assertFootprintValid(key, value)
       write(project, doc => {
         const footprints = { ...doc.asset_footprints }
@@ -221,6 +224,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
         else footprints[key] = { ...value }
         return { ...doc, asset_footprints: footprints }
       })
+      set(s => ({ footprintDrafts: { ...s.footprintDrafts, [keyOf(project)]: { ...s.footprintDrafts[keyOf(project)], [key]: true } } }))
     },
     renamePlacement: (project, cls, oldName, newName) => {
       const oldKey = placementKey(cls, oldName), newKey = placementKey(cls, newName)
@@ -260,7 +264,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
-      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {} })
+      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {}, footprintDrafts: {} })
     },
   }
 })
@@ -285,9 +289,12 @@ async function persist(project: string | null): Promise<'server' | 'local' | 're
     await sitesApi.putSites(project, doc)
     clearLocal(project)
     useSitesStore.setState(s => {
-      const dirty = { ...s.dirty }
+      // An older PUT must not acknowledge a newer dimension/reset draft.
+      if (s.docFor(project) !== doc) return s
+      const dirty = { ...s.dirty }, footprintDrafts = { ...s.footprintDrafts }
       delete dirty[keyOf(project)]
-      return { dirty }
+      delete footprintDrafts[keyOf(project)]
+      return { dirty, footprintDrafts }
     })
     return 'server'
   } catch (e) {
