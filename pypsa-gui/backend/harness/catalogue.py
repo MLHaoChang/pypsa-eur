@@ -2206,7 +2206,7 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "ui_set_snapshot",
-        "Move the canvas snapshot picker and show the results overlay at that snapshot, "
+        "Move the canvas snapshot picker and show the overlay at that snapshot, "
         "closing any open panel. On a multi-period network, pass period. "
         "A timestamp not on the time axis is refused. Safety: read.",
         {
