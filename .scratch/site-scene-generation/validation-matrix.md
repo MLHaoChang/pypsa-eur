@@ -67,6 +67,7 @@ Use the existing Site/model/results interfaces where possible. Exact new operati
 | V57 | SC-03 exact null contract | Missing process series/factor/unsupported group total serializes value=null, available=false and reason; resolved zero serializes value=0, available=true; UI never substitutes 0.00. |
 | V58 | Independent milestone/feature gates | Native milestone and layout workflow complete with Blender/CUDA absent; optional actions remain explicitly unavailable without blocking native use. |
 | V59 | SC-01 atomic generation | Crash before pointer commit preserves old state; crash after commit reads the receipt; concurrent snapshot/export contains one complete generation and no mixed bindings/envelopes. |
+| V60 | SC-01 closure export/copy | Seed marked orphan/superseded/failed/cache artifacts under sites/; scene-enabled snapshot/scenario/Save-As/export includes only locked manifest closure, rejects a missing required artifact and rewrites destination-owned refs without exposing foreign originals. |
 
 ## Domain acceptance fixtures
 

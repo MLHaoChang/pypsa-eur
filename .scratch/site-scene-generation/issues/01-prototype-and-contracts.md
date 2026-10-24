@@ -20,7 +20,7 @@ Done for each milestone separately: exact reproducible evidence and its agreed d
 
 ## Validation
 
-V05–08, V14, V29–30, V41–43, V49, V53–59; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
+V05–08, V14, V29–30, V41–43, V49, V53–60; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
 
 ## Coordination
 

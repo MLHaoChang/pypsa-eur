@@ -43,6 +43,7 @@ Recheck current master and AGENTS before each slice. These paths are an initial 
 - Permissions: new routes in `services/not_via_chat.py` and `test_route_chat_disposition.py`; tool inventory only changes if a separately approved chat tool is actually added.
 - Flow authority: `services/flow_service.py`, `routers/flow.py` and frontend flow consumers; additive scene action verdicts, with existing run_ready behavior pinned unchanged.
 - Original-media privacy: new app-data private store outside the project tree, authorized by Project UUID via existing registry/ACL; copy/snapshot/export/import/delete lifecycle tests in the current project paths. Do not inherit uploads/sites recursive export for originals.
+- Enabled-scene export/copy: replace the recursive sites/ subtree copy with the locked-generation manifest-closure builder in contracts.md. Include only authorized referenced derived hashes, reject missing required artifacts, exclude marked orphan/superseded/failed state and rewrite destination-owned references. The current recursive copier does not provide these semantics.
 
 Current outsourced G-a/G-b/H/I/J/K/L scopes do not include these new scene files. Shared projects route, result/prompt, upload and queue files still require a fresh overlap check with all open PRs. No changes to their branches are authorized by this plan.
 

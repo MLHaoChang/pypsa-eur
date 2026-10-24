@@ -17,7 +17,7 @@ Generate a visually appealing 3D site first; associate buildings and complexes w
 1. AGENTS.md and current owner/outsourced register; fetch current master and rebaseline open PR overlaps.
 2. spec.md — requirements, semantics and integrity constraints.
 3. implementation-plan.md — records, candidate interfaces, build sequence and touch points.
-4. validation-matrix.md — 59 proposed acceptance cases plus domain fixtures.
+4. validation-matrix.md — 60 proposed acceptance cases plus domain fixtures.
 5. issues/01–07 — independent prototype/build slices and dependencies.
 
 ## Current evidence and state
