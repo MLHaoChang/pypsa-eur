@@ -169,3 +169,23 @@ def test_a_recognised_decision_question_uses_a_pack_base_without_the_eh_sidecar(
         assert (project_storage_dir(origin) / "eh_template.json").is_file()
     finally:
         enabled.close()
+
+
+def test_report_jobs_keep_the_template_appendix_when_reportable_worksheet_evidence_exists(
+        client, api_project, project_storage_dir):
+    import json
+    from routers.deps import AuthorizedProject
+    from routers.report_jobs import _evidence_for
+    from services.adequacy.worksheet import save_worksheet
+    from tests.test_adequacy_worksheet import _expert_row
+
+    name = api_project("ledger-with-evidence")
+    directory = project_storage_dir(name)
+    (directory / "eh_template.json").write_text(json.dumps({"ledger": [
+        {"item": "reference", "value": 12, "source": "assumed"},
+    ]}))
+    save_worksheet(directory, manual_rows=[_expert_row()], overlays={})
+    project = AuthorizedProject(name=name, directory=directory, uuid=name, org_id="local", registry_key=name)
+    evidence, _figures = _evidence_for(project)
+    assert evidence.tables["template_ledger"].rows[0][:4] == ["reference", "12", "", "assumed"]
+    assert evidence.sections[E.WORKSHEET_SECTION].status == "ok"

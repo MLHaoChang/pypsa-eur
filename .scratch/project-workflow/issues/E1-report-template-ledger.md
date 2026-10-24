@@ -1,6 +1,6 @@
 # E1 follow-up. The template ledger in the reports' assumptions appendix
 
-Status: ready-for-human — appendix draft implemented after GK plan OK; blocked on brief amendment for report_jobs.py metadata-only admission guard (Outsourced task L)
+Status: ready-for-agent — implementation under validation; owner authorized the report_jobs.py metadata-only admission guard fix (Outsourced task L)
 Type: task
 Blocked by: E1a merged (`claude/e1a-planning-years-staged-dc`)
 Gated: yes, gatekeeper (a new report seam). Send the plan first.
