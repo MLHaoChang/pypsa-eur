@@ -18,6 +18,8 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { sitesApi } from '../api/sites'
 import { rawFetchHeaders } from '../api/csrf'
+import { assertFootprintValid } from './footprints'
+import type { AssetFootprint } from './types'
 import { useUIStore } from '../store/uiStore'
 import { evaluateMutation } from '../utils/mutationGuard'
 import {
@@ -79,13 +81,15 @@ interface SitesState {
   dirty: Record<string, true>
   docFor: (project: string | null) => SitesDocument
   siteById: (project: string | null, siteId: string) => Site | null
-  ensureLoaded: (project: string | null) => Promise<void>
+  loadFailures: Record<string, true>
+  ensureLoaded: (project: string | null, retry?: boolean) => Promise<void>
   upsertSite: (project: string | null, site: Site) => void
   removeSite: (project: string | null, siteId: string) => void
   setSiteBuses: (project: string | null, siteId: string, buses: string[]) => void
   setBoundary: (project: string | null, siteId: string, boundary: LngLatTuple[]) => void
   setPlacement: (project: string | null, siteId: string, key: string, placement: Placement) => void
   removePlacement: (project: string | null, siteId: string, key: string) => void
+  setAssetFootprint: (project: string | null, key: string, value: AssetFootprint | null) => void
   renamePlacement: (project: string | null, cls: string, oldName: string, newName: string) => boolean
   /**
    * Arrange (D8): write every packed object's current position as a
@@ -136,9 +140,11 @@ export const useSitesStore = create<SitesState>((set, get) => {
     dirty: {},
     docFor: project => get().docs[keyOf(project)] ?? EMPTY_DOC,
     siteById: (project, siteId) => get().docFor(project).sites.find(s => s.id === siteId) ?? null,
-    ensureLoaded: async project => {
+    loadFailures: {},
+    ensureLoaded: async (project, retry = false) => {
       const k = keyOf(project)
-      if (get().loaded[k]) return
+      if (get().loaded[k] && !retry) return
+      let loadFailed = false
       let doc: SitesDocument
       if (!project) {
         doc = readLocal(null) ?? emptySitesDocument()
@@ -149,6 +155,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
           // Unreachable server: the local fallback is the best we have. A
           // server that ANSWERED (even with nothing) always wins — see the
           // deleted-and-recreated project name in the tests.
+          loadFailed = true
           doc = readLocal(project) ?? emptySitesDocument()
         }
       }
@@ -156,6 +163,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
         // A write that landed while the GET was in flight wins over the fetch.
         docs: s.dirty[k] ? s.docs : { ...s.docs, [k]: doc },
         loaded: { ...s.loaded, [k]: true },
+        loadFailures: loadFailed ? { ...s.loadFailures, [k]: true } : Object.fromEntries(Object.entries(s.loadFailures).filter(([key]) => key !== k)),
       }))
     },
     upsertSite: (project, site) => {
@@ -180,12 +188,24 @@ export const useSitesStore = create<SitesState>((set, get) => {
       delete rest[key]
       return { ...s, placements: rest }
     }),
+    setAssetFootprint: (project, key, value) => {
+      if (value !== null) assertFootprintValid(key, value)
+      write(project, doc => {
+        const footprints = { ...doc.asset_footprints }
+        if (value === null) delete footprints[key]
+        else footprints[key] = { ...value }
+        return { ...doc, asset_footprints: footprints }
+      })
+    },
     renamePlacement: (project, cls, oldName, newName) => {
       const oldKey = placementKey(cls, oldName), newKey = placementKey(cls, newName)
       const doc = get().docFor(project)
-      if (!doc.sites.some(s => oldKey in (s.placements ?? {}))) return false
+      if (!(oldKey in (doc.asset_footprints ?? {})) && !doc.sites.some(s => oldKey in (s.placements ?? {}))) return false
       write(project, d => ({
         ...d,
+        ...(d.asset_footprints && oldKey in d.asset_footprints ? {
+          asset_footprints: Object.fromEntries(Object.entries(d.asset_footprints).map(([key, value]) => [key === oldKey ? newKey : key, value])),
+        } : {}),
         sites: d.sites.map(s => {
           if (!(oldKey in (s.placements ?? {}))) return s
           const { [oldKey]: moved, ...rest } = s.placements
@@ -209,12 +229,13 @@ export const useSitesStore = create<SitesState>((set, get) => {
     })),
     replaceDocument: (project, doc) => {
       doc.sites.forEach(assertSiteValid)
+      for (const [key, value] of Object.entries(doc.asset_footprints ?? {})) assertFootprintValid(key, value)
       write(project, () => doc)
     },
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
-      set({ docs: {}, loaded: {}, dirty: {} })
+      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {} })
     },
   }
 })

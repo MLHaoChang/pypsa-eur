@@ -58,6 +58,7 @@ import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
+import AssetFootprintEditor from '../components/AssetFootprintEditor'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
 import { useReducedMotion, flyStart, flyPose, flyDuration, type Pose } from '../site3d/motion'
 import { useSiteResults, type SiteComponents, type SiteResultObject } from '../site3d/useSiteResults'
@@ -752,9 +753,9 @@ function SiteCanvas() {
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
   const layout = useMemo(() => (site && memberInputs.length > 0
-    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, busCarrier, sizing })
+    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, footprints: sitesDoc.asset_footprints, busCarrier, sizing })
     : null),
-  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing])
+  [site, sitesDoc.asset_footprints, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing])
   const objects: SiteObject[] = layout?.objects ?? []
 
   // ── Site context (WP5): the cache first (never an upstream call), then
@@ -1149,7 +1150,7 @@ function SiteCanvas() {
           onArrangeAll={() => {
             // Everything by the rules, as if nothing had ever been moved: the
             // layout rebuilt with no placements, written as the new placements.
-            const fresh = buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing })
+            const fresh = buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, footprints: sitesDoc.asset_footprints, busCarrier, sizing })
             const placed = fresh.objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading }))
             rearrangeAll(currentProject, site.id, placed)
             notePlacementChange(placed.map(p => p.key))
@@ -1157,6 +1158,8 @@ function SiteCanvas() {
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
+        {selectedComponent && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
+        <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}
         <SiteLegend entries={legend} results={resultsStore} />
         {/* The placement check's findings, in words, each a deep link (S2). */}

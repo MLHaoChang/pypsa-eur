@@ -39,6 +39,10 @@ MAX_SITES_BYTES = 4 * 1024 * 1024
 SITE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SCHEMA_VERSION = 1
 
+# Presentation envelopes only; no cable/line, building-load or bus footprint.
+FOOTPRINT_CLASSES = frozenset({"Generator", "StorageUnit", "Store", "Transformer", "Link"})
+MAX_FOOTPRINT_DIMENSION_M = 100_000
+
 # The PyPSA classes a placement key may name. `Bus` is included: the site
 # view draws a switchyard per bus and the user may move it.
 PLACEABLE_CLASSES = frozenset(
@@ -115,6 +119,23 @@ def _check_vertex(v: object, where: str) -> None:
         raise SitesInvalid(f"{where}: boundary vertex out of range")
 
 
+def _validate_asset_footprints(value: object) -> None:
+    if not isinstance(value, dict):
+        raise SitesInvalid("asset_footprints must be an object")
+    for key, dims in value.items():
+        if not isinstance(key, str):
+            raise SitesInvalid("asset_footprints key must be a string")
+        cls, sep, name = key.partition(":")
+        if not sep or not name or cls not in FOOTPRINT_CLASSES:
+            raise SitesInvalid("asset_footprints key must be <equipment Class>:<name>")
+        if not isinstance(dims, dict):
+            raise SitesInvalid(f"asset_footprints[{key!r}] must be dimensions")
+        for field in ("width_m", "depth_m", *(["height_m"] if "height_m" in dims else [])):
+            v = dims.get(field)
+            if not _finite(v) or not 0 < v <= MAX_FOOTPRINT_DIMENSION_M:
+                raise SitesInvalid(f"asset_footprints[{key!r}].{field} must be positive finite metres <= {MAX_FOOTPRINT_DIMENSION_M}")
+
+
 def validate_sites(doc: object) -> None:
     """
     Raise `SitesInvalid` naming the field, else return. Unknown keys are
@@ -128,6 +149,8 @@ def validate_sites(doc: object) -> None:
     sites = doc.get("sites")
     if not isinstance(sites, list):
         raise SitesInvalid("sites must be a list")
+    if "asset_footprints" in doc:
+        _validate_asset_footprints(doc["asset_footprints"])
     seen: set[str] = set()
     for i, site in enumerate(sites):
         where = f"sites[{i}]"
@@ -174,12 +197,38 @@ def rename_component(doc: dict, component_class: str, old: str, new: str) -> boo
     """
     old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
     changed = False
+    footprints = doc.get("asset_footprints", {})
+    if old_key in footprints:
+        footprints[new_key] = footprints.pop(old_key)
+        changed = True
     for site in doc.get("sites", []):
         placements = site.get("placements")
         if isinstance(placements, dict) and old_key in placements:
             placements[new_key] = placements.pop(old_key)
             changed = True
     return changed
+
+
+def remove_asset_footprint(doc: dict, component_class: str, name: str) -> bool:
+    """A deleted component must not donate its envelope to same-name recreation."""
+    footprints = doc.get("asset_footprints", {})
+    key = f"{component_class}:{name}"
+    if key not in footprints:
+        return False
+    del footprints[key]
+    return True
+
+
+def remove_asset_footprint_on_disk(project_dir: pathlib.Path | str | None, component_class: str, name: str) -> None:
+    if not project_dir:
+        return
+    try:
+        pdir = pathlib.Path(project_dir)
+        doc = read_sites(pdir)
+        if remove_asset_footprint(doc, component_class, name):
+            write_sites(pdir, doc)
+    except (OSError, ValueError) as exc:
+        log.warning("sites.json footprint cleanup failed for %s %r: %s", component_class, name, type(exc).__name__)
 
 
 def rename_component_on_disk(project_dir: pathlib.Path | str | None, component_class: str, old: str, new: str) -> None:

@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): Add optional equipment width, depth and height in the shared Guided/Expert asset and Site editors. User envelopes drive simple 3D proxies, packing and land-area checks; reset restores the labelled library estimate. Dimensions stay separate from electrical parameters and results.
