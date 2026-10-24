@@ -75,6 +75,17 @@ Both independent agents reviewed the technical delta and confirmed the exact com
 
 Documentation checks pass at the reviewed technical head: all 17 package Markdown files have SPDX headers, relative links resolve, eight tickets follow 01–08, V01–V72 are unique and diff checks pass. The 72 cases remain proposed; no new runtime tests, model calls or worker reconstruction were performed. Later publication-record edits only record this verdict and update README/HANDOFF status, not the technical design. Earlier CI on a129323 does not certify the new head.
 
-## Optional coordinate-first workflow clarification — delta review pending
+## Optional coordinate-first workflow clarification — review complete
 
-The latest owner clarification adds optional-site-workflow.md, source-based workflow-assessment.md and V73–V90, assigned to the existing slices. Earlier verdicts above apply only to their named technical heads. This90-case design requires a new delta review before claiming a current advisory GO. Runtime/engine enablement remains NO-GO pending actual implementation and applicable evidence.
+Reviewed technical head: `eb2f8f64f9b7402764c559fafd1034228165c4a0`.
+Scope: delta after e508bcd5506f9d89f79d728fd773ecec6bb27027;19package Markdown files, eight implementation/prototype tickets and90proposed acceptance cases.
+
+The owner's detailed workflow requires optional entry at native site coordinates, campus mapping before generation, review/correction/explicit regeneration, buildings-only save/resume, later associations to configured native2D/SLD targets and energy connections, and playback at actual native cadence. optional-site-workflow.md is normative; workflow-assessment.md maps source-grounded gaps to the existing slices. V73–V90 pin the new acceptance conditions. No new card, mandatory3D study dependency, duplicate topology model, dummy Bus or default paid engine is introduced.
+
+Both read-only advisory agents confirmed this exact technical head. **Spec:0unresolved findings. Standards:0unresolved findings.** One Spec finding was corrected: PoC is resolved from existing Bus.eh_poc, role/config import/export Links and separate Transformer terminals, preserving multiple/ambiguous relations; no standalone universal PoC class is invented. V82 and SC-02 cover it. Partial result playback retains substantiated layers while missing quantities remain unavailable.
+
+The Standards review reports no hard violations and no actionable heuristic findings. The clarification retains server /flow authority, existing owning editors and return paths, six-card optional scope, native settings/ACL contract freeze, legacy origin compatibility and normal effect/privacy/recovery contracts.
+
+**Advisory GO:** publish this design and begin the bounded SC-00 N prototype/contract validation. Subsequent implementation remains conditional on accepted prototype evidence and applicable engine/UX plan gates. **NO-GO:** release or enable new native/Blender/photo runtime features before actual implementation and required validation. No official GK/UX approval, construction accuracy, broad domain certification or completed conversational quality evaluation is claimed.
+
+Local documentation checks pass: all19Markdown files have SPDX headers, relative links resolve, tickets retain01–08, V01–V90 are unique and diff checks pass. These90cases are planned, not executed tests. No runtime code, dependency, paid model/media call, Blender/photo worker, reconstruction or new runtime test was introduced/run. Later publication-record edits update this verdict and README/HANDOFF status only.
