@@ -81,6 +81,9 @@ function withReturn(target: FlowTarget | null, jump: () => void): void {
   if (origin) useUIStore.setState({ flowReturn: origin })
 }
 
+/** Run a programmatic jump (the assistant's) and remember the view it left. */
+export function withReturnFrom(jump: () => void): void { withReturn(null, jump) }
+
 /** "Back to <origin>": put the view a fix link left back, with its scroll. */
 export function returnToOrigin(): void {
   const o = useUIStore.getState().flowReturn

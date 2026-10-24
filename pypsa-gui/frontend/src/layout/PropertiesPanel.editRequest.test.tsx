@@ -152,3 +152,17 @@ describe('propertiesEditRequest', () => {
     expect(useUIStore.getState().propertiesEditRequest).toEqual({ type: 'Bus', name: 'hub' })
   })
 })
+
+describe.each(['Line', 'Transformer'] as const)('%s edit requests', type => {
+  it('opens Edit Parameters for the selected row and consumes its request', async () => {
+    const row = { name: 'branch', bus0: 'hub', bus1: 'other', s_nom: 100,
+      length: 10, r: 0.1, x: 0.2, b: 0, carrier: 'AC', v_nom_0: 110, v_nom_1: 20 }
+    const method = type === 'Line' ? 'getLines' : 'getTransformers'
+    vi.spyOn(networkApi, method).mockResolvedValue([row] as never)
+    useUIStore.setState({ currentProject: 'Demo', selectedComponent: { type, name: 'branch' },
+      propertiesEditRequest: { type, name: 'branch' } })
+    renderPanel()
+    expect(await screen.findByText('Edit Parameters')).toBeTruthy()
+    expect(useUIStore.getState().propertiesEditRequest).toBeNull()
+  })
+})

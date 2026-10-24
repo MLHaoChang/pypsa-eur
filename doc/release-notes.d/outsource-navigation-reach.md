@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The assistant can now set the canvas snapshot it names (or says it is not on the time axis), keeps a selected component's Properties in view, opens a component's edit form without saving, and switches the canvas to the Hybrid and Site 3D views.
