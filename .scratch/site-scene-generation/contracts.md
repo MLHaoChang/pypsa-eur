@@ -91,3 +91,7 @@ SC-00 N: native model-free generation, flow projection, canonical authority, pri
 SC-00 B: genuine Blender exchange and optional-worker readiness/resource evidence. SC-04 native artifact code can start after N; claiming Blender compatibility requires B. SC-05 cannot enable its worker before B.
 
 SC-00 P: a supported genuine photo-reconstruction/registration experiment and measured limits. SC-06 layout/manual-tracing can start after N and its file policy; its photo action remains unavailable until P. Completion/failure of B and P cannot hold N's accepted status open. Each milestone records source SHA, fixture/engine versions, exact command/output and GO/NO-GO independently.
+
+## Companion integration contract
+
+[ai-guided-project-flow.md](ai-guided-project-flow.md) defines the normative per-turn scope, flow mapping, proposed read/prepare/apply adapters, ordinary audited approvals, exact receipt/read-back, privacy, recovery and manual fallback. Native scene services own the effects; no chat-specific writer or autonomous geometry execution bypass is introduced. SC-00 N freezes these contracts and SC-07 delivers them alongside the native slices; V61–V72 are required integrated acceptance cases.

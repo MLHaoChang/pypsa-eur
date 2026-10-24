@@ -18,9 +18,11 @@ Use a reference 10 x 20 x 8 m building and two known camera/control/scale fixtur
 
 Done for each milestone separately: exact reproducible evidence and its agreed downstream contracts, with each unsupported input/engine explicitly disabled. Record accepted N independently even while B/P remain unavailable or pending. Before SC-02, lifecycle identity must be demonstrably enforceable or its required scope amendment is recorded. No production worker or per-project arbitrary-library override is enabled here.
 
+The owner also requires end-to-end AI guidance: freeze the bounded per-turn context, proposed scene tool tiers/DTOs, approval/receipt/recovery and per-section handoff in ../ai-guided-project-flow.md. Prototype a native journey with the existing scripted provider and real native records; no paid call. This is part of N and must not wait for optional engines.
+
 ## Validation
 
-V05–08, V14, V29–30, V41–43, V49, V53–60; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
+V05–08, V14, V29–30, V41–43, V49, V53–60, V61–72; definitions in ../validation-matrix.md. Tests before implementation at the frozen public seams; no passing evidence is claimed by this ticket.
 
 ## Coordination
 

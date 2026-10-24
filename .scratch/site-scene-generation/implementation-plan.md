@@ -5,7 +5,7 @@
 
 Status: needs-triage — proposed slices; no implementation started
 Baseline: master `aba252d2384f55116bbd15516a5b025951ba265e`
-Read with: spec.md, validation-matrix.md, HANDOFF.md and issues/01–07.
+Read with: spec.md, validation-matrix.md, HANDOFF.md and issues/01–08.
 
 ## Architecture and ownership
 
@@ -24,7 +24,7 @@ These are design contracts, not current routes or classes:
 - Proposal: ID, owner/project/site, base scene/site/target digests, proposed changes, adapter/version, warnings, output hashes, validity/expiry and job state.
 - Receipt: proposal ID, admitted revision, resulting revision, effect summary and status. A duplicate apply returns the established receipt, not another write.
 
-Propose authenticated GET/PUT scene, create/read/cancel scene job, preview/apply proposal and create/read/download export operations under existing project/site routing. Before code, enumerate exact method/path/request/error contracts against current OpenAPI. Every new route gets a stated chat disposition in E's route coverage test; no new chatbot tool is silently implied. Reuse ProjectAccessDep, edit locks, upload guards and owned artifact delivery rather than importing their internals into worker math.
+Propose authenticated GET/PUT scene, create/read/cancel scene job, preview/apply proposal and create/read/download export operations under existing project/site routing. Before code, enumerate exact method/path/request/error contracts against current OpenAPI. Every new route gets a stated chat disposition in E's route coverage test; no new chatbot tool is silently implied. SC-07 explicitly specifies the proposed bounded scene-context and prepare/apply adapters, subject to frozen contracts and normal review. Reuse ProjectAccessDep, edit locks, upload guards and owned artifact delivery rather than importing their internals into worker math.
 
 Scene persistence uses expected_revision. Initial read of a legacy project synthesizes an empty scene without writing or migrating it. Atomic apply verifies all revisions, ownership, target identity and artifact hashes before atomically switching the current-generation pointer. A half-written generation is not visible and cannot become a fallback source. Model mutations are separate native commands; there is no scene-to-network back door. A placement failure after model creation preserves the native asset and explains the unfinished placement instead of retrying creation.
 
@@ -41,6 +41,7 @@ Recheck current master and AGENTS before each slice. These paths are an initial 
 - Exchange: new pure scene manifest/GLB normalization module; existing heroLoader/noCdn/bounds tests guide browser asset constraints but are not a general arbitrary-scene importer.
 - Jobs: existing solve queue is electrically specialized. Decide a separate bounded scene job runner versus a properly typed adapter using measured prototype evidence; do not insert an arbitrary job kind that falls through to solving.
 - Permissions: new routes in `services/not_via_chat.py` and `test_route_chat_disposition.py`; tool inventory only changes if a separately approved chat tool is actually added.
+- AI guidance: existing harness compose/workflows/dispatch/eventlog/navigation and native edit-card contracts; companion per-turn UI context and flow-navigation return anchors. See ai-guided-project-flow.md; no second executor or provider stack.
 - Flow authority: `services/flow_service.py`, `routers/flow.py` and frontend flow consumers; additive scene action verdicts, with existing run_ready behavior pinned unchanged.
 - Original-media privacy: new app-data private store outside the project tree, authorized by Project UUID via existing registry/ACL; copy/snapshot/export/import/delete lifecycle tests in the current project paths. Do not inherit uploads/sites recursive export for originals.
 - Enabled-scene export/copy: replace the recursive sites/ subtree copy with the locked-generation manifest-closure builder in contracts.md. Include only authorized referenced derived hashes, reject missing required artifacts, exclude marked orphan/superseded/failed state and rewrite destination-owned references. The current recursive copier does not provide these semantics.
@@ -57,11 +58,13 @@ Current outsourced G-a/G-b/H/I/J/K/L scopes do not include these new scene files
 6. SC-05: configured Blender worker and controlled return. Trusted pinned scripts, capability readiness, runtime limits, cancellation, export base IDs, preview and explicit apply. Desktop launch optional. Reference-only import for unmappable geometry; no arbitrary .blend execution.
 7. SC-06: uploaded-layout adapters and photo reconstruction. The layout/manual-calibration portion depends on N and its own file-policy evidence, not B/P. Photo depends on P and the common proposal lifecycle, not necessarily Blender. Vector CAD/IFC extraction and photogrammetry have independent adapter/evidence gates. Use one proven reconstruction worker, not several heavy dependencies. Photo output is reference geometry until semantic proxies and metric registration are established.
 
+8. SC-07: integrated AI guidance, context, typed scene adapters and recovery alongside SC-01–SC-03; do not defer it until optional engines. SC-00 N freezes these contracts and the native integrated release includes V61–V72. Optional engine guidance is enabled only with its own capability. See issues/08-ai-guided-project-flow.md and ai-guided-project-flow.md.
+
 Do not combine all slices into one implementation PR. Each PR carries tests, the applicable release fragment, changed route dispositions, screenshots in Guided/Expert if UI changes, and a current handoff. Specs alone do not receive implementation pass/coverage claims.
 
 ## User-facing integration
 
-Retain the existing Site plan destination. An initial source choice (Location, Layout or Photos when available) leads to a common building preview. A source-specific deficiency opens calibration/correction in place. Show observed/estimated/proposed distinctions and an inspectable source line.
+Follow ai-guided-project-flow.md throughout: one project flow and one companion, server-derived completion, confirmed actions and durable read-back, manual/no-provider parity. Retain the existing Site plan destination. An initial source choice (Location, Layout or Photos when available) leads to a common building preview. A source-specific deficiency opens calibration/correction in place. Show observed/estimated/proposed distinctions and an inspectable source line.
 
 The backend `/flow` projection exclusively supplies action availability, blockers and the computation description. The frontend cannot enable Photos/Blender because a browser/device check says so. Loss of worker readiness, access or limits between verdict, submit and Apply is refused server-side, with an updated in-place state. Original input ingestion uses the private-media policy in contracts.md, not the generic project uploads directory.
 

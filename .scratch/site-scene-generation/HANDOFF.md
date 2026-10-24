@@ -16,9 +16,9 @@ Generate a visually appealing 3D site first; associate buildings and complexes w
 
 1. AGENTS.md and current owner/outsourced register; fetch current master and rebaseline open PR overlaps.
 2. spec.md and contracts.md — requirements, canonical persistence/privacy/flow and integrity constraints.
-3. implementation-plan.md — records, candidate interfaces, build sequence and touch points.
-4. validation-matrix.md — 60 proposed acceptance cases plus domain fixtures.
-5. tools-and-experiments.md and issues/01–07 — selected tools, independent prototype/build slices and dependencies.
+3. implementation-plan.md and ai-guided-project-flow.md — build sequence and the required whole-process companion/context/approval/recovery integration.
+4. validation-matrix.md — 72 proposed acceptance cases plus domain fixtures.
+5. tools-and-experiments.md and issues/01–08 — selected tools, independent prototype/build slices and dependencies.
 6. review-verdict.md — reviewed technical SHA, all findings/resolutions and scoped GO/NO-GO.
 
 ## Current evidence and state
@@ -34,3 +34,7 @@ Review SC-00 Native milestone in issues/01-prototype-and-contracts.md and freeze
 Open items: exact external runtime/packaging choice, supported photo engine/hardware, frozen file/resource limits, metric registration criteria, agreed real-site fixtures and native model-target lifecycle hooks. Canonical authority, original-media privacy, geometry-first admission and /flow authority are now specified in contracts.md; runtime proof remains a prototype outcome. These are named prototype outcomes, not permission to guess silently. Existing engine/UX review requirements apply to future code. Owner/coordinator arranges review; do not contact reviewers from this session.
 
 Preserve the separate G-a/G-b/K task package and its handoff at `/workspace/scratch/gb-k-readiness-20261024/NEXT-STEPS.md`. This design must not rewrite or merge their branches. Coordinator retains merge authority.
+
+## Owner clarification: integrated guidance
+
+The entire process is one project flow with contextual AI guidance, not a separate 3D wizard. ai-guided-project-flow.md, SC-07 (issues/08-ai-guided-project-flow.md) and V61–V72 specify it. Freeze contracts in SC-00 N; deliver shared guidance alongside SC-01–SC-03, not after optional engines. Scope includes existing section mapping, bounded fresh context, approved scene/model actions, native receipt/read-back, truthful result explanations, resume and manual fallback. No new voice stack, paid evaluation or autonomous execution is implied. Earlier review remains historical for the 60-case scope; check the extension review record before claiming a current reviewed design.

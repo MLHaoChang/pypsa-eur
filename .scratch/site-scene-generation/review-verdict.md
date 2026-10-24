@@ -61,3 +61,7 @@ Final Standards review: no hard violations unresolved and no blocking heuristic 
 - No Blender/photo executable was installed or run, no photos/layouts reconstructed, no paid model/media calls, external reviewer contact, deployment or merge occurred.
 
 Summary: Spec 0 unresolved (five findings corrected); Standards 0 unresolved (three findings corrected). First implementation task is the independent Native milestone in issues/01-prototype-and-contracts.md.
+
+## Owner clarification extension — AI guidance (pending delta review)
+
+The owner requires the complete process to be part of the overall project flow with AI guidance. New ai-guided-project-flow.md, SC-07, V61–V72 and cross-cutting requirements in all slices specify that integration. This is a technical specification change beyond the reviewed head above; its independent delta verdict is pending. No previous exact-head review or CI result certifies the extension. Runtime release remains NO-GO pending implementation and evidence.

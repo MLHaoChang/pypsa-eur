@@ -40,6 +40,10 @@ Imported OSM buildings currently form background meshes. The packer consumes mod
 13. Close, reload, copy a scenario, restore a snapshot or export/import a project without losing geometry, provenance or binding integrity.
 14. Work offline with the saved scene and parametric fallback; missing workers or remote sources explain their unavailability.
 
+## Integrated project flow with AI guidance
+
+The entire process is part of the existing project flow with the single GridSpine companion, as specified in [ai-guided-project-flow.md](ai-guided-project-flow.md). Guidance follows the current section, selected building/model target, planning period and study scope through site generation, parameterization, approved execution and native results. It explains blockers, prepares typed proposals and reads back outcomes; native /flow and receipts determine progress. Manual controls remain usable without a provider. This integration is a required native release deliverable, not an optional chat link or a separate 3D wizard.
+
 ## Domain model
 
 Keep Site and campus study distinct. A Site owns geometry; the campus study remains the native electrical analysis on the Site's buses. The scene is a view and placement record, not a solver or engineering certification.
