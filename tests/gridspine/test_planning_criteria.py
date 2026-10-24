@@ -656,16 +656,18 @@ def test_angle_matches_a_hand_computed_two_bus_case():
     assert res["angle_verdict"].iloc[0] == "pass"
 
 
-def _shifted_pair():
-    """Two parallel 110/20 kV transformers of a vector group with a 150 degree
-    phase shift, feeding a 10 MW load."""
+def _shifted_pair(shift=150.0):
+    """Two parallel 110/20 kV transformers with vector-group shift ``shift``
+    degrees, feeding a 10 MW load. The library type is YNd5 (150 degrees);
+    any other shift is written onto both copies."""
     n = pp.create_empty_network(sn_mva=100)
     hv, lv = pp.create_bus(n, 110, name="BUS_H"), pp.create_bus(n, 20, name="BUS_L")
     pp.create_ext_grid(n, hv, vm_pu=1.0, name="SLK")
     for _ in range(2):
-        pp.create_transformer(n, hv, lv, "25 MVA 110/20 kV")
+        i = pp.create_transformer(n, hv, lv, "25 MVA 110/20 kV")
+        n.trafo.at[i, "shift_degree"] = float(shift)
     pp.create_load(n, lv, p_mw=10.0, q_mvar=2.0)
-    assert (n.trafo["shift_degree"] == 150.0).all()
+    assert (n.trafo["shift_degree"] == shift).all()
     return n
 
 
@@ -679,6 +681,34 @@ def test_angle_across_a_shifted_transformer_excludes_its_phase_shift():
     named, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed", pairs=(first, second)))
     assert (named["angle_verdict"] == "pass").all()
     assert (named["angle_deg"] < 10.0).all()
+
+
+def test_a_330_degree_shift_wraps_to_the_small_angle_across_the_branch():
+    """YNd11 is 330 degrees, the same angle as -30. Subtracting that shift
+    and skipping the wrap reports about 360 degrees and fails a 10 degree
+    limit. The nameplate's principal angle is 30 degrees."""
+    n = _shifted_pair(330.0)
+    cset = branch_contingencies(n)
+    first, second = (ids[0] for ids in cset["element_ids"])
+    res, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed", pairs=(first, second)))
+    assert (res["angle_verdict"] == "pass").all()
+    assert (res["angle_deg"] < 10.0).all() and (res["angle_deg"] > 0.0).all()
+
+
+def test_a_bus_pair_across_a_shifted_transformer_keeps_the_raw_angle():
+    """A (bus, bus) pair is the solved voltage-angle difference, not the
+    branch angle with the vector group removed. 150 degrees stays near 150;
+    330 degrees stays near 30. Both fail a 10 degree limit the branch passes,
+    in either bus order."""
+    for shift, principal in ((150.0, 150.0), (330.0, 30.0)):
+        n = _shifted_pair(shift)
+        cset = branch_contingencies(n).head(1)
+        for pair in (("BUS_H", "BUS_L"), ("BUS_L", "BUS_H")):
+            res, _ = _screen(n, cset, angle_limit=AngleLimit(10.0, "assumed", pairs=(pair,)))
+            row = res.iloc[0]
+            assert row["angle_pair"] == f"{pair[0]}:{pair[1]}"
+            assert row["angle_verdict"] == "fail"
+            assert row["angle_deg"] == pytest.approx(principal, abs=5.0)
 
 
 def test_angle_default_measures_in_service_branches_only():

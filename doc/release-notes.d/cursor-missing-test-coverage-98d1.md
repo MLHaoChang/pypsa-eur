@@ -1,0 +1,1 @@
+* Test(gridspine): A 330 degree transformer angle limit wraps the phase shift to the small angle across the branch. A bus pair keeps the raw voltage angle, near the vector group, and can fail a limit the branch itself passes.
