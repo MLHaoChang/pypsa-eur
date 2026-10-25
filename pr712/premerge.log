@@ -1,0 +1,27 @@
+PR #712
+head:       c117493f494a74d7d19d9a053286cb7f347730e9
+master:     aba252d2384f55116bbd15516a5b025951ba265e
+merge-base: aba252d2384f55116bbd15516a5b025951ba265e
+behind:     0 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+not needed (no route, chat-tool, project-ACL or MCP-server change)
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+UX: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+
+== checks
+17 check run(s) on c117493f494a74d7d19d9a053286cb7f347730e9
+all success or skipped
+
+RESULT: ok to merge c117493f494a74d7d19d9a053286cb7f347730e9
