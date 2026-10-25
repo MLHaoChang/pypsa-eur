@@ -1,0 +1,52 @@
+{
+  "type": "shared-component browser with synthetic intercepted HTTP, not full application E2E",
+  "modes": [
+    {
+      "mode": "guided",
+      "save_reload_reset": true,
+      "readonly": true,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/projects/Preview/sites"
+        }
+      ]
+    },
+    {
+      "mode": "expert",
+      "save_reload_reset": true,
+      "readonly": true,
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "GET",
+          "path": "/api/projects/Preview/sites"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/projects/Preview/sites"
+        }
+      ]
+    }
+  ],
+  "errors": []
+}
