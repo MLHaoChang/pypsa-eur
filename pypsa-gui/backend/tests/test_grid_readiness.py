@@ -864,3 +864,119 @@ def test_the_dynamic_requirements_need_an_rms_study(tmp_path):
     d, n = _project(tmp_path, "eh_datacenter")
     dyn = [r for r in G.grid_readiness(d, n, PROFILE)["rows"] if r["id"].startswith("dynamic:")]
     assert dyn and all(r["note"].startswith("Needs an RMS study") and r["verdict"] == "unknown" for r in dyn)
+
+
+# ── harmonic voltage distortion (grid-to-process issue 17) ─────────────────
+
+
+def _harmonic_site(source="6-pulse", rated=20.0, sk=1400.0, spectrum=""):
+    """A grid PoC feeding one process unit, a compressor drive."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-07-01", periods=2, freq="h"))
+    n.add("Bus", "grid", v_nom=110.0)
+    n.add("Bus", "mv", v_nom=20.0)
+    n.add("Bus", "nh3", carrier="NH3")
+    n.add("Generator", "grid_supply", bus="grid", carrier="grid", p_nom=500.0, marginal_cost=50.0)
+    n.add("Link", "grid_import", bus0="grid", bus1="mv", p_nom=60.0, efficiency=0.99)
+    n.add("Link", "compressor", bus0="mv", bus1="nh3", p_nom=5.0)
+    n.add("Load", "nh3_offtake", bus="nh3", p_set=4.0)
+    n.buses["eh_poc"] = [True, False, False]
+    n.buses["eh_sk_mva"] = [sk, math.nan, math.nan]
+    n.links["eh_process"] = [False, True]
+    n.links["rated_mva"] = [math.nan, rated]
+    n.links["harmonic_source"] = ["", source]
+    n.links["harmonic_spectrum"] = ["", spectrum]
+    return n
+
+
+def _harmonic_row_of(tmp_path, n, profile=PROFILE, **kw):
+    return _rows(G.grid_readiness(tmp_path, n, profile, **kw))["harmonic_distortion"]
+
+
+def test_without_a_harmonic_limit_the_row_is_unknown(tmp_path):
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code(PROFILE, raw=True)
+    p.pop("thd_limit_pct")
+    p.pop("harmonic_limits_pct")
+    codes = tmp_path / "codes"
+    codes.mkdir()
+    (codes / "no_harmonics.yaml").write_text(json.dumps(p))
+    row = _harmonic_row_of(tmp_path, _harmonic_site(), "no_harmonics", profile_dirs=(codes,))
+    assert row["verdict"] == "unknown" and row["limit"] is None and row["project_value"] is None
+    assert row["note"] == "The grid code sets no harmonic limit"
+    assert row["section"] == "assets"
+
+
+def test_without_a_process_unit_the_row_is_unknown(tmp_path):
+    n = _harmonic_site()
+    n.links["eh_process"] = [False, False]
+    n.links["harmonic_source"] = ["", ""]
+    row = _harmonic_row_of(tmp_path, n)
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert "No process unit" in row["note"] and row["target"]["field"] == "eh_process"
+
+
+@pytest.mark.parametrize("source, spectrum, field", [("12-pulse", "5:abc", "harmonic_spectrum"),
+                                                      ("24-pulse", "", "harmonic_source")])
+def test_an_invalid_stored_unit_input_makes_the_row_unknown(tmp_path, source, spectrum, field):
+    # A malformed stored value must not take the whole scorecard down with it.
+    row = _harmonic_row_of(tmp_path, _harmonic_site(source=source, spectrum=spectrum))
+    assert row["verdict"] == "unknown" and row["assumed"] and row["project_value"] is None
+    assert row["note"].startswith("compressor: Harmonic ")
+    assert row["target"]["field"] == field and row["target"]["entity"] == "compressor"
+
+
+def test_without_a_fault_level_the_row_is_unknown(tmp_path):
+    row = _harmonic_row_of(tmp_path, _harmonic_site(sk=math.nan))
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert "No short-circuit level" in row["note"] and row["target"]["field"] == "eh_sk_mva"
+
+
+@pytest.mark.parametrize("source, verdict, failing", [("6-pulse", "warn", [5]), ("12-pulse", "pass", [])])
+def test_a_six_pulse_drive_warns_where_a_twelve_pulse_passes(tmp_path, source, verdict, failing):
+    row = _harmonic_row_of(tmp_path, _harmonic_site(source))
+    assert row["verdict"] == verdict and row["harmonics"]["failing_orders"] == failing
+    assert row["limit"] == 3.0 and row["unit"] == "% THD"                  # the profile's THD limit
+    assert row["project_value"] == row["harmonics"]["thd_pct"]
+    assert row["section"] == "assets" and row["target"]["entity"] == "compressor"
+
+
+def test_a_demo_spectrum_makes_the_row_assumed_and_says_so(tmp_path):
+    row = _harmonic_row_of(tmp_path, _harmonic_site("12-pulse"))
+    assert row["assumed"] is True and row["harmonics"]["demo_spectrum_units"] == ["compressor"]
+    assert "demo default spectrum for compressor" in row["note"]
+    assert "a screening estimate" in row["note"]
+    assert row["target"]["field"] == "harmonic_spectrum"
+
+
+def test_a_vendor_spectrum_or_a_linear_unit_is_no_demo(tmp_path):
+    for source, spectrum in (("6-pulse", "5:20,7:14"), ("linear", "")):
+        row = _harmonic_row_of(tmp_path, _harmonic_site(source, spectrum=spectrum))
+        assert row["harmonics"]["demo_spectrum_units"] == [] and "demo" not in row["note"]
+
+
+def test_a_unit_without_its_rating_blocks_a_pass(tmp_path):
+    row = _harmonic_row_of(tmp_path, _harmonic_site("12-pulse", rated=math.nan))
+    assert row["verdict"] == "unknown" and row["harmonics"]["no_input_units"] == ["compressor"]
+    assert row["target"] == {**row["target"], "entity": "compressor", "field": "rated_mva"}
+
+
+def test_the_row_equals_the_campus_studys_harmonic_csv(tmp_path):
+    """The scorecard and ``campus_harmonics.csv`` read the same S_k and limits on a
+    single-PoC network-produced campus, so their THD and worst order agree."""
+    from gridspine.drivers.campus_study import (
+        HARMONICS_CSV, SK_FROM_NETWORK, draft_from_project, harmonics_campus, prepare_campus)
+
+    n = _harmonic_site()
+    n.optimize(solver_name="highs")
+    path = tmp_path / "network.nc"
+    n.export_to_netcdf(str(path))
+    prepare_campus(tmp_path / "run", draft_from_project(path).spec, path)
+    harmonics_campus(tmp_path / "run", PROFILE)
+    poc = pd.read_csv(tmp_path / "run" / HARMONICS_CSV).query("level == 'poc'").iloc[0]
+    assert poc["sk_mva_source"] == SK_FROM_NETWORK
+    row = _harmonic_row_of(tmp_path, pypsa.Network(str(path)))
+    assert row["harmonics"]["thd_pct"] == pytest.approx(poc["thd_pct"], rel=1e-9)
+    assert row["harmonics"]["worst_u_h_pct"] == pytest.approx(poc["worst_u_h_pct"], rel=1e-9)
+    assert row["project_value"] == pytest.approx(poc["thd_pct"], rel=1e-9)

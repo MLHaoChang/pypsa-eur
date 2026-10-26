@@ -5,7 +5,8 @@ Grid-to-process custom network columns: the process-unit columns on Link and the
 Not PyPSA attributes and not Energy Hub tags, so they have their own registry beside `EH_CUSTOM_COLUMNS`. They ride
 the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project that never writes one never gets the
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
-"process_role" (one of PROCESS_GENERATOR_ROLES or "") and "text".
+"process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
+and "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen).
 """
 from __future__ import annotations
 
@@ -19,12 +20,19 @@ CRITICALITY_TIERS: tuple[str, ...] = ("safety", "process_critical", "process_fle
 # `lost_production` stream). The empty string is "an ordinary generator".
 PROCESS_GENERATOR_ROLES: tuple[str, ...] = ("buy_in", "shortfall")
 
+# A unit's drive topology or heater control for the harmonic screen (grid-to-process issue 17); `linear` declares a
+# unit that emits none. The empty string is "not set" (no input). Equal to `gridspine.static.harmonics.TOPOLOGIES`.
+HARMONIC_SOURCES: tuple[str, ...] = ("linear", "6-pulse", "12-pulse", "18-pulse", "active-front-end", "phase-angle",
+                                     "burst", "thyristor-stack")
+
 PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Bus": {"mwh_per_t": "float_nonneg", "product_value": "float_nonneg",
             "lost_production_value": "float_nonneg"},
     "Generator": {"process_role": "process_role"},
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
-             "specific_energy_kwh_per_t": "float_nonneg"},
+             "specific_energy_kwh_per_t": "float_nonneg", "rated_mva": "float_nonneg",
+             "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
+             "spectrum_post_filter": "bool"},
 }
 
 

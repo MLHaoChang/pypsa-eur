@@ -18,6 +18,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
+from models.process_unit import HARMONIC_SOURCES
 from services.asset_schema.schema import part_columns
 
 GROUPS = ("identity", "size", "investment", "fom", "variable", "performance", "replacement", "provenance")
@@ -385,6 +386,18 @@ LINK: tuple[FieldSpec, ...] = (
     FieldSpec("specific_energy_kwh_per_t", "performance", "Specific energy", "Display only, derived: electricity "
               "per tonne of product, from the efficiency. The solve reads the efficiency, not this.",
               "kWh/t", "kWh/t", derived=True, reveal_when={"eh_process": True}),
+    FieldSpec("rated_mva", "performance", "Rated apparent power", "Rated apparent power of the drive or heater, for "
+              "the harmonic screen. Leave empty when unknown: the check then reads unknown. It is never taken from "
+              "the capacity.", "MVA", "MVA", reveal_when={"eh_process": True}),
+    FieldSpec("harmonic_source", "performance", "Harmonic source", "The drive topology or heater control that sets "
+              "the unit's harmonic currents. linear declares no harmonic emission. Leave empty when unknown: the "
+              "check then reads unknown.", kind="enum", options=HARMONIC_SOURCES, reveal_when={"eh_process": True}),
+    FieldSpec("harmonic_spectrum", "performance", "Harmonic spectrum", "Harmonic current per order, as order:% of "
+              "rated current, e.g. 5:20, 7:14. Leave empty to use the demo default for the harmonic source.",
+              kind="text", reveal_when={"eh_process": True}),
+    FieldSpec("spectrum_post_filter", "performance", "Spectrum includes the unit's filter", "Tick when the "
+              "harmonic spectrum is measured or quoted after the unit's own harmonic filter.", kind="bool",
+              reveal_when={"eh_process": True}),
     *_outages(with_cf_flag=False),
 )
 
@@ -559,9 +572,9 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 # M5: per class. `empty` sends "" (a text column the write model types `str = ""`: an emptied country or display
 # name is a decision, and null would be refused); GlobalConstraint's optional columns clear to null.
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
-                   "Link": {"bus2", "bus3", "bus4", "criticality_tier"}}
+                   "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Bus": {"mwh_per_t", "product_value"}}
+                   "Bus": {"mwh_per_t", "product_value"}, "Link": {"rated_mva"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:

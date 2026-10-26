@@ -56,6 +56,14 @@ A profile may carry these optional keys:
     (0, 1]. Lagging is reactive power drawn from the grid (``q`` > 0 above),
     leading is reactive power sent to it. ``q_range_demand`` stays as the
     symmetric band.
+``thd_limit_pct``
+    The total harmonic voltage distortion limit at the connection point, %
+    of the fundamental (grid-to-process issue 17), a positive number.
+``harmonic_limits_pct``
+    Per-order harmonic voltage limits at the connection point:
+    ``orders`` ``{h: % of the fundamental}``, h a whole number 2..50, each
+    limit a positive number. The harmonic screen judges on whichever of
+    the two is set.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -103,11 +111,12 @@ PROFILE_ID = re.compile(r"[a-z0-9_]{1,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
-                  "q_capability_pq", "pf_min_lagging", "pf_min_leading")
+                  "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
-                          "pf_min_leading", "dynamic_requirements", "notes", "document", "name"})
+                          "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "dynamic_requirements", "notes",
+                          "document", "name"})
 #: Every key a voltage band may carry.
 BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
                        "clause", "source", "page", "quote"})
@@ -204,7 +213,7 @@ def _check_profile(name, p):
     missing = [k for k in _REQUIRED if k not in p]
     if missing:
         raise ContractError(f"{where} is missing {missing}")
-    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct"):
+    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
@@ -223,6 +232,8 @@ def _check_profile(name, p):
                 raise ContractError(f"{where}: {key} value must be a power factor in (0, 1], got {v!r}")
     if "q_capability_pq" in p:
         _check_q_capability(p["q_capability_pq"], where)
+    if "harmonic_limits_pct" in p:
+        _check_harmonic_orders(p["harmonic_limits_pct"], where)
     bands = p["voltage_bands"]
     if not isinstance(bands, list) or not bands:
         raise ContractError(f"{where}: voltage_bands must be a non-empty list")
@@ -287,6 +298,21 @@ def _check_q_capability(lim, where):
         if i and not pt[0] > points[i - 1][0]:
             raise ContractError(f"{where}: q_capability_pq.points[{i}] p_pu {pt[0]:g} does not follow "
                                 f"{points[i - 1][0]:g}; p_pu must rise strictly, each value once")
+
+
+def _check_harmonic_orders(lim, where):
+    _check_limit("harmonic_limits_pct", lim, where)
+    orders = lim.get("orders")
+    if not isinstance(orders, dict) or not orders:
+        raise ContractError(f"{where}: harmonic_limits_pct.orders must be a non-empty mapping of order to %")
+    for h, v in orders.items():
+        # A profile read from JSON has string keys: "5" is order 5.
+        order = h if isinstance(h, int) and not isinstance(h, bool) else \
+            int(h) if isinstance(h, str) and h.isdecimal() else None
+        if order is None or not 2 <= order <= 50:
+            raise ContractError(f"{where}: harmonic_limits_pct.orders has order {h!r}; an order is a whole number 2..50")
+        if not _is_number(v) or v <= 0:
+            raise ContractError(f"{where}: harmonic_limits_pct.orders[{h}] must be a positive number, got {v!r}")
 
 
 def q_band_at(lim: dict, p_pu: float):
