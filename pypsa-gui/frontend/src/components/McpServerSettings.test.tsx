@@ -126,6 +126,15 @@ it('saves a key and clears the input', async () => {
   expect(input.value).toBe('')
 })
 
+it('says in words why a key is too short to hide', async () => {
+  const data = payload()
+  data.servers[1].key = { present: true, hint: '…abc', redactable: false }
+  vi.mocked(fetchMcpServersOrNull).mockResolvedValue(data)
+  renderSection()
+  expect((await screen.findByTestId('mcp-key-feed-bearer-short')).textContent)
+    .toBe('Too short to hide from logs')
+})
+
 it('shows the tools a test lists, as text', async () => {
   vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
   vi.mocked(postMcpTest).mockResolvedValue({ ok: true, skipped: 1, tools: [

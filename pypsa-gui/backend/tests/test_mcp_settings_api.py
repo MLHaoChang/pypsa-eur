@@ -152,6 +152,8 @@ def test_put_writes_an_http_entry_at_0600_with_a_derived_bearer_slot(admin):
     ("a", _http(url="https://token@example.com/mcp")),
     ("a", _http(url="https://169.254.169.254/latest")),                 # metadata, link-local
     ("a", _http(url="http://169.254.169.254/latest")),
+    ("a", _http(url="https://[::ffff:169.254.169.254]/latest")),         # v4-mapped link-local
+    ("a", _http(url="http://[::ffff:169.254.169.254]/latest")),
     ("a", _http(url="https://[fe80::1]/mcp")),
     ("a", _http(url="https://example.com:99999/mcp")),
     ("a", {"enabled": False}),                                          # no URL
@@ -329,6 +331,22 @@ def test_replacing_or_deleting_an_http_server_clears_its_slots(admin):
     assert "PYPSA_GUI_MCP_KEY__FEED" not in os.environ
     assert _file() == {"servers": []}
     assert admin.delete(f"{BASE}/feed").status_code == 404
+
+
+def test_the_bearer_token_is_cleared_before_the_file_is_replaced(admin, monkeypatch):
+    admin.put(f"{BASE}/feed", json=_http())
+    admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET})
+    seen = []
+    real = os.replace
+
+    def spy(src, dst, *a, **k):
+        if os.path.basename(dst) == "mcp-servers.json":
+            seen.append(app_secrets.get_stored("PYPSA_GUI_MCP_KEY__FEED"))
+        return real(src, dst, *a, **k)
+
+    monkeypatch.setattr(mcp_client.os, "replace", spy)
+    assert admin.put(f"{BASE}/feed", json=_http(url="https://other.example/mcp")).status_code == 200
+    assert seen == [None]
 
 
 def test_moving_a_server_to_another_host_clears_its_bearer_token(admin):

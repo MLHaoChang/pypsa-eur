@@ -866,6 +866,9 @@ def put_mcp_server(
 
     def replace(entries: list[Any]) -> list[Any]:
         _mcp_refuse_unless_http(entries, server_id)
+        # Before the file is written: a crash between the write and the
+        # clear must not leave the old token on the new origin.
+        _mcp_clear_bearer_on_new_origin(server_id, entries, body.url)
         # In place, so the list keeps its order; other entries, valid or
         # not, are written back as they were.
         out, placed = [], False
@@ -881,7 +884,6 @@ def put_mcp_server(
     before = _mcp_update(replace)
     mcp_client.forget(server_id)
     _mcp_clear_orphans(server_id, before, replace(before))
-    _mcp_clear_bearer_on_new_origin(server_id, before, body.url)
     return _mcp_server_out(entry)
 
 

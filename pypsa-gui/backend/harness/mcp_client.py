@@ -124,6 +124,8 @@ def _https_or_loopback(url: str) -> bool:
         address = ipaddress.ip_address(parts.hostname)
     except ValueError:
         address = None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        address = address.ipv4_mapped               # ::ffff:a.b.c.d is a.b.c.d
     if address is not None and address.is_link_local:
         return False
     if parts.scheme == "https":

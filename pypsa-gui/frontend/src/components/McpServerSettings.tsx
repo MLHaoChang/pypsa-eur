@@ -136,7 +136,7 @@ function KeyField({
         </button>
       )}
       {status.redactable === false && (
-        <span className="text-warn" title="Too short to be hidden from logs and transcripts">short</span>
+        <span className="text-warn" data-testid={`${testId}-short`}>Too short to hide from logs</span>
       )}
     </div>
   )
