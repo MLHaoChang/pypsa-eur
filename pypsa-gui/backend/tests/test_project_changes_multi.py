@@ -270,3 +270,16 @@ def test_sweep_and_experiment_allowlist_unchanged(mixed):
                                       "capital_cost", "r", "x"}
     with pytest.raises(HTTPException):
         assistant_tools._changes([{"component_class": "Line", "names": ["L1"], "attribute": "length", "value": 2.0}])
+
+
+def test_a_priced_part_without_a_lifetime_is_refused_as_a_single_edit_is(mixed):
+    # GK B: the bulk handler skips the part check update_component runs, so one
+    # card could store a priced energy part that no lifetime prices.
+    with pytest.raises(HTTPException) as single:
+        chat_tools.update_component("StorageUnit", "Battery", {"inv_energy_overnight": 50000.0})
+    assert single.value.status_code == 422
+    detail = refusal([{"component_class": "StorageUnit", "names": ["Battery"],
+                       "attribute": "inv_energy_overnight", "value": 50000.0}])
+    assert detail["error_kind"] == "invalid_edit_value"
+    assert str(single.value.detail) in detail["message"]
+    assert values() == BEFORE

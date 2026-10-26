@@ -442,13 +442,26 @@ def _preview_candidate(ctx, parsed):
     """The candidate network, its typed diff and the edit card's rows. Each
     class runs through the native bulk handler on an isolated copy, so derived
     columns recompute and show as derived rows."""
-    from services import change_log_service, chat_tools
+    from services import change_log_service, chat_tools, network_crud
     from harness import edit_card
 
     targets = {}
     for change in parsed:
         for name in change.names:
             targets.setdefault(change.component_class, {}).setdefault(name, {})[change.attribute] = change.value
+    # The bulk handler skips the priced-part check a single edit runs
+    # (`network_crud._update_component`): a part priced without a lifetime is
+    # refused here, before any sandbox work, with the single edit's words.
+    for klass, rows in targets.items():
+        attr = edit_card._component_attr(klass)
+        for name, attrs in rows.items():
+            kwargs, submitted = network_crud.split_parts(klass, dict(attrs))
+            merged, current = network_crud.split_parts(
+                klass, network_crud._merge_partial_update(ctx.network, attr, name, kwargs))
+            try:
+                network_crud._check_investment_parts(klass, {**current, **submitted}, row=merged)
+            except HTTPException as exc:
+                workflow._refuse("invalid_edit_value", f"{klass} {name!r}: {exc.detail}")
 
     def run(klass):
         groups = {}
