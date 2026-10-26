@@ -1,0 +1,33 @@
+PR #712
+head:       1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329
+master:     7234bfbd7b0b678c8cf8f5cf3adb7b3e28ed0013
+merge-base: aba252d2384f55116bbd15516a5b025951ba265e
+behind:     5 merge(s) on master since merge-base
+
+== conflicts
+clean
+
+== files changed on both sides since merge-base
+none
+
+== semantic tests
+not needed (no route, chat-tool, project-ACL or MCP-server change)
+
+== template sync
+not needed (no live coordination file changed)
+
+== reviewer verdicts
+GK: no verdict posted (not blocking: premerge cannot tell whether this PR needs it)
+UX NOT OK @c117493f494a74d7d19d9a053286cb7f347730e9 is newer than the last UX OK: blocks
+
+== checks
+16 check run(s) on 1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329
+  queued      -               GUI backend pilot gate and QA drivers
+  in_progress -               GUI backend shard 3/4
+  in_progress -               GUI backend shard 4/4
+  queued      -               GUI backend shard 2/4
+  in_progress -               GUI backend shard 1/4
+  in_progress -               GUI frontend
+  queued      -               Integration (macos)
+
+RESULT: blocked (UX NOT OK; checks: 7 running)

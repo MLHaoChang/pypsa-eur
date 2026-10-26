@@ -34,7 +34,7 @@ The visible Overpass HTTP 502/no imagery line is an actual external-source avail
 - `backend-final.xml` is **historical c117493f evidence** (357 passed/one existing empty-parameter skip), not a new backend run. No backend code changed in this UX follow-up. Do not sum old and new counts.
 - Both local advisory axes cleared the code at the current head; Spec additionally visually accepted all six required screenshots and the extra drawer/overlay/read-only states. These are not official UX/GK verdicts.
 
-Applicable exact-head remote CI is recorded in the PR body and handoff as it completes. Old c117493f CI does not certify this new head. Official UX/GK re-review is pending; the coordinator owns merge. Probe text logs normalize trailing whitespace only; original local stdout remains under `/workspace/scratch/pr712-ux-20261026`.
+Current remote snapshot: CodeQL 40373202818 and release guard 40373202850 passed; Unit executed successfully and frontend Type-check passed. Test 40373202777 is still pending. See remote-test-jobs.json and remote-codeql-jobs.json. Current premerge.log is bound to the new head/master and reports a clean merge/no overlap, with CI and the prior UX NOT OK still blocking. Applicable exact-head remote CI is recorded in the PR body and handoff as it completes. Old c117493f CI does not certify this new head. Official UX/GK re-review is pending; the coordinator owns merge. Probe text logs normalize trailing whitespace only; original local stdout remains under `/workspace/scratch/pr712-ux-20261026`.
 
 ## Historical evidence
 

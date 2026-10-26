@@ -1,0 +1,29 @@
+{
+  "source_head": "1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329",
+  "screenshots": {
+    "guided-properties-collapsed.png": "274c0b931e4682323a8cecb582af341a701a4b8fe66d522c0da33b51e0178dbc",
+    "guided-properties-open.png": "f48db20f90da418e3d565cdcf66a54e2412fc9e3d2576e385619f889d12e5416",
+    "guided-properties-saved.png": "fd371d2eba1fddd1f25f3da5ba660a01a150fd26dfc241dfe7a2e3ab8054ea23",
+    "guided-site.png": "f1b6f76f1ffe4a29923418b15fba5873d1c61cdc9c17094d27214c58ee1541a1",
+    "guided-site-drawer.png": "a1ad45979d9ffd922a6dfd296bced219bc87d676232fe5d37517cfbe3473d913",
+    "expert-properties-collapsed.png": "47c7c5fe95d8fb13d19c4cb8c84f5357f2ad9a7ca27a8748c93971e8dbcb59ce",
+    "expert-properties-open.png": "228beef32ebd5c548e373d59634481b161c52209f93354bac51495ab1978f770",
+    "expert-properties-saved.png": "f7eca0aac91e2f676db00d96d686515f659912f2ca880fb6aced75131beaf3a0",
+    "expert-site.png": "9912ec32f8209cce1a420b446a2007aebabae044d1d9aad498ae9eaeae5f4e42",
+    "expert-site-overlay.png": "7fe806a494c292f9692b367c53331fa5169f71fc8a9ba62ca3d1149f42639b4a",
+    "expert-readonly.png": "0e3fa963eddc9493a5e35c01ea212fea7e2f0edc24d013bf868f9c91de09839f",
+    "guided-readonly.png": "e42012542d0a7f5d1bca9b911ab1759cb6780d747393b49213307f19c4a84fcf"
+  },
+  "local_frontend": {
+    "passed": 940,
+    "files": 95,
+    "failed": 0,
+    "pending": 0
+  },
+  "typescript": "passed",
+  "browser": "passed",
+  "new_local_backend_run": false,
+  "official_review": "pending",
+  "remote_test_run": 40373202777,
+  "remote_test_status_at_snapshot": "in_progress"
+}

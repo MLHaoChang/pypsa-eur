@@ -7,7 +7,7 @@ PR: https://github.com/MLHaoChang/pypsa-eur/pull/712
 Source branch: `claude/asset-footprint-parameters`
 Exact current source head: **1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329**
 Previous reviewed head: c117493f494a74d7d19d9a053286cb7f347730e9
-Last fetched master during this fix: f82c8c9fc96cbdc5877c2dddd035623c1fdff97f
+Latest premerge master: 7234bfbd7b0b678c8cf8f5cf3adb7b3e28ed0013
 
 ## Completed in this follow-up
 
@@ -18,6 +18,10 @@ Last fetched master during this fix: f82c8c9fc96cbdc5877c2dddd035623c1fdff97f
 - Twelve real-app screenshots replace the primary synthetic-card evidence. Native HTTP read-back, native foreign-lock transitions, DOM ownership and computed opacity assertions pass; zero browser page errors.
 - Scoped frontend regressions: 940 passed/95 files; TypeScript passed. Backend/solver code is unchanged by this follow-up.
 - Both independent advisory code axes cleared this head; Spec visually accepted the complete required screenshot matrix. No official reviewer approval is implied.
+
+## Current remote snapshot
+
+CodeQL 40373202818, release guard 40373202850 and actual Unit tests passed; frontend Type-check passed. Test run 40373202777 still has frontend/backend/pilot jobs pending at this snapshot. See remote-test-jobs.json for observed step states. Fresh premerge found a clean merge/no overlap but is blocked by pending CI and the prior official UX NOT OK. No green or merge approval is claimed.
 
 ## Pending
 
