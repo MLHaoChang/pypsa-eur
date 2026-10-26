@@ -63,10 +63,16 @@ def site_intake() -> dict:
     }
 
 
+#: The defaults pack the frozen WP0 numbers were recorded and re-derived on.
+WP0_PACK_VERSION = "2026-10-05"
+
+
 def site_library():
     from services.study import library as study_library
 
-    return study_library.load_defaults()
+    # The frozen WP0 parity (u2_pre_numbers.json) was recorded on this pack: pinned, so the
+    # comparison keeps its inputs when the study's PACK_VERSION moves.
+    return study_library.load_defaults(WP0_PACK_VERSION)
 
 
 def site_ledger():

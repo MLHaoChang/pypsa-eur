@@ -209,8 +209,10 @@ DEFAULTS_VERSION_PREFIX = "generic-defaults"
 # own parity check; `test_study_ledger_from_pack` fails when a newer vendored
 # pack changes anything the study reads (its mapped and named rows, the pack
 # tariffs, the finance fields), and `unmapped_pack_rows` stays strict on the
-# pinned pack itself.
-PACK_VERSION = "2026-10-05"
+# pinned pack itself. 2026-10-26 (money-year issue 01): the technology-data rows
+# in 2025 EUR (MONEY-YEAR-1) and the seed tariffs converted to 2025 EUR
+# (MONEY-YR-SEED-1), so the study's money is 2025.
+PACK_VERSION = "2026-10-26"
 
 # Pack value key -> the GS identity in `_TECH_KEYS`, in the ledger's row order
 # (the order of the legacy `technology_costs.csv`, so a seeded ledger lists
