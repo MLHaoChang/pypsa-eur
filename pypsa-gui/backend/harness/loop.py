@@ -2426,11 +2426,16 @@ def _tool_tier(session: ChatSession, tool_name: str) -> str:
     return mcp_client.tier_for(session, tool_name) or _safety_tier_for(tool_name)
 
 
-def _publish_hook(ctx, run_token):
+def _publish_hooks(ctx, run_token) -> dict:
+    """The detached monitor's run-evidence hooks; none without a run record."""
     if run_token is None:
-        return None
+        return {}
     from services import run_evidence
-    return lambda: run_evidence.publish_foreground_run(run_token, ctx)
+    return {
+        "on_terminal": lambda: run_evidence.publish_foreground_run(run_token, ctx),
+        "on_superseded": lambda: run_evidence.publish_foreground_superseded(run_token),
+        "is_pending": lambda: run_evidence.foreground_run_pending(run_token),
+    }
 
 
 def _dispatch_real_tool_call(
@@ -2992,7 +2997,7 @@ def _dispatch_real_tool_call(
                     session, active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
-                    on_terminal=None if task_path else _publish_hook(active_ctx, run_token),
+                    **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
                     from harness import continuation

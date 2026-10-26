@@ -1412,12 +1412,16 @@ def abort():
     raise HTTPException(400, "No simulation running")
 
 
-def ac_pf_refusal(n) -> tuple[str, str] | None:
+def ac_pf_refusal(n, config) -> tuple[str, str] | None:
     """``(error_kind, message)`` for why `/run_ac_pf` would refuse ``n`` (its
     400), or None. Only a solved network with ``fresh`` dispatch has an LP
-    dispatch to fix. One copy for the route and for the load-flow verdict
-    (`services.run_separability`)."""
+    dispatch to fix, and the first Stage-2 error (``_check_stage2_ac_pf`` under
+    ``config``) refuses too: ``fresh`` only compares column sets, so an
+    attribute edit after the solve (r=0, x=0) still passes the dispatch checks.
+    Stage-2 warnings don't refuse. One copy for the route and for the
+    load-flow verdict (`services.run_separability`)."""
     from services.dispatch_status import dispatch_status
+    from services.validation_service import _check_stage2_ac_pf
 
     if not getattr(n, "is_solved", False):
         return "ac_pf_not_solved", "No LOPF solution to fix dispatch from. Run /run first."
@@ -1439,7 +1443,20 @@ def ac_pf_refusal(n) -> tuple[str, str] | None:
         return ("ac_pf_already_run",
                 "AC power flow already ran on this solve, and its values replaced the "
                 "optimisation's. Run the solve again first.")
+    for issue in _check_stage2_ac_pf(n, config):
+        if issue.severity == "error":
+            return issue.code, issue.message
     return None
+
+
+# The refusals `/run_ac_pf` answers with a structured detail, so the chat tool
+# result carries the kind. Literal dicts so the tool-error-kind manifest
+# (`tests/test_tool_error_kind_manifest.py`) derives each kind.
+_AC_PF_KIND_DETAIL = {
+    "ac_pf_already_run": {"error_kind": "ac_pf_already_run"},
+    "stage2_multi_period": {"error_kind": "stage2_multi_period"},
+    "stage2_zero_impedance": {"error_kind": "stage2_zero_impedance"},
+}
 
 
 @router.post("/run_ac_pf")
@@ -1532,12 +1549,11 @@ def run_ac_pf():
             if existing is not None and existing.is_alive():
                 raise HTTPException(409, "Simulation already running")
             # stale state (worker died) → fall through and claim
-        _refusal = ac_pf_refusal(n)
+        _refusal = ac_pf_refusal(n, _state["solver_config"])
         if _refusal is not None:
-            if _refusal[0] == "ac_pf_already_run":
-                # Structured so the chat tool result carries the kind.
-                raise HTTPException(400, {"error_kind": "ac_pf_already_run",
-                                          "message": _refusal[1]})
+            _detail = _AC_PF_KIND_DETAIL.get(_refusal[0])
+            if _detail is not None:
+                raise HTTPException(400, {**_detail, "message": _refusal[1]})
             raise HTTPException(400, _refusal[1])
         # Atomic claim — lifecycle reset + thread handle in one apply, so no
         # window where status="running" but thread is unset.

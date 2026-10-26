@@ -119,7 +119,7 @@ function DerivedRow({ spec, value, stamps }: { spec: AssetFieldSpec; value: unkn
 
 function EnumInput({ spec, fs, set, badge }: { spec: AssetFieldSpec; fs: FS; set: SetFS; badge?: ReactNode }) {
   return (
-    <label className="flex flex-col gap-0.5">
+    <label className="flex flex-col justify-end gap-0.5">
       <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
         <InfoTip text={spec.help}>{spec.label}</InfoTip>
       </FieldLabel>
