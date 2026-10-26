@@ -26,9 +26,18 @@ export interface Site {
   context_fetched_at?: string
 }
 
+export interface AssetFootprint {
+  /** Total equipment envelope, not dimensions per module. Metres. */
+  width_m: number
+  depth_m: number
+  height_m?: number
+}
+
 export interface SitesDocument {
   version: 1
   sites: Site[]
+  /** Presentation only; native ratings/topology and results are unchanged. */
+  asset_footprints?: Record<string, AssetFootprint>
 }
 
 export const SITE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/

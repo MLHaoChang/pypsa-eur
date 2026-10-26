@@ -300,3 +300,19 @@ describe('arrange and reset (WP3)', () => {
     expect(putSites).not.toHaveBeenCalled()
   })
 })
+
+it('keeps footprint metadata through arrange/reset and exact-class rename', async () => {
+  getSites.mockResolvedValue(doc())
+  const s = useSitesStore.getState()
+  await s.ensureLoaded('p')
+  s.setAssetFootprint('p', 'Generator:old', { width_m: 12, depth_m: 6 })
+  s.setAssetFootprint('p', 'Store:old', { width_m: 4, depth_m: 2 })
+  s.arrangeAll('p', 'site_a', [{ key: 'Generator:old', origin: [1, 2], heading: 90 }], [])
+  s.removePlacement('p', 'site_a', 'Generator:old')
+  expect(s.renamePlacement('p', 'Generator', 'old', 'new')).toBe(true)
+  expect(s.docFor('p').asset_footprints).toEqual({
+    'Generator:new': { width_m: 12, depth_m: 6 }, 'Store:old': { width_m: 4, depth_m: 2 },
+  })
+  await flushPendingSitesToServer('p')
+  expect(putSites).toHaveBeenLastCalledWith('p', s.docFor('p'))
+})

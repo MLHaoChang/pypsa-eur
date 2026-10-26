@@ -46,8 +46,10 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
-4. **Tell the sessions.** `send_message` each live session the new id.
+4. **Tell the sessions.** `send_message` each live session the new id. When any session rotates, reviewer or builder, tell every peer that works with it the new id at once.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
+
+When this coordinator's children would hit the session-chain depth limit, the owner starts the successor at depth 0 (owner decision ROTATE-DEPTH).
 
 Done when the routine fires into the new session, every live session has the new id, and `docs/agents/coordinator.md` on master holds it.
 
@@ -99,23 +101,27 @@ After `create_session`, re-enable the sweep routine if [Wakes](#wakes) disabled 
 
 Leave `outcome_branch` unset, so the session can open each PR on its own `claude/*` branch. A session bound to one push branch has to hand its fixes over as patches.
 
+Always pass `source_url`, `model`, `title` and `tags` (lowercase `team:<lead|review|build|assurance>`) on `create_session`. Before opening a package, check `git log origin/master` for it: it may have landed.
+
 Send `docs/agents/session-brief.md`, filled in, as the first message. The brief carries everything the session needs:
 - the owner's decisions, with the owner's own words for the goal;
 - file pointers and the master SHA it starts from;
 - who reviews it (the gatekeeper for engine code);
+- a "Context budget" paragraph: the context size at which to hand off.
 - what "done" looks like.
 
 When a package's last PR merges, read the session's hand-off note, `archive_session` it, and open the next package fresh from that note. Context stays short that way. Every tool call re-reads the whole context, and Sonnet prices cache reads the same as Opus, so a long-lived session costs more than its model tier saves.
 
 ## Merging
 
-Merge one PR at a time:
+Merge one PR at a time. The coordinator merges a PR whose premerge ends in `ok to merge` with each needed reviewer OK current or carried (owner decision MERGE-AUTH-1):
 
 1. Start from a session's `premerge ok <sha>` report. The session drives its PR's CI, so run `scripts/coord/premerge.sh <pr>` once, here; it covers conflicts, overlap, the semantic tests on a trial merge, template sync and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
    - On "TEMPLATE NOT UPDATED", ask the session to port the change to `templates/agent-coordination/`.
    - When the change is specific to this project, rerun with `PREMERGE_TEMPLATE_SYNC=skip` instead and log why.
-2. For gridspine and IC engine changes, the gatekeeper's OK must be on the PR; for a PR that changes UI, the UX reviewer's too (owner decision VERDICT-PR). Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean master merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks.
-3. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged.
+   - Run premerge from a detached origin/master worktree: `git worktree add --detach <scratch>/wt-pm origin/master`, then `git checkout -q --detach origin/master` after each fetch, with `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python`. Never leave a trial merge half-done there (`git merge --abort`): a dirty wt-pm broke ciwait once.
+2. For gridspine and IC engine changes, the gatekeeper's OK must be on the PR; for a PR that changes UI, the UX reviewer's too (owner decision VERDICT-PR). Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean master merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks. Two gatekeepers review by area (owner decision GK-SPLIT-1): GK A for gridspine, DC, grid-to-process and IC/adequacy engine code, GK B for the harness, app, finance and outsourced work. A PR spanning both gets one lead GK, named by the coordinator. Any push after a GK or UX OK needs a re-OK, unless it is a clean base merge whose tree equals `git merge-tree --write-tree <old-head> origin/master`. A hand-resolved conflict always needs a re-OK.
+3. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged. Read `head.ref` from `pull_request_read get` for the merge commit title "Merge pull request #N from <owner>/<head.ref>"; retry once on a GitHub 500.
 4. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.
 
 **A blocked PR:**
@@ -148,7 +154,7 @@ Each refresh is three calls, made at most once per owner report:
 **Feature progress.** One row per subcomponent: each `.scratch/<feature>/issues/*.md` on master, plus the polish backlog, with a `stage` (Done, In review, In progress, Ready, Needs triage, Needs owner, Won't do) and a `note`. The owner wants it high level: core feature, area, percentage built and the names of what is missing. Status lines on master lag merges, so in-flight stages come from the state file. To refresh, download the current file (Artifact `read`, `path` set to the asset id in `datasets/tasks`'s `source.url`), change the rows' `stage` and `note` with a short Python edit, upload it and update `datasets/tasks`.
 
 **Token usage.** Tokens and API-equivalent cost per Berlin day, over every Claude Code session on the account (Cowork sessions are not listed).
-1. A Haiku subagent saves each `list_sessions` page (`mine: true`, `limit: 100`, following `after_id`) verbatim to `<scratchpad>/usage/page-N.json`.
+1. A Haiku subagent saves each `list_sessions` page (`mine: true`, `limit: 100`, following `after_id`) verbatim to `<scratchpad>/usage/page-N.json`. If a page comes back inline with no saved file, note its cursor in the log and continue; older sessions keep their snapshot totals.
 2. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
 3. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
 4. Upload the three files, then one `ArtifactData batch`: `datasets/daily`, `datasets/sessions`, and `state/usage` with the new `snapshots` url.
@@ -161,7 +167,8 @@ Each refresh is three calls, made at most once per owner report:
   - retire a session: rename it "Done · …", then `archive_session`;
   - `list_sessions`: save it and return the `sessions.py` summary;
   - `get_session` of another session.
-- A PR with no session (the coordinator's own): start `scripts/coord/ciwait.sh <max-min ≤ 118> <pr>...` with the Bash tool's `run_in_background`. It prints READY, FAIL, MACOS or TIMEOUT on the first hit. Sessions drive the CI of their own PRs.
+- A PR with no session (the coordinator's own): start `scripts/coord/ciwait.sh <max-min ≤ 118> <pr>...` with the Bash tool's `run_in_background`. It prints READY, FAIL, MACOS or TIMEOUT on the first hit. Sessions drive the CI of their own PRs. `ciwait.sh` exits on the FIRST hit: rerun it after a push or for the remaining PRs. Own a PR with no session (its driver rotated, or Codex) with ciwait, and push small mechanical fixes yourself.
+- `list_sessions` with `limit: 100` overflows a subagent: use `limit: 25` and have it copy the saved tool-results JSON to the file. `list_pull_requests` overflows too: parse its saved file with python.
 - `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call. Read a session's events only that way, from a saved file.
 - Read a PR's file list with `git diff --stat origin/master...<head>`; `pull_request_read get_files` returns hundreds of thousands of characters on a large PR (684k on #491).
 
