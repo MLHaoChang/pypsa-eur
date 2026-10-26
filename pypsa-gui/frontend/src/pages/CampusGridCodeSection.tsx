@@ -84,7 +84,7 @@ function limitValue(path: string, lim: GridLimit): string {
   if (path === 'harmonic_limits_pct') {
     const orders = (lim as GridLimit & { orders?: Record<string, number> }).orders ?? {}
     return Object.entries(orders).sort(([a], [b]) => Number(a) - Number(b))
-      .map(([h, v]) => `h${h} ${v} %`).join(' · ')
+      .map(([h, v]) => `h${h} ${v}\u00a0%`).join(' · ')
   }
   if (path === 'pf_min_lagging' || path === 'pf_min_leading' || path === 'pst_limit' || path === 'plt_limit') {
     return `${lim.value}`

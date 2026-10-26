@@ -366,7 +366,7 @@ export function NumInput({ label, k, fs, set, unit, tip, badge }: {
 }) {
   return (
     <label className="flex flex-col gap-0.5">
-      <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
+      <FieldLabel className="text-[9px] text-muted leading-tight break-words" badge={badge}>
         <InfoTip text={tip}>{label}{unit ? ` (${unit})` : ''}</InfoTip>
       </FieldLabel>
       <input type="number" step="any" value={fs[k] ?? ''}
