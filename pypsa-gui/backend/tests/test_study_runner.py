@@ -860,3 +860,45 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
     case = client.get(f"/api/projects/run-legacy/studies/{sid}/options/bess_2h/case")
     assert case.status_code == 409
     assert case.json()["detail"]["error_kind"] == "ledger_changed_since_run"
+
+
+def test_a_study_seeded_on_an_older_pack_runs_on_its_own_tariff(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 01: a study stored with a ledger seeded on 2026-10-05
+    (2020 EUR) still runs and values its cases after the pin moved to the
+    2025 pack: the seed tariff is read from the pack the ledger names
+    (`library.library_for_ledger`), never the pin's 2025 one, so nothing is
+    refused ``currency_year_mixed`` and its bills are that pack's — the
+    same dispatch billed on the pin's ledger costs exactly the HICP factor
+    more.
+    """
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    totals = {}
+    for name, version in (("run-1005", L.WP0_PACK_VERSION), ("run-pin", L.PACK_VERSION)):
+        sid = _setup(client, api_project, name)
+        base = project_storage_dir(name)
+        study = store.load_study(base, sid)
+        lib = L.load_defaults(version)
+        ledger = L.seed_ledger(Q.get_question(study.question_id), study.intake, lib)
+        year = int(lib.finance["currency_year"])
+        store.save_study(base, study.model_copy(update={
+            "ledger": ledger, "ledger_version": ledger.ledger_version, "currency_year": year}))
+        r = client.post(f"/api/projects/{name}/studies/{sid}/run", json={})
+        assert r.status_code == 202, r.text
+        rec = wait_run(client, name, sid)
+        assert rec["status"] == "done", rec
+        run = client.get(f"/api/projects/{name}/studies/{sid}/run").json()
+        bill = run["details"]["none"]["bill"]
+        assert bill["unavailable"] == {}, bill["unavailable"]
+        totals[version] = (year, bill["total"])
+        case = client.get(f"/api/projects/{name}/studies/{sid}/options/bess_2h/case")
+        assert case.status_code == 200, case.text
+        assert case.json()["engine"] == "finance_engine"
+    assert totals[L.WP0_PACK_VERSION][0] == 2020 and totals[L.PACK_VERSION][0] == 2025
+    factor = 1.257334601  # Eurostat HICP (EEA) 2020->2025, MONEY-YR-SEED-1
+    assert totals[L.PACK_VERSION][1] == pytest.approx(
+        totals[L.WP0_PACK_VERSION][1] * factor, rel=1e-8)

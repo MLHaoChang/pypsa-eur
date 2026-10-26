@@ -1180,7 +1180,6 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         raise HTTPException(409, detail={"error_kind": "intake_changed_since_run", "message": (
             "the study's answers (site, load, tariff or PV) changed after the run; "
             "re-run the study before reading its cases")})
-    library = _library_or_500()
     # Gate S5 BC-S5-1: the fork's file, never its resident context, and only
     # when it is the network the run solved — the run record's bills and
     # asset economics belong to that network, and the case's model hash
@@ -1212,6 +1211,8 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
                                          "message": run_hashes.edited_since_run([option_id])})
     details = (run.get("details") or {})
     try:
+        # The defaults the run's ledger was seeded from (money-year 01).
+        library = packs.library_for(ledger)
         # The config the fork was solved with (the run's export series).
         compiled = packs.option_commercial(study.intake, ledger, library, network.snapshots,
                                            export_series=run.get("export_series"))

@@ -38,6 +38,9 @@ from __future__ import annotations
 
 import pandas as pd
 
+# The defaults pack the frozen WP0 numbers were recorded and re-derived on.
+from services.study.library import WP0_PACK_VERSION
+
 SITE_YEAR = 2025
 CONNECTION_MW = 2.0
 BASE_MW = 0.6
@@ -62,9 +65,6 @@ def site_intake() -> dict:
         "pv": {"enabled": True, "kind": "rooftop"},
     }
 
-
-#: The defaults pack the frozen WP0 numbers were recorded and re-derived on.
-WP0_PACK_VERSION = "2026-10-05"
 
 
 def site_library():

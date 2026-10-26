@@ -305,3 +305,27 @@ def test_the_2026_10_05_study_keeps_its_ledger_hash():
     assert lib.version == "generic-defaults 2026-10-05 962a0184861c"
     # recorded on master 1d80850, before the not-seeded rows were named
     assert P.ledger_hash(L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), lib)) == "974275b95d58a7c2"
+
+
+# ── a stored ledger reads the pack it was seeded from (GK B, condition 3) ─
+
+def test_a_stored_ledger_reads_the_defaults_it_was_seeded_from():
+    from services.study import library as L
+    from services.study import packs as P
+    from services.study import questions as Q
+    from tests.golden import site_fixture as sf
+
+    for version in ("2026-10-05", PREV, NEW):
+        lib = L.load_defaults(version)
+        ledger = L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), lib)
+        assert L.library_for_ledger(ledger).version == lib.version
+    assert L.library_for_ledger(None).version == L.load_defaults().version
+    legacy = ledger.model_copy(update={"ledger_version": L.LIBRARY_VERSION})
+    assert L.library_for_ledger(legacy).version == L.load_defaults(L.WP0_PACK_VERSION).version
+    assert int(L.library_for_ledger(legacy).finance["currency_year"]) == 2020
+    for bad in ("generic-defaults 2026-10-05 000000000000", "generic-defaults 2026-10-05", "nonsense"):
+        with pytest.raises(L.LibraryError):
+            L.library_for_ledger(ledger.model_copy(update={"ledger_version": bad}))
+        with pytest.raises(P.PackError) as err:
+            P.library_for(ledger.model_copy(update={"ledger_version": bad}))
+        assert err.value.code == "ledger_defaults_unknown"

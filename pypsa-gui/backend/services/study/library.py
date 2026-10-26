@@ -18,7 +18,8 @@ Until U2 WP10 the same view was also read from three vendored files under
 1-20 are frozen in ``tests/fixtures/legacy_study_library.json`` (gate U2-S1
 C8 a). A ledger a study stored before then still loads, runs and is valued:
 it names :data:`LIBRARY_VERSION` (read-only), and every reader takes the
-pinned pack for what the ledger does not hold. ``study_library/load_profiles/``
+WP0 pack (:data:`WP0_PACK_VERSION`, :func:`library_for_ledger`) for what the
+ledger does not hold. ``study_library/load_profiles/``
 stays: the sector load profiles, which the pack does not carry (Q7).
 
 :func:`seed_ledger` turns the library plus the study's intake into an
@@ -47,7 +48,8 @@ __all__ = [
     "BESS_KEY_DRIVERS", "DEFAULTS_VERSION_PREFIX", "DERIVED", "ENGINE_PATHS",
     "ENGINE_ROWS", "INTAKE_DERIVED_ROWS", "LIBRARY_VERSION", "Library",
     "LibraryError", "RULE_DESCRIPTOR", "TechnologyRow",
-    "horizon_and_replacements", "key_drivers_of", "load_defaults", "seed_ledger",
+    "WP0_PACK_VERSION", "horizon_and_replacements", "key_drivers_of", "library_for_ledger",
+    "load_defaults", "seed_ledger",
 ]
 
 #: READ-ONLY since U2 WP10: the `ledger_version` of a ledger seeded from the
@@ -484,6 +486,38 @@ def load_defaults(version: str | None = None) -> Library:
     ``"generic-defaults <pack version> <pack hash[:12]>"``.
     """
     return _load_defaults(version or PACK_VERSION)
+
+
+#: The pack U2 WP0's parity was frozen on (2020 EUR). A ledger naming
+#: :data:`LIBRARY_VERSION` (seeded before U2 WP8) reads it: its rows 1-20 are
+#: that pack's (`test_study_ledger_from_pack`), in the same money year.
+WP0_PACK_VERSION = "2026-10-05"
+
+
+def library_for_ledger(ledger) -> Library:
+    """
+    The defaults a STORED ledger was seeded from, so its seed tariff and
+    finance rules are read in its own money year (money-year issue 01): a
+    ledger seeded on 2026-10-05 (2020 EUR) is never priced with the 2025
+    seed tariffs of a later pin. ``"generic-defaults <version> <hash12>"``
+    reads that version, refused when its hash no longer starts with
+    ``hash12``; :data:`LIBRARY_VERSION` reads :data:`WP0_PACK_VERSION`; no
+    ledger reads the pin (it is about to be seeded from it). Anything else
+    is refused, never read against the pin.
+    """
+    if ledger is None:
+        return load_defaults()
+    label = ledger.ledger_version or ""
+    if label == LIBRARY_VERSION:
+        return load_defaults(WP0_PACK_VERSION)
+    parts = label.split()
+    if len(parts) != 3 or parts[0] != DEFAULTS_VERSION_PREFIX:
+        raise LibraryError(f"the ledger names defaults {label!r}, which no pack provides")
+    library = load_defaults(parts[1])
+    if library.version != label:
+        raise LibraryError(f"the ledger was seeded from {label!r}, but pack {parts[1]} "
+                           f"now reads {library.version!r}")
+    return library
 
 
 def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: str,
