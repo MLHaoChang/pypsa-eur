@@ -365,8 +365,8 @@ export function NumInput({ label, k, fs, set, unit, tip, badge }: {
   label: string; k: string; fs: FS; set: SetFS; unit?: string; tip?: string; badge?: React.ReactNode
 }) {
   return (
-    <label className="flex flex-col gap-0.5">
-      <FieldLabel className="text-[9px] text-muted truncate" badge={badge}>
+    <label className="flex flex-col justify-end gap-0.5">
+      <FieldLabel className="text-[9px] leading-tight text-muted break-words" badge={badge}>
         <InfoTip text={tip}>{label}{unit ? ` (${unit})` : ''}</InfoTip>
       </FieldLabel>
       <input type="number" step="any" value={fs[k] ?? ''}

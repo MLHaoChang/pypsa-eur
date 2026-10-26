@@ -70,7 +70,7 @@ export interface SiteObject {
   footprint: [number, number]
   parts: Part[]
   color: string
-  /** One line for the hover label, e.g. "Battery storage — 40 MWh in 10 containers". */
+  /** One line for the hover label, e.g. "Battery storage: 40 MWh in 10 containers". */
   summary: string
   /** Land the asset occupies, m² — the "does it fit" number (assessment Q1/Q6). */
   areaM2: number
