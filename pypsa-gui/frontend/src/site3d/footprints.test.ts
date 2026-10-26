@@ -41,7 +41,7 @@ describe('optional asset footprint in the actual site layout', () => {
   it('refuses invalid override geometry instead of rendering a malformed mesh', () => {
     expect(() => buildSiteLayout({ ...input,
       footprints: { 'Generator:G': { width_m: -12, depth_m: 6 } },
-    })).toThrow(/footprint/i)
+    })).toThrow('Width, depth and height must be positive numbers of metres, up to 100000 m.')
   })
 })
 

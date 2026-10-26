@@ -11,7 +11,7 @@ export function assertFootprintValid(key: string, value: AssetFootprint): void {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Footprint requires dimensions')
   const dims = [value.width_m, value.depth_m, ...('height_m' in value ? [value.height_m] : [])]
   if (!dims.every(v => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_FOOTPRINT_DIMENSION_M)) {
-    throw new Error(`Footprint dimensions must be positive finite metres up to ${MAX_FOOTPRINT_DIMENSION_M}`)
+    throw new Error(`Width, depth and height must be positive numbers of metres, up to ${MAX_FOOTPRINT_DIMENSION_M} m.`)
   }
 }
 

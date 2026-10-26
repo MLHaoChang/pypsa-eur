@@ -40,6 +40,7 @@ function FootprintFields({ componentClass, name }: Props) {
     setHeight(value?.height_m === undefined ? '' : String(value.height_m))
     setError(''); setMessage('')
   }, [project, key, value])
+  useEffect(() => { if (readOnly) setMessage('') }, [readOnly])
   const blocked = readOnly || !loaded || !!loadFailed || busy
   async function save(reset = false) {
     const current = useUIStore.getState()
@@ -53,13 +54,14 @@ function FootprintFields({ componentClass, name }: Props) {
     setError(''); setBusy(true)
     useSitesStore.getState().setAssetFootprint(project, key, next)
     const result = await flushPendingSitesToServer(project)
-    setMessage(result.status === 'server' ? 'Saved to project' : result.status === 'refused'
-      ? 'Not saved: project is read-only' : 'Local draft — not saved to project')
+    const afterSave = useUIStore.getState()
+    setMessage(afterSave.readOnly || afterSave.currentProject !== project ? '' : result.status === 'server' ? 'Saved to project' : result.status === 'refused'
+      ? 'Not saved: project is read-only' : 'Local draft: not saved to project')
     setBusy(false)
   }
   const area = Number(width) * Number(depth)
   return <div className="mt-2 space-y-2">
-    <p className="text-muted">{value ? 'User-entered equipment envelope; simple 3D proxy.' : 'Library estimate — detailed footprint not provided; actual dimensions may differ.'}</p>
+    <p className="text-muted">{value ? 'User-entered equipment envelope; simple 3D proxy.' : 'Library estimate: detailed footprint not provided; actual dimensions may differ.'}</p>
     <p className="text-muted">Total envelope for this asset, not per module. Geometry only; ratings and results stay unchanged. Review after capacity changes.</p>
     {loadFailed && <p role="alert">Could not load site metadata. <button type="button" className="underline" onClick={() => void useSitesStore.getState().ensureLoaded(project, true)}>Retry loading</button></p>}
     {readOnly && <p role="status">{readOnlyMessage(reason) ?? 'Read-only: editing is unavailable.'}</p>}
@@ -71,10 +73,11 @@ function FootprintFields({ componentClass, name }: Props) {
           <input aria-label={label} type="number" step="any" value={v} onChange={e => { setter(e.target.value); setMessage('') }}
             className="w-24 rounded border border-border bg-panel px-1 text-text disabled:opacity-50" />
         </label>)}
-      {width.trim() && depth.trim() && Number(width) > 0 && Number(depth) > 0 && Number.isFinite(area) && <p>Envelope area: {area} m²</p>}
-      <p className="text-muted">Height omitted: library height estimate. Clearances and safety compliance require separate checks.</p>
+      {width.trim() && depth.trim() && Number(width) > 0 && Number(depth) > 0 && Number.isFinite(area) && <p>Envelope area: {area < 0.1 ? '<0.1' : area.toLocaleString('en-US', { maximumFractionDigits: 1 })} m²</p>}
+      {!height.trim() && <p className="text-muted">Height omitted: library height estimate.</p>}
+      <p className="text-muted">Clearances and safety compliance require separate checks.</p>
       <div className="flex gap-2">
-        <button type="button" className="rounded border border-border px-1.5 py-0.5" onClick={() => void save()}>Save footprint</button>
+        <button type="button" className="rounded border border-border px-1.5 py-0.5 disabled:opacity-50" onClick={() => void save()}>Save footprint</button>
         <button type="button" disabled={!value} className="rounded border border-border px-1.5 py-0.5 disabled:opacity-50" onClick={() => void save(true)}>Use library estimate</button>
       </div>
     </fieldset>
