@@ -185,6 +185,9 @@ try {
     assert.match(empty, /Nothing was previewed or applied\. No Generator with carrier wind; carriers of Generator here: /)
     assert.deepEqual(await read(), BEFORE, 'nothing previewed or applied')
     shots[`empty-${mode}`] = `oj22-empty-${mode}.png`
+    // Wait for the turn to finish so the shot shows the answer, not "streaming…".
+    await page.waitForFunction(() => document.querySelector('[data-testid="chat-input"]')?.placeholder !== 'streaming…', null, { timeout: 60000 })
+    await refused.scrollIntoViewIfNeeded()
     await page.screenshot({ path: path.join(artifacts, shots[`empty-${mode}`]) })
     report[mode] = { three, receipt: words, one, empty }
   }
