@@ -417,7 +417,8 @@ export function ConfirmationCard() {
       </p>}
       {pending.tool_name === 'apply_project_changes' && (review ? (
         <div className="mb-2 text-xs">
-          <div className="overflow-x-auto">
+          {/* LC-16: the edit card above already lists every row; the bare diff is the fallback. */}
+          {!edit && <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <caption className="text-left font-semibold mb-1">Changes to apply</caption>
               <thead><tr>{['Asset', 'Field', 'Old value', 'New value', 'Unit'].map(h => (
@@ -430,7 +431,7 @@ export function ConfirmationCard() {
                 ))}
               </tr>)}</tbody>
             </table>
-          </div>
+          </div>}
           <p className="mt-1 text-muted">Applies every value shown. Existing time-series overrides remain. Changes are left unsaved.</p>
         </div>
       ) : <p role="alert" className="mb-2 text-xs text-warn">

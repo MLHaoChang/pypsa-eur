@@ -97,6 +97,9 @@ class Adapter:
     # The flow section a settings edit lands in, when its rows name no component (a card
     # with a class-keyed row gets its section from the component).
     section_id: str | None = None
+    # What else the card binds (in its digest) beside its rows: the stored
+    # review an `apply_project_changes` card shows.
+    binding: Callable[[dict], dict] | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -176,6 +179,8 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+    if adapter.binding is not None:
+        card["binding"] = adapter.binding(args or {})
     if not sections and adapter.section_id:
         from services import flow_sections as F
 
@@ -662,6 +667,28 @@ def _bulk_preview(args: dict) -> list[dict]:
 
 register("update_component", Adapter("parameter_edit", _update_component_preview, _component_readback))
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
+
+
+# ── Several assets in one reviewed preview: apply_project_changes (LC-16) ──
+#
+# The rows are the stored preview's, rechecked against the live inputs by
+# `preview_confirmation`; the card binds that preview's review_sha256, so the
+# card the user approves is provably the preview the handler applies.
+
+def _project_changes_preview(args: dict) -> list[dict]:
+    from services.assistant_tools import preview_card
+
+    return preview_card(args.get("preview_id"))[0]
+
+
+def _project_changes_binding(args: dict) -> dict:
+    from services.assistant_tools import preview_card
+
+    return preview_card(args.get("preview_id"))[1]
+
+
+register("apply_project_changes", Adapter("parameter_edit", _project_changes_preview, _component_readback,
+                                           binding=_project_changes_binding))
 
 
 # ── Library references: apply_library_reference ───────────────────────────

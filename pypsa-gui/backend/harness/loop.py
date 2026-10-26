@@ -58,6 +58,7 @@ NO ANTHROPIC SDK IMPORT. `run_turn` drives an `LLMProvider` (the seam in
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import contextvars
 import logging
 import threading
@@ -2769,18 +2770,27 @@ def _dispatch_real_tool_call(
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
                 from harness.experiment_execution import invoke
+                reviewed = contextlib.nullcontext()
                 if tool_name == 'apply_project_changes':
-                    from services.assistant_tools import confirmed_preview
-                    with confirmed_preview(confirmation_args['review_sha256']):
-                        return invoke(session, tool_name, args or {}, handler)
-                if edit_card is not None:
-                    edit_cards.require_current(tool_name, args or {}, edit_card)
-                    with edit_cards.approved(edit_card["digest"]):
-                        out = invoke(session, tool_name, args or {}, handler)
-                    if isinstance(out, dict):
-                        out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
-                    return out
-                return invoke(session, tool_name, args or {}, handler)
+                    from services.assistant_tools import confirmed_preview, preview_confirmation
+                    reviewed = confirmed_preview(confirmation_args['review_sha256'])
+                    # LC-16: the card the user approved, the review shown and
+                    # the stored preview the handler applies are one record.
+                    if edit_card is not None and (
+                            (edit_card.get("binding") or {}).get("review_sha256") != confirmation_args['review_sha256']
+                            or preview_confirmation(args.get("preview_id"))['review_sha256']
+                            != confirmation_args['review_sha256']):
+                        edit_cards._refuse("invalid_preview", "The reviewed preview changed; create and review a "
+                                           "new preview.", 409)
+                with reviewed:
+                    if edit_card is not None:
+                        edit_cards.require_current(tool_name, args or {}, edit_card)
+                        with edit_cards.approved(edit_card["digest"]):
+                            out = invoke(session, tool_name, args or {}, handler)
+                        if isinstance(out, dict):
+                            out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
+                        return out
+                    return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool
             # every session shares, so a call that never got a worker was

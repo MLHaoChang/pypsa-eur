@@ -18,7 +18,9 @@ from urllib.parse import quote
 
 import pandas as pd
 from fastapi import HTTPException
-from pydantic import ValidationError
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError
 from services.pypsa_service import PyPSAService
 from services import assistant_tasks as tasks
 from services import workflow_tools as workflow
@@ -43,11 +45,15 @@ def _preview_digest(record):
                                     separators=(',', ':')).encode()).hexdigest()
 
 
+def _review_body(diffs, rows):
+    return json.dumps([diffs, rows], sort_keys=True, default=str)
+
+
 def _preview_review(record):
     """Require the complete bounded review; legacy/clipped records fail closed."""
     try:
         rows = record['diff']
-        valid = (record.get('version') == 1 and isinstance(rows, list)
+        valid = (record.get('version') == 2 and isinstance(rows, list) and isinstance(record.get('rows'), list)
                  and 1 <= len(rows) <= 20 and record['changes_total'] == len(rows)
                  and record['review_sha256'] == _preview_digest(record))
         if not valid:
@@ -334,6 +340,144 @@ def _candidate(ctx, changes):
     return candidate, diffs, validation
 
 
+# LC-16: a preview names any parameter the class schema marks editable, on the
+# classes whose static rows the edit card reads back. The sweep and experiment
+# allowlist (`workflow._ATTRIBUTES`, `_changes`) stays as it is.
+_PREVIEW_ROWS = 20
+
+
+class _PreviewChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    component_class: Literal["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]
+    names: list[str] = Field(min_length=1, max_length=100)
+    attribute: str = Field(min_length=1, max_length=64)
+    value: StrictBool | StrictFloat | StrictInt
+
+
+def _quoted(names, limit=5):
+    shown = ", ".join(repr(name[:40] + ("…" if len(name) > 40 else "")) for name in names[:limit])
+    return shown + (f" and {len(names) - limit} more" if len(names) > limit else "")
+
+
+def _parameter_kind(field):
+    """'number' or 'boolean' for a field the schema types as one (the app's own
+    asset fields carry no native type, only their validation schema)."""
+    if not field:
+        return None
+    schema = field.get("validation_schema") or {}
+    types = {s.get("type") for s in schema.get("anyOf", [schema])} - {"null", None}
+    native = str(field.get("native_type") or "")
+    if types <= {"number", "integer"} and types or native.startswith(("float", "int")):
+        return "number"
+    if types == {"boolean"} or native.startswith("bool"):
+        return "boolean"
+    return None
+
+
+def _preview_changes(changes, network):
+    """Parse and check a preview before any sandbox work: every member exists,
+    every field is an editable number or flag, at most 20 entity × field rows."""
+    import difflib
+    from harness import edit_card
+
+    if not isinstance(changes, list) or not 1 <= len(changes) <= _PREVIEW_ROWS:
+        workflow._refuse("invalid_changes", "Provide 1–20 typed engineering changes.")
+    try:
+        parsed = [_PreviewChange.model_validate(change) for change in changes]
+    except ValidationError:
+        workflow._refuse("invalid_changes", "Changes require component_class (Generator, Load, Line, Link, StorageUnit, "
+                         "Store, Bus or Transformer), names, attribute and a finite number or boolean value.")
+    if any(isinstance(c.value, float) and not math.isfinite(c.value) for c in parsed):
+        workflow._refuse("invalid_changes", "Use finite numbers.")
+    if sum(len(c.names) for c in parsed) > _PREVIEW_ROWS:
+        workflow._refuse("invalid_preview", f"One card holds at most {_PREVIEW_ROWS} asset × field rows; "
+                         "split the edit into smaller previews.")
+    missing = {}
+    for change in parsed:
+        index = network.components[change.component_class].static.index
+        missing.setdefault(change.component_class, []).extend(
+            n for n in change.names if n not in index and n not in missing.get(change.component_class, []))
+    missing = {klass: names for klass, names in missing.items() if names}
+    if missing:
+        words = []
+        for klass, names in missing.items():
+            existing = [str(n) for n in network.components[klass].static.index]
+            near = []
+            for name in names:
+                near += [n for n in difflib.get_close_matches(name, existing, n=5, cutoff=0.4) if n not in near]
+            near += [n for n in existing if n not in near]
+            words.append(f"{klass} {_quoted(names)} not found" + (
+                f"; existing {klass} names include {_quoted(near)}" if near else f"; this project has no {klass}"))
+        workflow._refuse("change_component_missing", "Nothing was previewed or applied. " + ". ".join(words) + ".")
+    seen = set()
+    for change in parsed:
+        field = edit_card._fields(change.component_class).get(change.attribute)
+        kind = _parameter_kind(field)
+        if kind is None:
+            workflow._refuse("invalid_change_attribute", f"{change.component_class}.{change.attribute} is not a numeric "
+                             "or true/false parameter of that class. Read get_component_schema.")
+        if (kind == "boolean") != isinstance(change.value, bool):
+            workflow._refuse("invalid_edit_value", f"{change.component_class}.{change.attribute} takes "
+                             + ("true or false." if kind == "boolean" else "a number."))
+        if isinstance(change.value, int) and not isinstance(change.value, bool):
+            try:
+                exact = float(change.value) == change.value
+            except OverflowError:
+                exact = False
+            if not exact:
+                workflow._refuse("invalid_change_value", "The native input field would round this value; choose an "
+                                 "exactly representable value and create a new preview.")
+        for name in change.names:
+            edit_card._check_value(change.component_class, change.attribute, change.value, field)
+            edit_card._check_rating(name, change.attribute, change.value, field)
+            key = (change.component_class, name, change.attribute)
+            if key in seen:
+                workflow._refuse("duplicate_change", "Each component/attribute may be changed only once per preview.")
+            seen.add(key)
+    return parsed
+
+
+def _preview_candidate(ctx, parsed):
+    """The candidate network, its typed diff and the edit card's rows. Each
+    class runs through the native bulk handler on an isolated copy, so derived
+    columns recompute and show as derived rows."""
+    from services import change_log_service, chat_tools
+    from harness import edit_card
+
+    targets = {}
+    for change in parsed:
+        for name in change.names:
+            targets.setdefault(change.component_class, {}).setdefault(name, {})[change.attribute] = change.value
+
+    def run(klass):
+        groups = {}
+        for name, attrs in targets[klass].items():
+            groups.setdefault(json.dumps(attrs, sort_keys=True), (attrs, []))[1].append(name)
+        return lambda: [chat_tools.bulk_update_components(klass, names, attrs) for attrs, names in groups.values()]
+
+    rows = []
+    for klass in targets:
+        rows += edit_card._sandbox_rows(klass, list(targets[klass].items()), run(klass))
+    candidate = PyPSAService.build_context()
+    candidate.network = workflow._network_copy(ctx.network)
+    candidate.user_ts = copy.deepcopy(ctx.user_ts)
+    candidate.solver_state["solver_config"] = copy.deepcopy(ctx.solver_state["solver_config"])
+    with workflow._isolated(candidate), change_log_service.suppressed():
+        for klass in targets:
+            run(klass)()
+        validation = chat_tools.validate_network()
+    if not validation.get("ok") or validation.get("deferred"):
+        workflow._refuse("change_preflight_failed", "The candidate fails network validation; the project was not modified.", 409)
+
+    def scalar(value):
+        return "nan" if value is None else value
+
+    diffs = [{"component_class": r["component_class"], "name": r["name"], "attribute": r["field"],
+              "before": scalar(r["old"]), "after": r["new"], "unit": r["unit"]}
+             for r in rows if r["role"] == "typed"]
+    return candidate, diffs, rows, validation
+
+
 def _idle(ctx, project):
     from services.study_state import refuse_edit_during_live_study
     refuse_edit_during_live_study()
@@ -343,21 +487,22 @@ def _idle(ctx, project):
 
 def preview_project_changes(changes: list[dict]) -> dict:
     project, root, owner = _project()
-    parsed = _changes(changes)
     with PyPSAService.get_lock():
         ctx = PyPSAService.get_active_context()
         _idle(ctx, project)
+        parsed = _preview_changes(changes, ctx.network)
         fingerprint = workflow._network_input_fingerprint(ctx)
-        _, diffs, validation = _candidate(ctx, parsed)
+        _, diffs, rows, validation = _preview_candidate(ctx, parsed)
         preview_id = str(uuid.uuid4())
-        record = {"version": 1, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
+        record = {"version": 2, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
                   "fingerprint": fingerprint, "changes": [c.model_dump() for c in parsed],
-                  "diff": diffs, "changes_total": len(diffs), "applied": False}
+                  "diff": diffs, "changes_total": len(diffs), "rows": rows, "applied": False}
         record['review_sha256'] = _preview_digest(record)
         _preview_review(record)
         tasks._save(root / "assistant_previews" / (preview_id + ".json"), record)
     out = {"preview_id": preview_id, "project_id": str(project.id), "fingerprint": fingerprint,
            "valid": True, "changes_total": len(diffs), "diff": diffs[:20],
+           "derived_rows": sum(1 for r in rows if r["role"] in ("derived", "follows", "at_solve")),
            "warning_count": validation.get("warnings", 0),
            "validation_issues": validation.get("issues", [])[:3],
            "note": "No network changes applied. Static parameters can be overridden by existing time series. apply_project_changes requires confirmation and unchanged inputs."}
@@ -389,8 +534,8 @@ def apply_project_changes(preview_id: str) -> dict:
             return {"preview_id": preview_id, "project_id": str(project.id), "applied": True, "reused": True}
         if workflow._network_input_fingerprint(ctx) != record["fingerprint"]:
             workflow._refuse("preview_stale", "Project inputs changed; create and review a new preview.", 409)
-        candidate, diffs, _ = _candidate(ctx, _changes(record["changes"]))
-        if json.dumps(diffs, sort_keys=True) != json.dumps(record['diff'], sort_keys=True):
+        candidate, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record["changes"], ctx.network))
+        if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):
             workflow._refuse('invalid_preview', 'The stored changes do not match the exact review; create a new preview.', 409)
         # Persist uncertainty BEFORE effects, so an interrupted apply cannot replay.
         if record.get("applying"):
@@ -579,7 +724,18 @@ def preview_confirmation(preview_id):
         ctx = PyPSAService.get_active_context()
         if workflow._network_input_fingerprint(ctx) != record['fingerprint']:
             workflow._refuse('preview_stale', 'Project inputs changed; create and review a new preview.', 409)
-        _, diffs, _ = _candidate(ctx, _changes(record['changes']))
-        if json.dumps(diffs, sort_keys=True) != json.dumps(record['diff'], sort_keys=True):
+        _, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record['changes'], ctx.network))
+        if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):
             workflow._refuse('invalid_preview', 'The stored changes do not match the exact review; create a new preview.', 409)
         return out
+
+
+def preview_card(preview_id):
+    """The edit card's rows for `apply_project_changes` and the review they
+    bind: the stored, rechecked preview, never model arguments."""
+    out = preview_confirmation(preview_id)
+    _, root, _ = _project()
+    record = workflow._read_json(root / "assistant_previews" / (out['preview_id'] + ".json"))
+    if record.get('review_sha256') != out['review_sha256']:
+        workflow._refuse('invalid_preview', 'The reviewed preview changed; create and review a new preview.', 409)
+    return copy.deepcopy(record['rows']), {'preview_id': out['preview_id'], 'review_sha256': out['review_sha256']}

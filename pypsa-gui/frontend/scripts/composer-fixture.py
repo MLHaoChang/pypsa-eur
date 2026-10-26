@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -71,6 +71,19 @@ def main():
                 steps = [("resolve_reference", {"target": "component", "component_class": "Line"}),
                          ("update_component", {"component_class": target.get("component_class"),
                                                "name": target.get("name"), "attrs": {"s_nom": 400}})]
+            elif "and the battery's overnight power cost" in said:
+                # LC-16 OJ-21: one preview for three assets of two classes, then one apply card.
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Line", "names": ["L1"], "attribute": "s_nom", "value": 500},
+                    {"component_class": "Line", "names": ["L2"], "attribute": "s_nom", "value": 450},
+                    {"component_class": "StorageUnit", "names": ["Battery"], "attribute": "inv_power_overnight",
+                     "value": 150000}]}),
+                         ("apply_project_changes", {"preview_id": results[0].get("preview_id") if results else None})]
+            elif "and L3 to 400" in said:
+                # LC-16 OJ-23: one member does not exist; nothing is previewed.
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Line", "names": ["L1", "L2"], "attribute": "s_nom", "value": 500},
+                    {"component_class": "Line", "names": ["L3"], "attribute": "s_nom", "value": 400}]})]
             elif "Undo that change" in said:
                 steps = [("undo_last", {})]
             elif "NH3 tank" in said:
@@ -104,7 +117,9 @@ def main():
                 text = (f"OJ03_ANSWER {verb} {offered[0] if offered else 'nothing'}; "
                         f"also with data: {', '.join(offered[1:]) or 'none'}; "
                         f"already shown: {', '.join(listing.get('shown', []))}.")
-            elif steps[-1][0] in ("update_component", "undo_last"):
+            elif steps[-1][0] == "preview_project_changes":
+                text = f"OJ23_ANSWER {json.dumps(results[0])[:600]}"
+            elif steps[-1][0] in ("update_component", "undo_last", "apply_project_changes"):
                 receipt = results[-1].get("_edit_receipt") or {}
                 text = (f"OJ05_ANSWER {receipt.get('says') or results[-1]}; "
                         f"{'read back' if receipt.get('outcome') == 'verified' else 'not confirmed'}; "
@@ -253,7 +268,7 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey in ("oj01", "oj05"):
+            if args.journey in ("oj01", "oj05", "oj21"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
                 subprocess.run([sys.executable, "-c", "import sys; from tests.oj_grid import build_oj_grid; "

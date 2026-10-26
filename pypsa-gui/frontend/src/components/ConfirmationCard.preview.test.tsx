@@ -68,3 +68,19 @@ it('preserves zero and boolean values without substituting a missing value', () 
     'Generator G1', 'marginal_cost', '0', '0.001', 'currency/MWh',
   ])
 })
+
+it('shows several assets once, in the edit card, when the apply carries one (LC-16)', () => {
+  const row = (name: string, old: number, now: number) => ({ component_class: 'Line', name, field: 's_nom',
+    label: 'Rating', old, new: now, unit: 'MVA', role: 'typed' })
+  const edit_card = { version: 1, kind: 'parameter_edit', tool: 'apply_project_changes', complete: true,
+    says: 'L1 s_nom 300 → 500 MVA; L2 s_nom 300 → 450 MVA', digest: 'd'.repeat(64),
+    rows: [row('L1', 300, 500), row('L2', 300, 450)] }
+  useChatStore.setState({ pending: { ...useChatStore.getState().pending!, edit_card } })
+  render(<ConfirmationCard />)
+  // One table: the edit card's rows, not the bare diff beside it.
+  const tables = screen.getAllByRole('table', { name: 'Changes to apply' })
+  expect(tables).toHaveLength(1)
+  expect(within(tables[0]).getAllByRole('row')).toHaveLength(3)
+  expect(within(tables[0]).queryByText('Generator G1')).toBeNull()
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false)
+})
