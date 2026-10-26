@@ -79,6 +79,8 @@ def main():
                     {"component_class": "StorageUnit", "names": ["Battery"], "attribute": "inv_power_overnight",
                      "value": 150000}]}),
                          ("apply_project_changes", {"preview_id": results[0].get("preview_id") if results else None})]
+                if results and not results[0].get("preview_id"):
+                    steps = steps[:1]  # a refused preview ends the turn; nothing to apply
             elif "and L3 to 400" in said:
                 # LC-16 OJ-23: one member does not exist; nothing is previewed.
                 steps = [("preview_project_changes", {"changes": [
