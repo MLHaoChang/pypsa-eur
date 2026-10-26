@@ -380,6 +380,11 @@ export function ConfirmationCard() {
           ? guidedWording.header
           : <>Confirm · {pending.safety_tier}</>}
       </div>
+      {pending.external && (
+        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-external">
+          External tool from MCP server &ldquo;{pending.external.server}&rdquo;
+        </div>
+      )}
       {guidedWording?.note && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
           {guidedWording.note}

@@ -127,6 +127,11 @@ _R_LLM_SETTINGS = (
     "LLM provider settings: instance/user scope, `_require_super_admin`-gated "
     "where they are instance-wide. Not project data."
 )
+_R_MCP_SETTINGS = (
+    "the install's MCP server list and its keys (`<app data>/mcp-servers.json`, "
+    "`user.env`; chat harness issue 19), `_require_super_admin`-gated. The test "
+    "route only connects and lists tools. Not project data."
+)
 _R_SKILL_REGISTRY = (
     "re-reads the assistant's skill files from the package and the install's "
     "`<app data>/skills/` into the in-process registry (chat harness issue 14). "
@@ -236,6 +241,11 @@ ROUTE_POLICY: dict[tuple[str, str], tuple[str, str]] = {
     ("DELETE", "/api/chat/settings/llm/profiles/{profile_id}/key"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("POST", "/api/chat/settings/llm/active"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
     ("POST", "/api/chat/settings/llm/profiles/{profile_id}/test"): (NOT_PROJECT_DATA, _R_LLM_SETTINGS),
+    ("PUT", "/api/chat/settings/mcp/servers/{server_id}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
+    ("DELETE", "/api/chat/settings/mcp/servers/{server_id}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
+    ("POST", "/api/chat/settings/mcp/servers/{server_id}/test"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
+    ("PUT", "/api/chat/settings/mcp/servers/{server_id}/keys/{name}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
+    ("DELETE", "/api/chat/settings/mcp/servers/{server_id}/keys/{name}"): (NOT_PROJECT_DATA, _R_MCP_SETTINGS),
     ("PUT", "/api/local-settings/anthropic-key"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/local-settings/reveal-log"): (NOT_PROJECT_DATA, _R_LOCAL),
     ("POST", "/api/dictation/transcribe"): (NOT_PROJECT_DATA, _R_NO_PROJECT),

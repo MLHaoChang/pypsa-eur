@@ -61,6 +61,7 @@ SCHEMA_MAX_DEPTH = 6
 KEY_PREFIX = "PYPSA_GUI_MCP_KEY__"
 _ID = re.compile(r"[a-z0-9]{1,16}")
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT", "TEMP", "TMP")
+CHILD_ENV = _CHILD_ENV   # what a stdio server receives besides its mapped keys
 _TIER_ORDER = ("read", "write", "destructive", "execution", "execution_long_running")
 
 # The refusals, as `{"error_kind": ...}` literals so
@@ -119,13 +120,22 @@ def _https_or_loopback(url: str) -> bool:
 
 
 def _parse_one(entry: Any) -> tuple[ServerConfig | None, str | None]:
+    cfg, problem = validate_entry(entry)
+    if cfg is not None and entry.get("enabled", True) is False:
+        return None, None
+    return cfg, problem
+
+
+def validate_entry(entry: Any) -> tuple[ServerConfig | None, str | None]:
+    """The entry's config, or the reason it is refused; `enabled` aside, so a
+    disabled entry is checked as strictly as a live one."""
     if not isinstance(entry, dict):
         return None, "an entry must be an object"
     sid = entry.get("id")
     if not isinstance(sid, str) or not _ID.fullmatch(sid):
         return None, f"server id {sid!r} must be 1-16 characters of [a-z0-9]"
-    if entry.get("enabled", True) is False:
-        return None, None
+    if not isinstance(entry.get("enabled", True), bool):
+        return None, f"{sid}: enabled must be true or false"
     transport = entry.get("transport")
     env = entry.get("env") or {}
     if not isinstance(env, dict) or not all(
@@ -183,6 +193,70 @@ def _load() -> list[ServerConfig]:
     for problem in problems:
         logger.warning("mcp: server refused: %s", problem)
     return servers
+
+
+class ConfigUnreadable(Exception):
+    """`mcp-servers.json` exists but is not a servers list; it is never
+    overwritten while it is in that state."""
+
+
+_FILE_LOCK = threading.Lock()
+
+
+def is_server_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(_ID.fullmatch(value))
+
+
+def key_slot(server_id: str, var: str | None = None) -> str:
+    """The managed key the settings routes give a server's bearer token
+    (`var` None) or one of its child-environment variables."""
+    slot = KEY_PREFIX + server_id.upper()
+    return slot if var is None else f"{slot}__{var}"
+
+
+def _read_entries() -> list[Any]:
+    path = config_path()
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ConfigUnreadable(f"{path.name} is not valid JSON") from exc
+    entries = data.get("servers") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        raise ConfigUnreadable(f"{path.name} must be an object with a servers list")
+    return entries
+
+
+def read_entries() -> list[Any]:
+    """Every entry in the file as written, valid or not; [] without a file."""
+    with _FILE_LOCK:
+        return _read_entries()
+
+
+def update_entries(change: Callable[[list[Any]], list[Any]]) -> list[Any]:
+    """Read the entries, apply `change`, write the result: under one lock, at
+    0600 from the first byte, through a unique temp file and `os.replace`
+    (the `llm_config.save_profiles` pattern), so a failed write leaves the
+    previous file whole. Returns the entries `change` was given."""
+    import tempfile
+    with _FILE_LOCK:
+        before = _read_entries()
+        after = change(list(before))
+        path = config_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump({"servers": after}, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+        return before
 
 
 # ── the connections ────────────────────────────────────────────────────────
@@ -506,6 +580,51 @@ def _connection(cfg: ServerConfig) -> _Connection:
             raise
         _CONNECTIONS[cfg.id] = conn
         return conn
+
+
+def forget(server_id: str) -> None:
+    """Close the pooled connection to `server_id`, if any (the admin edited,
+    disabled or removed it)."""
+    with _CONNECTIONS_LOCK:
+        conn = _CONNECTIONS.pop(server_id, None)
+    if conn is not None:
+        conn.close()
+
+
+# A test failure's message is fixed per kind: a server's own error text is
+# data, and never travels back to the settings panel.
+_PROBE_MESSAGES = {
+    "mcp_unavailable": "The server could not be started or reached.",
+    "mcp_timeout": "The server did not answer in time.",
+    "mcp_protocol_error": "The server's answer was not usable MCP.",
+}
+
+
+def probe(cfg: ServerConfig) -> dict[str, Any]:
+    """Connect to `cfg` on a connection of its own (never the pool), list its
+    tools and close: what the model would be offered, for the admin to read
+    before enabling the server."""
+    conn: _Connection | None = None
+    try:
+        conn = _StdioConnection(cfg) if cfg.transport == "stdio" else _HttpConnection(cfg)
+        conn.initialize()
+        tools = conn.list_tools()
+    except _Failure as failure:
+        kind = failure.kind["error_kind"]
+        logger.warning("mcp: test of %s failed (%s)", cfg.id, kind)
+        return {"ok": False, "error_kind": kind,
+                "message": _PROBE_MESSAGES.get(kind, _PROBE_MESSAGES["mcp_protocol_error"])}
+    except Exception as exc:  # noqa: BLE001 — a test never 500s the settings route
+        logger.warning("mcp: test of %s failed (%s)", cfg.id, type(exc).__name__)
+        return {"ok": False, "error_kind": _PROTOCOL["error_kind"],
+                "message": _PROBE_MESSAGES["mcp_protocol_error"]}
+    finally:
+        if conn is not None:
+            conn.close()
+    shaped = _shape(cfg, tools)
+    return {"ok": True, "skipped": len(tools) - len(shaped),
+            "tools": [{"name": e["name"], "tier": e["_tier"], "description": e["description"]}
+                      for e in shaped]}
 
 
 def reset_for_tests() -> None:

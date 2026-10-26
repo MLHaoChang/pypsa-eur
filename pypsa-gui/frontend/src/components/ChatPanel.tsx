@@ -169,6 +169,7 @@ interface ToolPendingFrame {
   confirmation_token: string
   ttl_seconds: number
   edit_card?: unknown
+  external?: { server: string }
 }
 
 // P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
@@ -2227,6 +2228,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           ttl_seconds: d.ttl_seconds,
           expires_at_epoch_ms: Date.now() + d.ttl_seconds * 1000,
           edit_card: d.edit_card,
+          external: d.external,
         })
         break
       }

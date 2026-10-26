@@ -30,7 +30,8 @@ ALLOWLIST. Only names that `is_managed_key` accepts are ever read out of
 `user.env` or written into it: the fixed `KNOWN_PROVIDER_KEYS` (aliased as
 `MANAGED_KEYS` for existing callers), plus any `PYPSA_GUI_LLM_KEY__<SLOT>` name
 whose suffix is uppercase letters, digits and underscores — one slot per
-saved provider profile. This is a security boundary, not tidiness: without
+saved provider profile — and the same shape under `PYPSA_GUI_MCP_KEY__<SLOT>`,
+the credentials an admin's MCP servers receive (`harness/mcp_client.py`). This is a security boundary, not tidiness: without
 it, anything that could write this file could set `SECRET_KEY` (forging
 session cookies) or `PYPSAGUI_APP_DATA_DIR` (repointing the database), and the
 second is circular besides — the file lives *inside* the directory that
@@ -81,6 +82,8 @@ MANAGED_KEYS: tuple[str, ...] = KNOWN_PROVIDER_KEYS
 # `_SHELL_NAMES` precedence check on that platform.
 _LLM_KEY_PREFIX = "PYPSA_GUI_LLM_KEY__"
 _LLM_KEY_SLOT_RE = re.compile(r"\A[A-Z0-9_]{1,64}\Z")
+# MCP server credential slots (`harness/mcp_client.KEY_PREFIX`), same slot rule.
+_MCP_KEY_PREFIX = "PYPSA_GUI_MCP_KEY__"
 
 # Longest value accepted. Some provider keys (e.g. long-lived tokens) run well
 # past a typical Anthropic key; this is a sanity bound against a paste of an
@@ -95,16 +98,17 @@ def is_managed_key(name: str) -> bool:
     This is the allowlist rule itself — the security boundary the module
     docstring describes. `KNOWN_PROVIDER_KEYS` covers the fixed built-in
     providers; the `PYPSA_GUI_LLM_KEY__<SLOT>` prefix covers one slot per
-    saved provider profile, with the slot restricted to uppercase letters,
+    saved provider profile, and `PYPSA_GUI_MCP_KEY__<SLOT>` one per MCP
+    server credential, with the slot restricted to uppercase letters,
     digits and underscores so it can never collide with, or be mistaken for,
     an unrelated environment variable such as `SECRET_KEY` or
     `PYPSAGUI_APP_DATA_DIR`.
     """
     if name in KNOWN_PROVIDER_KEYS:
         return True
-    if name.startswith(_LLM_KEY_PREFIX):
-        suffix = name[len(_LLM_KEY_PREFIX):]
-        return bool(_LLM_KEY_SLOT_RE.match(suffix))
+    for prefix in (_LLM_KEY_PREFIX, _MCP_KEY_PREFIX):
+        if name.startswith(prefix):
+            return bool(_LLM_KEY_SLOT_RE.match(name[len(prefix):]))
     return False
 
 

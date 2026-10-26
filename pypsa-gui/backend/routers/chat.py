@@ -22,8 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -36,6 +37,7 @@ from db.models import User
 from db.session import get_db
 from deps import current_session, optional_user, require_user
 from harness import loop as chat_service
+from harness import mcp_client
 from services import app_secrets, llm_config
 
 logger = logging.getLogger("pypsa_gui.chat")
@@ -674,6 +676,271 @@ def post_llm_profile_test(
     _require_super_admin(user)
     profile = _get_llm_profile_or_404(profile_id)
     return _connection_test_result(profile)
+
+
+# ── Issue 19 slice 2 — MCP servers (`harness/mcp_client.py`) ────────────────
+#
+# The same super-admin gate as the LLM keys: servers are per install, and a
+# stdio server is a process this backend starts. The body names a server's
+# environment VARIABLES only; the managed key behind each is derived here
+# (`mcp_client.key_slot`), for the same reason `ProfileIn` carries no
+# `key_env`: a client-chosen slot would let a server be pointed at another
+# server's credential. Values travel only through the `/keys/{name}` routes
+# into `app_secrets`; no response carries one.
+
+_MCP_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,31}")
+_MCP_TIER = Literal["read", "write", "destructive", "execution", "execution_long_running"]
+
+
+class McpServerIn(BaseModel):
+    """Body for `PUT /settings/mcp/servers/{id}`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: StrictBool = False
+    transport: Literal["stdio", "http"]
+    command: str | None = Field(default=None, max_length=4096)
+    args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=64)
+    url: str | None = Field(default=None, max_length=2048)
+    env: list[str] = Field(default_factory=list, max_length=32)
+    tiers: dict[Annotated[str, Field(max_length=128)], _MCP_TIER] = Field(
+        default_factory=dict, max_length=64)
+
+
+class McpKeyRequest(BaseModel):
+    """Body for `PUT /settings/mcp/servers/{id}/keys/{name}`."""
+
+    value: str
+
+
+def _mcp_managed(name: Any) -> bool:
+    """A key an MCP entry may name: only the `PYPSA_GUI_MCP_KEY__` family,
+    never a provider key a hand-edited file points at."""
+    return (isinstance(name, str) and name.startswith(mcp_client.KEY_PREFIX)
+            and app_secrets.is_managed_key(name))
+
+
+def _mcp_key_out(name: Any) -> dict[str, Any]:
+    if not _mcp_managed(name):
+        return {"present": False, "hint": None, "redactable": None}
+    status = app_secrets.status(name)
+    return {"present": bool(status["configured"]), "hint": status["hint"],
+            "redactable": status["redactable"]}
+
+
+def _mcp_server_out(entry: Any) -> dict[str, Any]:
+    """One file entry for the panel, valid or not; never a key value."""
+    _, problem = mcp_client.validate_entry(entry)
+    raw = entry if isinstance(entry, dict) else {}
+    sid = raw.get("id")
+    env = raw.get("env") if isinstance(raw.get("env"), dict) else {}
+    args = raw.get("args") if isinstance(raw.get("args"), list) else []
+    tiers = raw.get("tiers") if isinstance(raw.get("tiers"), dict) else {}
+    transport = raw.get("transport") if raw.get("transport") in ("stdio", "http") else None
+    return {
+        "id": sid if mcp_client.is_server_id(sid) else None,
+        "enabled": raw.get("enabled", True) is True,
+        "transport": transport,
+        "command": raw.get("command") if isinstance(raw.get("command"), str) else None,
+        "args": [a for a in args if isinstance(a, str)],
+        "url": raw.get("url") if isinstance(raw.get("url"), str) else None,
+        "tiers": {k: v for k, v in tiers.items() if isinstance(v, str)},
+        "env": [{"name": var, **_mcp_key_out(key)} for var, key in env.items()
+                if isinstance(var, str)],
+        "key": _mcp_key_out(raw.get("key")) if transport == "http" else None,
+        "problem": problem,
+    }
+
+
+def _mcp_valid_id(server_id: str) -> str:
+    if not mcp_client.is_server_id(server_id):
+        raise HTTPException(status_code=422,
+                            detail="a server id is 1-16 characters of [a-z0-9]")
+    return server_id
+
+
+def _mcp_entry_or_404(server_id: str) -> dict[str, Any]:
+    try:
+        entries = mcp_client.read_entries()
+    except mcp_client.ConfigUnreadable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("id") == server_id:
+            return entry
+    raise HTTPException(status_code=404, detail=f"no MCP server named {server_id!r}")
+
+
+def _mcp_update(change: Any) -> list[Any]:
+    try:
+        return mcp_client.update_entries(change)
+    except mcp_client.ConfigUnreadable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+def _mcp_referenced_keys(entries: list[Any]) -> set[str]:
+    keys: set[str] = set()
+    for entry in entries:
+        if isinstance(entry, dict):
+            if isinstance(entry.get("key"), str):
+                keys.add(entry["key"])
+            if isinstance(entry.get("env"), dict):
+                keys.update(v for v in entry["env"].values() if isinstance(v, str))
+    return keys
+
+
+def _mcp_clear_orphans(server_id: str, before: list[Any], after: list[Any]) -> None:
+    """Clear the slots this server's routes derived and nothing still names.
+    A hand-written mapping to some other key is left to whoever wrote it."""
+    own = mcp_client.key_slot(server_id)
+    for key in _mcp_referenced_keys(before) - _mcp_referenced_keys(after):
+        if (key == own or key.startswith(own + "__")) and _mcp_managed(key) \
+                and app_secrets.get_stored(key) is not None:
+            app_secrets.clear_secret(key)
+
+
+@router.get("/settings/mcp/servers")
+def get_mcp_servers(
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Every entry in `mcp-servers.json`, with a reason beside any refused one."""
+    _require_super_admin(user)
+    try:
+        entries = mcp_client.read_entries()
+    except mcp_client.ConfigUnreadable as exc:
+        return {"servers": [], "file_error": str(exc)}
+    return {"servers": [_mcp_server_out(e) for e in entries], "file_error": None}
+
+
+@router.put("/settings/mcp/servers/{server_id}")
+def put_mcp_server(
+    server_id: str,
+    body: McpServerIn,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Create or replace one server. Its keys are derived from its id; a
+    changed transport or a dropped variable clears the slot it leaves."""
+    _require_super_admin(user)
+    _mcp_valid_id(server_id)
+    for var in body.env:
+        if not _MCP_ENV_NAME.fullmatch(var) or var in mcp_client.CHILD_ENV:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{var!r}: a variable is up to 32 characters of [A-Z0-9_], "
+                       "not one the server already receives (PATH, HOME, ...)")
+    if len(set(body.env)) != len(body.env):
+        raise HTTPException(status_code=422, detail="each variable is listed once")
+    entry: dict[str, Any] = {
+        "id": server_id, "enabled": body.enabled, "transport": body.transport,
+        "env": {var: mcp_client.key_slot(server_id, var) for var in body.env},
+        "tiers": dict(body.tiers),
+    }
+    if body.transport == "stdio":
+        entry.update(command=body.command, args=list(body.args))
+    else:
+        entry.update(url=body.url, key=mcp_client.key_slot(server_id))
+    _, problem = mcp_client.validate_entry(entry)
+    if problem:
+        raise HTTPException(status_code=422, detail=problem)
+
+    def replace(entries: list[Any]) -> list[Any]:
+        # In place, so the list keeps its order; other entries, valid or
+        # not, are written back as they were.
+        out, placed = [], False
+        for e in entries:
+            if isinstance(e, dict) and e.get("id") == server_id:
+                if not placed:
+                    out.append(entry)
+                placed = True
+            else:
+                out.append(e)
+        return out if placed else out + [entry]
+
+    before = _mcp_update(replace)
+    mcp_client.forget(server_id)
+    _mcp_clear_orphans(server_id, before, replace(before))
+    return _mcp_server_out(entry)
+
+
+@router.delete("/settings/mcp/servers/{server_id}")
+def delete_mcp_server(
+    server_id: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Remove one server, close its connection and clear its derived keys."""
+    _require_super_admin(user)
+    _mcp_valid_id(server_id)
+    _mcp_entry_or_404(server_id)
+
+    def remove(entries: list[Any]) -> list[Any]:
+        return [e for e in entries if not (isinstance(e, dict) and e.get("id") == server_id)]
+
+    before = _mcp_update(remove)
+    mcp_client.forget(server_id)
+    _mcp_clear_orphans(server_id, before, remove(before))
+    return {"ok": True}
+
+
+@router.post("/settings/mcp/servers/{server_id}/test")
+def post_mcp_server_test(
+    server_id: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Connect, list the tools and close, enabled or not: the names, tiers and
+    descriptions the model would see. A failure carries a fixed message."""
+    _require_super_admin(user)
+    _mcp_valid_id(server_id)
+    cfg, problem = mcp_client.validate_entry(_mcp_entry_or_404(server_id))
+    if cfg is None:
+        raise HTTPException(status_code=422, detail=problem)
+    return mcp_client.probe(cfg)
+
+
+def _mcp_key_name(server_id: str, name: str) -> str:
+    entry = _mcp_entry_or_404(server_id)
+    if name == "bearer":
+        key = entry.get("key") if entry.get("transport") == "http" else None
+    else:
+        env = entry.get("env") if isinstance(entry.get("env"), dict) else {}
+        key = env.get(name)
+    if not _mcp_managed(key):
+        raise HTTPException(status_code=404,
+                            detail=f"server {server_id!r} takes no key named {name!r}")
+    return key
+
+
+@router.put("/settings/mcp/servers/{server_id}/keys/{name}")
+def put_mcp_server_key(
+    server_id: str,
+    name: str,
+    body: McpKeyRequest,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Store one of a server's keys (`bearer`, or a variable it lists) and
+    apply it to this process (see `app_secrets.set_secret`)."""
+    _require_super_admin(user)
+    _mcp_valid_id(server_id)
+    key = _mcp_key_name(server_id, name)
+    try:
+        app_secrets.set_secret(key, body.value)
+    except app_secrets.SecretValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    mcp_client.forget(server_id)
+    return _mcp_key_out(key)
+
+
+@router.delete("/settings/mcp/servers/{server_id}/keys/{name}")
+def delete_mcp_server_key(
+    server_id: str,
+    name: str,
+    user: User | None = Depends(optional_user),
+) -> dict[str, Any]:
+    """Forget one of a server's keys, from the file and from this process."""
+    _require_super_admin(user)
+    _mcp_valid_id(server_id)
+    key = _mcp_key_name(server_id, name)
+    app_secrets.clear_secret(key)
+    mcp_client.forget(server_id)
+    return _mcp_key_out(key)
 
 
 @router.get("/profiles")
