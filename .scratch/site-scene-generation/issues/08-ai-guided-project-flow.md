@@ -6,7 +6,7 @@
 Status: needs-triage — owner-required specification; not implemented
 Type: task
 Dependencies: accepted SC-00 N contracts; develop native adapters with SC-01–SC-03, optional adapters only when their respective engine gates pass
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
 
 ## Implementation assignment
 

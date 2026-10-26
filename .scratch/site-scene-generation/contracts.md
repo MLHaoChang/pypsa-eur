@@ -4,7 +4,7 @@
 # Contracts that implementation must preserve
 
 Status: proposed normative contracts; no new endpoint or storage behavior exists yet
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
 
 ## 1. Geometry before an electrical model
 
@@ -19,6 +19,15 @@ The new scene render path must work without yard/bus objects. Later explicit ass
 Unadopted Sites retain the legacy sites.json authority. A scene-enabled Site has immutable generations, each containing its complete Site envelope and scene state, and an atomic `sites/<site_id>/scene/current.json` pointer. The pointer contains revision, generation manifest hash and last applied proposal/receipt reference. It is the sole commit point for that Site. All transforms, including component gizmo positions, are authoritative in the pointed generation; legacy placements are never a second writer.
 
 Explicit adoption locks the project, verifies the current sites.json digest, snapshots the exact legacy envelope/placements into a first generation, fsyncs the complete generation and atomically commits its pointer. Opening/GET does not adopt. No rewrite of sites.json is needed for that commit. For a newly saved empty Site, a crash before the first pointer leaves a valid empty legacy plot, not a claimed generated campus.
+
+Existing equipment geometry (#712). sites.json already carries a project-level `asset_footprints` record: a map from `<Class>:<name>` to `width_m`/`depth_m`/optional `height_m` in metres, validated by `_validate_asset_footprints` in `pypsa-gui/backend/services/site_service.py`, re-keyed by `rename_component`/`rename_component_on_disk` and dropped by `remove_asset_footprint`/`remove_asset_footprint_on_disk` (called from `services/network_crud.py`), held client-side in `pypsa-gui/frontend/src/site3d/sitesStore.ts`, validated and drawn by `site3d/footprints.ts` (`FOOTPRINT_CLASSES`, `assertFootprintValid`, `footprintGeometry`) and used by `site3d/layout.ts`. It is the existing equipment geometry. Native equipment proxies reuse its `width_m`/`depth_m`/`height_m` fields and units; there is no second equipment-footprint store. SC-00 N freezes how an adopted Site's canonical generation takes it over:
+
+- Legacy projection: adoption snapshots the `asset_footprints` entries of that Site's placed equipment into the first generation; afterwards GET projects them from the pointed generation for an enabled Site and from sites.json for every other Site, and the client sees one record shape either way.
+- Stale-save refusal: today `PUT /projects/{name}/sites` (`put_sites` in `routers/projects.py`; client `sitesApi.putSites` in `frontend/src/api/sites.ts`) is lock-checked (409) but carries no revision. A whole-document PUT whose `asset_footprints` would change an entry the enabled Site's generation owns is refused with the same refresh/upgrade conflict as an envelope or placement change; it never overwrites the generation.
+- Copy/bundle closure: sites.json stays in `_BUNDLE_FILES` and Save-As copies it whole; for an enabled Site the adopted footprints travel only inside the pointed generation's closure, never as a second copy that could diverge.
+- Rename/delete rekeying: `rename_component_on_disk` and `remove_asset_footprint_on_disk` must enter the scene module for an enabled Site (re-key or drop in a new generation), never edit sites.json behind the pointer.
+
+The `<Class>:<name>` key is the D06 identity gap: it re-keys on rename and is dropped on delete, but it cannot tell a same-name recreation from the original once the removal hook was skipped or failed (the `_on_disk` variants are best-effort). SC-02 must close D06 before any binding relies on it.
 
 GET sites projects enabled Site envelopes from current generations and other Sites from legacy storage. Legacy whole-document PUT must inspect the backend's enabled Site set, even if the client omits those IDs. A request that changes/deletes an enabled Site or lacks the required current revision is refused with a refresh/upgrade conflict. It cannot remove the directory/pointer or reset a placement. Never trust a client-supplied scene_enabled flag. Provide a versioned native write path for modern clients; legacy clients may inspect enabled Sites but cannot silently edit them.
 

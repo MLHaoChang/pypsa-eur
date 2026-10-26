@@ -6,7 +6,7 @@
 Status: needs-triage — specification proposed; not implemented
 Type: task
 Dependencies: accepted SC-00 N only; Blender/Photo not required
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
 
 ## Implementation assignment
 
@@ -16,7 +16,7 @@ Follow [execution-guide.md](../execution-guide.md) and the matching units in [ex
 
 Write a public scene HTTP/store red test before implementing its behavior. Preserve legacy sites.json authority for unadopted Sites and the fixed origin. For adopted Sites, implement the single canonical generation/pointer authority, compatibility projection and stale legacy-save refusal and manifest-closure export/copy in contracts.md. Add native building/zone proxies, source/geometry records and compare-and-swap save/apply. Render imported footprints with source-derived or visibly estimated heights; promoting context suppresses its duplicate background mesh.
 
-Implement location/2D preview -> Generate -> correction in the existing Site plan view, using current style/selection controls. Native generation works without Blender or remote data, with manual footprints as fallback. A saved Project may have an empty network: generate from coordinate/boundary, with buses=[] and no dummy component creation. Replace the new action's model-first client checklist with the additive server /flow action verdict, and recheck at submission. Change no electrical inputs when editing building geometry. Add numeric geometry/placement controls and explicit unit/scale handling; do not imply engineering precision from decimal display.
+Implement location/2D preview -> Generate -> correction in the existing Site 3D view, using current style/selection controls. Native generation works without Blender or remote data, with manual footprints as fallback. A saved Project may have an empty network: generate from coordinate/boundary, with buses=[] and no dummy component creation. Replace the new action's model-first client checklist with the additive server /flow action verdict, and recheck at submission. Change no electrical inputs when editing building geometry. Add numeric geometry/placement controls and explicit unit/scale handling; do not imply engineering precision from decimal display.
 
 Tests cover legacy reads with no write, source classification, independent metric oracle, overlap/boundary geometry, concurrent edits, ownership/lock, failed apply preserving the old scene, reload and scenario/snapshot/bundle behavior. Show Guided and Expert correction, missing-data, read-only and offline states.
 

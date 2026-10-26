@@ -4,7 +4,7 @@
 # Implementation plan and integration contracts
 
 Status: needs-triage — proposed slices; no implementation started
-Baseline: master `aba252d2384f55116bbd15516a5b025951ba265e`
+Baseline: master `9988f9899a3bf8e80f51272529f18ea70599b90c`
 Read with: spec.md, validation-matrix.md, HANDOFF.md and issues/01–08.
 
 ## Execution contract

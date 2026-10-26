@@ -5,13 +5,13 @@
 
 Status: needs-triage — concrete design proposal; no new capability implemented or independently approved
 Type: specification
-Baseline: master `aba252d2384f55116bbd15516a5b025951ba265e`, fetched 2026-10-24
+Baseline: master `9988f9899a3bf8e80f51272529f18ea70599b90c`, fetched 2026-10-26 (after #712)
 
 ## Problem and intended outcome
 
 The user wants to start with a real location or an uploaded layout, generate a visually appealing approximate campus, associate buildings and areas with multi-energy loads and industrial processes, place equipment, and play native simulation results through the scene. They also want an integrated Blender option, external refinement, and exploration of reconstruction from site photographs.
 
-The ordinary workflow remains in GridSpine's existing Site plan view. It works without Blender. Blender can run behind a bounded generation/export job, or receive an exported scene for advanced editing. Photo reconstruction is a separate optional worker, because Blender alone does not infer a metrically reliable site from photographs.
+The ordinary workflow remains in GridSpine's existing Site 3D view. It works without Blender. Blender can run behind a bounded generation/export job, or receive an exported scene for advanced editing. Photo reconstruction is a separate optional worker, because Blender alone does not infer a metrically reliable site from photographs.
 
 Geometry-first generation explicitly replaces the current electrical-model-first prerequisite for this new path. A confirmed coordinate/boundary and an authorized saved Project suffice: its network may contain zero buses, branches, Loads and process units. The new Site may have `buses: []`. No dummy Bus or branch is created. The old model-driven generation path remains available, but its `siteReadiness` checklist cannot gate the new geometry-only action. SC-01 must update SiteEmptyState, readiness and rendering to support this case, using the server verdict below.
 

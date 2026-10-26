@@ -6,7 +6,7 @@
 Status: needs-triage — specification proposed; not implemented
 Type: research/prototype then bounded task
 Dependencies: SC-00 N and SC-01 native proposal lifecycle for layout; independently accepted SC-00 P for photo; no Blender prerequisite
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
 
 ## Implementation assignment
 

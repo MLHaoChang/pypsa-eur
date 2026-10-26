@@ -6,7 +6,7 @@
 Status: execution-support extension prepared; historical advisory reviews recorded; prototype/runtime implementation not started
 Date: 2026-10-24
 Branch/worktree: `claude/site-scene-generation-spec`, `/workspace/site-scene-spec`
-Baseline: `aba252d2384f55116bbd15516a5b025951ba265e`
+Baseline: `9988f9899a3bf8e80f51272529f18ea70599b90c`
 
 ## Implementer entry and current boundaries
 

@@ -5,7 +5,7 @@
 
 Status: design gap assessment and specified corrections; no runtime implementation assessment pass
 Date: 2026-10-24 (Europe/Berlin)
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e and PR711 publication e508bcd5506f9d89f79d728fd773ecec6bb27027
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c and PR711 publication e508bcd5506f9d89f79d728fd773ecec6bb27027
 
 ## Finding
 

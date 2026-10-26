@@ -6,7 +6,7 @@
 Status: needs-triage — specification proposed; not implemented
 Type: task
 Dependencies: SC-01; SC-00 target-lifecycle contract
-Baseline: master aba252d2384f55116bbd15516a5b025951ba265e
+Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
 
 ## Implementation assignment
 

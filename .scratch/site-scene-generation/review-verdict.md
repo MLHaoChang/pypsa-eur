@@ -5,7 +5,7 @@
 
 Date: 2026-10-24
 Reviewed technical head: `7cb8daac79ea86725cab184be9b8b246194eec60`
-Master baseline: `aba252d2384f55116bbd15516a5b025951ba265e`
+Master baseline: pre-#712 master (superseded; the package is re-baselined on `9988f9899a3bf8e80f51272529f18ea70599b90c`, after #712)
 Scope: planning documents, contracts, seven implementation/prototype tickets and 60 proposed validation cases. There is no new runtime implementation to certify.
 
 The owner requested independent review against existing gaps, corrections and publication to Git. Two read-only review agents independently checked the requirements/feasibility and repository standards axes using the current source. Neither authored the specifications. This is an advisory review, separate from the repository's official engine gatekeeper and UX approval process.
@@ -54,7 +54,7 @@ Final Standards review: no hard violations unresolved and no blocking heuristic 
 
 ## Evidence and limits
 
-- The reviewed technical diff is `git diff aba252d2384f55116bbd15516a5b025951ba265e...7cb8daac79ea86725cab184be9b8b246194eec60`.
+- The reviewed technical diff ran from the pre-#712 master baseline to `7cb8daac79ea86725cab184be9b8b246194eec60`. It predates #712's `asset_footprints` record and the re-baseline; it does not cover them.
 - Publication-record changes after this technical head only add this verdict, documentation validation evidence and handoff/index status. They are not a new runtime implementation or a claim of a new official exact-head approval.
 - Local checks: all relative Markdown links resolve, all seven ticket filenames follow 01–07, V01–V60 are unique, explicit documentation SPDX headers exist, and git diff --check passes. No executable test was added by this docs-only package.
 - The preceding assessment's 45 files / 544 passing existing 3D tests are baseline evidence only; they are not tests of these new capabilities. The 60 cases here remain proposed.
