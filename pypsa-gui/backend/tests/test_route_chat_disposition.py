@@ -32,6 +32,7 @@ _LIBRARY_PREVIEW_PATH = (
 # Settings selects an existing profile only; secret editing stays NOT_VIA_CHAT.
 # get_file_delivery authorizes the upload and returns its exact native blob link.
 SERVED_BY_TOOL: dict[tuple[str, str], str] = {
+    ('GET', '/api/profiles/schema'): 'get_profile_parameters',
     ('GET', '/api/campus-electrical/{name}'): 'campus_get_study',
     ('GET', '/api/campus-electrical/{name}/grid-codes'): 'campus_list_grid_codes',
     ('GET', '/api/campus-electrical/{name}/grid-readiness'): 'campus_grid_readiness',

@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-22",
+  "generated_at": "2026-10-23",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 287,
+  "tool_count": 288,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -783,7 +783,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "6e453e7eb9e81a00165b7e973f330357f8cba403c0f6367a16667b03d7c56b65",
+      "schema_sha256": "5321b138cd3f3667e253a22c17fbf1c7758392be4c7458a1870b930298c0a92a",
       "behavioral_fixture": "pending"
     },
     {
@@ -2290,6 +2290,33 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "compare_profiles",
+      "toolsets": [
+        "network",
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/compare"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "a",
+        "b",
+        "component"
+      ],
+      "required": [
+        "project_id",
+        "a",
+        "b"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "42fb52ad4fc8a5f2d3cbe2fff509a66ebb6aaf308f7a7e3f579a2756608405ae",
       "behavioral_fixture": "pending"
     },
     {

@@ -102,6 +102,9 @@ RULE_SCR = {"comparator": ">=", "otherwise": "warn", "tolerance": 0.0}
 RULE_RAMP = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
 RULE_RVC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
+#: The harmonic row's THD (or, with no THD limit, its worst order) against its limit. The verdict also reads
+#: the per-order limits, which the row does not store as a scalar.
+RULE_HARMONIC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 #: The oscillation row's after-mitigation value only (the before verdict also
 #: reads the band of concern, which is not a scalar): in band, ≤ the limit.
 RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
@@ -502,6 +505,102 @@ def _rvc_row(inp: _Inputs) -> dict:
                 section="connection", target=target)
 
 
+_HARMONIC_SCREENING = ("a screening estimate (IEC 61000-3-6 summation, U_h = I_h · h / S_k) that ignores network "
+                       "resonance, background distortion and the operator's allocation of the planning level; above "
+                       "the limit a harmonic study is needed")
+
+
+def _harmonic_row(inp: _Inputs) -> dict:
+    """The harmonic voltage distortion the process units cause at the PoC (grid-to-process issue 17,
+    ``gridspine.static.harmonics``): every unit lumped at the PoC, S_k from ``_poc_sk_mva``, judged on whichever
+    of ``thd_limit_pct`` and ``harmonic_limits_pct`` the profile sets."""
+    import pandas as pd
+
+    rid, req = "harmonic_distortion", "Harmonic voltage distortion at the PoC from the site's drives and heaters"
+    unit_target = _target("assets", "Link", None, "harmonic_source")
+    try:
+        from gridspine.drivers.campus_study import harmonic_units
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import harmonics as hm
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The harmonic screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_HARMONIC, limit=None, unit="% of nominal", source=note,
+                    project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
+                    target=unit_target)
+    limits, cited = hm.limits_from_profile(inp.profile)
+    if not cited:
+        return _row(rid, req, rule=RULE_HARMONIC, limit=None, unit="% of nominal",
+                    source=inp.profile_error or "The grid code sets no harmonic limit", project_value=None,
+                    verdict="unknown", assumed=True, note="The grid code sets no harmonic limit",
+                    section="assets", target=unit_target)
+    lim_assumed = any(c["source"] != "code" for c in cited)
+    by_thd = limits.thd_pct is not None
+    limit = limits.thd_pct if by_thd else None
+    unit = "% THD" if by_thd else "% of nominal"
+    part = {"thd_limit_pct": "THD", "harmonic_limits_pct": "Individual orders"}
+    source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
+    units = harmonic_units(inp.n, "PoC") if inp.n is not None else None
+    if units is None or units.empty:
+        return _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True,
+                    note="No process unit on this project: the screen reads each drive's or heater's Harmonic "
+                         "source and Rated apparent power",
+                    section="assets", target=_target("assets", "Link", None, "eh_process"))
+    sk = _poc_sk_mva(inp.n)
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    if sk is None:
+        return _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True, note="No short-circuit level at the point of connection",
+                    section="assets",
+                    target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                                   "eh_sk_mva"))
+    for rec in units.to_dict("records"):
+        try:
+            hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
+        except ContractError as exc:
+            # One unit's malformed stored input reads as unknown here, not a failed scorecard.
+            field = "harmonic_spectrum" if str(exc).startswith("Harmonic spectrum") else "harmonic_source"
+            return _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=None,
+                        verdict="unknown", assumed=True, note=f"{rec['unit']}: {exc}", section="assets",
+                        target=_target("assets", "Link", rec["unit"], field))
+    study = hm.harmonic_table(units, {"PoC": sk}, limits)
+    poc = study.pocs.iloc[0]
+    demo = study.units.loc[study.units["spectrum_source"].astype(str).str.startswith("demo"), "unit"].tolist()
+    missing = list(poc["no_input_units"])
+    first = missing[0] if missing else (demo[0] if demo else None)
+    field = ("rated_mva" if missing and "rated_mva" in study.units.set_index("unit").at[first, "note"]
+             else "harmonic_source" if missing else "harmonic_spectrum" if demo else "harmonic_source")
+    target = _target("assets", "Link", first, field)
+    thd, worst = _num(poc["thd_pct"]), _num(poc["worst_u_h_pct"])
+    value = thd if by_thd else worst
+    if not by_thd:
+        limit = _num(poc["worst_limit_pct"])
+    notes = []
+    if thd is not None:
+        notes.append(f"THD {thd:.4g} %" + (f" (limit {limits.thd_pct:g} %)" if by_thd else ""))
+    if worst is not None and pd.notna(poc["worst_order"]):
+        lim_h = _num(poc["worst_limit_pct"])
+        notes.append(f"worst order {int(poc['worst_order'])}: {worst:.4g} %"
+                     + (f" (limit {lim_h:g} %)" if lim_h is not None else ""))
+    if poc["failing_orders"]:
+        notes.append("orders over their limit: " + ", ".join(map(str, poc["failing_orders"])))
+    if missing:
+        notes.append("no input for " + ", ".join(map(str, missing)) + ": a unit without its inputs blocks a pass")
+    if demo:
+        notes.append("demo default spectrum for " + ", ".join(map(str, demo))
+                     + " (no vendor spectrum entered)")
+    notes.append(f"S_k {sk:g} MVA; {_HARMONIC_SCREENING}")
+    verdict = {"pass": "pass", "fail": RULE_HARMONIC["otherwise"]}.get(poc["verdict"], "unknown")
+    row = _row(rid, req, rule=RULE_HARMONIC, limit=limit, unit=unit, source=source, project_value=value,
+               verdict=verdict, assumed=lim_assumed or fault_assumed or bool(demo), note="; ".join(notes),
+               section="assets", target=target)
+    row["harmonics"] = {"sk_mva": sk, "thd_pct": thd, "worst_order": None if pd.isna(poc["worst_order"])
+                        else int(poc["worst_order"]), "worst_u_h_pct": worst,
+                        "failing_orders": list(poc["failing_orders"] or []), "no_input_units": missing,
+                        "demo_spectrum_units": demo}
+    return row
+
+
 def _poc_sk_mva(n) -> float | None:
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
         return None
@@ -852,8 +951,8 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _reactive_row(inp), *_support_rows(inp), *_island_rows(inp),
-            _lole_row(inp)]
+            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _reactive_row(inp), *_support_rows(inp),
+            *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),

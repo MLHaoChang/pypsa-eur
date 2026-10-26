@@ -725,6 +725,11 @@ def purge_component_side_data(n, component_class: str, attr: str, name: str) -> 
     vintage_service.delete_bounds_for_asset(n, component_class, name)
     _user_ts_delete_asset(attr, name)
     asset_provenance.drop(n, component_class, name)
+    from services import site_service
+
+    storage_dir = getattr(PyPSAService.get_active_context(), "storage_dir", None)
+    site_service.remove_asset_footprint_on_disk(storage_dir, component_class, name)
+
 
 
 def _delete_component(component_class: str, attr: str, name: str) -> None:

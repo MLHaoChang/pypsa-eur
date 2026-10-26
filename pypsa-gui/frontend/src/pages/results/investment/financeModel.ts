@@ -728,10 +728,71 @@ function campusLifeNotes(flags: string[]): string[] {
   })
 }
 
+/** Flags emitted by services/results/finance_case.py. The tail preserves
+ *  colon-bearing line/asset ids; unknown future keys remain visible verbatim. */
+const PROJECT_FLAG_WORDS: Record<string, (tail: string) => string> = {
+  ledger_party_unknown: v => `The paying or receiving party is not established for ${v}.`,
+  difference_line_single_class: v => `The whole difference on ${v} escalates in one class because its volume could not be allocated.`,
+  degradation_link_unknown: v => `The generation link needed to price degradation is not established for ${v}.`,
+  export_degrades_by_generation_share: v => `Export on ${v} degrades in proportion to each owner's generator output.`,
+  degradation_bill_value_negative: v => `The bill value attributed to degradation is negative in period ${v}.`,
+  co2_price_money_year_differs: v => {
+    const [price, money] = v.split(':')
+    return `The CO2 price is in ${price} money; the real case is in ${money} money.`
+  },
+  co2_price_not_established: v => `The CO2 price is not established: ${v.replace(/_/g, ' ')}.`,
+  co2_price_not_applied: v => `The CO2 price is not applied: ${v.replace(/_/g, ' ')}.`,
+  load_shed_excluded: v => `The comparison excludes ${v || 'not established'} MWh of shed load.`,
+  counterfactual_includes_conversion_load: v => `The comparison includes ${v} MWh of the site's conversion load, using its actual draw.`,
+  counterfactual_conversion_load_links: v => `The comparison includes conversion load from ${assetLabel(v)}.`,
+  counterfactual_removes_non_owner_assets: v => `The comparison removes assets not owned by the investor (${assetLabel(v)}); the baseline is not established.`,
+  counterfactual_owner_conversion_links: v => `Conversion load depends on the owner's assets (${assetLabel(v)}); its baseline supply is not established.`,
+  counterfactual_reference_purchase_missing: v => `The comparison has no reference purchase for ${assetLabel(v)}.`,
+  counterfactual_reference_purchase_unused: v => `The reference purchase for ${assetLabel(v)} is unused in the comparison.`,
+  counterfactual_purchase_replaces: v => `The comparison's reference purchase replaces ${assetLabel(v)} instead of counting both.`,
+  counterfactual_not_established: v => `The comparison site is not established: ${v.replace(/_/g, ' ')}.`,
+  counterfactual_bill_not_established: v => `The comparison site's bill is not established in period ${v}.`,
+  counterfactual_commodity_omitted: v => `The comparison omits the commodity line: ${v.replace(/_/g, ' ')}.`,
+  counterfactual_keeps_contract: v => `The comparison keeps contract ${v}, which exists without the owner's assets.`,
+  baseline_removed: v => `The site-today baseline removes ${assetLabel(v)}.`,
+  counterfactual_baseline_unserved: v => `The site-today baseline cannot serve ${assetLabel(v)}.`,
+  counterfactual_baseline_shed_unknown: v => `Shed load in the site-today baseline is not established for ${assetLabel(v)}.`,
+  counterfactual_shed_unpriced: v => `Shed load in the comparison is unpriced because no value of lost load is set${v.includes(':') ? ` (period ${v.slice(v.indexOf(':') + 1)})` : ''}.`,
+  cod_from_build_year: v => `The commercial operation date of ${assetLabel(v)} comes from its build year.`,
+  lcos_not_applicable: v => `Levelised storage cost does not apply to ${assetLabel(v)}: it is not on a site electricity bus.`,
+  lcos_dispatch_not_established: v => `Dispatch needed for the levelised storage cost of ${assetLabel(v)} is not established.`,
+  lcos_charge_price_not_established: v => `The storage charging price is not established: ${v.replace(/_/g, ' ')}.`,
+  lcos_surplus_price_floored: v => `Negative surplus charging prices for ${assetLabel(v)} are floored at zero.`,
+  lcos_charge_from_surplus_unpriced: v => {
+    const split = v.lastIndexOf(':')
+    return `${assetLabel(v.slice(0, split))} charges from ${v.slice(split + 1)} MWh of surplus generation; no export price is set.`
+  },
+  lcos_charge_from_surplus_at_export_price: v => {
+    const split = v.lastIndexOf(':')
+    return `${assetLabel(v.slice(0, split))} charges from ${v.slice(split + 1)} MWh of surplus generation, valued at the export price.`
+  },
+  extra_asset_may_double_count: v => `${assetLabel(v)} may duplicate a transformer or cable already costed in the network.`,
+  not_built: v => `${assetLabel(v)} was sized to zero in a later period and is not bought.`,
+  template_annualised: v => `The sampled operating cash is scaled to a full year by a factor of ${v}.`,
+  generation_not_established: v => `Generation is not established for ${assetLabel(v)}.`,
+  monthly_item_months_missing: v => {
+    const split = v.lastIndexOf(':')
+    return `The monthly item ${v.slice(0, split)} covers ${v.slice(split + 1)} months; a full-year amount is not established.`
+  },
+  annualise_monthly_item_not_established: v => `A full-year amount cannot be established for monthly item ${v}.`,
+  template_annualised_monthly: v => {
+    const split = v.lastIndexOf(':')
+    return `Monthly item ${v.slice(0, split)} is scaled to a full year by a factor of ${v.slice(split + 1)}.`
+  },
+  ledger_conservation_failed: () => 'The cash ledger does not balance.',
+  ledger_conservation_not_established: () => 'Whether the cash ledger balances is not established.',
+  extra_asset_money_year_unstated: () => 'No case money year is stated to compare with the additional equipment costs.',
+}
+
 /** The project flag list in words. A campus asset's life-end and later-renewal
  *  flags are worded in the campus equipment block, so they are not repeated;
  *  `part_not_replaced` for an asset that has a life-end flag states the same fact
- *  and is left out. Any other flag passes through unchanged. */
+ *  and is left out. Known finance flags are worded; unknown flags pass through unchanged. */
 export function projectFlagWords(flags: string[]): string[] {
   const lifeEnds = flags.filter(f => f.startsWith(LIFE_ENDS))
     .map(f => f.slice(LIFE_ENDS.length).split(':').slice(0, -2).join(':'))
@@ -745,7 +806,12 @@ export function projectFlagWords(flags: string[]): string[] {
       return [`${assetLabel(asset)}${partName ? `, ${partName}` : ''}: its life ends inside the case's `
         + 'horizon and no replacement is planned.']
     }
-    return [f]
+    const colon = f.indexOf(':')
+    const key = colon < 0 ? f : f.slice(0, colon)
+    // Headline caveats and Counterfactual are both rendered in this report.
+    if (BASELINE_CAVEATS.some(([code]) => code === key)) return []
+    const words = PROJECT_FLAG_WORDS[key]
+    return [words ? words(colon < 0 ? '' : f.slice(colon + 1)) : f]
   })
 }
 

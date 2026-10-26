@@ -224,4 +224,18 @@ describe('GridReadinessScorecard', () => {
     expect(screen.getByTestId('gr-latency-ramp_rate').textContent)
       .toBe("'bess_1' 0.02 s (grid forming), 'ups_battery' walks in over 15 s (UPS); all assumed")
   })
+
+  it('the harmonic row (issue 17) shows its verdict and names the unit field Expert edits', async () => {
+    const user = userEvent.setup()
+    const harmonic = row({ id: 'harmonic_distortion', verdict: 'warn', section: 'assets', limit: 3, unit: '% THD',
+      requirement: "Harmonic voltage distortion at the PoC from the site's drives and heaters",
+      project_value: 3.21, note: 'demo default spectrum for compressor (no vendor spectrum entered)',
+      target: target('assets', 'Link', 'compressor', 'harmonic_spectrum'),
+      harmonics: { sk_mva: 1400, thd_pct: 3.21, worst_order: 5, worst_u_h_pct: 2.14, failing_orders: [5],
+        no_input_units: [], demo_spectrum_units: ['compressor'] } })
+    render(<GridReadinessScorecard data={{ ...DATA, rows: [harmonic] }} mode="guided" fieldLabels={{}} />)
+    await user.click(screen.getByTestId('gr-more-harmonic_distortion'))
+    expect(screen.getByTestId('gr-editable-harmonic_distortion').textContent)
+      .toBe('Editable in Expert: Assets & sizing › compressor › Harmonic spectrum')
+  })
 })

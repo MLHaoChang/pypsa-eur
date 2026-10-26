@@ -189,6 +189,12 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-23: a rotated coordinator opened sessions without the owner's title convention.** The convention was an owner-decisions row only, and the coordinator skill's "Opening a session" didn't mention it.
   - Fix: "Opening a session" now says to title and tag every session per the naming decision, and to retitle it when its work changes.
   - Lives in: coordinator (Opening a session).
+- **2026-10-23: dashboards looked lost after every coordinator rotation.** The app lists only the artifacts a session has published or opened. Two newer dashboards were known only from the hand-off brief, and the token-usage history lived in the old coordinator's scratchpad.
+  - Fix: the new coordinator opens each dashboard; the skill lists every dashboard and its refresh; any state a refresh needs is kept in the artifact, not the scratchpad.
+  - Lives in: coordinator (Rotation, Dashboard).
 - **2026-10-23: premerge counted verdicts embedded in reports, and unreported context appeared empty.**
   - Fix: count only a comment's first non-empty verdict line, diagnose skipped markers, and allow an optional login filter. Print `?` for unknown context and require `get_session` before rotation.
   - Lives in: premerge.sh "reviewer verdicts", `scripts/coord/verdicts.py`, `sessions.py`, and review-gk/review-ux first-line guidance (live and template copies).
+- **2026-10-26: coordinator habits lived only in the coordinator's head.** Merge titles, the premerge worktree, ciwait's first-hit exit, re-OK after a push, session-opening arguments, rotation notices and tool-output overflows were learned by repetition and lost at each rotation.
+  - Fix: each is now a line in the coordinator skill, in the section it belongs to; the live skill also cites the owner decisions on rotation depth, the gatekeeper split and merge authority.
+  - Lives in: coordinator (Rotation, Opening a session, Merging, Tool hygiene).

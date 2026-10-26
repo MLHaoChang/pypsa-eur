@@ -3,7 +3,7 @@
 
 # Planning-criteria contingencies: emergency ratings, N-M-1 / N-1-1, bus-section loss, angle limit
 
-Status: ready-for-agent
+Status: done (#702, #708; follow-ups 16–18 in #709)
 Type: task
 Blocked by: none (09 is the owner's priority, not a dependency)
 Gated: **yes** (gridspine)

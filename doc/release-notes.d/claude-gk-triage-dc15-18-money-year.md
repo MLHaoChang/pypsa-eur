@@ -1,0 +1,1 @@
+* Docs: Gatekeeper triage of data-centre issues 15–18 (reactive capability curve and deadband, stage-2 redispatch, post-contingency voltage band and angle limit from the grid-code profile) and of the money-year template repin.

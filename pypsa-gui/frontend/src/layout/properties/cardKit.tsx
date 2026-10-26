@@ -1061,7 +1061,7 @@ export function EhBusInputs({ fs, set, poc = false }: { fs: FS; set: SetFS; poc?
         <div data-testid="eh-sk-readonly" className="flex flex-col gap-0.5">
           <span className="text-[9px] text-muted truncate"><InfoTip text={tip.sk}>Short-circuit level (MVA)</InfoTip></span>
           <span className="text-[10px] font-mono">{fs.eh_sk_mva ? fs.eh_sk_mva : 'not set'}</span>
-          <button type="button" onClick={openFaultLevelEditor} className="self-start text-[10px] text-accent underline">
+          <button type="button" onClick={openFaultLevelEditor} className="self-start whitespace-nowrap text-[10px] text-accent underline">
             Edit in Connection &amp; grid ›
           </button>
         </div>
