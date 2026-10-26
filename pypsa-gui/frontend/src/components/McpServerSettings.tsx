@@ -89,54 +89,56 @@ function KeyField({
   const [replacing, setReplacing] = useState(false)
   const editing = !status.present || replacing
   return (
-    <div className="flex items-center gap-2 text-xs" data-testid={testId}>
-      <span className="w-40 shrink-0 font-mono truncate" title={label}>{label}</span>
-      <span className={status.present ? 'shrink-0' : 'shrink-0 text-muted'} data-testid={`${testId}-status`}>
-        {status.present ? `Key set${status.hint ? ` (${status.hint})` : ''}` : 'No key'}
-      </span>
-      {editing && (
-        <>
-          <input
-            type="password"
-            autoComplete="off"
-            className={INPUT}
-            placeholder="Paste the value"
-            aria-label={`${label} value`}
-            value={draft}
-            onChange={e => setDraft(e.target.value)}
-            data-testid={`${testId}-input`}
-          />
-          <button
-            type="button"
-            className={BUTTON}
-            disabled={pending || !draft}
-            onClick={() => { onSave(draft); setDraft(''); setReplacing(false) }}
-            data-testid={`${testId}-save`}
-          >
-            Save
+    <div className="space-y-1" data-testid={testId}>
+      <div className="flex items-center gap-2 text-xs">
+        <span className="w-40 shrink-0 font-mono truncate" title={label}>{label}</span>
+        <span className={status.present ? 'shrink-0' : 'shrink-0 text-muted'} data-testid={`${testId}-status`}>
+          {status.present ? `Key set${status.hint ? ` (${status.hint})` : ''}` : 'No key'}
+        </span>
+        {editing && (
+          <>
+            <input
+              type="password"
+              autoComplete="off"
+              className={INPUT}
+              placeholder="Paste the value"
+              aria-label={`${label} value`}
+              value={draft}
+              onChange={e => setDraft(e.target.value)}
+              data-testid={`${testId}-input`}
+            />
+            <button
+              type="button"
+              className={BUTTON}
+              disabled={pending || !draft}
+              onClick={() => { onSave(draft); setDraft(''); setReplacing(false) }}
+              data-testid={`${testId}-save`}
+            >
+              Save
+            </button>
+          </>
+        )}
+        {status.present && !replacing && (
+          <button type="button" className="text-xs text-muted underline" onClick={() => setReplacing(true)}
+            data-testid={`${testId}-replace`}>
+            Replace
           </button>
-        </>
-      )}
-      {status.present && !replacing && (
-        <button type="button" className="text-xs text-muted underline" onClick={() => setReplacing(true)}
-          data-testid={`${testId}-replace`}>
-          Replace
-        </button>
-      )}
-      {replacing && (
-        <button type="button" className="text-xs text-muted underline"
-          onClick={() => { setDraft(''); setReplacing(false) }} data-testid={`${testId}-cancel`}>
-          Cancel
-        </button>
-      )}
-      {status.present && (
-        <button type="button" className="text-xs text-muted underline" onClick={onClear}
-          data-testid={`${testId}-clear`}>
-          Remove
-        </button>
-      )}
+        )}
+        {replacing && (
+          <button type="button" className="text-xs text-muted underline"
+            onClick={() => { setDraft(''); setReplacing(false) }} data-testid={`${testId}-cancel`}>
+            Cancel
+          </button>
+        )}
+        {status.present && (
+          <button type="button" className="text-xs text-muted underline" onClick={onClear}
+            data-testid={`${testId}-clear`}>
+            Remove
+          </button>
+        )}
+      </div>
       {status.redactable === false && (
-        <span className="text-warn" data-testid={`${testId}-short`}>Too short to hide from logs</span>
+        <p className="text-xs text-warn" data-testid={`${testId}-short`}>Too short to hide from logs</p>
       )}
     </div>
   )
