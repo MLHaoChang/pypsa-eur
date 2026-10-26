@@ -47,6 +47,8 @@ def test_u2_is_the_unbalanced_load_over_s_sc2_with_the_c_factor(tmp_path):
     assert row["limit"] == 1.0 and row["verdict"] == "pass"
     assert "screening" in row["note"] and "Z2 = Z1" in row["note"]
     assert R.disposition(row) == ("checked", "pass")
+    assert row["unbalance"]["margin_pct"] == pytest.approx(1.0 - expected, rel=1e-9)
+    assert row["unbalance"]["band"] == "PoC S_k''" and row["unbalance"]["label"].startswith("screening")
 
 
 def test_over_the_limit_warns(tmp_path):

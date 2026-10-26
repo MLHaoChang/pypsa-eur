@@ -603,10 +603,12 @@ def _harmonic_row(inp: _Inputs) -> dict:
     return row
 
 
-#: IEC 60909's c_max above 1 kV: S_k'' = c U^2 / |Z|, so the network's own S_sc2 is S_k'' / c.
-_C_MAX = 1.1
+#: The scorecard has one S_k'' per PoC and no sequence network, so its row is the single-PoC form of
+#: ``gridspine.static.unbalance``: S_sc2 = S_k'' / c_max (S_k'' = c U^2 / |Z|; the largest c gives the smallest
+#: S_sc2, conservative whichever case S_k'' is) with Z2 = Z1, no transfer from other PoCs and no min/max bands.
+_UNBALANCE_BAND = "PoC S_k''"
 _UNBALANCE_SCREENING = ("a screening upper bound (u2 = S_unbal / S_sc2, every unit lumped at the PoC on one phase "
-                        "pair) with S_sc2 = S_k'' / 1.1 (c factor and Z2 = Z1 assumed) and no background "
+                        "pair) with S_sc2 = S_k'' / c_max (c factor and Z2 = Z1 assumed) and no background "
                         "unbalance; above the limit an unbalanced load-flow study is needed")
 
 
@@ -622,6 +624,7 @@ def _unbalance_row(inp: _Inputs) -> dict:
         from gridspine.drivers.campus_study import harmonic_units
         from gridspine.schema.contracts import ContractError
         from gridspine.static import unbalance as ub
+        from gridspine.static.island_sc_seq import c_factor
     except ImportError as exc:  # pragma: no cover - build-shape branch
         note = f"The unbalance screen needs gridspine ({exc})"
         return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit="% of nominal", source=note,
@@ -660,9 +663,9 @@ def _unbalance_row(inp: _Inputs) -> dict:
                     note="No short-circuit level at the point of connection", section="assets",
                     target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                                    "eh_sk_mva"))
-    s_sc2 = sk / _C_MAX
+    s_sc2 = sk / c_factor(None, "max")
     u2 = ub.u2_pct(s_unbal["PoC"], s_sc2)
-    verdict, _ = ub.judge(u2, limit)
+    verdict, margin = ub.judge(u2, limit)
     notes = [f"u2 ≈ {s_unbal['PoC']:.4g} MVA unbalanced / {s_sc2:.4g} MVA S_sc2 × 100 = {u2:.4g} %"]
     if missing:
         if verdict != "fail":
@@ -671,11 +674,14 @@ def _unbalance_row(inp: _Inputs) -> dict:
                      + " (Single-phase share or Rated apparent power): a unit without its inputs blocks a pass")
     notes.append(_UNBALANCE_SCREENING)
     verdict = {"pass": "pass", "fail": RULE_UNBALANCE["otherwise"]}.get(verdict, "unknown")
-    return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of nominal", source=source,
-                project_value=round(u2, 4), verdict=verdict,
-                assumed=True if missing else lim_assumed or _marking_assumed(inp.marking("fault_level")),
-                note="; ".join(notes), section="assets",
-                target=_target("assets", "Link", missing[0], "single_phase_share") if missing else unit_target)
+    row = _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of nominal", source=source,
+               project_value=round(u2, 4), verdict=verdict,
+               assumed=True if missing else lim_assumed or _marking_assumed(inp.marking("fault_level")),
+               note="; ".join(notes), section="assets",
+               target=_target("assets", "Link", missing[0], "single_phase_share") if missing else unit_target)
+    row["unbalance"] = {"s_unbalanced_mva": s_unbal["PoC"], "s_sc2_mva": s_sc2, "margin_pct": margin,
+                        "band": _UNBALANCE_BAND, "no_input_units": missing, "label": ub.LABEL}
+    return row
 
 
 def _poc_sk_mva(n) -> float | None:
