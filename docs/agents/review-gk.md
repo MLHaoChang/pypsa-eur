@@ -16,9 +16,11 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - `tool-error-kinds.json`: its kinds must be the union of both parents.
 - Inventory: `smoke/assistant_inventory.py --check`; regenerate with `--write`, never hand-merge.
 
+- A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
+
 ## Known container-only failures
 
-`test_harness_provider_parity` and `test_profile_gen_atlite_source` (atlite is not installed).
+`test_harness_provider_parity`, `test_workflow_provider_parity[*-anthropic]`, `test_profile_gen_atlite_source` (atlite is not installed) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`.
 
 ## Test quality
 
