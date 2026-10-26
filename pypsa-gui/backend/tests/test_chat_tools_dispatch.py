@@ -698,8 +698,14 @@ def test_ui_open_panel_returns_event_marker():
     assert event["results_tab"] == "economics"
 
 
-def test_ui_set_snapshot_returns_event_marker():
+def test_ui_set_snapshot_returns_event_marker(install_network):
+    import pandas as pd
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=3, freq="h"))
+    install_network(n)
     event = chat_tools.ui_set_snapshot(snapshot_iso="2025-01-01T00:00:00", period=2030)
+    assert event["snapshot_index"] == 0
     assert event["_ui_event"] is True
     assert event["kind"] == "set_snapshot"
     assert event["snapshot_iso"] == "2025-01-01T00:00:00"

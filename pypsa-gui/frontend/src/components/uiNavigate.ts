@@ -1,5 +1,6 @@
 import { manualNavigation, navigationEpoch, withAssistantNavigation } from '../utils/navigationEpoch'
-import { useUIStore } from '../store/uiStore'
+import { useUIStore, type CanvasView, type PropertiesEditRequest } from '../store/uiStore'
+import { withReturnFrom } from '../layout/flowNavigation'
 
 /**
  * Map chat tool panel_id → SlidePanel / special navigation targets.
@@ -72,6 +73,8 @@ type NavigationRequest = {
   compare_tab?: string
   component_class?: string
   name?: string
+  snapshot_index?: number
+  canvas_view?: string
   snapshot_iso?: string
   period?: number | null
   category?: string
@@ -88,6 +91,7 @@ type NavigationRequest = {
 
 export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
   if (expectedEpoch !== undefined && expectedEpoch !== navigationEpoch()) return false
+  if (d.kind === 'set_snapshot' && typeof d.snapshot_index !== 'number') return true
   if (expectedEpoch === undefined) manualNavigation()
   withAssistantNavigation(() => apply(d))
   return true
@@ -95,9 +99,18 @@ export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): b
 
 function apply(d: NavigationRequest) {
   const ui = useUIStore.getState()
+  const closePanelWithReturn = () => withReturnFrom(() => useUIStore.getState().setSlidePanel(null))
   if (d.kind === 'select_component' && d.component_class && d.name) {
+    if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
     ui.setSelectedComponent({ type: d.component_class, name: d.name })
     ui.openRightPanel()
+    return
+  }
+  if (d.kind === 'open_properties' && d.component_class && d.name) {
+    if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
+    ui.setSelectedComponent({ type: d.component_class, name: d.name })
+    ui.openRightPanel()
+    ui.requestPropertiesEdit({ type: d.component_class as PropertiesEditRequest['type'], name: d.name })
     return
   }
   if (d.kind === 'open_asset_detail' && d.component_class && d.name) {
@@ -124,20 +137,20 @@ function apply(d: NavigationRequest) {
     })
     return
   }
-  if (d.kind === 'set_snapshot' && d.snapshot_iso) {
-    // Snapshot picker is driven by ISO + optional period; store the index
-    // is unknown here — open Results so the user sees the picker context.
-    ui.setSlidePanel('results')
+  if (d.kind === 'set_snapshot') {
+    if (typeof d.snapshot_index !== 'number') return
+    if (ui.activeSlidePanel) closePanelWithReturn()
+    ui.setResultsSnapshotIdx(d.snapshot_index)
+    ui.setResultsOverlay(true)
     return
   }
   // kind === 'navigate' | legacy 'open_panel'
   const panel = d.panel_id ? _normalizePanelId(d.panel_id) : null
-  if (panel === 'topology') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('blank')
-  } else if (panel === 'map') {
-    ui.setSlidePanel(null)
-    ui.setCanvasView('satellite')
+  if (panel === 'topology' || panel === 'map') {
+    if (ui.activeSlidePanel) closePanelWithReturn()
+    const view = d.canvas_view && ['blank', 'satellite', 'hybrid', 'site'].includes(d.canvas_view)
+      ? d.canvas_view as CanvasView : panel === 'topology' ? 'blank' : 'satellite'
+    ui.setCanvasView(view)
   } else if (panel === 'properties') {
     ui.openRightPanel()
   } else if (panel === 'palette') {

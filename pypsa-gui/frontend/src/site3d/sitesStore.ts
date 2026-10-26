@@ -18,6 +18,8 @@ import { useEffect } from 'react'
 import { create } from 'zustand'
 import { sitesApi } from '../api/sites'
 import { rawFetchHeaders } from '../api/csrf'
+import { assertFootprintValid } from './footprints'
+import type { AssetFootprint } from './types'
 import { useUIStore } from '../store/uiStore'
 import { evaluateMutation } from '../utils/mutationGuard'
 import {
@@ -79,13 +81,18 @@ interface SitesState {
   dirty: Record<string, true>
   docFor: (project: string | null) => SitesDocument
   siteById: (project: string | null, siteId: string) => Site | null
-  ensureLoaded: (project: string | null) => Promise<void>
+  footprintDrafts: Record<string, Record<string, true>>
+  loadFailures: Record<string, true>
+  ensureLoaded: (project: string | null, retry?: boolean) => Promise<void>
   upsertSite: (project: string | null, site: Site) => void
   removeSite: (project: string | null, siteId: string) => void
   setSiteBuses: (project: string | null, siteId: string, buses: string[]) => void
   setBoundary: (project: string | null, siteId: string, boundary: LngLatTuple[]) => void
   setPlacement: (project: string | null, siteId: string, key: string, placement: Placement) => void
   removePlacement: (project: string | null, siteId: string, key: string) => void
+  reconcileCachedFootprints: (project: string, prefix: string, observed: Record<string, AssetFootprint>, saved: Record<string, AssetFootprint>, names: Set<string>) => void
+  dropCachedFootprints: (project: string | null, keys: string[]) => void
+  setAssetFootprint: (project: string | null, key: string, value: AssetFootprint | null) => void
   renamePlacement: (project: string | null, cls: string, oldName: string, newName: string) => boolean
   /**
    * Arrange (D8): write every packed object's current position as a
@@ -136,9 +143,12 @@ export const useSitesStore = create<SitesState>((set, get) => {
     dirty: {},
     docFor: project => get().docs[keyOf(project)] ?? EMPTY_DOC,
     siteById: (project, siteId) => get().docFor(project).sites.find(s => s.id === siteId) ?? null,
-    ensureLoaded: async project => {
+    footprintDrafts: {},
+    loadFailures: {},
+    ensureLoaded: async (project, retry = false) => {
       const k = keyOf(project)
-      if (get().loaded[k]) return
+      if (get().loaded[k] && !retry) return
+      let loadFailed = false
       let doc: SitesDocument
       if (!project) {
         doc = readLocal(null) ?? emptySitesDocument()
@@ -149,6 +159,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
           // Unreachable server: the local fallback is the best we have. A
           // server that ANSWERED (even with nothing) always wins — see the
           // deleted-and-recreated project name in the tests.
+          loadFailed = true
           doc = readLocal(project) ?? emptySitesDocument()
         }
       }
@@ -156,6 +167,7 @@ export const useSitesStore = create<SitesState>((set, get) => {
         // A write that landed while the GET was in flight wins over the fetch.
         docs: s.dirty[k] ? s.docs : { ...s.docs, [k]: doc },
         loaded: { ...s.loaded, [k]: true },
+        loadFailures: loadFailed ? { ...s.loadFailures, [k]: true } : Object.fromEntries(Object.entries(s.loadFailures).filter(([key]) => key !== k)),
       }))
     },
     upsertSite: (project, site) => {
@@ -180,12 +192,49 @@ export const useSitesStore = create<SitesState>((set, get) => {
       delete rest[key]
       return { ...s, placements: rest }
     }),
+    // Native deletion already updated disk. Reconcile the cached/pending document
+    // without arming a new write or losing unrelated unsaved scene edits.
+    reconcileCachedFootprints: (project, prefix, observed, saved, names) => {
+      const doc = get().docFor(project)
+      const footprints = { ...doc.asset_footprints }
+      for (const key of Object.keys(observed)) {
+        if (key.startsWith(prefix) && footprints[key] === observed[key] && !names.has(key.slice(prefix.length))) delete footprints[key]
+      }
+      for (const [key, value] of Object.entries(saved)) {
+        if (key.startsWith(prefix) && names.has(key.slice(prefix.length)) && !footprints[key] && !get().footprintDrafts[keyOf(project)]?.[key]) {
+          assertFootprintValid(key, value)
+          footprints[key] = value
+        }
+      }
+      set(s => ({ docs: { ...s.docs, [keyOf(project)]: { ...doc, asset_footprints: footprints } } }))
+    },
+    dropCachedFootprints: (project, keys) => {
+      const doc = get().docFor(project)
+      if (!keys.some(key => key in (doc.asset_footprints ?? {}))) return
+      const footprints = { ...doc.asset_footprints }
+      for (const key of keys) delete footprints[key]
+      set(s => ({ docs: { ...s.docs, [keyOf(project)]: { ...doc, asset_footprints: footprints } } }))
+    },
+    setAssetFootprint: (project, key, value) => {
+      if (!canWrite()) return
+      if (value !== null) assertFootprintValid(key, value)
+      write(project, doc => {
+        const footprints = { ...doc.asset_footprints }
+        if (value === null) delete footprints[key]
+        else footprints[key] = { ...value }
+        return { ...doc, asset_footprints: footprints }
+      })
+      set(s => ({ footprintDrafts: { ...s.footprintDrafts, [keyOf(project)]: { ...s.footprintDrafts[keyOf(project)], [key]: true } } }))
+    },
     renamePlacement: (project, cls, oldName, newName) => {
       const oldKey = placementKey(cls, oldName), newKey = placementKey(cls, newName)
       const doc = get().docFor(project)
-      if (!doc.sites.some(s => oldKey in (s.placements ?? {}))) return false
+      if (!(oldKey in (doc.asset_footprints ?? {})) && !doc.sites.some(s => oldKey in (s.placements ?? {}))) return false
       write(project, d => ({
         ...d,
+        ...(d.asset_footprints && oldKey in d.asset_footprints ? {
+          asset_footprints: Object.fromEntries(Object.entries(d.asset_footprints).map(([key, value]) => [key === oldKey ? newKey : key, value])),
+        } : {}),
         sites: d.sites.map(s => {
           if (!(oldKey in (s.placements ?? {}))) return s
           const { [oldKey]: moved, ...rest } = s.placements
@@ -209,12 +258,13 @@ export const useSitesStore = create<SitesState>((set, get) => {
     })),
     replaceDocument: (project, doc) => {
       doc.sites.forEach(assertSiteValid)
+      for (const [key, value] of Object.entries(doc.asset_footprints ?? {})) assertFootprintValid(key, value)
       write(project, () => doc)
     },
     resetForTests: () => {
       for (const t of timers.values()) clearTimeout(t)
       timers.clear()
-      set({ docs: {}, loaded: {}, dirty: {} })
+      set({ docs: {}, loaded: {}, dirty: {}, loadFailures: {}, footprintDrafts: {} })
     },
   }
 })
@@ -239,9 +289,12 @@ async function persist(project: string | null): Promise<'server' | 'local' | 're
     await sitesApi.putSites(project, doc)
     clearLocal(project)
     useSitesStore.setState(s => {
-      const dirty = { ...s.dirty }
+      // An older PUT must not acknowledge a newer dimension/reset draft.
+      if (s.docFor(project) !== doc) return s
+      const dirty = { ...s.dirty }, footprintDrafts = { ...s.footprintDrafts }
       delete dirty[keyOf(project)]
-      return { dirty }
+      delete footprintDrafts[keyOf(project)]
+      return { dirty, footprintDrafts }
     })
     return 'server'
   } catch (e) {

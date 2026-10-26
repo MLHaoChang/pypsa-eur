@@ -235,7 +235,7 @@ describe('grid codes: extract', () => {
     expect(thd).toContain('3 %')
     const orders = screen.getByTestId('limit-harmonic_limits_pct').textContent
     expect(orders).toContain('Harmonic voltage by order at the PCC')
-    expect(orders).toContain('h5 2 % · h7 2 % · h11 1.5 %')
+    expect(orders).toContain('h5\u00A02\u00A0% · h7\u00A02\u00A0% · h11\u00A01.5\u00A0%')
   })
 
   it('shows no SAGC-type row for a profile without those limits', async () => {

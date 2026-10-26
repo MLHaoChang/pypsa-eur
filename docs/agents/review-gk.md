@@ -16,9 +16,19 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - `tool-error-kinds.json`: its kinds must be the union of both parents.
 - Inventory: `smoke/assistant_inventory.py --check`; regenerate with `--write`, never hand-merge.
 
+- Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
+- A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
+
+- A PR that touches project templates: check native byte-identity. Load `eh_templates` by path, `write_sidecars` into a temp dir per `TEMPLATE_META` id, and `filecmp` each file against `project_templates/<id>/`.
+
+- A plan or PR that hooks "user writes to `_user_ts`": list the writers with `git grep -nE "user_ts\[[^]]*\]\s*=[^=]"` and check each is hooked.
+
+- Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
+- A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
+
 ## Known container-only failures
 
-`test_harness_provider_parity` and `test_profile_gen_atlite_source` (atlite is not installed).
+`test_harness_provider_parity`, `test_workflow_provider_parity[*-anthropic]`, `test_profile_gen_atlite_source` (atlite is not installed) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`.
 
 ## Test quality
 
@@ -28,3 +38,10 @@ Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask fo
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
+
+## Engineering rules
+
+- Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
+- A shipped demo limit that is an IEC planning level says so in its clause: "planning level, not an emission limit allocated to this installation".
+- A new scorecard input read from a component is registered as an editable field end to end (FieldSpec, model, schemas, attrs_doc, fieldLabels, fixture) in the same PR.
+- E1 growth placeholders: setting `nh3_delivery_tpd` converts t/d to MWh_NH3/h (× 5.166/24), with a test.

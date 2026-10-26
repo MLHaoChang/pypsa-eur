@@ -1,6 +1,9 @@
 # Templates: move the case currency year and the pack pins to 2025 together
 
-Status: needs-triage
+Status: ready-for-agent
+Gated: **yes** (study compile, finance and adequacy pins; an owner check of result deltas before merge)
+Model tier: opus
+Size: M
 Progress: the relabelled pack 2026-10-25 merged (#688, 719f8b01); the repin and the case-year move are not done.
 
 Follow-up to the MONEY-YEAR-1 relabel (pack 2026-10-25, branch `claude/pack-money-year-relabel`).
@@ -32,3 +35,36 @@ The gatekeeper's plan review decided that the case year and the pins are one dec
 
 Nothing converts a pack cost by its money year, so the relabel moved no result. Repinning without moving the
 case year would show 2025 asset costs inside a case that says 2020.
+
+
+## Triage (gatekeeper, 2026-10-26)
+
+**Status `ready-for-agent`, gated, size M, opus. This change moves results, so the owner checks
+it before merge.** Master 7234bfbd still pins `TEMPLATE_PACK_VERSION`, `AMMONIA_PACK_VERSION` and
+`REDUNDANCY_PACK_VERSION` at 2026-10-22, has `study/library.PACK_VERSION` at 2026-10-05, and keeps
+`currency_year` 2020 at the five template sites. #713's LG-02 is this issue's execution expansion,
+not a second owner: one implementer and one PR.
+
+Rulings:
+
+- **Plan first.** Before any edit, the implementer sends the GK a row-level table: every pin, case
+  year, tariff, CO2 and finance input touched, with its old and new year and its old and new value,
+  and whether the row is a relabel (value unchanged) or a conversion (cite the source and index).
+  Code starts after GK plan OK.
+- **One change.** The template and ammonia pins, the five case years, the study `PACK_VERSION` and
+  the removal of `_ACKNOWLEDGED_BUMP_CHANGES` move in one commit. `currency_year_mixed` must stay
+  live; a test shows it still refuses a mismatched tariff year.
+- **Tariffs, CO2 and finance** are each decided from their own source. A 2020 source value is
+  converted with a cited index, or keeps its 2020 label. It is never relabelled by analogy. If
+  keeping a 2020 tariff would trip `currency_year_mixed` against a 2025 study, the table says so
+  and the owner chooses (convert or hold the study year).
+- **Redundancy pin:** it moves only if `redundancy.py` reads a relabelled row. The table shows which
+  rows it reads.
+- **Regional packs:** new immutable regional versions on the 2026-10-25 base. Never edit existing
+  version files, and absent local money never falls back to EUR.
+- **Results move.** The case `currency_year` feeds the base year to which `results/baseline.py`
+  inflates the CO2 price and to which finance escalation runs. Attach a before/after table of
+  headline results (LCOE/NPV and annual cost) for every shipped template and the guided study. The
+  coordinator sends it to the owner, and the PR does not merge without that owner check.
+- **Saved projects:** a project pinned to 2026-10-22 or 2026-10-05 keeps its values, hashes and
+  case year exactly. A test loads one.

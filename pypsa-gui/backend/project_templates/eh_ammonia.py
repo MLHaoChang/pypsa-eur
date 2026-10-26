@@ -13,6 +13,10 @@ so ``services.process_template_rules.refusals`` runs on it at build:
 
 The NH3 bus is in MWh_NH3 (LHV, 5.166 MWh/t), upstream PyPSA-Eur's convention. ``register(T)`` adds it to
 ``eh_templates``' registries (``T`` as in ``eh_staged_hubs``); it is called from there.
+
+It is built for entered planning years too (E1c), as the staged H2 hub is: the delivery is the growth
+value (``nh3_delivery_tpd``, the example's same-stage value, a placeholder where the year is not the
+example's), and the CO2 path, tariff and finance follow the H2 hub's for the same ``Planning``.
 """
 from __future__ import annotations
 
@@ -41,7 +45,7 @@ H2_MWH_PER_T = 5.93
 EL_MWH_PER_MWH = 0.2473
 #: ... which is 1.278 MWh_el per t NH3.
 EL_MWH_PER_T = EL_MWH_PER_MWH * MWH_PER_T
-#: Delivered NH3 per period (t/d, demo).
+#: Delivered NH3 per period (t/d, demo): the example's years; other years take the same stage's value.
 DELIVERY_TPD = {2027: 50.0, 2030: 100.0, 2035: 150.0}
 HB_TPD = 160.0
 HB_P_MIN_PU = 0.4
@@ -88,15 +92,16 @@ def _hubs():
     return mod
 
 
-def co2_price(year: int) -> float:
-    """EUR/t CO2 in the period: the staged hubs' path (80 from 2027, 120 from 2030)."""
-    path = _hubs().CO2_PRICE["eur_per_t_by_year"]
+def co2_price(year: int, planning=None) -> float:
+    """EUR/t CO2 in the period: the staged hubs' path (80 from 2027, 120 from 2030) for ``planning``,
+    whose start before 2027 holds the first point (ledgered; gatekeeper E1 condition 5)."""
+    path = _hubs()._co2_price(planning)["eur_per_t_by_year"]
     return float(path[max(y for y in path if y <= year)])
 
 
-def buy_cost_eur_per_mwh(year: int) -> float:
+def buy_cost_eur_per_mwh(year: int, planning=None) -> float:
     """The grey purchase per MWh_NH3 in a period: the price plus its CO2."""
-    return BUY_EUR_PER_MWH + GREY_CO2_T_PER_T / MWH_PER_T * co2_price(year)
+    return BUY_EUR_PER_MWH + GREY_CO2_T_PER_T / MWH_PER_T * co2_price(year, planning)
 
 
 def hb_p_nom_mw() -> float:
@@ -105,7 +110,16 @@ def hb_p_nom_mw() -> float:
 
 
 def delivery_mw(year: int) -> float:
-    return DELIVERY_TPD[year] / 24.0 * MWH_PER_T
+    return _tpd_mw(DELIVERY_TPD[year])
+
+
+def _tpd_mw(tpd: float) -> float:
+    return tpd / 24.0 * MWH_PER_T
+
+
+def _plan(T, planning=None):
+    """The ammonia hub for one ``Planning`` (None: the example's years): the delivery by period."""
+    return _hubs()._HubPlan(T, "eh_ammonia_staged", planning, DELIVERY_TPD)
 
 
 def _set_columns(n) -> None:
@@ -119,8 +133,11 @@ def _set_columns(n) -> None:
     n.links["specific_energy_kwh_per_t"] = float("nan")
 
 
-def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
-    n = T.BUILDERS["eh_h2_hub_staged"]()
+def build_eh_ammonia_staged(T, planning=None) -> "pypsa.Network":  # noqa: F821
+    plan = _plan(T, planning)
+    years = plan.years
+    mw = {y: _tpd_mw(plan.values[y]) for y in years}
+    n = T.BUILDERS["eh_h2_hub_staged"](planning=planning)
     snaps = n.snapshots
     n.generators.loc[["wind_farm", "solar_park"], "p_nom"] *= RE_FLEET_SCALE
     # The fuel cell and the offtake go; the H2 tank is re-added as a candidate below.
@@ -164,16 +181,16 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     for name, bus, carrier, tech in (("h2_storage", "h2", "H2", "h2-tank"),
                                      ("nh3_tank", "nh3", "NH3", "nh3-tank")):
         n.add("Store", name, bus=bus, carrier=carrier, e_nom=0.0, e_nom_extendable=True,
-              e_nom_max=TANK_E_NOM_MAX[name], build_year=YEARS[0], e_cyclic=True)
+              e_nom_max=TANK_E_NOM_MAX[name], build_year=years[0], e_cyclic=True)
         price_from_pack(n, "stores", name, tech, version=pv)
     n.stores["e_cyclic_per_period"] = True
 
     # Delivery and its two slacks, scaled per period like the other staged loads.
     delivery = np.concatenate([np.full(len(snaps.get_level_values(0)[snaps.get_level_values(0) == y]),
-                                       delivery_mw(y)) for y in YEARS])
+                                       mw[y]) for y in years])
     n.add("Load", "nh3_delivery", bus="nh3", carrier="NH3", p_set=0.0)
     n.loads_t.p_set["nh3_delivery"] = delivery
-    peak = delivery_mw(YEARS[-1])
+    peak = mw[years[-1]]
     for g, role, carrier, cost in (("__buy_nh3", "buy_in", "NH3 import", BUY_EUR_PER_MWH),
                                    ("__lost_nh3", "shortfall", "NH3 shortfall", LOST_EUR_PER_MWH)):
         n.add("Generator", g, bus="nh3", carrier=carrier, p_nom=peak, marginal_cost=cost)
@@ -181,7 +198,8 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
         n.generators_t.p_max_pu[g] = delivery / peak
     # The purchase carries the CO2 of grey ammonia at the case's CO2 price of the period (design §2.1).
     n.generators_t.marginal_cost["__buy_nh3"] = np.concatenate([
-        np.full(int((snaps.get_level_values(0) == y).sum()), buy_cost_eur_per_mwh(y)) for y in YEARS])
+        np.full(int((snaps.get_level_values(0) == y).sum()), buy_cost_eur_per_mwh(y, planning))
+        for y in years])
 
     # Columns made on an empty frame are object dtype until cast (netCDF cannot write them).
     n.links["eh_process"] = n.links["eh_process"].astype(bool)
@@ -199,28 +217,29 @@ def build_eh_ammonia_staged(T) -> "pypsa.Network":  # noqa: F821
     return n
 
 
-def _commercial_and_finance(T) -> dict:
+def _commercial_and_finance(T, planning=None) -> dict:
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
     from services.commercial import value_flow_templates as VFT
 
     H = _hubs()
     base = CommercialConfig.model_validate(
-        {"poc_link": "grid_import", "import_tariff": H.SYNTHETIC_TARIFF, "timezone": "UTC",
-         "reference_purchases": [GREY_NH3], "co2_price": H.CO2_PRICE})
-    vf = VFT.build("single_owner", build_eh_ammonia_staged(T), base).config
+        {"poc_link": "grid_import", "import_tariff": H._tariff(planning), "timezone": "UTC",
+         "reference_purchases": [GREY_NH3], "co2_price": H._co2_price(planning)})
+    vf = VFT.build("single_owner", build_eh_ammonia_staged(T, planning), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
-    fin = H._h2_finance()
-    fin["cod_by_asset"] = {a: f"{YEARS[0]}-01-01" for a in EXISTING}
+    fin = H._h2_finance(planning)
+    fin["cod_by_asset"] = {a: f"{_plan(T, planning).years[0]}-01-01" for a in EXISTING}
     return {"commercial": commercial.model_dump(mode="json"),
             "finance": FinanceInputs.model_validate(fin).model_dump(mode="json")}
 
 
-def _ledger(T) -> list[dict]:
+def _ledger(plan) -> list[dict]:
     H = _hubs()
-    tpd = " / ".join(f"{DELIVERY_TPD[y]:g}" for y in YEARS)
+    years = plan.years
+    tpd = " / ".join(f"{plan.values[y]:g}" for y in years)
     return [
-        *H._COMMON_LEDGER,
+        *H._common_ledger(plan),
         {"item": "NH3 energy content", "value": f"{MWH_PER_T} MWh/t (LHV)", "source": "sourced",
          "note": "upstream PyPSA-Eur config.default.yaml:1015 (MWh_NH3_per_tNH3); the NH3 bus is in "
                  "MWh_NH3 and shows tonnes through this factor"},
@@ -246,11 +265,11 @@ def _ledger(T) -> list[dict]:
                  "solve does not charge it; the rows are there for the investment case"},
         {"item": "NH3 tank", "value": "211.83 EUR/MWh_NH3, 2 %/year, 20 years", "source": "sourced",
          "note": f"technology-data v0.14.0 'NH3 (l) storage tank incl. liquefaction', pack "
-                 f"{AMMONIA_PACK_VERSION} (nh3-tank); extendable, one row built in {YEARS[0]}"},
+                 f"{AMMONIA_PACK_VERSION} (nh3-tank); extendable, one row built in {years[0]}"},
         {"item": "H2 tank", "value": "60.05 EUR/kWh_H2, 1.11 %/year, 30 years", "source": "sourced",
          "note": f"technology-data v0.14.0 'hydrogen storage tank type 1 including compressor', pack "
                  f"{AMMONIA_PACK_VERSION} (h2-tank); extendable from 0 (the hub's 2000 MWh tank "
-                 f"is replaced), one row built in {YEARS[0]}"},
+                 f"is replaced), one row built in {years[0]}"},
         {"item": "tank size limits", "value": "H2 tank up to 10,000 MWh, NH3 tank up to 6,000 MWh_NH3 "
                                               "(about 1,160 t)", "source": "assumed",
          "note": "finite upper bounds the solver needs; about 10 days of the 2035 H2 draw and 8 days of "
@@ -258,11 +277,12 @@ def _ledger(T) -> list[dict]:
         {"item": "electrolyser", "value": "pack electrolysis (1886 EUR/kW_e, 25 y), efficiency 0.68",
          "source": "assumed",
          "note": "the pack's AEC efficiency is 0.6217; the template keeps today's 0.68 (demo)"},
-        {"item": "NH3 delivery", "value": f"{tpd} t/d (2027 / 2030 / 2035)", "source": "synthetic",
+        {"item": "NH3 delivery", "value": f"{tpd} t/d ({' / '.join(map(str, years))})",
+         "source": "synthetic",
          "note": "sized so the 2035 Haber-Bosch needs about 37 MW of H2 (about 55 MW of electrolysis), "
                  "within the 200 MW connection; replace with the offtake contract"},
         {"item": "Haber-Bosch size", "value": f"{HB_TPD:g} t/d fixed ({hb_p_nom_mw():.2f} MW_el), "
-                                              "in service from 2027", "source": "synthetic",
+                                              f"in service from {years[0]}", "source": "synthetic",
          "note": "about 7 % headroom over the 2035 delivery, so a stop can be caught up; fixed-size, "
                  "never extendable (a committable and extendable unit is bilinear)"},
         {"item": "Haber-Bosch minimum load", "value": f"p_min_pu {HB_P_MIN_PU}", "source": "synthetic",
@@ -276,19 +296,22 @@ def _ledger(T) -> list[dict]:
         {"item": "unit commitment in planning",
          "value": "linearised (process_uc auto), then one binary check per period",
          "source": "assumed",
-         "note": "the relaxation understates restarts, so the binary operational check runs after "
+         "note": H._measured(
+                 "the relaxation understates restarts, so the binary operational check runs after "
                  "the plan and reports its per-period gap. Measured on this plan (electrolysis priced "
                  "per MW of electrical input, RE fleet 1.75x, GS-2b ticket 03, 2026-10-22): in 2027 the "
                  "loop is on 101 of 168 h (stops of 32 h and 8 h, runs of 31 h and 25 h), no grey NH3 is "
                  "bought and the binary check equals the linearised one (0.39 M EUR); gaps 2027 / 2030 / "
-                 "2035: 0.0 % / 2.57 % / 0.008 % (0.0 M / 3.43 M / 0.43 M EUR)"},
+                 "2035: 0.0 % / 2.57 % / 0.008 % (0.0 M / 3.43 M / 0.43 M EUR)", plan)},
         {"item": "grey NH3 buy-in (__buy_nh3)", "value": f"{BUY_EUR_PER_MWH:g} EUR/MWh_NH3 "
                                                          f"(about {BUY_EUR_PER_MWH * MWH_PER_T:.0f} EUR/t)",
          "source": "sourced",
          "note": "upstream PyPSA-Eur default import price, config.default.yaml:982 "
                  "(imports.price.NH3); a model default, not a market quote. In the plan the purchase "
-                 "also pays the CO2 of grey ammonia at the period's CO2 price: 128 EUR/MWh_NH3 in "
-                 "2027, 143 from 2030 (still below the lost-production value)"},
+                 "also pays the CO2 of grey ammonia at the period's CO2 price: "
+                 + ("128 EUR/MWh_NH3 in 2027, 143 from 2030" if plan.is_native else
+                    "128 EUR/MWh_NH3 at 80 EUR/t, 143 at 120 EUR/t")
+                 + " (still below the lost-production value)"},
         {"item": "lost-production value (__lost_nh3)", "value": f"{LOST_EUR_PER_T:g} EUR/t "
                                                                 f"({LOST_EUR_PER_MWH:.2f} EUR/MWh_NH3)",
          "source": "synthetic",
@@ -325,20 +348,33 @@ def _ledger(T) -> list[dict]:
 def register(T) -> None:
     """Add the ammonia hub to ``eh_templates``' registries."""
     tid = "eh_ammonia_staged"
-    T.BUILDERS[tid] = lambda: build_eh_ammonia_staged(T)
+    T.BUILDERS[tid] = lambda load_spec=None, planning=None: build_eh_ammonia_staged(T, planning)
     T.STRESS_SCENARIOS[tid] = copy.deepcopy(T.STRESS_SCENARIOS["eh_h2_hub"])
     T.SOLVER_CONFIG_EXTRA[tid] = dict(T.SOLVER_CONFIG_EXTRA["eh_h2_hub_staged"])
-    T._SOLVER_CONFIG_BUILT[tid] = lambda: _commercial_and_finance(T)
+    T._SOLVER_CONFIG_BUILT[tid] = lambda planning=None: _commercial_and_finance(T, planning)
+    # Built for entered planning years too (E1c).
+    T.NATIVE_PLANNING[tid] = T.Planning(YEARS, HORIZON_END)
+    T.TEMPLATE_META[tid] = _meta(T)
+    T._PLANNED_META[tid] = lambda p, _spec: _meta(T, p)
+
+
+def _meta(T, planning=None) -> dict:
+    """The ammonia hub's ``eh_template.json`` for ``planning`` (None: the example's years)."""
+    tid = "eh_ammonia_staged"
     H = _hubs()
-    py = H._period_years_static()
-    peaks = {y: 40.0 + delivery_mw(y) * (H2_MWH_PER_T / MWH_PER_T) / 0.68
-             + delivery_mw(y) * EL_MWH_PER_T / MWH_PER_T for y in YEARS}
-    T.TEMPLATE_META[tid] = {
+    plan = _plan(T, planning)
+    years, tpd = plan.years, plan.values
+    py = plan.planning.period_years      # eh_site is not loaded while registering
+    mw = {y: _tpd_mw(tpd[y]) for y in years}
+    peaks = {y: 40.0 + mw[y] * (H2_MWH_PER_T / MWH_PER_T) / 0.68
+             + mw[y] * EL_MWH_PER_T / MWH_PER_T for y in years}
+    meta = {
         "id": tid,
         "name": "Green Ammonia Hub (staged growth)",
         "description": (
-            "The hydrogen hub making green ammonia for a contracted delivery of 50 → 100 → 150 t/d "
-            "over 2027, 2030 and 2035, beside a 40 MW process load on a 200 MW connection. A "
+            "The hydrogen hub making green ammonia for a contracted delivery of "
+            f"{' → '.join(f'{tpd[y]:g}' for y in years)} t/d over {T._years_text(years)}, beside "
+            "a 40 MW process load on a 200 MW connection. A "
             "fixed 160 t/d Haber-Bosch loop (minimum load, restart time), H2 and NH3 tanks to size, "
             "wind, solar, battery and electrolyser candidates per period; a shortfall is bought in "
             "as grey ammonia or paid as a contract penalty. Multi-period; ready for an Energy Hub "
@@ -348,11 +384,11 @@ def register(T) -> None:
         "stages": None,
         "dtc_attribution": None,
         "projected_load": H._stages_meta(peaks, "process load plus the electrolysis and Haber-Bosch "
-                                                "the delivery needs; synthetic"),
+                                                "the delivery needs; synthetic", plan),
         "energization": [{"year": y, "available_import_mw": 200.0, "connection_mw": 200.0,
-                          "source": "assumed", "note": "fully energized"} for y in YEARS],
-        "period_years": {str(y): py[y] for y in YEARS},
-        "ledger": _ledger(T),
+                          "source": "assumed", "note": "fully energized"} for y in years],
+        "period_years": {str(y): py[y] for y in years},
+        "ledger": _ledger(plan),
         "study_notes": [
             "Each period is the same representative week, with the period's NH3 delivery.",
             "The Haber-Bosch loop is a fixed-size unit; the plan sizes the grid, storage, "
@@ -364,3 +400,4 @@ def register(T) -> None:
         ],
         "provenance": T.PROVENANCE,
     }
+    return H._planned_meta(T, meta, plan, "nh3_delivery_tpd", tpd, H._held_ledger(plan))
