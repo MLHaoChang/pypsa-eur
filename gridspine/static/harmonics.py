@@ -169,15 +169,21 @@ def unit_spectrum(topology, vendor) -> tuple[dict | None, str]:
     return None, "no harmonic_source and no spectrum"
 
 
-def _u_h(contribs: list, sk: float, law: str) -> dict:
-    """U_h % per order from [(rated_mva, spectrum)] at a PoC of S_k MVA."""
+def _i_h(contribs: list, law: str) -> dict:
+    """The summed harmonic current per order, in MVA at the PoC's voltage, from
+    [(rated_mva, spectrum)]: each unit's I_h = rated_mva · % / 100, summed with
+    the exponent ``alpha(h, law)``."""
     orders = sorted({h for _, s in contribs for h in s})
     out = {}
     for h in orders:
         a = alpha(h, law)
-        i_h = sum((mva * s.get(h, 0.0) / 100.0) ** a for mva, s in contribs) ** (1.0 / a)
-        out[h] = 100.0 * h * i_h / sk
+        out[h] = sum((mva * s.get(h, 0.0) / 100.0) ** a for mva, s in contribs) ** (1.0 / a)
     return out
+
+
+def _u_h(contribs: list, sk: float, law: str) -> dict:
+    """U_h % per order from [(rated_mva, spectrum)] at a PoC of S_k MVA."""
+    return {h: 100.0 * h * i_h / sk for h, i_h in _i_h(contribs, law).items()}
 
 
 def _judge(u: dict, limits: Limits) -> dict:

@@ -77,6 +77,11 @@ profiles:
       value: 0.6
       clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
       source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
+      source: assumed
     # What a steady-state study cannot show, reported as "dynamic study needed"
     # and never counted as passed (plan 2026-10-14 e2e demo, section 7.3). The
     # clauses and ranges below were not re-read against the adopted text when
@@ -157,6 +162,11 @@ profiles:
     plt_limit:
       value: 0.6
       clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "generic placeholder until a real code is supplied: placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
       source: assumed
 
   us_ieee2800_nerc:

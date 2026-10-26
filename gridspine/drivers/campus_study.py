@@ -985,3 +985,46 @@ def flicker_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> 
                         profile, limit_assumed, fl.POC_COLUMNS, fl.UNIT_COLUMNS)
     _write_text_atomic(run_dir / FLICKER_CSV, out.to_csv(index=False))
     return out
+
+
+# --- the current-distortion screen (datacenter readiness 12, part 1) --------
+
+TDD_CSV = "campus_tdd.csv"
+
+
+def _rated_load_mva(campus) -> float | None:
+    """I_L as MVA: the rated campus load, sum p_mw / pf over the ``load``
+    units (all behind the one PCC). None when the campus has none."""
+    loads = campus.units[campus.units["kind"] == "load"]
+    if loads.empty:
+        return None
+    return float((loads["p_mw"] / loads["pf"]).sum())
+
+
+def tdd_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
+    """The current-distortion screen of a prepared run
+    (``static/current_tdd.py``), written to ``campus_tdd.csv``: one ``level``
+    ``poc`` row for the PCC.
+
+    The harmonic sources and their spectra are the harmonic screen's
+    (``harmonic_units``), S_sc is the PCC's minimum case with its source as in
+    ``harmonics_campus``, and I_L is the rated campus load (``assumed``). The
+    profile's ``current_tdd_standard`` names the limits; without it the row
+    is ``unknown``. A project's Links are process units, never generation, so
+    no unit is flagged ``generation`` here."""
+    from gridspine.static import current_tdd as td
+
+    run_dir = Path(run_dir)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
+    standard, _ = td.standard_from_profile(code)
+
+    pcc = campus["campus"]["pcc"]
+    poc = str(pcc["bus"])
+    sk_source, typical = _sk_source(campus, n)
+    pocs = td.tdd_table(harmonic_units(n, poc), {poc: _pcc_sk_min(pcc)}, {poc: _rated_load_mva(build_campus(campus))},
+                        {poc: float(pcc["vn_kv"])}, standard, law=law)
+    # Every row is assumed: I_L is the rated campus load, and the table values are not verified.
+    out = _screen_frame(pocs, pocs.iloc[0:0], pd.Series(dtype=bool), sk_source, typical, profile, True,
+                        td.POC_COLUMNS, td.POC_COLUMNS)
+    _write_text_atomic(run_dir / TDD_CSV, out.to_csv(index=False))
+    return out
