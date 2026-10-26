@@ -344,13 +344,27 @@ def test_a_line_keeps_its_capacitance_at_the_networks_frequency(f_hz):
     assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
 
 
-def test_a_stated_frequency_wins_over_the_networks():
+def test_a_stated_frequency_drafts_at_that_frequency_and_agrees_with_the_networks():
+    n = _feeder(60)
+    _, cable = _by_pypsa(draft_campus(n, f_hz=60).spec["campus"]["cables"])["feeder"]
+    assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
+    n.meta["f_hz"] = 60
+    assert draft_campus(n, f_hz=60).spec["campus"]["f_hz"] == 60
+
+
+def test_a_stated_frequency_that_differs_from_the_networks_is_refused_naming_both():
     n = _feeder(60)
     n.meta["f_hz"] = 50
-    spec = draft_campus(n, f_hz=60).spec["campus"]
-    _, cable = _by_pypsa(spec["cables"])["feeder"]
-    assert spec["f_hz"] == 60
-    assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
+    with pytest.raises(ContractError, match=r"f_hz=60.*meta\['f_hz'\] is 50"):
+        draft_campus(n, f_hz=60)
+
+
+def test_the_draft_says_when_it_assumed_50_hz():
+    assert "f_hz 50 assumed (no frequency on the network)" in draft_campus(_feeder(50)).skipped
+    n = _feeder(50)
+    n.meta["f_hz"] = 50
+    assert not any("f_hz" in s for s in draft_campus(n).skipped)
+    assert not any("f_hz" in s for s in draft_campus(_feeder(50), f_hz=50).skipped)
 
 
 @pytest.mark.parametrize("stated", [False, True])

@@ -155,7 +155,7 @@ _AC = frozenset({"AC", ""})
 class CampusDraft:
     """``spec`` is the campus mapping, ready for ``build_campus`` or for
     writing as YAML. ``skipped`` holds a sentence per project element that
-    the draft left out, and why."""
+    the draft left out, and why, and one for a frequency it assumed."""
     spec: dict
     skipped: list
 
@@ -365,9 +365,13 @@ def draft_campus(n, island=None, f_hz=None) -> CampusDraft:
     docstring for what becomes what). ``island`` is the hub sidecar as
     ``schema.island.validate_island_config`` returns it; with it, the draft
     carries the island data (``_attach_island``). ``f_hz`` is the nominal
-    frequency; unstated, the network's ``meta["f_hz"]``, else 50."""
-    source = {"f_hz": f_hz} if f_hz is not None else (getattr(n, "meta", None) or {})
-    f0 = int(campus_f_hz(source))
+    frequency; unstated, the network's ``meta["f_hz"]``, else 50, which
+    ``skipped`` then notes as assumed. The two stated differently are refused."""
+    meta = getattr(n, "meta", None) or {}
+    if f_hz is not None and "f_hz" in meta and meta["f_hz"] != f_hz:
+        raise ContractError(f"f_hz={f_hz!r} was given but the network's meta['f_hz'] is {meta['f_hz']!r}; "
+                            "state one frequency")
+    f0 = int(campus_f_hz({"f_hz": f_hz} if f_hz is not None else meta))
     buses = n.buses
     carrier = buses["carrier"].fillna("AC") if "carrier" in buses.columns else pd.Series("AC", index=buses.index)
     ac = [b for b in buses.index if carrier[b] in _AC]
@@ -377,7 +381,7 @@ def draft_campus(n, island=None, f_hz=None) -> CampusDraft:
             f"the project must mark exactly one AC bus as the PCC (eh_poc); found {poc or 'none'}"
         )
     pcc = poc[0]
-    skipped = []
+    skipped = [] if f_hz is not None or "f_hz" in meta else [f"f_hz {f0} assumed (no frequency on the network)"]
 
     bus_ids = dict(zip(ac, short_names(ac)))
     pcc_kv = float(buses.at[pcc, "v_nom"])
