@@ -879,11 +879,15 @@ _GROWTH_KINDS = {
     # the microgrid's load scale per load (×, the example's 2027 load = 1).
     "h2_offtake_mw": ("H2 offtake", "MW", "loads", "Load", "h2_offtake", "p_set"),
     "load_scale": ("Load scale", "×", "loads", "Load", None, "p_set"),
+    # The ammonia hub (E1c): the contracted NH3 delivery (t/d; the load is in
+    # MWh_NH3 at 5.166 MWh/t), not an electric load.
+    "nh3_delivery_tpd": ("NH3 delivery", "t/d", "loads", "Load", "nh3_delivery", "p_set"),
 }
 
 
 #: The growth kinds the site's electric peak reads (``site_peak.PEAK_INPUTS``;
-#: a test pins the two equal). The H2 offtake is not one: it is a load on the H2 bus.
+#: a test pins the two equal). The H2 offtake and the NH3 delivery are not: they are loads
+#: on the H2 and NH3 buses.
 _PEAK_KINDS = ("it_mw", "energized_mw", "load_scale")
 
 
