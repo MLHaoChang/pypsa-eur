@@ -1493,6 +1493,17 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "compare_profiles",
+        "Compare current:<generator>, pending:<job>[:<point>] or "
+        "shaped:<job>[:<point>] profiles on the project's snapshot clock. "
+        "Every statistic, delta, monthly mean, duration curve and peak week "
+        "is computed server-side; cite only the returned numbers. "
+        "project_id is the project NAME. Safety: read.",
+        {"project_id": {"type": "string"}, "a": {"type": "string"},
+         "b": {"type": "string"}, "component": {"type": "string"}},
+        ["project_id", "a", "b"],
+    ),
+    _t(
         "generate_renewable_profile",
         "Queue a renewable-profile generation for a project as a solve-queue "
         "job (kind profile_gen) and answer the job — it does NOT complete "
@@ -4468,6 +4479,7 @@ TOOL_ROUTES: dict[str, list] = {
     "preview_renewable_profile": [("POST", "/api/profiles/estimate")],
     "list_pending_profiles": [("GET", "/api/projects/{name}/profiles/pending")],
     "get_profile_readiness": [("GET", "/api/projects/{name}/profiles/readiness")],
+    "compare_profiles": [("GET", "/api/projects/{name}/profiles/compare")],
     "generate_renewable_profile": [("POST", "/api/projects/{name}/profiles/generate")],
     "apply_generated_profile": [("POST", "/api/projects/{name}/profiles/apply")],
     "apply_generated_profiles": [("POST", "/api/projects/{name}/profiles/apply-batch")],
