@@ -212,8 +212,6 @@ OFFTAKER = "offtaker"
 PPA = {"wind_farm": ("ppa_wind", 65.0), "pv_plant": ("ppa_pv", 50.0)}
 PPA_SHARE = 0.7
 PPA_TENOR = 10
-COD = f"{YEAR}-01-01"
-FINANCIAL_CLOSE = f"{YEAR - 2}-01-01"
 ANALYSIS_YEARS = 25
 ESCALATION = 0.02                                # every cash class, per year
 DEGRADATION = {"wind_farm": 0.003, "pv_plant": 0.005, "bess": 0.0}
@@ -501,7 +499,7 @@ def _redated_rows(year: int) -> list[dict]:
         {"item": "money year", "value": f"{year} EUR, no conversion", "source": "assumed",
          "note": f"the example's {YEAR} money (illustrative shapes, PPA prices and network "
                  f"charges) and the observed {OBSERVED_YEAR} prices are taken as {year} money, "
-                 f"not converted (owner E1D-IPP-1). The case stays nominal at the same "
+                 f"not converted. The case stays nominal at the same "
                  f"{ESCALATION * 100:g} % escalation, which now runs from {year}"},
         {"item": f"illustrative prices and profiles re-dated from {YEAR}",
          "value": "hour of year kept, 29 Feb dropped", "source": "assumed",

@@ -803,7 +803,7 @@ def _mg_finance(planning: Planning | None = None) -> dict:
         "degradation_by_asset": {
             **{a: (0.005 if a == "pv_plant" else 0.0) for a in MG_EXISTING if a != "hospital_feeder"},
             **{a: 0.0 for a in MG_CANDIDATES}},
-        "analysis_years": end - first,                                # 2030-2044
+        "analysis_years": end - first,                                # 2030-2044 natively
         "annualise": False,                                           # the week weighs 8,760 h
         "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
         "replacement_rule": "part_lifetimes",
