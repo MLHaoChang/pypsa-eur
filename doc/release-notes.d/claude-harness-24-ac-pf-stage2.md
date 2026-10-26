@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The standalone load flow (`POST /api/simulation/run_ac_pf`, the assistant's `run_ac_pf_stage`) and its `loadflow` run verdict now refuse what the chained Stage 2 refuses: a line edited to r=0 and x=0 after the solve (`stage2_zero_impedance`) and multi-investment-period snapshots (`stage2_multi_period`). Stage-2 warnings still don't refuse.
