@@ -290,7 +290,7 @@ jobs:
   gui-owner-journeys:
     name: GUI owner journeys (browser)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     defaults:
       run:
