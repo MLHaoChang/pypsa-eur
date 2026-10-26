@@ -144,7 +144,7 @@ it('shows the tools a test lists, as text', async () => {
   renderSection()
   await userEvent.click(await screen.findByTestId('mcp-test-tariffs'))
   const tools = await screen.findByTestId('mcp-test-tools')
-  expect(within(tools).getByText('mcp__tariffs__lookup')).toBeTruthy()
+  expect(within(tools).getByText('lookup')).toBeTruthy()
   expect(within(tools).getByText('<b>External tool</b> Safety: read')).toBeTruthy()
   expect(tools.querySelector('b')).toBeNull()
   expect(tools.textContent).toContain('1 skipped')
@@ -168,6 +168,8 @@ it('adds an http server, disabled, with tiers; no command form', async () => {
   await userEvent.click(await screen.findByTestId('mcp-add-open'))
   expect(screen.queryByTestId('mcp-form-command')).toBeNull()
   expect(screen.queryByTestId('mcp-form-transport')).toBeNull()
+  expect(screen.getByLabelText('Server id')).toBeTruthy()
+  expect(screen.getByLabelText('URL')).toBeTruthy()
   const submit = screen.getByTestId('mcp-form-submit') as HTMLButtonElement
   await userEvent.type(screen.getByTestId('mcp-form-id'), 'tariffs')
   expect(screen.getByText('That id is taken.')).toBeTruthy()

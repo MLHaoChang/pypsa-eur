@@ -241,7 +241,8 @@ def test_an_allowed_variable_passes():
 def test_an_unreadable_file_is_reported_and_never_overwritten(admin):
     mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
     mcp_client.config_path().write_text("{not json")
-    assert admin.get(BASE).json()["file_error"]
+    got = admin.get(BASE).json()["file_error"]
+    assert got and "not json" not in got and str(mcp_client.config_path()) not in got
     assert admin.put(f"{BASE}/a", json=_http()).status_code == 409
     assert mcp_client.config_path().read_text() == "{not json"
 

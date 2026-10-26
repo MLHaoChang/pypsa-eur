@@ -42,6 +42,9 @@ export const MCP_SERVERS_KEY = ['mcpServers'] as const
 
 const ID_RE = /^[a-z0-9]{1,16}$/
 const TIERS: McpTier[] = ['read', 'write', 'destructive', 'execution', 'execution_long_running']
+/** The server's own tool name: the model sees `mcp__<server>__<tool>`. */
+const shortToolName = (name: string) => name.replace(/^mcp__[a-z0-9]+__/, '')
+
 const INPUT = 'w-full rounded border border-border bg-bg px-2 py-1 text-xs'
 const BUTTON = 'rounded border border-border px-2 py-1 text-xs disabled:opacity-50'
 
@@ -168,7 +171,7 @@ function TestOutput({ state }: { state: TestState }) {
         <tbody>
           {state.tools.map(t => (
             <tr key={t.name} className="align-top border-t border-border">
-              <td className="pr-2 font-mono break-all">{t.name}</td>
+              <td className="pr-2 font-mono break-all">{shortToolName(t.name)}</td>
               <td className="pr-2 whitespace-nowrap" title={t.tier}>{tierWords(t.tier)}</td>
               <td>
                 <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted bg-bg-2 rounded p-1">
@@ -223,17 +226,19 @@ function ServerForm({
 
   return (
     <div className="rounded border border-border p-3 space-y-2" data-testid="mcp-server-form">
+      <label className="block text-xs text-muted" htmlFor="mcp-form-id">Server id</label>
       <input
+        id="mcp-form-id"
         className={INPUT}
-        placeholder="Server id (e.g. tariffs)"
-        aria-label="Server id"
+        placeholder="e.g. tariffs"
         value={id}
         disabled={initial != null}
         onChange={e => setId(e.target.value)}
         data-testid="mcp-form-id"
       />
       {idError && <p className="text-xs text-danger">{idError}</p>}
-      <input className={INPUT} placeholder="https://…/mcp (http only on this machine)" aria-label="URL"
+      <label className="block text-xs text-muted" htmlFor="mcp-form-url">URL</label>
+      <input id="mcp-form-url" className={INPUT} placeholder="https://…/mcp (http only on this machine)"
         value={url} onChange={e => setUrl(e.target.value)} data-testid="mcp-form-url" />
       <p className="text-xs text-muted">
         URL servers only. A server that runs as a command on this machine is added by editing
@@ -367,7 +372,7 @@ export default function McpServerSettings() {
                   Test
                 </button>
               )}
-              {s.id && s.transport === 'http' && (
+              {s.id && s.transport === 'http' && s.problem == null && (
                 <>
                   <button type="button" className="text-xs text-muted underline" onClick={() => setForm(s)}
                     aria-label={`Edit ${s.id}`} data-testid={`mcp-edit-${s.id}`}>

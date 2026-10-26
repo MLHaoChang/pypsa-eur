@@ -841,7 +841,8 @@ def get_mcp_servers(
     try:
         entries = mcp_client.read_entries()
     except mcp_client.ConfigUnreadable as exc:
-        return {"servers": [], "file_error": str(exc)}
+        logger.warning("mcp-servers.json is unreadable: %s", exc)
+        return {"servers": [], "file_error": "mcp-servers.json could not be read"}
     return {"servers": [_mcp_server_out(e) for e in entries], "file_error": None}
 
 
