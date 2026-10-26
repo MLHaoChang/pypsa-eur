@@ -255,6 +255,7 @@ export default function App() {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds, selectedComponent,
+    fieldDrawer, rightPanelOpen, creationItem,
   } = useUIStore()
   // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
   useSitesLifecycle(currentProject)
@@ -262,6 +263,11 @@ export default function App() {
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
   const fullScreenTab = activeSlidePanel != null && FULL_SCREEN_TABS.has(activeSlidePanel)
+  const componentDrawer = uiMode === 'guided' && Boolean(fieldDrawer
+    && !LIMIT_FIELDS[fieldDrawer.field ?? ''] && fieldDrawer.component && fieldDrawer.entity)
+  const propertiesMounted = !activeSlidePanel
+    || (activeSlidePanel === 'issues' && Boolean(selectedComponent)) || componentDrawer
+  const footprintInProperties = propertiesMounted && rightPanelOpen && !creationItem
 
   // Guided default-open (guided-mode spec §3.6 + §10 addendum): with a
   // project open and no panel showing, Guided opens the hub-design flow —
@@ -728,7 +734,7 @@ export default function App() {
                     : canvasView === 'site'
                       ? (
                         <React.Suspense fallback={<div className="flex h-full items-center justify-center text-[12px] text-muted">Loading 3D view…</div>}>
-                          <SiteCanvas />
+                          <SiteCanvas showFootprintEditor={!footprintInProperties} />
                         </React.Suspense>
                       )
                       : <MapCanvas mode={canvasView} />}
@@ -789,10 +795,10 @@ export default function App() {
           {/* Beside the Issues list too (J9): an item opens its field here and
               Issues stays, so the user fixes it and sees it clear without
               going back. */}
-          {!activeSlidePanel && <PropertiesPanel />}
+          {!activeSlidePanel && <PropertiesPanel showFootprintEditor={!componentDrawer} />}
           {activeSlidePanel === 'issues' && selectedComponent && (
             <div data-no-panel-close className="flex min-h-0 shrink-0">
-              <PropertiesPanel />
+              <PropertiesPanel showFootprintEditor={!componentDrawer} />
             </div>
           )}
 

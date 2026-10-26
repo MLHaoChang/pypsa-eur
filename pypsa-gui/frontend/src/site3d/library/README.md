@@ -117,3 +117,14 @@ model-agnostic; the manifest row tells it how to fit the file.
 - Generative (text- or image-to-3D) meshes (assessment §4.4).
 - Vendor-faithful equipment, glTF export, paid photorealistic tiles
   (plan 3 S6, parked).
+
+## Optional per-asset dimensions
+
+A user may enter a total width/depth envelope and optional height in the shared
+Properties/Site editor. These values are presentation metadata in `sites.json`,
+not a per-project library, mesh, electrical rating or topology override. An
+explicit envelope uses a simple labelled proxy for packing, rendering and area
+checks; Reset restores the existing library estimate. Missing height remains an
+estimate. Explicit dimensions do not scale when installed/optimised capacity
+changes: review them after capacity changes. Equipment bounds and campus land
+area do not establish access clearances, safety compliance or planning approval.

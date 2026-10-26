@@ -757,7 +757,7 @@
     },
     "invalid_navigation": {
       "surface": "inline",
-      "why": "The navigation tool named an invalid application panel or tab; the specific tool fails without changing the active view."
+      "why": "ui_open_panel, ui_set_snapshot or ui_select_component named an invalid panel, tab, canvas view, snapshot or edit target; the specific tool fails without changing the active view."
     },
     "invalid_progress_cursor": {
       "surface": "inline",
@@ -845,7 +845,7 @@
     },
     "component_not_found": {
       "surface": "inline",
-      "why": "apply_generated_profile named a generator that is not on the open network (renamed or deleted since generation). The detail names it; the assistant lists the generators and asks which one, per call."
+      "why": "apply_generated_profile named a generator that is not on the open network (renamed or deleted since generation), or ui_select_component with open_editor named a missing component. The detail names the component; the assistant lists the available components and asks which one, per call."
     },
     "profile_bound_conflict": {
       "surface": "inline",

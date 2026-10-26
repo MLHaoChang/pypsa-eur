@@ -162,7 +162,7 @@ export default function WorkspacePanel() {
             {readOnly ? <Lock className="mt-px shrink-0" size={12} /> : <LockOpen className="mt-px shrink-0" size={12} />}
             <span>
               {readOnly
-                ? <>Read-only — {readOnlyBannerMessage(readOnlyReason, lockHolderEmail)}</>
+                ? <>Read-only: {readOnlyBannerMessage(readOnlyReason, lockHolderEmail)}</>
                 : 'You hold the edit lock'}
             </span>
           </div>
