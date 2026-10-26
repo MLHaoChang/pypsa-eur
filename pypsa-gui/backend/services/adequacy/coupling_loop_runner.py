@@ -154,7 +154,13 @@ def start_coupling_loop(
     from services.adequacy.sweep import _solve_once, preserve_bus_topology
 
     # ── the synchronous 422 set ───────────────────────────────────────────
-    target = getattr(body, "target_lole_h", None)
+    # W3b-R: an omitted target or draws is the project's one stored goal
+    # (its h/yr target on this network's horizon basis).
+    from services.reliability_goal import active_goal, loop_goal
+    _n = PyPSAService.get_network() if getattr(body, "target_lole_h", None) is None else None
+    target, draws, goal_sources = loop_goal(
+        body, active_goal(solver_state),
+        float(horizon_years(_n)) if _n is not None else None)
     try:
         target = float(target) if target is not None else None
     except (TypeError, ValueError):
@@ -165,10 +171,10 @@ def start_coupling_loop(
             "target_lole_h is required and must be > 0: the loop searches for "
             "the cheapest cap whose plan meets a RELIABILITY STANDARD, and a "
             "target of zero (or none) is not a standard — it is the demand "
-            "that no draw ever sheds an hour, which no finite plan can buy")
+            "that no draw ever sheds an hour, which no finite plan can buy. "
+            "Set the reliability goal's allowed shortfall in Scenarios & "
+            "optimisation")
 
-    draws = getattr(body, "draws", None)
-    draws = 500 if draws is None else int(draws)
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
     if draws > MAX_DRAWS:
@@ -391,6 +397,7 @@ def start_coupling_loop(
         "study": "coupling_loop",
         "status": "running",
         "target_lole_h": target,
+        "goal_sources": goal_sources,
         "basis": basis,
         "horizon_years": nyears,
         "draws": draws,
@@ -637,4 +644,4 @@ def start_coupling_loop(
     return {"status": "running", "target_lole_h": target, "draws": draws,
             "seed": seed, "eps0": eps0, "max_solves": max_solves,
             "restore": restore, "basis": basis,
-            "resolution_floor_h": floor_h}
+            "resolution_floor_h": floor_h, "goal_sources": goal_sources}

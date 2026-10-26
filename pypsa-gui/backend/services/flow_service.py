@@ -255,16 +255,25 @@ def read_template(project_dir: pathlib.Path) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
-def site_card_study_body(meta: dict) -> dict | None:
+def site_card_study_body(meta: dict, cfg: Any = None) -> dict | None:
     """The study request the hub-design cards build from a template:
     ``buildEhStudyBody(meta.recommended_archetype, formFromTemplate(meta)).body``
     (``EhReferenceDesignPanel.tsx``), in Python. The Site card's readiness reads
     its ``archetype`` and ``pack_overrides``; the Goal card starts the study
     with all of it. None where the frontend's body is null (a value out of its
     range: the card shows the error and sends no overrides). Pinned to the
-    frontend by ``flow_site_card_args.json``."""
-    archetype = str(meta.get("recommended_archetype") or "strong_grid")
-    po = meta.get("pack_overrides") or {}
+    frontend by ``flow_site_card_args.json``.
+
+    ``cfg`` (the solver config) carries the project's one reliability goal
+    (W3b-R): a stored site type, LOLE or ENS target wins over the template's,
+    as ``reliability_goal.effective_goal`` orders them for the run."""
+    from services.reliability_goal import STORED, effective_goal
+
+    goal = effective_goal(cfg or {}, meta)
+    stored = {k for k, v in goal.items() if v["source"] == STORED}
+    archetype = _archetype(meta, cfg)
+    po = {**(meta.get("pack_overrides") or {}),
+          **{k: goal[k]["value"] for k in ("ens_cap_permyriad", "target_lole_h") if k in stored}}
     # (key, applies, valid): `formFromTemplate` keeps numbers only; a number
     # `buildEhStudyBody` rejects makes the whole body null.
     rules = (("ens_cap_permyriad", True, lambda v: v > 0),
@@ -293,11 +302,25 @@ def site_card_study_body(meta: dict) -> dict | None:
     return body
 
 
-def _request_for(template: dict) -> dict:
+def _archetype(template: dict | None, cfg: Any = None) -> str:
+    """The site type: the stored one, else the template's recommendation
+    (kept as written, so an unknown one is refused by the study), else
+    strong_grid."""
+    from services.reliability_goal import STORED, effective_goal
+
+    goal = effective_goal(cfg or {}, template)["site_archetype"]
+    if goal["source"] == STORED:
+        return goal["value"]
+    return str((template or {}).get("recommended_archetype") or "strong_grid")
+
+
+def _request_for(template: dict | None, cfg: Any = None) -> dict:
     """The cards' request, or the archetype alone where the frontend's body is
-    null (what the Site card's readiness then sends)."""
-    return site_card_study_body(template) or {
-        "archetype": str(template.get("recommended_archetype") or "strong_grid")}
+    null (what the Site card's readiness then sends). ``cfg`` carries the
+    stored goal; a project without a template takes its site type alone."""
+    if template is None:
+        return {"archetype": _archetype(None, cfg)}
+    return site_card_study_body(template, cfg) or {"archetype": _archetype(template, cfg)}
 
 
 def _pack_for(body: dict):
@@ -315,7 +338,7 @@ def _connection(n, config, template: dict | None) -> tuple[list[str], set[str]]:
     does), plus the commercial config's PoC and export Links."""
     from services.adequacy import archetypes as arch
 
-    body = _request_for(template) if template is not None else {"archetype": "strong_grid"}
+    body = _request_for(template, config)
     try:
         overlay = _pack_for(body).import_overlay
         imports, _rule = arch.select_import_links_with_rule(n, overlay)
@@ -467,7 +490,7 @@ def _readiness(facts: _Facts, template: dict, cache_key: str) -> dict | Exceptio
     from services.adequacy.eh_readiness import eh_readiness
     from services.adequacy.eh_study import readiness_refusal_classes
 
-    body = _request_for(template)
+    body = _request_for(template, facts.cfg_dict)
     try:
         # The Site card's request: archetype and pack overrides; stages and
         # DtC attribution left to the engine (`useHubReadiness`).
@@ -895,10 +918,16 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
     # ledger rows they set, and their hash joins the readiness key.
     template = with_user_limits(read_template(project_dir), project_dir)
     scope = S.read_scope(project_dir, template)
-    body = _request_for(template) if template is not None else None
-    islanded = body is not None and body["archetype"] == "off_grid"
     deferred, issues, facts = preflight_validate(
         lambda n, cfg: _gather(n, cfg, template=template, cache_key=cache_key))
+    # The stored goal's site type (W3b-R) rides on the config the preflight read.
+    if template is not None:
+        from services.reliability_goal import stored_config
+        body = _request_for(template, facts.cfg_dict if facts is not None
+                            else stored_config(project_dir))
+    else:
+        body = None
+    islanded = body is not None and body["archetype"] == "off_grid"
     # A generation-only template whose network has no Load (the IPP plant): nothing to make
     # adequate, so loads are not needed and the Run requests no reliability study. Keyed on
     # the network as well as the project's own template meta, so a Load added later brings

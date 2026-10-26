@@ -1599,6 +1599,14 @@ def _solver_config_from_dict(data: dict):
     # The 'lpf' mode was removed in v1.x — coerce any legacy value to 'lopf'.
     if clean.get("mode") == "lpf":
         clean["mode"] = "lopf"
+    # The reliability goal (W3b-R) is validated as PUT validates it; a value
+    # PUT would refuse loads as "not set" (logged), never as a bad goal.
+    from services import reliability_goal as G
+    for key, ok in (("target_lole_h", G.valid_lole), ("mc_draws", G.valid_draws),
+                    ("site_archetype", G.valid_archetype)):
+        if clean.get(key) is not None and not ok(clean[key]):
+            logger.warning("solver_config: ignoring invalid %s=%r", key, clean[key])
+            clean[key] = None
     return SolverConfig(**clean)
 
 
