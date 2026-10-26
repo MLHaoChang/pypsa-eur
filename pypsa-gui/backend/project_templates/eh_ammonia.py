@@ -308,8 +308,10 @@ def _ledger(plan) -> list[dict]:
          "source": "sourced",
          "note": "upstream PyPSA-Eur default import price, config.default.yaml:982 "
                  "(imports.price.NH3); a model default, not a market quote. In the plan the purchase "
-                 "also pays the CO2 of grey ammonia at the period's CO2 price: 128 EUR/MWh_NH3 in "
-                 "2027, 143 from 2030 (still below the lost-production value)"},
+                 "also pays the CO2 of grey ammonia at the period's CO2 price: "
+                 + ("128 EUR/MWh_NH3 in 2027, 143 from 2030" if plan.is_native else
+                    "128 EUR/MWh_NH3 at 80 EUR/t, 143 at 120 EUR/t")
+                 + " (still below the lost-production value)"},
         {"item": "lost-production value (__lost_nh3)", "value": f"{LOST_EUR_PER_T:g} EUR/t "
                                                                 f"({LOST_EUR_PER_MWH:.2f} EUR/MWh_NH3)",
          "source": "synthetic",

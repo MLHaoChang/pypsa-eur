@@ -141,6 +141,7 @@ def test_the_ledger_states_the_entered_period_and_the_money_year():
     assert "close 2025-01-01, to 2050" in rows["finance inputs"]["value"]
     assert rows["NH3 delivery"]["value"] == "50 / 100 / 150 t/d (2026 / 2029 / 2040)"
     assert "on the example's plan (2027 / 2030 / 2035)" in rows["unit commitment in planning"]["note"]
+    assert "128 EUR/MWh_NH3 at 80 EUR/t, 143 at 120 EUR/t" in rows["grey NH3 buy-in (__buy_nh3)"]["note"]
     assert meta["period_years"] == {"2026": 3, "2029": 11, "2040": 10}
     assert [e["year"] for e in meta["energization"]] == [2026, 2029, 2040]
     assert meta["description"].startswith(
