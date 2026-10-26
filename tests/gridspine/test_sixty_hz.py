@@ -9,8 +9,8 @@ Oracles:
   judge, trip floor, EMT flag and equipment call of the frequency check, the
   cuts and the GFM settings;
 * the RAW export writes a 60 Hz campus's base frequency;
-* no study path in ``gridspine/static`` or ``gridspine/drivers`` carries a
-  50 Hz constant outside a default argument.
+* no study path in ``gridspine/static``, ``gridspine/drivers`` or
+  ``gridspine/producers`` carries a 50 Hz constant outside a default argument.
 """
 import copy
 import pathlib
@@ -142,6 +142,9 @@ ALLOWED = (
     re.compile(r"^PEAK_FACTOR = \{50: 2\.5, 60: 2\.6\}$"),         # campus_sc.py: IEC 62271's peak factor by frequency
     re.compile(r"^retry_max_iteration: int = 50$"),                # voltage_stability.py: a load-flow iteration count, not a frequency
     re.compile(r"^H_MIN, H_MAX = 2, 50$"),                          # harmonics.py: IEC 61000-3-6's orders 2..50, not a frequency
+    # producers/campus.py: a typical LV fault level in MVA
+    re.compile(r"^TYPICAL_SK_MVA = \(\(220\.0, 10000\.0, 0\.1\), \(60\.0, 3000\.0, 0\.1\), \(10\.0, 300\.0, 0\.3\), \(0\.0, 50\.0, 0\.5\)\)$"),
+    re.compile(r'^"load_step_max_pct": 50\.0, "cos_phi_r"'),      # producers/campus.py: a genset load step in percent
 )
 #: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.
 DEFAULT = re.compile(r"\w+\s*(:\s*\w+\s*)?=\s*50(\.0*)?\s*[,)]")
@@ -172,7 +175,7 @@ def _fifty(path):
 
 def test_no_study_path_carries_a_50_hz_constant_outside_a_default():
     hits = [f"{path.relative_to(ROOT)}:{i}: {code}"
-            for folder in ("gridspine/static", "gridspine/drivers")
+            for folder in ("gridspine/static", "gridspine/drivers", "gridspine/producers")
             for path in sorted((ROOT / folder).rglob("*.py")) for i, code in _fifty(path)]
     assert not hits, "\n".join(hits)
 
