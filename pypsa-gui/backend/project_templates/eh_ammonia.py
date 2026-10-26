@@ -234,7 +234,7 @@ def _commercial_and_finance(T, planning=None) -> dict:
             "finance": FinanceInputs.model_validate(fin).model_dump(mode="json")}
 
 
-def _ledger(T, plan) -> list[dict]:
+def _ledger(plan) -> list[dict]:
     H = _hubs()
     years = plan.years
     tpd = " / ".join(f"{plan.values[y]:g}" for y in years)
@@ -386,7 +386,7 @@ def _meta(T, planning=None) -> dict:
         "energization": [{"year": y, "available_import_mw": 200.0, "connection_mw": 200.0,
                           "source": "assumed", "note": "fully energized"} for y in years],
         "period_years": {str(y): py[y] for y in years},
-        "ledger": _ledger(T, plan),
+        "ledger": _ledger(plan),
         "study_notes": [
             "Each period is the same representative week, with the period's NH3 delivery.",
             "The Haber-Bosch loop is a fixed-size unit; the plan sizes the grid, storage, "
