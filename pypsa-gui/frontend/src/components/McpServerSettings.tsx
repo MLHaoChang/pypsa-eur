@@ -171,7 +171,7 @@ function TestOutput({ state }: { state: TestState }) {
         <tbody>
           {state.tools.map(t => (
             <tr key={t.name} className="align-top border-t border-border">
-              <td className="pr-2 font-mono break-all">{shortToolName(t.name)}</td>
+              <td className="pr-2 font-mono break-all" title={t.name}>{shortToolName(t.name)}</td>
               <td className="pr-2 whitespace-nowrap" title={t.tier}>{tierWords(t.tier)}</td>
               <td>
                 <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted bg-bg-2 rounded p-1">
