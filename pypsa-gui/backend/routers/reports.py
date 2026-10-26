@@ -358,6 +358,11 @@ def _current_chapter_sources(project: AuthorizedProject) -> dict[str, Any]:
     except HTTPException as exc:
         logger.info("reports: no investment case for this project: %s", exc.detail)
     d = pathlib.Path(project.directory)
+    from services.flow_service import read_template
+
+    template = read_template(d)
+    if template is not None:
+        out["template_ledger"] = template
     if (d / "island_config.json").is_file() \
             or (d / "campus_electrical" / "run" / "campus_freq_events.csv").is_file():
         import importlib

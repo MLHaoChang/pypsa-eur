@@ -211,7 +211,8 @@ def test_sections_follow_the_four_categories():
     assert doc.sections[0].section_id == "executive_summary" and cats[0] is None
     assert doc.sections[-1].section_id == "pipeline" and cats[-1] is None
     order = ["investment", "grid_plan", "reliability", "operation"]
-    middle = [c for c in cats[1:-1]]
+    assert doc.sections[-2].section_id == "template_ledger" and cats[-2] is None
+    middle = [c for c in cats[1:-2]]
     assert middle == sorted(middle, key=order.index)           # grouped, never interleaved
     by = _by_id(doc)
     assert (by["cost"].category, by["fmea_top"].category, by["gates"].category) == (
