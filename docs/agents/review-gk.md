@@ -23,6 +23,9 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 
 - A plan or PR that hooks "user writes to `_user_ts`": list the writers with `git grep -nE "user_ts\[[^]]*\]\s*=[^=]"` and check each is hooked.
 
+- Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
+- A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
+
 ## Known container-only failures
 
 `test_harness_provider_parity`, `test_workflow_provider_parity[*-anthropic]`, `test_profile_gen_atlite_source` (atlite is not installed) and `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`.
