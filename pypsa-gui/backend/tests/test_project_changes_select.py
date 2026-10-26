@@ -251,7 +251,7 @@ def test_guided_treats_the_selector_form_as_the_names_form(grid):
     assert p_nom()["Solar"] == 96
 
 
-def test_the_undo_card_keeps_the_set_line(grid):
+def test_the_undo_card_shows_every_member_row(grid):
     ctx, session, _ = grid
     preview = chat_tools.preview_project_changes([ALL_SOLAR_P_NOM])
     dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]})

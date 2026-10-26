@@ -401,7 +401,7 @@ class _Operation(BaseModel):
 class _RelativeChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
     component_class: Literal["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]
-    names: list[str] | None = Field(None, min_length=1, max_length=100)
+    names: list[str] | None = Field(None, min_length=1, max_length=100)  # as _Change: the row cap says "split"
     select: _Selector | None = None
     attribute: str = Field(min_length=1, max_length=64)
     value: StrictBool | StrictFloat | StrictInt | None = None
@@ -435,7 +435,7 @@ def _bus_columns(static):
     return [c for c in static.columns if c == "bus" or (c.startswith("bus") and c[3:].isdigit())]
 
 
-def _selector_keys(klass, static):
+def _selector_keys(static):
     return [k for k, ok in (("carrier", "carrier" in static.columns),
                             ("bus", bool(_bus_columns(static))), ("all", True)) if ok]
 
@@ -443,7 +443,7 @@ def _selector_keys(klass, static):
 def _select(klass, selector, network):
     """The members a selector names, in index order, and its words."""
     static = network.components[klass].static
-    keys = _selector_keys(klass, static)
+    keys = _selector_keys(static)
     wrong = [k for k in ("carrier", "bus", "all") if getattr(selector, k) is not None and k not in keys]
     if wrong:
         workflow._refuse("invalid_change_selector", f"{klass} has no {', '.join(wrong)} to select by; "
@@ -516,6 +516,7 @@ def _scaled(change, names, static):
         workflow._refuse("invalid_change_value", f"Nothing was previewed or applied. {change.component_class} "
                          f"{change.attribute} is a per-unit share, at most 1: {'; '.join(over[:5])}.")
     missing = [n for n in names if n not in static.index]
+    # A placeholder row for the missing names: `_preview_changes` refuses it, naming them.
     return out + ([{**base, "names": missing, "value": 1.0}] if missing else [])
 
 

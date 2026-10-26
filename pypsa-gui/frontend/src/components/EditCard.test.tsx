@@ -296,3 +296,11 @@ it('the Guided preview result shows the set line above its rows', () => {
   expect(screen.getByTestId('assistant-change-set').textContent)
     .toBe('Every Generator with carrier Solar · 1 asset · Capacity × 1.2 (+20 %)')
 })
+
+it('a bus set on a Line says any port, as the server matches bus0 or bus1', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  showSetCard({ ...setCard, rows: [{ component_class: 'Line', name: 'L1', field: 's_nom', label: 'Rating',
+    old: 100, new: 120, unit: 'MVA', role: 'typed' }], sets: [{ ...solarSet, component_class: 'Line',
+    attribute: 's_nom', selector: { bus: 'B2' }, names: ['L1'], size: 1, inactive: 0 }] })
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Every Line at bus B2 (any port)')
+})

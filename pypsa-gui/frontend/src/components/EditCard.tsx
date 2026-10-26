@@ -152,13 +152,16 @@ function inSet(members: Set<string>, r: EditCardRow): boolean {
   return members.has(`${r.component_class}\u0000${r.name}\u0000${r.field}`)
 }
 
+const MULTI_PORT = new Set(['Line', 'Link', 'Transformer'])
+
 /** What a set selects, in the table's words: "Every Generator with carrier Solar at bus B1".
  * A names-form scale lists its members. */
 function setPhrase(g: EditCardSet): string {
   if (!g.selector) return g.names.map(n => assetWords(g.component_class, n)).join(', ')
   const parts = [`Every ${componentLabel(g.component_class)}`]
   if (g.selector.carrier !== undefined) parts.push(`with carrier ${carrierDisplayName(g.selector.carrier)}`)
-  if (g.selector.bus !== undefined) parts.push(`at bus ${g.selector.bus}${g.component_class === 'Link' ? ' (any port)' : ''}`)
+  // Lines, Transformers and Links have bus0, bus1…: the server matches any of them, as Expert's words say.
+  if (g.selector.bus !== undefined) parts.push(`at bus ${g.selector.bus}${MULTI_PORT.has(g.component_class) ? ' (any port)' : ''}`)
   return parts.join(' ')
 }
 

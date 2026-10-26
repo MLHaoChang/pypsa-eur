@@ -145,8 +145,8 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         if group["factor_words"]:
             change = f"{group['attribute']} {group['factor_words']}"
         else:
-            row = next(r for r in rows if r["role"] == "typed" and r["name"] in group["names"]
-                       and r["field"] == group["attribute"])
+            row = next(r for r in rows if r["role"] == "typed" and r.get("component_class") == group["component_class"]
+                       and r["name"] in group["names"] and r["field"] == group["attribute"])
             shown = row.get("display") or row
             change = f"{group['attribute']} → {_number(shown['new'])}" + (f" {shown['unit']}" if shown.get("unit") else "")
         return f"{group['words']} · {count} · {change}"
