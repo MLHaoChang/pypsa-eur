@@ -238,14 +238,15 @@ def test_a_shifted_year_is_a_placeholder_with_the_examples_value_by_stage():
 def test_an_example_year_in_another_stage_says_why_its_value_is_not_used():
     """dates [2035]: 2035 is the example's third stage but this planning's
     second, so it takes the second stage's 24 MW; the note says so, and says
-    the check stays unknown (setting a placeholder is a follow-up)."""
+    the check stays unknown until the IT load series is edited."""
     meta = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045, "dates": [2035]}))
     row = next(r for r in meta["ledger"] if r["item"] == "placeholder it_mw 2035")
     assert row["value"] == 24.0
     assert "the example's 2035 value is not used: this planning puts 2035 in stage 2, so it " \
            "takes 24 MW" in row["note"]
     assert "IT load" in row["label"] and "it load" not in row["note"]
-    assert "stays unknown" in row["note"] and "E1-set-growth-placeholders" in row["note"]
+    assert "unknown until it is set" in row["note"]
+    assert "editing the IT load series for 2035 sets it" in row["note"]
     other = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045,
                                         "dates": [2030, 2038]}))
     row = next(r for r in other["ledger"] if r["item"] == "placeholder it_mw 2038")
