@@ -35,6 +35,7 @@ import {
   type McpServerOut,
   type McpTestResult,
   type McpTier,
+  shortMcpToolName,
 } from '../api/mcpSettings'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -42,9 +43,6 @@ export const MCP_SERVERS_KEY = ['mcpServers'] as const
 
 const ID_RE = /^[a-z0-9]{1,16}$/
 const TIERS: McpTier[] = ['read', 'write', 'destructive', 'execution', 'execution_long_running']
-/** The server's own tool name: the model sees `mcp__<server>__<tool>`. */
-const shortToolName = (name: string) => name.replace(/^mcp__[a-z0-9]+__/, '')
-
 const INPUT = 'w-full rounded border border-border bg-bg px-2 py-1 text-xs'
 const BUTTON = 'rounded border border-border px-2 py-1 text-xs disabled:opacity-50'
 
@@ -171,7 +169,7 @@ function TestOutput({ state }: { state: TestState }) {
         <tbody>
           {state.tools.map(t => (
             <tr key={t.name} className="align-top border-t border-border">
-              <td className="pr-2 font-mono break-all" title={t.name}>{shortToolName(t.name)}</td>
+              <td className="pr-2 font-mono whitespace-nowrap" title={t.name}>{shortMcpToolName(t.name)}</td>
               <td className="pr-2 whitespace-nowrap" title={t.tier}>{tierWords(t.tier)}</td>
               <td>
                 <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted bg-bg-2 rounded p-1">

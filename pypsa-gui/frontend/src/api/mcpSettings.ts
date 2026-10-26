@@ -10,6 +10,9 @@
  * `mcp-servers.json`: these routes list, test and key it, never change it.
  */
 import axios from 'axios'
+
+/** An external server's own tool name: the model sees `mcp__<server>__<tool>`. */
+export const shortMcpToolName = (name: string): string => name.replace(/^mcp__[a-z0-9]+__/, '')
 import { client } from './client'
 
 export type McpTier = 'read' | 'write' | 'destructive' | 'execution' | 'execution_long_running'

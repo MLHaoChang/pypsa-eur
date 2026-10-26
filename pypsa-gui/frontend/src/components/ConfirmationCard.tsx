@@ -1,3 +1,4 @@
+import { shortMcpToolName } from '../api/mcpSettings'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -203,11 +204,6 @@ for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'expo
   GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename) ? `Export the file ${a.filename}` : 'Export a file')
 }
 
-/** An external server's own tool name, without the `mcp__<server>__` prefix the model sees. */
-function externalToolName(name: string): string {
-  return name.replace(/^mcp__[a-z0-9]+__/, '')
-}
-
 export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
   const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
   if (f) return f(args ?? {})
@@ -400,7 +396,7 @@ export function ConfirmationCard() {
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
             {edit?.says || (pending.external
-              ? externalToolName(pending.tool_name)
+              ? shortMcpToolName(pending.tool_name)
               : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
           {/* P26 gate B2: a destructive card shows its raw call by default. */}
@@ -416,7 +412,7 @@ export function ConfirmationCard() {
       ) : (
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.external ? externalToolName(pending.tool_name) : pending.tool_name}
+            {pending.external ? shortMcpToolName(pending.tool_name) : pending.tool_name}
           </div>
           <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
             {JSON.stringify(pending.args, null, 2)}
