@@ -1551,3 +1551,13 @@ def test_a_first_draft_still_assumes_50_hz(user_and_db):
     out = ce.draft(row)
     assert _cable_c_nf_per_km(out["campus_yaml"]) == pytest.approx(LINE_B_S / (2 * np.pi * 50) / 2.0 * 1e9, rel=1e-6)
     assert any("assumed" in s for s in out["skipped"])
+
+
+def test_a_campus_file_that_states_no_frequency_keeps_the_assumed_note(user_and_db):
+    row = _hub_with_line(user_and_db)
+    ce.draft(row)
+    spec = yaml.safe_load(ce.get_state(row)["campus_yaml"])
+    del spec["campus"]["f_hz"]
+    ce.save_campus(row, yaml.safe_dump(spec))
+    out = ce.draft(row, overwrite=True)
+    assert any("assumed" in s for s in out["skipped"])

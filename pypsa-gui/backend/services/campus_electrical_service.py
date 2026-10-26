@@ -911,9 +911,10 @@ def draft(project, overwrite: bool = False) -> dict:
             f_hz = None
             if (d / CAMPUS_FILE).is_file():
                 try:
-                    f_hz = campus_f_hz(project_registry.project_dir(project))
-                except IslandRefusal:
-                    pass                      # unreadable file: draft as a first draft
+                    stated = yaml.safe_load((d / CAMPUS_FILE).read_text())["campus"]["f_hz"]
+                    f_hz = campus_f_hz(project_registry.project_dir(project)) if stated is not None else None
+                except (yaml.YAMLError, KeyError, TypeError, IslandRefusal):
+                    pass                      # no stated frequency: draft as a first draft
             result = cs.draft_from_project(nc, island=island, f_hz=f_hz)
         except ContractError as exc:
             raise _unprocessable(exc)
