@@ -960,17 +960,17 @@ def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(
     n = _unchanged_project(run_dir)
     campus = load_run_campus(run_dir)
     bus, cases, notes = hs.campus_cases(campus)
-    spectrum_orders = set()
+    spectrum_orders, demo = set(), False
     for _, u in harmonic_units(n, str(campus.net.bus.at[bus, "name"])).iterrows():
-        spectrum, _ = hm.unit_spectrum(u["harmonic_source"], u["harmonic_spectrum"])
+        spectrum, source = hm.unit_spectrum(u["harmonic_source"], u["harmonic_spectrum"])
         spectrum_orders.update(h for h, pct in (spectrum or {}).items() if pct > 0)
+        demo |= bool(spectrum) and source.startswith("demo")
     limit, cited = hs.clearance_from_profile(load_grid_code(profile, extra_dirs=profile_dirs))
-    if cited and cited[0]["source"] != "code":
+    not_code = bool(cited) and cited[0]["source"] != "code"
+    if not_code:
         notes.append(f"the resonance clearance is {cited[0]['source']}, not the grid code's")
-    study = hs.impedance_scan(campus.net, bus, cases, spectrum_orders=sorted(spectrum_orders), limit_h=limit,
-                              notes=notes)
-    if cited and cited[0]["source"] != "code":
-        study.resonance["assumed"] = True
+    study = hs.impedance_scan(campus.net, bus, cases, spectrum_orders=sorted(spectrum_orders), spectrum_demo=demo,
+                              limit_h=limit, limit_assumed=not_code, notes=notes)
     for name, df in ((HARMONIC_SCAN_CSV, study.scan), (HARMONIC_ENVELOPE_CSV, study.envelope),
                      (HARMONIC_RESONANCE_CSV, study.resonance)):
         _write_text_atomic(run_dir / name, df.to_csv(index=False))

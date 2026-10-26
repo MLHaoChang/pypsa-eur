@@ -94,12 +94,24 @@ def test_too_many_combinations_fall_back_with_a_note():
     assert len(states) == 2 + 3 * 4
     assert "MAX_CAP_STATES" in notes[0]
     assert {i: 4 for i in net.shunt.index} in states and {i: 0 for i in net.shunt.index} in states
+    net, _ = _net(caps=[(10.0, 70)])                                # one bank: all-out is scanned once
+    states, _ = hs.cap_states(hs.switched_shunts(net))
+    assert len(states) == 71 and states.count({net.shunt.index[0]: 0}) == 1
 
 
 def test_the_nearest_order_counts_the_unit_spectra():
     assert hs.nearest_order(8.9) == (7, "6k±1")
     assert hs.nearest_order(9.1, spectrum_orders=[9]) == (9, "unit spectrum")
     assert hs.nearest_order(7.2, spectrum_orders=[7]) == (7, "6k±1 and unit spectrum")
+    assert hs.nearest_order(9.1, spectrum_orders=[9], demo=True) == (9, "demo unit spectrum")
+
+
+def test_a_resonance_nearest_a_demo_order_only_is_assumed():
+    net, poc = _net(s_sc=1000.0, rx=0.02, caps=[(10.0, 1)])         # h_r = 10
+    res = hs.impedance_scan(net, poc, {"max": (1000.0, 0.02)}, spectrum_orders=[10], spectrum_demo=True,
+                            limit_h=0.5).resonance
+    assert res.iloc[0]["order_set"] == "demo unit spectrum" and bool(res.iloc[0]["assumed"])
+    assert res.iloc[0]["verdict"] == "flag"
 
 
 @pytest.mark.parametrize("h_r, verdict", [(7.5, "clear"), (7.49, "flag"), (6.5, "clear"), (6.51, "flag")])
@@ -139,6 +151,7 @@ def test_a_long_cable_is_named():
     net.line["c_nf_per_km"] = 250.0
     study = hs.impedance_scan(net, poc, _cases(net))
     assert any("cable cable (60 km)" in n for n in study.notes)
+    assert not hs.impedance_scan(net, poc, _cases(net), h_max=2).notes      # judged at h_max * f0
     assert study.envelope["note"].str.contains("lumped pi").all()
 
 

@@ -79,7 +79,9 @@ LEDGER = (
     "R rises with sqrt(h) (skin effect) on cables, transformers and the grid; X with h",
     "the grid is Un^2 / S_sc without IEC 60909's voltage factor c, so h_r = sqrt(S_sc / Q_c) holds as in "
     "the textbook",
-    "transformers at their rated ratio, without the magnetising branch",
+    "transformers at their rated ratio (no off-nominal correction where a bus's kV differs from the "
+    "winding's), without the magnetising branch",
+    "a peak at or above h_max is not reported (the scan has no point beyond it)",
     "a cable drafted from a PyPSA project converts b to C at 50 Hz (gridspine/producers/campus.py), so "
     "on a 60 Hz project its C is 1.2 times too high until that is fixed",
 )
@@ -92,6 +94,7 @@ RESONANCE_COLUMNS = ("case", "cap_state", "h_r", "f_hz", "z_peak_ohm", "prominen
 
 CHARACTERISTIC = "6k±1"
 SPECTRUM = "unit spectrum"
+SPECTRUM_DEMO = "demo unit spectrum"
 NO_NORMAL = "no normal case given (pcc.sk_normal_mva), so it is not scanned"
 
 
@@ -119,12 +122,12 @@ def _in_service(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["in_service"].astype(bool)] if "in_service" in df.columns else df
 
 
-def _branches(net, f0: float):
+def _branches(net, f0: float, h_max: float = H_MAX):
     """``(series, notes)``: each in-service cable and transformer as ``(from bus, to bus, r pu, x pu,
     b pu)`` on ``net.sn_mva`` and the bus voltages, at the fundamental."""
     sbase, vn = float(net.sn_mva), net.bus["vn_kv"].astype(float)
     series, notes = [], []
-    lam_f = H_MAX * f0
+    f_top = h_max * f0
     for _, ln in _in_service(net.line).iterrows():
         a, b = int(ln["from_bus"]), int(ln["to_bus"])
         length, par = float(ln["length_km"]), float(ln.get("parallel", 1) or 1)
@@ -136,10 +139,10 @@ def _branches(net, f0: float):
         series.append((a, b, r, x, bsh))
         l_h = float(ln["x_ohm_per_km"]) / (2 * math.pi * f0)
         if c > 0 and l_h > 0:
-            quarter = 1.0 / math.sqrt(l_h * c) / (4 * lam_f)
+            quarter = 1.0 / math.sqrt(l_h * c) / (4 * f_top)
             if length > PI_FRACTION * quarter:
                 notes.append(f"cable {ln['name']} ({length:g} km) is longer than {PI_FRACTION} of a quarter "
-                             f"wavelength at {lam_f:g} Hz ({quarter:.3g} km): one lumped pi understates its "
+                             f"wavelength at {f_top:g} Hz ({quarter:.3g} km): one lumped pi understates its "
                              f"resonances")
     for _, tr in _in_service(net.trafo).iterrows():
         a, b = int(tr["hv_bus"]), int(tr["lv_bus"])
@@ -185,7 +188,8 @@ def cap_states(shunts: pd.DataFrame) -> tuple[list, list]:
     states = [full, {i: 0 for i in idx}]
     for i in idx:
         for s in range(int(shunts.at[i, "max_step"])):
-            states.append({**full, i: s})
+            if {**full, i: s} not in states:
+                states.append({**full, i: s})
     note = (f"{count} capacitor states exceed MAX_CAP_STATES ({MAX_CAP_STATES}): scanned all in, all out and "
             f"each shunt stepped alone with the others in ({len(states)} states)")
     return states, [note]
@@ -288,12 +292,14 @@ def peaks(z: np.ndarray, ratio: float = PEAK_RATIO) -> list:
     return out
 
 
-def nearest_order(h_r: float, spectrum_orders=(), h_max: float = H_MAX) -> tuple[int, str]:
+def nearest_order(h_r: float, spectrum_orders=(), h_max: float = H_MAX, demo: bool = False) -> tuple[int, str]:
     """``(order, which set)``: the order that counts nearest to ``h_r``, from 6k +- 1 and the units'
-    spectra; the set names where that order comes from."""
+    spectra; the set names where that order comes from (``demo``: the spectra include a topology's
+    demo default)."""
     char, spec = characteristic_orders(h_max), {int(h) for h in spectrum_orders}
     best = min(char | spec, key=lambda h: (abs(h - h_r), h))
-    sets = [name for name, s in ((CHARACTERISTIC, char), (SPECTRUM, spec)) if best in s]
+    sets = [name for name, s in ((CHARACTERISTIC, char), (SPECTRUM_DEMO if demo else SPECTRUM, spec))
+            if best in s]
     return best, " and ".join(sets)
 
 
@@ -315,21 +321,23 @@ def envelope(scan: pd.DataFrame, f0: float, h_max: float = H_MAX) -> pd.DataFram
     return pd.DataFrame(rows, columns=[c for c in ENVELOPE_COLUMNS if c not in ("note", "label")])
 
 
-def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), limit_h: float | None = None,
-                   notes=(), h_max: float = H_MAX, dh: float = DH) -> ScanStudy:
+def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), spectrum_demo: bool = False,
+                   limit_h: float | None = None, limit_assumed: bool = False, notes=(), h_max: float = H_MAX,
+                   dh: float = DH) -> ScanStudy:
     """The scan of ``net`` from ``poc_bus`` for each case in ``cases`` (``{case: (s_sc_mva, rx)}``) and
     each capacitor state. ``limit_h`` is the grid code's clearance; None takes ``DEFAULT_CLEARANCE_H``
-    and marks every resonance row ``assumed``. ``notes`` are carried onto the envelope and resonance
-    rows."""
+    and marks every resonance row ``assumed``, as does ``limit_assumed`` (a limit that is not the
+    code's). A row whose nearest order is only in a demo spectrum (``spectrum_demo``) is ``assumed``
+    too. ``notes`` are carried onto the envelope and resonance rows."""
     f0 = float(net.f_hz)
     hs = orders(h_max, dh)
     shunts = switched_shunts(net)
     states, state_notes = cap_states(shunts)
-    series, line_notes = _branches(net, f0)
+    series, line_notes = _branches(net, f0, h_max)
     notes = [*notes, *state_notes, *line_notes]
     note = "; ".join(notes)
-    assumed = limit_h is None
-    limit = DEFAULT_CLEARANCE_H if assumed else float(limit_h)
+    limit = DEFAULT_CLEARANCE_H if limit_h is None else float(limit_h)
+    assumed = limit_h is None or limit_assumed
 
     frames, res = [], []
     for case, (s_sc, rx) in cases.items():
@@ -343,14 +351,15 @@ def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), limit_
                                         "r_ohm": z.real, "x_ohm": z.imag, "z_ohm": mag, "label": LABEL}))
             for i, prom in peaks(mag):
                 h_r = float(hs[i])
-                order, which = nearest_order(h_r, spectrum_orders, h_max)
+                order, which = nearest_order(h_r, spectrum_orders, h_max, spectrum_demo)
                 margin = abs(h_r - order)
                 res.append({"case": case, "cap_state": label, "h_r": h_r, "f_hz": h_r * f0,
                             "z_peak_ohm": float(mag[i]), "prominence": prom, "nearest_order": order,
                             "order_set": which, "margin_h": margin, "limit_h": limit,
-                            "verdict": judge(margin, limit), "assumed": assumed,
+                            "verdict": judge(margin, limit), "assumed": assumed or which == SPECTRUM_DEMO,
                             "note": "; ".join(filter(None, [
-                                "the grid code sets no resonance clearance; demo default" if assumed else "",
+                                "the grid code sets no resonance clearance; demo default" if limit_h is None
+                                else "",
                                 note])),
                             "label": LABEL})
     scan = pd.concat(frames, ignore_index=True).reindex(columns=list(SCAN_COLUMNS)) if frames \
