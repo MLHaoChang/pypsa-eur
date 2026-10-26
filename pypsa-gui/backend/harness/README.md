@@ -241,7 +241,7 @@ component (`frontend/src/components/EditCard.tsx`).
   `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
   is gated as Guided gates a write, so Expert shows the card too.
 - **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
-  says, complete, digest}`, or refuses before any card (`unknown_field`,
+  says, complete, binding, digest}`, or refuses before any card (`unknown_field`,
   `derived_field`, `read_only_field`, `invalid_edit_value`,
   `component_not_found`, `edit_refused`). Component rows come from running the
   NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
@@ -261,6 +261,8 @@ component (`frontend/src/components/EditCard.tsx`).
   `edit_card.register(tool, Adapter(kind, preview, readback))`, where
   `preview(args)` returns rows `{component_class, name, field, label, old,
   new, unit, role}` and `readback(args, rows)` the stored values in row order.
+  An optional `Adapter.binding(args)` returns a dict the card carries as
+  `binding` and its digest covers (a stored record the edit applies).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
@@ -833,6 +835,17 @@ copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
 and the existing foreign-lock/study/undo gates. It commits a validated private
 candidate, retains unsaved work, and refuses interrupted application replay.
+LC-16: one preview spans several assets of the eight component classes, each
+change an `attribute` that `get_component_schema` types as a number or
+boolean in its stored unit; derived, read-only, negative and non-finite values
+refuse, and one missing name refuses everything (`change_component_missing`,
+naming it and up to five existing names). The rows come from the native bulk
+handler on a copy (`edit_card._sandbox_rows`), and a number column the asset
+never set is created there, as a single edit does. `apply_project_changes` is
+an edit card (`parameter_edit`) whose `binding` is `{preview_id,
+review_sha256}`; the loop refuses `invalid_preview` when the approved card's
+binding is not the record the handler applies. Records are version 2 (with
+`rows`); older records fail closed. One apply is one `undo_last` step.
 Previews are limited to a complete review of at most 20 values fitting a
 3800-character card; larger changes must be split. Legacy/clipped records need
 a new preview. The card renders an old/new/unit table on both surfaces and
@@ -869,7 +882,8 @@ review. Verified failed/uncertain steps may be explicitly reconciled through
 the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
-still receives only its catalogue arguments; chat renders the preview table.
+still receives only its catalogue arguments; chat renders the preview table,
+or, when the confirmation carries a complete edit card, the card alone.
 
 ### Plan jobs and continuation (LC-05, LC-12)
 
