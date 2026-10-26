@@ -494,9 +494,9 @@ export interface CouplingLoopPayload {
 export const MAX_LOOP_SOLVES = 8
 
 export interface CouplingLoopRequestBody {
-  /** REQUIRED and horizon-basis. The h/yr → horizon conversion is the
-   *  panel's job (plan [S12]); the wire stays unit-safe. */
-  target_lole_h: number
+  /** Horizon-basis when sent. W3b-R: the panel omits it, and the backend
+   *  takes the stored goal's h/yr target on the horizon basis. */
+  target_lole_h?: number
   draws?: number
   seed?: number
   eps0?: number
@@ -613,8 +613,9 @@ export interface MarginLoopPayload {
 }
 
 export interface MarginLoopRequestBody {
-  /** REQUIRED and horizon-basis; the h/yr conversion is the panel's job. */
-  target_lole_h: number
+  /** Horizon-basis when sent. W3b-R: the panel omits it, and the backend
+   *  takes the stored goal's h/yr target on the horizon basis. */
+  target_lole_h?: number
   draws?: number
   seed?: number
   max_solves?: number
@@ -629,7 +630,8 @@ export interface MarginLoopRequestBody {
 export type EhArchetype = 'strong_grid' | 'weak_flexible' | 'off_grid'
 
 export interface EhStudyRequestBody {
-  archetype: EhArchetype
+  /** W3b-R: omitted, the project's stored site type. */
+  archetype?: EhArchetype
   stages?: string[]
   budget_solves?: number
   /** P13: validated server-side (422 names the field). Omit blank knobs. */

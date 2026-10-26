@@ -13,6 +13,7 @@ import { useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { actionLabel, actionText, actionTexts, askText, stressScenarioText } from '../delegate'
 import { DC_TEMPLATE, REPORT, review } from '../testFixtures'
+import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { ImproveCard } from './ImproveCard'
 import { nk } from '../../../utils/queryKeys'
 
@@ -29,6 +30,12 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 })
 const sweep = { mutate: vi.fn(), reset: vi.fn(), isPending: false, isSuccess: false }
 // The real `fmeaModesRefetchInterval` (A5): only the mutation is stubbed.
+// The site type is the stored reliability goal's (W3b-R).
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getReliabilityGoal: vi.fn(async () => goal({ site_archetype: ['weak_flexible', 'template'] })) }
+})
+
 vi.mock('../../../hooks/useStartFmeaSweep', async (orig) => ({
   ...(await orig<typeof import('../../../hooks/useStartFmeaSweep')>()),
   useStartFmeaSweep: vi.fn(() => sweep),
@@ -38,8 +45,7 @@ beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'hubDesign',
     resultsTabRequest: null, assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
-  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
-    step: 'improve', archetype: 'weak_flexible' })
+  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'improve' })
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: REPORT })
   vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)

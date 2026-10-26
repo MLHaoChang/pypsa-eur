@@ -18,7 +18,7 @@ import {
   type PackForm,
 } from '../results/EhReferenceDesignPanel'
 import { dispatchSolved } from './chapters'
-import { useHubDesignStore } from './hubDesignStore'
+import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
 export function useHubStudy() {
@@ -87,7 +87,9 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
 export function useHubReadiness(template: EhTemplateMeta | null, running: boolean,
   ready: boolean, { observeOnly = false }: { observeOnly?: boolean } = {}) {
   const project = useUIStore(s => s.currentProject)
-  const archetype = useHubDesignStore(s => s.archetype)
+  // The stored site type (W3b-R); read before the first request so it never
+  // asks for the default type's readiness first.
+  const { archetype, isPending: goalPending } = useReliabilityGoal()
   const overrides = buildEhStudyBody(archetype, templateForm(template)).body?.pack_overrides
   const q = useQuery({
     queryKey: [...nk(project, 'results', 'eh_readiness'), archetype, 'hub-design',
@@ -96,7 +98,7 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
       { stages: undefined, pack_overrides: overrides }),
     // `observeOnly` (the panel's load-error line, P30 B8): read the shared
     // cache entry's state without starting a request of its own.
-    enabled: !observeOnly && !!project && ready && !running,
+    enabled: !observeOnly && !!project && ready && !goalPending && !running,
   })
   return { isError: q.isError, refetch: q.refetch, readiness: q.data ?? null }
 }

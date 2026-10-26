@@ -14,6 +14,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
+import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
 import { compact, restoreSentence, CAP_LEVER } from './LoopPanel'
 import { MarginLoopPanel, MARGIN_LEVER, bindingLabel, leverPct } from './MarginLoopPanel'
@@ -34,6 +35,14 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getCopt: vi.fn(),
     },
   }
+})
+
+// The target and the draws are the project's one stored goal (W3b-R): shown
+// read-only, never sent; the backend puts the h/yr target on the horizon basis.
+const getReliabilityGoal = vi.fn()
+vi.mock('../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/flow')>()
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 /** A representative week — the h/yr → horizon conversion is a REAL one. */
@@ -189,6 +198,7 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  getReliabilityGoal.mockReset().mockResolvedValue(goal({ target_lole_h: [3, 'stored'] }))
   vi.mocked(resultsApi.getMarginLoop).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.startMarginLoop).mockReset()
     .mockResolvedValue({ status: 'running' })
@@ -652,28 +662,48 @@ describe('MarginLoopPanel verdict', () => {
 describe('MarginLoopPanel run controls', () => {
   // ★ [S12] Bite: POST the raw h/yr field — the same unit trap the cap loop
   // has, and the same 52x on a representative week.
-  it('converts the typed h/yr target through the MC horizon before POSTing', async () => {
+  it('echoes the goal\'s h/yr target on the MC horizon, and POSTs no target or draws', async () => {
     vi.mocked(resultsApi.getMc).mockResolvedValue(MC_WEEK)
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
-    await waitFor(() => expect(
-      screen.getByTestId('margin-loop-target-echo').textContent,
-    ).toBe('3 h/yr = 0.058 h / 168 h horizon'))
+    expect(screen.queryByLabelText(/target/i)).toBeNull()
+    expect(screen.queryByLabelText(/draws/i)).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('margin-loop-target-echo').textContent)
+      .toBe('3 h/yr = 0.058 h / 168 h horizon'))
+    expect(screen.getByTestId('margin-loop-goal-values').textContent)
+      .toBe('allowed shortfall 3 h/yr · 500 MC draws (default)')
+    expect(screen.getByTestId('margin-loop-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startMarginLoop).toHaveBeenCalled())
-    const body = vi.mocked(resultsApi.startMarginLoop).mock.calls[0][0]
-    expect(body.target_lole_h).toBeCloseTo(0.05753424, 7)
-    expect(body.target_lole_h).not.toBe(3)
+    // The backend converts the stored goal (`reliability_goal.loop_goal`).
+    expect(vi.mocked(resultsApi.startMarginLoop).mock.calls[0][0]).toEqual({ restore: 'base' })
+  })
+
+  it('with no goal, Run is disabled and says so, with a link to set it', async () => {
+    getReliabilityGoal.mockResolvedValue(goal())
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results', activeSection: 'results',
+      flowReturn: null, solverBlockRequest: null, fieldDrawer: null })
+    const { user } = await openPanel()
+    const run = screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement
+    expect((await screen.findByTestId('margin-loop-goal-no-goal')).textContent).toBe('No reliability goal set.')
+    expect(run.disabled).toBe(true)
+    expect(run.title).toMatch(/^No reliability goal set\./)
+    const link = screen.getByTestId('margin-loop-goal-set')
+    expect(link.textContent).toBe('Set it in Scenarios & optimisation ›')
+    // "·" separates data only: the link is its own element.
+    expect(link.parentElement!.textContent).not.toMatch(/·/)
+    await user.click(link)
+    // Guided: the Goal card, in place, with a way back (never flips the mode).
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'guided', activeSlidePanel: 'hubDesign',
+      activeSection: 'scenarios', solverBlockRequest: 'goal' })
+    expect(useUIStore.getState().flowReturn).toMatchObject({ mode: 'guided', panel: 'results' })
+    expect(resultsApi.startMarginLoop).not.toHaveBeenCalled()
   })
 
   // ★ [S9] Bite: hardcode `restore: "base"` and ignore the toggle.
   it('sends restore:"final" when the user asks to keep the certified plan', async () => {
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByTestId('margin-loop-restore-toggle'))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startMarginLoop).toHaveBeenCalled())
@@ -683,9 +713,8 @@ describe('MarginLoopPanel run controls', () => {
 
   it('defaults to "base" — the loop never applies an unasked-for margin', async () => {
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startMarginLoop).toHaveBeenCalled())
     expect(vi.mocked(resultsApi.startMarginLoop).mock.calls[0][0].restore)
@@ -699,9 +728,8 @@ describe('MarginLoopPanel run controls', () => {
     vi.mocked(resultsApi.startMarginLoop).mockRejectedValue(
       httpError(409, 'a coupling-loop study is running — wait for it to finish'))
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     const msg = await screen.findByTestId('margin-loop-blocked')
     expect(msg.textContent).toMatch(/coupling-loop study is running/)
@@ -731,7 +759,9 @@ describe('MarginLoopPanel run controls', () => {
   })
 
   it('refuses to start without a target rather than POSTing an empty body', async () => {
+    getReliabilityGoal.mockResolvedValue(goal())
     const { user } = await openPanel()
+    await screen.findByTestId('margin-loop-goal-no-goal')
     const btn = await screen.findByTestId('margin-loop-run')
     expect((btn as HTMLButtonElement).disabled).toBe(true)
     await user.click(btn)

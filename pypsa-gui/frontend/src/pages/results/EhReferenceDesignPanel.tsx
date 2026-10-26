@@ -25,6 +25,8 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { ehStudyRefetchInterval } from './ehStudyPoll'
 import { useChatStore } from '../../store/chatStore'
@@ -184,6 +186,23 @@ export function buildEhStudyBody(
     const chosen = new Set(['apply_pack', 'ens_solve', 'assemble', ...form.stages])
     body.stages = PIPELINE_ORDER.filter(st => chosen.has(st))
   }
+  return { body, error: null }
+}
+
+/**
+ * The request a study sends (W3b-R): `buildEhStudyBody` without the goal
+ * fields — no site type, LOLE or ENS target, no MC draws. The backend fills
+ * each from the project's one stored goal (`reliability_goal.py`), so every
+ * study runs the goal Guided and Expert show. `archetype` is the goal's site
+ * type, used only for the rules that depend on it (import fields, levers).
+ */
+export function buildGoalFreeStudyBody(
+  archetype: EhArchetype, form: PackForm,
+): { body: EhStudyRequestBody | null; error: string | null } {
+  const built = buildEhStudyBody(archetype, { ...form, ensCap: '', loleTarget: '', draws: '' })
+  if (!built.body) return built
+  const { archetype: _goal, ...body } = built.body
+  void _goal
   return { body, error: null }
 }
 
@@ -915,15 +934,23 @@ export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [archetype, setArchetype] = useState<EhArchetype>('strong_grid')
+  // The site type, the LOLE and ENS targets and the MC draws are the project's
+  // one reliability goal (W3b-R): shown read-only here and left out of the
+  // request, which the backend fills from the stored goal.
+  const { goal, archetype, isPending: goalPending } = useReliabilityGoal()
   const [blocked, setBlocked] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
-  const built = buildEhStudyBody(archetype, form)
+  const built = buildGoalFreeStudyBody(archetype, form)
   const readinessBudget = useDebounced(built.body?.budget_solves, 400)
-  // The stages and overrides that will run, settled like the budget.
+  // The stages and overrides that will run, settled like the budget. Readiness
+  // reads no goal, so its preview carries the goal's targets as the run will.
+  const previewOverrides = buildEhStudyBody(archetype, {
+    ...form, loleTarget: goalText(goal, 'target_lole_h'),
+    ensCap: goalText(goal, 'ens_cap_permyriad'), draws: '',
+  }).body?.pack_overrides
   const readinessPreview = useDebounced(JSON.stringify({
-    stages: built.body?.stages, pack_overrides: built.body?.pack_overrides,
+    stages: built.body?.stages, pack_overrides: previewOverrides,
   }), 400)
   const { data: template } = useQuery({
     queryKey: nk(currentProject, 'adequacy', 'eh_template'),
@@ -939,10 +966,9 @@ export function EhReferenceDesignPanel() {
     useUIStore.getState().setAssistantDockOpen(true)
     useChatStore.getState().seedComposer(text)
   }
-  const applyTemplate = (meta: EhTemplateMeta) => {
-    setArchetype(meta.recommended_archetype)
-    setForm(formFromTemplate(meta))
-  }
+  // The template's site type and targets are the goal's fallback (W3b-R);
+  // here it sets the pack settings only.
+  const applyTemplate = (meta: EhTemplateMeta) => setForm(formFromTemplate(meta))
   // P19–P22 gate: "open the panel and press Run" on a template project must
   // run the RECOMMENDED pack, not the strong_grid default — preselect once per
   // project, and only while the user has not touched the form.
@@ -950,8 +976,7 @@ export function EhReferenceDesignPanel() {
   useEffect(() => {
     if (!template || preselectedFor.current === currentProject) return
     preselectedFor.current = currentProject
-    const untouched = archetype === 'strong_grid'
-      && JSON.stringify(form) === JSON.stringify(EMPTY_PACK_FORM)
+    const untouched = JSON.stringify(form) === JSON.stringify(EMPTY_PACK_FORM)
     if (untouched) applyTemplate(template)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [template, currentProject])
@@ -1022,7 +1047,7 @@ export function EhReferenceDesignPanel() {
       archetype, readinessBudget, form.dtcAttribution || undefined,
       JSON.parse(readinessPreview) as {
         stages?: string[]; pack_overrides?: Record<string, unknown> }),
-    enabled: open && !running,
+    enabled: open && !running && !goalPending,
   })
 
   const { data: reportData } = useQuery({
@@ -1202,23 +1227,12 @@ export function EhReferenceDesignPanel() {
             a time.
           </p>
 
-          <label className="flex flex-col gap-1 text-[10px] text-muted">
-            <span className="uppercase tracking-wide font-semibold">
-              <InfoTip text={fieldTip('archetype')}>Archetype</InfoTip>
+          <div className="flex flex-col gap-1 text-[10px] text-muted">
+            <ReliabilityGoalSummary testId="eh-goal" items={['site', 'target', 'ens', 'draws']} />
+            <span data-testid="eh-archetype">
+              <InfoTip text={fieldTip('archetype')}>{selected.label}</InfoTip>: {selected.blurb}
             </span>
-            <select
-              data-testid="eh-archetype"
-              value={archetype}
-              disabled={running}
-              onChange={e => setArchetype(e.target.value as EhArchetype)}
-              className="bg-bg border border-border rounded px-2 py-1 text-[11px] text-text"
-            >
-              {ARCHETYPES.map(a => (
-                <option key={a.id} value={a.id}>{a.label}</option>
-              ))}
-            </select>
-            <span className="text-muted">{selected.blurb}</span>
-          </label>
+          </div>
 
           {/* Stays while a study runs: it is the context the run was set up from. */}
           {template && (
@@ -1270,14 +1284,11 @@ export function EhReferenceDesignPanel() {
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {([
-                    ['ensCap', 'ENS target (‱)', 'eh-pack-ens-cap', true, 'ens_cap_permyriad'],
-                    ['loleTarget', 'LOLE target (h/yr)', 'eh-pack-lole-target', true, 'target_lole_h'],
                     ['importMw', 'Import cap (MW)', 'eh-pack-import-mw',
                       archetype === 'weak_flexible', 'import_p_nom_mw'],
                     ['importEnergy', 'Import energy (MWh/yr)', 'eh-pack-import-energy',
                       archetype === 'weak_flexible', 'import_energy_mwh_per_year'],
                     ['budget', 'Budget (LP solves)', 'eh-pack-budget', true, 'budget_solves'],
-                    ['draws', 'MC draws', 'eh-pack-draws', true, 'mc_draws'],
                     ['seed', 'MC seed', 'eh-pack-seed', true, 'mc_seed'],
                   ] as [keyof PackForm, string, string, boolean, string][])
                     .filter(([, , , show]) => show)
@@ -1394,7 +1405,7 @@ export function EhReferenceDesignPanel() {
             <button
               type="button"
               onClick={() => run.mutate()}
-              disabled={running || built.error !== null}
+              disabled={running || built.error !== null || goalPending}
               title={built.error ?? undefined}
               data-testid="eh-run"
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"

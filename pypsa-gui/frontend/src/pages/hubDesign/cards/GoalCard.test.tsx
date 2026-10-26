@@ -1,6 +1,7 @@
-// Guided-mode spec §5.3 (Goal): the allowed shortfall defaults from the
-// template, then from the pack readiness reports; VOLL ≤ 0 offers the
-// assistant fix. The Run is in section 9 (`shared/GoalStudyRun.test.tsx`).
+// Guided-mode spec §5.3 (Goal): the allowed shortfall is the project's one
+// stored reliability goal (W3b-R) — stored, else the template's, else the
+// site type's default as the placeholder; "Save goal" sends only the edited
+// fields. VOLL ≤ 0 offers the assistant fix. The Run is in section 9 (`shared/GoalStudyRun.test.tsx`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -11,6 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
+import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { GoalCard } from './GoalCard'
 import { nk } from '../../../utils/queryKeys'
 
@@ -23,24 +25,27 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
       getEhStudy: vi.fn(), getEhReadiness: vi.fn(), getEhTemplate: vi.fn(),
       startEhStudy: vi.fn(), abortEhStudy: vi.fn(), getFmeaModes: vi.fn(),
     },
-    simulationApi: { ...actual.simulationApi, getSolverConfig: vi.fn() },
+    simulationApi: { ...actual.simulationApi, getSolverConfig: vi.fn(), updateSolverConfig: vi.fn() },
   }
 })
 
 // The scope (W4a): unread by default, so every block shows; one test reads
 // a scope with Reliability off.
 const getFlowScope = vi.fn()
+const getReliabilityGoal = vi.fn()
 vi.mock('../../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/flow')>()
-  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a),
+    getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 beforeEach(() => {
   getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
-  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
-    step: 'goal', archetype: 'weak_flexible' })
+  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'goal' })
+  getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
+  vi.mocked(simulationApi.updateSolverConfig).mockResolvedValue({} as never)
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
   vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
@@ -57,19 +62,27 @@ function mount() {
 }
 const input = (id: string) => screen.getByTestId(id) as HTMLInputElement
 
-describe('GoalCard defaults', () => {
-  it('a template override wins over the pack default', async () => {
-    useHubDesignStore.setState({ loleTarget: '1.5', loleSource: 'template' })
+describe('GoalCard goal (W3b-R: the one stored goal)', () => {
+  it('a template value is the goal, named as the template\'s', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [1.5, 'template'],
+      site_archetype: ['weak_flexible', 'template'] }))
     mount()
-    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
-    await new Promise(r => setTimeout(r, 0))
-    expect(input('hub-goal-lole').value).toBe('1.5')
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('1.5'))
+    expect(screen.getByTestId('hub-goal-lole-template').textContent).toBe('From the project template')
   })
 
-  it('without one, the pack default from readiness (3 h/yr on the data center)', async () => {
+  it('a stored value wins and carries no template note', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [4, 'stored'] }))
     mount()
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
-    expect(useHubDesignStore.getState().loleSource).toBe('pack')
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('4'))
+    expect(screen.queryByTestId('hub-goal-lole-template')).toBeNull()
+  })
+
+  it('without one, the site type\'s default (3 h/yr on the data center) is the placeholder', async () => {
+    mount()
+    await waitFor(() => expect(input('hub-goal-lole').placeholder).toBe('3 (default)'))
+    expect(input('hub-goal-lole').value).toBe('')
+    expect(screen.queryByTestId('hub-goal-empty-hint')).toBeNull()
   })
 
   it('a pack without a target leaves the goal empty', async () => {
@@ -86,39 +99,54 @@ describe('GoalCard defaults', () => {
       + 'to get a pass or fail answer.')
   })
 
-  // The pack default depends on the site type: strong_grid has none here.
-  const byType = (a: string) => readiness({ pack_defaults: a === 'strong_grid'
-    ? { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' }
-    : { target_lole_h: 3, ens_cap_permyriad: 10, certification_metric: 'mc_lole' } })
-
-  it('a pack-seeded goal follows the pack when the site type changes', async () => {
-    vi.mocked(resultsApi.getEhReadiness).mockImplementation(async a => byType(a))
+  it('readiness asks for the stored site type', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['off_grid', 'stored'] }))
     mount()
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
-    act(() => useHubDesignStore.getState().setArchetype('strong_grid'))
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe(''))
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
+    expect(vi.mocked(resultsApi.getEhReadiness).mock.calls.every(c => c[0] === 'off_grid')).toBe(true)
   })
 
-  it('the user\'s own value is never overwritten by the pack', async () => {
-    vi.mocked(resultsApi.getEhReadiness).mockImplementation(async a => byType(a))
+  it('"Save goal" sends only the field the user typed', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [1.5, 'template'],
+      ens_cap_permyriad: [4, 'template'] }))
     const user = mount()
-    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('1.5'))
+    const save = screen.getByTestId('hub-goal-save') as HTMLButtonElement
+    expect(save.disabled).toBe(true)
     await user.clear(input('hub-goal-lole'))
     await user.type(input('hub-goal-lole'), '7')
-    expect(useHubDesignStore.getState()).toMatchObject({ loleTarget: '7', loleSource: 'user' })
-    act(() => useHubDesignStore.getState().setArchetype('strong_grid'))
-    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
-      'strong_grid', undefined, undefined, expect.anything()))
-    await new Promise(r => setTimeout(r, 20))
-    expect(input('hub-goal-lole').value).toBe('7')
+    expect(save.disabled).toBe(false)
+    await user.click(save)
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ target_lole_h: 7 })
+    // the goal is read again, so both modes show the saved value
+    await waitFor(() => expect(getReliabilityGoal.mock.calls.length).toBeGreaterThanOrEqual(2))
   })
 
-  it('energy strictness sits behind the advanced toggle', async () => {
+  it('an invalid value is named and cannot be saved', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-lole').disabled).toBe(false))
+    await user.type(input('hub-goal-lole'), '-1')
+    expect(screen.getByTestId('hub-goal-error').textContent).toMatch(/Allowed shortfall/)
+    expect((screen.getByTestId('hub-goal-save') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('energy strictness and simulation runs sit behind the advanced toggle', async () => {
     const user = mount()
     expect(screen.queryByTestId('hub-goal-ens')).toBeNull()
+    expect(screen.queryByTestId('hub-goal-draws')).toBeNull()
     await user.click(screen.getByTestId('hub-goal-advanced'))
+    await waitFor(() => expect(input('hub-goal-ens').disabled).toBe(false))
+    expect(input('hub-goal-draws').placeholder).toBe('500 (default)')
     await user.type(input('hub-goal-ens'), '2')
-    expect(useHubDesignStore.getState().ensCap).toBe('2')
+    await user.click(screen.getByTestId('hub-goal-save'))
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledWith({ ens_cap_permyriad: 2 }))
+  })
+
+  it('takes a "set the goal" request from a Results study (Guided home of the goal)', async () => {
+    useUIStore.setState({ solverBlockRequest: 'goal' })
+    mount()
+    await waitFor(() => expect(useUIStore.getState().solverBlockRequest).toBeNull())
   })
 })
 

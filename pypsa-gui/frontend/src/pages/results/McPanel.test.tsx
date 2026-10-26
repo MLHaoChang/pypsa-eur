@@ -13,6 +13,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
+import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
 import {
   McPanel, blockerMessage, ciRange, loleStatement, elccShare, capMessage,
@@ -33,6 +34,14 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getAdequacy: vi.fn(), getCopt: vi.fn(),
     },
   }
+})
+
+// The draws are the project's one stored goal (W3b-R): shown read-only, never
+// sent; the backend fills them.
+const getReliabilityGoal = vi.fn()
+vi.mock('../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/flow')>()
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 // Verbatim copy of services/adequacy/mc.py's MC_WARNING_V1. It lives in the
@@ -172,6 +181,7 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  getReliabilityGoal.mockReset().mockResolvedValue(goal({ mc_draws: [250, 'stored'] }))
   vi.mocked(resultsApi.getMc).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.startMc).mockReset().mockResolvedValue({ status: 'running' })
   vi.mocked(resultsApi.getAdequacy).mockReset().mockResolvedValue(null as never)
@@ -420,13 +430,23 @@ describe('McPanel', () => {
       .toMatch(/nothing to sample/)
   })
 
-  it('sends the typed draw count to the backend', async () => {
+  it('shows the goal\'s draws read-only and sends none: the backend fills them', async () => {
     const user = await openPanel()
-    const input = screen.getByLabelText(/draws/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '250')
+    expect(screen.queryByLabelText(/draws/i)).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe('250 MC draws'))
+    expect(screen.getByTestId('mc-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run study/i }))
-    await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({ draws: 250 }))
+    await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({}))
+  })
+
+  it('"Change in Scenarios & optimisation ›" opens Solver settings › Reliability in Expert, with a way back', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results', flowReturn: null,
+      solverBlockRequest: null })
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('mc-goal-change'))
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'expert', activeSlidePanel: 'simparams',
+      activeSection: 'scenarios', solverBlockRequest: 'goal' })
+    expect(useUIStore.getState().flowReturn).toMatchObject({ mode: 'expert', panel: 'results' })
   })
 })
 
@@ -602,7 +622,6 @@ describe('McPanel ELCC picker', () => {
     await user.click(screen.getByTestId('elcc-candidate-Battery-A'))
     await user.click(screen.getByRole('button', { name: /run study/i }))
     await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({
-      draws: 500,
       elcc_assets: [
         { kind: 'vre', name: 'Wind-North' },
         { kind: 'storage_unit', name: 'Battery-A' },
@@ -664,7 +683,7 @@ describe('McPanel ELCC picker', () => {
     await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalled())
     const body = vi.mocked(resultsApi.startMc).mock.calls[0][0] as Record<string, unknown>
     expect(Object.prototype.hasOwnProperty.call(body, 'elcc_assets')).toBe(false)
-    expect(body).toEqual({ draws: 500 })
+    expect(body).toEqual({})
   })
 })
 

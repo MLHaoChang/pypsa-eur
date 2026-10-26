@@ -27,6 +27,7 @@
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
 import { assetLabel } from './results/investment/financeModel'
+import { SiteTypeSelect } from '../components/reliabilityGoal/SiteTypeSelect'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
@@ -140,11 +141,16 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
   const qc = useQueryClient()
   // The site connection is the project's, not the campus study's: it shows even when the campus read fails
   // or the project is not a hub, because Economics and Investment send the user here to set it.
-  const lead = part === 'inputs' ? (
+  // The site type (W3b-R) heads the panel: the reliability goal's, which every
+  // reliability study runs; Guided sets it on the Site card.
+  const lead = part === 'inputs' ? (<>
+    <PageSection title="Site type" hint="The grid connection every reliability study assumes">
+      <SiteTypeSelect mode="expert" testId="campus-site-type" label="Grid connection" />
+    </PageSection>
     <PageSection title="Site connection" hint="The point of connection the bill and the investment case read">
       <SiteConnectionEditor />
     </PageSection>
-  ) : null
+  </>) : null
   const notice = useCampusRunNotice(s => s.notices[name])
   const setNotice = useCampusRunNotice(s => s.set)
   const lost: LostRun | null = notice?.lost ?? null

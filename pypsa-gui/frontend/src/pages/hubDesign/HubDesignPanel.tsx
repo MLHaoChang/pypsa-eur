@@ -69,14 +69,9 @@ export default function HubDesignPanel() {
   // A project reset while a read had failed is re-derived once it recovers.
   const resetWhileFailed = useRef<string | null>(null)
   const reset = () => {
-    const po = template?.pack_overrides ?? {}
-    const str = (v: unknown) => (typeof v === 'number' ? String(v) : '')
-    useHubDesignStore.getState().resetFor(project, {
-      step: initialStep(flow, isTemplate),
-      archetype: template?.recommended_archetype ?? 'strong_grid',
-      loleTarget: str(po.target_lole_h),
-      ensCap: str(po.ens_cap_permyriad),
-    })
+    // The goal and the site type are the stored reliability goal (W3b-R):
+    // the template's values are its fallback, read by `useReliabilityGoal`.
+    useHubDesignStore.getState().resetFor(project, { step: initialStep(flow, isTemplate) })
     // A project opened mid-study shows the study where it runs: section 9.
     if (flow === 'running') useUIStore.getState().setActiveSection('readiness')
     resetWhileFailed.current = failed ? project : null

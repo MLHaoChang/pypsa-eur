@@ -7,6 +7,7 @@ import type {
 } from '../../api/simulation'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { useUIStore } from '../../store/uiStore'
+import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -359,7 +360,6 @@ export function McPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  const [draws, setDraws] = useState('500')
   const [blocked, setBlocked] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   // Phase 12c: the portfolio opt-in, beside the picker it extends.
@@ -406,14 +406,11 @@ export function McPanel() {
   })
 
   const run = useMutation({
-    // A bare `{}` when the field is empty or unparseable: every field has an
-    // engine-side default, and inventing a frontend one would fork it. The
-    // same rule governs `elcc_assets` — the key is ABSENT, not empty, when
-    // nothing is selected, so a bare default run stays bare.
+    // No `draws`: they are the project's one reliability goal (W3b-R), which
+    // the backend fills in. The same rule governs `elcc_assets` — the key is
+    // ABSENT, not empty, when nothing is selected, so a bare run stays bare.
     mutationFn: () => {
-      const n = Number(draws)
       const body: McRequestBody = {}
-      if (draws.trim() !== '' && isFinite(n) && n > 0) body.draws = n
       if (assets) body.elcc_assets = assets
       // Same rule as `elcc_assets`: ABSENT unless asked, so a bare run stays
       // bare and the backend's default (no portfolio) is never forked here.
@@ -456,15 +453,8 @@ export function McPanel() {
             are hours and megawatt-hours, not euros.
           </p>
 
+          <ReliabilityGoalSummary testId="mc-goal" items={['draws']} />
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-[10px] text-muted flex items-center gap-1">
-              Draws
-              <input
-                type="number" min={1} value={draws} aria-label="draws"
-                onChange={e => setDraws(e.target.value)}
-                className="w-20 px-1 py-0.5 border border-border rounded bg-bg text-[10px] font-mono"
-              />
-            </label>
             <button
               onClick={() => run.mutate()} disabled={running}
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"

@@ -7,6 +7,8 @@ import type {
   CouplingMcBlock, McStatus,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { hasTarget, NO_GOAL, ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
@@ -291,8 +293,10 @@ export function LoopPanel() {
   // Empty by default, deliberately: the target is the ONE required field and
   // the loop is up to eight full capacity expansions. A pre-filled 3 would
   // make "run" a one-click commitment to a standard the user never typed.
-  const [target, setTarget] = useState('')
-  const [draws, setDraws] = useState('')
+  // The target and the draws are the project's one reliability goal
+  // (W3b-R): shown read-only and left out of the request, which the backend
+  // fills from the stored goal (the h/yr target on the horizon basis).
+  const { target: goalTarget } = useReliabilityGoal()
   const [restore, setRestore] = useState<'base' | 'final'>('base')
   const [blocked, setBlocked] = useState<string | null>(null)
 
@@ -339,8 +343,7 @@ export function LoopPanel() {
       : { horizon_years: horizonYears },
   )
 
-  const typed = Number(target)
-  const targetValid = target.trim() !== '' && isFinite(typed) && typed > 0
+  const targetValid = hasTarget(goalTarget)
 
   const run = useMutation({
     mutationFn: () => {
@@ -348,11 +351,8 @@ export function LoopPanel() {
       // choice, so both always ride. `draws` is omitted when blank: the
       // engine's default is 500 and inventing a frontend one would fork it.
       const body: CouplingLoopRequestBody = {
-        target_lole_h: wireTarget(typed, horizonYears),
         restore,
       }
-      const d = Number(draws)
-      if (draws.trim() !== '' && isFinite(d) && d > 0) body.draws = d
       return resultsApi.startCouplingLoop(body)
     },
     onSuccess: () => {
@@ -395,34 +395,16 @@ export function LoopPanel() {
             minutes; it holds the network for its whole run.
           </p>
 
-          {/* ── target entry: h/yr in, horizon-basis on the wire ────────── */}
+          {/* ── the goal (h/yr; the backend puts it on the horizon basis) ── */}
+          <ReliabilityGoalSummary testId="loop-goal" items={['target', 'draws']} requireTarget />
           <div className="flex flex-wrap items-center gap-2">
-            <label className="text-[10px] text-muted flex items-center gap-1">
-              Target LOLE
-              <input
-                type="number" min={0} step="any" value={target}
-                aria-label="target LOLE in hours per year"
-                onChange={e => setTarget(e.target.value)}
-                className="w-24 px-1 py-0.5 border border-border rounded bg-bg text-[10px] font-mono"
-              />
-              h/yr
-            </label>
-            <label className="text-[10px] text-muted flex items-center gap-1">
-              Draws
-              <input
-                type="number" min={1} value={draws} aria-label="draws"
-                placeholder="500"
-                onChange={e => setDraws(e.target.value)}
-                className="w-20 px-1 py-0.5 border border-border rounded bg-bg text-[10px] font-mono"
-              />
-            </label>
             <button
               onClick={() => run.mutate()}
               disabled={running || !targetValid}
               data-testid="loop-run"
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"
               title={blocked ?? (targetValid ? undefined
-                : 'Type a reliability target first — it is the standard the '
+                : `${NO_GOAL} The allowed shortfall is the standard the `
                   + 'loop searches for a plan against.')}
             >
               Run loop
@@ -454,7 +436,7 @@ export function LoopPanel() {
               className="text-[10px] text-muted font-mono"
               data-testid="loop-target-echo"
             >
-              {targetEcho(typed, horizonYears)}
+              {targetEcho(goalTarget as number, horizonYears)}
             </span>
           )}
 

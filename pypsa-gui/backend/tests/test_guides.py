@@ -90,8 +90,11 @@ def test_every_panel_hover_key_is_in_the_catalogue():
     src = (FE_SRC / "pages" / "results" / "EhReferenceDesignPanel.tsx").read_text()
     keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", src))
     keys |= set(re.findall(r"'eh-pack-[a-z-]+', [^\]]*?, '([a-z_]+)'\]", src))
-    assert {"ens_cap_permyriad", "target_lole_h", "mc_seed", "dsr_buses",
-            "dtc_attribution", "levers", "stages", "archetype"} <= keys
+    assert {"mc_seed", "dsr_buses", "dtc_attribution", "levers", "stages",
+            "archetype"} <= keys
+    # W3b-R: the LOLE and ENS targets and the draws are the one reliability
+    # goal's, edited in Solver settings / the Goal card, never pack inputs.
+    assert not {"ens_cap_permyriad", "target_lole_h", "mc_draws"} & keys
     fields = G.load_guide("eh_fmea")["fields"]
     assert keys <= set(fields), keys - set(fields)
 

@@ -15,6 +15,7 @@ import { nk } from '../../utils/queryKeys'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from './hubDesignStore'
 import { BLOCKED_NO_PROJECT, BLOCKED_NO_STUDY } from './flow'
 import { DC_TEMPLATE, REPORT, readiness, review } from './testFixtures'
+import { goal } from '../../test/fixtures/reliabilityGoal'
 import HubDesignPanel from './HubDesignPanel'
 import guide from '../../../../backend/data/guides/eh_fmea_guide.json'
 
@@ -36,7 +37,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
 // scenarios section is still to do.
 vi.mock('../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/flow')>()
-  return { ...actual, getProjectFlow: vi.fn() }
+  return { ...actual, getProjectFlow: vi.fn(), getReliabilityGoal: vi.fn() }
 })
 const STATES: Record<string, string | null> = {
   project: 'complete', carriers: 'complete', connection: 'warning', loads: 'complete',
@@ -60,6 +61,7 @@ const DONE = { status: 'done', archetype: 'weak_flexible' as const, report: REPO
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSection: null, fieldDrawer: null, uiMode: 'guided' })
   vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flowPayload())
+  vi.mocked(flowApi.getReliabilityGoal).mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL })
   vi.spyOn(guidesApi, 'getGuide').mockRejectedValue(new Error('offline'))
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
@@ -209,17 +211,23 @@ describe('auto-advance (§5.6)', () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
     act(() => { useUIStore.setState({ currentProject: 'Other' }) })
     await screen.findByTestId('hub-card-start')
-    expect(useHubDesignStore.getState()).toMatchObject({ project: 'Other', step: 'start',
-      archetype: 'strong_grid', loleTarget: '' })
+    expect(useHubDesignStore.getState()).toMatchObject({ project: 'Other', step: 'start' })
+    // The goal is the project's own (W3b-R): read again for the new project.
+    await waitFor(() => expect(flowApi.getReliabilityGoal).toHaveBeenCalledWith('Other'))
+    expect(useHubDesignStore.getState()).not.toHaveProperty('archetype')
+    expect(useHubDesignStore.getState()).not.toHaveProperty('loleTarget')
   })
 
-  it('a template project takes its archetype and override from the template', async () => {
+  it('a template project shows the goal\'s site type, the template\'s as its fallback (W3b-R)', async () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(
       { ...DC_TEMPLATE, pack_overrides: { import_p_nom_mw: 40, target_lole_h: 2, ens_cap_permyriad: 4 } })
     mount()
     await screen.findByTestId('hub-card-site')
-    expect(useHubDesignStore.getState()).toMatchObject({ archetype: 'weak_flexible',
-      loleTarget: '2', loleSource: 'template', ensCap: '4' })
+    await waitFor(() => expect((screen.getByTestId('hub-site-type') as HTMLSelectElement).value)
+      .toBe('weak_flexible'))
+    expect(screen.getByTestId('hub-site-type-source').textContent).toMatch(/template's choice/)
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
+    expect(vi.mocked(resultsApi.getEhReadiness).mock.calls.every(c => c[0] === 'weak_flexible')).toBe(true)
   })
 })
 
