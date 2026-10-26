@@ -262,6 +262,7 @@ def test_record_changed_after_the_card_refuses_the_apply(mixed):
 
     frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]}, decide=tamper)
     assert any(e == "tool_error" for e, _ in frames) or "error" in json.dumps(frame(frames, "tool_result"), default=str)
+    assert "invalid_preview" in json.dumps(frames, default=str)
     assert values() == BEFORE
 
 
@@ -283,3 +284,17 @@ def test_a_priced_part_without_a_lifetime_is_refused_as_a_single_edit_is(mixed):
     assert detail["error_kind"] == "invalid_edit_value"
     assert str(single.value.detail) in detail["message"]
     assert values() == BEFORE
+
+
+def test_a_part_priced_with_its_lifetime_in_the_same_preview_passes(mixed):
+    # GK B's two cases on an imported battery without power parts: the price
+    # alone refuses as update_component does; with its lifetime it previews.
+    PyPSAService.get_network().storage_units.drop(columns=["inv_power_overnight", "inv_power_lifetime"], inplace=True)
+    price = {"component_class": "StorageUnit", "names": ["Battery"], "attribute": "inv_power_overnight", "value": 150000}
+    with pytest.raises(HTTPException) as single:
+        chat_tools.update_component("StorageUnit", "Battery", {"inv_power_overnight": 150000})
+    assert single.value.status_code == 422
+    assert refusal([price])["error_kind"] == "invalid_edit_value"
+    assert "inv_power_overnight" not in PyPSAService.get_network().storage_units.columns
+    preview = chat_tools.preview_project_changes([price, {**price, "attribute": "inv_power_lifetime", "value": 20}])
+    assert preview["valid"] and preview["changes_total"] == 2
