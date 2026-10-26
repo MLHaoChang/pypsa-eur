@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): "Apply clustering…" in Solver settings asks before it changes the network, and once done offers "Run the solve" through the one gated Run. The unused standalone AC power flow client call is removed from the frontend.

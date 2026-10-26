@@ -12,6 +12,7 @@ import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
@@ -2047,9 +2048,11 @@ function NumberField({
 //               on the passive-branch graph: lines + transformers)
 //   • custom  — pick a PyPSA algorithm and tune its parameters
 //
-// Clicking "Apply clustering" calls POST /api/network/cluster which mutates
-// the in-memory network and triggers full cache invalidation so the canvas
-// and tables refresh to the reduced topology.
+// "Apply clustering…" asks first (R1-single-run): Confirm calls POST
+// /api/network/cluster, which mutates the in-memory network (the network
+// middleware pushes an undo snapshot and clears the solve results) and
+// triggers full cache invalidation so the canvas and tables refresh to the
+// reduced topology. The done line's next step is the one gated Run.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ClusterMode = 'nodal' | 'zone' | 'region' | 'custom'
@@ -2089,11 +2092,29 @@ const DEFAULT_CLUSTER_REQ: ClusterRequest = {
   stubs:  { matching_attrs: [] },
 }
 
-function ClusteringSection() {
+export function ClusteringSection() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const [req, setReq] = useState<ClusterRequest>(DEFAULT_CLUSTER_REQ)
+  const [confirming, setConfirming] = useState(false)
+  // The done line, pinned to the network revision and undo depth it left.
+  // The next network edit clears it; an undo (revision moves, depth drops)
+  // turns it into "Clustering undone." A Save keeps the revision, so it stays.
+  const [done, setDone] = useState<{ text: string; rev?: number; depth: number } | null>(null)
+  const [undone, setUndone] = useState(false)
+  const undoInfoQuery = (project: string | null) =>
+    ({ queryKey: nk(project, 'undoInfo'), queryFn: networkApi.undoInfo, staleTime: 0 })
+  const { data: undoInfo } = useQuery(undoInfoQuery(currentProject))
+  useEffect(() => {
+    if (!done || undoInfo?.network_revision == null) return
+    // The read right after clustering failed: pin to the next poll instead.
+    if (done.rev == null) { setDone({ ...done, rev: undoInfo.network_revision, depth: undoInfo.depth }); return }
+    if (undoInfo.network_revision === done.rev) return
+    setUndone(undoInfo.depth < done.depth)
+    setDone(null)
+  }, [done, undoInfo])
 
   // Context counts surfaced above the form: tells the user what they're
   // working with before they pick a mode. Counts come from /buses (already
@@ -2110,22 +2131,29 @@ function ClusteringSection() {
 
   const apply = useMutation({
     mutationFn: () => networkApi.applyClustering(req),
-    onSuccess: (res: { bus_count: number; line_count: number; message: string }) => {
+    onSuccess: async (res: { bus_count: number; line_count: number; message: string }) => {
       // Clustering reshapes the CURRENT project's network — every component
       // table + result is stale. Scope to this project's network roots (which
       // include `results`) rather than a bare `invalidateQueries()` that nuked
       // every resident project's cache; other open projects survive for B8.
       invalidateNetworkQueries(qc, useUIStore.getState().currentProject)
-      toast.success(res.message ?? `Clustered to ${res.bus_count} buses`)
+      setConfirming(false)
+      setUndone(false)
+      const text = `Clustered to ${res.bus_count} bus${res.bus_count === 1 ? '' : 'es'} · solve results cleared`
+      const info = await qc.fetchQuery(undoInfoQuery(useUIStore.getState().currentProject))
+        .catch(() => undefined)
+      setDone({ text, rev: info?.network_revision ?? undefined, depth: info?.depth ?? 0 })
     },
     onError: (e: { response?: { data?: { detail?: string } } } | Error) => {
       const msg = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
                 ?? (e as Error).message
+      setConfirming(false)
       toast.error(`Clustering failed: ${msg}`)
     },
   })
 
-  const setMode = (m: ClusterMode) => setReq(r => ({ ...r, mode: m }))
+  // A new choice makes the last done line stale.
+  const setMode = (m: ClusterMode) => { setDone(null); setUndone(false); setReq(r => ({ ...r, mode: m })) }
   const setAlgorithm = (a: ClusterAlgorithm) => setReq(r => ({ ...r, algorithm: a }))
   const patchK = (p: Partial<KmeansOpts>) => setReq(r => ({ ...r, kmeans: { ...r.kmeans!, ...p } }))
   const patchH = (p: Partial<HacOpts>) => setReq(r => ({ ...r, hac:    { ...r.hac!,    ...p } }))
@@ -2139,6 +2167,11 @@ function ClusteringSection() {
   }
 
   const showCustom = req.mode === 'custom'
+  const clusterInto =
+    req.mode === 'zone' ? `into ${nCountries} by country`
+    : req.mode === 'region' ? 'by sub-network'
+    : req.algorithm === 'stubs' ? 'by merging stub buses'
+    : `into ${req.n_clusters} (${req.algorithm})`
   const algoNeedsN = showCustom && req.algorithm !== 'stubs'
 
   return (
@@ -2325,11 +2358,11 @@ function ClusteringSection() {
             (would be a no-op). */}
         <div className="border-t border-border pt-3 flex items-center gap-2">
           <button
-            onClick={() => apply.mutate()}
+            onClick={() => setConfirming(true)}
             disabled={apply.isPending || req.mode === 'nodal'}
             className="flex-1 px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
           >
-            {apply.isPending ? 'Clustering…' : 'Apply clustering'}
+            {apply.isPending ? 'Clustering…' : 'Apply clustering…'}
           </button>
           <button
             onClick={() => setReq(DEFAULT_CLUSTER_REQ)}
@@ -2338,11 +2371,36 @@ function ClusteringSection() {
             Reset
           </button>
         </div>
+        {done && (
+          <div data-testid="clustering-done" role="status"
+            className="flex items-center gap-2 px-2 py-1.5 border border-accent/40 bg-accent/5 rounded text-[11px] text-text">
+            <span className="flex-1 min-w-0">{done.text}</span>
+            {/* The one gated Run (as RunFromReadiness), never a second solve path. */}
+            <button type="button" onClick={() => { setDone(null); requestRunSolve() }}
+              className="text-accent font-medium hover:underline">
+              Run the solve ›
+            </button>
+          </div>
+        )}
+        {undone && (
+          <p data-testid="clustering-undone" role="status" className="text-[11px] text-muted">Clustering undone.</p>
+        )}
         <p className="text-[10px] text-muted">
-          Clustering replaces the in-memory network with the reduced topology.
-          Save the project (header → Save) afterwards to persist; the operation
-          can't be undone in-session beyond ⌘Z range, so save first if uncertain.
+          Clustering replaces the network with the reduced topology and clears
+          the solve results. Undo (Ctrl+Z) reverts it; save the project (header → Save) to keep it.
         </p>
+        <ConfirmDialog
+          open={confirming}
+          title="Apply clustering?"
+          message={<>
+            Cluster {nBuses} bus{nBuses === 1 ? '' : 'es'} {clusterInto}? This clears any solve results.
+            You can undo it with Ctrl+Z.
+          </>}
+          confirmLabel="Apply clustering"
+          pending={apply.isPending}
+          onConfirm={() => apply.mutate()}
+          onCancel={() => setConfirming(false)}
+        />
       </div>
     </section>
   )

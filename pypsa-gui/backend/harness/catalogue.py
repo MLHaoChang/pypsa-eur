@@ -2164,10 +2164,13 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "ui_select_component",
         "Emit a typed SSE ui_event frame the ChatPanel forwards to "
-        "uiStore.setSelectedComponent. NO backend mutation. Safety: read.",
+        "uiStore.setSelectedComponent, closing an open panel except Issues so Properties is visible. "
+        "With open_editor=true, opens the component's Edit form in Properties for the user to change and save; "
+        "nothing is saved by this tool. NO backend mutation. Safety: read.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
+            "open_editor": {"type": "boolean"},
         },
         ["component_class", "name"],
     ),
@@ -2183,9 +2186,11 @@ TOOLS: list[dict[str, Any]] = [
         "Energy Hub design panel (Guided mode's main view). workspace, settings, "
         "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
         "price basis and every asset's investment costs; "
-        "adequacy and fmea select their Results tabs. Safety: read.",
+        "adequacy and fmea select their Results tabs. Use map with canvas_view hybrid "
+        "(satellite with labels) or site (the 3D site view). Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
+            "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
             "bottom_tab": {"type": "string", "enum": BOTTOM_TAB_ENUM},
             "compare_rail": {"type": "boolean"},
@@ -2212,8 +2217,9 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "ui_set_snapshot",
-        "Drive SnapshotPicker selection from chat. Multi-period: use "
-        "period|iso form. Safety: read.",
+        "Move the canvas snapshot picker and show the overlay at that snapshot, "
+        "closing any open panel. On a multi-period network, pass period. "
+        "A timestamp not on the time axis is refused. Safety: read.",
         {
             "snapshot_iso": {"type": "string"},
             "period": {"type": "integer"},

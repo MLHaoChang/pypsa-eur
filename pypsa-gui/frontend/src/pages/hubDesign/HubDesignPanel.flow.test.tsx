@@ -417,7 +417,7 @@ describe('the rail is the ten flow sections', () => {
     expect(buttons.map(b => b.textContent?.replace(/^\d+/, ''))).toEqual([
       'Project & site', 'Carriers & processes', 'Connection & grid', 'Loads & demand', 'Assets & sizing',
       'Time series & profiles', 'Commercial & parties', 'Scenarios & optimisation', 'Readiness and run',
-      'Results → reports'])
+      'Results & reports'])
     expect(ids).toHaveLength(10)
   })
 

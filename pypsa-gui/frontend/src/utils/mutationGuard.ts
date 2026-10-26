@@ -14,10 +14,10 @@ import { canMutate, type ReadOnlyReason } from './lockState'
 // AND honestly. The single hardcoded "another user is editing this project" was
 // wrong for every solve-induced refusal.
 export const READ_ONLY_MUTATION_MESSAGE =
-  'Read-only — another user is editing this project.'
+  'Read-only: another user is editing this project.'
 
 export const SOLVING_MUTATION_MESSAGE =
-  'Read-only — this project is solving in the queue. It becomes editable when the solve finishes.'
+  'Read-only: this project is solving in the queue. It becomes editable when the solve finishes.'
 
 const MESSAGE_BY_REASON: Record<ReadOnlyReason, string | null> = {
   writable: null,
@@ -68,7 +68,7 @@ export function readOnlyMessage(reason: ReadOnlyReason): string | null {
 // own table rather than reusing the one above:
 //
 //   1. Both render their own "Read-only" label, so the clause must not repeat
-//      the "Read-only — " prefix every toast string carries.
+//      the "Read-only: " prefix every toast string carries.
 //   2. A banner is the only surface that can name the lock HOLDER, and a
 //      holder exists for 'locked-by-user' only — under 'solving' there is no
 //      email to put anywhere, which is exactly how LockBanner ended up

@@ -35,7 +35,9 @@ def test_synthetic_losses_scale_the_mean_exactly():
 def test_untuned_generation_matches_master(technology):
     # Full-year float64 values captured on unchanged master1871073. Comparing
     # numbers avoids treating platform-level math/CSV last bits as a regression;
-    # atol=0 keeps the baseline's exact night/clipping zeros exact.
+    # atol=0 keeps the baseline's exact night/clipping zeros exact. rtol is 1e-9,
+    # not 1e-12: a CI runner's solar output differed by 2.3e-12 relative at one
+    # hour (a few ulps of a small value), far below any real tuning change.
     result = _generate(technology)
     fixture = Path(__file__).parent / "fixtures/profile_gen/untuned_master_1871073.npz"
     with np.load(fixture, allow_pickle=False) as baseline:
@@ -45,7 +47,7 @@ def test_untuned_generation_matches_master(technology):
         np.testing.assert_array_equal(np.isnan(actual), np.isnan(expected))
         np.testing.assert_allclose(
             actual, expected,
-            rtol=1e-12, atol=0, equal_nan=False,
+            rtol=1e-9, atol=0, equal_nan=False,
         )
     pd.testing.assert_index_equal(
         result.series.index, pd.date_range("2023-01-01", periods=8760, freq="h"),
