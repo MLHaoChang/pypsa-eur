@@ -141,7 +141,8 @@ ALLOWED = (
     re.compile(r"^F0 = 50\.0$"),                                   # frequency.py: the default for callers that state nothing
     re.compile(r"^PEAK_FACTOR = \{50: 2\.5, 60: 2\.6\}$"),         # campus_sc.py: IEC 62271's peak factor by frequency
     re.compile(r"^H_MIN, H_MAX = 2, 50$"),                          # harmonics.py: IEC 61000-3-6's orders 2..50, not a frequency
-    re.compile(r"^TYPICAL_SK_MVA = .*\(0\.0, 50\.0, 0\.5\)\)$"), # producers/campus.py: a typical LV fault level in MVA
+    # producers/campus.py: a typical LV fault level in MVA
+    re.compile(r"^TYPICAL_SK_MVA = \(\(220\.0, 10000\.0, 0\.1\), \(60\.0, 3000\.0, 0\.1\), \(10\.0, 300\.0, 0\.3\), \(0\.0, 50\.0, 0\.5\)\)$"),
     re.compile(r'^"load_step_max_pct": 50\.0, "cos_phi_r"'),      # producers/campus.py: a genset load step in percent
 )
 #: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.

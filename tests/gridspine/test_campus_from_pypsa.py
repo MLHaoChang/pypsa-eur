@@ -353,9 +353,11 @@ def test_a_stated_frequency_wins_over_the_networks():
     assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
 
 
+@pytest.mark.parametrize("stated", [False, True])
 @pytest.mark.parametrize("bad", [7, "60", True, 60.5])
-def test_a_frequency_other_than_50_or_60_is_refused(bad):
+def test_a_frequency_other_than_50_or_60_is_refused(bad, stated):
     n = _feeder(50)
-    n.meta["f_hz"] = bad
+    if not stated:
+        n.meta["f_hz"] = bad
     with pytest.raises(ContractError, match="f_hz"):
-        draft_campus(n)
+        draft_campus(n, f_hz=bad) if stated else draft_campus(n)

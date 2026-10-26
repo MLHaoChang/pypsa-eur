@@ -3,7 +3,7 @@
 
 # 60 Hz throughout: line capacitance at the network's frequency
 
-Status: in review (PR on `claude/dc19-line-capacitance-frequency`)
+Status: done (PR on `claude/dc19-line-capacitance-frequency`)
 Type: bug
 Blocked by: none (follows 09, 60 Hz throughout)
 Gated: **yes** (gridspine)
