@@ -303,7 +303,21 @@ def test_replacing_or_deleting_an_http_server_clears_its_slots(admin):
     assert admin.delete(f"{BASE}/feed").status_code == 404
 
 
+def test_moving_a_server_to_another_host_clears_its_bearer_token(admin):
+    admin.put(f"{BASE}/feed", json=_http())
+    admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET})
+    admin.put(f"{BASE}/feed", json=_http(url="https://example.com/mcp/v2", enabled=True))
+    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__FEED") == SECRET     # same origin
+    for url in ("https://other.example/mcp", "https://example.com:8443/mcp"):
+        admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET})
+        out = admin.put(f"{BASE}/feed", json=_http(url=url)).json()
+        assert out["key"]["present"] is False
+        assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__FEED") is None
+        assert "PYPSA_GUI_MCP_KEY__FEED" not in os.environ
+
+
 def test_the_family_is_managed_and_bounded():
+    assert app_secrets._MCP_KEY_PREFIX == mcp_client.KEY_PREFIX
     assert app_secrets.is_managed_key("PYPSA_GUI_MCP_KEY__TARIFFS")
     assert app_secrets.is_managed_key("PYPSA_GUI_MCP_KEY__TARIFFS__TOKEN")
     assert not app_secrets.is_managed_key("PYPSA_GUI_MCP_KEY__tariffs")

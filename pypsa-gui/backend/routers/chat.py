@@ -24,6 +24,7 @@ import asyncio
 import logging
 import threading
 from typing import Annotated, Any, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response
@@ -810,6 +811,27 @@ def _mcp_clear_orphans(server_id: str, before: list[Any], after: list[Any]) -> N
             app_secrets.clear_secret(key)
 
 
+def _mcp_origin(url: Any) -> tuple[str, str, int | None] | None:
+    if not isinstance(url, str):
+        return None
+    try:
+        parts = urlsplit(url)
+        return parts.scheme, (parts.hostname or ""), parts.port
+    except ValueError:
+        return None
+
+
+def _mcp_clear_bearer_on_new_origin(server_id: str, before: list[Any], url: str) -> None:
+    """A bearer token was given for one host: when an edit moves the server
+    to another scheme, host or port, clear it rather than send it there."""
+    slot = mcp_client.key_slot(server_id)
+    for e in before:
+        if isinstance(e, dict) and e.get("id") == server_id \
+                and _mcp_origin(e.get("url")) != _mcp_origin(url) \
+                and app_secrets.get_stored(slot) is not None:
+            app_secrets.clear_secret(slot)
+
+
 @router.get("/settings/mcp/servers")
 def get_mcp_servers(
     user: User | None = Depends(optional_user),
@@ -859,6 +881,7 @@ def put_mcp_server(
     before = _mcp_update(replace)
     mcp_client.forget(server_id)
     _mcp_clear_orphans(server_id, before, replace(before))
+    _mcp_clear_bearer_on_new_origin(server_id, before, body.url)
     return _mcp_server_out(entry)
 
 

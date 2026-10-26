@@ -241,6 +241,11 @@ function ServerForm({
         placeholder="Optional tier overrides, one per line: tool = destructive (can only raise a tier)"
         value={tiers} onChange={e => setTiers(e.target.value)} data-testid="mcp-form-tiers" />
       {tierError && <p className="text-xs text-danger">{tierError}</p>}
+      {!ready && !idError && !tierError && (
+        <p className="text-xs text-muted" data-testid="mcp-form-missing">
+          {ID_RE.test(id) ? 'Enter the server URL to save.' : 'Enter a server id to save.'}
+        </p>
+      )}
       <div className="flex items-center gap-2">
         <button type="button" className={BUTTON} disabled={pending || !ready} onClick={submit}
           data-testid="mcp-form-submit">
