@@ -1,8 +1,10 @@
 # Coordinator
 
-Current coordinator session: `session_01GjwV95aJpYrLGsGM6Rufqg`
+Current coordinator session: `session_01TDofqXG6rbQi6Mk2AAsQGR`
 
-Engine gatekeeper (gridspine, IC and engine reviews): `session_01TjVZocxNLaZr9Fav2ASxEM`
+Engine gatekeeper A (gridspine, DC, grid-to-process and IC/adequacy engine reviews; owner decision GK-SPLIT-1): `session_0199ShqjxXdw7U1kZApBqWh5`
+
+Engine gatekeeper B (harness, app backend, investment/finance and outsourced reviews; GK-SPLIT-1): `session_011aHPZqtUnUaYvwwXHnJeD1`
 
 UX reviewer (UI coherence gate, owner decision 2026-10-20): `session_01YEcG85vbgKJdsUVKSeRrer`
 
