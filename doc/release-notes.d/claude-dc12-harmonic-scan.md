@@ -1,0 +1,1 @@
+* Feat(gridspine): Harmonic impedance scan at the campus PCC. It writes R(h) and X(h) per short-circuit case (max, min and an optional normal case) and per capacitor step state, the R–X envelope per order, and the resonance peaks with their clearance to 6k±1 and to the units' spectral orders. Every row is labelled screening (datacenter grid readiness issue 12, part 3).
