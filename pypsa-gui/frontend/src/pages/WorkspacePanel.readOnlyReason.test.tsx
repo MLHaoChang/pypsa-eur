@@ -2,7 +2,7 @@
 //
 // The chip is the second dedicated read-only banner and it is NOT gated on
 // `authEnabled`, so it renders in the desktop single-user build too. Reading
-// `readOnly` + `lockHolderEmail` alone, it told that build "Read-only — the
+// `readOnly` + `lockHolderEmail` alone, it told that build "Read-only: the
 // edit lock could not be acquired" while the project was merely solving in the
 // queue — in a mode that has no lock machinery at all. `authEnabled: false`
 // below is therefore the case under test, not a convenience.
@@ -37,7 +37,7 @@ async function renderPanel(): Promise<string> {
   // The chip is the only element carrying "Read-only" or the writable copy.
   return await waitFor(() => {
     const chip = screen.getByText(
-      (_, el) => /^(Read-only — |You hold the edit lock)/.test(el?.textContent ?? '')
+      (_, el) => /^(Read-only: |You hold the edit lock)/.test(el?.textContent ?? '')
         && el?.tagName === 'SPAN',
     )
     return chip.textContent ?? ''

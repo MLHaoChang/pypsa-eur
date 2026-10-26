@@ -1,0 +1,1 @@
+* Feat(gridspine): The planning-criteria screen's stage 2 can redispatch named units (`Controls.redispatch`, `redispatch_step_mw`) after the tap and shunt walk: balanced up/down pairs within each unit's P limits, never the slack, reported in MW per unit, with the binding limit named when an overload is left. Without it, results are unchanged.

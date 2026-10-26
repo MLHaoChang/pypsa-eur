@@ -1,6 +1,6 @@
 # Carrier KPIs: hydrogen is not renewable
 
-Status: ready-for-agent (outsourced: H)
+Status: done (outsourced H, #699)
 Type: task
 Blocked by: 11 (#676)
 Gated: yes (GK triage 2026-10-23: G1 (a), G2 include, G3 follow-up, G4 accept)

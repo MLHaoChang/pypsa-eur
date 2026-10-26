@@ -851,7 +851,7 @@ export default function AppHeader() {
     }
     // 3. IDLE / slot may be free → ENQUEUE the current project.
     if (readOnly) {
-      toast.error('Read-only — another user is editing this project.')
+      toast.error('Read-only: another user is editing this project.')
       return
     }
     if (!currentProject) {
@@ -1122,7 +1122,7 @@ export default function AppHeader() {
             onClick={handleRunButton}
             disabled={abort.isPending || enqueue.isPending || (readOnly && !amber) || gated}
             title={readOnly && !amber
-              ? 'Read-only — another user is editing this project'
+              ? 'Read-only: another user is editing this project'
               : gated
               ? `Cannot run yet — ${runGate.reason}`
               : jobRunning || isRunning

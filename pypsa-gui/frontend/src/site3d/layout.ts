@@ -36,6 +36,8 @@ import {
 import { isGenericMatch } from '../utils/assetTypes'
 import { runTemplate, type Anchors, type Part, type TemplateInput, type TemplateOutput } from './templates'
 import { sizeOf, type SizingMode } from './sizing'
+import { assertFootprintValid, footprintGeometry } from './footprints'
+import type { AssetFootprint } from './types'
 import {
   rectOf, rectSize, rectCentre, rectsOverlap, rectDistance, bearingDeg, betweenSegment, pairRequirement, ruleLookup,
   type Rect, type XY,
@@ -68,7 +70,7 @@ export interface SiteObject {
   footprint: [number, number]
   parts: Part[]
   color: string
-  /** One line for the hover label, e.g. "Battery storage — 40 MWh in 10 containers". */
+  /** One line for the hover label, e.g. "Battery storage: 40 MWh in 10 containers". */
   summary: string
   /** Land the asset occupies, m² — the "does it fit" number (assessment Q1/Q6). */
   areaM2: number
@@ -76,6 +78,7 @@ export interface SiteObject {
   anchors: Anchors
   /** The library has no specific type for this carrier: drawn as its class's generic stand-in (plan 3 S4). */
   generic?: true
+  footprintSource?: 'user'
 }
 
 export interface SiteBusInput {
@@ -103,6 +106,7 @@ export interface SiteInput {
   library?: readonly AssetType[]
   /** Installed sizes (the default) or, for extendable assets, the optimum (spec E6). */
   sizing?: SizingMode
+  footprints?: Record<string, AssetFootprint>
 }
 
 export interface SiteLayout {
@@ -129,10 +133,17 @@ export const objectKey = (o: Pick<SiteObject, 'type' | 'name'>): string => `${o.
 
 interface Candidate { cls: PyPSAClass; comp: MatchComponent; m: MatchResult }
 
-function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: Omit<TemplateInput, 'amount'> = {}, sizing: SizingMode = 'installed'): { obj: SiteObject; out: TemplateOutput } {
+function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: Omit<TemplateInput, 'amount'> = {}, sizing: SizingMode = 'installed', footprint?: AssetFootprint): { obj: SiteObject; out: TemplateOutput } {
   const t = m.type
   const size = sizeOf(comp, t.size[cls] ?? { param: 'none', unit: '' }, sizing)
-  const out = runTemplate(t.geometry, { amount: size.amount, ...input })
+  let out = runTemplate(t.geometry, { amount: size.amount, ...input })
+  if (footprint) {
+    out = footprintGeometry(footprint, out, t.color)
+    if (input.roof) {
+      out.fitsRoof = footprint.width_m <= input.roof.w && footprint.depth_m <= input.roof.d
+      if (out.fitsRoof) out.areaM2 = 0
+    }
+  }
   const carrier = (comp.carrier as string | undefined) ?? ''
   const obj: SiteObject = {
     type: cls, name: comp.name, kind: t.id, carrier, bus: m.owner, far: m.far,
@@ -143,6 +154,10 @@ function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input
       params: t.geometry.params,
     }) + (size.optimised ? ' (optimised)' : ''),
     areaM2: out.areaM2, anchors: out.anchors,
+  }
+  if (footprint) {
+    obj.footprintSource = 'user'
+    obj.summary += ` · user-entered envelope ${footprint.width_m} × ${footprint.depth_m} m (${footprint.width_m * footprint.depth_m} m²); simple proxy${footprint.height_m === undefined ? ', height estimated' : ''}; review after capacity changes`
   }
   if (isGenericMatch(m.rule, cls === 'Bus' ? (comp.carrier as string | undefined) ?? 'AC' : carrier)) obj.generic = true
   return { obj, out }
@@ -377,7 +392,7 @@ function candidatesFor(input: SiteInput, ctx: MatchContext, lib: readonly AssetT
  * follows a moved hall), re-run on the roof; without a hall it keeps its
  * canopy in the south zone. Exempt from the no-overlap rule: it is on the roof.
  */
-function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readonly AssetType[], sizing: SizingMode): void {
+function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readonly AssetType[], sizing: SizingMode, footprints: Record<string, AssetFootprint>): void {
   const roofTypes = new Set(lib.filter(t => t.zone === 'roof').map(t => t.id))
   const hallType = lib.find(t => t.geometry.template === 'hall')?.id
   const halls = objects.filter(o => o.kind === hallType)
@@ -393,9 +408,13 @@ function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readon
     if (!roofTypes.has(o.kind)) continue
     const c = candidates.find(x => x.cls === o.type && x.comp.name === o.name)
     if (!c) continue
-    const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free }, sizing)
+    const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free }, sizing, footprints[objectKey(o)])
     if (out.fitsRoof) {
-      Object.assign(o, { parts: obj.parts, footprint: obj.footprint, summary: obj.summary, origin: [...hall.origin], heading: hall.heading, elevation: free.h })
+      const angle = -hall.heading * Math.PI / 180
+      const origin = o.footprintSource
+        ? [hall.origin[0] - free.cy * Math.sin(angle), hall.origin[1] + free.cy * Math.cos(angle)]
+        : [...hall.origin]
+      Object.assign(o, { parts: obj.parts, footprint: obj.footprint, ...(o.footprintSource ? { areaM2: obj.areaM2, anchors: obj.anchors } : {}), summary: obj.summary, origin, heading: hall.heading, elevation: free.h })
     } else {
       // Not one table fits the roof: the canopy stands just south of the hall.
       o.origin = [hall.origin[0], hall.origin[1] - d / 2 - o.footprint[1] / 2 - 8]
@@ -418,6 +437,8 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   const lib = input.library ?? DEFAULT_LIBRARY
   validateLibrary(lib)
   const placements = input.placements ?? {}
+  const footprints = input.footprints ?? {}
+  for (const [key, value] of Object.entries(footprints)) assertFootprintValid(key, value)
   const sizing = input.sizing ?? 'installed'
   const members = input.buses.map(b => b.name)
   const ctx: MatchContext = { members, busCarrier: input.busCarrier ?? (() => undefined) }
@@ -446,7 +467,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   for (const bus of input.buses) {
     objects.push(yards.get(bus.name)!)
     for (const c of candidates.filter(c => c.m.owner === bus.name)) {
-      const o = objectFrom(c.cls, c.comp, c.m, {}, sizing).obj
+      const o = objectFrom(c.cls, c.comp, c.m, {}, sizing, footprints[`${c.cls}:${c.comp.name}`]).obj
       objects.push(o)
       const p = placements[objectKey(o)]
       if (p) {
@@ -475,7 +496,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   for (const bus of input.buses) {
     packZones(packer, yards.get(bus.name)!, pending.filter(o => !done.has(o) && o.bus === bus.name), zone)
   }
-  rooftopPass(objects, candidates, lib, sizing)
+  rooftopPass(objects, candidates, lib, sizing, footprints)
   // A rooftop object that went onto a hall is not "placed" by its own entry.
   const onRoof = new Set(objects.filter(o => roofTypes.has(o.kind) && o.elevation).map(objectKey))
   const placedOut = placed.filter(k => !onRoof.has(k))

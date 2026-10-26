@@ -12,7 +12,7 @@
 // an icon, never a colour alone; an unknown row says first what is missing.
 import { FIELD_LABELS } from '../../utils/fieldLabels'
 import { useQuery } from '@tanstack/react-query'
-import { AlertCircle, AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, HelpCircle,
   MessageCircleQuestion } from 'lucide-react'
 import { create } from 'zustand'
 import { campusApi, type GridReadiness, type GridReadinessAfterUnit, type GridReadinessRow,
@@ -37,7 +37,7 @@ export const SECTION_LABELS: Record<string, string> = {
   commercial: 'Commercial & parties',
   scenarios: 'Scenarios & optimisation',
   readiness: 'Readiness and run',
-  results: 'Results → reports',
+  results: 'Results & reports',
 }
 
 const VERDICT: Record<GridReadinessVerdict, { word: string; Icon: typeof CheckCircle2; cls: string }> = {
@@ -205,7 +205,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
           <button type="button" data-testid={`gr-jump-${row.id}`} onClick={() => onJump(t.component!, t.entity!)}
             title={`Open ${t.component} "${t.entity}" in the editor`}
             className="shrink-0 flex items-center gap-1 rounded-md border border-accent/30 bg-accent/5 px-2 py-1 text-[10.5px] font-medium text-accent hover:bg-accent/10">
-            Go to field <ArrowRight size={11} />
+            Go to field ›
           </button>
         )}
         {mode === 'guided' && (

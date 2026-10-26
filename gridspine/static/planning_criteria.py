@@ -25,8 +25,20 @@ on-load tap changers and switched shunts on automatic control. They walk
 ``campus_taps._better`` on ``(voltage excursion, worst overload above normal,
 steps moved)``; a move that does not converge is rejected, and the walk
 stops when no move improves or after ``TAP_ROUNDS`` x the total step range.
-The net is then judged on NORMAL ratings and the voltage band. No redispatch
-is modelled (owner decision DC13-SCOPE), and every stage-2 row says so.
+The net is then judged on NORMAL ratings and the voltage band: with a
+grid-code ``profile``, each bus's continuous ``voltage_bands`` entry for
+its nominal kV, else the assumed band; each row and the report say which.
+
+**Redispatch** (``Controls.redispatch``, optional): after the tap and
+shunt walk, while a branch is still above its normal rating,
+``redispatch_walk`` moves balanced pairs of named units, one up and one
+down by ``redispatch_step_mw`` clipped to both units' ``min_p_mw``/
+``max_p_mw`` headroom, so the slack takes only the change in losses. Each
+pass keeps the pair with the lowest (voltage excursion, worst overload)
+(ties: lower priority sum, then names, then MW moved), at most ``REDISPATCH_MAX_SOLVES`` solves; a row left
+overloaded names why (a unit at its limit, no pair improving, the cap). It
+is not cost-optimal (no OPF), and the slack is never a redispatch unit.
+With none named, no redispatch is modelled and every stage-2 row says so.
 
 **Bus sections** (``contingency_set.bus_section_contingencies``): the bus and
 everything on it go out. The load and generation lost are reported, on the
@@ -76,7 +88,7 @@ from gridspine.schema.contingency import (
 )
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.dispatch import validate_dispatch, validate_loads
-from gridspine.static.campus_taps import TAP_ROUNDS, V_TOL, _better, excursion
+from gridspine.static.campus_taps import STEP_TOL, TAP_ROUNDS, V_TOL, _better, excursion
 from gridspine.static.contingency import (
     LOADING_MAX_PCT,
     V_MAX_PU,
@@ -86,6 +98,7 @@ from gridspine.static.contingency import (
 )
 from gridspine.static.contingency_set import branch_contingencies
 from gridspine.static.loadflow import branch_keys, check_net_carries_hour
+from gridspine.templates.grid_codes import band_for, validate_profile
 
 LINE_EMERGENCY = "max_i_ka_emergency"
 TRAFO_EMERGENCY = "sn_mva_emergency"
@@ -93,6 +106,11 @@ TRAFO_EMERGENCY = "sn_mva_emergency"
 NO_REDISPATCH = "no redispatch modelled"
 NO_CONTROLS = "no remedial controls named; " + NO_REDISPATCH
 NO_CONTROLS_ON = "no named remedial control in service; " + NO_REDISPATCH
+#: The most load flows stage-2 redispatch solves per walk; past it the walk
+#: stops and the row says "solve cap reached".
+REDISPATCH_MAX_SOLVES = 200
+#: A pair move smaller than this (MW, after clipping to headroom) is not tried.
+REDISPATCH_EPS_MW = 1e-3
 
 PLANNING_LEDGER = (
     "stage 1 judges thermal loading only, right after the outage with taps and "
@@ -100,12 +118,26 @@ PLANNING_LEDGER = (
     "is given, against its normal rating (conservative)",
     "loading is the from/HV-side definition of static/contingency.py; the "
     "emergency figure replaces the normal one, df and parallel kept",
-    f"stage 2 judges loading against the normal rating and bus voltages against "
-    f"[{V_MIN_PU}, {V_MAX_PU}] pu (the assumed band of static/contingency.py), "
+    f"stage 2 judges loading against the normal rating and each bus voltage against "
+    "the selected grid-code profile's continuous voltage band for its nominal kV "
+    f"(v_min/v_max; v_max_30min is not judged), else the assumed [{V_MIN_PU}, {V_MAX_PU}] pu "
+    "band of static/contingency.py; the report names the profile, or says assumed, "
+    "and counts the buses on each; the profile's campus_voltage (the design "
+    "band for buses inside a campus) is not applied by this screen; "
     "after the named on-load tap changers and switched shunts walk one step at "
     "a time to lower (voltage excursion, worst overload, steps moved)",
-    "stage 2 models no redispatch: a branch above "
+    "without a redispatch control stage 2 models no redispatch: a branch above "
     "its normal rating that taps and shunts cannot relieve fails stage 2",
+    "with redispatch named (Controls.redispatch), after the tap and shunt walk and "
+    "only while a branch is above its normal rating, balanced pairs of named units "
+    "move, one up and one down by the same MW: the step, clipped to both units' "
+    "headroom within min_p_mw/max_p_mw on the hour's dispatch; each pass keeps the "
+    "pair that lowers (voltage excursion, worst overload) most (ties: lower priority "
+    "sum, then names, then MW moved), at most "
+    f"{REDISPATCH_MAX_SOLVES} solves (REDISPATCH_MAX_SOLVES); it is not cost-optimal "
+    "(no OPF), and the slack is never a redispatch unit; stage 1 and the angle check "
+    "are judged before the judged outage's walk, so for N-1-1 and N-M-1 they follow "
+    "the re-adjustment between outages, redispatch included",
     "a bus-section loss takes out the bus and everything on it; the load and "
     "generation lost (p_mw x scaling) are reported, and the lost generation is "
     "picked up by the slack",
@@ -135,9 +167,13 @@ ANGLE_BASES = frozenset({"assumed", "sagc"})
 class Controls:
     """The remedial controls stage 2 may move: on-load tap changers by their
     branch id (``"{hv_bus}-{lv_bus}-{ckt}"``, as ``branch_contingencies``
-    names them) and switched shunts by ``net.shunt`` name."""
+    names them), switched shunts by ``net.shunt`` name, and redispatch units
+    as ``(gen or sgen name, priority)`` moved in balanced pairs of up to
+    ``redispatch_step_mw`` (``redispatch_walk``)."""
     oltc: tuple = ()
     switched_shunts: tuple = ()
+    redispatch: tuple = ()
+    redispatch_step_mw: float | None = None
 
 
 def _finite_number(v) -> bool:
@@ -336,6 +372,45 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
     return knobs
 
 
+def _bands(net, judged, profile: dict | None, by_kv: dict) -> tuple:
+    """``({bus name: (v_min, v_max)}, {bus name: (kv, profile band or None)})``
+    for the ``judged`` buses: the profile's continuous band for each bus's
+    ``vn_kv``, else the assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no
+    band covering that kV; ``None``). ``by_kv`` caches the lookup per kV across
+    one screen."""
+    bands, used = {}, {}
+    for b in judged:
+        name, kv = str(net.bus.at[b, "name"]), float(net.bus.at[b, "vn_kv"])
+        if kv not in by_kv:
+            band = None
+            if profile is not None:
+                try:
+                    band = band_for(profile, kv)
+                except ContractError:  # no profile band covers this kV
+                    band = None
+            by_kv[kv] = ((V_MIN_PU, V_MAX_PU) if band is None
+                         else (float(band["v_min"]), float(band["v_max"])), band)
+        bands[name], used[name] = by_kv[kv][0], (kv, by_kv[kv][1])
+    return bands, used
+
+
+def _band_note(used: dict, profile: dict | None) -> str:
+    """``"voltage band: 110 kV 0.95-1.05 pu (profile p, <clause>, code); 20 kV
+    0.9-1.1 pu (assumed)"``, one entry per nominal kV judged."""
+    by_kv = {}
+    for kv, band in used.values():
+        by_kv.setdefault(kv, band)
+    parts = []
+    for kv in sorted(by_kv, reverse=True):
+        band = by_kv[kv]
+        if band is None:
+            parts.append(f"{kv:g} kV {V_MIN_PU:g}-{V_MAX_PU:g} pu (assumed)")
+        else:
+            parts.append(f"{kv:g} kV {float(band['v_min']):g}-{float(band['v_max']):g} pu "
+                         f"(profile {profile['name']}, {band['clause']}, {band['source']})")
+    return "voltage band: " + "; ".join(parts)
+
+
 def _key(state: _State, bands: dict, moved: int):
     """The walk's key: (voltage excursion pu, worst overload above the normal
     rating in percentage points, steps moved). ``_better`` takes a lower
@@ -378,6 +453,160 @@ def remedial_walk(work, knobs: list, bands: dict, judged, state: _State):
         k.put(work, p)
         pos[k.name] = p
     return state, {n: pos[n] - start[n] for n in pos if pos[n] != start[n]}
+
+
+@dataclasses.dataclass(frozen=True)
+class _Unit:
+    """One named redispatch unit: ``net[table].at[index, "p_mw"]`` moves in lo..hi MW."""
+    name: str
+    table: str
+    index: int
+    priority: float
+    lo: float
+    hi: float
+
+    def get(self, net) -> float:
+        return float(net[self.table].at[self.index, "p_mw"])
+
+    def put(self, net, value) -> None:
+        net[self.table].at[self.index, "p_mw"] = value
+
+    def room_up(self, net) -> float:
+        return self.hi - self.get(net)
+
+    def room_down(self, net) -> float:
+        return self.get(net) - self.lo
+
+    def live(self, net, judged: set) -> bool:
+        """In service and on a bus still judged (not out or cut off)."""
+        return (bool(net[self.table].at[self.index, "in_service"])
+                and int(net[self.table].at[self.index, "bus"]) in judged)
+
+
+def _units(net, controls: Controls, h) -> list:
+    """The named redispatch units as ``_Unit``s, in (priority, name) order."""
+    if not controls.redispatch:
+        return []
+    step = controls.redispatch_step_mw
+    if not _finite_number(step) or step <= 0:
+        raise ContractError(f"redispatch_step_mw must be a finite number above 0 MW, got {step!r}")
+    slack = {str(n) for n in net.ext_grid["name"]}
+    if "slack" in net.gen:   # a pandapower gen can be the slack too; its p_mw is not held
+        slack |= {str(n) for n in net.gen.loc[net.gen["slack"].fillna(False).astype(bool), "name"]}
+    units, seen = [], set()
+    for entry in controls.redispatch:
+        if not isinstance(entry, tuple) or len(entry) != 2:
+            raise ContractError(f"a redispatch unit is (name, priority), got {entry!r}")
+        name, priority = entry
+        if not _finite_number(priority):
+            raise ContractError(f"redispatch unit {name!r} has no finite priority (got {priority!r})")
+        if name in seen:
+            raise ContractError(f"redispatch unit {name!r} is named twice")
+        seen.add(name)
+        if name in slack:
+            raise ContractError(f"redispatch unit {name!r} is the slack: it has no P setpoint to move")
+        tables = [t for t in ("gen", "sgen") if name in getattr(h, t)]
+        if len(tables) != 1:
+            raise ContractError(f"redispatch unit {name!r} is " +
+                                ("not a gen or sgen on the net" if not tables else "both a gen and an sgen"))
+        table = tables[0]
+        i = getattr(h, table)[name]
+        if not bool(net[table].at[i, "in_service"]):
+            raise ContractError(f"redispatch unit {name!r} is out of service at this hour")
+        lim = {}
+        for col in ("min_p_mw", "max_p_mw"):
+            v = net[table][col].get(i) if col in net[table] else None
+            if not _finite_number(v):
+                raise ContractError(f"redispatch unit {name!r} has no finite {col} (got {v!r})")
+            lim[col] = float(v)
+        p = float(net[table].at[i, "p_mw"])
+        if not lim["min_p_mw"] <= p <= lim["max_p_mw"]:
+            raise ContractError(f"redispatch unit {name!r} runs at {p:g} MW, outside "
+                                f"[{lim['min_p_mw']:g}, {lim['max_p_mw']:g}]")
+        units.append(_Unit(name, table, int(i), float(priority), lim["min_p_mw"], lim["max_p_mw"]))
+    return sorted(units, key=lambda u: (u.priority, u.name))
+
+
+def _limits(net, on: list) -> str:
+    """The units ``on`` at a P limit, ``"G1 at max_p_mw, G2 at min_p_mw"``."""
+    out = []
+    for u in on:
+        p = u.get(net)
+        if p >= u.hi - REDISPATCH_EPS_MW:
+            out.append(f"{u.name} at max_p_mw")
+        elif p <= u.lo + REDISPATCH_EPS_MW:
+            out.append(f"{u.name} at min_p_mw")
+    return ", ".join(out)
+
+
+def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: _State):
+    """Move balanced pairs of the live ``units`` on ``work`` (module
+    docstring) from ``state`` while a branch is above its normal rating.
+    Returns ``(state, {name: MW moved}, why)``: the last converged state,
+    ``work`` left at its setpoints, and why an overload is left ("" when
+    none is)."""
+    live = set(judged)
+    start = {u.name: u.get(work) for u in units if u.live(work, live)}
+    on = []
+    now = _key(state, bands, 0.0)
+    solves = 0
+    why = ""
+    while now[1] > 0.0 and not why:
+        # liveness is checked before each pass; ``start`` stays the initial setpoints
+        on = [u for u in units if u.name in start and u.live(work, live)]
+        best, tried, capped, volts = None, False, False, False
+        for up in on:
+            for down in on:
+                if up is down:
+                    continue
+                d = min(step, up.room_up(work), down.room_down(work))
+                if d < REDISPATCH_EPS_MW:
+                    continue
+                if solves >= REDISPATCH_MAX_SOLVES:
+                    capped = True
+                    break
+                tried = True
+                p_up, p_down = up.get(work), down.get(work)
+                up.put(work, p_up + d)
+                down.put(work, p_down - d)
+                trial = _solve(work, judged)
+                solves += 1
+                moved = sum(abs(u.get(work) - start[u.name]) for u in on)
+                up.put(work, p_up)
+                down.put(work, p_down)
+                if trial is None:
+                    continue
+                key = _key(trial, bands, moved)
+                volts |= key[1] < now[1] and key[0] > now[0] + STEP_TOL
+                # (excursion, overload) first; ties go to the lower (priority sum, names), then MW moved
+                order = (up.priority + down.priority, up.name, down.name, moved)
+                k, b = (key[0], key[1], 0), best and (best[0][0], best[0][1], 0)
+                if best is None or _better(k, b) or (not _better(b, k) and order < best[1]):
+                    best = (key, order, up, down, d, trial)
+            if capped:
+                break
+        if best is not None and _better(best[0], now):
+            now, _, up, down, d, state = best
+            up.put(work, up.get(work) + d)
+            down.put(work, down.get(work) - d)
+            if capped:
+                why = "solve cap reached"
+            continue
+        if capped:
+            why = "solve cap reached"
+        elif len(on) < 2:
+            why = "fewer than two named redispatch units in service"
+        elif not tried:
+            ups = [u for u in on if u.room_up(work) >= REDISPATCH_EPS_MW]
+            why = "no up unit left" if not ups else "no down unit left"
+        else:
+            why = "every pair that relieves it worsens the voltage excursion" if volts else "no pair improves"
+    if now[1] > 0.0:
+        at = _limits(work, on)
+        why = why + (f" ({at})" if at else "")
+    mw = {u.name: u.get(work) - start[u.name] for u in units
+          if u.name in start and abs(u.get(work) - start[u.name]) >= REDISPATCH_EPS_MW}
+    return state, mw, why if now[1] > 0.0 else ""
 
 
 # ---------------------------------------------------------------------------
@@ -587,12 +816,15 @@ def _summary(results: pd.DataFrame, kinds, skipped: dict) -> dict:
 
 
 def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, controls: Controls | None = None,
-                    max_compound: int | None = None, angle_limit: AngleLimit | None = None):
+                    max_compound: int | None = None, angle_limit: AngleLimit | None = None,
+                    profile: dict | None = None):
     """``(results, report)``: one ``validate_planning_results`` row per
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
-    {...} or "unset", "seconds"}``. Kinds judged: branch (any order), unit,
-    bus_section, n_m_1, n_1_1."""
+    {...} or "unset", "voltage_band": {"profile": name or "assumed", "buses":
+    {"profile": n, "assumed": n}} (the base case's live buses), "seconds"}``. Kinds judged: branch (any
+    order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
+    (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``)."""
     cset = validate_contingency_set(contingencies)
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
@@ -600,6 +832,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     controls = controls or Controls()
     if angle_limit is not None and not isinstance(angle_limit, AngleLimit):
         raise ContractError(f"angle_limit must be an AngleLimit or None, got {type(angle_limit).__name__}")
+    if profile is not None:
+        if not isinstance(profile, dict) or not profile.get("name"):
+            raise ContractError("profile must be a grid-code profile (load_grid_code) with its name, or None")
+        profile = validate_profile(profile["name"], profile)
     check_net_carries_hour(net, dispatch, loads, hour, registry)
     validate_emergency_ratings(net)
     kinds = set(cset["kind"])
@@ -612,6 +848,8 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     trafo_pos = {c: int(i) for c, t, i in zip(ids, keys["element_type"], keys["element_index"]) if t == "trafo"}
     handles = _Handles.of(net)
     knobs = _knobs(net, controls, trafo_pos)
+    units = _units(net, controls, handles)
+    step = controls.redispatch_step_mw
     pairs = _angle_pairs(net, angle_limit, keys, ids, handles)
     base = copy.deepcopy(net)
     try:
@@ -620,12 +858,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
     cut_before = set(unsupplied_buses(base))
     out_before = set(base.bus.index[~base.bus["in_service"].astype(bool)])
+    by_kv = {}   # nominal kV -> its band, for _bands
 
     def live(work):
         return [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
-
-    def bands_of(work, judged):
-        return {str(work.bus.at[b, "name"]): (V_MIN_PU, V_MAX_PU) for b in judged}
 
     def cut_off(work):
         out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
@@ -650,8 +886,13 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             if s0 is None:
                 rows.append(_row(r, hour, note=f"load flow does not converge at the first outage ({first})"))
                 continue
-            _, pre = remedial_walk(work, knobs, bands_of(work, judged), judged, s0)
-            notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre)}")
+            first_bands = _bands(work, judged, profile, by_kv)[0]
+            s0, pre = remedial_walk(work, knobs, first_bands, judged, s0)
+            pre_mw, pre_why = {}, ""
+            if units:
+                _, pre_mw, pre_why = redispatch_walk(work, units, step, first_bands, judged, s0)
+            notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre, pre_mw)}"
+                         + (f" (redispatch leaves an overload: {pre_why})" if pre_why else ""))
         _apply_outage(work, r, handles)
         out_bus, cut = cut_off(work)
         load_lost, gen_lost = _lost(base, work, out_bus | cut)
@@ -665,7 +906,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             rows.append(_row(r, hour, islanded=True, note="; ".join(notes), **lost))
             continue
         judged = live(work)
-        bands = bands_of(work, judged)
+        bands, used = _bands(work, judged, profile, by_kv)
         s1 = _solve(work, judged)
         if s1 is None:
             notes.append("post-outage load flow does not converge")
@@ -675,17 +916,22 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         stage1 = {"stage1_loading_pct": s1_pct, "stage1_branch": s1_branch, "stage1_verdict": _verdict(s1_pct)}
         angle = _angle_fields(work, pairs, set(judged), angle_limit, notes)
         notes.append(_rating_note(work))
-        notes.append(NO_CONTROLS if not knobs else
-                     NO_REDISPATCH if any(k.in_service(work) for k in knobs) else NO_CONTROLS_ON)
+        notes.append(_band_note(used, profile))
+        notes.append(_controls_note(work, knobs, units, set(judged)))
         s2, moves = remedial_walk(work, knobs, bands, judged, s1)
-        if moves:
+        mw = {}
+        if units:
+            s2, mw, why = redispatch_walk(work, units, step, bands, judged, s2)
+            if why:
+                notes.append(f"redispatch leaves an overload: {why}")
+        if moves or mw:
             # the walk keeps converged states only; the chosen positions are re-solved as the result
             final = _solve(work, judged)
             if final is None:
                 pct, branch = _worst(s2.loading, ids)
                 notes.append(f"stage 2 does not converge at the chosen controls; last converged state "
                              f"{pct:.1f} % ({branch}), {min(s2.vm.values()):.3f}-{max(s2.vm.values()):.3f} pu")
-                rows.append(_row(r, hour, converged=True, remedial=_moved(moves),
+                rows.append(_row(r, hour, converged=True, remedial=_moved(moves, mw),
                                  note="; ".join(n for n in notes if n), **stage1, **angle, **lost))
                 continue
             s2 = final
@@ -696,19 +942,37 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             stage2_loading_pct=s2_pct, stage2_branch=s2_branch,
             stage2_min_vm_pu=min(s2.vm.values()), stage2_max_vm_pu=max(s2.vm.values()),
             stage2_verdict="pass" if ok2 else "fail",
-            remedial=_moved(moves), note="; ".join(n for n in notes if n), **angle, **lost,
+            remedial=_moved(moves, mw), note="; ".join(n for n in notes if n), **angle, **lost,
         ))
     results = validate_planning_results(pd.DataFrame(rows, columns=list(PLANNING_RESULT_COLUMNS)))
+    base_used = _bands(base, live(base), profile, by_kv)[1].values()
     report = {
         "counts": {k: int(n) for k, n in cset["kind"].value_counts().sort_index().items()},
         "skipped": skipped,
         "summary": _summary(results, kinds, skipped),
         "angle_limit": angle_limit.ledger() if angle_limit is not None else "unset",
+        "voltage_band": {"profile": profile["name"] if profile is not None else "assumed",
+                         "buses": {"profile": sum(band is not None for _, band in base_used),
+                                   "assumed": sum(band is None for _, band in base_used)}},
         "seconds": round(time.perf_counter() - t0, 3),
     }
     return results, report
 
 
-def _moved(moves: dict) -> str:
-    """``"SH1 +3, T1 -2"``: each control's steps from where it was, or "none"."""
-    return ", ".join(f"{n} {d:+d}" for n, d in sorted(moves.items())) if moves else "none"
+def _moved(moves: dict, mw: dict | None = None) -> str:
+    """``"SH1 +3, T1 -2, G1 +20.0 MW, G2 -20.0 MW"``: each control's steps and
+    each redispatch unit's MW from where it was, or "none"."""
+    parts = [f"{n} {d:+d}" for n, d in sorted(moves.items())]
+    parts += [f"{n} {d:+.1f} MW" for n, d in sorted((mw or {}).items())]
+    return ", ".join(parts) if parts else "none"
+
+
+def _controls_note(work, knobs: list, units: list, judged: set) -> str:
+    """The row's note on the controls named; without redispatch, today's
+    ``NO_CONTROLS`` / ``NO_REDISPATCH`` / ``NO_CONTROLS_ON``."""
+    taps_on = any(k.in_service(work) for k in knobs)
+    if not units:
+        return NO_CONTROLS if not knobs else NO_REDISPATCH if taps_on else NO_CONTROLS_ON
+    live = sum(u.live(work, judged) for u in units)
+    taps = "no tap or shunt named" if not knobs else "" if taps_on else "no named tap or shunt in service"
+    return "; ".join(x for x in (taps, f"redispatch: {live} of {len(units)} named units live") if x)

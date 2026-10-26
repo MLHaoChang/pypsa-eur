@@ -120,9 +120,9 @@ try {
     const card = page.getByTestId('chat-edit-card')
     await card.waitFor({ timeout: 60000 })
     assert.equal(await sNom(), 300, 'nothing changes before approval')
-    assert.equal(await page.getByTestId('chat-edit-header').textContent(), 'Line > L2')
+    assert.equal(await page.getByTestId('chat-edit-header').textContent(), "Connection & grid › Line 'L2'")
     const row = await page.getByTestId('chat-edit-row-typed').first().innerText()
-    assert.match(row, mode === 'guided' ? /Line L2\s+Capacity\s+300\s+400\s+MVA/ : /Line L2\s+s_nom\s+300\s+400\s+MVA/, row)
+    assert.match(row, mode === 'guided' ? /Line 'L2'\s+Capacity\s+(?:Show in Properties\s+)?300\s+400\s+MVA/ : /Line 'L2'\s+s_nom\s+(?:Show in Properties\s+)?300\s+400\s+MVA/, row)
     shots[`card_${mode}`] = `oj05-card-${mode}.png`
     await page.screenshot({ path: path.join(artifacts, shots[`card_${mode}`]) })
     await card.screenshot({ path: path.join(artifacts, `oj05-card-${mode}-close.png`) })
