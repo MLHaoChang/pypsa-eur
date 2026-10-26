@@ -378,11 +378,14 @@ def test_the_compiled_config_names_the_fixed_constants_and_the_pack_validity(tar
         "grid_import", "grid_export", None, "site")
     assert cfg.import_tariff_ref is None and cfg.import_tariff_id == tariff_id
     assert cfg.import_tariff.jurisdiction == ("DE" if tariff_id == DE else "generic")
-    assert cfg.import_tariff.valid_from == date(2020, 1, 1) and cfg.import_tariff.valid_to is None
+    seeded = _defaults().pack.tariffs[tariff_id]  # the pinned pack's own validity and money year
+    assert cfg.import_tariff.valid_from == seeded.tariff.valid_from == date(seeded.meta.currency_year, 1, 1)
+    assert cfg.import_tariff.valid_to is None
     assert cfg.export_price_ref is not None and cfg.export_price_ref.id == FAKE_REF["id"]
     assert cfg.connection is None
     meta = c.tariff_meta
-    assert (meta["currency"], meta["currency_year"], meta["illustrative"]) == ("EUR", 2020, True)
+    assert (meta["currency"], meta["currency_year"], meta["illustrative"]) == (
+        "EUR", seeded.meta.currency_year, True)
     assert set(c.item_component) == {i.id for i in cfg.import_tariff.items}
     assert set(c.item_component.values()) <= SEVEN
 

@@ -113,11 +113,13 @@ def test_the_blocks_validate_and_say_what_is_missing():
     assert com.export_link is None and mg["island_constraints"] is True
     fin = FinanceInputs.model_validate(mg["finance"])
     assert fin.cod_by_asset == {a: date(2027, 1, 1) for a in H.MG_EXISTING}
+    from services.library.defaults_pack.loader import load_defaults_pack
+    pack_year = load_defaults_pack(T.TEMPLATE_PACK_VERSION).finance.currency_year
     for tid in IDS:
         items = {r["item"]: r for r in T.TEMPLATE_META[tid]["ledger"]}
         assert "investment case" in items
         assert "real base-year EUR" in items["money year"]["value"]
-        assert "2020 price data" in items["money year"]["value"]
+        assert f"pack prices ({pack_year} EUR)" in items["money year"]["value"]
         assert "2020 money" not in items["finance inputs"]["value"]
     h2_ledger = {r["item"]: r for r in T.TEMPLATE_META["eh_h2_hub_staged"]["ledger"]}
     for item in ("grey H2 reference price", "CO2 price"):

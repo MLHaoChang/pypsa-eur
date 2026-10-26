@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import queue
 import threading
+from decimal import Decimal
 
 import pandas as pd
 import pytest
@@ -24,6 +25,18 @@ from tests import u2_record_pre_numbers as REC
 from tests.u2_targets import FAKE_REF, WP0, flat_resolver
 
 TOY = WP0["toy_3month"]
+
+
+def _money_year_factor():
+    """The pinned pack's exact money-year factor (2020 -> its currency year)."""
+    import json
+    from decimal import Decimal
+
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+    from services.study import library as L
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    return Decimal(manifest["money_year_conversion"]["factor"])
 
 
 def _C():
@@ -242,7 +255,9 @@ def test_the_pack_writes_no_prices_and_the_solve_materialises_them():
     c = _C().bind_on_network(n, c, resolve_ref=flat_resolver(40.0, n.snapshots))
     applied = materialise_poc_prices(n, c.config)
     try:
-        assert np.allclose(n.links_t.marginal_cost["grid_import"].to_numpy(), 130.0)
+        # The seed tariff's 130 EUR/MWh (2020) in the pin's money: x the manifest factor.
+        assert np.allclose(n.links_t.marginal_cost["grid_import"].to_numpy(),
+                           float(Decimal(130) * _money_year_factor()))
         assert np.allclose(n.links_t.marginal_cost["grid_export"].to_numpy(), -40.0)
     finally:
         applied.undo()
