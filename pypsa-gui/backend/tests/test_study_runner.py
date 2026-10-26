@@ -983,3 +983,12 @@ def test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year(
     for k in keys:
         want = next(r for r in pin.rows if r.key == k)
         assert (rows[k]["value"], rows[k]["currency_year"]) == (want.value, want.currency_year), k
+    # The study stays in 2020 (follow-up issue): its case is refused, and the
+    # refusal names the setting that fixes it (GK B, money-year 01).
+    assert client.post(f"/api/projects/reset-1005/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "reset-1005", sid)["status"] == "done"
+    case = client.get(f"/api/projects/reset-1005/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 422, case.text
+    detail = case.json()["detail"]
+    assert detail["error_kind"] == "currency_year_mixed"
+    assert "set the study's currency year to 2025 in its settings" in detail["message"]
