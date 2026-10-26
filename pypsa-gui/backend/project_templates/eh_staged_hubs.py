@@ -605,6 +605,13 @@ def _h2_meta(T, planning=None) -> dict:
         ],
         "provenance": T.PROVENANCE,
     }
+    return _planned_meta(T, meta, plan, "h2_offtake_mw", off, _held_ledger(plan))
+
+
+def _held_ledger(plan: _HubPlan) -> list[dict]:
+    """The assumed rows for a start before the CO2 path or the synthetic
+    tariff (gatekeeper E1 condition 5); the ammonia hub reads them too."""
+    y0 = plan.years[0]
     co2 = CO2_PRICE["eur_per_t_by_year"]
     held = [] if _co2_price(plan.planning) is CO2_PRICE else [
         {"item": "CO2 price before the path", "value": f"{co2[min(co2)]:g} EUR/t in {y0}",
@@ -619,7 +626,7 @@ def _h2_meta(T, planning=None) -> dict:
              "note": (f"assumed, held from {tariff_year}: the synthetic tariff is dated "
                       f"{SYNTHETIC_TARIFF['valid_from']}, so its rates are held from the start "
                       "year; replace with the site's tariff for those years")})
-    return _planned_meta(T, meta, plan, "h2_offtake_mw", off, held)
+    return held
 
 
 def _mg_meta(T, planning=None) -> dict:
