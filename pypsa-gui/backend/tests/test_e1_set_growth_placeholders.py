@@ -282,6 +282,32 @@ def test_assign_profile_sets_the_load(client, tmp_projects_dir, bound_ctx):
     assert row["set"] is True and row["value"] == pytest.approx(before["value"] * 1.5)
 
 
+def test_the_chat_load_profile_tool_sets_every_period_it_tiles_to(
+        client, tmp_projects_dir, bound_ctx):
+    """C1: ``apply_demand_from_excel`` tiles a one-period profile over every period."""
+    from services import chat_tools, upload_service
+
+    _create(client, DC, "gp_chat", DC_SHIFTED)
+    d = _dir(bound_ctx, client)
+    unset = {g["year"]: g["value"] for g in _meta(d)["growth_inputs"]
+             if g["kind"] == "it_mw" and not g["set"]}
+    assert unset
+    week = _series(bound_ctx, client, "loads", "p_set", "it_load", min(unset)) * 1.25
+    csv = "timestamp,demand\n" + "".join(f"{t.isoformat()},{v}\n" for t, v in week.items())
+    with bound_ctx(client):
+        meta = upload_service.add_upload("gp_chat", csv.encode(), "demand.csv", "text/csv")
+        result = chat_tools.apply_demand_from_excel(
+            file_id=meta.file_id, time_col="timestamp", value_col="demand", load_name="it_load")
+    assert result["applied"] is True
+    m = _meta(d)
+    for y in unset:
+        row = _row(m, "it_mw", y)
+        assert row["set"] is True and row["source"] == "entered"
+        assert _ledger(m, "it_mw", y)["source"] == "entered"
+    # The earliest period's peak moved by 1.25; its placeholder value with it.
+    assert _row(m, "it_mw", min(unset))["value"] == pytest.approx(unset[min(unset)] * 1.25)
+
+
 def test_without_a_template_file_a_write_is_untouched(client, tmp_projects_dir, bound_ctx):
     """A project with no ``eh_template.json`` (the common case): nothing to do."""
     from services.pypsa_service import PyPSAService
