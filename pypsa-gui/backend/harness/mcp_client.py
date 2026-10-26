@@ -111,17 +111,26 @@ def config_path() -> Path:
 
 
 def _https_or_loopback(url: str) -> bool:
-    parts = urlsplit(url)
-    if parts.scheme == "https":
-        return bool(parts.hostname)
-    if parts.scheme != "http" or not parts.hostname:
-        return False
-    if parts.hostname == "localhost":
-        return True
+    """https, or http to a loopback host; never credentials in the URL nor a
+    link-local address (the cloud metadata endpoints live there)."""
     try:
-        return ipaddress.ip_address(parts.hostname).is_loopback
+        parts = urlsplit(url)
+        parts.port                                  # raises on a bad port
     except ValueError:
         return False
+    if not parts.hostname or parts.username is not None or parts.password is not None:
+        return False
+    try:
+        address = ipaddress.ip_address(parts.hostname)
+    except ValueError:
+        address = None
+    if address is not None and address.is_link_local:
+        return False
+    if parts.scheme == "https":
+        return True
+    if parts.scheme != "http":
+        return False
+    return parts.hostname == "localhost" or (address is not None and address.is_loopback)
 
 
 def _parse_one(entry: Any) -> tuple[ServerConfig | None, str | None]:

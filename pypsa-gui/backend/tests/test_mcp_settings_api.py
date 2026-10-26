@@ -148,6 +148,12 @@ def test_put_writes_an_http_entry_at_0600_with_a_derived_bearer_slot(admin):
     ("toolongserverid12345", _http()),
     ("a", _http(url="http://example.com/mcp")),                         # http off loopback
     ("a", _http(url="file:///etc/passwd")),
+    ("a", _http(url="https://user:pass@example.com/mcp")),               # credentials in the URL
+    ("a", _http(url="https://token@example.com/mcp")),
+    ("a", _http(url="https://169.254.169.254/latest")),                 # metadata, link-local
+    ("a", _http(url="http://169.254.169.254/latest")),
+    ("a", _http(url="https://[fe80::1]/mcp")),
+    ("a", _http(url="https://example.com:99999/mcp")),
     ("a", {"enabled": False}),                                          # no URL
     ("a", _http(transport="stdio")),                                    # the web makes http only
     ("a", _http(command=sys.executable, args=[str(STUB)])),
@@ -161,8 +167,17 @@ def test_invalid_bodies_are_refused_and_nothing_is_written(admin, sid, body):
     assert not mcp_client.config_path().exists()
 
 
-def test_loopback_http_is_allowed(admin):
-    assert admin.put(f"{BASE}/local", json=_http(url="http://127.0.0.1:9000/mcp")).status_code == 200
+@pytest.mark.parametrize("url", [
+    "http://127.0.0.1:9000/mcp", "http://127.8.0.1/mcp", "http://[::1]:9000/mcp",
+    "http://localhost:9000/mcp",
+])
+def test_loopback_http_is_allowed(admin, url):
+    assert admin.put(f"{BASE}/local", json=_http(url=url)).status_code == 200
+
+
+def test_a_hand_written_url_gets_the_same_check():
+    for url in ("https://u:p@example.com/mcp", "https://169.254.169.254/", "https://[fe80::1]/"):
+        assert mcp_client.validate_entry({"id": "x", "transport": "http", "url": url})[1]
 
 
 def test_put_replaces_in_place_and_keeps_other_entries_as_written(admin):
@@ -227,6 +242,19 @@ def test_an_unreadable_file_is_reported_and_never_overwritten(admin):
     assert admin.get(BASE).json()["file_error"]
     assert admin.put(f"{BASE}/a", json=_http()).status_code == 409
     assert mcp_client.config_path().read_text() == "{not json"
+
+
+@pytest.mark.parametrize("text", ["{not json", "[]", '{"servers": {}}', '{"other": []}'])
+def test_no_write_route_rewrites_a_file_it_cannot_read(admin, text):
+    mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
+    mcp_client.config_path().write_text(text)
+    assert admin.put(f"{BASE}/a", json=_http()).status_code == 409
+    assert admin.delete(f"{BASE}/a").status_code == 409
+    assert admin.put(f"{BASE}/a/keys/bearer", json={"value": SECRET}).status_code == 409
+    assert admin.delete(f"{BASE}/a/keys/bearer").status_code == 409
+    assert admin.post(f"{BASE}/a/test").status_code == 409
+    assert mcp_client.config_path().read_text() == text
+    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__A") is None
 
 
 def test_a_disabled_entry_is_still_validated(admin):
