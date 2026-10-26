@@ -7,24 +7,35 @@ slack takes the rest). The last converged step and the first failing one
 bracket the nose; bisection between them to ``tol_mw`` makes the answer
 independent of the step size. The nose is reported in MW with the PoC
 voltage there, and the margin from the planned load in MW and as a % of it.
+A nose not reached by ``cap_mw`` is reported at the cap as a lower bound
+(``nose_is_lower_bound``); a nose below the planned load gives a negative
+margin and ``nose_below_planned``.
 
-Non-convergence can be the solver rather than collapse, so every failing
-point is retried once from a flat start with more iterations before it
-counts as past the nose. The row records how many points were retried and
-how many the retry rescued.
+Every load flow enforces generator Q limits (``enforce_q_lims=True``): the
+nose depends heavily on them. Non-convergence can be the solver rather than
+collapse, so every failing point is retried once from a flat start with more
+iterations before it counts as past the nose. The row records how many
+points were retried and how many the retry rescued.
 
 **Q–V.** With the planned load in place, a fictitious PV source at the PoC
-(no P, no Q limits) holds its voltage set-point while the set-point is swept,
-and the source's Q is read. The Q margin is the distance from Q = 0 to the
-curve's minimum (positive: the PoC can lose that much reactive support
-before collapse). dQ/dV is the slope at the operating point, by a central
-difference; positive is the stable side.
+(no P, Q limits of +/- ``QV_SOURCE_Q_LIMIT_MVAR`` so it never clips) holds
+its voltage set-point while the set-point is swept, and the source's Q is
+read. ``q_margin_mvar`` is minus the curve's minimum Q: positive means
+margin, the reactive support the PoC can lose before collapse; negative
+means the PoC already needs that much. When the minimum sits on the edge of
+the converged sweep (``qmin_at_sweep_edge``) the margin is a bound, not a
+found minimum. Sweep points that do not converge are skipped and counted.
+dQ/dV is the slope at the operating point, by a central difference; positive
+is the stable side.
 
 **Cases.** Intact, plus the worst N-1 outages of the contingency set (read
 only; branch and unit outages, the N-1 screen's kinds). Worst means the
-lowest PoC voltage with the planned load connected, from the screen's own
-batched lightsim2grid solve; islanded and non-converged outages are not
-ranked and are named in the summary. At most ``max_cases`` are studied.
+lowest PoC voltage with the planned load connected, read from the screen's
+own batched lightsim2grid solve (``contingency._branch_outcomes`` /
+``_unit_outcomes``). At most ``max_cases`` of these converged outages are
+studied. An outage that islands or does not converge with the planned load
+connected is the most severe case, not one to drop: it is always listed, as
+a ``not_solved`` row with no nose or margin numbers.
 
 Every row is labelled ``SCREENING_BASIS``: this is a static screen and the
 binding answer is the RMS study, which stays outside this tool.
@@ -54,7 +65,14 @@ from gridspine.static.planning_criteria import _apply_outage, _Handles
 
 SCREENING_BASIS = "screening; binding answer is the RMS study"
 QV_SOURCE_NAME = "QV_PROBE"
+QV_SOURCE_Q_LIMIT_MVAR = 1e9
 _RANKED_KINDS = ("branch", "unit")
+
+SOLVED = "solved"
+NOT_SOLVED = "not_solved"
+NOTE_COLLAPSE = "collapses at or below the planned load"
+NOTE_ISLANDED = "islanded"
+NOTE_NO_BASE = "does not converge with no load added"
 
 #: What every margin in a bundle rests on; the study ledger carries it.
 VOLTAGE_STABILITY_LEDGER = (
@@ -62,32 +80,45 @@ VOLTAGE_STABILITY_LEDGER = (
     "balanced as a connection-capacity trial (committed units pro-rata to "
     "headroom, the slack takes the rest); the last converged and first failing "
     "steps bracket the nose and bisection narrows it to tol_mw",
+    "every P–V and Q–V load flow enforces generator Q limits",
     "a failing point is retried once from a flat start with more iterations "
     "before it counts as past the nose; the row records retries and rescues",
     "margin = nose MW - planned MW, and as a % of the planned MW; a nose not "
-    "reached by cap_mw is reported at the cap and flagged, never extrapolated",
-    "Q–V: a fictitious PV source at the PoC, no Q limits, swept over its "
+    "reached by cap_mw is reported at the cap as a lower bound, never "
+    "extrapolated",
+    "Q–V: a fictitious PV source at the PoC, Q never clipped, swept over its "
     "voltage set-point with the planned load connected; the Q margin is minus "
-    "the curve's minimum Q, dQ/dV is a central difference at the operating "
-    "point; a minimum on the sweep's edge is flagged",
+    "the curve's minimum Q (positive is margin), a bound when the minimum is "
+    "on the sweep's edge; dQ/dV is a central difference at the operating point",
     "cases: intact plus the worst N-1 branch and unit outages of the "
     "contingency set by PoC voltage with the planned load connected, up to "
-    "max_cases; islanded and non-converged outages are not ranked",
+    "max_cases; an outage that islands or does not converge with the planned "
+    "load is always listed, not_solved",
     f"every row is {SCREENING_BASIS!r}: static load flow only, no dynamics, "
     "controls or protection",
 )
+
+
+def _require_positive(name, v):
+    if isinstance(v, bool) or not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0):
+        raise ContractError(f"{name} must be a finite number > 0, got {v!r}")
+
+
+def _require_count(name, v, low):
+    if isinstance(v, bool) or not (isinstance(v, int) and v >= low):
+        raise ContractError(f"{name} must be an integer >= {low}, got {v!r}")
 
 
 @dataclasses.dataclass(frozen=True)
 class VoltageStabilitySettings:
     #: power factor of the PoC load, lagging
     pf: float = DEFAULT_CRITERIA.load_pf
-    #: worst N-1 outages studied besides the intact case
+    #: worst converged N-1 outages studied besides the intact case
     max_cases: int = 5
     #: P–V step, % of the planned load
     step_pct: float = 20.0
     #: bisection tolerance on the nose
-    tol_mw: float = 1.0
+    tol_mw: float = 0.1
     #: highest load tried; None means 10 x the planned load
     cap_mw: float | None = None
     #: iterations allowed on the flat-start retry
@@ -99,20 +130,13 @@ class VoltageStabilitySettings:
     dqdv_h_pu: float = 0.005
 
     def __post_init__(self):
-        def positive(name):
-            v = getattr(self, name)
-            if not (isinstance(v, (int, float)) and math.isfinite(v) and v > 0):
-                raise ContractError(f"{name} must be a finite number > 0, got {v!r}")
-
         for name in ("step_pct", "tol_mw", "qv_step_pu", "dqdv_h_pu", "qv_v_min_pu", "qv_v_max_pu"):
-            positive(name)
+            _require_positive(name, getattr(self, name))
         if self.cap_mw is not None:
-            positive("cap_mw")
-        if not (isinstance(self.max_cases, int) and self.max_cases >= 0):
-            raise ContractError(f"max_cases must be an integer >= 0, got {self.max_cases!r}")
-        if not (isinstance(self.retry_max_iteration, int) and self.retry_max_iteration > 0):
-            raise ContractError(f"retry_max_iteration must be an integer > 0, got {self.retry_max_iteration!r}")
-        if not (isinstance(self.pf, (int, float)) and 0 < self.pf <= 1):
+            _require_positive("cap_mw", self.cap_mw)
+        _require_count("max_cases", self.max_cases, 0)
+        _require_count("retry_max_iteration", self.retry_max_iteration, 1)
+        if isinstance(self.pf, bool) or not (isinstance(self.pf, (int, float)) and 0 < self.pf <= 1):
             raise ContractError(f"power factor must lie in (0, 1], got {self.pf!r}")
         if self.qv_v_min_pu >= self.qv_v_max_pu:
             raise ContractError(
@@ -127,14 +151,14 @@ class _Tally:
 
 
 def _run(work, st: VoltageStabilitySettings, tally: _Tally) -> bool:
-    """Solve ``work`` in place; one flat-start retry on failure."""
+    """Solve ``work`` in place, Q limits enforced; one flat-start retry on failure."""
     try:
-        pp.runpp(work)
+        pp.runpp(work, enforce_q_lims=True)
         return True
     except pp.LoadflowNotConverged:
         tally.retries += 1
     try:
-        pp.runpp(work, init="flat", max_iteration=st.retry_max_iteration)
+        pp.runpp(work, enforce_q_lims=True, init="flat", max_iteration=st.retry_max_iteration)
     except pp.LoadflowNotConverged:
         return False
     tally.rescues += 1
@@ -160,7 +184,8 @@ class _Probe:
         return w if _run(w, self.st, self.tally) else None
 
 
-def _nose(probe: _Probe, b, planned_mw) -> dict:
+def _nose(probe: _Probe, b, planned_mw) -> dict | None:
+    """The bracketed and bisected nose, or None when nothing converges."""
     st = probe.st
     cap = 10.0 * planned_mw if st.cap_mw is None else float(st.cap_mw)
     step = planned_mw * st.step_pct / 100.0
@@ -171,7 +196,7 @@ def _nose(probe: _Probe, b, planned_mw) -> dict:
 
     v_lo = v_at(0.0)
     if v_lo is None:
-        return {"converged": False, "nose_mw": np.nan, "v_nose_pu": np.nan, "nose_beyond_cap": False}
+        return None
     lo, hi = 0.0, None
     k = 1
     while hi is None and lo < cap:
@@ -190,19 +215,20 @@ def _nose(probe: _Probe, b, planned_mw) -> dict:
                 hi = mid
             else:
                 lo, v_lo = mid, v
-    return {"converged": True, "nose_mw": lo, "v_nose_pu": v_lo, "nose_beyond_cap": hi is None}
+    return {"nose_mw": lo, "v_nose_pu": v_lo, "nose_is_lower_bound": hi is None}
 
 
 def _qv(probe: _Probe, b, planned_mw, v_op) -> dict:
     out = {"q_margin_mvar": np.nan, "v_at_qmin_pu": np.nan, "qmin_at_sweep_edge": False,
-           "dqdv_mvar_per_pu": np.nan}
+           "qv_points_skipped": 0, "dqdv_mvar_per_pu": np.nan}
     if not math.isfinite(v_op):
         return out
     st = probe.st
     w = probe.work
     if probe.solve(planned_mw) is None:
         return out
-    g = pp.create_gen(w, b, p_mw=0.0, vm_pu=v_op, name=QV_SOURCE_NAME)
+    g = pp.create_gen(w, b, p_mw=0.0, vm_pu=v_op, name=QV_SOURCE_NAME,
+                      min_q_mvar=-QV_SOURCE_Q_LIMIT_MVAR, max_q_mvar=QV_SOURCE_Q_LIMIT_MVAR)
     try:
         def q_at(v):
             w.gen.at[g, "vm_pu"] = v
@@ -212,6 +238,7 @@ def _qv(probe: _Probe, b, planned_mw, v_op) -> dict:
         grid = np.linspace(st.qv_v_max_pu, st.qv_v_min_pu, n)
         q = np.array([q_at(v) for v in grid])
         ok = np.flatnonzero(~np.isnan(q))
+        out["qv_points_skipped"] = int(n - ok.size)
         if ok.size:
             i = ok[np.argmin(q[ok])]
             out.update(q_margin_mvar=-float(q[i]), v_at_qmin_pu=float(grid[i]),
@@ -223,15 +250,39 @@ def _qv(probe: _Probe, b, planned_mw, v_op) -> dict:
     return out
 
 
+_NUMBERS = {
+    "nose_mw": np.nan, "v_nose_pu": np.nan, "nose_is_lower_bound": False,
+    "margin_mw": np.nan, "margin_pct": np.nan, "nose_below_planned": False, "v_poc_pu": np.nan,
+    "q_margin_mvar": np.nan, "v_at_qmin_pu": np.nan, "qmin_at_sweep_edge": False,
+    "qv_points_skipped": 0, "dqdv_mvar_per_pu": np.nan,
+}
+
+
+def _not_solved(label, cid, kind, note, tally=None) -> dict:
+    return {"case": label, "contingency_id": cid, "kind": kind, "verdict": NOT_SOLVED, "note": note,
+            **_NUMBERS,
+            "flat_start_retries": tally.retries if tally else 0,
+            "flat_start_rescues": tally.rescues if tally else 0,
+            "basis": SCREENING_BASIS}
+
+
 def _case_row(case, label, cid, kind, bus, b, planned_mw, st) -> dict:
     tally = _Tally()
     probe = _Probe(case, bus, st, tally)
-    row = {"case": label, "contingency_id": cid, "kind": kind}
-    row.update(_nose(probe, b, planned_mw))
-    op = probe.solve(planned_mw) if row["converged"] else None
-    v_op = float(op.res_bus.at[b, "vm_pu"]) if op is not None else np.nan
-    row["margin_mw"] = row["nose_mw"] - planned_mw
+    nose = _nose(probe, b, planned_mw)
+    if nose is None:
+        return _not_solved(label, cid, kind, NOTE_NO_BASE, tally)
+    row = {"case": label, "contingency_id": cid, "kind": kind, "verdict": SOLVED, "note": "", **_NUMBERS}
+    row.update(nose)
+    row["margin_mw"] = nose["nose_mw"] - planned_mw
     row["margin_pct"] = 100.0 * row["margin_mw"] / planned_mw
+    row["nose_below_planned"] = bool(row["margin_mw"] < 0)
+    if row["nose_below_planned"]:
+        row["note"] = "nose below the planned load"
+    elif nose["nose_is_lower_bound"]:
+        row["note"] = "nose beyond cap_mw: nose and margin are lower bounds"
+    op = None if row["nose_below_planned"] else probe.solve(planned_mw)
+    v_op = float(op.res_bus.at[b, "vm_pu"]) if op is not None else np.nan
     row["v_poc_pu"] = v_op
     row.update(_qv(probe, b, planned_mw, v_op))
     row["flat_start_retries"] = tally.retries
@@ -240,15 +291,12 @@ def _case_row(case, label, cid, kind, bus, b, planned_mw, st) -> dict:
     return row
 
 
-def _rank(net, bus, b, planned_mw, cset, st) -> tuple:
-    """N-1 rows by PoC voltage with the planned load connected, lowest first;
-    and the contingency ids that could not be ranked."""
-    rows = cset[(cset["order"] == 1) & cset["kind"].isin(_RANKED_KINDS)]
-    if rows.empty:
-        return rows, []
+def _rank(net, bus, b, planned_mw, rows, st) -> tuple:
+    """The converged N-1 rows by PoC voltage with the planned load connected,
+    lowest first; and ``{contingency_id: note}`` for the rest."""
     work = _Probe(net, bus, st, _Tally()).solve(planned_mw)
     if work is None:
-        return rows.iloc[0:0], list(rows["contingency_id"])
+        return rows.iloc[0:0], {cid: NOTE_COLLAPSE for cid in rows["contingency_id"]}
     gm = gridmodel_for(work)
     v0 = work._ppc["internal"]["V"]
     nl = len(work.line)
@@ -256,43 +304,60 @@ def _rank(net, bus, b, planned_mw, cset, st) -> tuple:
     outcomes.update(_branch_outcomes(work, gm, v0, rows[rows["kind"] == "branch"], nl))
     outcomes.update(_unit_outcomes(work, gm, v0, rows[rows["kind"] == "unit"], nl))
     pos = work.bus.index.get_loc(b)
-    v = {cid: float(vm[pos]) for cid, (conv, isl, _ld, vm) in outcomes.items() if conv and not isl}
-    not_ranked = [cid for cid in rows["contingency_id"] if cid not in v]
+    v, failed = {}, {}
+    for cid in rows["contingency_id"]:
+        conv, isl, _ld, vm = outcomes[cid]
+        if conv:
+            v[cid] = float(vm[pos])
+        else:
+            failed[cid] = NOTE_ISLANDED if isl else NOTE_COLLAPSE
     ranked = rows[rows["contingency_id"].isin(v)].copy()
     ranked["_v"] = ranked["contingency_id"].map(v)
     ranked = ranked.sort_values(["_v", "contingency_id"], kind="stable").drop(columns="_v")
-    return ranked, not_ranked
+    return ranked, failed
 
 
 def voltage_stability(net, poc_bus, planned_mw, contingencies=None,
                       settings: VoltageStabilitySettings | None = None) -> tuple:
     """P–V and Q–V margins at ``poc_bus`` for a planned load of ``planned_mw``.
 
-    Returns ``(rows, summary)``: one row per case (intact first, then the
-    studied N-1 outages, worst first) and a summary of which N-1 outages were
-    ranked, not ranked and studied, with the ledger.
+    ``contingencies`` is an N-1 set of branch and unit outages (the N-1
+    screen's kinds), or None for the intact case only.
+
+    Returns ``(rows, summary)``: one row per case — intact first, then the
+    N-1 outages that island or do not converge with the planned load
+    (``not_solved``), then the studied converged ones, worst first — and a
+    summary of how many were ranked, not solved and studied, with the ledger.
     """
     st = VoltageStabilitySettings() if settings is None else settings
+    if not isinstance(st, VoltageStabilitySettings):
+        raise ContractError(f"settings must be VoltageStabilitySettings, got {type(st).__name__}")
     b = _bus_index(net, poc_bus)
+    if isinstance(planned_mw, bool):
+        raise ContractError(f"planned_mw must be a number, got {planned_mw!r}")
     planned_mw = float(planned_mw)
     if not math.isfinite(planned_mw) or planned_mw <= 0:
         raise ContractError(f"planned_mw must be finite and > 0, got {planned_mw}")
-
-    results = [_case_row(net, "intact", None, None, poc_bus, b, planned_mw, st)]
-    summary = {"n1_ranked": 0, "n1_not_ranked": [], "n1_studied": 0, "kinds_not_ranked": [],
-               "ledger": VOLTAGE_STABILITY_LEDGER}
+    cset = None
     if contingencies is not None:
         cset = validate_contingency_set(contingencies.copy(deep=True))
-        summary["kinds_not_ranked"] = sorted(
-            set(cset.loc[(cset["order"] != 1) | ~cset["kind"].isin(_RANKED_KINDS), "kind"])
-        )
-        ranked, not_ranked = _rank(net, poc_bus, b, planned_mw, cset, st)
-        summary["n1_ranked"] = len(ranked)
-        summary["n1_not_ranked"] = not_ranked
+        if (cset["order"] != 1).any():
+            raise ContractError("voltage_stability takes an N-1 set; got rows with order != 1")
+        unjudged = sorted(set(cset["kind"]) - set(_RANKED_KINDS))
+        if unjudged:
+            raise ContractError(f"voltage_stability ranks branch and unit outages only; kind not judged here: {unjudged}")
+
+    results = [_case_row(net, "intact", None, None, poc_bus, b, planned_mw, st)]
+    summary = {"n1_ranked": 0, "n1_not_solved": [], "n1_studied": 0, "ledger": VOLTAGE_STABILITY_LEDGER}
+    if cset is not None and not cset.empty:
+        ranked, failed = _rank(net, poc_bus, b, planned_mw, cset, st)
+        kind_of = dict(zip(cset["contingency_id"], cset["kind"]))
+        results += [_not_solved(cid, cid, kind_of[cid], note) for cid, note in failed.items()]
         handles = _Handles.of(net)
-        for r in ranked.head(st.max_cases).itertuples(index=False):
+        studied = ranked.head(st.max_cases)
+        for r in studied.itertuples(index=False):
             case = copy.deepcopy(net)
             _apply_outage(case, r, handles)
             results.append(_case_row(case, r.contingency_id, r.contingency_id, r.kind, poc_bus, b, planned_mw, st))
-        summary["n1_studied"] = len(results) - 1
+        summary.update(n1_ranked=len(ranked), n1_not_solved=list(failed), n1_studied=len(studied))
     return pd.DataFrame(results), summary
