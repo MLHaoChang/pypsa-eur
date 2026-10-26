@@ -121,6 +121,28 @@ def test_denial_leaves_every_value_unchanged(mixed):
     assert values() == BEFORE
 
 
+def test_a_part_column_the_asset_never_had_is_created_like_a_single_edit(mixed):
+    # The OJ grid's battery has no investment parts: the column is absent, as
+    # after a NetCDF import. A single update_component creates it; so does the batch.
+    ctx, session, _ = mixed
+    PyPSAService.get_network().storage_units.drop(columns=["inv_power_overnight"], inplace=True)
+    preview = chat_tools.preview_project_changes(OJ21[2:3])
+    assert "inv_power_overnight" not in PyPSAService.get_network().storage_units.columns
+    assert [(d["name"], d["before"], d["after"]) for d in preview["diff"]] == [("Battery", "nan", 150000)]
+    frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]})
+    row = next(r for r in frame(frames, "tool_pending_confirmation")["edit_card"]["rows"] if r["role"] == "typed")
+    assert (row["old"], row["new"]) == (None, 150000)
+    receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
+    assert receipt["outcome"] == "verified"
+    assert "not set → 150000 EUR/MW" in receipt["says"], receipt["says"]
+    assert PyPSAService.get_network().storage_units.at["Battery", "inv_power_overnight"] == 150000
+    undo = [(r["name"], r["field"], r["old"], r["new"]) for r in edit_card._undo_preview({}) if r["role"] == "typed"]
+    assert ("Battery", "inv_power_overnight", 150000, None) in undo, undo
+    chat_tools.undo_last()
+    units = PyPSAService.get_network().storage_units
+    assert "inv_power_overnight" not in units.columns or pd.isna(units.at["Battery", "inv_power_overnight"])
+
+
 def test_one_missing_member_refuses_everything_and_names_it(mixed):
     ctx, _, root = mixed
     detail = refusal([{"component_class": "Line", "names": ["L1", "L2"], "attribute": "s_nom", "value": 500},

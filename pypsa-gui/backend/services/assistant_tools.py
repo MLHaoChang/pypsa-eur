@@ -453,7 +453,19 @@ def _preview_candidate(ctx, parsed):
         groups = {}
         for name, attrs in targets[klass].items():
             groups.setdefault(json.dumps(attrs, sort_keys=True), (attrs, []))[1].append(name)
-        return lambda: [chat_tools.bulk_update_components(klass, names, attrs) for attrs, names in groups.values()]
+
+        def apply():
+            # The schema typed every field, so an absent number column is one
+            # the asset never set (an import without investment parts), not a
+            # typo: create it on the copy, as a single edit does.
+            df = getattr(PyPSAService.get_network(), edit_card._component_attr(klass))
+            fields = edit_card._fields(klass)
+            for attrs, _ in groups.values():
+                for column in attrs:
+                    if column not in df.columns and _parameter_kind(fields.get(column)) == "number":
+                        df[column] = float("nan")
+            return [chat_tools.bulk_update_components(klass, names, attrs) for attrs, names in groups.values()]
+        return apply
 
     rows = []
     for klass in targets:

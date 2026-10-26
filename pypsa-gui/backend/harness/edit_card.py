@@ -140,7 +140,9 @@ def _says(rows: list[dict]) -> str:
         if row["field"] == "exists":
             return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
         unit = f" {row['unit']}" if row.get("unit") else ""
-        old = "?" if row.get("old") is None and row.get("old_known") is False else _number(row.get("old"))
+        old = row.get("old")
+        # The card's own words for an absent value (EditCard.tsx): never "None".
+        old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
         return f"{what} {old} → {_number(row['new'])}{unit}"
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
@@ -924,13 +926,16 @@ def _undo_preview(args: dict) -> list[dict]:
             continue
         before = restored.components[klass].static
         defaults = component.defaults
-        inputs = [c for c in current.columns if c in before.columns
-                  and "Input" in str(defaults.at[c, "status"] if c in defaults.index else "Input")]
+        # A column the undone edit created (an investment part) is absent from
+        # the restored frame: the undo takes it back to "not set".
+        inputs = [c for c in current.columns
+                  if "Input" in str(defaults.at[c, "status"] if c in defaults.index else "Input")]
         for name in current.index.union(before.index):
             if name not in before.index or name not in current.index:
                 change = [("exists", name in current.index, name in before.index)]
             else:
-                change = [(c, _scalar(current.at[name, c]), _scalar(before.at[name, c])) for c in inputs]
+                change = [(c, _scalar(current.at[name, c]),
+                           _scalar(before.at[name, c]) if c in before.columns else None) for c in inputs]
             for field, old, new in change:
                 if not (_plain(old) and _plain(new)) or (_blank(old) and _blank(new)) or _same(old, new):
                     continue
@@ -961,7 +966,8 @@ def _undo_readback(args: dict, rows: list[dict]) -> list[Any]:
         if row["field"] == "exists":
             out.append(row["name"] in frame.index)
         else:
-            out.append(frame.at[row["name"], row["field"]] if row["name"] in frame.index else None)
+            out.append(frame.at[row["name"], row["field"]]
+                       if row["name"] in frame.index and row["field"] in frame.columns else None)
     return out
 
 
