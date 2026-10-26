@@ -3392,14 +3392,15 @@
       ],
       "input_keys": [
         "component_class",
-        "name"
+        "name",
+        "open_editor"
       ],
       "required": [
         "component_class",
         "name"
       ],
       "safety_tier": "read",
-      "schema_sha256": "8fcf1af620907ec9eea2e325e5981fd665785455bab256b5ead3f13987acf2b3",
+      "schema_sha256": "f8aaa3aa1f205674d055e2efea24358747f7f0e6a218827fe2a093db21e66211",
       "behavioral_fixture": "pending"
     },
     {
@@ -3410,6 +3411,7 @@
       ],
       "input_keys": [
         "panel_id",
+        "canvas_view",
         "results_tab",
         "bottom_tab",
         "compare_rail",
@@ -3421,7 +3423,7 @@
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "35b8610813f01928bc62b179f710a796da2132329b4585e51f4e741d865133e3",
+      "schema_sha256": "87421d83e3460af3d57df789bde741a01880948d99938662b7eaa4273ebf28eb",
       "behavioral_fixture": "pending"
     },
     {
