@@ -183,7 +183,8 @@ class LengthsFromGeometryRequest(BaseModel):
 
 # Columns a Create model declares but a create writes only when the caller sent them.
 LINK_LAZY_COLUMNS = frozenset({"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
-                               "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter"})
+                               "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
+                               "single_phase_share"})
 BUS_LAZY_COLUMNS = frozenset({"mwh_per_t", "product_value"})
 
 
@@ -262,6 +263,8 @@ class LinkCreate(BaseModel):
     harmonic_source: str | None = None
     harmonic_spectrum: str | None = None
     spectrum_post_filter: bool | None = None
+    # The unbalance screen's input, lazy the same way.
+    single_phase_share: float | None = None
 
     @model_validator(mode="after")
     def _process_unit_ports_state_their_efficiency(self):

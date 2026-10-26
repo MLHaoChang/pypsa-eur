@@ -12,6 +12,7 @@ export const FIELD_LABELS: Record<string, string> = {
   rated_mva: 'Rated apparent power',
   harmonic_source: 'Harmonic source',
   harmonic_spectrum: 'Harmonic spectrum',
+  single_phase_share: 'Single-phase share',
 }
 
 /** The ledger's label for each field its rows point at (DC-02: the grid

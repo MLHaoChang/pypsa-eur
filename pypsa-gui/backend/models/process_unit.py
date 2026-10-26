@@ -6,7 +6,7 @@ Not PyPSA attributes and not Energy Hub tags, so they have their own registry be
 the same lazy-column machinery (`services/adequacy/eh_columns.py`): a project that never writes one never gets the
 column. Kinds are those of `eh_columns`: "bool", "float_nonneg", "tier" (one of CRITICALITY_TIERS or ""),
 "process_role" (one of PROCESS_GENERATOR_ROLES or ""), "text", "harmonic_source" (one of HARMONIC_SOURCES or "")
-and "harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen).
+"harmonic_spectrum" (order:% pairs, checked by gridspine's harmonic screen) and "fraction" (0..1).
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg", "rated_mva": "float_nonneg",
              "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
-             "spectrum_post_filter": "bool"},
+             "spectrum_post_filter": "bool", "single_phase_share": "fraction"},
 }
 
 

@@ -118,7 +118,7 @@ ATTRS_DOC = (
     "(fraction),p_max_pu (fraction),committable (bool),ramp_limit_up (fraction),ramp_limit_down "
     "(fraction),min_up_time (h),min_down_time (h),rated_mva "
     "(MVA),harmonic_source=linear|6-pulse|12-pulse|18-pulse|active-front-end|phase-angle|burst|thyristor-stack,harmonic_spectrum,spectrum_post_filter"
-    " (bool),outage_rate_value (fraction),outage_rate_basis=FOR|EFORd,mttr_hours (h); derived: "
+    " (bool),single_phase_share (fraction),outage_rate_value (fraction),outage_rate_basis=FOR|EFORd,mttr_hours (h); derived: "
     "capital_cost,start_up_cost,throughput_unit,specific_energy_kwh_per_t.\n"
     "Load: carrier,bus*,p_set (MW),q_set (MVAr),sign.\n"
     "ShuntImpedance: bus*,g (S),b (S).\n"
