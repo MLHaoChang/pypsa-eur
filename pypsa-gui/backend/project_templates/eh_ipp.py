@@ -14,6 +14,11 @@ below and shipped as `price_series/` (ticket 02), never market data. Two observe
 (SMARD DE-LU, Energinet DK1; GS-4) ship beside them, attributed and filling nothing until the
 user picks one (`OBSERVED`). ``register(T)`` adds the
 template to ``eh_templates``' registries (``T`` as in ``eh_staged_hubs``); it is called from there.
+
+A create body's ``planning`` {start_year, end_year} builds it for another year (E1d, owner
+E1D-IPP-1): the start year is the solved year and the COD, the case runs to the end year. The
+example's 2030 profiles and shapes and the observed 2024 years are re-dated onto it (hour of year
+kept, 29 Feb dropped) and taken as start-year money, no conversion; the ledger says so.
 """
 from __future__ import annotations
 
@@ -74,19 +79,26 @@ OBSERVED = {
 OBSERVED_YEAR = 2024
 
 
-def snapshots() -> pd.DatetimeIndex:
-    return pd.date_range(f"{YEAR}-01-01", periods=8760, freq="h")
+def snapshots(year: int = YEAR) -> pd.DatetimeIndex:
+    """The year's hours; a leap year's 29 Feb is dropped, so every year has 8760."""
+    idx = pd.date_range(f"{year}-01-01", f"{year + 1}-01-01", freq="h", inclusive="left")
+    return idx if len(idx) == 8760 else idx[~((idx.month == 2) & (idx.day == 29))]
 
 
-def profiles() -> tuple[pd.Series, pd.Series]:
-    """(wind CF, PV CF) for the year at the reference point, from the deterministic synthetic
-    source (`services.profile_gen`; the TS-generators package owns the writers)."""
+def _year(planning) -> int:
+    return YEAR if planning is None else planning.start_year
+
+
+def profiles(year: int = YEAR) -> tuple[pd.Series, pd.Series]:
+    """(wind CF, PV CF) for the example's year at the reference point, from the deterministic
+    synthetic source (`services.profile_gen`; the TS-generators package owns the writers),
+    re-dated onto ``year`` (hour of year kept)."""
     from services.profile_gen import ProfilePoint, generate_profile
 
     point = [ProfilePoint(id="ref", lon=REF_LON, lat=REF_LAT)]
     wind = generate_profile(point, "wind", year=YEAR).series["ref"]
     sun = generate_profile(point, "solar", year=YEAR).series["ref"]
-    idx = snapshots()
+    idx = snapshots(year)
     # A dawn sliver below 0.1 % reads as zero: with half the year dark, a handful of such hours
     # would set the PV median and trip the profile QA's spike rule (`timeseries_spike`).
     pv = sun.to_numpy(dtype=float)
@@ -94,8 +106,9 @@ def profiles() -> tuple[pd.Series, pd.Series]:
     return (pd.Series(wind.to_numpy(dtype=float), index=idx), pd.Series(pv, index=idx))
 
 
-def price_shape(case: str = "base") -> pd.Series:
-    """An illustrative hourly day-ahead price (EUR/MWh, 2030 money, UTC): never market data."""
+def price_shape(case: str = "base", year: int = YEAR) -> pd.Series:
+    """An illustrative hourly day-ahead price (EUR/MWh, 2030 money, UTC): never market data.
+    Another ``year`` gets the same values re-dated (hour of year kept)."""
     wind, sun = profiles()
     idx = wind.index
     h = idx.hour.to_numpy()
@@ -112,7 +125,7 @@ def price_shape(case: str = "base") -> pd.Series:
          + rng.normal(0.0, s["noise"], len(idx)))
     if case == "low":
         p = p * LOW_LEVEL_FACTOR
-    return pd.Series(np.round(p, 2), index=idx, name=SERIES[case])
+    return pd.Series(np.round(p, 2), index=snapshots(year), name=SERIES[case])
 
 
 def price_stats(case: str = "base") -> dict:
@@ -131,12 +144,14 @@ def _price(n, component: str, name: str, technology: str) -> None:
     price_from_pack(n, component, name, technology, version=PACK_VERSION)
 
 
-def build_eh_ipp_hybrid() -> "pypsa.Network":  # noqa: F821
+def build_eh_ipp_hybrid(load_spec=None, planning=None) -> "pypsa.Network":  # noqa: F821
+    """The site for one hourly year: 2030, or the start year of ``planning`` (E1d)."""
     import pypsa
 
+    year = _year(planning)
     n = pypsa.Network()
     n.name = "Renewables IPP with battery"
-    idx = snapshots()
+    idx = snapshots(year)
     n.set_snapshots(idx)
     for c in ("AC", "grid", "wind", "solar", "battery"):
         n.add("Carrier", c, co2_emissions=0.0)
@@ -149,7 +164,7 @@ def build_eh_ipp_hybrid() -> "pypsa.Network":  # noqa: F821
           efficiency=1.0, marginal_cost=0.0)
     n.add("Link", "grid_export", bus0="poi", bus1="grid", carrier="AC", p_nom=EXPORT_MW,
           efficiency=1.0, marginal_cost=0.0)
-    wind, sun = profiles()
+    wind, sun = profiles(year)
     # Forced-size candidates (G5): the investment case counts their capex and the
     # counterfactual (the site without its candidates) is empty.
     for name, carrier, mw, tech in (("wind_farm", "wind", WIND_MW, "onwind"),
@@ -212,9 +227,9 @@ def _placeholder(series: str) -> dict:
     return {"id": series, "version": 1, "hash": "template-placeholder", "source": "template"}
 
 
-def import_tariff() -> dict:
+def import_tariff(year: int = YEAR) -> dict:
     return {"id": "ipp_poi", "name": "POI network charges (illustrative)", "jurisdiction": "DE",
-            "valid_from": f"{YEAR}-01-01",
+            "valid_from": f"{year}-01-01",
             "items": [
                 {"id": "network_charges", "kind": "energy", "unit": "per_kwh",
                  "measured_on": "import",
@@ -223,11 +238,11 @@ def import_tariff() -> dict:
                  "direction": "cost", "periods": [{"name": "all", "rate": 0.0}]}]}
 
 
-def contracts() -> list[dict]:
+def contracts(year: int = YEAR) -> list[dict]:
     return [{"type": "ppa", "id": cid, "kind": "pay_as_produced", "price": price,
              "tenor_years": PPA_TENOR, "seller": SITE_PARTY, "buyer": OFFTAKER,
              "asset_ids": [asset], "share": PPA_SHARE, "settlement": "financial",
-             "suspend_on_negative_price": True, "base_year": YEAR,
+             "suspend_on_negative_price": True, "base_year": year,
              "reference_price": _placeholder(SERIES["base"])}
             for asset, (cid, price) in PPA.items()]
 
@@ -244,43 +259,54 @@ def value_flows() -> dict:
             "export_revenue_to": "site_party"}
 
 
-FINANCE: dict = {
-    "currency": "EUR", "currency_year": YEAR, "price_basis": "nominal",
-    "financial_close": FINANCIAL_CLOSE,
-    "cod_by_asset": {a: COD for a in ("wind_farm", "pv_plant", "bess")},
-    "capex_phasing": [0.4, 0.6], "stage_capex_lead_years": 1, "contingency_share": 0.05,
-    "escalation": {c: ESCALATION for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
-    "degradation_by_asset": DEGRADATION,
-    "analysis_years": ANALYSIS_YEARS,
-    "annualise": False,                          # a full hourly year
-    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
-    "replacement_rule": "part_lifetimes",
-    "terminal_value": {"method": "remaining_life_annuity"},
-    "wacc_nominal": 0.07, "cost_of_equity": 0.09, "inflation": 0.02,
-    # German corporate tax (the DE pack): the municipality's Hebesatz and the battery's
-    # depreciation class, which the BMF AfA tables do not list, are stated assumptions.
-    "tax_pack_id": "eu_de", "hebesatz_pct": HEBESATZ_PCT,
-    # The pack's AfA lives (solar 20, onwind 16 years) stated per asset, the battery's assumed.
-    "depreciation_class_by_asset": {"pv_plant": "afa_20", "wind_farm": "afa_16",
-                                    "bess": BESS_DEPRECIATION},
-    "acquisition_date": COD,
-    "solve_ppa": {"contract_id": "ppa_wind", "target_irr": 0.08, "target_year": ANALYSIS_YEARS},
-}
+def finance(planning=None) -> dict:
+    """The case's inputs: close two years before the COD, the COD the start year, the case to
+    the end year, in start-year money (E1d; None: the example's 2030 to 2055)."""
+    year = _year(planning)
+    analysis = ANALYSIS_YEARS if planning is None else planning.analysis_years
+    cod = f"{year}-01-01"
+    return {
+        "currency": "EUR", "currency_year": year, "price_basis": "nominal",
+        "financial_close": f"{year - 2}-01-01",
+        "cod_by_asset": {a: cod for a in ("wind_farm", "pv_plant", "bess")},
+        "capex_phasing": [0.4, 0.6], "stage_capex_lead_years": 1, "contingency_share": 0.05,
+        "escalation": {c: ESCALATION for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+        "degradation_by_asset": DEGRADATION,
+        "analysis_years": analysis,
+        "annualise": False,                          # a full hourly year
+        "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+        "replacement_rule": "part_lifetimes",
+        "terminal_value": {"method": "remaining_life_annuity"},
+        "wacc_nominal": 0.07, "cost_of_equity": 0.09, "inflation": 0.02,
+        # German corporate tax (the DE pack): the municipality's Hebesatz and the battery's
+        # depreciation class, which the BMF AfA tables do not list, are stated assumptions.
+        "tax_pack_id": "eu_de", "hebesatz_pct": HEBESATZ_PCT,
+        # The pack's AfA lives (solar 20, onwind 16 years) stated per asset, the battery's assumed.
+        "depreciation_class_by_asset": {"pv_plant": "afa_20", "wind_farm": "afa_16",
+                                        "bess": BESS_DEPRECIATION},
+        "acquisition_date": cod,
+        "solve_ppa": {"contract_id": "ppa_wind", "target_irr": 0.08, "target_year": analysis},
+    }
 
 
-def commercial_and_finance() -> dict:
-    """The template's `commercial` and `finance` blocks, validated as the routes store them."""
+FINANCE: dict = finance()
+
+
+def commercial_and_finance(planning=None) -> dict:
+    """The template's `commercial` and `finance` blocks, validated as the routes store them,
+    for ``planning`` (None: the example's)."""
+    year = _year(planning)
     from models.commercial import CommercialConfig
     from models.finance import FinanceInputs
 
     commercial = CommercialConfig.model_validate({
         "poc_link": "grid_import", "export_link": "grid_export", "timezone": "UTC",
-        "site_party": SITE_PARTY, "import_tariff": import_tariff(),
+        "site_party": SITE_PARTY, "import_tariff": import_tariff(year),
         "export_price_ref": _placeholder(SERIES["base"]),
         "import_price_ref": _placeholder(SERIES["base"]),
-        "contracts": contracts(), "value_flows": value_flows()})
+        "contracts": contracts(year), "value_flows": value_flows()})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(FINANCE).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(finance(planning)).model_dump(mode="json")}
 
 
 # ── The shipped price series (ticket 02) ───────────────────────────────────
@@ -288,45 +314,53 @@ def commercial_and_finance() -> dict:
 SERIES_NOTES = ["currency:EUR", "price_basis:real", f"currency_year:{YEAR}", "region:DE-LU"]
 
 
-def series_meta() -> dict:
+def series_meta(year: int = YEAR) -> dict:
     """`price_series/meta.json`: the base shape fills the export, import and PPA references;
-    the two case shapes are minted for the cases (§7) and fill nothing."""
+    the two case shapes are minted for the cases (§7) and fill nothing. Dated and in money of
+    ``year``: every `currency_year` note moves with the case's (`basis_conflicts`)."""
+    redated = ("" if year == YEAR else
+               f" Re-dated from {YEAR} (hour of year kept, 29 Feb dropped; weekdays and holidays "
+               f"fall as in {YEAR}) and taken as {year} money, no conversion.")
     base_targets = ["commercial.export_price_ref", "commercial.import_price_ref",
                     *(f"contract:{cid}.reference_price" for cid, _p in PPA.values())]
     out = []
     for case, label in (("base", "base"), ("low", "low price level (× 0.8)"),
                         ("cannibalised", "deeper solar cannibalisation")):
         out.append({"name": SERIES[case], "file": f"{case}.csv",
-                    "label": f"Illustrative DE-LU day-ahead shape, {label} ({YEAR})",
-                    "source": "illustrative (assumed)", "vintage_year": YEAR,
+                    "label": f"Illustrative DE-LU day-ahead shape, {label} ({year})",
+                    "source": "illustrative (assumed)", "vintage_year": year,
                     "description": "Generated by project_templates/eh_ipp.py; not market data. "
-                                   "Replace it with your own (upload, or ENTSO-E with your token).",
-                    "notes": list(SERIES_NOTES),
+                                   "Replace it with your own (upload, or ENTSO-E with your token)."
+                                   + redated,
+                    "notes": [*SERIES_NOTES[:2], f"currency_year:{year}", *SERIES_NOTES[3:]],
                     "targets": base_targets if case == "base" else []})
     for name, spec in OBSERVED.items():
         out.append({"name": name, "file": spec["file"],
                     "label": f"Observed {spec['region']} day-ahead price {OBSERVED_YEAR}, "
-                             f"re-dated to {YEAR}",
+                             f"re-dated to {year}",
                     "source": f"{spec['attribution']} (CC BY 4.0)", "provider": spec["provider"],
                     "vintage_year": OBSERVED_YEAR,
                     "description": (
                         f"Observed {OBSERVED_YEAR} hourly day-ahead prices, {spec['region']} "
-                        f"({spec['attribution']}). The data changed: re-dated to the {YEAR} "
-                        "calendar (hour of year kept, 29 Feb dropped, UTC kept, so weekdays "
-                        f"shift by one day) and taken as {YEAR} real money (assumed). The "
+                        f"({spec['attribution']}). The data changed: re-dated to the {year} "
+                        "calendar (hour of year kept, 29 Feb dropped, UTC kept, so "
+                        + ("weekdays shift by one day" if year == YEAR else
+                           f"weekdays and holidays fall as in {OBSERVED_YEAR}")
+                        + f") and taken as {year} real money (assumed). The "
                         "price–weather correlation not preserved: the prices are "
                         f"{OBSERVED_YEAR}'s, the template's wind and PV profiles are synthetic. "
                         "Fetched once by project_templates/fetch_ipp_market_series.py."),
-                    "notes": ["currency:EUR", "price_basis:real", f"currency_year:{YEAR}",
+                    "notes": ["currency:EUR", "price_basis:real", f"currency_year:{year}",
                               f"region:{spec['region']}"],
                     "targets": []})
     return {"series": out}
 
 
-def observed_series(name: str) -> pd.Series:
-    """An observed 2024 year on the template's 2030 snapshots: hour of year kept, 29 Feb
-    dropped, UTC kept (so 2030's weekdays fall one day later than 2024's). The values are the
-    source's, unchanged; taking them as 2030 real money is an assumption (the ledger's)."""
+def observed_series(name: str, year: int = YEAR) -> pd.Series:
+    """An observed 2024 year on the template's 2030 snapshots (or ``year``'s): hour of year
+    kept, 29 Feb dropped, UTC kept (so 2030's weekdays fall one day later than 2024's). The
+    values are the source's, unchanged; taking them as 2030 real money is an assumption (the
+    ledger's)."""
     import pathlib
 
     src = pathlib.Path(__file__).parent / TID / "sources" / OBSERVED[name]["source_file"]
@@ -336,7 +370,7 @@ def observed_series(name: str) -> pd.Series:
     values = df["value"].to_numpy(dtype=float)[keep]
     if len(values) != 8760 or (idx[keep].year != OBSERVED_YEAR).any():
         raise ValueError(f"{src.name}: not one full hourly {OBSERVED_YEAR}")
-    return pd.Series(values, index=snapshots(), name=name)
+    return pd.Series(values, index=snapshots(year), name=name)
 
 
 def observed_stats(name: str) -> dict:
@@ -350,27 +384,39 @@ def _write_csv(p: pd.Series, path) -> None:
                   "value": p.to_numpy()}).to_csv(path, index=False)
 
 
-def write_price_series(out_dir) -> None:
+def write_price_series(out_dir, planning=None) -> None:
     import json
     import pathlib
 
+    year = _year(planning)
     d = pathlib.Path(out_dir) / "price_series"
     d.mkdir(parents=True, exist_ok=True)
     for case in SERIES:
-        _write_csv(price_shape(case), d / f"{case}.csv")
+        _write_csv(price_shape(case, year), d / f"{case}.csv")
     for name, spec in OBSERVED.items():
-        _write_csv(observed_series(name), d / spec["file"])
-    (d / "meta.json").write_text(json.dumps(series_meta(), indent=2, sort_keys=True) + "\n")
+        _write_csv(observed_series(name, year), d / spec["file"])
+    (d / "meta.json").write_text(json.dumps(series_meta(year), indent=2, sort_keys=True) + "\n")
 
 
 # ── The ledger and the registration ────────────────────────────────────────
 
-def _ledger() -> list[dict]:
+def _ledger(planning=None) -> list[dict]:
     st = price_stats("base")
+    year = _year(planning)
+    analysis = ANALYSIS_YEARS if planning is None else planning.analysis_years
+    period = ({"item": "planning period", "value": f"{YEAR}, one hourly year (8760 h)",
+               "source": "assumed",
+               "note": "the example is built for 2030 (native horizon until free planning years, "
+                       "E1)"}
+              if planning is None else
+              {"item": "planning period",
+               "value": f"{year}, one hourly year (8760 h); the case runs to {planning.end_year}",
+               "source": "entered",
+               "note": f"the entered start year is the solved year and the COD; financial close "
+                       f"{year - 2}, {analysis} operating years"})
     return [
-        {"item": "planning period", "value": f"{YEAR}, one hourly year (8760 h)",
-         "source": "assumed",
-         "note": "the example is built for 2030 (native horizon until free planning years, E1)"},
+        period,
+        *([] if planning is None else _redated_rows(year)),
         {"item": "site location", "value": "not set", "source": "assumed",
          "note": f"the template invents no pin; profiles are generated at a DE-LU reference "
                  f"point ({REF_LAT} N, {REF_LON} E) until you set it, and regenerated then"},
@@ -407,10 +453,12 @@ def _ledger() -> list[dict]:
            "note": f"{spec['attribution']}, CC BY 4.0; shipped as {name}, filling nothing: pick "
                    "it for the export, import or PPA reference price, or in a case"}
           for name, spec in OBSERVED.items() for ob in (observed_stats(name),)),
-        {"item": f"observed prices re-dated to {YEAR}", "value": "hour of year, 29 Feb dropped",
+        {"item": f"observed prices re-dated to {year}", "value": "hour of year, 29 Feb dropped",
          "source": "assumed",
-         "note": f"the {OBSERVED_YEAR} values are taken as {YEAR} real money; UTC hours kept, so "
-                 "weekdays shift by one day; price–weather correlation not preserved: prices are "
+         "note": f"the {OBSERVED_YEAR} values are taken as {year} real money; UTC hours kept, so "
+                 + ("weekdays shift by one day" if year == YEAR else
+                    f"the weekday and holiday alignment is {OBSERVED_YEAR}'s")
+                 + "; price–weather correlation not preserved: prices are "
                  f"{OBSERVED_YEAR}, the profiles are synthetic"},
         {"item": "network charges on import",
          "value": f"{NETWORK_CHARGE_EUR_PER_MWH:g} EUR/MWh; injection 0 EUR/MWh",
@@ -426,9 +474,9 @@ def _ledger() -> list[dict]:
                  "sheet"},
         {"item": "finance",
          "value": f"{FINANCE['wacc_nominal'] * 100:g} % WACC, {FINANCE['cost_of_equity'] * 100:g} % cost of "
-                  f"equity, {ESCALATION * 100:g} % escalation, {ANALYSIS_YEARS} years",
+                  f"equity, {ESCALATION * 100:g} % escalation, {analysis} years",
          "source": "assumed",
-         "note": f"a nominal, post-tax case in base-year money ({YEAR}), escalated from that year. "
+         "note": f"a nominal, post-tax case in base-year money ({year}), escalated from that year. "
                  f"The defaults pack's {PACK_VERSION} discount rate (7 %) is real and pre-tax, "
                  "so it is not this WACC; the optimisation's discount rate is the WACC (K0)"},
         {"item": "tax", "value": f"German corporate tax (pack eu_de), Hebesatz {HEBESATZ_PCT:g} %",
@@ -442,6 +490,24 @@ def _ledger() -> list[dict]:
         {"item": "cases", "value": "8 planned cases (editable once sensitivities land; make any now "
                                    "with Duplicate)", "source": "template",
          "note": "cases.json beside the template"},
+    ]
+
+
+def _redated_rows(year: int) -> list[dict]:
+    """The ledger rows an entered start year adds (E1d; gatekeeper's plan conditions 2 and 3)."""
+    return [
+        {"item": "money year", "value": f"{year} EUR, no conversion", "source": "assumed",
+         "note": f"the example's {YEAR} money (illustrative shapes, PPA prices and network "
+                 f"charges) and the observed {OBSERVED_YEAR} prices are taken as {year} money, "
+                 f"not converted (owner E1D-IPP-1). The case stays nominal at the same "
+                 f"{ESCALATION * 100:g} % escalation, which now runs from {year}"},
+        {"item": f"illustrative prices and profiles re-dated from {YEAR}",
+         "value": "hour of year kept, 29 Feb dropped", "source": "assumed",
+         "note": f"the example's {YEAR} wind and PV profiles and day-ahead shapes keep their "
+                 f"values; their weekday and holiday alignment is {YEAR}'s, not {year}'s"},
+        {"item": "tariff and PPA dates", "value": f"valid from {year}-01-01, PPA base year {year}",
+         "source": "assumed",
+         "note": f"the example's {YEAR} network charges and PPA prices, re-dated with the series"},
     ]
 
 
@@ -531,6 +597,10 @@ def cases() -> dict:
 def register(T) -> None:
     """Add the IPP template to ``eh_templates``' registries."""
     T.BUILDERS[TID] = build_eh_ipp_hybrid
+    # One hourly year; the case runs its 25 years to 2055 (E1d: a planning entry moves both).
+    T.NATIVE_PLANNING[TID] = T.Planning((YEAR,), YEAR + ANALYSIS_YEARS)
+    T.SINGLE_YEAR[TID] = True
+    T._PLANNED_META[TID] = lambda p, _spec: _meta(p)
     T.STRESS_SCENARIOS[TID] = []
     # No load, so nothing to shed: VoLL is not applicable (spec §8.2) and no shedding slacks
     # are added; a VoLL with no capture would leave the case's served load unknown.
@@ -538,14 +608,21 @@ def register(T) -> None:
     T._SOLVER_CONFIG_BUILT[TID] = commercial_and_finance
     T.PRICE_SERIES[TID] = write_price_series
     T.CASES[TID] = cases
-    T.TEMPLATE_META[TID] = {
+    T.TEMPLATE_META[TID] = _meta()
+
+
+def _meta(planning=None) -> dict:
+    """`eh_template.json` for ``planning`` (None: the example's 2030 to 2055)."""
+    year = _year(planning)
+    analysis = ANALYSIS_YEARS if planning is None else planning.analysis_years
+    return {
         "id": TID,
         "name": "Renewables IPP with battery",
         "description": (
             "A 60 MW wind farm and a 50 MWp PV plant with an optional battery behind one 70 MW "
             "grid connection. Size the battery and weigh PPA against merchant revenue on an "
-            "illustrative day-ahead price over a full hourly 2030. Generation-only; financial "
-            "PPAs and a 25-year investment case."),
+            f"illustrative day-ahead price over a full hourly {year}. Generation-only; financial "
+            f"PPAs and a {analysis}-year investment case."),
         "recommended_archetype": "strong_grid",
         # No load: no bus is critical and no adequacy goal applies (spec §8.2).
         "generation_only": True,
@@ -557,7 +634,7 @@ def register(T) -> None:
         "not_needed": {"loads": "generation-only: export through the POI in section 3"},
         "initial_results_tab": "investment",            # the Investment case view (ticket 05)
         "initial_results_section": "case",
-        "ledger": _ledger(),
+        "ledger": _ledger(planning),
         "study_notes": [
             "One hourly year: the battery is sized against the day-ahead price and the curtailment "
             "it can recover at the export limit.",
