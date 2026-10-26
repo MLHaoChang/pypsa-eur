@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): UX polish: no em dashes in the Read-only and 3D hover copy, no arrows in "Results & reports" and "Go to field ›", wrapped number-field labels align their inputs, and harmonic orders ("h5 2 %") never split across lines.
