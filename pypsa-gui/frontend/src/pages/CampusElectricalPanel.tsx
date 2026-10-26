@@ -26,6 +26,7 @@
 // shows as the new run's: it re-reads the state, warns while the backend says a
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
+import { assetLabel } from './results/investment/financeModel'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
@@ -131,6 +132,8 @@ function CampusPanel({ part }: { part: CampusPart }) {
 
 export default function CampusElectricalPanel() { return <CampusPanel part="inputs" /> }
 export function CampusStudyPanel() { return <CampusPanel part="study" /> }
+const bandEdge = (value: number) => num(value, 3).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '').replace('-', '\u2212')
+
 export function CampusResultsPanel() { return <CampusPanel part="results" /> }
 
 function CampusView({ name, part }: { name: string; part: CampusPart }) {
@@ -597,7 +600,7 @@ function TrafoVerdict({ t, bought }: { t: TransformerSizing; bought: InvestmentR
     <span className="whitespace-nowrap">
       <Tag tone="accent">planned</Tag>{' '}
       <span className="text-muted">
-        (drafted rating {verdict}; bought as {bought.units} × {bought.library_id}{t.n_minus_1 ? ' for N-1' : ''})
+        (drafted rating {verdict}; bought as {bought.units} × <span title={bought.library_id ?? undefined}>{bought.library_id ? assetLabel(bought.library_id) : '—'}</span>{t.n_minus_1 ? ' for N-1' : ''})
       </span>
     </span>
   )
@@ -679,7 +682,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
                     {/* a band with a negative edge reads "−a to b": an en dash beside a minus is hard to read */}
                     {c.limit_min != null && c.limit_max != null
                       ? (c.limit_min < 0
-                        ? `${num(c.limit_min, 3).replace('-', '\u2212')} to ${num(c.limit_max, 3)} ${c.unit ?? ''}`
+                        ? `${bandEdge(c.limit_min)} to ${bandEdge(c.limit_max)} ${c.unit ?? ''}`
                         : `${num(c.limit_min, 3)}–${num(c.limit_max, 3)} ${c.unit ?? ''}`).trim()
                       : `${num(c.limit, 3)} ${c.unit ?? ''}`.trim()}
                   </td>

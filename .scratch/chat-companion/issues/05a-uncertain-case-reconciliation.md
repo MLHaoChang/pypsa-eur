@@ -1,6 +1,6 @@
 # CP-05a — Explicit uncertain-case reconciliation
 
-Status: ready-for-agent
+Status: done (#352, e1adb0db)
 Type: implementation
 Baseline: master `319985014d7cd5b74fbc07bb1ad4975aaffcd6f7` (#351).
 

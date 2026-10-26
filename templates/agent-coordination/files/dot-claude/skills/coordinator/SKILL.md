@@ -90,9 +90,10 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    - live sessions, each with its id and package;
    - owner decisions in force, in the owner's words;
    - open owner questions;
-   - the dashboard's last `ArtifactData` `if_version`, and the routine's trigger id.
+   - each dashboard's link and its datasets' last `ArtifactData` `if_version`, and the routine's trigger id.
 2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for {{REPO}}. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
+   The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` each live session the new id.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
@@ -154,7 +155,7 @@ Merge one PR at a time:
 
 ## Dashboard
 
-The dashboard is a Dashboard-type artifact (link in `docs/agents/roles.md`). Its page is `templates/agent-coordination/dashboard/index.html` in the repo the template came from. All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field says which table shows it:
+The dashboard is a Dashboard-type artifact (link in `docs/agents/roles.md`). It keeps its data, and any state needed to rebuild it, in the artifact itself (uploaded files and `ArtifactData` docs), never only in the scratchpad: the scratchpad goes with the session at rotation. Its page is `templates/agent-coordination/dashboard/index.html` in the repo the template came from. All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field says which table shows it:
 
 | `board` | Fields |
 |---|---|

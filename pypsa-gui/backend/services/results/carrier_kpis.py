@@ -12,12 +12,35 @@ the router already used, so they are intentionally absent from this header.
 """
 from __future__ import annotations
 
+import re
+
 from services.period_utils import (
     period_years_map,
     years_for_period,
 )
 from services.results.load_frames import corrected_marginal_prices
 
+
+
+_RENEWABLE_KW = (
+    "wind", "solar", "ror", "hydro", "geothermal", "wave", "tidal",
+    "pv", "biomass", "biogas", "run-of-river",
+)
+
+
+def _without_hydrogen_words(carrier: str) -> str:
+    """Mask hydrogen words as in profile_shapes._gen_category; keep punctuation."""
+    return re.sub(
+        r'[A-Za-z]+',
+        lambda m: ''.join(' ' if w.lower().startswith('hydrogen') else w
+                          for w in re.split(r'(?<=[a-z])(?=[A-Z])', m[0])),
+        carrier or '',
+    ).lower()
+
+
+def _is_renewable_carrier(name: str) -> bool:
+    carrier = _without_hydrogen_words(name)
+    return any(k in carrier for k in _RENEWABLE_KW)
 
 
 def compute_carrier_kpis(n, *, result_df):
@@ -158,15 +181,8 @@ def compute_carrier_kpis(n, *, result_df):
     # (p_nom − p), which the Curtailment / Dispatch tabs never show. Keeping
     # it here made Load Flow's carrier table disagree with those tabs (e.g.
     # gas "1 017 GWh curtailed" while Curtailment only listed PV spill).
+    # Hydrogen words do not count as renewable.
     CURTAILMENT_SOURCES = {"Generator", "Link"}
-    _RENEWABLE_KW = (
-        "wind", "solar", "ror", "hydro", "geothermal", "wave", "tidal",
-        "pv", "biomass", "biogas", "run-of-river",
-    )
-
-    def _is_renewable_carrier(name: str) -> bool:
-        c = (name or "").lower()
-        return any(k in c for k in _RENEWABLE_KW)
 
     rows: list[dict] = []
     for comp, carrier in sorted(keys):

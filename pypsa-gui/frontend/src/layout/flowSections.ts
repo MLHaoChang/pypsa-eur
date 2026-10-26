@@ -20,7 +20,7 @@ export const SECTION_META: SectionMeta[] = [
   { id: 'profiles', number: 6, label: 'Time series & profiles' },
   { id: 'commercial', number: 7, label: 'Commercial & parties' },
   { id: 'scenarios', number: 8, label: 'Scenarios & optimisation' },
-  { id: 'readiness', number: 9, label: 'Readiness → run' },
+  { id: 'readiness', number: 9, label: 'Readiness and run' },
   { id: 'results', number: 10, label: 'Results → reports' },
 ]
 

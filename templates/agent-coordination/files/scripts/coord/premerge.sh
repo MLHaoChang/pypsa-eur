@@ -262,7 +262,7 @@ verdict_carries() { # verdict_carries <full-sha>: succeeds when an OK at <sha> s
 
 if verdicts=$(command -v gh >/dev/null &&
   gh api "repos/$gh_repo/issues/$pr/comments" --paginate \
-    --jq '.[] | .body | split("\n")[] | capture("^(?<who>GK|UX) (?<v>NOT OK|OK) @(?<sha>[0-9a-f]{7,40})") | [.who, .v, .sha] | @tsv'); then
+    --jq '.[] | {login: .user.login, body: .body}' | python3 "$(dirname "$0")/verdicts.py"); then
   for who in GK UX; do
     mine=$(awk -F'\t' -v w="$who" '$1 == w' <<<"$verdicts")
     if [[ -z $mine ]]; then

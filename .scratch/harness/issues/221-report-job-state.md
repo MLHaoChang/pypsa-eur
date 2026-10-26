@@ -3,8 +3,7 @@
 
 # PR #221 — report worker state and recovery regression
 
-Status: ready-for-human
-Progress: report_job declared in STUDY_KEYS and project_context; no regression test for 409 reset with held worker found; PR #221 not merged
+Status: done (#221, 0f4b9d19)
 Type: task
 
 The owner authorized completing the initial open PRs before CP-03. Cursor's tests-only source `00965f2b46e2d8a100adc2af69d39bdc3b3e8659` failed [Test 38547611378](https://github.com/MLHaoChang/pypsa-eur/actions/runs/38547611378) in backend shard 1: `test_state_dict_keys_match_solver_state_fields` found the undeclared `report_job` key. The strict guard is preserved.

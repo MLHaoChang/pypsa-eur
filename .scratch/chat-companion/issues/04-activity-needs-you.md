@@ -1,6 +1,6 @@
 # CP-04 — Activity / Needs-you
 
-Status: ready-for-human
+Status: done (#309, 07f90f23)
 Progress: Activity observer shipped (release note); issue itself lists durable recovery, native evidence navigation and real worker journeys as incomplete
 Type: implementation
 Baseline: master `5711a6fa0116731ab61cfa2f757ef2d2a5540703`

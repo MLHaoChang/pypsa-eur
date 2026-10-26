@@ -3654,6 +3654,12 @@ def get_profile_readiness(project_id: str) -> dict:
     return _profile_route(_h, proj=_authorized_project(project_id))
 
 
+def compare_profiles(project_id: str, a: str, b: str, component: str | None = None) -> dict:
+    from routers.profiles import compare_profiles as _h
+    return _profile_route(_h, a=a, b=b, component=component,
+                          proj=_authorized_project(project_id))
+
+
 def generate_renewable_profile(project_id: str, points: list | None = None,
                                technology: str = "",
                                preset: str | None = None,
@@ -7940,6 +7946,7 @@ DISPATCHERS: dict[str, Any] = {
     "preview_renewable_profile": preview_renewable_profile,
     "list_pending_profiles": list_pending_profiles,
     "get_profile_readiness": get_profile_readiness,
+    "compare_profiles": compare_profiles,
     "generate_renewable_profile": generate_renewable_profile,
     "apply_generated_profile": apply_generated_profile,
     "apply_generated_profiles": apply_generated_profiles,

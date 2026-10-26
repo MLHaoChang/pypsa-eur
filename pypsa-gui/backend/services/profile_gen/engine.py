@@ -257,6 +257,10 @@ def generate_profile(
     pts = _normalize_points(points)
 
     frame, meta_extra = source_fn(pts, tech, params, year)
+    if "losses" in params or "derate" in params:
+        from services.profile_gen.tuning import post_source
+
+        frame = post_source(frame, tech, params)
     if res != "hourly":
         frame = _aggregate(frame, res)
 
@@ -280,6 +284,13 @@ def generate_profile(
         "atlite_version": None,  # the atlite source overwrites this via extra
     }
     meta.update(meta_extra)
+    if "tuning" in params:
+        from services.profile_gen.tuning import ignored_by_source
+
+        meta["tuning"] = params["tuning"]
+        ignored = ignored_by_source(tech, params["tuning"], source)
+        if ignored:
+            meta["tuning_not_applied"] = ignored
     return ProfileResult(series=frame, meta=meta)
 
 

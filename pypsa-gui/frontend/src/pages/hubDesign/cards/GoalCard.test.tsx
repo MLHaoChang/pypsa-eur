@@ -133,7 +133,7 @@ describe('GoalCard voll line', () => {
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
   })
 
-  it('has no Run of its own: the study runs from Readiness → run', async () => {
+  it('has no Run of its own: the study runs from Readiness and run', async () => {
     mount()
     await screen.findByTestId('hub-goal-run-hint')
     expect(screen.queryByTestId('hub-goal-run')).toBeNull()

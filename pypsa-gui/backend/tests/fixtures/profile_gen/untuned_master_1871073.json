@@ -1,0 +1,60 @@
+{
+  "source_commit": "1871073c9d583b0013010e574b81ea339080eee3",
+  "source_module": "pypsa-gui/backend/services/profile_gen/engine.py",
+  "request": {
+    "points": [
+      [
+        "g",
+        8.0,
+        50.0
+      ]
+    ],
+    "preset": "default",
+    "params": {
+      "preset": "default"
+    },
+    "year": 2023,
+    "resolution": "hourly",
+    "source": "synthetic",
+    "now": "2026-01-01T00:00:00+00:00"
+  },
+  "index": {
+    "start": "2023-01-01T00:00:00",
+    "periods": 8760,
+    "frequency": "h",
+    "timezone": null
+  },
+  "columns": [
+    "g"
+  ],
+  "capture_versions": {
+    "numpy": "2.4.6",
+    "pandas": "2.3.3"
+  },
+  "profiles": {
+    "wind": {
+      "csv_sha256_at_capture": "36bdfa9946fd2440cdb56bc0dc4365263fb7593cd5c44b817186bec69f995b0b",
+      "values_sha256": "fa355ccd6f24a822a8dde256e7bac107a371315d27eab575aef266bfb226b19a",
+      "shape": [
+        8760,
+        1
+      ],
+      "dtype": "float64"
+    },
+    "solar": {
+      "csv_sha256_at_capture": "269467b9299a19eea1d7391e61ce39262b43a7665d366b66ec991a88692faa5c",
+      "values_sha256": "78723ad625a839f9cd7d464945f7c247aa9f654ccddef5e744d25c45b047a71b",
+      "shape": [
+        8760,
+        1
+      ],
+      "dtype": "float64"
+    }
+  },
+  "comparison": {
+    "rtol": 1e-12,
+    "atol": 0,
+    "equal_nan": false
+  },
+  "note": "Frozen full-year float64 values from the original master, not generated from the implementation under test. CSV hashes are capture provenance, not cross-machine test assertions."
+}

@@ -1398,6 +1398,18 @@
     "task_unreadable": {
       "surface": "inline",
       "why": "Task tools cannot read a valid durable checkpoint. The assistant reports that the checkpoint needs repair instead of creating completion evidence or replaying work."
+    },
+    "invalid_params": {
+      "surface": "inline",
+      "why": "A profile tuning setting has the wrong type or is outside its stated bounds. The per-call message names the field and allowed values; correct the parameters before generating."
+    },
+    "invalid_compare_side": {
+      "surface": "inline",
+      "why": "The profile comparison side is malformed or needs a component/point selection. The per-call message lists the supported side forms; no write or conversation recovery is needed."
+    },
+    "not_a_shaped_profile": {
+      "surface": "inline",
+      "why": "The requested shaped artifact has no calibration receipt. Select a calibrated artifact or use pending for an unshaped candidate; no network state changed."
     }
   }
 }

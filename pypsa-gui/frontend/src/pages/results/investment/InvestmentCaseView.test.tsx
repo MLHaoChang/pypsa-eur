@@ -273,7 +273,8 @@ describe('InvestmentCaseView', () => {
     expect(gate.textContent).toMatch(/discount rate not established/)
 
     expect(screen.getByTestId('ic-counterfactual-statement').textContent).toMatch(/has a counterfactual/)
-    expect(screen.getByTestId('ic-project-flags').textContent).toMatch(/load_shed_excluded/)
+    expect(screen.getByTestId('ic-project-flags').textContent).toContain('The comparison excludes 1.5 MWh of shed load.')
+    expect(screen.getByTestId('ic-project-flags').textContent).toContain('The sampled operating cash is scaled to a full year by a factor of 1.2.')
 
     expect(screen.getByTestId('ic-case-section-tax').getAttribute('data-status')).toBe('not_established')
     expect(screen.getByTestId('ic-case-section-project').getAttribute('data-status')).toBe('ok')
