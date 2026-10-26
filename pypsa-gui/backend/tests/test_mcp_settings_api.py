@@ -6,8 +6,8 @@ Chat harness issue 19, slice 2 — the MCP server settings routes
     PUT    /api/chat/settings/mcp/servers/{id}
     DELETE /api/chat/settings/mcp/servers/{id}
     POST   /api/chat/settings/mcp/servers/{id}/test
-    PUT    /api/chat/settings/mcp/servers/{id}/keys/{name}
-    DELETE /api/chat/settings/mcp/servers/{id}/keys/{name}
+    PUT    /api/chat/settings/mcp/servers/{id}/keys/{key_name}
+    DELETE /api/chat/settings/mcp/servers/{id}/keys/{key_name}
 
 Super-admin only, like the LLM keys. The web adds and edits http entries
 only; stdio entries are written by hand and given back as they were. The

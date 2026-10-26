@@ -687,7 +687,7 @@ def post_llm_profile_test(
 # gives it back as it was. A bearer slot is derived here
 # (`mcp_client.key_slot`), for the same reason `ProfileIn` carries no
 # `key_env`: a client-chosen slot would let a server be pointed at another
-# server's credential. Values travel only through the `/keys/{name}` routes
+# server's credential. Values travel only through the `/keys/{key_name}` routes
 # into `app_secrets`; no response carries one.
 
 _MCP_TIER = Literal["read", "write", "destructive", "execution", "execution_long_running"]
