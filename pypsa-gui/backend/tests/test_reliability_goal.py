@@ -174,6 +174,18 @@ def test_eh_request_fills_omitted_fields_and_names_overrides():
                        "target_lole_h": "override", "ens_cap_permyriad": "stored"}
 
 
+def test_the_eh_study_takes_the_stored_ens_over_the_templates():
+    # C7: a stored and a template ENS target disagree; the run uses the stored one.
+    template = {"pack_overrides": {"ens_cap_permyriad": 3.0}}
+    body, sources = G.eh_request_with_goal(
+        EhStudyRequest(), G.effective_goal({"ens_cap_permyriad": 7.0}, template))
+    assert body.pack_overrides["ens_cap_permyriad"] == 7.0
+    assert sources["ens_cap_permyriad"] == "stored"
+    body, sources = G.eh_request_with_goal(EhStudyRequest(), G.effective_goal({}, template))
+    assert (body.pack_overrides["ens_cap_permyriad"], sources["ens_cap_permyriad"]) \
+        == (3.0, "template")
+
+
 def test_eh_request_leaves_the_pack_defaults_alone_without_a_goal():
     body, sources = G.eh_request_with_goal(EhStudyRequest(), G.effective_goal({}, None))
     assert body.archetype == "strong_grid"
@@ -279,3 +291,72 @@ def test_a_bundle_with_an_invalid_goal_imports_and_names_the_drop(
     assert (live["target_lole_h"], live["mc_draws"], live["site_archetype"]) == (None, 300, None)
     # PUT refuses the same value.
     assert client.put(CONFIG_URL, json={"target_lole_h": -1}).status_code == 422
+
+
+@pytest.mark.parametrize("module", ["test_adequacy_coupling_endpoint", "test_adequacy_margin_loop"])
+def test_each_loop_takes_target_and_draws_from_the_goal(
+        client, install_network, session_ctx, monkeypatch, module):
+    """C3/C6 through the endpoint: an omitted target is the goal's h/yr on
+    the network's horizon basis, omitted draws the goal's; explicit wins."""
+    import importlib
+
+    from services.adequacy.metrics import horizon_years
+
+    m = importlib.import_module(f"tests.{module}")
+    stubs = m._Stubs(lole_seq=[0.0]) if "coupling" in module else m._Stubs()
+    m._install_stubs(monkeypatch, stubs)
+    m._setup(client, install_network)
+    r = client.post(m.LOOP_URL, json={"seed": m.SEED, "max_solves": 1})
+    assert r.status_code == 422, r.text
+    assert "Scenarios & optimisation" in str(r.json()["detail"])
+
+    # h/yr; the test network spans 4 hours, so a large one clears the floor.
+    _put(client, target_lole_h=500.0, mc_draws=m.DRAWS)
+    nyears = float(horizon_years(session_ctx(client).network))
+    r = client.post(m.LOOP_URL, json={"seed": m.SEED, "max_solves": 1})
+    assert r.status_code == 200, r.text
+    assert r.json()["target_lole_h"] == pytest.approx(500.0 * nyears)
+    assert (r.json()["draws"], r.json()["goal_sources"]) == (
+        m.DRAWS, {"target_lole_h": "stored", "mc_draws": "stored"})
+    m._poll(client)
+
+    r = client.post(m.LOOP_URL, json={"seed": m.SEED, "max_solves": 1,
+                                      "target_lole_h": 0.5, "draws": 8})
+    assert r.status_code == 200, r.text
+    assert (r.json()["target_lole_h"], r.json()["draws"]) == (0.5, 8)
+    assert r.json()["goal_sources"] == {"target_lole_h": "override", "mc_draws": "override"}
+    m._poll(client)
+
+
+def test_the_assistant_tools_default_to_the_goal(install_network, monkeypatch):
+    """C4: the chat tools need no archetype or target; the stored goal fills
+    them and the result names each source, an explicit value wins."""
+    import dataclasses
+    import time
+
+    from fastapi import HTTPException
+
+    from services import chat_tools as T
+    from services.pypsa_service import PyPSAService
+    from tests.test_energy_hub_study_http import _install_stub
+    from tests.test_energy_hub_study_http import _network as eh_network
+
+    install_network(eh_network())
+    state = PyPSAService.get_solver_state()
+    state["solver_config"] = dataclasses.replace(
+        state["solver_config"], solver_name="highs", voll=150.0)
+    with pytest.raises(HTTPException) as exc:
+        T.run_coupling_loop()
+    assert "Scenarios & optimisation" in str(exc.value.detail)
+
+    _install_stub(monkeypatch)
+    state["solver_config"] = dataclasses.replace(
+        state["solver_config"], site_archetype="weak_flexible")
+    stages = ["apply_pack", "ens_solve", "assemble"]
+    out = T.run_eh_study(stages=stages)
+    assert (out["archetype"], out["goal_sources"]["site_archetype"]) == ("weak_flexible", "stored")
+    deadline = time.time() + 10
+    while T.get_adequacy_results("eh_study").get("status") == "running" and time.time() < deadline:
+        time.sleep(0.02)
+    out = T.run_eh_study(archetype="strong_grid", stages=stages)
+    assert (out["archetype"], out["goal_sources"]["site_archetype"]) == ("strong_grid", "override")

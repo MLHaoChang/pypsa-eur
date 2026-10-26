@@ -181,6 +181,19 @@ def loop_goal(body: Any, goal: dict, nyears: float | None) -> tuple[float | None
     return target, int(draws), {k: sources[k] for k in ("target_lole_h", "mc_draws")}
 
 
+def active_loop_goal(body: Any, solver_state: dict) -> tuple[float | None, int, dict[str, str]]:
+    """`loop_goal` for the open project: its goal on the live network's
+    horizon (read only when the request leaves the target to the goal)."""
+    from services.adequacy.metrics import horizon_years
+    from services.pypsa_service import PyPSAService
+
+    nyears = None
+    if getattr(body, "target_lole_h", None) is None:
+        n = PyPSAService.get_network()
+        nyears = float(horizon_years(n)) if n is not None else None
+    return loop_goal(body, active_goal(solver_state), nyears)
+
+
 def stored_config(project_dir) -> dict | None:
     """A project's solver config as a dict: the live one when it is the open
     project, else its saved ``solver_config.json``; None when neither reads."""

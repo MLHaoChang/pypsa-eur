@@ -5,6 +5,7 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 from models.commercial import CommercialConfig
+from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS
 
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
 # spread-then-override idiom can actually un-set a previously-typed value).
@@ -640,7 +641,7 @@ class SolverConfigSchema(BaseModel):
     # allowed shortfall in h/yr (finite, ≥ 0), the MC draws (a strict int,
     # 1..mc.MAX_DRAWS) and the site type. None = not set.
     target_lole_h: float | None = Field(default=None, ge=0, allow_inf_nan=False)
-    mc_draws: StrictInt | None = Field(default=None, ge=1, le=2000)
+    mc_draws: StrictInt | None = Field(default=None, ge=1, le=_MC_MAX_DRAWS)
     site_archetype: Literal["strong_grid", "weak_flexible", "off_grid"] | None = None
     # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
     # Firm-capacity standard as a FRACTION (0.15 == 15 %); None/0 = off.

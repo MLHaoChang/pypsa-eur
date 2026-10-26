@@ -130,11 +130,8 @@ def start_margin_loop(
     # ── the synchronous 422 set (§2.4) ────────────────────────────────────
     # W3b-R: an omitted target or draws is the project's one stored goal
     # (its h/yr target on this network's horizon basis).
-    from services.reliability_goal import active_goal, loop_goal
-    _n = PyPSAService.get_network() if getattr(body, "target_lole_h", None) is None else None
-    target, draws, goal_sources = loop_goal(
-        body, active_goal(solver_state),
-        float(horizon_years(_n)) if _n is not None else None)
+    from services.reliability_goal import active_loop_goal
+    target, draws, goal_sources = active_loop_goal(body, solver_state)
     try:
         target = float(target) if target is not None else None
     except (TypeError, ValueError):
