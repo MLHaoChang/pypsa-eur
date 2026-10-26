@@ -53,9 +53,9 @@ import numpy as np
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static.harmonics import H_MAX
 from gridspine.static.island_sc_seq import c_factor
 
-H_MAX = 50
 DH = 0.1
 #: Short-circuit cases in the order they are scanned.
 CASES = ("max", "min", "normal")
@@ -85,8 +85,8 @@ LEDGER = (
     "transformers at their rated ratio (no off-nominal correction where a bus's kV differs from the "
     "winding's), without the magnetising branch",
     "a peak at or above h_max is not reported (the scan has no point beyond it)",
-    "a cable drafted from a PyPSA project converts b to C at 50 Hz (gridspine/producers/campus.py), so "
-    "on a 60 Hz project its C is 1.2 times too high until that is fixed",
+    "a cable drafted from a PyPSA project converts b to C at a fixed European system frequency "
+    "(gridspine/producers/campus.py), so on a 60 Hz project its C is 1.2 times too high until that is fixed",
 )
 
 SCAN_COLUMNS = ("case", "cap_state", "h", "f_hz", "r_ohm", "x_ohm", "z_ohm", "label")
