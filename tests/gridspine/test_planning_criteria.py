@@ -440,10 +440,30 @@ def test_a_kv_level_no_profile_band_covers_keeps_the_assumed_band():
     assert row["stage2_verdict"] == "pass"
 
 
-@pytest.mark.parametrize("bad", [{"name": "x", "voltage_bands": []}, "test_band", {"title": "no name"}])
-def test_a_bad_profile_is_refused(bad):
+def test_the_walk_moves_toward_the_profile_band():
     net = _net()
-    with pytest.raises(ContractError, match="profile"):
+    controls = Controls(switched_shunts=("SH1",))
+    today, _ = _screen(net, _set(net), controls=controls)
+    res, _ = _screen(net, _set(net), controls=controls, profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert _one(today, PARALLEL[1])["remedial"] == "none"      # 0.946 pu is inside 0.9-1.1
+    row = _one(res, PARALLEL[1])
+    assert row["remedial"].startswith("SH1 +")                  # but not inside 0.95-1.05
+    assert row["stage2_verdict"] == "pass" and row["stage2_min_vm_pu"] >= 0.95
+
+
+def _malformed():
+    p = load_grid_code("generic_assumed", raw=True)
+    p["voltage_bands"][0]["v_min"] = 1.05                       # v_min above 1
+    p["name"] = "broken"
+    return p
+
+
+@pytest.mark.parametrize("bad, match", [(_malformed(), "v_min < 1 < v_max"), ("test_band", "profile"),
+                                        ({"title": "no name"}, "profile")])
+def test_a_bad_profile_is_refused_before_the_base_solve(bad, match, monkeypatch):
+    net = _net()
+    monkeypatch.setattr(planning_criteria.pp, "runpp", lambda *a, **k: pytest.fail("solved"))
+    with pytest.raises(ContractError, match=match):
         _screen(net, _set(net), profile=bad)
 
 

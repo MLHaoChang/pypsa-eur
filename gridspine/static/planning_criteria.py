@@ -107,7 +107,8 @@ PLANNING_LEDGER = (
     "the selected grid-code profile's continuous voltage band for its nominal kV "
     f"(v_min/v_max; v_max_30min is not judged), else the assumed [{V_MIN_PU}, {V_MAX_PU}] pu "
     "band of static/contingency.py; the report names the profile, or says assumed, "
-    "and counts the buses on each, "
+    "and counts the buses on each; the profile's campus_voltage (the design "
+    "band for buses inside a campus) is not applied by this screen; "
     "after the named on-load tap changers and switched shunts walk one step at "
     "a time to lower (voltage excursion, worst overload, steps moved)",
     "stage 2 models no redispatch: a branch above "
@@ -346,19 +347,19 @@ def _bands(net, judged, profile: dict | None) -> tuple:
     """``({bus name: (v_min, v_max)}, {bus name: source})`` for the ``judged``
     buses: the profile's continuous band for each bus's ``vn_kv``, else the
     assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no band covering that kV)."""
-    bands, used = {}, {}
+    bands, used, by_kv = {}, {}, {}
     for b in judged:
         name, kv = str(net.bus.at[b, "name"]), float(net.bus.at[b, "vn_kv"])
-        band = None
-        if profile is not None:
-            try:
-                band = band_for(profile, kv)
-            except ContractError:
-                band = None
-        if band is None:
-            bands[name], used[name] = (V_MIN_PU, V_MAX_PU), (kv, None)
-        else:
-            bands[name], used[name] = (float(band["v_min"]), float(band["v_max"])), (kv, band)
+        if kv not in by_kv:
+            band = None
+            if profile is not None:
+                try:
+                    band = band_for(profile, kv)
+                except ContractError:   # no profile band covers this kV
+                    band = None
+            by_kv[kv] = ((V_MIN_PU, V_MAX_PU) if band is None
+                         else (float(band["v_min"]), float(band["v_max"])), band)
+        bands[name], used[name] = by_kv[kv][0], (kv, by_kv[kv][1])
     return bands, used
 
 
