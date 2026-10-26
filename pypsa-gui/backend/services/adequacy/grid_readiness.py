@@ -105,6 +105,8 @@ RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
 #: The harmonic row's THD (or, with no THD limit, its worst order) against its limit. The verdict also reads
 #: the per-order limits, which the row does not store as a scalar.
 RULE_HARMONIC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The flicker row's Pst (or, with no Pst limit, its Plt) against its limit. The verdict reads both.
+RULE_FLICKER = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 #: The oscillation row's after-mitigation value only (the before verdict also
 #: reads the band of concern, which is not a scalar): in band, ≤ the limit.
 RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
@@ -601,6 +603,100 @@ def _harmonic_row(inp: _Inputs) -> dict:
     return row
 
 
+_FLICKER_SCREENING = ("a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, "
+                      "Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the "
+                      "planning level; S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated "
+                      "by up to 1.1; above the limit a flicker-meter study is needed")
+
+
+def _flicker_row(inp: _Inputs) -> dict:
+    """The flicker severity the process units cause at the PoC (grid-to-process issue 17,
+    ``gridspine.static.flicker``): every unit lumped at the PoC, S_k from ``_poc_sk_mva``, judged on whichever
+    of ``pst_limit`` and ``plt_limit`` the profile sets."""
+    rid, req = "flicker", "Flicker severity at the PoC from the site's stepping loads"
+    unit_target = _target("assets", "Link", None, "flicker_step_mva")
+    try:
+        from gridspine.drivers.campus_study import flicker_units
+        from gridspine.static import flicker as fl
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The flicker screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_FLICKER, limit=None, unit="Pst", source=note, project_value=None,
+                    verdict="unknown", assumed=True, note=note, section="assets", target=unit_target)
+    limits, cited = fl.limits_from_profile(inp.profile)
+    if not cited:
+        return _row(rid, req, rule=RULE_FLICKER, limit=None, unit="Pst",
+                    source=inp.profile_error or "The grid code sets no flicker limit", project_value=None,
+                    verdict="unknown", assumed=True, note="The grid code sets no flicker limit",
+                    section="assets", target=unit_target)
+    lim_assumed = any(c["source"] != "code" for c in cited)
+    by_pst = limits.pst is not None
+    limit, unit = (limits.pst, "Pst") if by_pst else (limits.plt, "Plt")
+    part = {"pst_limit": "Pst", "plt_limit": "Plt"}
+    source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
+    units = flicker_units(inp.n, "PoC") if inp.n is not None else None
+    if units is None or units.empty:
+        return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True,
+                    note="No process unit on this project: the screen reads each unit's Largest power step and "
+                         "Changes per minute",
+                    section="assets", target=_target("assets", "Link", None, "eh_process"))
+    sk = _poc_sk_mva(inp.n)
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    if sk is None:
+        return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True, note="No short-circuit level at the point of connection",
+                    section="assets",
+                    target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                                   "eh_sk_mva"))
+    labels = {"flicker_step_mva": "Largest power step", "flicker_changes_per_min": "Changes per minute"}
+    for rec in units.to_dict("records"):
+        for field, col in (("flicker_step_mva", "step_mva"), ("flicker_changes_per_min", "changes_per_min")):
+            v = _num(rec[col])
+            if v is not None and v < 0:
+                # One unit's malformed stored input reads as unknown here, not a failed scorecard.
+                return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source,
+                            project_value=None, verdict="unknown", assumed=True,
+                            note=f"{rec['unit']}: {labels[field]} must be 0 or more, got {v:g}", section="assets",
+                            target=_target("assets", "Link", rec["unit"], field))
+    study = fl.flicker_table(units, {"PoC": sk}, limits)
+    poc = study.pocs.iloc[0]
+    by_unit = study.units.set_index("unit")
+    missing, outside = list(poc["no_input_units"]), list(poc["outside_range_units"])
+    notes, first = [], None
+    for name in missing:
+        u = by_unit.loc[name]
+        fields = [f for f, v in (("flicker_step_mva", u["step_mva"]), ("flicker_changes_per_min",
+                                                                       u["changes_per_min"])) if _num(v) is None]
+        first = first or (name, fields[0])
+        notes.append(f"{name}: " + " and ".join(labels[f] for f in fields)
+                     + (" is" if len(fields) == 1 else " are") + " not set")
+    for name in outside:
+        u = by_unit.loc[name]
+        too_fast = 60.0 / u["changes_per_min"] < fl.MIN_INTERVAL_S if u["changes_per_min"] else False
+        first = first or (name, "flicker_changes_per_min" if too_fast else "flicker_step_mva")
+        notes.append(f"{name}: outside the analytic method ({u['note']})")
+    known = study.units.dropna(subset=["pst"])
+    if first is None and not known.empty:
+        first = (known.loc[known["pst"].idxmax(), "unit"], "flicker_step_mva")
+    target = _target("assets", "Link", first[0] if first else None, first[1] if first else "flicker_step_mva")
+    p, plt = _num(poc["pst"]), _num(poc["plt"])
+    if p is not None:
+        notes.insert(0, f"Pst {p:.4g}" + (f" (limit {limits.pst:g})" if by_pst else "")
+                     + f", Plt {plt:.4g}" + (f" (limit {limits.plt:g})" if limits.plt is not None else ""))
+    if limits.pst is None or limits.plt is None:
+        notes.append(f"judged on {unit} only: the grid code sets no {'Plt' if by_pst else 'Pst'} limit")
+    if missing or outside:
+        notes.append("a unit without its inputs or outside the method blocks a pass")
+    notes.append(f"S_k {sk:g} MVA; {_FLICKER_SCREENING}")
+    verdict = {"pass": "pass", "fail": RULE_FLICKER["otherwise"]}.get(poc["verdict"], "unknown")
+    row = _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source,
+               project_value=p if by_pst else plt, verdict=verdict, assumed=lim_assumed or fault_assumed,
+               note="; ".join(notes), section="assets", target=target)
+    row["flicker"] = {"sk_mva": sk, "pst": p, "plt": plt, "pst_limit": limits.pst, "plt_limit": limits.plt,
+                      "no_input_units": missing, "outside_range_units": outside}
+    return row
+
+
 def _poc_sk_mva(n) -> float | None:
     if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
         return None
@@ -951,7 +1047,8 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _reactive_row(inp), *_support_rows(inp),
+            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _flicker_row(inp),
+            _reactive_row(inp), *_support_rows(inp),
             *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),

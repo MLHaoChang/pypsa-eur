@@ -980,3 +980,123 @@ def test_the_row_equals_the_campus_studys_harmonic_csv(tmp_path):
     assert row["harmonics"]["thd_pct"] == pytest.approx(poc["thd_pct"], rel=1e-9)
     assert row["harmonics"]["worst_u_h_pct"] == pytest.approx(poc["worst_u_h_pct"], rel=1e-9)
     assert row["project_value"] == pytest.approx(poc["thd_pct"], rel=1e-9)
+
+
+# ── flicker severity (grid-to-process issue 17, PR 2) ───────────────────────
+
+
+def _flicker_site(step=20.0, rate=2.0, sk=1000.0):
+    """A grid PoC feeding one process unit, a burst-fired heater."""
+    n = _harmonic_site(source="burst", sk=sk)
+    n.links["flicker_step_mva"] = [math.nan, step]
+    n.links["flicker_changes_per_min"] = [math.nan, rate]
+    return n
+
+
+def _flicker_row_of(tmp_path, n, profile=PROFILE, **kw):
+    return _rows(G.grid_readiness(tmp_path, n, profile, **kw))["flicker"]
+
+
+def _profile_without(tmp_path, *keys):
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code(PROFILE, raw=True)
+    for k in keys:
+        p.pop(k)
+    codes = tmp_path / "codes"
+    codes.mkdir(exist_ok=True)
+    name = "no_" + "_".join(keys)
+    (codes / f"{name}.yaml").write_text(json.dumps(p))
+    return name, (codes,)
+
+
+def test_the_flicker_row_follows_the_harmonic_row(tmp_path):
+    ids = [r["id"] for r in G.grid_readiness(tmp_path, _flicker_site(), PROFILE)["rows"]]
+    assert ids.index("flicker") == ids.index("harmonic_distortion") + 1
+
+
+def test_without_a_flicker_limit_the_row_is_unknown(tmp_path):
+    name, dirs = _profile_without(tmp_path, "pst_limit", "plt_limit")
+    row = _flicker_row_of(tmp_path, _flicker_site(), name, profile_dirs=dirs)
+    assert row["verdict"] == "unknown" and row["limit"] is None and row["project_value"] is None
+    assert row["note"] == "The grid code sets no flicker limit" and row["section"] == "assets"
+
+
+def test_a_burst_heater_over_the_limit_warns(tmp_path):
+    row = _flicker_row_of(tmp_path, _flicker_site())
+    assert row["verdict"] == "warn" and row["limit"] == 0.8 and row["unit"] == "Pst"
+    assert row["project_value"] == pytest.approx(0.8963, abs=1e-4) == row["flicker"]["pst"]
+    assert row["source"].count("61000-3-7") == 2 and "Pst: " in row["source"] and "; Plt: " in row["source"]
+    assert "c factor" in row["note"] and row["assumed"] is True
+    assert row["target"] == {**row["target"], "entity": "compressor", "field": "flicker_step_mva"}
+
+
+@pytest.mark.parametrize("step, rate", [(10.0, 2.0), (20.0, 0.5), (0.0, 2.0)])
+def test_a_smaller_step_a_lower_rate_or_a_steady_load_passes(tmp_path, step, rate):
+    assert _flicker_row_of(tmp_path, _flicker_site(step, rate))["verdict"] == "pass"
+
+
+def test_doubling_the_fault_level_halves_the_rows_pst(tmp_path):
+    a = _flicker_row_of(tmp_path, _flicker_site(sk=1000.0))["project_value"]
+    b = _flicker_row_of(tmp_path, _flicker_site(sk=2000.0))["project_value"]
+    assert abs(b - a / 2) < 1e-9
+
+
+@pytest.mark.parametrize("step, rate, field, note", [
+    (math.nan, 2.0, "flicker_step_mva", "compressor: Largest power step is not set"),
+    (20.0, math.nan, "flicker_changes_per_min", "compressor: Changes per minute is not set"),
+    (math.nan, math.nan, "flicker_step_mva", "compressor: Largest power step and Changes per minute are not set"),
+])
+def test_a_unit_without_its_flicker_inputs_blocks_a_pass(tmp_path, step, rate, field, note):
+    row = _flicker_row_of(tmp_path, _flicker_site(step, rate))
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"].startswith(note) and row["flicker"]["no_input_units"] == ["compressor"]
+    assert row["target"] == {**row["target"], "entity": "compressor", "field": field}
+
+
+def test_a_unit_outside_the_analytic_method_is_unknown_never_pass(tmp_path):
+    row = _flicker_row_of(tmp_path, _flicker_site(step=1.0, rate=120.0))
+    assert row["verdict"] == "unknown" and "flicker-meter study" in row["note"]
+    assert row["target"]["field"] == "flicker_changes_per_min"
+
+
+def test_a_negative_stored_input_makes_the_row_unknown(tmp_path):
+    row = _flicker_row_of(tmp_path, _flicker_site(step=-1.0))
+    assert row["verdict"] == "unknown" and row["note"] == "compressor: Largest power step must be 0 or more, got -1"
+    assert row["target"] == {**row["target"], "entity": "compressor", "field": "flicker_step_mva"}
+
+
+def test_without_a_fault_level_the_flicker_row_is_unknown(tmp_path):
+    row = _flicker_row_of(tmp_path, _flicker_site(sk=math.nan))
+    assert row["verdict"] == "unknown" and row["target"]["field"] == "eh_sk_mva"
+    assert row["note"] == "No short-circuit level at the point of connection"
+
+
+def test_without_a_process_unit_the_flicker_row_is_unknown(tmp_path):
+    n = _flicker_site()
+    n.links["eh_process"] = [False, False]
+    n.links["flicker_step_mva"] = [math.nan, math.nan]
+    row = _flicker_row_of(tmp_path, n)
+    assert row["verdict"] == "unknown" and "No process unit" in row["note"]
+    assert row["target"]["field"] == "eh_process"
+
+
+def test_with_only_a_plt_limit_the_row_says_so(tmp_path):
+    name, dirs = _profile_without(tmp_path, "pst_limit")
+    row = _flicker_row_of(tmp_path, _flicker_site(step=15.0), name, profile_dirs=dirs)
+    assert row["unit"] == "Plt" and row["limit"] == 0.6 and row["verdict"] == "warn"
+    assert "judged on Plt only: the grid code sets no Pst limit" in row["note"]
+
+
+def test_the_flicker_row_equals_the_campus_studys_flicker_csv(tmp_path):
+    from gridspine.drivers.campus_study import FLICKER_CSV, draft_from_project, flicker_campus, prepare_campus
+
+    n = _flicker_site()
+    n.optimize(solver_name="highs")
+    path = tmp_path / "network.nc"
+    n.export_to_netcdf(str(path))
+    prepare_campus(tmp_path / "run", draft_from_project(path).spec, path)
+    flicker_campus(tmp_path / "run", PROFILE)
+    poc = pd.read_csv(tmp_path / "run" / FLICKER_CSV).query("level == 'poc'").iloc[0]
+    row = _flicker_row_of(tmp_path, pypsa.Network(str(path)))
+    assert row["project_value"] == pytest.approx(poc["pst"], rel=1e-9)

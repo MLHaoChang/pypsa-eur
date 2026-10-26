@@ -48,7 +48,7 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   paths.push('q_range_demand', 'rvc_limit_pct')
   if (profile.campus_voltage) paths.push('campus_voltage')
   for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-    'thd_limit_pct', 'harmonic_limits_pct'] as const) {
+    'thd_limit_pct', 'harmonic_limits_pct', 'pst_limit', 'plt_limit'] as const) {
     if (profile[key]) paths.push(key)
   }
   return paths
@@ -72,6 +72,8 @@ function limitLabel(path: string): string {
     pf_min_leading: 'Minimum power factor, leading',
     thd_limit_pct: 'Total harmonic distortion at the PCC',
     harmonic_limits_pct: 'Harmonic voltage by order at the PCC',
+    pst_limit: 'Flicker severity Pst at the PCC',
+    plt_limit: 'Flicker severity Plt at the PCC',
   }[path] ?? path
 }
 
@@ -84,7 +86,9 @@ function limitValue(path: string, lim: GridLimit): string {
     return Object.entries(orders).sort(([a], [b]) => Number(a) - Number(b))
       .map(([h, v]) => `h${h} ${v} %`).join(' · ')
   }
-  if (path === 'pf_min_lagging' || path === 'pf_min_leading') return `${lim.value}`
+  if (path === 'pf_min_lagging' || path === 'pf_min_leading' || path === 'pst_limit' || path === 'plt_limit') {
+    return `${lim.value}`
+  }
   if (path === 'q_capability_pq') {
     const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
     const pu = (v: number) => `${v}`.replace('-', '−')

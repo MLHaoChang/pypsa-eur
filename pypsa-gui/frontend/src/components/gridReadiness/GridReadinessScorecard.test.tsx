@@ -238,4 +238,17 @@ describe('GridReadinessScorecard', () => {
     expect(screen.getByTestId('gr-editable-harmonic_distortion').textContent)
       .toBe('Editable in Expert: Assets & sizing › compressor › Harmonic spectrum')
   })
+
+  it('the flicker row (issue 17) shows its verdict and names the unit field Expert edits', async () => {
+    const user = userEvent.setup()
+    const flicker = row({ id: 'flicker', verdict: 'unknown', section: 'assets', limit: 0.8, unit: 'Pst',
+      requirement: "Flicker severity at the PoC from the site's stepping loads", project_value: null,
+      note: 'heater: Largest power step is not set', target: target('assets', 'Link', 'heater', 'flicker_step_mva'),
+      flicker: { sk_mva: 1000, pst: null, plt: null, pst_limit: 0.8, plt_limit: 0.6, no_input_units: ['heater'],
+        outside_range_units: [] } })
+    render(<GridReadinessScorecard data={{ ...DATA, rows: [flicker] }} mode="guided" fieldLabels={{}} />)
+    await user.click(screen.getByTestId('gr-more-flicker'))
+    expect(screen.getByTestId('gr-editable-flicker').textContent)
+      .toBe('Editable in Expert: Assets & sizing › heater › Largest power step')
+  })
 })

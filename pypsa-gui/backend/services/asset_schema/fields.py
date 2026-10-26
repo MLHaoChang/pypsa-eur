@@ -398,6 +398,13 @@ LINK: tuple[FieldSpec, ...] = (
     FieldSpec("spectrum_post_filter", "performance", "Spectrum includes the unit's filter", "Tick when the "
               "harmonic spectrum is measured or quoted after the unit's own harmonic filter.", kind="bool",
               reveal_when={"eh_process": True}),
+    FieldSpec("flicker_step_mva", "performance", "Largest power step", "The largest single change in the unit's "
+              "apparent power, for the flicker screen. 0 declares a steady load. Leave empty when unknown: the "
+              "check then reads unknown.", "MVA", "MVA", reveal_when={"eh_process": True}),
+    FieldSpec("flicker_changes_per_min", "performance", "Changes per minute", "How often the power step happens, "
+              "for the flicker screen: switching on and switching off each count, so one on/off cycle a minute is "
+              "2. 0 declares a steady load. Leave empty when unknown: the check then reads unknown.", "1/min",
+              "1/min", reveal_when={"eh_process": True}),
     *_outages(with_cf_flag=False),
 )
 
@@ -574,7 +581,7 @@ _CLEAR = {"p_nom_max", "e_nom_max", "s_nom_max", "v_nom_0", "v_nom_1", "lifetime
 _EMPTY_BY_CLASS = {"Bus": {"country", "sub_network", "unit"}, "Carrier": {"nice_name", "color", "unit"},
                    "Link": {"bus2", "bus3", "bus4", "criticality_tier", "harmonic_source", "harmonic_spectrum"}}
 _CLEAR_BY_CLASS = {"GlobalConstraint": {"carrier_attribute", "carrier", "investment_period"},
-                   "Bus": {"mwh_per_t", "product_value"}, "Link": {"rated_mva"}}
+                   "Bus": {"mwh_per_t", "product_value"}, "Link": {"rated_mva", "flicker_step_mva", "flicker_changes_per_min"}}
 
 
 def _with_blank(component: str, specs: tuple[FieldSpec, ...]) -> tuple[FieldSpec, ...]:
