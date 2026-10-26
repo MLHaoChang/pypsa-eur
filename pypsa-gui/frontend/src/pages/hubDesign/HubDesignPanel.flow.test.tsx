@@ -115,7 +115,7 @@ describe('flowState → rail and card (§5.4)', () => {
     expect(railStates()).toMatchObject({ start: 'current', site: 'warning', results: 'todo' })
   })
 
-  it('failed without a report is no_study; Readiness → run shows the error and Run again', async () => {
+  it('failed without a report is no_study; Readiness and run shows the error and Run again', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'failed', error: 'boom', report: null })
     // the route answers 204 for a failed study (N2): the review is not asked
     const user = mount()
@@ -127,7 +127,7 @@ describe('flowState → rail and card (§5.4)', () => {
     expect(resultsApi.getEhReview).not.toHaveBeenCalled()
   })
 
-  it('running: opens on Readiness → run with a spinner; Improve blocked, Results says it is running', async () => {
+  it('running: opens on Readiness and run with a spinner; Improve blocked, Results says it is running', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(RUNNING)
     const user = mount()
     await screen.findByTestId('hub-run-running')
@@ -189,7 +189,7 @@ describe('auto-advance (§5.6)', () => {
     expect(screen.getByTestId('hub-card-site')).toBeTruthy()
   })
 
-  it('done → running moves the rail to Readiness → run, where the Run is', async () => {
+  it('done → running moves the rail to Readiness and run, where the Run is', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE)
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
     const user = mount()
@@ -416,7 +416,7 @@ describe('the rail is the ten flow sections', () => {
     expect(buttons).toHaveLength(10)
     expect(buttons.map(b => b.textContent?.replace(/^\d+/, ''))).toEqual([
       'Project & site', 'Carriers & processes', 'Connection & grid', 'Loads & demand', 'Assets & sizing',
-      'Time series & profiles', 'Commercial & parties', 'Scenarios & optimisation', 'Readiness → run',
+      'Time series & profiles', 'Commercial & parties', 'Scenarios & optimisation', 'Readiness and run',
       'Results → reports'])
     expect(ids).toHaveLength(10)
   })

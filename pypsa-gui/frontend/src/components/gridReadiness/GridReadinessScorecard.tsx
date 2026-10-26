@@ -36,7 +36,7 @@ export const SECTION_LABELS: Record<string, string> = {
   profiles: 'Time series & profiles',
   commercial: 'Commercial & parties',
   scenarios: 'Scenarios & optimisation',
-  readiness: 'Readiness → run',
+  readiness: 'Readiness and run',
   results: 'Results → reports',
 }
 

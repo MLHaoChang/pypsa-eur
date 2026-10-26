@@ -33,7 +33,7 @@ declared type. At most ``MAX_PDF_BYTES`` (20 MiB: the API takes 32 MB per
 request, and base64 grows the file by 4/3) and ``MAX_PDF_PAGES`` (100, the
 API's page limit for a PDF). The pages are counted with pypdf; an encrypted
 or unreadable file is a 422. A longer code is uploaded with a page selection,
-``"1-40,120-180"`` (``parse_page_ranges``): the whole file is kept, the cap
+``"1-40, 120-180"`` (``parse_page_ranges``): the whole file is kept, the cap
 applies to the pages selected, and the metadata's ``page_ranges`` records
 them. The extraction then reads only those pages, and the pages it cites are
 mapped back to the file's own, so a quote is checked where it really is.
@@ -102,7 +102,7 @@ MAX_PDF_BYTES = 20 * 1024 * 1024
 #: The API reads at most 100 pages of a PDF on every model.
 MAX_PDF_PAGES = 100
 #: The page-selection syntax, as an error message names it.
-PAGE_RANGES_EXAMPLE = "1-40,120-180"
+PAGE_RANGES_EXAMPLE = "1-40, 120-180"
 _PAGE_RANGE = re.compile(r"([1-9][0-9]*)(?:-([1-9][0-9]*))?")
 MAX_PROFILE_BYTES = ce.MAX_CAMPUS_BYTES
 _PDF_MAGIC = b"%PDF-"

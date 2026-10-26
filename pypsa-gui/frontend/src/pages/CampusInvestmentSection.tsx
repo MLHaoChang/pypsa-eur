@@ -29,6 +29,7 @@
 // One line under Investment says which of the two feeds the investment case
 // (owner decision 2026-10-12: the joint optimisation when it is fresh and found
 // its own choice, else the least-cost one), so the switch is never silent.
+import { assetLabel } from './results/investment/financeModel'
 import {
   type CampusMilp, type CampusState, type CostBasis, type CostRow, type HistoryRow, type HorizonScope, type HubCost,
   type InvestmentRow, type InvestStatus, type MilpHistoryRow, type MilpStop, type ParallelScope, type PccTapControl,
@@ -450,7 +451,7 @@ function InvestmentTable({ rows, testid = 'invest' }: { rows: InvestmentRow[]; t
               </td>
               <td data-testid="invest-action" className="pr-3 whitespace-nowrap">{x.action || '—'}</td>
               <td className="pr-3 whitespace-nowrap">
-                {x.library_id ?? '—'}
+                {x.library_id ? <span title={x.library_id}>{assetLabel(x.library_id)}</span> : '—'}
                 {x.length_km != null && <span className="text-muted"> · {x.length_km} km</span>}
               </td>
               <td className="pr-3 tabular-nums">{x.units}</td>

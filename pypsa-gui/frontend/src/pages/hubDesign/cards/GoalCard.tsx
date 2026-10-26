@@ -1,7 +1,7 @@
 // Step 3 — Goal (guided-mode spec §5.3): how much shortfall per year is
 // acceptable, how strict to be on energy (advanced), the price of undelivered
 // energy (read-only, with an assistant fix). The Run is in section 9,
-// Readiness → run (`shared/GoalStudyRun.tsx`): this card sets the goal.
+// Readiness and run (`shared/GoalStudyRun.tsx`): this card sets the goal.
 import { useEffect, useState } from 'react'
 import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
@@ -111,7 +111,7 @@ export function GoalCard() {
       )}
 
       <p data-testid="hub-goal-run-hint" className="text-[12px] text-muted">
-        The study runs from Readiness → run, once the checks pass; the button below goes there.
+        The study runs from Readiness and run, once the checks pass; the button below goes there.
       </p>
     </CardShell>
   )
