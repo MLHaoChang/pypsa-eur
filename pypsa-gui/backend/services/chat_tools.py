@@ -3277,6 +3277,17 @@ def get_project_flow(name: str) -> dict:
     return _route(_h, project=_authorized_project(name))
 
 
+def get_reliability_goal(name: str) -> dict:
+    """The project's reliability goal (W3b-R) as every study resolves it,
+    through the same handler as ``GET /api/projects/{name}/flow/reliability_goal``.
+    Reads the open project only (409 otherwise), as ``get_project_flow`` does."""
+    from routers.flow import _require_open, get_reliability_goal as _h
+
+    project = _authorized_project(name)
+    _require_open(project)
+    return _route(_h, project=project)
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -7926,6 +7937,7 @@ DISPATCHERS: dict[str, Any] = {
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
     "get_project_flow": get_project_flow,
+    "get_reliability_goal": get_reliability_goal,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,

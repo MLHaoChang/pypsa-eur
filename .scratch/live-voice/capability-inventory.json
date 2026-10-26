@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 288,
+  "tool_count": 289,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -6580,6 +6580,25 @@
         [
           "GET",
           "/api/projects/{name}/flow"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_reliability_goal",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow/reliability_goal"
         ]
       ],
       "input_keys": [
