@@ -84,3 +84,19 @@ it('shows several assets once, in the edit card, when the apply carries one (LC-
   expect(within(tables[0]).queryByText('Generator G1')).toBeNull()
   expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(false)
 })
+
+it('Guided headlines the change in the table\'s words and display unit (LC-16 UX)', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  const edit_card = { version: 1, kind: 'parameter_edit', tool: 'apply_project_changes', complete: true,
+    says: 'L1 s_nom 300 → 500 MVA; Battery inv_power_overnight not set → 150 EUR/kW (stored as 150000 EUR/MW)',
+    digest: 'd'.repeat(64), rows: [
+      { component_class: 'Line', name: 'L1', field: 's_nom', label: 'Capacity', old: 300, new: 500, unit: 'MVA', role: 'typed' },
+      { component_class: 'StorageUnit', name: 'Battery', field: 'inv_power_overnight', label: 'Power part: overnight cost',
+        old: null, new: 150000, unit: 'EUR/MW', role: 'typed', display: { old: null, new: 150, unit: 'EUR/kW' } }] }
+  useChatStore.setState({ pending: { ...useChatStore.getState().pending!, edit_card } })
+  render(<ConfirmationCard />)
+  const summary = screen.getByTestId('chat-confirmation-summary').textContent ?? ''
+  expect(summary).toContain('Capacity 300 → 500 MVA')
+  expect(summary).toContain('Power part: overnight cost not set → 150 EUR/kW')
+  expect(summary).not.toMatch(/s_nom|inv_power_overnight|150000|EUR\/MW/)
+})

@@ -139,12 +139,17 @@ def _says(rows: list[dict]) -> str:
     def one(row):
         if row["field"] == "exists":
             return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
-        unit = f" {row['unit']}" if row.get("unit") else ""
-        old = row.get("old")
+        # The card's display unit (150 EUR/kW, stored as 150000 EUR/MW), as EditCard.tsx shows it.
+        shown = row.get("display")
+        old, new, unit = (shown["old"], shown["new"], shown["unit"]) if shown else (row.get("old"), row["new"], row.get("unit"))
+        unit = f" {unit}" if unit else ""
         # The card's own words for an absent value (EditCard.tsx): never "None".
         old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        new = "not set" if new is None else _number(new)
+        stored = (f" (stored as {_number(row['new'])} {row['unit']})"
+                  if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
-        return f"{what} {old} → {_number(row['new'])}{unit}"
+        return f"{what} {old} → {new}{unit}{stored}"
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
 
 
@@ -530,16 +535,23 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
                    "unit": _carrier_unit(field.get("unit_storage") or field.get("native_unit") or "",
                                          candidate.network, after, new_name),
                    "role": "typed" if column in attrs else "derived" if field.get("derived") else "follows"}
-            scale = field.get("display_scale")
-            if scale not in (None, 1, 1.0) and _numeric(new):
-                row["display"] = {"old": old * scale if _numeric(old) else None, "new": new * scale,
-                                  "unit": field.get("unit_display")}
-            rows.append(row)
+            rows.append(_with_display(row, field))
     targets_now = {(component_class, n) for name, attrs in targets for n in (name, attrs.get("name", name))}
     rows += _existence_rows(active.network, candidate.network, targets_now)
     rows += _solve_time_rows(component_class, candidate.network, attr, [attrs.get("name", name) for name, attrs in targets])
     rows += _cost_notes(component_class, candidate.network, attr, targets, rows)
     return rows
+
+
+def _with_display(row: dict, field: dict) -> dict:
+    """A row in the field's display unit too (EUR/kW for a stored EUR/MW), so
+    every card, receipt and undo shows one value in one unit."""
+    scale = field.get("display_scale")
+    old, new = row["old"], row["new"]
+    if scale not in (None, 1, 1.0) and (_numeric(new) or _numeric(old)):
+        row["display"] = {"old": old * scale if _numeric(old) else None,
+                          "new": new * scale if _numeric(new) else None, "unit": field.get("unit_display")}
+    return row
 
 
 def _carrier_unit(unit: str, network, frame, name: str) -> str:
@@ -904,7 +916,7 @@ def _undo_preview(args: dict) -> list[dict]:
 
     import pypsa
 
-    from services import undo_service
+    from services import chat_tools, undo_service
     from services.pypsa_service import PyPSAService
 
     netcdf = undo_service.peek()
@@ -919,7 +931,7 @@ def _undo_preview(args: dict) -> list[dict]:
     finally:
         path.unlink(missing_ok=True)
     now = PyPSAService.get_network()
-    rows, more = [], 0
+    rows, more, described = [], 0, {}
     for component in now.components:
         klass, current = component.name, component.static
         if klass in SKIP_CLASSES:
@@ -943,9 +955,15 @@ def _undo_preview(args: dict) -> list[dict]:
                     more += 1
                     continue
                 unit = str(defaults.at[field, "unit"]) if field in defaults.index else ""
-                rows.append({"component_class": klass, "name": str(name), "field": field, "label": field,
-                             "old": old, "new": new, "unit": "" if unit in ("n/a", "nan") else unit,
-                             "role": "typed"})
+                # The app's own fields (an investment part) carry their unit and
+                # label in the class schema, as the edit card that set them did.
+                if klass not in described:
+                    described[klass] = _fields(klass) if klass in chat_tools._COMPONENT_CREATE_SCHEMAS else {}
+                known = described[klass].get(field) or {}
+                unit = known.get("unit_storage") or known.get("native_unit") or unit
+                rows.append(_with_display({"component_class": klass, "name": str(name), "field": field,
+                                           "label": known.get("label", field), "old": old, "new": new,
+                                           "unit": "" if unit in ("n/a", "nan") else unit, "role": "typed"}, known))
     if more:
         rows.append(_note("", "", "more", f"and {more} more values this undo restores"))
     if not rows:

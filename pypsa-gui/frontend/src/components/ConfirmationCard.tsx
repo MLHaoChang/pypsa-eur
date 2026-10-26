@@ -5,7 +5,7 @@ import { postChatConfirm } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
-import { EditCardTable, editCardOf } from './EditCard'
+import { EditCardTable, editCardOf, editCardWords } from './EditCard'
 
 // Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
 // v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
@@ -389,7 +389,7 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {edit?.says || guidedCardSummary(pending.tool_name, pending.args)}
+            {(edit && (editCardWords(edit) || edit.says)) || guidedCardSummary(pending.tool_name, pending.args)}
           </div>
           {/* P26 gate B2: a destructive card shows its raw call by default. */}
           <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"

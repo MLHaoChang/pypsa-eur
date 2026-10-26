@@ -482,12 +482,15 @@ def _preview_candidate(ctx, parsed):
     if not validation.get("ok") or validation.get("deferred"):
         workflow._refuse("change_preflight_failed", "The candidate fails network validation; the project was not modified.", 409)
 
-    def scalar(value):
-        return "nan" if value is None else value
+    def diff(r):
+        # The card's display unit and its words for an absent value ("not set", never "nan").
+        shown = r.get("display")
+        before, after, unit = (shown["old"], shown["new"], shown["unit"]) if shown else (r["old"], r["new"], r["unit"])
+        return {"component_class": r["component_class"], "name": r["name"], "attribute": r["field"],
+                "label": r.get("label", r["field"]), "before": "not set" if before is None else before,
+                "after": after, "unit": unit}
 
-    diffs = [{"component_class": r["component_class"], "name": r["name"], "attribute": r["field"],
-              "before": scalar(r["old"]), "after": r["new"], "unit": r["unit"]}
-             for r in rows if r["role"] == "typed"]
+    diffs = [diff(r) for r in rows if r["role"] == "typed"]
     return candidate, diffs, rows, validation
 
 

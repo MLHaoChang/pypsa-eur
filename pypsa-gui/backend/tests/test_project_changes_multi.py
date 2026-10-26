@@ -92,7 +92,9 @@ def test_mixed_classes_one_card_one_approval_native_readback(mixed):
     preview = chat_tools.preview_project_changes(OJ21)
     assert preview["changes_total"] == 4
     assert [(d["name"], d["before"], d["after"]) for d in preview["diff"]] == [
-        ("L1", 300, 500), ("L2", 300, 450), ("Battery", BEFORE[2], 150000), ("T1", 40, 63)]
+        ("L1", 300, 500), ("L2", 300, 450), ("Battery", BEFORE[2] / 1000, 150), ("T1", 40, 63)]
+    # The card's display unit, not the stored one: 150 EUR/kW is 150000 EUR/MW.
+    assert [d["unit"] for d in preview["diff"]] == ["MVA", "MVA", "EUR/kW", "MVA"]
     assert values() == BEFORE
     frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]})
     pending = [d for e, d in frames if e == "tool_pending_confirmation"]
@@ -149,16 +151,20 @@ def test_a_part_column_the_asset_never_had_is_created_like_a_single_edit(mixed):
     PyPSAService.get_network().storage_units.drop(columns=["inv_power_overnight"], inplace=True)
     preview = chat_tools.preview_project_changes(OJ21[2:3])
     assert "inv_power_overnight" not in PyPSAService.get_network().storage_units.columns
-    assert [(d["name"], d["before"], d["after"]) for d in preview["diff"]] == [("Battery", "nan", 150000)]
+    assert [(d["name"], d["before"], d["after"]) for d in preview["diff"]] == [("Battery", "not set", 150)]
     frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]})
     row = next(r for r in frame(frames, "tool_pending_confirmation")["edit_card"]["rows"] if r["role"] == "typed")
     assert (row["old"], row["new"]) == (None, 150000)
     receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
     assert receipt["outcome"] == "verified"
-    assert "not set → 150000 EUR/MW" in receipt["says"], receipt["says"]
+    assert "not set → 150 EUR/kW (stored as 150000 EUR/MW)" in receipt["says"], receipt["says"]
     assert PyPSAService.get_network().storage_units.at["Battery", "inv_power_overnight"] == 150000
     undo = [(r["name"], r["field"], r["old"], r["new"]) for r in edit_card._undo_preview({}) if r["role"] == "typed"]
     assert ("Battery", "inv_power_overnight", 150000, None) in undo, undo
+    # The undo row keeps the unit and display the edit card had (never "No unit").
+    back = next(r for r in edit_card._undo_preview({}) if r["field"] == "inv_power_overnight")
+    assert (back["unit"], back["display"]) == ("EUR/MW", {"old": 150, "new": None, "unit": "EUR/kW"}), back
+    assert back["label"] != "inv_power_overnight"
     chat_tools.undo_last()
     units = PyPSAService.get_network().storage_units
     assert "inv_power_overnight" not in units.columns or pd.isna(units.at["Battery", "inv_power_overnight"])
