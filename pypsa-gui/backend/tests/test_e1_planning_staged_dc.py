@@ -462,12 +462,14 @@ def test_dc_load_at_the_native_years_is_refused_against_entered_years(client, tm
     assert detail["code"] == detail["error_kind"] == "dc_load_invalid" and "[2028, 2031, 2036]" in detail["message"]
 
 
-def test_planning_is_not_a_parameter_of_a_template_without_native_years(client, tmp_projects_dir):
+def test_an_unknown_parameter_beside_planning_is_refused(client, tmp_projects_dir):
+    # E1d gave the single-year data center native years, so ``planning`` is
+    # one of its parameters now; any other key is still refused.
     r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "dc_single"},
-                    json={"planning": {"start_year": 2028, "end_year": 2040}})
+                    json={"planning": {"start_year": 2028, "end_year": 2040}, "growth": 1})
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert detail["code"] == detail["error_kind"] == "template_params_invalid" and detail["field"] == "planning"
+    assert detail["code"] == detail["error_kind"] == "template_params_invalid" and detail["field"] == "growth"
 
 
 @pytest.mark.live_solve

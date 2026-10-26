@@ -453,7 +453,9 @@ def _ledger(planning=None) -> list[dict]:
            "note": f"{spec['attribution']}, CC BY 4.0; shipped as {name}, filling nothing: pick "
                    "it for the export, import or PPA reference price, or in a case"}
           for name, spec in OBSERVED.items() for ob in (observed_stats(name),)),
-        {"item": f"observed prices re-dated to {year}", "value": "hour of year, 29 Feb dropped",
+        {"item": (f"observed prices re-dated to {YEAR}" if year == YEAR else
+                  f"observed prices re-dated from {OBSERVED_YEAR} to {year}"),
+         "value": "hour of year, 29 Feb dropped",
          "source": "assumed",
          "note": f"the {OBSERVED_YEAR} values are taken as {year} real money; UTC hours kept, so "
                  + ("weekdays shift by one day" if year == YEAR else
