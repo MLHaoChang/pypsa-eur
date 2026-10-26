@@ -236,6 +236,10 @@ describe('grid codes: extract', () => {
     const orders = screen.getByTestId('limit-harmonic_limits_pct').textContent
     expect(orders).toContain('Harmonic voltage by order at the PCC')
     expect(orders).toContain('h5 2 % · h7 2 % · h11 1.5 %')
+    // The by-order list wraps rather than widening the whole table; a single value stays on one line.
+    const cells = screen.getByTestId('limit-harmonic_limits_pct').querySelectorAll('td')
+    expect(cells[1].className).not.toContain('whitespace-nowrap')
+    expect(screen.getByTestId('limit-thd_limit_pct').querySelectorAll('td')[1].className).toContain('whitespace-nowrap')
   })
 
   it('shows no SAGC-type row for a profile without those limits', async () => {

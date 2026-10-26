@@ -687,7 +687,7 @@ def _flicker_row(inp: _Inputs) -> dict:
                      + f", Plt {plt:.4g}" + (f" (limit {limits.plt:g})" if limits.plt is not None else ""))
     if limits.pst is None or limits.plt is None:
         notes.append(f"judged on {unit} only: the grid code sets no {'Plt' if by_pst else 'Pst'} limit")
-    else:
+    elif p is not None:
         notes.append(f"{unit} binds: Plt equals Pst for a steady pattern")
     if missing or outside:
         notes.append("a unit without its inputs or outside the method blocks a pass")

@@ -1053,6 +1053,7 @@ def test_a_unit_without_its_flicker_inputs_blocks_a_pass(tmp_path, step, rate, f
     row = _flicker_row_of(tmp_path, _flicker_site(step, rate))
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"].startswith(note) and row["flicker"]["no_input_units"] == ["compressor"]
+    assert "binds" not in row["note"]                   # no Pst computed, so no limit binds
     assert row["target"] == {**row["target"], "entity": "compressor", "field": field}
 
 

@@ -470,7 +470,10 @@ function DraftReview({ name, id, onDraft, onPublished, onDelete }: {
                   <div className="font-medium">{limitLabel(path)}</div>
                   <div className="font-mono text-[10.5px] text-muted">{path}</div>
                 </td>
-                <td className="py-2 pr-3 tabular-nums whitespace-nowrap">{limitValue(path, lim)}</td>
+                {/* The by-order list runs to some 40 orders: it wraps, so the table keeps its width. */}
+                <td className={`py-2 pr-3 tabular-nums ${path === 'harmonic_limits_pct' ? 'min-w-[12rem] max-w-[20rem]' : 'whitespace-nowrap'}`}>
+                  {limitValue(path, lim)}
+                </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-start gap-1.5">
                     <Tag tone={SOURCE_TONE[lim.source]}>{lim.source}</Tag>
