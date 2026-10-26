@@ -349,7 +349,8 @@ _PREVIEW_ROWS = 20
 class _PreviewChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
     component_class: Literal["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]
-    names: list[str] = Field(min_length=1, max_length=20)  # the catalogue's maxItems; rows cap at 20
+    # Looser than the catalogue's maxItems 20, so a long list gets the row cap's "split" refusal.
+    names: list[str] = Field(min_length=1, max_length=100)
     attribute: str = Field(min_length=1, max_length=64)
     value: StrictBool | StrictFloat | StrictInt
 

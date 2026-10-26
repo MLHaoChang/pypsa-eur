@@ -239,7 +239,10 @@ component (`frontend/src/components/EditCard.tsx`).
   (`catalogue.tool_edits_network`) or a project setting (`SETTINGS_EDITS`).
   Every other write-tier tool is in `NOT_EDITS` with its reason;
   `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
-  is gated as Guided gates a write, so Expert shows the card too.
+  is gated as Guided gates a write, so Expert shows the card too. The reverse
+  holds for `confirm.GUIDED_UNCARDED` (`preview_project_changes`): it stores a
+  record and changes nothing, so Guided gates it as Expert does and the apply
+  card is the one approval (OJ-21).
 - **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
   says, complete, binding, digest}`, or refuses before any card (`unknown_field`,
   `derived_field`, `read_only_field`, `invalid_edit_value`,

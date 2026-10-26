@@ -4,7 +4,7 @@
  * all three rows before anything changes; one approval writes all three and
  * the receipt says read back, results stale, undo. "Undo that change." restores
  * all three through its own card. In Guided the same card is denied and nothing
- * changes. OJ-23: a missing member (L3) refuses the whole batch and the words
+ * changes, and the preview asks no approval of its own. OJ-23: a missing member (L3) refuses the whole batch and the words
  * name L3 and the two lines that exist.
  * Screenshots for the UX gate: card (Expert, Guided), receipt, undo card, OJ-23.
  * npm run build
@@ -122,20 +122,14 @@ try {
   async function card(mode) {
     const before = await page.getByTestId('chat-edit-card').count()
     await send(page, SENTENCE)
-    if (mode === 'guided') {
-      // Guided cards every write-tier tool, and the preview stores a record:
-      // its generic card comes first (called out on the PR; not the edit card).
-      const approve = page.getByTestId('chat-confirm-approve').last()
-      await page.getByText(/wants to use preview project changes/i).last().waitFor({ timeout: 60000 })
-      assert.deepEqual(await read(), BEFORE, 'the preview writes nothing')
-      await approve.click()
-    }
     const shown = page.getByTestId('chat-edit-card').nth(before)
     await shown.waitFor({ timeout: 60000 }).catch(async error => {
       throw new Error(`${error.message}\n${(await page.getByTestId('chat-messages').innerText()).slice(-1500)}`)
     })
     assert.deepEqual(await read(), BEFORE, 'nothing changes before approval')
     assert.equal(await page.getByTestId('chat-edit-card').count(), before + 1, 'one card for the whole batch')
+    // One approval in Guided too: the preview itself is not carded.
+    assert.equal(await page.getByText(/wants to use preview project changes/i).count(), 0, 'no card for the preview')
     const rows = await shown.getByTestId('chat-edit-row-typed').allInnerTexts()
     assert.equal(rows.length, 3, rows.join('\n'))
     const capacity = mode === 'guided' ? 'Capacity' : 's_nom'
@@ -184,7 +178,6 @@ try {
   assert.deepEqual(await read(), BEFORE, 'denial leaves every value unchanged')
 
   // OJ-23: one bad member refuses the batch; the words name L3 and the lines that exist.
-  await page.getByTestId('ui-mode-expert').click()
   await send(page, OJ23)
   const refused = page.getByTestId('chat-messages').getByText(/OJ23_ANSWER/).last()
   await refused.waitFor({ timeout: 60000 })

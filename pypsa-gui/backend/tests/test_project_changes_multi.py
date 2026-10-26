@@ -67,10 +67,10 @@ def values():
             n.transformers.at["T1", "s_nom"])
 
 
-def dispatch(session, name, args, decide=lambda data: "approve"):
+def dispatch(session, name, args, decide=lambda data: "approve", guided=False):
     frames, collector = [], []
     for event, data in chat_service._dispatch_real_tool_call(
-            session, {"id": uuid.uuid4().hex, "name": name, "input": args}, collector):
+            session, {"id": uuid.uuid4().hex, "name": name, "input": args}, collector, guided=guided):
         frames.append((event, data))
         if event == "tool_pending_confirmation":
             session.record_decision(data["confirmation_token"], decide(data))
@@ -112,6 +112,27 @@ def test_mixed_classes_one_card_one_approval_native_readback(mixed):
     assert receipt["outcome"] == "verified"
     assert receipt["undo"]["available"] is True
     assert values() == (500, 450, 150000, 63)
+
+
+def test_guided_asks_one_approval_and_still_cards_other_writes(mixed):
+    # OJ-21: "one card, one approval … in Expert or Guided". The preview stores
+    # a record and changes nothing; the apply card is the approval.
+    from harness import confirm
+
+    ctx, session, _ = mixed
+    assert confirm.GUIDED_UNCARDED == frozenset({"preview_project_changes"})
+    frames = dispatch(session, "preview_project_changes", {"changes": OJ21}, guided=True)
+    assert not [d for e, d in frames if e == "tool_pending_confirmation"]
+    preview = frame(frames, "tool_result")["result"]
+    assert values() == BEFORE
+    frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]}, guided=True)
+    pending = [d for e, d in frames if e == "tool_pending_confirmation"]
+    assert len(pending) == 1 and pending[0]["edit_card"]["complete"] is True
+    assert values() == (500, 450, 150000, 63)
+    # Every other write-tier tool keeps Guided's generic card.
+    frames = dispatch(session, "create_chart", {"component": "Line", "attribute": "s_nom", "names": ["L1"]},
+                      decide=lambda d: "deny", guided=True)
+    assert len([d for e, d in frames if e == "tool_pending_confirmation"]) == 1
 
 
 def test_denial_leaves_every_value_unchanged(mixed):

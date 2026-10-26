@@ -2548,7 +2548,8 @@ def _dispatch_real_tool_call(
     # in Guided, so an edit is gated as Guided gates a write.
     from harness import edit_card as edit_cards
     is_edit = tier != "read" and not external and edit_cards.is_edit(tool_name)
-    guided = guided or is_edit
+    from harness.confirm import GUIDED_UNCARDED
+    guided = (guided and tool_name not in GUIDED_UNCARDED) or is_edit
     if tier in _confirm_tiers(guided):
         from services.chat_tools import PRE_DISPATCH_VALIDATORS
         validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
