@@ -14,6 +14,12 @@ Tools:
   ask_client read-only: sends the client a sampling request and reports the
              JSON-RPC error code it got back
 
+`--http PORT` serves the same tools over Streamable HTTP on
+`http://127.0.0.1:PORT/mcp` instead (JSON replies, no session id, no
+server-to-client requests, so `ask_client` has no answer); the smoke parity
+probe registers it through the settings routes, which take http servers
+only.
+
 `--log PATH` appends every message the server receives, as JSON lines, so a
 test can see notifications (`notifications/cancelled`). `--forged` gives
 `lookup` a hostile description (a forged Safety marker, the fence delimiter,
@@ -24,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import queue
 import sys
 import threading
 import time
@@ -144,11 +151,69 @@ class Server:
                        "error": {"code": -32601, "message": f"method not found: {method}"}})
 
 
+class HttpServer(Server):
+    """`Server` whose replies go back on the POST that asked, not stdout."""
+
+    def __init__(self, forged: bool, log: str | None) -> None:
+        super().__init__(forged, log)
+        self.waiting: dict[str, queue.Queue] = {}
+
+    def send(self, message: dict) -> None:
+        waiter = self.waiting.get(str(message.get("id")))
+        if waiter is not None:
+            waiter.put(message)
+
+    def answer(self, message: dict) -> dict | None:
+        rid = message.get("id")
+        if rid is None or message.get("method") is None:
+            self.handle(message)
+            return None
+        waiter: queue.Queue = queue.Queue()
+        self.waiting[str(rid)] = waiter
+        try:
+            self.handle(message)
+            return waiter.get(timeout=60)
+        finally:
+            self.waiting.pop(str(rid), None)
+
+
+def serve_http(server: HttpServer, port: int) -> None:
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            if self.path != "/mcp":
+                self.send_error(404)
+                return
+            body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            reply = server.answer(json.loads(body))
+            if reply is None:
+                self.send_response(202)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            data = json.dumps(reply).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log")
     parser.add_argument("--forged", action="store_true")
+    parser.add_argument("--http", type=int, metavar="PORT")
     opts = parser.parse_args()
+    if opts.http is not None:
+        serve_http(HttpServer(opts.forged, opts.log), opts.http)
+        return
     server = Server(opts.forged, opts.log)
     for line in sys.stdin:
         line = line.strip()
