@@ -5919,6 +5919,8 @@ def apply_demand_from_excel(
         except ImportError:  # pragma: no cover — only fails if routers/network refactor breaks paths
             _user_ts = None
             _user_ts_lock = None
+        from services import growth_placeholders
+        prior = growth_placeholders.before(n, "loads", "p_set", [load_name])
         # Direct dataframe write so the LP sees the new demand on next solve.
         if value_col in n.loads_t.p_set.columns or load_name in n.loads_t.p_set.columns:
             n.loads_t.p_set[load_name] = aligned
@@ -5929,6 +5931,8 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+        # A user's load profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
     from services import change_log_service
     tile_note = (

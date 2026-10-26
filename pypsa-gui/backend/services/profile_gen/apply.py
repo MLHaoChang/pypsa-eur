@@ -55,7 +55,7 @@ from typing import Any, Literal, Mapping
 import numpy as np
 import pandas as pd
 
-from services import change_log_service
+from services import change_log_service, growth_placeholders
 from services.dispatch_status import clear_dispatch
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import family_of, get_family
@@ -1493,6 +1493,8 @@ def assign_profile(
     # (None for a value an imported series left unset).
     with PyPSAService.get_lock():
         old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
+        prior = growth_placeholders.before(n, key[0], key[1], [key[2]],
+                                           project_dir=getattr(ctx, "storage_dir", None))
     finite = old[np.isfinite(old)]
     before = ({"peak": float(finite.max()), "mean": float(finite.mean()),
                "min": float(finite.min())} if len(finite) else None)
@@ -1515,6 +1517,9 @@ def assign_profile(
                 "meaning": "reverse bound scaled by the same availability"}
     with PyPSAService.get_lock():
         _reapply_user_ts_to_network(n, store=ctx.user_ts)
+        # A user's profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, key[0], key[1], {key[2]: aligned}, prior,
+                                     project_dir=getattr(ctx, "storage_dir", None))
         # A new profile invalidates solved dispatch exactly like a topology
         # edit — flip freshness so Results can't serve the old solve.
         dispatch_cleared = clear_dispatch(n)

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from fastapi import HTTPException
 
-from services import change_log_service
+from services import change_log_service, growth_placeholders
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
     _backup_network_ts_to_user_ts,
@@ -59,7 +59,8 @@ def push_undo_snapshot() -> None:
             finally:
                 tmp.unlink(missing_ok=True)
             user_ts_payload = _serialize_user_ts()
-        undo_service.push(netcdf_bytes, user_ts_payload)
+            template_meta = growth_placeholders.snapshot_meta()
+        undo_service.push(netcdf_bytes, user_ts_payload, template_meta)
     except Exception as exc:
         # Log instead of swallowing silently so future regressions are visible.
         _logging.getLogger(__name__).warning("undo snapshot skipped: %s", exc)
@@ -107,11 +108,11 @@ def apply_undo():
     # /api/network/undo is in `_UNDO_EXCLUDE`, so the middleware's
     # push-then-rollback does not cover it either.
     PyPSAService.refuse_if_study_running("undo")
-    result = undo_service.pop()
+    result = undo_service.pop_entry()
     if result is None:
         raise HTTPException(409, "Nothing to undo")
 
-    netcdf_bytes, user_ts_data = result
+    netcdf_bytes, user_ts_data = result["netcdf"], result["user_ts"]
     # PyPSA ≥ 1.0 import_from_netcdf also requires a path — round-trip via tempfile.
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
         tmp = pathlib.Path(f.name)
@@ -170,6 +171,9 @@ def apply_undo():
     _restore_user_ts(user_ts_data)
     n = PyPSAService.get_network()
     _reapply_user_ts_to_network(n)
+    # An undone series edit leaves its growth placeholder as it was (C3).
+    with PyPSAService.get_lock():
+        growth_placeholders.restore_meta(result["template_meta"])
     change_log_service.log("undo", "Network", "", "Undone last action")
     return {"undone": True, "remaining": undo_service.depth()}
 
