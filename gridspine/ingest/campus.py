@@ -12,7 +12,9 @@ The description is one YAML mapping under ``campus``:
     carries the grid operator's figures: ``sk_max_mva`` and ``sk_min_mva``
     (Sk''), ``rx_max`` and ``rx_min`` (R/X), and the set-point ``vm_pu``;
     optionally the zero sequence ``x0x_max`` / ``x0x_min`` (X0/X1) and
-    ``r0x0_max`` / ``r0x0_min`` (R0/X0) for the unbalanced faults (I5b).
+    ``r0x0_max`` / ``r0x0_min`` (R0/X0) for the unbalanced faults (I5b),
+    and the normal case ``sk_normal_mva`` with ``rx_normal`` (both or
+    neither, Sk'' between min and max) for the harmonic impedance scan.
     It becomes an ``ext_grid`` named ``GRID``. Optionally it carries
     ``p_connection_mw``, the contracted connection capacity, which is the
     reactive requirement's P_ref. ``tie_normally_open: true`` (an untagged
@@ -196,7 +198,10 @@ _RELAY_T_MIN = (0.02, 0.05, 0.10, 0.25)
 _PCC_FIELDS = ("vm_pu", "sk_max_mva", "sk_min_mva", "rx_max", "rx_min")
 #: Optional at the PCC: the contracted connection capacity, the P_ref of the
 #: reactive requirement. Without it the study uses the year's peak import.
-_PCC_OPTIONAL = ("p_connection_mw", "ik_rated_ka", "x0x_max", "r0x0_max", "x0x_min", "r0x0_min")
+#: ``sk_normal_mva`` with ``rx_normal`` is the normal short-circuit case the
+#: harmonic impedance scan adds to max and min.
+_PCC_OPTIONAL = ("p_connection_mw", "ik_rated_ka", "x0x_max", "r0x0_max", "x0x_min", "r0x0_min",
+                 "sk_normal_mva", "rx_normal")
 #: Optional on any bus: the switchgear's rated short-time current (kA).
 _BUS_OPTIONAL = ("ik_rated_ka",)
 _TRAFO_FIELDS = ("sn_mva", "vn_hv_kv", "vn_lv_kv", "vk_percent", "vkr_percent", "pfe_kw", "i0_percent")
@@ -226,7 +231,7 @@ _ASSET_FLAGS = ("existing", "library_id")
 _COMMISSIONED = "commissioning_year"
 _COMP_STRUCTURAL = ("name", "bus", "kind", "library_id", "pypsa_name")
 #: Fields that may be zero. Every other tagged field must be strictly positive.
-_MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "c0_nf_per_km",
+_MAY_BE_ZERO = frozenset({"pfe_kw", "i0_percent", "c_nf_per_km", "rx_sc", "rx_max", "rx_min", "rx_normal", "c0_nf_per_km",
                           "r0x0_max", "r0x0_min"})
 
 CAMPUS_LEDGER = (
@@ -522,6 +527,11 @@ def build_campus(spec) -> Campus:
             _tagged(f"pcc.{pcc_bus}", f, pcc, rows)
     if pv["sk_min_mva"] > pv["sk_max_mva"]:
         raise ContractError(f"pcc: sk_min_mva ({pv['sk_min_mva']}) is above sk_max_mva ({pv['sk_max_mva']})")
+    if ("sk_normal_mva" in pcc) != ("rx_normal" in pcc):
+        raise ContractError("pcc: sk_normal_mva and rx_normal (the normal short-circuit case) come together")
+    if "sk_normal_mva" in pcc and not (pv["sk_min_mva"] <= pcc["sk_normal_mva"]["value"] <= pv["sk_max_mva"]):
+        raise ContractError(f"pcc: sk_normal_mva ({pcc['sk_normal_mva']['value']}) is outside "
+                            f"sk_min_mva..sk_max_mva ({pv['sk_min_mva']}..{pv['sk_max_mva']})")
 
     net = pp.create_empty_network(sn_mva=NET_BASE_MVA, f_hz=float(f_hz), name=name)
     idx = {b: pp.create_bus(net, vn_kv=kv, name=b) for b, kv in buses.items()}
