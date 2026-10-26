@@ -24,8 +24,8 @@ An outsourced app opens one PR from its `outsource/<slug>` branch, with a body t
 | L | Reports list the project's template ledger in an assumptions appendix (E1) | Codex | `outsource/report-template-ledger` | `.scratch/project-workflow/outsource/L-report-template-ledger.md` | `.scratch/project-workflow/issues/E1-report-template-ledger.md` | merged 18ff198d (#704) |
 | M | `scripts/coord/`: premerge counts only a comment's first line as a verdict; sessions.py prints `?` for unreported context | Codex | `outsource/coord-script-fixes` | `.scratch/coordination/outsource/M-coord-script-fixes.md` | none | merged d4ee749f (#705) |
 | N | Fix stale `Status:` lines in `.scratch/` (docs only) | Codex | `outsource/stale-status-lines` | `.scratch/coordination/outsource/N-stale-status-lines.md` | none | merged dc065537 (#703) |
-| #711 | Editable campuses and Blender exchange (spec only) | Codex | `claude/site-scene-generation-spec` | `.scratch/site-scene-generation/execution-guide.md` | — | draft; stays a draft (owner, 26 Oct) |
-| #712 | Optional asset footprint dimensions (width, depth, height) in Site 3D and Properties | Codex | `claude/asset-footprint-parameters` | PR body | — | UX NOT OK @c117493f (4 fixes); no GK needed |
+| #711 | Editable campuses and Blender exchange (spec only) | Codex | `claude/site-scene-generation-spec` | `.scratch/site-scene-generation/execution-guide.md` | — | draft (DRAFT-711); #712 merged → GK B + UX review SC-00 only |
+| #712 | Optional asset footprint dimensions (width, depth, height) in Site 3D and Properties | Codex | `claude/asset-footprint-parameters` | PR body | — | merged 26 Oct 20:05 CET (UX OK @1f7a44ba) |
 | #713 | Library gap research and implementation plan (19 tickets, LG-01…LG-19) | Codex | `claude/library-gap-implementation-plan` | PR body | — | draft; GK plan OK @1d79b630 with 9 conditions |
 
 I and G-a both edit `harness/catalogue.py` and the capability inventory: whichever merges second merges master and regenerates the inventory with `--write`, never by hand. H touches no file G-a or I touches.
