@@ -1538,6 +1538,14 @@ export function LinePanel({ name }: { name: string }) {
     onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Line' || !line || editRequest.name !== line.name) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, line])
+
   if (!line) return <p className="p-3 text-xs text-muted">Loading…</p>
 
   // Derive per-km values from the stored absolute Ohm / Siemens via the
@@ -1724,6 +1732,14 @@ export function TransformerPanel({ name }: { name: string }) {
     },
     onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
+
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Transformer' || !tr || editRequest.name !== tr.name) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, tr])
 
   if (!tr) return <p className="p-3 text-xs text-muted">Loading…</p>
 

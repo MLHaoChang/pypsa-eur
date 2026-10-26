@@ -365,8 +365,8 @@ export function NumInput({ label, k, fs, set, unit, tip, badge }: {
   label: string; k: string; fs: FS; set: SetFS; unit?: string; tip?: string; badge?: React.ReactNode
 }) {
   return (
-    <label className="flex flex-col gap-0.5">
-      <FieldLabel className="text-[9px] text-muted leading-tight break-words" badge={badge}>
+    <label className="flex flex-col justify-end gap-0.5">
+      <FieldLabel className="text-[9px] leading-tight text-muted break-words" badge={badge}>
         <InfoTip text={tip}>{label}{unit ? ` (${unit})` : ''}</InfoTip>
       </FieldLabel>
       <input type="number" step="any" value={fs[k] ?? ''}
@@ -457,7 +457,7 @@ export function BuildYearSelect({ fs, set, tip }: { fs: FS; set: SetFS; tip?: st
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [options])
   return (
-    <label className="flex flex-col gap-0.5">
+    <label className="flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted truncate">
         <InfoTip text={tip}>Build year</InfoTip>
       </span>
@@ -511,7 +511,7 @@ export function DiscountRateInput({ fs, set, tip }: { fs: FS; set: SetFS; tip?: 
     ? `global (${(globalRate * 100).toFixed(1)}%)`
     : 'global'
   return (
-    <label className="flex flex-col gap-0.5">
+    <label className="flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted truncate">
         <InfoTip text={tip}>Discount rate (%)</InfoTip>
       </span>
@@ -534,7 +534,7 @@ export function discountRatePct(rate: number | null | undefined): string {
 
 export function TxtInput({ label, k, fs, set, tip }: { label: string; k: string; fs: FS; set: SetFS; tip?: string }) {
   return (
-    <label className="col-span-2 flex flex-col gap-0.5">
+    <label className="col-span-2 flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted">
         <InfoTip text={tip}>{label}</InfoTip>
       </span>
@@ -585,7 +585,7 @@ export function CoordPairInput({ fs, set, tip }: { fs: FS; set: SetFS; tip?: str
   }
 
   return (
-    <label className="col-span-2 flex flex-col gap-0.5">
+    <label className="col-span-2 flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted">
         <InfoTip text={tip}>Coordinates (lat, lng)</InfoTip>
       </span>
@@ -650,7 +650,7 @@ export function SelInput({ label, k, fs, set, options, tip }: { label: string; k
   const current = fs[k] ?? ''
   const allOpts = current && !options.includes(current) ? [current, ...options] : options
   return (
-    <label className="flex flex-col gap-0.5">
+    <label className="flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted truncate">
         <InfoTip text={tip}>{label}</InfoTip>
       </span>
@@ -705,7 +705,7 @@ export function CarrierGroupSelect({ k, fs, set, carriers, tip }: { k: string; f
   const current = fs[k] ?? ''
   const groups = categorizeCarriers(carriers, current)
   return (
-    <label className="col-span-2 flex flex-col gap-0.5">
+    <label className="col-span-2 flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted">
         <InfoTip text={tip}>Carrier</InfoTip>
       </span>
@@ -741,7 +741,7 @@ export function BusSelect({ k, fs, set, buses, tip, label = 'Bus' }: {
   const current = (fs[k] as string | undefined) ?? ''
   const known = (buses ?? []).some(b => b.name === current)
   return (
-    <label className="col-span-2 flex flex-col gap-0.5">
+    <label className="col-span-2 flex flex-col justify-end gap-0.5">
       <span className="text-[9px] text-muted">
         <InfoTip text={tip}>{label}</InfoTip>
       </span>

@@ -21,7 +21,7 @@ export const SECTION_META: SectionMeta[] = [
   { id: 'commercial', number: 7, label: 'Commercial & parties' },
   { id: 'scenarios', number: 8, label: 'Scenarios & optimisation' },
   { id: 'readiness', number: 9, label: 'Readiness and run' },
-  { id: 'results', number: 10, label: 'Results → reports' },
+  { id: 'results', number: 10, label: 'Results & reports' },
 ]
 
 export const sectionMeta = (id: FlowSectionId): SectionMeta =>

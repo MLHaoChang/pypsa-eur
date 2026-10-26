@@ -511,7 +511,7 @@ Gating column: the existing gate is **kept**. RO means "read-only role: the serv
 
 | Current | New home | Gating kept |
 |---|---|---|
-| Canvas switcher Blank / Satellite / Hybrid / Site 3D (`MapModeSwitcher`) | renamed **Schematic / Map / Hybrid / Site plan** (§8) | RO for edits |
+| Canvas switcher Blank / Satellite / Hybrid / Site 3D (`MapModeSwitcher`) | renamed **Schematic / Map / Hybrid / Site 3D** (§8) | RO for edits |
 | Schematic toolbar (add bus, connect, fit, auto-layout, reset, results overlay, grouping, legend) | unchanged | — |
 | Map toolbar (import geometry, add or connect bus, OSM, site boundary, find an address, unplaced buses) | unchanged; "Find an address" also sets the section-1 site pin | RO |
 | Site 3D overlay (site picker, sized, arrange, reset, snapshot, walk, fit, findings, legend) | unchanged | RO; needs a site |
@@ -557,7 +557,7 @@ A group out of scope shows its tab as "Outside scope", never as passed.
 
 - **The owner's "real map example"** is the app's Leaflet map, `pages/MapCanvas.tsx` (Satellite and Hybrid; Esri tiles, address search, click-to-place, bus drag, the unplaced-buses panel). The **site plan** is `pages/SiteCanvas.tsx` (the 3D site view; `site3d/*`) and the **schematic** is `pages/TopologyCanvas.tsx`. All three are views of one model, switched by `MapModeSwitcher`.
   - #436's Expert preview shows the same idea as Network / Map / Site tabs.
-  - The switcher keeps its four modes, labelled **Schematic / Map / Hybrid / Site plan**. Guided shows Map and Site plan as a thumbnail on the section-1 and section-5 cards. The existing `SiteThumbnailCard` "Open in 3D" stays.
+  - The switcher keeps its four modes, labelled **Schematic / Map / Hybrid / Site 3D**. Guided shows Map and Site 3D as a thumbnail on the section-1 and section-5 cards. The existing `SiteThumbnailCard` "Open in 3D" stays.
 - **Site location lives in section 1.** A map pin, or an address search (`api/geocode.ts`) on the real map. Country and timezone are derived. The template examples ship every bus at 0,0, which `utils/geo.ts` and `network_geometry._bus_coord` treat as unplaced, so today renewable profiles refuse them (RP-01 `missing_coordinates`).
 - **Placing the pin** (owner, Q4 = A): the pin places every **unplaced** bus in a compact cluster around it, keeping the schematic's arrangement. The user then drags buses on the map. Placed buses are never moved. It is one undoable batch of bus `x/y` writes (the existing `busPositionPatch`), with no engine change. Line lengths are recomputed only where "derive lengths from geometry" is on, as today.
 - **Per-bus coordinates** keep their one editor (`CoordPairInput` in the bus form). The Map is the visual editor of the same values.
