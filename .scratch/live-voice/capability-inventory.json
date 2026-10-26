@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-23",
+  "generated_at": "2026-10-26",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -783,7 +783,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "5321b138cd3f3667e253a22c17fbf1c7758392be4c7458a1870b930298c0a92a",
+      "schema_sha256": "0c0e5acb69a77387ae4bf345475e55f66ecba3f5ac7920acd7ef4f3a16cd2f31",
       "behavioral_fixture": "pending"
     },
     {
