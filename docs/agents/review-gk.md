@@ -16,6 +16,7 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - `tool-error-kinds.json`: its kinds must be the union of both parents.
 - Inventory: `smoke/assistant_inventory.py --check`; regenerate with `--write`, never hand-merge.
 
+- Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
 
 ## Known container-only failures
@@ -30,3 +31,10 @@ Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask fo
 
 - `profile_location_missing` skips uploaded and network_native profiles (`readiness.profile_kind`).
 - A project-scoped result-view read carries `project_id` = the active project, and 404/409 count as `no_data`.
+
+## Engineering rules
+
+- Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
+- A shipped demo limit that is an IEC planning level says so in its clause: "planning level, not an emission limit allocated to this installation".
+- A new scorecard input read from a component is registered as an editable field end to end (FieldSpec, model, schemas, attrs_doc, fieldLabels, fixture) in the same PR.
+- E1 growth placeholders: setting `nh3_delivery_tpd` converts t/d to MWh_NH3/h (× 5.166/24), with a test.
