@@ -3182,7 +3182,7 @@ def _dispatch_real_tool_call(
         yield "choice_request", ui_event_payload
     elif isinstance(result, dict) and result.get("_ui_event"):
         ui_event_payload = {
-            k: v for k, v in result.items() if k != "_ui_event"
+            k: v for k, v in result.items() if k not in ("_ui_event", "highlight_facts")
         }
         # Keep a compact acknowledgement for the model (full navigate args stay
         # on the SSE ui_event frame for the frontend).
@@ -3203,6 +3203,11 @@ def _dispatch_real_tool_call(
             "period": ui_event_payload.get("period"),
             "snapshot_index": ui_event_payload.get("snapshot_index"),
             "canvas_view": ui_event_payload.get("canvas_view"),
+            # Live-voice 07 — Load flow source, window and highlighted branch.
+            "loadflow_source": ui_event_payload.get("loadflow_source"),
+            "window_from": ui_event_payload.get("window_from"),
+            "window_to": ui_event_payload.get("window_to"),
+            "highlight": result.get("highlight_facts"),
             # Issue 06 — open_run_result acknowledges the discussed run id.
             "run_id": ui_event_payload.get("run_id"),
             "section": ui_event_payload.get("section"),
@@ -3224,9 +3229,26 @@ def _dispatch_real_tool_call(
         acknowledgement = None
         if session.assurance_turn is None and session.navigation_turn is not None:
             from harness.navigation import issue
-            acknowledgement = issue(session.navigation_turn, {
-                **{k: v for k, v in ui_event_payload.items() if v is not None},
-                "tool_use_id": tool_use_id})
+            try:
+                acknowledgement = issue(session.navigation_turn, {
+                    **{k: v for k, v in ui_event_payload.items() if v is not None},
+                    "tool_use_id": tool_use_id})
+            except HTTPException as exc:
+                # The Load flow view changed between the tool and the ACK
+                # record: refuse as the tool would, and show nothing.
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                kind = detail.get("error_kind", "loadflow_view_unavailable")
+                yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                     "error_kind": kind, "message": _redact_for_log(detail or exc)}
+                tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                               "is_error": True,
+                                               "content": _error_result_content(detail, exc, kind)})
+                return
+            loadflow_facts = (acknowledgement or {}).pop("loadflow", None)
+            if loadflow_facts:
+                # What the issued record bound, not the tool's earlier read.
+                result_for_model["highlight"] = loadflow_facts["highlight"]
+                result_for_model["source_binding"] = loadflow_facts["source_binding"]
             if acknowledgement:
                 ui_event_payload.update(acknowledgement=acknowledgement, tool_use_id=tool_use_id)
         yield "ui_event", ui_event_payload

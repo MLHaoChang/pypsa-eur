@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant can open the Load flow results with the same source and snapshot window it just summarised and name one line or transformer to highlight. The navigation is checked against the view first: an unavailable view or an unknown branch is refused with no navigation, and the acknowledgement binds the exact source, window, data and highlighted branch.

@@ -2187,7 +2187,12 @@ TOOLS: list[dict[str, Any]] = [
         "gridspine, reports and campusElectrical (the grid connection) open their application panels; campusStudy opens the grid study's settings and run, campusResults its results; economics opens the rates, "
         "price basis and every asset's investment costs; "
         "adequacy and fmea select their Results tabs. Use map with canvas_view hybrid "
-        "(satellite with labels) or site (the 3D site view). Safety: read.",
+        "(satellite with labels) or site (the 3D site view). "
+        "With results_tab loadflow, pass loadflow_source, window_from/window_to and "
+        "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
+        "window and highlight one line or transformer. Only when one of these is given, an "
+        "unavailable view or an unknown branch refuses with no navigation; the result's highlight "
+        "says whether the branch is ranked and shown. Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
@@ -2197,6 +2202,18 @@ TOOLS: list[dict[str, Any]] = [
             "compare_a": {"type": "string"},
             "compare_b": {"type": "string"},
             "compare_tab": {"type": "string", "enum": COMPARE_TAB_ENUM},
+            "loadflow_source": {"type": "string", "enum": ["lopf", "ac_pf"]},
+            "window_from": {"type": "integer", "minimum": 0},
+            "window_to": {"type": "integer", "minimum": 0},
+            "highlight_branch": {
+                "type": "object",
+                "properties": {
+                    "component": {"type": "string", "enum": ["Line", "Transformer"]},
+                    "name": {"type": "string", "minLength": 1, "maxLength": 128},
+                },
+                "required": ["component", "name"],
+                "additionalProperties": False,
+            },
         },
         ["panel_id"],
     ),

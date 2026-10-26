@@ -991,17 +991,23 @@ class Turn:
                 "message": "The tool did not complete. No completed effect is verified.",
             }
         if event == "ui_event":
-            from harness.navigation import issue
+            from harness import navigation
 
-            acknowledgement = issue(self, payload)
+            try:
+                acknowledgement = navigation.issue(self, payload)
+            except HTTPException:
+                # A refused Load flow target issues no ACK: it stays submitted.
+                acknowledgement = None
             if acknowledgement:
+                acknowledgement.pop("loadflow", None)
                 self.navigation_actions.append(acknowledgement["action_id"])
             return {
                 **({"acknowledgement": acknowledgement} if acknowledgement else {}),
                 **{
                     k: v
                     for k, v in payload.items()
-                    if k in {"kind", "panel_id", "results_tab", "tool_use_id"}
+                    if k in {"kind", "panel_id", "results_tab", "tool_use_id",
+                             *navigation.LOADFLOW_KEYS}
                 },
             }
         return payload
