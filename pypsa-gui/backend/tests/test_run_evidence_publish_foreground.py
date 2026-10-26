@@ -57,6 +57,10 @@ def _start_solve(install_network, monkeypatch, *, final: dict, hold: float = 0.3
         with ctx.solver_state_lock:
             ctx.solver_state.update(status='running', kind=kind, objective=None,
                                     condition=None, solve_time=None, log_queue=log_queue, thread=worker)
+        # Start the worker only once 'running' is published, so 'completed'
+        # can never precede it.
+        if worker.ident is None:
+            worker.start()
         return {'status': 'started'}
 
     monkeypatch.setattr('routers.simulation.run', fake_run)
@@ -71,7 +75,6 @@ def _start_solve(install_network, monkeypatch, *, final: dict, hold: float = 0.3
 
     # Publish the same worker identity production claims with status=running.
     worker = threading.Thread(target=finish_later, daemon=True)
-    worker.start()
     session = chat_service.ChatSession()
     tool = 'run_simulation' if kind == 'lopf' else 'run_ac_pf_stage'
     frames = list(chat_service._dispatch_real_tool_call(
