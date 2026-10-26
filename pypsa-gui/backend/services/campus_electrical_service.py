@@ -895,7 +895,9 @@ def owner_assets_response(project, replacements: bool = False) -> dict:
 def draft(project, overwrite: bool = False) -> dict:
     """Write the campus file from the project's solved network, with the
     island data of the project's island sidecar when it has one (campus
-    island plan I9b; owner, 2026-10-14)."""
+    island plan I9b; owner, 2026-10-14). A redraft keeps the frequency of the
+    campus file it replaces, so a 60 Hz campus gets 60 Hz line capacitance."""
+    from services.solver.island import IslandRefusal, campus_f_hz
     from services.adequacy.island_config import SIDECAR_NAME, load_island_config
 
     require_capacity_expansion(project)
@@ -906,7 +908,13 @@ def draft(project, overwrite: bool = False) -> dict:
     with _netcdf_lock():
         try:
             island = load_island_config(project_registry.project_dir(project) / SIDECAR_NAME)
-            result = cs.draft_from_project(nc, island=island)
+            f_hz = None
+            if (d / CAMPUS_FILE).is_file():
+                try:
+                    f_hz = campus_f_hz(project_registry.project_dir(project))
+                except IslandRefusal:
+                    pass                      # unreadable file: draft as a first draft
+            result = cs.draft_from_project(nc, island=island, f_hz=f_hz)
         except ContractError as exc:
             raise _unprocessable(exc)
     text = yaml.safe_dump(result.spec, sort_keys=False)
