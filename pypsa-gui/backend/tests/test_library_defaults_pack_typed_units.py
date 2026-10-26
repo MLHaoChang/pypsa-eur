@@ -220,7 +220,7 @@ def test_a_legacy_regional_version_is_refused_and_names_its_successor():
 
     with pytest.raises(LegacyPackVersion) as err:
         price_from_pack(_net(), "generators", "g", "onwind", version="2026-10-21", region="uk")
-    assert err.value.successor == TYPED
+    assert err.value.successor == LATEST    # the newest typed version shipped for the region
 
 
 def test_the_legacy_set_is_pinned():

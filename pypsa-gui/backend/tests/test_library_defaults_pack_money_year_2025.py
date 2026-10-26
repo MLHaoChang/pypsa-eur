@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import pathlib
 from decimal import Decimal
 
 import pytest
@@ -117,9 +118,7 @@ def test_every_pin_moved_and_the_co2_path_keeps_2020():
 
     from services.adequacy import redundancy
     from services.study import library
-    from tests.test_library_defaults_pack import BACKEND
-
-    sys.path.insert(0, str(BACKEND / "project_templates"))
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
     import eh_ammonia
     import eh_ipp
     import eh_site
@@ -162,7 +161,8 @@ def test_a_project_priced_on_2026_10_22_reloads_with_its_cost_hash_and_year():
     new = price_from_pack(n, "generators", "w", "onwind", version=NEW)
     assert new["money_year"] == 2025 and new["overnight_cost"] == old["overnight_cost"]
     # A saved project's finance block keeps the case year it was saved with.
-    saved = {"currency": "EUR", "currency_year": 2020, "price_basis": "nominal"}
+    saved = {"financial_close": "2026-01-01", "currency": "EUR", "currency_year": 2020,
+             "price_basis": "nominal"}
     assert FinanceInputs.model_validate(saved).currency_year == 2020
 
 
