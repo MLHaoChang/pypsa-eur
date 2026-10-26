@@ -1,7 +1,8 @@
 // The one reliability goal editor (W3b-R): controlled, the same values in
 // Guided and Expert, only the typed field reported.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactElement } from 'react'
 import { goal } from '../../test/fixtures/reliabilityGoal'
@@ -58,5 +59,23 @@ describe('ReliabilityGoalEditor', () => {
     expect(input('hub-goal-lole').placeholder).toBe('3 (default)')
     expect(screen.queryByTestId('hub-goal-ens')).toBeNull()
     expect(screen.queryByTestId('hub-goal-draws')).toBeNull()
+  })
+
+  it('Expert shows the catalogue\'s hover help on the goal fields, as the EH panel did', async () => {
+    const { guidesApi } = await import('../GuidedTour')
+    vi.spyOn(guidesApi, 'getGuide').mockResolvedValue({
+      version: 1, tours: {},
+      fields: { target_lole_h: 'LOLE target — allowed loss-of-load hours per year.' },
+    } as never)
+    const user = userEvent.setup()
+    render(<ReliabilityGoalEditor mode="expert" goal={G} edits={{}} onChange={vi.fn()} />)
+    const label = input('solver-goal-lole').closest('label')!
+    const trigger = await waitFor(() => {
+      const t = label.querySelector('[tabindex="0"]')
+      if (!t) throw new Error('help icon not rendered yet')
+      return t
+    })
+    await user.hover(trigger)
+    expect(await screen.findByText(/allowed loss-of-load hours per year/)).toBeTruthy()
   })
 })

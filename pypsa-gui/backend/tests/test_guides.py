@@ -99,6 +99,21 @@ def test_every_panel_hover_key_is_in_the_catalogue():
     assert keys <= set(fields), keys - set(fields)
 
 
+def test_every_goal_hover_key_is_in_the_catalogue():
+    """W3b-R: the goal fields' hover help moved with them from the EH panel
+    to the one goal editor and the site-type select; same keys, same
+    catalogue."""
+    goal_dir = FE_SRC / "components" / "reliabilityGoal"
+    editor = (goal_dir / "ReliabilityGoalEditor.tsx").read_text()
+    site = (goal_dir / "SiteTypeSelect.tsx").read_text()
+    editor_keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", editor))
+    site_keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", site))
+    assert {"ens_cap_permyriad", "target_lole_h"} <= editor_keys
+    assert "archetype" in site_keys
+    fields = G.load_guide("eh_fmea")["fields"]
+    assert (editor_keys | site_keys) <= set(fields), (editor_keys | site_keys) - set(fields)
+
+
 # ── P24: plain-language terms for the hub-design step cards ────────────────
 
 HUB_FIELDS = (

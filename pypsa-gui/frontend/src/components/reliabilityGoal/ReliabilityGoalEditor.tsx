@@ -10,6 +10,8 @@ import {
   goalPatchFromEdits, goalText, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
 } from '../../hooks/useReliabilityGoal'
 import { Term } from '../../pages/hubDesign/shared/Term'
+import { useGuide } from '../GuidedTour'
+import { InfoTip } from '../../layout/properties/cardKit'
 
 /** The ENS target's hint, as Solver settings has always worded it. */
 export const ENS_HINT = "Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
@@ -34,15 +36,19 @@ export function ReliabilityGoalEditor({
 }) {
   const guided = mode === 'guided'
   const error = goalPatchFromEdits(edits).error
+  // The catalogue's hover help (P21), as the EH panel's pack fields had it.
+  // Guided's labels are glossary terms with their own hover; draws has none.
+  const { data: guide } = useGuide()
+  const fieldTip = (key: string): string | undefined => guide?.fields?.[key]
 
   const label: Record<GoalNumberField, ReactNode> = guided ? {
     target_lole_h: <Term k="shortfall_hours">Allowed shortfall (hours per year)</Term>,
     ens_cap_permyriad: <><Term k="energy_strictness">Energy strictness</Term> ({ENS_UNIT})</>,
-    mc_draws: <>Simulation runs per check</>,
+    mc_draws: <InfoTip text={fieldTip('mc_draws')}>Simulation runs per check</InfoTip>,
   } : {
-    target_lole_h: 'Allowed shortfall (h/yr)',
-    ens_cap_permyriad: `ENS target (${ENS_UNIT})`,
-    mc_draws: 'MC draws',
+    target_lole_h: <InfoTip text={fieldTip('target_lole_h')}>Allowed shortfall (h/yr)</InfoTip>,
+    ens_cap_permyriad: <InfoTip text={fieldTip('ens_cap_permyriad')}>{`ENS target (${ENS_UNIT})`}</InfoTip>,
+    mc_draws: <InfoTip text={fieldTip('mc_draws')}>MC draws</InfoTip>,
   }
   const placeholder = (k: GoalNumberField): string => {
     if (k === 'mc_draws') return `${goal?.mc_draws.value ?? 500} (default)`

@@ -4,6 +4,8 @@
 import type { ReactNode } from 'react'
 import type { EhArchetype } from '../../api/simulation'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { useGuide } from '../GuidedTour'
+import { InfoTip } from '../../layout/properties/cardKit'
 
 export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
   { id: 'strong_grid', label: 'Strong — import whenever needed' },
@@ -23,9 +25,15 @@ export function SiteTypeSelect({ mode, label, disabled = false, testId }: {
   const { goal, archetype, save } = useReliabilityGoal()
   const source = goal?.site_archetype.source
   const guided = mode === 'guided'
+  const { data: guide } = useGuide()
+  const fieldTip = (key: string): string | undefined => guide?.fields?.[key]
   return (
     <label className={guided ? 'flex flex-col gap-1 text-[12px]' : 'flex flex-col gap-1'}>
-      <span className={guided ? 'font-semibold text-text' : 'text-[10px] text-muted'}>{label}</span>
+      <span className={guided ? 'font-semibold text-text' : 'text-[10px] text-muted'}>
+        {/* Guided's label is a glossary term with its own hover; Expert gets
+            the catalogue's (P21), as the EH panel's archetype had it. */}
+        {guided ? label : <InfoTip text={fieldTip('archetype')}>{label}</InfoTip>}
+      </span>
       <select data-testid={testId} value={archetype}
         disabled={disabled || !goal || save.isPending}
         onChange={e => save.mutate({ site_archetype: e.target.value as EhArchetype })}

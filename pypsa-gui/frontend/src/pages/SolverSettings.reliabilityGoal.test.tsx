@@ -2,10 +2,16 @@
 // ENS target input in Solver settings › Network; edits go into the draft and
 // the panel's Save sends only what changed.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import type { SolverConfig } from '../api/types'
 import { goal } from '../test/fixtures/reliabilityGoal'
 import { ReliabilityAssumptions, solverSettingsSaveBody } from './SolverSettings'
+
+// The goal editor's labels read the hover-help catalogue (a query).
+const render = (ui: ReactElement) => rtlRender(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 afterEach(() => cleanup())
 
