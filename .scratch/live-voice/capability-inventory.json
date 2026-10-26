@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-23",
+  "generated_at": "2026-10-26",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
