@@ -42,6 +42,7 @@ import { AssetFieldsEdit, assetReadoutItems, fieldHelp, schemaFields } from './p
 import { GuideButton } from '../components/GuidedTour'
 import CarrierPanel from './properties/CarrierPanel'
 import ShuntPanel from './properties/ShuntPanel'
+import AssetFootprintEditor from '../components/AssetFootprintEditor'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -1537,6 +1538,14 @@ export function LinePanel({ name }: { name: string }) {
     onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
 
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Line' || !line || editRequest.name !== line.name) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, line])
+
   if (!line) return <p className="p-3 text-xs text-muted">Loading…</p>
 
   // Derive per-km values from the stored absolute Ohm / Siemens via the
@@ -1723,6 +1732,14 @@ export function TransformerPanel({ name }: { name: string }) {
     },
     onError: (e: Error) => toast.error(`Update failed: ${blockerMessage(e)}`),
   })
+
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest?.type !== 'Transformer' || !tr || editRequest.name !== tr.name) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, tr])
 
   if (!tr) return <p className="p-3 text-xs text-muted">Loading…</p>
 
@@ -1964,7 +1981,7 @@ function LoadPanel({ name }: { name: string }) {
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
-export default function PropertiesPanel() {
+export default function PropertiesPanel({ showFootprintEditor = true }: { showFootprintEditor?: boolean }) {
   const { selectedComponent, setSelectedComponent, creationItem, rightPanelOpen, toggleRightPanel } = useUIStore()
   const qc = useQueryClient()
 
@@ -2128,6 +2145,7 @@ export default function PropertiesPanel() {
         {selectedComponent.type === 'Transformer' && <TransformerPanel key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Carrier'     && <CarrierPanel     key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'ShuntImpedance' && <ShuntPanel key={selectedComponent.name} name={selectedComponent.name} />}
+        {showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
       </div>
     </aside>
   )

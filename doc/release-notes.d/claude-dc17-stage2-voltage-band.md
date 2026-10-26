@@ -1,0 +1,1 @@
+* Feat(gridspine): The planning-criteria screen (`screen_planning`) takes a grid-code `profile` and judges each bus's stage-2 voltage against the profile's continuous band for its nominal kV, falling back to the assumed 0.9-1.1 pu band where no profile band covers that kV; each row and the report say which band applied.

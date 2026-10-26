@@ -3,7 +3,7 @@
 
 # P–V and Q–V voltage-stability margins at the PoC (screening)
 
-Status: ready-for-agent
+Status: done (PR #714)
 Type: task
 Blocked by: none (09 is the owner's priority, not a dependency)
 Gated: **yes** (gridspine)

@@ -50,6 +50,7 @@ from gridspine.static.planning_criteria import (
     screen_planning,
     validate_emergency_ratings,
 )
+from gridspine.templates.grid_codes import load_grid_code, validate_profile
 from tests.gridspine.test_shortcircuit import HOUR, _hour_tables
 
 PARALLEL = ["BUS_A-BUS_B-1", "BUS_A-BUS_B-2"]
@@ -388,6 +389,93 @@ def test_ledgers_state_the_assumptions():
     assert any("split busbar" in s for s in BUS_SECTION_LEDGER)
     assert any("thermal loading only" in s for s in PLANNING_LEDGER)
     assert any("no redispatch" in s for s in PLANNING_LEDGER)
+
+
+# --------------------------------------------------------------------------
+# the stage-2 voltage band from the grid-code profile
+# --------------------------------------------------------------------------
+
+def _profile(*bands):
+    """A validated profile whose voltage_bands are ``(kv_min, kv_max, v_min, v_max)``."""
+    p = load_grid_code("generic_assumed", raw=True)
+    p["voltage_bands"] = [{"kv_min": lo, "kv_max": hi, "v_min": vmin, "v_max": vmax,
+                           "clause": "test clause", "source": "code"} for lo, hi, vmin, vmax in bands]
+    return validate_profile("test_band", p)
+
+
+def test_a_profile_band_narrower_than_the_assumed_one_fails_a_bus_that_passes_today():
+    net = _net()
+    today, _ = _screen(net, _set(net))
+    res, report = _screen(net, _set(net), profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert _one(today, PARALLEL[1])["stage2_verdict"] == "pass"
+    row = _one(res, PARALLEL[1])
+    assert row["stage2_min_vm_pu"] < 0.95
+    assert row["stage2_verdict"] == "fail"
+    assert "110 kV 0.95-1.05 pu (profile test_band, test clause, code)" in row["note"]
+    assert report["voltage_band"] == {"profile": "test_band", "buses": {"profile": 6, "assumed": 0}}
+
+
+def test_no_profile_gives_todays_band_labelled_assumed():
+    net = _net()
+    res, report = _screen(net, _set(net))
+    same, _ = _screen(net, _set(net), profile=_profile((0.0, 200.0, 0.9, 1.1)))
+    cols = [c for c in res.columns if c != "note"]
+    pd.testing.assert_frame_equal(res[cols], same[cols])
+    assert report["voltage_band"] == {"profile": "assumed", "buses": {"profile": 0, "assumed": 6}}
+    row = _one(res, PARALLEL[1])
+    assert "voltage band: 110 kV 0.9-1.1 pu (assumed); 20 kV 0.9-1.1 pu (assumed)" in row["note"]
+    assert row["note"].endswith(NO_REDISPATCH)
+    assert any("assumed [0.9, 1.1] pu" in s for s in PLANNING_LEDGER)
+
+
+def test_a_kv_level_no_profile_band_covers_keeps_the_assumed_band():
+    net = _net()
+    # 110 kV covered (tight), 20 kV not: the 20 kV buses stay on 0.9-1.1
+    res, report = _screen(net, _set(net), profile=_profile((100.0, 200.0, 0.95, 1.05)))
+    assert report["voltage_band"] == {"profile": "test_band", "buses": {"profile": 4, "assumed": 2}}
+    row = _one(res, PARALLEL[1])
+    assert "110 kV 0.95-1.05 pu (profile test_band, test clause, code); 20 kV 0.9-1.1 pu (assumed)" in row["note"]
+    # the low bus is at 20 kV (~0.946 pu): in the assumed band, though outside the profile's 0.95
+    assert row["stage2_min_vm_pu"] < 0.95
+    assert row["stage2_verdict"] == "pass"
+
+
+def test_the_walk_moves_toward_the_profile_band():
+    net = _net()
+    controls = Controls(switched_shunts=("SH1",))
+    today, _ = _screen(net, _set(net), controls=controls)
+    res, _ = _screen(net, _set(net), controls=controls, profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert _one(today, PARALLEL[1])["remedial"] == "none"      # 0.946 pu is inside 0.9-1.1
+    row = _one(res, PARALLEL[1])
+    assert row["remedial"].startswith("SH1 +")                  # but not inside 0.95-1.05
+    assert row["stage2_verdict"] == "pass" and row["stage2_min_vm_pu"] >= 0.95
+
+
+def test_the_first_outage_re_adjusts_toward_the_profile_band():
+    net = _net()
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"] == f"{PARALLEL[1]}>BUS_D1-BUS_D2-1"].reset_index(drop=True)
+    controls = Controls(switched_shunts=("SH1",))
+    today, _ = _screen(net, cset, controls=controls)
+    res, _ = _screen(net, cset, controls=controls, profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert f"re-adjusted after the first outage ({PARALLEL[1]}): none" in today["note"].iloc[0]
+    assert f"re-adjusted after the first outage ({PARALLEL[1]}): SH1 +" in res["note"].iloc[0]
+
+
+def _malformed():
+    p = load_grid_code("generic_assumed", raw=True)
+    p["voltage_bands"][0]["v_min"] = 1.05                       # v_min above 1
+    p["name"] = "broken"
+    return p
+
+
+@pytest.mark.parametrize("bad, match", [(_malformed(), "v_min < 1 < v_max"), ("test_band", "profile"),
+                                        ({"title": "no name"}, "profile")])
+def test_a_bad_profile_is_refused_before_the_base_solve(bad, match, monkeypatch):
+    net = _net()
+    monkeypatch.setattr(planning_criteria.pp, "runpp", lambda *a, **k: pytest.fail("solved"))
+    with pytest.raises(ContractError, match=match):
+        _screen(net, _set(net), profile=bad)
 
 
 # --------------------------------------------------------------------------

@@ -823,3 +823,108 @@ def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriter
         _write_text_atomic(run_dir / MILP_HISTORY_CSV, out["milp_history"].to_csv(index=False))
         _write_text_atomic(run_dir / MILP_COMPARISON_CSV, out["comparison"].to_csv(index=False))
     return out
+
+
+# --- the harmonic screen (grid-to-process issue 17) --------------------------
+
+HARMONICS_CSV = "campus_harmonics.csv"
+
+SK_FROM_NETWORK = "the project's PoC fault level (eh_sk_mva)"
+SK_TYPICAL = "typical for the PoC voltage (the draft's fallback; the project gives no fault level)"
+SK_CAMPUS = "the campus description (uploaded or edited)"
+
+
+def _pcc_sk_min(pcc: dict) -> float:
+    v = pcc["sk_min_mva"]
+    return float(v["value"] if isinstance(v, dict) else v)
+
+
+def _sk_source(campus: dict, n) -> tuple[str, bool]:
+    """Where the campus PCC's minimum fault level came from, and whether it is
+    the producer's typical fallback."""
+    from gridspine.producers.campus import _typical_sk
+
+    pcc = campus["campus"]["pcc"]
+    sk = _pcc_sk_min(pcc)
+    bus = pcc.get("pypsa_name")
+    given = math.nan
+    if bus in n.buses.index and "eh_sk_mva" in n.buses.columns:
+        try:
+            given = float(n.buses.at[bus, "eh_sk_mva"])
+        except (TypeError, ValueError):
+            given = math.nan
+    if math.isfinite(given) and given > 0:
+        if math.isclose(sk, given, rel_tol=1e-9):
+            return SK_FROM_NETWORK, False
+    elif math.isclose(sk, _typical_sk(float(pcc["vn_kv"]))[0], rel_tol=1e-9):
+        return SK_TYPICAL, True
+    return SK_CAMPUS, False
+
+
+def harmonic_units(n, poc: str) -> pd.DataFrame:
+    """The harmonic sources of a project network, all lumped at ``poc``: every
+    Link that is a process unit (``eh_process``) or names a
+    ``harmonic_source``. A unit with an input missing is kept (the screen says
+    "no input")."""
+    links = n.links
+    cols = ("rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter")
+
+    def col(name, default):
+        return links[name] if name in links.columns else pd.Series(default, index=links.index, dtype=object)
+
+    process = col("eh_process", False).map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
+    source = col("harmonic_source", "").map(lambda v: "" if pd.isna(v) else str(v).strip())
+    chosen = links.index[process | (source != "")]
+    out = pd.DataFrame({"unit": list(chosen), "poc": poc}, columns=["unit", "poc"])
+    for c in cols:
+        values = col(c, None).reindex(chosen)
+        out[c if c != "spectrum_post_filter" else "post_filter"] = list(values)
+    return out
+
+
+def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
+    """The harmonic screen of a prepared run (``static/harmonics.py``),
+    written to ``campus_harmonics.csv``: one ``level`` ``poc`` row and one
+    ``unit`` row per harmonic source.
+
+    S_k is the campus PCC's minimum case; ``sk_mva_source`` says whether it is
+    the project's own fault level, the draft's typical fallback (the row is
+    then ``assumed`` and says so) or the campus description's. The unit inputs
+    are read from the project network the run was prepared from, which must
+    be unchanged since (its sha256 is in the manifest)."""
+    from gridspine.static import harmonics as hm
+
+    run_dir = Path(run_dir)
+    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
+    network_path = Path(manifest["network_path"])
+    if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
+        raise ContractError("the project changed since this campus run was prepared; prepare the run again")
+    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    n = load_solved_network(network_path)
+    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    limits, cited = hm.limits_from_profile(code)
+
+    pcc = campus["campus"]["pcc"]
+    poc = str(pcc["bus"])
+    sk = _pcc_sk_min(pcc)
+    sk_source, typical = _sk_source(campus, n)
+    study = hm.harmonic_table(harmonic_units(n, poc), {poc: sk}, limits, law=law)
+
+    limit_assumed = not cited or any(c["source"] != "code" for c in cited)
+    unit_demo = study.units["spectrum_source"].astype(str).str.startswith("demo")
+    frames = []
+    for level, df, demo in (("poc", study.pocs, bool(unit_demo.any())), ("unit", study.units, unit_demo)):
+        df = df.copy()
+        df.insert(0, "level", level)
+        df["sk_mva_source"] = sk_source
+        df["profile"] = profile
+        df["assumed"] = limit_assumed | typical | demo
+        if typical:
+            df["note"] = df["note"].map(lambda s: f"S_k is {SK_TYPICAL}, so no verdict here is a pass to "
+                                                  f"rely on; {s}")
+        frames.append(df)
+    columns = ["level", *dict.fromkeys((*hm.UNIT_COLUMNS[:2], *hm.POC_COLUMNS, *hm.UNIT_COLUMNS)),
+               "sk_mva_source", "profile", "assumed"]
+    out = pd.concat(frames, ignore_index=True).reindex(columns=columns)
+    _write_text_atomic(run_dir / HARMONICS_CSV, out.to_csv(index=False))
+    return out

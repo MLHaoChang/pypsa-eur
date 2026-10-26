@@ -4953,7 +4953,27 @@ def undo_status() -> dict:
 # frames the ChatPanel forwards to uiStore. NO backend mutation.
 
 
-def ui_select_component(component_class: str, name: str) -> dict:
+def ui_select_component(component_class: str, name: str, open_editor: bool | None = None) -> dict:
+    if open_editor is not None and type(open_editor) is not bool:
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": "open_editor",
+            "message": "Use a boolean for open_editor.",
+        })
+    if open_editor:
+        if component_class not in {"Bus", "Line", "Transformer", "Link", "Generator", "StorageUnit", "Store", "Load"}:
+            raise HTTPException(400, detail={
+                "error_kind": "invalid_navigation", "field": "component_class",
+                "message": "Choose a component with an Edit form in Properties.",
+            })
+        attr = _GENERIC_CRUD_ATTRS[component_class]
+        df = getattr(PyPSAService.get_network(), attr)
+        if name not in df.index:
+            raise HTTPException(404, detail={
+                "error_kind": "component_not_found", "component_class": component_class, "name": name,
+                "message": f"{component_class} '{name}' is not in the network.",
+            })
+        return {"_ui_event": True, "kind": "open_properties",
+                "component_class": component_class, "name": name}
     return {"_ui_event": True, "kind": "select_component",
             "component_class": component_class, "name": name}
 
@@ -4966,6 +4986,7 @@ def ui_open_panel(
     compare_a: str | None = None,
     compare_b: str | None = None,
     compare_tab: str | None = None,
+    canvas_view: str | None = None,
 ) -> dict:
     """
     Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
@@ -4996,6 +5017,14 @@ def ui_open_panel(
                 "error_kind": "invalid_navigation", "field": key,
                 "message": f"Use the declared {key} type from the tool schema.",
             })
+    if canvas_view is not None and not (
+        (panel_id in {"Topology", "topology"} and canvas_view == "blank")
+        or (panel_id in {"MapCanvas", "map"} and canvas_view in ("satellite", "hybrid", "site"))
+    ):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": "canvas_view",
+            "message": "Choose blank for topology, or satellite, hybrid or site for map.",
+        })
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
@@ -5013,12 +5042,68 @@ def ui_open_panel(
         event["compare_b"] = compare_b
     if compare_tab:
         event["compare_tab"] = compare_tab
+    if canvas_view is not None:
+        event["canvas_view"] = canvas_view
     return event
 
 
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
+    import pandas as pd
+
+    snapshots = PyPSAService.get_network().snapshots
+    multi = isinstance(snapshots, pd.MultiIndex)
+    timesteps = snapshots.get_level_values(1) if multi else snapshots
+    periods = list(dict.fromkeys(snapshots.get_level_values(0))) if multi else []
+    axis_range = ""
+    if len(timesteps):
+        first, last = (ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+                       for ts in (timesteps[0], timesteps[-1]))
+        axis_range = f"{first} … {last}"
+    period_note = " Periods: " + ", ".join(map(str, periods)) + "." if periods else ""
+    suffix = (f" ({axis_range})." if axis_range else "") + period_note
+
+    def refuse(message, context=suffix):
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": "snapshot_iso",
+            "message": message + context,
+        })
+
+    if not len(snapshots):
+        refuse("The network has no snapshots.")
+    if not isinstance(snapshot_iso, str):
+        refuse("Send a valid ISO timestamp.")
+    if "|" in snapshot_iso:
+        encoded_period, snapshot_iso = snapshot_iso.split("|", 1)
+        try:
+            encoded_period = int(encoded_period)
+        except ValueError:
+            refuse("Send a valid investment period before the timestamp.")
+        if period is not None and period != encoded_period:
+            refuse("The timestamp's period disagrees with the period argument.")
+        period = encoded_period
+    try:
+        target = pd.Timestamp(snapshot_iso)
+        if pd.isna(target):
+            refuse("Send a valid ISO timestamp.")
+    except (ValueError, TypeError, OverflowError):
+        refuse("Send a valid ISO timestamp.")
+    axis_tz = getattr(timesteps, "tz", None)
+    if (target.tzinfo is None) != (axis_tz is None):
+        if axis_tz is None:
+            refuse(f"The time axis has no time zone. Send the time without an offset, between {axis_range}.",
+                   period_note)
+        refuse("The time axis has a time zone. Send the time with an offset.")
+    matches = [i for i, timestep in enumerate(timesteps)
+               if timestep == target and (not multi or period is None or snapshots[i][0] == period)]
+    if not matches:
+        refuse(f"The timestamp {snapshot_iso} is not on the time axis")
+    if len(matches) > 1:
+        refuse("The timestamp is ambiguous. Choose its investment period.")
+    index = matches[0]
+    matched_period = int(snapshots[index][0]) if multi else period
     return {"_ui_event": True, "kind": "set_snapshot",
-            "snapshot_iso": snapshot_iso, "period": period}
+            "snapshot_iso": timesteps[index].isoformat(), "period": matched_period,
+            "snapshot_index": index}
 
 
 def discuss_project_run(

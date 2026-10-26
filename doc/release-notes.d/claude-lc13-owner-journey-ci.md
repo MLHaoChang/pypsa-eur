@@ -1,0 +1,1 @@
+* Test(pypsa-gui): Owner journeys OJ-01 and OJ-05 now run in a real browser in CI (`GUI owner journeys (browser)`), and a manual, cost-capped live run (`Owner journeys (live, manual)`, `tools/run_owner_journeys.py`) reports pass counts per journey.
