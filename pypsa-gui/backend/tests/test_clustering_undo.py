@@ -7,6 +7,7 @@ undo depth dropped. So POST /api/network/cluster must be one undo step that
 bumps the revision, and undoing it must restore the network, bump the
 revision again and drop the depth back.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -27,11 +28,16 @@ def _two_country_network() -> pypsa.Network:
 
 
 def test_clustering_is_one_undo_step_and_its_undo_is_visible_to_the_poll(
-        client, install_network, api_project):
+    client, install_network, api_project
+):
     api_project("clustering_undo_project")
     install_network(_two_country_network())
-    bus_names = lambda: sorted(b["name"] for b in client.get("/api/network/buses").json())
-    info = lambda: client.get("/api/network/undo/info").json()
+
+    def bus_names():
+        return sorted(b["name"] for b in client.get("/api/network/buses").json())
+
+    def info():
+        return client.get("/api/network/undo/info").json()
 
     before = info()
     assert bus_names() == ["b0", "b1", "b2", "b3"]
