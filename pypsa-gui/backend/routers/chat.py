@@ -705,7 +705,7 @@ class McpServerIn(BaseModel):
 
 
 class McpKeyRequest(BaseModel):
-    """Body for `PUT /settings/mcp/servers/{id}/keys/{name}`."""
+    """Body for `PUT /settings/mcp/servers/{id}/keys/{key_name}`."""
 
     value: str
 
@@ -945,10 +945,10 @@ def _mcp_key_name(server_id: str, name: str, *, valid: bool = False) -> str:
     return key
 
 
-@router.put("/settings/mcp/servers/{server_id}/keys/{name}")
+@router.put("/settings/mcp/servers/{server_id}/keys/{key_name}")
 def put_mcp_server_key(
     server_id: str,
-    name: str,
+    key_name: str,
     body: McpKeyRequest,
     user: User | None = Depends(optional_user),
 ) -> dict[str, Any]:
@@ -956,7 +956,7 @@ def put_mcp_server_key(
     apply it to this process (see `app_secrets.set_secret`)."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
-    key = _mcp_key_name(server_id, name, valid=True)
+    key = _mcp_key_name(server_id, key_name, valid=True)
     try:
         app_secrets.set_secret(key, body.value)
     except app_secrets.SecretValueError as exc:
@@ -965,16 +965,16 @@ def put_mcp_server_key(
     return _mcp_key_out(key)
 
 
-@router.delete("/settings/mcp/servers/{server_id}/keys/{name}")
+@router.delete("/settings/mcp/servers/{server_id}/keys/{key_name}")
 def delete_mcp_server_key(
     server_id: str,
-    name: str,
+    key_name: str,
     user: User | None = Depends(optional_user),
 ) -> dict[str, Any]:
     """Forget one of a server's keys, from the file and from this process."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
-    key = _mcp_key_name(server_id, name)
+    key = _mcp_key_name(server_id, key_name)
     app_secrets.clear_secret(key)
     mcp_client.forget(server_id)
     return _mcp_key_out(key)
