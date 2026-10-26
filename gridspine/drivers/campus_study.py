@@ -1022,8 +1022,9 @@ def tdd_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: st
     poc = str(pcc["bus"])
     sk_source, typical = _sk_source(campus, n)
     pocs = td.tdd_table(harmonic_units(n, poc), {poc: _pcc_sk_min(pcc)}, {poc: _rated_load_mva(build_campus(campus))},
-                        {poc: float(pcc["vn_kv"])}, standard, law=law)
-    # Every row is assumed: I_L is the rated campus load, and the table values are not verified.
+                        {poc: float(pcc["vn_kv"])}, standard, law=law, basis=(td.STRICTER, td.I_L_NOTE))
+    # Every row is assumed: I_L is the rated campus load, and the table values are not verified. The screen
+    # has PoC rows only, so the unit level is empty.
     out = _screen_frame(pocs, pocs.iloc[0:0], pd.Series(dtype=bool), sk_source, typical, profile, True,
                         td.POC_COLUMNS, td.POC_COLUMNS)
     _write_text_atomic(run_dir / TDD_CSV, out.to_csv(index=False))

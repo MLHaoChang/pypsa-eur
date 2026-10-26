@@ -38,11 +38,11 @@ def test_tdd_matches_a_hand_calculation():
     assert row["verdict"] == "fail"
 
 
-def test_a_small_distortion_passes_and_states_its_assumptions():
-    row = _one(spectrum="5: 2, 7: 1")
+def test_a_small_distortion_passes_and_carries_the_callers_basis():
+    units = _units(("U1", "PCC", 10.0, "", "5: 2, 7: 1"))
+    row = td.tdd_table(units, {"PCC": 1000.0}, {"PCC": 20.0}, {"PCC": 33.0}, STD, basis=("from here",)).iloc[0]
     assert row["verdict"] == "pass" and row["failing_orders"] == []
-    assert td.STRICTER in row["note"] and td.I_L_NOTE in row["note"]
-    assert row["label"] == td.LABEL
+    assert row["note"].endswith("; from here") and row["label"].startswith("screening")
 
 
 def test_two_units_sum_with_the_harmonic_screens_law():
@@ -84,7 +84,7 @@ def test_the_table_follows_the_pcc_voltage(kv, table):
 
 
 def test_table_3_is_about_half_of_table_2():
-    assert [b[2] for b in td.TABLES[1][3]] == [2.5, 4.0, 6.0, 7.5, 10.0]
+    assert [b.tdd for b in td.TABLES[1].rows] == [2.5, 4.0, 6.0, 7.5, 10.0]
 
 
 # --- the order groups ------------------------------------------------------------
@@ -92,7 +92,7 @@ def test_table_3_is_about_half_of_table_2():
 @pytest.mark.parametrize("h, limit", [(2, 1.0), (3, 4.0), (10, 1.0), (11, 2.0), (17, 1.5), (23, 0.6),
                                       (34, 0.15), (35, 0.3), (49, 0.3), (50, 0.075), (1, None), (51, None)])
 def test_order_groups_are_half_open_and_even_orders_take_a_quarter(h, limit):
-    lowest = td.TABLES[0][3][0][1]                      # Table 2, Isc/IL <= 20
+    lowest = td.TABLES[0].rows[0].odd                     # Table 2, Isc/IL <= 20
     got = td.order_limit(h, lowest)
     assert got == (None if limit is None else pytest.approx(limit))
 

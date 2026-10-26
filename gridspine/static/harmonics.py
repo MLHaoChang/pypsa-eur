@@ -238,6 +238,34 @@ def _sk_of(sk_mva_by_poc, poc):
 NO_SK = "No short-circuit level at the point of connection"
 
 
+def check_units(units: pd.DataFrame, law: str) -> None:
+    """Refuse a bad summation law, a units frame without the screen's
+    columns, or a unit named twice."""
+    alpha(5, law)                                   # refuse a bad law up front
+    for col in ("unit", "poc", "rated_mva", "harmonic_source", "harmonic_spectrum"):
+        if col not in units.columns:
+            raise ContractError(f"units needs a {col!r} column")
+    if units["unit"].duplicated().any():
+        raise ContractError(f"duplicate unit(s): {sorted(units.loc[units['unit'].duplicated(), 'unit'])}")
+
+
+def unit_inputs(rec: dict) -> tuple:
+    """A unit record's ``(rated_mva or NaN, spectrum or None, spectrum
+    source, missing inputs)``; ``missing`` empty means the unit can be
+    judged."""
+    spectrum, source = unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
+    try:
+        mva = float(rec["rated_mva"])
+    except (TypeError, ValueError):
+        mva = math.nan
+    missing = []
+    if not (math.isfinite(mva) and mva > 0):
+        missing.append("rated_mva")
+    if spectrum is None:
+        missing.append(source)
+    return mva, spectrum, source, missing
+
+
 def harmonic_table(units: pd.DataFrame, sk_mva_by_poc: dict, limits: Limits,
                    law: str = "iec") -> HarmonicStudy:
     """Per-unit and per-PoC harmonic distortion.
@@ -247,32 +275,18 @@ def harmonic_table(units: pd.DataFrame, sk_mva_by_poc: dict, limits: Limits,
     (``"5: 20, 7: 14"``, a dict, or empty) and ``post_filter`` (whether the
     spectrum already includes the unit's filter). ``sk_mva_by_poc``: S_k (MVA)
     by PoC; a PoC with none is ``unknown``."""
-    alpha(5, law)                                   # refuse a bad law up front
-    for col in ("unit", "poc", "rated_mva", "harmonic_source", "harmonic_spectrum"):
-        if col not in units.columns:
-            raise ContractError(f"units needs a {col!r} column")
-    if units["unit"].duplicated().any():
-        raise ContractError(f"duplicate unit(s): {sorted(units.loc[units['unit'].duplicated(), 'unit'])}")
+    check_units(units, law)
     limits = limits or Limits()
 
     unit_rows, by_poc = [], {}
     for rec in units.to_dict("records"):
         poc, name = rec["poc"], rec["unit"]
         post = bool(rec.get("post_filter")) if pd.notna(rec.get("post_filter")) else False
-        spectrum, source = unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
-        try:
-            mva = float(rec["rated_mva"])
-        except (TypeError, ValueError):
-            mva = math.nan
+        mva, spectrum, source, missing = unit_inputs(rec)
         sk = _sk_of(sk_mva_by_poc, poc)
         row = {"poc": poc, "unit": name, "rated_mva": mva if math.isfinite(mva) else None,
                "harmonic_source": rec["harmonic_source"] or "", "spectrum_source": source,
                "post_filter": post, "sk_mva": sk, "label": LABEL}
-        missing = []
-        if not (math.isfinite(mva) and mva > 0):
-            missing.append("rated_mva")
-        if spectrum is None:
-            missing.append(source)
         entry = by_poc.setdefault(poc, {"known": [], "missing": [], "names": []})
         entry["names"].append(name)
         if missing:

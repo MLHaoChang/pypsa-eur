@@ -36,6 +36,7 @@ Pure pandas; no engine import.
 from __future__ import annotations
 
 import math
+from typing import NamedTuple
 
 import pandas as pd
 
@@ -45,7 +46,7 @@ from gridspine.templates.grid_codes import CURRENT_TDD_STANDARDS as STANDARDS
 
 TOLERANCE = hm.TOLERANCE
 
-LABEL = "static screen; binding answer is a harmonic load-flow study with the grid's impedance"
+LABEL = "screening; binding answer is a harmonic load-flow study with the grid's impedance"
 
 #: The odd order groups, half-open [lo, hi): the last is 35 <= h <= 50.
 GROUPS = ((3, 11), (11, 17), (17, 23), (23, 35), (35, 51))
@@ -62,8 +63,24 @@ def _labels(bounds: tuple) -> tuple:
     return (f"<= {edges[0]}", *(f"{lo}-{hi}" for lo, hi in zip(edges, edges[1:])), f"> {edges[-1]}")
 
 
-def _table(name: str, kv_max: float | None, bounds: tuple, rows: tuple) -> tuple:
-    return name, kv_max, bounds, tuple((label, odd, tdd) for label, (odd, tdd) in zip(_labels(bounds), rows))
+class Row(NamedTuple):
+    """One Isc/IL row: its label, odd-order limits by group and TDD (% of I_L)."""
+    label: str
+    odd: tuple
+    tdd: float
+
+
+class Table(NamedTuple):
+    """An IEEE 519-2014 table: the highest PCC voltage it covers (kV,
+    inclusive; None for no ceiling), its Isc/IL bounds and its rows."""
+    name: str
+    kv_max: float | None
+    bounds: tuple
+    rows: tuple
+
+
+def _table(name: str, kv_max: float | None, bounds: tuple, rows: tuple) -> Table:
+    return Table(name, kv_max, bounds, tuple(Row(label, odd, tdd) for label, (odd, tdd) in zip(_labels(bounds), rows)))
 
 
 #: IEEE 519-2014 current-distortion limits, % of I_L, by table: its name, the
@@ -98,6 +115,8 @@ LEDGER = (
     "I_L is the rated campus load, not IEEE 519's average of monthly maximum demands",
     "the IEEE 519-2014 table values are from memory and not verified against the text (assumed)",
     "a ratio exactly on a band boundary takes the stricter band",
+    "Isc/IL takes the caller's S_k'' as given, with no IEC 60909 voltage factor c; IEEE 519's Isc is the "
+    "maximum fault current, so leaving c out lowers the ratio and makes the screen stricter",
 )
 STRICTER = ("band from S_sc,min, while IEEE 519 uses the maximum short-circuit current, so the screen is "
             "stricter than the standard")
@@ -116,7 +135,7 @@ def table_for(vn_kv: float) -> tuple:
     if not (math.isfinite(v) and v > 0):
         raise ContractError(f"the PCC voltage must be a positive number of kV, got {vn_kv!r}")
     for entry in TABLES:
-        if entry[1] is None or v <= entry[1]:
+        if entry.kv_max is None or v <= entry.kv_max:
             return entry
     raise AssertionError("unreachable: the last table has no ceiling")  # pragma: no cover
 
@@ -166,8 +185,18 @@ def _judge(i_h_pct: dict, odd_limits: tuple, tdd_limit: float) -> dict:
             "verdict": "fail" if failing or tdd_fail else "pass", "notes": notes}
 
 
+def _positive(by_poc, poc) -> float | None:
+    """``by_poc[poc]`` as a positive finite number, else None."""
+    v = (by_poc or {}).get(poc)
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) and v > 0 else None
+
+
 def tdd_table(units: pd.DataFrame, sk_mva_by_poc: dict, i_l_mva_by_poc: dict, vn_kv_by_poc: dict,
-              standard: str | None, law: str = "iec") -> pd.DataFrame:
+              standard: str | None, law: str = "iec", basis: tuple = ()) -> pd.DataFrame:
     """One row per PCC (``POC_COLUMNS``): the total demand distortion of its
     units' summed harmonic currents against IEEE 519-2014.
 
@@ -176,16 +205,14 @@ def tdd_table(units: pd.DataFrame, sk_mva_by_poc: dict, i_l_mva_by_poc: dict, vn
     optional ``generation`` flag (missing or NaN is False). ``sk_mva_by_poc``
     is S_sc (MVA), ``i_l_mva_by_poc`` I_L as MVA at the PCC voltage and
     ``vn_kv_by_poc`` the PCC voltage. ``standard`` is one of ``STANDARDS`` or
-    None; with None, or with no S_sc or I_L at a PCC, that PCC is
-    ``unknown``. A unit with no input blocks a pass at its PCC."""
-    hm.alpha(5, law)                                    # refuse a bad law up front
+    None; with None, or with no voltage, S_sc or I_L at a PCC, that PCC is
+    ``unknown`` and carries no table, band, limit or margin, since none
+    applies. A unit with no input blocks a pass at its PCC. ``basis``: notes
+    on where the caller's S_sc and I_L come from, added to every judged
+    row."""
+    hm.check_units(units, law)
     if standard is not None and standard not in STANDARDS:
         raise ContractError(f"current-distortion standard {standard!r} is not one of {', '.join(STANDARDS)}")
-    for col in ("unit", "poc", "rated_mva", "harmonic_source", "harmonic_spectrum"):
-        if col not in units.columns:
-            raise ContractError(f"units needs a {col!r} column")
-    if units["unit"].duplicated().any():
-        raise ContractError(f"duplicate unit(s): {sorted(units.loc[units['unit'].duplicated(), 'unit'])}")
 
     by_poc = {}
     for rec in units.to_dict("records"):
@@ -194,19 +221,15 @@ def tdd_table(units: pd.DataFrame, sk_mva_by_poc: dict, i_l_mva_by_poc: dict, vn
         gen = rec.get("generation")
         if gen is not None and not (isinstance(gen, float) and math.isnan(gen)) and bool(gen):
             entry["generation"].append(rec["unit"])
-        spectrum, _ = hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
-        try:
-            mva = float(rec["rated_mva"])
-        except (TypeError, ValueError):
-            mva = math.nan
-        if spectrum is None or not (math.isfinite(mva) and mva > 0):
+        mva, spectrum, _, missing = hm.unit_inputs(rec)
+        if missing:
             entry["missing"].append(rec["unit"])
         else:
             entry["known"].append((mva, spectrum))
 
     rows = []
     for poc, entry in by_poc.items():
-        sk, i_l, vn = (hm._sk_of(by, poc) for by in (sk_mva_by_poc, i_l_mva_by_poc, vn_kv_by_poc))
+        sk, i_l, vn = (_positive(by, poc) for by in (sk_mva_by_poc, i_l_mva_by_poc, vn_kv_by_poc))
         row = {"poc": poc, "units": entry["names"], "no_input_units": entry["missing"],
                "generation_units": entry["generation"], "law": law, "standard": standard,
                "vn_kv": vn, "sk_mva": sk, "i_l_mva": i_l, "label": LABEL}
@@ -222,13 +245,12 @@ def tdd_table(units: pd.DataFrame, sk_mva_by_poc: dict, i_l_mva_by_poc: dict, vn
         if i_l is None:
             rows.append(_unknown(row, "No load behind the point of connection, so I_L is unknown"))
             continue
-        table, _, bounds, bands = table_for(vn)
+        table = table_for(vn)
         ratio = sk / i_l
-        band = 0 if entry["generation"] else band_index(ratio, bounds)
-        label, odd_limits, tdd_limit = bands[band]
+        band = table.rows[0 if entry["generation"] else band_index(ratio, table.bounds)]
         i_h = hm._i_h(entry["known"], law)
-        j = _judge({h: 100.0 * v / i_l for h, v in i_h.items()}, odd_limits, tdd_limit)
-        notes = [f"IEEE 519-2014 {table}, Isc/IL {ratio:.4g}, band {label}", *j.pop("notes"), STRICTER, I_L_NOTE]
+        j = _judge({h: 100.0 * v / i_l for h, v in i_h.items()}, band.odd, band.tdd)
+        notes = [f"IEEE 519-2014 {table.name}, Isc/IL {ratio:.4g}, band {band.label}", *j.pop("notes"), *basis]
         if entry["generation"]:
             notes.insert(1, "generation equipment (" + ", ".join(map(str, entry["generation"]))
                          + ") is limited to the lowest Isc/IL row whatever the ratio")
@@ -236,7 +258,7 @@ def tdd_table(units: pd.DataFrame, sk_mva_by_poc: dict, i_l_mva_by_poc: dict, vn
             if j["verdict"] != "fail":
                 j["verdict"] = "unknown"
             notes.append("no input for " + ", ".join(map(str, entry["missing"])) + ": a missing unit blocks a pass")
-        rows.append(row | j | {"isc_il": ratio, "table": table, "band": label, "note": "; ".join(notes)})
+        rows.append(row | j | {"isc_il": ratio, "table": table.name, "band": band.label, "note": "; ".join(notes)})
     return pd.DataFrame(rows, columns=list(POC_COLUMNS))
 
 
