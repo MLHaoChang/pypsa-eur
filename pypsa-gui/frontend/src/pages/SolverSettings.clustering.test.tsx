@@ -63,7 +63,7 @@ it('asks before it changes the network, and Cancel changes nothing', async () =>
   fireEvent.click(screen.getByDisplayValue('zone'))
   fireEvent.click(applyBtn())
   expect(await screen.findByRole('heading', { name: 'Apply clustering?' })).toBeTruthy()
-  expect(await screen.findByText(/Cluster 3 buses into 2 by country\? This clears the solve results\./)).toBeTruthy()
+  expect(await screen.findByText(/Cluster 3 buses into 2 by country\? This clears any solve results\./)).toBeTruthy()
   expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
   expect(networkApi.applyClustering).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))

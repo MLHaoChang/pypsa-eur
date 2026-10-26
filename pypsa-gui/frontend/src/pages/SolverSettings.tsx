@@ -2104,11 +2104,14 @@ export function ClusteringSection() {
   // turns it into "Clustering undone." A Save keeps the revision, so it stays.
   const [done, setDone] = useState<{ text: string; rev?: number; depth: number } | null>(null)
   const [undone, setUndone] = useState(false)
-  const { data: undoInfo } = useQuery({
-    queryKey: nk(currentProject, 'undoInfo'), queryFn: networkApi.undoInfo, staleTime: 0,
-  })
+  const undoInfoQuery = (project: string | null) =>
+    ({ queryKey: nk(project, 'undoInfo'), queryFn: networkApi.undoInfo, staleTime: 0 })
+  const { data: undoInfo } = useQuery(undoInfoQuery(currentProject))
   useEffect(() => {
-    if (!done || done.rev == null || !undoInfo || undoInfo.network_revision === done.rev) return
+    if (!done || undoInfo?.network_revision == null) return
+    // The read right after clustering failed: pin to the next poll instead.
+    if (done.rev == null) { setDone({ ...done, rev: undoInfo.network_revision, depth: undoInfo.depth }); return }
+    if (undoInfo.network_revision === done.rev) return
     setUndone(undoInfo.depth < done.depth)
     setDone(null)
   }, [done, undoInfo])
@@ -2137,9 +2140,8 @@ export function ClusteringSection() {
       setConfirming(false)
       setUndone(false)
       const text = `Clustered to ${res.bus_count} bus${res.bus_count === 1 ? '' : 'es'} · solve results cleared`
-      const info = await qc.fetchQuery({
-        queryKey: nk(useUIStore.getState().currentProject, 'undoInfo'), queryFn: networkApi.undoInfo, staleTime: 0,
-      }).catch(() => undefined)
+      const info = await qc.fetchQuery(undoInfoQuery(useUIStore.getState().currentProject))
+        .catch(() => undefined)
       setDone({ text, rev: info?.network_revision ?? undefined, depth: info?.depth ?? 0 })
     },
     onError: (e: { response?: { data?: { detail?: string } } } | Error) => {
@@ -2391,7 +2393,7 @@ export function ClusteringSection() {
           open={confirming}
           title="Apply clustering?"
           message={<>
-            Cluster {nBuses} bus{nBuses === 1 ? '' : 'es'} {clusterInto}? This clears the solve results.
+            Cluster {nBuses} bus{nBuses === 1 ? '' : 'es'} {clusterInto}? This clears any solve results.
             You can undo it with Ctrl+Z.
           </>}
           confirmLabel="Apply clustering"
