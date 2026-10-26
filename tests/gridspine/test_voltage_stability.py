@@ -22,7 +22,10 @@ from scipy.optimize import brentq
 
 from gridspine.schema.contracts import ContractError
 from gridspine.static import voltage_stability as vs
-from gridspine.static.contingency_set import branch_contingencies
+from gridspine.static.contingency_set import (
+    branch_contingencies,
+    bus_section_contingencies,
+)
 from gridspine.static.voltage_stability import (
     SCREENING_BASIS,
     VoltageStabilitySettings,
@@ -72,6 +75,10 @@ def analytic_nose(e_kv=E_KV, x_ohm=X_OHM, pf=PF):
     return e_kv**2 * math.cos(phi) / (2 * x_ohm * (1 + math.sin(phi)))
 
 
+def analytic_v_nose_pu(pf=PF):
+    return 1.0 / math.sqrt(2 * (1 + math.sin(math.acos(pf))))
+
+
 def q_src(v_kv, p_mw, q_mw, e_kv=E_KV, x_ohm=X_OHM):
     return q_mw - (v_kv * math.sqrt(e_kv**2 - (p_mw * x_ohm / v_kv) ** 2) - v_kv**2) / x_ohm
 
@@ -96,8 +103,7 @@ def test_two_bus_nose_matches_analytic_within_one_percent():
     assert not r["nose_is_lower_bound"] and not r["nose_below_planned"]
     # The nose voltage of this grid, V = E / sqrt(2 (1 + sin phi)): the upper
     # branch, never a low-voltage solution.
-    v_nose = 1.0 / math.sqrt(2 * (1 + math.sin(math.acos(PF))))
-    assert r["v_nose_pu"] == pytest.approx(v_nose, rel=0.01)
+    assert r["v_nose_pu"] == pytest.approx(analytic_v_nose_pu(), rel=0.01)
 
 
 def test_nose_does_not_depend_on_the_step_size():
@@ -110,15 +116,17 @@ def test_nose_does_not_depend_on_the_step_size():
     assert abs(noses[0] - noses[1]) <= 2 * tol
 
 
-def test_a_solver_failure_is_retried_from_a_flat_start_and_recorded(monkeypatch):
+@pytest.mark.parametrize("lo, hi", [(0.5, 0.7), (0.95, 1.01)])
+def test_a_solver_failure_is_retried_from_a_flat_start_and_recorded(monkeypatch, lo, hi):
     """A point that fails only because of the solver is not the nose: the flat
-    start rescues it and the row says so."""
+    start rescues it, the rescue is on the upper branch (also right at the
+    nose) and the row says so."""
     real = pp.runpp
     p_max = analytic_nose()
 
     def flaky(net, **kw):
         probe = net.load.loc[net.load["name"] == vs.PROBE_NAME, "p_mw"]
-        if kw.get("init") != "flat" and len(probe) and 0.5 * p_max < float(probe.iloc[0]) < 0.7 * p_max:
+        if kw.get("init") is None and len(probe) and lo * p_max < float(probe.iloc[0]) < hi * p_max:
             raise pp.LoadflowNotConverged("solver trouble, not collapse")
         return real(net, **kw)
 
@@ -126,10 +134,10 @@ def test_a_solver_failure_is_retried_from_a_flat_start_and_recorded(monkeypatch)
     rows, _ = voltage_stability(two_bus(), "POC", PLANNED_MW, None, VoltageStabilitySettings(pf=PF))
     r = _intact(rows)
     assert r["nose_mw"] == pytest.approx(p_max, rel=0.01)
-    assert r["flat_start_retries"] >= 1
-    assert r["flat_start_rescues"] >= 1
-    v_nose = 1.0 / math.sqrt(2 * (1 + math.sin(math.acos(PF))))
-    assert r["v_nose_pu"] == pytest.approx(v_nose, rel=0.01)    # rescued on the upper branch
+    assert r["pv_flat_start_retries"] >= 1
+    assert r["pv_flat_start_rescues"] >= 1
+    assert r["pv_low_branch_rejected"] == 0
+    assert r["v_nose_pu"] == pytest.approx(analytic_v_nose_pu(), rel=0.01)    # rescued on the upper branch
 
 
 def test_nose_past_the_cap_is_flagged_not_invented():
@@ -239,6 +247,8 @@ def test_caller_net_and_contingency_set_are_not_mutated(meshed_run):
     {"planned_mw": float("nan")},
     {"planned_mw": float("inf")},
     {"planned_mw": True},
+    {"planned_mw": "200"},
+    {"planned_mw": None},
     {"poc_bus": "NOWHERE"},
 ])
 def test_bad_inputs_refuse(kw):
@@ -276,6 +286,7 @@ def test_intact_case_that_does_not_converge_is_not_solved():
     rows, _ = voltage_stability(net, "POC", PLANNED_MW, None, VoltageStabilitySettings(pf=PF))
     r = _intact(rows)
     assert r["verdict"] == "not_solved"
+    assert r["note"] == "does not converge with no load added"
     assert r[["nose_mw", "margin_mw", "margin_pct", "q_margin_mvar"]].isna().all()
 
 
@@ -313,3 +324,48 @@ def test_generator_q_limits_are_enforced():
     # unlimited, M holds 1 pu and the PoC sees the two-bus nose over one line
     assert unlimited["nose_mw"] == pytest.approx(analytic_nose(), rel=0.01)
     assert limited["nose_mw"] < 0.9 * unlimited["nose_mw"]
+
+
+def test_cap_at_or_below_the_planned_load_refuses():
+    with pytest.raises(ContractError):
+        voltage_stability(two_bus(), "POC", PLANNED_MW, None, VoltageStabilitySettings(cap_mw=PLANNED_MW))
+
+
+def test_outages_of_other_kinds_are_skipped_and_named():
+    net = meshed()
+    cset = bus_section_contingencies(net, ["A"])
+    rows, summary = voltage_stability(net, "POC", 50.0, cset, VoltageStabilitySettings(pf=PF))
+    assert list(rows["case"]) == ["intact"]
+    assert summary["n1_skipped"] == list(cset["contingency_id"])
+    assert summary["n1_ranked"] == 0
+
+
+def test_two_bus_qv_at_no_load_is_the_textbook_curve():
+    """With (almost) no load the curve is Q(V) = (V^2 - E V) / X: its minimum
+    is -E^2 / (4X) at V = E/2, and its slope at V = E is Vb^2 / X per pu."""
+    rows, _ = voltage_stability(two_bus(), "POC", 1e-3, None, VoltageStabilitySettings(pf=PF))
+    r = _intact(rows)
+    assert r["q_margin_mvar"] == pytest.approx(E_KV**2 / (4 * X_OHM), rel=0.01)
+    assert r["v_at_qmin_pu"] == pytest.approx(0.5, abs=0.01)
+    assert r["dqdv_mvar_per_pu"] == pytest.approx(E_KV**2 / X_OHM, rel=0.01)
+
+
+def test_a_rescue_on_the_low_voltage_branch_is_rejected(monkeypatch):
+    """A rescued point whose PoC voltage falls at a slightly lower load is on
+    the low-voltage branch: it counts as past the nose and the row says so."""
+    real = pp.runpp
+    p_max = analytic_nose()
+
+    def low_branch(net, **kw):
+        probe = net.load.loc[net.load["name"] == vs.PROBE_NAME, "p_mw"]
+        in_band = len(probe) and 0.5 * p_max < float(probe.iloc[0]) < 0.7 * p_max
+        if kw.get("init") is None and in_band:
+            raise pp.LoadflowNotConverged("solver trouble")
+        real(net, **kw)
+        if kw.get("init") == "results":
+            net.res_bus["vm_pu"] *= 0.5        # what a low-branch point does: V falls as P falls
+
+    monkeypatch.setattr(vs.pp, "runpp", low_branch)
+    r = _intact(voltage_stability(two_bus(), "POC", PLANNED_MW, None, VoltageStabilitySettings(pf=PF))[0])
+    assert r["pv_low_branch_rejected"] >= 1
+    assert r["nose_mw"] <= 0.5 * p_max + 1.0

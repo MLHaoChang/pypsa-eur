@@ -14,8 +14,12 @@ margin and ``nose_below_planned``.
 Every load flow enforces generator Q limits (``enforce_q_lims=True``): the
 nose depends heavily on them. Non-convergence can be the solver rather than
 collapse, so every failing point is retried once from a flat start with more
-iterations before it counts as past the nose. The row records how many
-points were retried and how many the retry rescued.
+iterations before it counts as past the nose. A P–V point the retry rescues
+must sit on the upper branch: re-solved from its own voltages at a slightly
+lower load, its PoC voltage must rise; a low-voltage-branch solution falls,
+and is rejected as past the nose. The row records, per sweep, how many points
+were retried and how many the retry rescued, and how many rescues were
+rejected.
 
 **Q–V.** With the planned load in place, a fictitious PV source at the PoC
 (no P, Q limits of +/- ``QV_SOURCE_Q_LIMIT_MVAR`` so it never clips) holds
@@ -29,7 +33,8 @@ dQ/dV is the slope at the operating point, by a central difference; positive
 is the stable side.
 
 **Cases.** Intact, plus the worst N-1 outages of the contingency set (read
-only; branch and unit outages, the N-1 screen's kinds). Worst means the
+only; branch and unit outages, the N-1 screen's kinds; other order-1 kinds
+are skipped and named in the summary). Worst means the
 lowest PoC voltage with the planned load connected, read from the screen's
 own batched lightsim2grid solve (``contingency._branch_outcomes`` /
 ``_unit_outcomes``). At most ``max_cases`` of these converged outages are
@@ -47,6 +52,7 @@ Allowed to import pandapower and lightsim2grid (``static/``); never pypsa.
 import copy
 import dataclasses
 import math
+import numbers
 
 import numpy as np
 import pandapower as pp
@@ -82,7 +88,9 @@ VOLTAGE_STABILITY_LEDGER = (
     "steps bracket the nose and bisection narrows it to tol_mw",
     "every P–V and Q–V load flow enforces generator Q limits",
     "a failing point is retried once from a flat start with more iterations "
-    "before it counts as past the nose; the row records retries and rescues",
+    "before it counts as past the nose; a rescued P–V point whose PoC voltage "
+    "does not rise at a slightly lower load is on the low-voltage branch and "
+    "is rejected; the row records retries, rescues and rejections per sweep",
     "margin = nose MW - planned MW, and as a % of the planned MW; a nose not "
     "reached by cap_mw is reported at the cap as a lower bound, never "
     "extrapolated",
@@ -105,7 +113,7 @@ def _require_positive(name, v):
 
 
 def _require_count(name, v, low):
-    if isinstance(v, bool) or not (isinstance(v, int) and v >= low):
+    if isinstance(v, bool) or not (isinstance(v, numbers.Integral) and v >= low):
         raise ContractError(f"{name} must be an integer >= {low}, got {v!r}")
 
 
@@ -148,6 +156,7 @@ class _Tally:
     def __init__(self):
         self.retries = 0
         self.rescues = 0
+        self.low_branch = 0
 
 
 def _run(work, st: VoltageStabilitySettings, tally: _Tally) -> bool:
@@ -170,29 +179,57 @@ class _Probe:
     trial, so a sweep does not copy the net per point. Every trial starts from
     the case's own dispatch, so the balancing never accumulates."""
 
-    def __init__(self, case, bus, st, tally):
+    def __init__(self, case, bus, b, st, tally):
         self.work = copy.deepcopy(case)
         self.gen_p = self.work.gen["p_mw"].copy()
-        self.bus, self.st, self.tally = bus, st, tally
+        self.bus, self.b, self.st, self.tally = bus, b, st, tally
 
-    def solve(self, p_mw):
-        """The solved net carrying ``p_mw`` at the PoC, or None."""
+    def _set_load(self, p_mw):
         w = self.work
         w.load = w.load[w.load["name"] != PROBE_NAME]
         w.gen["p_mw"] = self.gen_p
         apply_connection(w, self.bus, p_mw, "load", self.st.pf)
-        return w if _run(w, self.st, self.tally) else None
+
+    def solve(self, p_mw):
+        """The solved net carrying ``p_mw`` at the PoC, or None."""
+        self._set_load(p_mw)
+        return self.work if _run(self.work, self.st, self.tally) else None
+
+    def v_poc(self, p_mw):
+        """The PoC voltage at ``p_mw`` on the upper branch, or None.
+
+        A flat-start rescue is checked: re-solved from its own voltages at a
+        slightly lower load, an upper-branch point's PoC voltage rises and a
+        low-voltage-branch point's falls."""
+        rescues = self.tally.rescues
+        w = self.solve(p_mw)
+        if w is None:
+            return None
+        v = float(w.res_bus.at[self.b, "vm_pu"])
+        if self.tally.rescues == rescues or p_mw <= 0:
+            return v
+        self._set_load(p_mw - min(self.st.tol_mw, 0.5 * p_mw))
+        try:
+            pp.runpp(w, enforce_q_lims=True, init="results")
+            upper = float(w.res_bus.at[self.b, "vm_pu"]) > v
+        except pp.LoadflowNotConverged:
+            upper = False
+        if not upper:
+            self.tally.low_branch += 1
+            return None
+        return v
 
 
-def _nose(probe: _Probe, b, planned_mw) -> dict | None:
+def _cap(planned_mw, st) -> float:
+    return 10.0 * planned_mw if st.cap_mw is None else float(st.cap_mw)
+
+
+def _nose(probe: _Probe, planned_mw) -> dict | None:
     """The bracketed and bisected nose, or None when nothing converges."""
     st = probe.st
-    cap = 10.0 * planned_mw if st.cap_mw is None else float(st.cap_mw)
+    cap = _cap(planned_mw, st)
     step = planned_mw * st.step_pct / 100.0
-
-    def v_at(p):
-        w = probe.solve(p)
-        return None if w is None else float(w.res_bus.at[b, "vm_pu"])
+    v_at = probe.v_poc
 
     v_lo = v_at(0.0)
     if v_lo is None:
@@ -218,12 +255,13 @@ def _nose(probe: _Probe, b, planned_mw) -> dict | None:
     return {"nose_mw": lo, "v_nose_pu": v_lo, "nose_is_lower_bound": hi is None}
 
 
-def _qv(probe: _Probe, b, planned_mw, v_op) -> dict:
+def _qv(probe: _Probe, planned_mw, v_op, tally: _Tally) -> dict:
+    """The Q–V sweep on the probe's net; solves count on ``tally``."""
     out = {"q_margin_mvar": np.nan, "v_at_qmin_pu": np.nan, "qmin_at_sweep_edge": False,
            "qv_points_skipped": 0, "dqdv_mvar_per_pu": np.nan}
     if not math.isfinite(v_op):
         return out
-    st = probe.st
+    st, b = probe.st, probe.b
     w = probe.work
     if probe.solve(planned_mw) is None:
         return out
@@ -232,7 +270,7 @@ def _qv(probe: _Probe, b, planned_mw, v_op) -> dict:
     try:
         def q_at(v):
             w.gen.at[g, "vm_pu"] = v
-            return float(w.res_gen.at[g, "q_mvar"]) if _run(w, st, probe.tally) else np.nan
+            return float(w.res_gen.at[g, "q_mvar"]) if _run(w, st, tally) else np.nan
 
         n = int(round((st.qv_v_max_pu - st.qv_v_min_pu) / st.qv_step_pu)) + 1
         grid = np.linspace(st.qv_v_max_pu, st.qv_v_min_pu, n)
@@ -258,43 +296,47 @@ _NUMBERS = {
 }
 
 
-def _not_solved(label, cid, kind, note, tally=None) -> dict:
-    return {"case": label, "contingency_id": cid, "kind": kind, "verdict": NOT_SOLVED, "note": note,
-            **_NUMBERS,
-            "flat_start_retries": tally.retries if tally else 0,
-            "flat_start_rescues": tally.rescues if tally else 0,
-            "basis": SCREENING_BASIS}
+def _row(label, cid, kind, verdict, note, numbers, pv: _Tally, qv: _Tally) -> dict:
+    return {
+        "case": label, "contingency_id": cid, "kind": kind, "verdict": verdict, "note": note,
+        **_NUMBERS, **numbers,
+        "pv_flat_start_retries": pv.retries, "pv_flat_start_rescues": pv.rescues,
+        "pv_low_branch_rejected": pv.low_branch,
+        "qv_flat_start_retries": qv.retries, "qv_flat_start_rescues": qv.rescues,
+        "basis": SCREENING_BASIS,
+    }
 
 
 def _case_row(case, label, cid, kind, bus, b, planned_mw, st) -> dict:
-    tally = _Tally()
-    probe = _Probe(case, bus, st, tally)
-    nose = _nose(probe, b, planned_mw)
+    pv, qv = _Tally(), _Tally()
+    probe = _Probe(case, bus, b, st, pv)
+    nose = _nose(probe, planned_mw)
     if nose is None:
-        return _not_solved(label, cid, kind, NOTE_NO_BASE, tally)
-    row = {"case": label, "contingency_id": cid, "kind": kind, "verdict": SOLVED, "note": "", **_NUMBERS}
-    row.update(nose)
-    row["margin_mw"] = nose["nose_mw"] - planned_mw
-    row["margin_pct"] = 100.0 * row["margin_mw"] / planned_mw
-    row["nose_below_planned"] = bool(row["margin_mw"] < 0)
-    if row["nose_below_planned"]:
-        row["note"] = "nose below the planned load"
+        return _row(label, cid, kind, NOT_SOLVED, NOTE_NO_BASE, {}, pv, qv)
+    numbers = dict(nose)
+    numbers["margin_mw"] = nose["nose_mw"] - planned_mw
+    numbers["margin_pct"] = 100.0 * numbers["margin_mw"] / planned_mw
+    numbers["nose_below_planned"] = bool(numbers["margin_mw"] < 0)
+    note = ""
+    if numbers["nose_below_planned"]:
+        note = "nose below the planned load"
     elif nose["nose_is_lower_bound"]:
-        row["note"] = "nose beyond cap_mw: nose and margin are lower bounds"
-    op = None if row["nose_below_planned"] else probe.solve(planned_mw)
-    v_op = float(op.res_bus.at[b, "vm_pu"]) if op is not None else np.nan
-    row["v_poc_pu"] = v_op
-    row.update(_qv(probe, b, planned_mw, v_op))
-    row["flat_start_retries"] = tally.retries
-    row["flat_start_rescues"] = tally.rescues
-    row["basis"] = SCREENING_BASIS
-    return row
+        note = "nose beyond cap_mw: nose and margin are lower bounds"
+    v_op = np.nan
+    if not numbers["nose_below_planned"]:
+        v_op = probe.v_poc(planned_mw)
+        if v_op is None:
+            v_op = np.nan
+            note = "; ".join(filter(None, (note, "planned-load point did not converge: no Q–V")))
+    numbers["v_poc_pu"] = v_op
+    numbers.update(_qv(probe, planned_mw, v_op, qv))
+    return _row(label, cid, kind, SOLVED, note, numbers, pv, qv)
 
 
 def _rank(net, bus, b, planned_mw, rows, st) -> tuple:
     """The converged N-1 rows by PoC voltage with the planned load connected,
     lowest first; and ``{contingency_id: note}`` for the rest."""
-    work = _Probe(net, bus, st, _Tally()).solve(planned_mw)
+    work = _Probe(net, bus, b, st, _Tally()).solve(planned_mw)
     if work is None:
         return rows.iloc[0:0], {cid: NOTE_COLLAPSE for cid in rows["contingency_id"]}
     gm = gridmodel_for(work)
@@ -321,43 +363,50 @@ def voltage_stability(net, poc_bus, planned_mw, contingencies=None,
                       settings: VoltageStabilitySettings | None = None) -> tuple:
     """P–V and Q–V margins at ``poc_bus`` for a planned load of ``planned_mw``.
 
-    ``contingencies`` is an N-1 set of branch and unit outages (the N-1
-    screen's kinds), or None for the intact case only.
+    ``contingencies`` is an N-1 set, or None for the intact case only. Branch
+    and unit outages (the N-1 screen's kinds) are ranked; other kinds are
+    skipped and named in the summary.
 
     Returns ``(rows, summary)``: one row per case — intact first, then the
     N-1 outages that island or do not converge with the planned load
     (``not_solved``), then the studied converged ones, worst first — and a
-    summary of how many were ranked, not solved and studied, with the ledger.
+    summary of how many were ranked, not solved, skipped and studied, with
+    the ledger.
     """
     st = VoltageStabilitySettings() if settings is None else settings
     if not isinstance(st, VoltageStabilitySettings):
         raise ContractError(f"settings must be VoltageStabilitySettings, got {type(st).__name__}")
     b = _bus_index(net, poc_bus)
-    if isinstance(planned_mw, bool):
+    if isinstance(planned_mw, bool) or not isinstance(planned_mw, numbers.Real):
         raise ContractError(f"planned_mw must be a number, got {planned_mw!r}")
     planned_mw = float(planned_mw)
     if not math.isfinite(planned_mw) or planned_mw <= 0:
         raise ContractError(f"planned_mw must be finite and > 0, got {planned_mw}")
+    if _cap(planned_mw, st) <= planned_mw:
+        raise ContractError(f"cap_mw must exceed the planned load ({planned_mw} MW), got {st.cap_mw}")
     cset = None
     if contingencies is not None:
         cset = validate_contingency_set(contingencies.copy(deep=True))
         if (cset["order"] != 1).any():
             raise ContractError("voltage_stability takes an N-1 set; got rows with order != 1")
-        unjudged = sorted(set(cset["kind"]) - set(_RANKED_KINDS))
-        if unjudged:
-            raise ContractError(f"voltage_stability ranks branch and unit outages only; kind not judged here: {unjudged}")
 
     results = [_case_row(net, "intact", None, None, poc_bus, b, planned_mw, st)]
-    summary = {"n1_ranked": 0, "n1_not_solved": [], "n1_studied": 0, "ledger": VOLTAGE_STABILITY_LEDGER}
+    summary = {"n1_ranked": 0, "n1_not_solved": [], "n1_skipped": [], "n1_studied": 0,
+               "ledger": VOLTAGE_STABILITY_LEDGER}
     if cset is not None and not cset.empty:
-        ranked, failed = _rank(net, poc_bus, b, planned_mw, cset, st)
-        kind_of = dict(zip(cset["contingency_id"], cset["kind"]))
-        results += [_not_solved(cid, cid, kind_of[cid], note) for cid, note in failed.items()]
-        handles = _Handles.of(net)
-        studied = ranked.head(st.max_cases)
-        for r in studied.itertuples(index=False):
-            case = copy.deepcopy(net)
-            _apply_outage(case, r, handles)
-            results.append(_case_row(case, r.contingency_id, r.contingency_id, r.kind, poc_bus, b, planned_mw, st))
-        summary.update(n1_ranked=len(ranked), n1_not_solved=list(failed), n1_studied=len(studied))
+        judged = cset["kind"].isin(_RANKED_KINDS)
+        summary["n1_skipped"] = list(cset.loc[~judged, "contingency_id"])
+        if judged.any():
+            ranked, failed = _rank(net, poc_bus, b, planned_mw, cset[judged], st)
+            kind_of = dict(zip(cset["contingency_id"], cset["kind"]))
+            results += [_row(cid, cid, kind_of[cid], NOT_SOLVED, note, {}, _Tally(), _Tally())
+                        for cid, note in failed.items()]
+            handles = _Handles.of(net)
+            studied = ranked.head(st.max_cases)
+            for r in studied.itertuples(index=False):
+                case = copy.deepcopy(net)
+                _apply_outage(case, r, handles)
+                results.append(_case_row(case, r.contingency_id, r.contingency_id, r.kind,
+                                         poc_bus, b, planned_mw, st))
+            summary.update(n1_ranked=len(ranked), n1_not_solved=list(failed), n1_studied=len(studied))
     return pd.DataFrame(results), summary
