@@ -41,6 +41,7 @@ from models.study import (
     LedgerRow,
     Tariff,
 )
+from services.study._pack_rows_not_seeded import PACK_ROWS_NOT_SEEDED_SINCE_2026_10_05
 
 __all__ = [
     "BESS_KEY_DRIVERS", "DEFAULTS_VERSION_PREFIX", "DERIVED", "ENGINE_PATHS",
@@ -239,6 +240,8 @@ _PACK_TECH_ROWS: tuple[tuple[str, tuple[str, str]], ...] = (
 _PACK_ROWS_NOT_SEEDED = {
     # The guided pack books the battery's FOM on the inverter (power) part only.
     "battery.energy.fom_share": "fom_booked_on_power_part",
+    # Rows added after the 2026-10-05 pin, none of a technology the ledger reads.
+    **PACK_ROWS_NOT_SEEDED_SINCE_2026_10_05,
 }
 _PACK_FINANCE_KEYS = {"finance.discount_rate": "discount_rate",
                       "finance.sizing_limit_connection_multiple":

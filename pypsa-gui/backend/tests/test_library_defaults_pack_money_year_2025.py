@@ -274,3 +274,34 @@ def test_the_guided_study_on_the_live_pin_solves_in_2025_money_end_to_end():
     for k in A.BILL_COMPONENT_KEYS:
         if old[k] is not None:
             assert math.isclose(getattr(bill, k), old[k] * float(_factor()), rel_tol=1e-9, abs_tol=1e-9), k
+
+
+# ── the rows the guided ledger names as not seeded (GK B riders R2-R4) ───
+
+def test_every_row_named_as_not_seeded_is_in_the_pinned_pack():
+    from services.library.defaults_pack.loader import load_defaults_pack
+    from services.study import library as L
+
+    keys = {v.key for v in load_defaults_pack(L.PACK_VERSION).cost_values}
+    assert sorted(set(L._PACK_ROWS_NOT_SEEDED) - keys) == []
+
+
+def test_no_row_named_as_not_seeded_is_a_technology_the_ledger_reads():
+    from services.study import library as L
+    from services.study._pack_rows_not_seeded import PACK_ROWS_NOT_SEEDED_SINCE_2026_10_05 as LATER
+
+    read = {k.split(".")[0] for k, _ in L._PACK_TECH_ROWS}
+    assert read == {"battery", "solar-utility", "solar-rooftop"}
+    assert [k for k in LATER if k.split(".")[0] in read] == []
+
+
+def test_the_2026_10_05_study_keeps_its_ledger_hash():
+    from services.study import library as L
+    from services.study import packs as P
+    from services.study import questions as Q
+    from tests.golden import site_fixture as sf
+
+    lib = L.load_defaults("2026-10-05")
+    assert lib.version == "generic-defaults 2026-10-05 962a0184861c"
+    # recorded on master 1d80850, before the not-seeded rows were named
+    assert P.ledger_hash(L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), lib)) == "974275b95d58a7c2"

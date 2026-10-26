@@ -121,4 +121,4 @@ def test_moving_latest_changes_no_template_and_no_guided_seed():
     from services.study import library as L
 
     assert T.TEMPLATE_PACK_VERSION == "2026-10-26"    # repinned to the 2025-money pack (money-year 01)
-    assert L.PACK_VERSION == "2026-10-05"
+    assert L.PACK_VERSION == "2026-10-26"    # moved with the templates (money-year 01)
