@@ -1,0 +1,63 @@
+# Tier B owner journeys (LC-13, owner decision Q2): a real, paid model plays
+# each journey. Manual trigger only, a hard dollar cap, never a merge gate.
+name: Owner journeys (live, manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cap_usd:
+        description: Hard spend cap in USD across all trials
+        required: true
+        default: "2"
+      trials:
+        description: Runs per journey
+        required: true
+        default: "3"
+      model:
+        description: Model identifier
+        required: true
+        default: gpt-6.1-sol
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: Owner journeys (live)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash -l {0}
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        environments: test
+        cache: true
+        cache-write: false
+
+    - name: Run the live owner journeys
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        CAP_USD: ${{ inputs.cap_usd }}
+        TRIALS: ${{ inputs.trials }}
+        MODEL: ${{ inputs.model }}
+      run: |
+        pixi run -e test python tools/run_owner_journeys.py --live \
+          --cap-usd "$CAP_USD" --trials "$TRIALS" --model "$MODEL" \
+          --report owner-journeys-live.json
+      working-directory: pypsa-gui/backend
+
+    - name: Upload the report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: owner-journeys-live
+        path: |
+          pypsa-gui/backend/owner-journeys-live.json
+          pypsa-gui/backend/owner-journeys-live.spend.json
+        if-no-files-found: warn

@@ -2377,6 +2377,8 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           compare_tab?: string
           component_class?: string
           name?: string
+          snapshot_index?: number
+          canvas_view?: string
           snapshot_iso?: string
           period?: number | null
           category?: string

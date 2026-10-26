@@ -1,6 +1,6 @@
 // Phase 2 plan Task 6.4: the timeline is the 3D view's only time control, so
 // its slider has an accessible name and reads out the timestamp.
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SnapshotPicker from './SnapshotPicker'
@@ -26,4 +26,24 @@ describe('SnapshotPicker slider', () => {
     expect(slider.getAttribute('aria-label')).toBe('Snapshot')
     expect(slider.getAttribute('aria-valuetext')).toBe('2030-01-01 02:00 (3 of 4)')
   })
+})
+
+it('moves the period selector to an externally selected snapshot without clamping it', async () => {
+  vi.mocked(networkApi.getSnapshots).mockResolvedValue({
+    count: 6,
+    snapshots: ['2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00',
+      '2030-01-01T00:00:00', '2030-01-01T01:00:00', '2030-01-01T02:00:00'],
+    periods: [2030, 2030, 2030, 2040, 2040, 2040],
+  } as never)
+  useUIStore.setState({ resultsSnapshotIdx: 0 })
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={qc}><SnapshotPicker /></QueryClientProvider>)
+  const selector = await screen.findByTitle('Investment period to display') as HTMLSelectElement
+  await waitFor(() => expect(selector.value).toBe('2030'))
+  act(() => useUIStore.getState().setResultsSnapshotIdx(4))
+  await waitFor(() => expect(selector.value).toBe('2040'))
+  expect(useUIStore.getState().resultsSnapshotIdx).toBe(4)
+  fireEvent.change(selector, { target: { value: '2030' } })
+  await waitFor(() => expect(selector.value).toBe('2030'))
+  expect(useUIStore.getState().resultsSnapshotIdx).toBe(0)
 })

@@ -660,6 +660,9 @@ schema parity and source metadata, not behavioral/tool/GUI parameter completion.
 The assistant can navigate all current Results tabs and panel targets, including
 adequacy/FMEA, workspace/settings/GridSpine/reports/campus electrical. Invalid
 navigation IDs/types are refused by the shared handler before a UI event emits.
+It also sets the canvas snapshot (refusing one not on the time axis), opens a
+component's Edit form with `open_editor` at read tier without saving, and switches
+to every canvas view.
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
 the eligible registry using explicit names, always-available controls, recent
