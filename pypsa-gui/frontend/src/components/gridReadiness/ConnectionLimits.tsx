@@ -21,6 +21,7 @@ import { useUIStore } from '../../store/uiStore'
 import { openFlowTarget, openFlowTargetInPlace } from '../../layout/flowNavigation'
 import { blockerMessage } from '../../utils/blockerMessage'
 import { nk } from '../../utils/queryKeys'
+import { useFlowScope } from '../flowScope/useFlowScope'
 import { fmt, useGridReadiness } from './GridReadinessScorecard'
 
 const SHOWN: Record<string, string> = {
@@ -55,11 +56,11 @@ const sourceOf = (s: GridLimitSetting): GridLimitSource => {
 }
 
 /** What a reset returns to, in words: the template's value and source, or the generic placeholder. */
-export function resetTarget(s: GridLimitSetting, unit: string): string {
+export function resetTarget(s: GridLimitSetting, unit: string, templateName?: string): string {
   const d = s.default
   const v = d.value != null ? `${Number(d.value.toPrecision(4))}${unit ? ` ${unit}` : ''}` : null
   const src = SOURCE_WORDS[d.source] ?? d.source
-  if (d.origin === 'template') return `the template's ${v ? `${v}, ` : 'source '}${src}`
+  if (d.origin === 'template') return `the ${templateName?.trim() || 'starting template'}'s ${v ? `${v}, ` : 'source '}${src}`
   return `the generic placeholder${v ? ` ${v}` : ''}, assumed`
 }
 
@@ -70,6 +71,7 @@ function LimitEditor({ row, setting, label, faultBuses }: {
   row: GridReadinessRow; setting: GridLimitSetting; label: string; faultBuses?: FaultBus[]
 }) {
   const project = useUIStore(s => s.currentProject) ?? ''
+  const { registry } = useFlowScope()
   const qc = useQueryClient()
   const kind = kindOf(row)
   const { unit, max, hint } = EDITABLE[kind]
@@ -167,7 +169,7 @@ function LimitEditor({ row, setting, label, faultBuses }: {
         </button>
         {setting.user != null && (
           <button type="button" disabled={busy} onClick={() => reset.mutate()} className="underline">
-            Reset to {resetTarget(setting, unit)}
+            Reset to {resetTarget(setting, unit, registry?.preset_label)}
           </button>
         )}
       </div>

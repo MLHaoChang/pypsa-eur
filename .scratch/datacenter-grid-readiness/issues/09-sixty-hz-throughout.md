@@ -3,7 +3,7 @@
 
 # 60 Hz throughout (nominal frequency carried, not assumed)
 
-Status: done
+Status: done (09a #686, 1871073c; 09b #692, abefdbd4)
 Type: task
 Blocked by: none
 Gated: **yes** (gridspine)

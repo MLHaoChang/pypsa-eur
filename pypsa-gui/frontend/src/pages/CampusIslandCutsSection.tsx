@@ -39,6 +39,17 @@ const SCENARIO_WORDS: Record<string, string> = { ups_bridged: 'UPS-bridged', sea
 export const scenarioWords = (id: string) =>
   SCENARIO_WORDS[id] ?? id.replace(/_/g, ' ').replace(/^./, ch => ch.toUpperCase())
 
+const hourWords = (period: number, hour: number) => `${period}, hour ${hour}`
+const EVENT_WORDS: Record<string, string> = {
+  E1: 'Grid opens (islanding)', E2: 'Load step', E3: 'Unit trip',
+  E4: 'Start from a dead bus', E5: 'PV loss', E6: 'Planned islanding',
+}
+const eventWords = (id: string) => EVENT_WORDS[id] ?? id
+const KIND_WORDS: Record<string, string> = {
+  inertia: 'inertia', headroom_up: 'up headroom', headroom_down: 'down headroom', droop_gain: 'droop gain',
+}
+const kindWords = (id: string) => KIND_WORDS[id] ?? id
+
 const TH = 'text-left font-medium px-2'
 const TD = 'px-2'
 
@@ -146,7 +157,7 @@ export default function CampusIslandCutsSection({ name, mode = 'all' }: { name: 
               {data.trials.map(t => (
                 <tr key={t.trial}>
                   <td className={TD}>{t.trial}</td>
-                  <td className={TD}>{t.added.map(c => `${c.kind} p${c.period} h${c.hour} ≥ ${num(c.required)}`).join('; ')}</td>
+                  <td className={TD}>{t.added.map(c => `${kindWords(c.kind)} ${hourWords(c.period, c.hour)} ≥ ${num(c.required)}`).join('; ')}</td>
                   <td className={TD}>{cost(t.objective)}</td>
                   <td className={TD}>{(t.refreshed ?? []).map(refreshedText).join('; ') || 'none'}</td>
                   <td className={TD}>{t.verdict}</td>
@@ -164,8 +175,8 @@ export default function CampusIslandCutsSection({ name, mode = 'all' }: { name: 
             <tbody>
               {data.applied.map(c => (
                 <tr key={`${c.period}-${c.hour}-${c.kind}`}>
-                  <td className={TD}>{c.kind}</td>
-                  <td className={TD}>p{c.period} h{c.hour}</td>
+                  <td className={TD}>{kindWords(c.kind)}</td>
+                  <td className={TD}>{hourWords(c.period, c.hour)}</td>
                   <td className={TD}>≥ {num(c.required)}</td>
                   {act && <td className={TD}>
                     <Btn onClick={() => remove.mutate(c)} disabled={isRunning || remove.isPending}>
@@ -203,10 +214,10 @@ function ProposedTable({ rows }: { rows: ProposedCut[] }) {
         <tbody>
           {rows.map(c => (
             <tr key={`${c.period}-${c.hour}-${c.scenario}-${c.kind}`} data-applicable={c.applicable ? 'yes' : 'no'}>
-              <td className={TD}>p{c.period} h{c.hour}</td>
+              <td className={TD}>{hourWords(c.period, c.hour)}</td>
               <td className={TD}>{scenarioWords(c.scenario)}</td>
-              <td className={TD}>{c.event}</td>
-              <td className={TD}>{c.kind} ({c.unit})</td>
+              <td className={TD} title={c.event}>{eventWords(c.event)}</td>
+              <td className={TD}>{kindWords(c.kind)} ({c.unit})</td>
               <td className={TD}>{num(c.current)}</td>
               <td className={TD}>{num(c.required)}</td>
               <td className={`${TD} max-w-[260px] truncate`} title={c.binding ?? ''}>{c.binding}</td>

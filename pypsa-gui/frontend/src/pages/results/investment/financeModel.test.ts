@@ -312,11 +312,34 @@ describe('campus wording', () => {
       'part_not_replaced:campus:TR_132_33_40#1:investment',
       'part_not_replaced:bess:power',
       'campus_renewal_after_horizon:campus:CB_33_AL95#1:2060',
-      'load_shed_excluded',
+      'unknown_future_flag:12.5',
     ])
     expect(out).toEqual([
       "bess, power: its life ends inside the case's horizon and no replacement is planned.",
-      'load_shed_excluded',
+      'unknown_future_flag:12.5',
     ])
+  })
+})
+
+
+describe('project finance flags in plain words', () => {
+  it('explains the excluded load, annualisation, degradation and money basis with their values', () => {
+    expect(projectFlagWords([
+      'load_shed_excluded:12.5', 'template_annualised:52',
+      'co2_price_money_year_differs:2025:2020',
+      'lcos_charge_from_surplus_at_export_price:bess:4.5',
+    ])).toEqual([
+      'The comparison excludes 12.5 MWh of shed load.',
+      'The sampled operating cash is scaled to a full year by a factor of 52.',
+      'The CO2 price is in 2025 money; the real case is in 2020 money.',
+      'bess charges from 4.5 MWh of surplus generation, valued at the export price.',
+    ])
+  })
+  it('keeps unknown flags verbatim and only removes caveats already explained beside the figures', () => {
+    const caveats = ['counterfactual_exceeds_connection', 'counterfactual_shed_at_voll:5',
+      'counterfactual_buys:H2', 'co2_price_period:2030:2025:50', 'counterfactual_exceeds_supply']
+    expect(projectFlagWords([...caveats, 'new_flag:keep:this', 'part_not_replaced:bess:power']))
+      .toEqual(['new_flag:keep:this', "bess, power: its life ends inside the case's horizon and no replacement is planned."])
+    expect(baselineCaveats({ sections: { project: { payload: { flags: caveats } } } } as never)).toHaveLength(5)
   })
 })

@@ -100,7 +100,7 @@ export default function HubDesignPanel() {
   }
 
   // Auto-advance (§5.6): running → done opens Results unless the user moved
-  // the rail since; any → running opens Readiness → run, where the Run is. Every transition re-arms it.
+  // the rail since; any → running opens Readiness and run, where the Run is. Every transition re-arms it.
   const prevStatus = useRef<string | null | undefined>(undefined)
   useEffect(() => { prevStatus.current = undefined }, [project])
   useEffect(() => {

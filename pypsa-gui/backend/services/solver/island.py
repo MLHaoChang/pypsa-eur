@@ -71,7 +71,8 @@ gensets' inertia at N+k, and ΣK on that block. M sums H·s_nom over spinning
 gensets, H_v·s_nom over VSMs and τ_f·p_nom/(2R) over droop GFMs; ΣK sums
 p_nom/(R·f0) over GFMs and droop gensets, less the k largest genset units'.
 RoCoF reads the ``transition`` limits and the qss band the
-``steady_island`` ones; f0 is 50 Hz. A row with no variable that fails is a
+``steady_island`` ones; f0 is the campus's nominal frequency (``f_hz``,
+50 Hz when the project states none). A row with no variable that fails is a
 refusal naming it, not an infeasible LP.
 
 **The seamless island's own events (Guided smoke 2026-10-16).** I6 judges
@@ -104,8 +105,7 @@ hours); U_max over-subtracts when an extendable genset is not built
 (conservative); the occurrence derating is not applied, since N+k covers
 outages. I2b: only ``spinning`` gensets are online at 0⁺, whatever they
 dispatch (linearised UC is I2c); isochronous gensets add no droop gain
-(conservative); the instantaneous RoCoF at 0⁺ is stricter than I6's window;
-f0 is fixed at 50 Hz.
+(conservative); the instantaneous RoCoF at 0⁺ is stricter than I6's window.
 
 **Linearised UC (I2c, Q7).** With the sidecar's ``linearised_uc`` on, the
 fixed-size gensets are committed for the solve (``linearised_uc``: PyPSA's
@@ -183,7 +183,42 @@ def load_project_island() -> dict | None:
         raise IslandRefusal(f"{SIDECAR_NAME} is not a valid island config: {exc}") from exc
     if island is not None:
         island["cuts"] = load_applied_cuts(pathlib.Path(storage))
+        island["f_hz"] = campus_f_hz(storage)
     return island
+
+
+def campus_f_hz(project_dir) -> float:
+    """The nominal frequency of the project's campus (``campus.f_hz`` in its
+    campus file, gridspine's rule: 50 or 60), 50 Hz when it has no campus
+    file or the file states none. A file that is not YAML, or states another
+    frequency, is refused by name."""
+    import yaml
+
+    from services.campus_electrical_service import CAMPUS_FILE, SUBDIR
+
+    path = pathlib.Path(project_dir) / SUBDIR / CAMPUS_FILE
+    if not path.is_file():
+        return F0_HZ
+    try:
+        from gridspine.ingest.campus import campus_f_hz as rule
+        from gridspine.schema.contracts import ContractError
+    except ImportError as exc:
+        # The guarded seam (tests/test_packaging_requirements.py): a build
+        # without gridspine refuses by name rather than assume 50 Hz.
+        raise IslandRefusal(
+            f"{CAMPUS_FILE} states the campus, but gridspine is not available in "
+            f"this build, so its f_hz cannot be read") from exc
+    try:
+        spec = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        raise IslandRefusal(f"{CAMPUS_FILE} is not valid YAML, so its f_hz cannot be read: {exc}") from exc
+    campus = spec.get("campus") if isinstance(spec, dict) else None
+    if not isinstance(campus, dict):
+        raise IslandRefusal(f"{CAMPUS_FILE} has no 'campus' mapping to read f_hz from")
+    try:
+        return float(rule(campus))
+    except ContractError as exc:
+        raise IslandRefusal(f"{CAMPUS_FILE}: {exc}") from exc
 
 
 #: The frequency cuts the user applied (I7, owner QB), beside the sidecar.
@@ -672,7 +707,7 @@ def add_island_rows(n, snapshots, island, *, delta_p_plus=None, emit=None,
              "uc": ({"status": "linearised (u may be fractional)", "committed": committed,
                      "not_committed": not_committed} if req.get("linearised_uc")
                     else {"status": "off"}),
-             "instant": {"scenarios": sorted(scenarios), "f0_hz": F0_HZ, "rows": [],
+             "instant": {"scenarios": sorted(scenarios), "f0_hz": _f0(island), "rows": [],
                          "late_ups": [], "pcc": pcc}}
 
     # The unit the N+k test takes out of each genset: its sidecar unit_mw
@@ -954,7 +989,7 @@ def _cut_coefficients(n, island) -> dict:
     headroom: 1 for GFM storage, η for a spinning genset upward)."""
     from services.adequacy.island_config import GFM_CONTROLS
 
-    units = island["units"]
+    units, f0 = island["units"], _f0(island)
     out = {kind: [] for kind in CUT_KINDS}
     for name, u in units.items():
         v = u["values"]
@@ -963,7 +998,7 @@ def _cut_coefficients(n, island) -> dict:
                 continue
             m_coef = (v["H_v_s"] / v["pf_rated"] if u["control"] == "gfm_vsm"
                       else v["tau_f_s"] / (2.0 * v["droop_pct"] / 100.0))
-            for kind, coef in (("inertia", m_coef), ("droop_gain", 1.0 / (v["droop_pct"] / 100.0 * F0_HZ)),
+            for kind, coef in (("inertia", m_coef), ("droop_gain", 1.0 / (v["droop_pct"] / 100.0 * f0)),
                                ("headroom_up", 1.0), ("headroom_down", 1.0)):
                 out[kind].append((name, "StorageUnit", coef))
         elif u["kind"] == "genset" and (name in n.generators.index or name in n.links.index):
@@ -972,7 +1007,7 @@ def _cut_coefficients(n, island) -> dict:
             if not bool(frame.at[name, "p_nom_extendable"]):
                 continue
             if u.get("governor") == "droop":
-                out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * F0_HZ)))
+                out["droop_gain"].append((name, comp, eta / (v["droop_pct"] / 100.0 * f0)))
             if u.get("spinning"):                    # online at 0⁺
                 out["inertia"].append((name, comp, v["H_s"] / v["cos_phi_r"] * eta))
                 out["headroom_up"].append((name, comp, eta))
@@ -1034,9 +1069,14 @@ def _it_load(n, units, u, sns_p) -> pd.Series:
 
 # ── the instant of islanding (I2b) ─────────────────────────────────────────
 
-#: The nominal frequency the RoCoF and droop rows use. The hub carries none;
-#: the templates are Continental European (ledgered).
+#: The nominal frequency the RoCoF and droop rows use when the island states
+#: none (``f_hz``, from the project's campus file: ``campus_f_hz``).
 F0_HZ = 50.0
+
+
+def _f0(island) -> float:
+    """The island's nominal frequency in Hz."""
+    return float(island.get("f_hz", F0_HZ))
 
 #: ``eh_role`` tags of the PCC Links (``results.physical_quantities.POC_ROLES``
 #: for the import side; the export side is ``commercial.binding``'s tag).
@@ -1119,7 +1159,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
                   committed=(), cuts=(), event_rows=True):
     """The rows of the islanding instant for one period (I2b), by the
     scenario matrix; returns B(t), the seamless GFM bridge energy in MWh."""
-    units, req = island["units"], island["requirements"]
+    units, req, f0 = island["units"], island["requirements"], _f0(island)
     vals, scenarios = req["values"], set(req["scenarios"])
     limits = req["frequency_limits"]
     rocof_max = limits["transition"]["values"]["rocof_hz_per_s"]
@@ -1184,10 +1224,10 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
     # genset units' (K = P_n/(R·f0), R on P_n).
     k_sum = _Lin()
     for s in gfm:
-        _add_nominal(k_sum, n, "StorageUnit", s, 1.0 / (spec(s)["droop_pct"] / 100.0 * F0_HZ))
+        _add_nominal(k_sum, n, "StorageUnit", s, 1.0 / (spec(s)["droop_pct"] / 100.0 * f0))
     for g in droop_gensets:
-        nom_out(k_sum, g, 1.0 / (spec(g)["droop_pct"] / 100.0 * F0_HZ))
-    k_max = max((unit_rating[g] / (spec(g)["droop_pct"] / 100.0 * F0_HZ)
+        nom_out(k_sum, g, 1.0 / (spec(g)["droop_pct"] / 100.0 * f0))
+    k_max = max((unit_rating[g] / (spec(g)["droop_pct"] / 100.0 * f0)
                  for g in droop_gensets), default=0.0)
     k_sum.plus(-k * k_max)
 
@@ -1199,7 +1239,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
             gfm=gfm, upss=upss, l_c=l_c, joins_s=joins_s, links=links, fw_units=fw_units,
             delta_p_plus=delta_p_plus, facts=facts, active=active, period=period,
             p_out=p_out, nom_out=nom_out, on_out=on_out, online=online, p_store=p_store,
-            k_sum=k_sum, margin=margin,
+            k_sum=k_sum, margin=margin, f0=f0,
             rocof_max=rocof_max, df_qss=df_qss, cut_lhs=cut_lhs, blocks=vals.get("pickup_blocks"),
             event_rows=event_rows)
         cut_lhs["droop_gain"] = k_sum
@@ -1223,7 +1263,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
             nom_out(inertia, g, 2.0 * spec(g)["H_s"] / spec(g)["cos_phi_r"])
         inertia.plus(-2.0 * k * max((spec(g)["H_s"] * unit_rating[g] / spec(g)["cos_phi_r"]
                                      for g in gensets), default=0.0))
-        _row(m, inertia, _Lin().plus(F0_HZ * block / rocof_max), f"Island-rocof-block{tag}",
+        _row(m, inertia, _Lin().plus(f0 * block / rocof_max), f"Island-rocof-block{tag}",
              coord, refuse="RoCoF on the largest pickup block: the gensets' inertia at N+k "
                            "is too small", facts=facts)
         # (e) quasi-steady state on the largest block.
@@ -1235,7 +1275,7 @@ def _instant_rows(n, m, sns, sns_p, coord, tag, period, *, island, gensets, gfm,
 
 def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gfm, upss, l_c,
                    joins_s, links, fw_units, delta_p_plus, facts, active, period, p_out,
-                   nom_out, on_out, online, p_store, k_sum, margin, rocof_max, df_qss,
+                   nom_out, on_out, online, p_store, k_sum, margin, f0, rocof_max, df_qss,
                    cut_lhs=None, blocks=None, event_rows=True):
     """The ``seamless`` rows: the steps ΔP⁺ and ΔP⁻, headroom both ways, the
     MVA and inertia online at 0⁺, the droop gain, and B(t). ``cut_lhs``
@@ -1390,7 +1430,7 @@ def _seamless_rows(n, m, sns, sns_p, coord, tag, *, units, gensets, spinning, gf
             coef = spec(s)["tau_f_s"] / (2.0 * spec(s)["droop_pct"] / 100.0)
         _add_nominal(two_m, n, "StorageUnit", s, 2.0 * coef)
     for side, dp in (("up", dp_up), ("down", dp_down)):
-        _row(m, _Lin(sns_p).add(two_m), dp.scaled(F0_HZ / rocof_max),
+        _row(m, _Lin(sns_p).add(two_m), dp.scaled(f0 / rocof_max),
              f"Island-rocof-{side}{tag}", coord, facts=facts)
     if cut_lhs is not None:
         cut_lhs.update(inertia=two_m.scaled(0.5), headroom_up=up, headroom_down=down)
@@ -1678,7 +1718,7 @@ def island_hourly(n, island, unit_ids=None):
         validate_island_unit_hourly,
     )
 
-    units, req = island["units"], island["requirements"]
+    units, req, f0 = island["units"], island["requirements"], _f0(island)
     vals = req["values"]
     unit_ids = dict(unit_ids or {})
     solved = any(len(getattr(getattr(n, ts), attr, pd.DataFrame()).columns)
@@ -1767,10 +1807,10 @@ def island_hourly(n, island, unit_ids=None):
                      - k * max((spec(g)["H_s"] * unit_mw[g] / spec(g)["cos_phi_r"] for g in g_p),
                                default=0.0))
         droop_g = [g for g in g_p if units[g]["governor"] == "droop"]
-        k_sum = (sum(_solved_nom(n, "StorageUnit", s) / (spec(s)["droop_pct"] / 100.0 * F0_HZ)
+        k_sum = (sum(_solved_nom(n, "StorageUnit", s) / (spec(s)["droop_pct"] / 100.0 * f0)
                      for s in gfm_p)
-                 + sum(gen[g]["nom"] / (spec(g)["droop_pct"] / 100.0 * F0_HZ) for g in droop_g)
-                 - k * max((unit_mw[g] / (spec(g)["droop_pct"] / 100.0 * F0_HZ)
+                 + sum(gen[g]["nom"] / (spec(g)["droop_pct"] / 100.0 * f0) for g in droop_g)
+                 - k * max((unit_mw[g] / (spec(g)["droop_pct"] / 100.0 * f0)
                             for g in droop_g), default=0.0))
 
         for sc in req["scenarios"]:

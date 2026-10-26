@@ -1,6 +1,6 @@
 # Shared harness delegation bridge
 
-Status: claimed
+Status: ready-for-agent
 Type: task
 Blocked by: 08, 09 (integrated acceptance; bridge extraction can start earlier)
 

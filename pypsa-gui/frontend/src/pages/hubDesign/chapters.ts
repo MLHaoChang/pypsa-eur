@@ -103,7 +103,7 @@ function investment({ study, report }: ChapterInputs['investment']): Omit<Chapte
 
 function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 'id' | 'group'> {
   // Results once there are some; before that, the settings that run the study.
-  const open: ChapterOpen = { panel: (campus?.results?.compliance?.length ?? 0) > 0 ? 'campusResults' : 'campusStudy' }
+  const open: ChapterOpen = { panel: ((campus?.results?.compliance_invested ?? campus?.results?.compliance)?.length ?? 0) > 0 ? 'campusResults' : 'campusStudy' }
   const label = 'Grid checks'
   if (notHub) {
     return { label, value: '', state: 'not_applicable', open,
@@ -114,7 +114,7 @@ function gridPlan({ campus, notHub }: ChapterInputs['grid']): Omit<ChapterTile, 
   if (going) return { label, value: '', state: 'running', reason: going, open }
   const failed = failureLine(campus?.run_job)
   if (failed) return { label, value: '', state: 'unavailable', reason: failed, open }
-  const rows = campus?.results?.compliance ?? null
+  const rows = campus?.results?.compliance_invested ?? campus?.results?.compliance ?? null
   if (!rows || rows.length === 0) {
     return { label, value: '', state: 'not_run', open,
       reason: 'The grid checks (voltage, loading, reactive power) have not run.' }

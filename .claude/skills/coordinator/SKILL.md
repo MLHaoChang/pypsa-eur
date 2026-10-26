@@ -41,9 +41,10 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
    - live sessions, each with its id and package;
    - owner decisions in force, in the owner's words;
    - open owner questions;
-   - the dashboard's last `ArtifactData` `if_version`, and the routine's trigger id.
+   - each dashboard's link and its datasets' last `ArtifactData` `if_version`, and the routine's trigger id.
 2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for MLHaoChang/pypsa-eur. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
+   The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
 3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` each live session the new id.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
@@ -127,12 +128,30 @@ Merge one PR at a time:
 
 ## Dashboard
 
-The dashboard is https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk. All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field (`prs`, `sessions` or `merged`) says which table shows it. The page splits the rows with one calc per board.
+The owner has three dashboards. Each keeps its data, and any state needed to rebuild it, in the artifact itself (its uploaded files and `ArtifactData` docs), never only in the scratchpad: the scratchpad goes with the session at rotation.
+
+| Dashboard | Link | Datasets | Refresh |
+|---|---|---|---|
+| Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | With each owner report that changes a PR or a session |
+| Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | After a merge that finishes an issue, and on every sweep |
+| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | On every sweep |
+
+Every refresh uploads a file (Artifact `publish`, `asset: true`, `url` set to that dashboard) and points the dataset at it: an `ArtifactData` update that sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result (after a rotation, a `get` returns it).
+
+**Coordinator board.** All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field (`prs`, `sessions` or `merged`) says which table shows it. The page splits the rows with one calc per board.
 
 Each refresh is three calls, made at most once per owner report:
 1. One Bash call, `python3 scripts/coord/board.py` (`--help` lists the flags). From flags it upserts or removes session rows, adds merged rows, adds or removes pr rows, appends one line to the state file and prints the path of `board.json`, ready for upload.
 2. Upload that path with Artifact `publish`, `asset: true`, `url` set to the dashboard.
 3. One `ArtifactData` update to `datasets/board`. It sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result.
+
+**Feature progress.** One row per subcomponent: each `.scratch/<feature>/issues/*.md` on master, plus the polish backlog, with a `stage` (Done, In review, In progress, Ready, Needs triage, Needs owner, Won't do) and a `note`. The owner wants it high level: core feature, area, percentage built and the names of what is missing. Status lines on master lag merges, so in-flight stages come from the state file. To refresh, download the current file (Artifact `read`, `path` set to the asset id in `datasets/tasks`'s `source.url`), change the rows' `stage` and `note` with a short Python edit, upload it and update `datasets/tasks`.
+
+**Token usage.** Tokens and API-equivalent cost per Berlin day, over every Claude Code session on the account (Cowork sessions are not listed).
+1. A Haiku subagent saves each `list_sessions` page (`mine: true`, `limit: 100`, following `after_id`) verbatim to `<scratchpad>/usage/page-N.json`.
+2. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
+3. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
+4. Upload the three files, then one `ArtifactData batch`: `datasets/daily`, `datasets/sessions`, and `state/usage` with the new `snapshots` url.
 
 ## Tool hygiene
 

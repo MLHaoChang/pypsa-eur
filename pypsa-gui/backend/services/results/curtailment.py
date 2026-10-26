@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from services.results.carrier_kpis import _without_hydrogen_words
 from services.serialization import (
     slice_ts as _slice_ts,
     ts_payload as _ts_payload,
@@ -125,7 +126,7 @@ def curtailment_frame(n):
     for col in curtailment.columns:
         if col not in gens_df.index:
             continue
-        carrier = str(gens_df.at[col, "carrier"]).lower() if "carrier" in gens_df.columns else ""
+        carrier = _without_hydrogen_words(str(gens_df.at[col, "carrier"])) if "carrier" in gens_df.columns else ""
         is_renew = any(k in carrier for k in RENEW_KEYWORDS)
         has_subsidy = False
         if "curtailment_cost" in gens_df.columns:

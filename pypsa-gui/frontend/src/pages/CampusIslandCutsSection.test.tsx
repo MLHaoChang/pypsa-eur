@@ -155,7 +155,7 @@ describe('frequency cuts: the record', () => {
     renderSection()
     const row = (await screen.findByTestId('cuts-trials')).querySelector('tbody tr') as HTMLElement
     expect(row.textContent).toMatch(/1/)
-    expect(row.textContent).toMatch(/headroom_up/)
+    expect(row.textContent).toMatch(/up headroom/)
     expect(row.textContent).toMatch(/2[,.\s]?000/)
     expect(row.textContent).toContain('fails at 1 hour')
     // what the trial brought up to the re-solved hub in the campus file
@@ -194,4 +194,27 @@ describe('the two places of the cuts (W10 R3)', () => {
     expect(screen.getByRole('button', { name: /Apply cuts/ })).toBeTruthy()
     expect(screen.getByRole('button', { name: /Remove/ })).toBeTruthy()
   })
+})
+
+
+it('names hours, events and cut kinds across proposed, applied and trial rows without changing requests', async () => {
+  renderSection()
+  const proposed = await screen.findByTestId('cuts-proposed')
+  expect(proposed.textContent).toContain('2030, hour 3')
+  expect(within(proposed).getAllByTitle('E1')[0].textContent).toBe('Grid opens (islanding)')
+  expect(proposed.textContent).toContain('droop gain')
+  expect(screen.getByTestId('cuts-applied').textContent).toContain('up headroom')
+  expect(screen.getByTestId('cuts-applied').textContent).toContain('2030, hour 1')
+  expect(screen.getByTestId('cuts-trials').textContent).toContain('up headroom 2030, hour 1')
+})
+
+it.each([
+  ['E2', 'Load step'], ['E3', 'Unit trip'], ['E4', 'Start from a dead bus'],
+  ['E5', 'PV loss'], ['E6', 'Planned islanding'], ['E99', 'E99'],
+])('names event %s and preserves its exact id', async (event, label) => {
+  api.islandCuts.mockResolvedValue({ ...CUTS, proposed: [cut({ event, kind: 'headroom_down' })] })
+  renderSection()
+  const table = await screen.findByTestId('cuts-proposed')
+  expect(within(table).getByTitle(event).textContent).toBe(label)
+  expect(table.textContent).toContain('down headroom')
 })

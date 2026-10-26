@@ -1,6 +1,6 @@
 # CP-04b — Retained job observations
 
-Status: ready-for-human
+Status: done (#311, 76835bb3)
 Type: implementation
 Baseline: master `07f90f2316ebdc1f9e42e1fffc17ea22d3b30e6a` (#309)
 
