@@ -100,6 +100,8 @@ class Adapter:
     # What else the card binds (in its digest) beside its rows: the stored
     # review an `apply_project_changes` card shows.
     binding: Callable[[dict], dict] | None = None
+    # The set lines a card shows above their rows (LC-16 slice B), in its digest.
+    sets: Callable[[dict], list[dict]] | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -135,7 +137,19 @@ def _number(value) -> str:
     return f"{value:g}" if isinstance(value, float) else str(value)
 
 
-def _says(rows: list[dict]) -> str:
+def _says(rows: list[dict], sets: list[dict] = ()) -> str:
+    def phrase(group):
+        # One phrase per set, never a name per member: a 20-asset set stays one line.
+        count = f"{group['size']} asset{'' if group['size'] == 1 else 's'}"
+        if group["factor_words"]:
+            change = f"{group['attribute']} {group['factor_words']}"
+        else:
+            row = next(r for r in rows if r["role"] == "typed" and r["name"] in group["names"]
+                       and r["field"] == group["attribute"])
+            shown = row.get("display") or row
+            change = f"{group['attribute']} → {_number(shown['new'])}" + (f" {shown['unit']}" if shown.get("unit") else "")
+        return f"{group['words']} · {count} · {change}"
+
     def one(row):
         if row["field"] == "exists":
             return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
@@ -150,7 +164,9 @@ def _says(rows: list[dict]) -> str:
                   if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
         return f"{what} {old} → {new}{unit}{stored}"
-    return "; ".join(one(row) for row in rows if row["role"] == "typed")
+    grouped = {(g["component_class"], name, g["attribute"]) for g in sets for name in g["names"]}
+    return "; ".join([phrase(g) for g in sets] + [one(row) for row in rows if row["role"] == "typed"
+                                                   and (row.get("component_class"), row["name"], row["field"]) not in grouped])
 
 
 # Kept on the card for the receipt, outside the digest: a section's state can
@@ -186,6 +202,10 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+    sets = adapter.sets(args or {}) if adapter.sets is not None else []
+    if sets:
+        card["sets"] = sets
+        card["says"] = _says(rows, sets)
     if adapter.binding is not None:
         card["binding"] = adapter.binding(args or {})
     if not sections and adapter.section_id:
@@ -701,8 +721,14 @@ def _project_changes_binding(args: dict) -> dict:
     return preview_card(args.get("preview_id"))[1]
 
 
+def _project_changes_sets(args: dict) -> list[dict]:
+    from services.assistant_tools import preview_card
+
+    return preview_card(args.get("preview_id"))[2]
+
+
 register("apply_project_changes", Adapter("parameter_edit", _project_changes_preview, _component_readback,
-                                           binding=_project_changes_binding))
+                                           binding=_project_changes_binding, sets=_project_changes_sets))
 
 
 # ── Library references: apply_library_reference ───────────────────────────

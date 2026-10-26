@@ -20,7 +20,7 @@ import pandas as pd
 from fastapi import HTTPException
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError, model_validator
 from services.pypsa_service import PyPSAService
 from services import assistant_tasks as tasks
 from services import workflow_tools as workflow
@@ -375,7 +375,204 @@ def _parameter_kind(field):
     return None
 
 
-def _preview_changes(changes, network):
+# LC-16 slice B (OJ-22): a change may name a set instead of its members and a
+# relative operation instead of a value. `_resolve_changes` turns both into
+# ordinary per-name absolute changes, so the record stores resolved values: the
+# apply never re-resolves the set, and the input fingerprint refuses it when a
+# member was added or removed since the preview.
+class _Selector(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    carrier: str | None = Field(None, min_length=1, max_length=64)
+    bus: str | None = Field(None, min_length=1, max_length=64)
+    all: Literal[True] | None = None
+
+    @model_validator(mode="after")
+    def _some_key(self):
+        if self.carrier is None and self.bus is None and self.all is None:
+            raise ValueError("empty selector")
+        return self
+
+
+class _Operation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scale: StrictFloat | StrictInt
+
+
+class _RelativeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    component_class: Literal["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]
+    names: list[str] | None = Field(None, min_length=1, max_length=100)
+    select: _Selector | None = None
+    attribute: str = Field(min_length=1, max_length=64)
+    value: StrictBool | StrictFloat | StrictInt | None = None
+    operation: _Operation | None = None
+
+    @model_validator(mode="after")
+    def _one_each(self):
+        if (self.names is None) == (self.select is None) or (self.value is None) == (self.operation is None):
+            raise ValueError("exactly one of names/select and one of value/operation")
+        return self
+
+
+_MAX_SCALE = 1000.0
+# Shares of a rating or of energy: a scaled value above 1 is a typo, not a design.
+# A Link's efficiencies are conversion factors (a heat pump's COP), so they are left out.
+_PER_UNIT = frozenset({"p_max_pu", "p_min_pu", "s_max_pu", "e_max_pu", "e_min_pu", "efficiency",
+                       "efficiency_store", "efficiency_dispatch", "standing_loss"})
+
+
+def _number_words(value):
+    return f"{value:.12g}"
+
+
+def _factor_words(factor):
+    percent = float(_number_words((factor - 1) * 100))
+    sign = "+" if percent >= 0 else "−"
+    return f"× {_number_words(factor)} ({sign}{_number_words(abs(percent))} %)"
+
+
+def _bus_columns(static):
+    return [c for c in static.columns if c == "bus" or (c.startswith("bus") and c[3:].isdigit())]
+
+
+def _selector_keys(klass, static):
+    return [k for k, ok in (("carrier", "carrier" in static.columns),
+                            ("bus", bool(_bus_columns(static))), ("all", True)) if ok]
+
+
+def _select(klass, selector, network):
+    """The members a selector names, in index order, and its words."""
+    static = network.components[klass].static
+    keys = _selector_keys(klass, static)
+    wrong = [k for k in ("carrier", "bus", "all") if getattr(selector, k) is not None and k not in keys]
+    if wrong:
+        workflow._refuse("invalid_change_selector", f"{klass} has no {', '.join(wrong)} to select by; "
+                         f"select {klass} by {', '.join(keys)}.")
+    mask = pd.Series(True, index=static.index)
+    words = [f"all {klass}"]
+    ports = _bus_columns(static)
+    if selector.carrier is not None:
+        mask &= static["carrier"].astype(str) == selector.carrier
+        words.append(f"with carrier {selector.carrier}")
+    if selector.bus is not None:
+        mask &= static[ports].astype(str).eq(selector.bus).any(axis=1)
+        words.append(f"at bus {selector.bus}" + (" (any port)" if ports != ["bus"] else ""))
+    names = [str(n) for n in static.index[mask.to_numpy()]]
+    if not names:
+        what = []
+        if selector.carrier is not None:
+            what.append(f"carriers of {klass} here: {_quoted(sorted(static['carrier'].astype(str).unique()))}")
+        if selector.bus is not None:
+            what.append(f"buses of {klass} here: {_quoted(sorted({str(b) for c in ports for b in static[c]}))}")
+        workflow._refuse("change_selection_empty", f"Nothing was previewed or applied. No {klass} "
+                         + " ".join(words[1:]) + (f"; {'; '.join(what)}" if what else f"; this project has no {klass}")
+                         + ".")
+    return names, " ".join(words) + ", as of this preview"
+
+
+def _scaled(change, names, static):
+    """Per-name absolute changes for `operation.scale`, or a refusal naming every member it cannot compute."""
+    from harness import edit_card
+
+    factor = change.operation.scale
+    if not (math.isfinite(factor) and 0 < factor <= _MAX_SCALE):
+        workflow._refuse("invalid_change_value", f"A scale factor is a finite number above 0 and at most "
+                         f"{_MAX_SCALE:g}; to set a value to 0, give the value.")
+    field = edit_card._fields(change.component_class).get(change.attribute)
+    kind = _parameter_kind(field)
+    if kind == "boolean":
+        workflow._refuse("invalid_edit_value", f"{change.component_class}.{change.attribute} takes true or false; "
+                         "only a number can be scaled.")
+    if kind is None or change.attribute not in static.columns:
+        workflow._refuse("invalid_change_attribute", f"{change.component_class}.{change.attribute} is not a numeric "
+                         "parameter set on these assets. Read get_component_schema.")
+    integer = str(field.get("native_type") or "").startswith("int")
+    capped = change.attribute in _PER_UNIT and not (change.component_class == "Link"
+                                                    and change.attribute.startswith("efficiency"))
+    base = {"component_class": change.component_class, "attribute": change.attribute}
+    out, unset, rounded, over = [], [], [], []
+    for name in names:
+        if name not in static.index:
+            continue  # `_preview_changes` refuses a missing member by name
+        old = static.at[name, change.attribute]
+        if old is None or isinstance(old, bool) or not math.isfinite(float(old)):
+            unset.append(name)
+            continue
+        new = float(_number_words(float(old) * factor))  # 80 × 1.2 is 96, not 96.00000000000001
+        if integer and new != round(new):
+            rounded.append(f"{name} {change.attribute} {_number_words(float(old))} × {_number_words(factor)} "
+                           f"= {_number_words(new)}")
+        elif capped and abs(new) > 1:
+            over.append(f"{name} {_number_words(float(old))} → {_number_words(new)}")
+        else:
+            out.append({**base, "names": [name], "value": int(new) if integer else new})
+    if unset:
+        workflow._refuse("invalid_change_value", f"Nothing was previewed or applied. {change.component_class} "
+                         f"{_quoted(unset)} has no {change.attribute} to scale; set a value instead.")
+    if rounded:
+        workflow._refuse("invalid_change_value", f"Nothing was previewed or applied. {'; '.join(rounded[:5])} is "
+                         "not a whole number; choose a factor that gives one.")
+    if over:
+        workflow._refuse("invalid_change_value", f"Nothing was previewed or applied. {change.component_class} "
+                         f"{change.attribute} is a per-unit share, at most 1: {'; '.join(over[:5])}.")
+    missing = [n for n in names if n not in static.index]
+    return out + ([{**base, "names": missing, "value": 1.0}] if missing else [])
+
+
+def _resolve_changes(changes, network):
+    """Per-name absolute changes and the card's set lines. The server resolves
+    every set and computes every relative value; the model does no arithmetic."""
+    if not isinstance(changes, list) or not 1 <= len(changes) <= _PREVIEW_ROWS:
+        workflow._refuse("invalid_changes", "Provide 1–20 typed engineering changes.")
+    try:
+        parsed = [_RelativeChange.model_validate(change) for change in changes]
+    except ValidationError:
+        workflow._refuse("invalid_changes", "Each change takes component_class (Generator, Load, Line, Link, "
+                         "StorageUnit, Store, Bus or Transformer), attribute, exactly one of names or select "
+                         "(carrier, bus or all: true), and exactly one of a finite number or boolean value or "
+                         "operation {scale: factor}.")
+    resolved = []
+    for change in parsed:
+        names, words = (change.names, None) if change.select is None else _select(
+            change.component_class, change.select, network)
+        resolved.append((change, names, words))
+    total = sum(len(names) for _, names, _ in resolved)
+    if total > _PREVIEW_ROWS:
+        sizes = "; ".join(f"{words}: {len(names)}" for _, names, words in resolved if words)
+        workflow._refuse("invalid_preview", f"One card holds at most {_PREVIEW_ROWS} asset × field rows; this edit "
+                         f"resolves to {total}" + (f" ({sizes})" if sizes else "") + ". Split it into smaller previews.")
+    out, sets = [], []
+    for change, names, words in resolved:
+        static = network.components[change.component_class].static
+        if change.operation is None:
+            out.append({"component_class": change.component_class, "names": names, "attribute": change.attribute,
+                        "value": change.value})
+        else:
+            out += _scaled(change, names, static)
+        if change.select is None and change.operation is None:
+            continue
+        present = [n for n in names if n in static.index]
+        sets.append({"component_class": change.component_class, "attribute": change.attribute,
+                     "selector": change.select.model_dump(exclude_none=True) if change.select else None,
+                     "names": list(names), "size": len(names),
+                     "inactive": int((~static.loc[present, "active"].astype(bool)).sum()) if "active" in static else 0,
+                     "words": words or ", ".join(names),
+                     "factor": change.operation.scale if change.operation else None,
+                     "factor_words": _factor_words(change.operation.scale) if change.operation else None})
+    return out, sets
+
+
+def _shadowing_series(klass, names, attribute, network, user_ts):
+    """Members whose `attribute` time series overrides the static value at solve time."""
+    from harness import edit_card
+
+    frame = network.components[klass].dynamic.get(attribute)
+    columns = set(map(str, frame.columns)) if frame is not None and not frame.empty else set()
+    component_attr = edit_card._component_attr(klass)
+    return [n for n in names if n in columns or (component_attr, attribute, n) in (user_ts or {})]
+
+
+def _preview_changes(changes, network, user_ts=None):
     """Parse and check a preview before any sandbox work: every member exists,
     every field is an editable number or flag, at most 20 entity × field rows."""
     import difflib
@@ -435,6 +632,11 @@ def _preview_changes(changes, network):
             if key in seen:
                 workflow._refuse("duplicate_change", "Each component/attribute may be changed only once per preview.")
             seen.add(key)
+        shadowed = _shadowing_series(change.component_class, change.names, change.attribute, network, user_ts)
+        if shadowed:
+            workflow._refuse("change_series_shadowed", f"Nothing was previewed or applied. {change.component_class} "
+                             f"{_quoted(shadowed)} has a {change.attribute} time series, which overrides the static "
+                             "value at solve time; change the time series instead.")
     return parsed
 
 
@@ -519,18 +721,22 @@ def preview_project_changes(changes: list[dict]) -> dict:
     with PyPSAService.get_lock():
         ctx = PyPSAService.get_active_context()
         _idle(ctx, project)
-        parsed = _preview_changes(changes, ctx.network)
+        absolute, sets = _resolve_changes(changes, ctx.network)
+        parsed = _preview_changes(absolute, ctx.network, ctx.user_ts)
         fingerprint = workflow._network_input_fingerprint(ctx)
         _, diffs, rows, validation = _preview_candidate(ctx, parsed)
         preview_id = str(uuid.uuid4())
         record = {"version": 2, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
                   "fingerprint": fingerprint, "changes": [c.model_dump() for c in parsed],
                   "diff": diffs, "changes_total": len(diffs), "rows": rows, "applied": False}
+        if sets:
+            record["sets"] = sets
         record['review_sha256'] = _preview_digest(record)
         _preview_review(record)
         tasks._save(root / "assistant_previews" / (preview_id + ".json"), record)
     out = {"preview_id": preview_id, "project_id": str(project.id), "fingerprint": fingerprint,
            "valid": True, "changes_total": len(diffs), "diff": diffs[:20],
+           **({"sets": sets} if sets else {}),
            "derived_rows": sum(1 for r in rows if r["role"] in ("derived", "follows", "at_solve")),
            "warning_count": validation.get("warnings", 0),
            "validation_issues": validation.get("issues", [])[:3],
@@ -563,7 +769,7 @@ def apply_project_changes(preview_id: str) -> dict:
             return {"preview_id": preview_id, "project_id": str(project.id), "applied": True, "reused": True}
         if workflow._network_input_fingerprint(ctx) != record["fingerprint"]:
             workflow._refuse("preview_stale", "Project inputs changed; create and review a new preview.", 409)
-        candidate, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record["changes"], ctx.network))
+        candidate, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record["changes"], ctx.network, ctx.user_ts))
         if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):
             workflow._refuse('invalid_preview', 'The stored changes do not match the exact review; create a new preview.', 409)
         # Persist uncertainty BEFORE effects, so an interrupted apply cannot replay.
@@ -767,4 +973,5 @@ def preview_card(preview_id):
     record = workflow._read_json(root / "assistant_previews" / (out['preview_id'] + ".json"))
     if record.get('review_sha256') != out['review_sha256']:
         workflow._refuse('invalid_preview', 'The reviewed preview changed; create and review a new preview.', 409)
-    return copy.deepcopy(record['rows']), {'preview_id': out['preview_id'], 'review_sha256': out['review_sha256']}
+    return (copy.deepcopy(record['rows']), {'preview_id': out['preview_id'], 'review_sha256': out['review_sha256']},
+            copy.deepcopy(record.get('sets') or []))
