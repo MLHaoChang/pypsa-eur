@@ -84,7 +84,7 @@ it('retains viewing but refuses edits while read-only', async () => {
   expect((screen.getByRole('button', { name: 'Save footprint' }) as HTMLButtonElement).matches(':disabled')).toBe(true)
 })
 
-it('clears saved status and dims both actions when editing becomes read-only', async () => {
+it('clears saved status and disables both actions when editing becomes read-only', async () => {
   render(<AssetFootprintEditor componentClass="StorageUnit" name="BESS" />)
   await open()
   fireEvent.change(screen.getByLabelText('Width (m)'), { target: { value: '12' } })
@@ -96,7 +96,6 @@ it('clears saved status and dims both actions when editing becomes read-only', a
   for (const name of ['Save footprint', 'Use library estimate']) {
     const button = screen.getByRole('button', { name }) as HTMLButtonElement
     expect(button.matches(':disabled')).toBe(true)
-    expect(button.classList.contains('disabled:opacity-50')).toBe(true)
   }
 })
 

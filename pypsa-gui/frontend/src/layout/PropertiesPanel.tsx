@@ -1965,7 +1965,7 @@ function LoadPanel({ name }: { name: string }) {
 }
 
 // ── Main ───────────────────────────────────────────────────────────────────────
-export default function PropertiesPanel() {
+export default function PropertiesPanel({ showFootprintEditor = true }: { showFootprintEditor?: boolean }) {
   const { selectedComponent, setSelectedComponent, creationItem, rightPanelOpen, toggleRightPanel } = useUIStore()
   const qc = useQueryClient()
 
@@ -2129,7 +2129,7 @@ export default function PropertiesPanel() {
         {selectedComponent.type === 'Transformer' && <TransformerPanel key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Carrier'     && <CarrierPanel     key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'ShuntImpedance' && <ShuntPanel key={selectedComponent.name} name={selectedComponent.name} />}
-        <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />
+        {showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
       </div>
     </aside>
   )

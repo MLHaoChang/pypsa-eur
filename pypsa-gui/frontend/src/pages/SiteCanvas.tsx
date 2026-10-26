@@ -629,11 +629,12 @@ function SelectedPivot({ obj, enabled, onCommit, children }: {
 
 // ── The view ──────────────────────────────────────────────────────────────────
 
-// Memoised: it takes no props, and App re-renders on every store change
+// Memoised: its editor-visibility prop is stable on snapshot/store changes,
+// while App re-renders on every store change
 // (including each snapshot step); the site must not (Phase 2 plan Task 2.2).
 export default React.memo(SiteCanvas)
 
-function SiteCanvas() {
+function SiteCanvas({ showFootprintEditor = true }: { showFootprintEditor?: boolean }) {
   countRender('SiteCanvas')
   useEffect(() => { preloadHeroes() }, [])
   // Selectors, never the whole store: a snapshot step (resultsSnapshotIdx)
@@ -649,12 +650,6 @@ function SiteCanvas() {
   const arrangeAll = useSitesStore(s => s.arrangeAll)
   const rearrangeAll = useSitesStore(s => s.rearrangeAll)
   const readOnly = useUIStore(s => s.readOnly)
-  // App shows Properties beside the canvas/Issues, or in a Guided field
-  // drawer. Keep the overlay fallback only while that editor is absent.
-  const propertiesEditorVisible = useUIStore(s => s.rightPanelOpen && (
-    !s.activeSlidePanel || s.activeSlidePanel === 'issues'
-    || (s.uiMode === 'guided' && Boolean(s.fieldDrawer?.component && s.fieldDrawer?.entity))
-  ))
 
   const qBuses = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const qGen   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -1164,7 +1159,7 @@ function SiteCanvas() {
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
-        {selectedComponent && !propertiesEditorVisible && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
+        {selectedComponent && showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
         <p className="max-w-72 rounded bg-bg/95 px-2 py-1 text-[10px] text-muted">Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.</p>
         {/* Legend — under the picker; the result bands only while results show. */}
         <SiteLegend entries={legend} results={resultsStore} />
