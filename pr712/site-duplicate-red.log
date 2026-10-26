@@ -1,0 +1,292 @@
+buses [
+  { name: 'grid', x: 0, y: 0 },
+  { name: 'dc_mv', x: 0, y: 0 },
+  { name: 'it_bus', x: 5.1, y: 52.1 }
+]
+placed bus 200
+EDITOR_COUNT 2
+PALETTE Projects
+/
+Footprint UX review
+3
+buses
+0
+lines
+12
+assets
+Ctrl K
+6
+Run LOPF
+Guided
+Expert
+A step-by-step hub design with the assistant doing the engineering; advanced panels are hidden but reachable through the assistant.
+Every panel and tab, as today.
+Idle
+L
+Footprint UX review
+⚡
+PyPSA Studio
+SET-UP
+1
+PROJECT & SITE
+Model Horizon
+2
+CARRIERS & PROCESSES
+Carriers
+MODEL
+3
+CONNECTION & GRID
+Grid
+Grid connection
+4
+LOADS & DEMAND
+Loads
+Add demand
+5
+ASSETS & SIZING
+Grid
+Control
+Reliability
+Assets
+Capacity Bounds
+Next: Time series & profiles ›
+6
+TIME SERIES & PROFILES
+Time Series
+7
+COMMERCIAL & PARTIES
+Commercial
+Economics
+QUESTION & RUN
+8
+SCENARIOS & OPTIMISATION
+Grid
+Control
+Reliability
+Solver Settings
+Scenarios
+Grid study
+9
+READINESS → RUN
+Issues
+5
+Solve Queue
+RESULTS & HAND-OFF
+10
+RESULTS → REPORTS
+Results
+Grid study results
+Reports
+PROJECT
+Snapshots
+Commercial library
+Footprint UX review
+Unsaved · last save 10m ago
+Autosave
+
+PREFERENCES
+
+Dark
+Comfy
+ups_battery
+Battery storage — 10 MWh / 40 MW in 3 containers
+Site
+it_bus site
+·
+3 assets
+·
+land 0.1 ha · plot 0.6 ha
+·
+Arrange
+Arrange all
+Reset placement
+Snapshot
+Walk
+Footprint (optional)
+
+Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.
+
+Battery storage
+Data hall
+Feeder bay
+Switchyard
+Layout · arranged, no findings
+imagery unavailable: no tile loaded · site context unavailable: Overpass at https://overpass-api.de/api/interpreter answered HTTP 502; set PYPSAGUI_OVERPASS_URL to a private endpoint or try again later. · Refresh context · Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community · Models: Kenney (CC0)
+Claude Sonnet
+Chat here
+Start voice
+
+Continuous voice is not connected. Use reviewed dictation for speech.
+
+Blank
+Satellite
+Hybrid
+Site 3D
+Results
+Run a simulation to enable
+Log
+History
+Buses
+(3)
+Lines
+Transformers
+Generators
+(7)
+Storage
+(2)
+Stores
+Loads
+(3)
+Links
+(2)
+Carriers
+(5)
+Shunts
+Columns
+(7/46)
+Import values from a file…
+· Click a cell to select it, double-click or press Enter to edit. Select rows to paste or fill across many.
+	NAME	BUS	CARRIER	POWER (MW)	DURATION (H)	CHARGING EFFICIENCY (FRACTION)	DISCHARGING EFFICIENCY (FRACTION)
+	ups_battery	it_bus	battery	40	0.25	0.95	0.95
+
+	bess_new	it_bus	battery	0	4	0.95	0.95
+STORAGE UNIT
+
+ups_battery
+
+View results
+
+CONNECTED TO
+
+Bus
+it_bus
+
+STORAGE PROPERTIES
+
+Carrier
+battery
+Power
+40 MW
+Duration
+0.25 h
+Charging efficiency
+95 %
+Discharging efficiency
+95 %
+Cyclic state of charge
+✓
+Edit Storage
+Clone for vintage
+Footprint (optional)
+Idle
+|
+Footprint UX review
+|
+6 unsaved changes
+|
+Autosave on
+|
+168 snapshots
+Obj: —
+Overpass at https://overpass-api.de/api/interpreter answered HTTP 502; set PYPSAGUI_OVERPASS_URL to a private endpoint or try again later.
+ROLES [
+  'Projects',
+  'Footprint UX review',
+  'Ctrl K',
+  '6',
+  '',
+  'Run LOPF',
+  'Guided',
+  'Expert',
+  '',
+  '',
+  'L',
+  '',
+  '',
+  '',
+  'SET-UP',
+  'Model Horizon',
+  'Carriers',
+  'MODEL',
+  'Grid connection',
+  'Loads',
+  'Add demand',
+  'Assets',
+  'Capacity Bounds',
+  'Next: Time series & profiles ›',
+  'Time Series',
+  'Economics',
+  'QUESTION & RUN',
+  'Solver Settings',
+  'Scenarios',
+  'Grid study',
+  'Issues5',
+  'Solve Queue',
+  'RESULTS & HAND-OFF',
+  'Results',
+  'Grid study results',
+  'Reports',
+  'PROJECT',
+  'Snapshots',
+  'Commercial library',
+  '',
+  'Autosave',
+  'dark',
+  'Comfy',
+  'Arrange',
+  'Arrange all',
+  'Reset placement',
+  'Snapshot',
+  'Walk',
+  'Refresh context',
+  'Claude Sonnet',
+  '',
+  '',
+  'Chat here',
+  'Start voice',
+  'Blank',
+  'Satellite',
+  'Hybrid',
+  'Site 3D',
+  'Results',
+  'Log',
+  'History',
+  'Buses(3)',
+  'Lines',
+  'Transformers',
+  'Generators(7)',
+  'Storage(2)',
+  'Stores',
+  'Loads(3)',
+  'Links(2)',
+  'Carriers(5)',
+  'Shunts',
+  '',
+  'Columns(7/46)',
+  'Import values from a file…',
+  '',
+  '',
+  '',
+  ' View results',
+  ' Edit Storage',
+  '',
+  ' Clone for vintage'
+]
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Site and Properties must expose exactly one footprint editor
+
+2 !== 1
+
+    at file:///workspace/scratch/pr712-ux-20261026/site-probe.mjs:32:8 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 2,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

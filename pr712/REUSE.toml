@@ -1,6 +1,11 @@
 version = 1
 
 [[annotations]]
-path = ["*.png", "*.json", "*.xml", "*.log"]
+path = ["*.png", "*.json", "*.xml", "*.log", "historical-component/**"]
 SPDX-FileCopyrightText = "Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>"
 SPDX-License-Identifier = "CC-BY-4.0"
+
+[[annotations]]
+path = ["*.mjs"]
+SPDX-FileCopyrightText = "Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>"
+SPDX-License-Identifier = "MIT"

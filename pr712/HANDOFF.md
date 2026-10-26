@@ -1,28 +1,36 @@
 <!-- SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur> -->
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 
-# PR #712 continuation / review handoff
+# PR #712 UX follow-up handoff
 
-Source PR: https://github.com/MLHaoChang/pypsa-eur/pull/712
-Branch: claude/asset-footprint-parameters
-Exact implementation head: c117493f494a74d7d19d9a053286cb7f347730e9
-Fresh actual master: aba252d2384f55116bbd15516a5b025951ba265e
+PR: https://github.com/MLHaoChang/pypsa-eur/pull/712
+Source branch: `claude/asset-footprint-parameters`
+Exact current source head: **1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329**
+Previous reviewed head: c117493f494a74d7d19d9a053286cb7f347730e9
+Last fetched master during this fix: f82c8c9fc96cbdc5877c2dddd035623c1fdff97f
 
-## Implemented
+## Completed in this follow-up
 
-Optional project equipment envelopes (width/depth/optional height), shared Properties/Site editor, Guided/Expert parity, explicit user/estimated provenance, simple 3D proxies and consistent packing/fit/land values, fixed dimensions under sizing changes, server/client validation and existing saved-project guards. No solver inputs, new route/tool or dependency. Plain/cascade deletion, native/frontend rename, dirty dimension/reset preservation and malformed optional metadata have regression coverage. Campus/building/AI/Blender/photo work remains separate PR #711.
+- Conditional omitted-height hint, with the safety disclaimer retained in both cases.
+- Equally dimmed disabled actions; saved/local status clears on read-only, project and selection changes. Late completion cannot restore it after read-only entry.
+- Colon copy; optional clearer validation and display-only area rounding with an honest small-area label.
+- Central App ownership across ordinary Properties, Issues, Guided component drawers and the Site fallback. Specialized limit drawers/creation forms are excluded from false ownership. No duplicate footprint editor in the exercised states.
+- Twelve real-app screenshots replace the primary synthetic-card evidence. Native HTTP read-back, native foreign-lock transitions, DOM ownership and computed opacity assertions pass; zero browser page errors.
+- Scoped frontend regressions: 940 passed/95 files; TypeScript passed. Backend/solver code is unchanged by this follow-up.
+- Both independent advisory code axes cleared this head; Spec visually accepted the complete required screenshot matrix. No official reviewer approval is implied.
 
-## Evidence
+## Pending
 
-- Local: 884 frontend tests pass (89 files); 357 backend tests pass plus one existing empty-parameter skip; TypeScript passes.
-- Shared-component browser: Guided/Expert save/reload/reset/read-only checks pass, zero page errors, synthetic sites API. Screenshots and browser.json here. No full-application E2E or real-3D packaged-device performance claim.
-- Independent advisory Spec and Standards axes: zero remaining bounded blockers at exact implementation head. These are not official reviewer OKs.
-- Remote Test run40120389775 succeeds. All four actual backend shard Run backend tests steps, actual pilot evaluation and QA drivers, aggregate GUI backend, Unit and actual frontend type-check/tests complete successfully. See remote-test-jobs.json.
-- CodeQL40120389740 and release guard40120389725 succeed. Validator Bot40120389718 is an expected skip. Gridspine/integration no-change paths do not certify engine execution.
-- Fresh premerge exits0: exact head/base above, clean, no overlaps, 17 check runs success/skipped. Semantic/template checks correctly not required by changed paths; the three semantic suites also passed locally. See premerge.log.
+1. Finish/inspect every applicable CI run on the exact current source head; record actual steps rather than path-filtered job colour. The PR body is the current remote validation record.
+2. Owner/coordinator obtains official renewed UX/GK review. The UX NOT OK on c117493f is historical but not self-cleared by an implementer. Any new gatekeeper addendum is a separate task from the four relayed findings.
+3. Run fresh `scripts/coord/premerge.sh 712` against actual master immediately before reporting/merge. Coordinator retains merge authority. Do not merge, force-push, rebase or amend from this handoff.
 
-## Next action
+The fix used two additive commits and one ordinary source-branch push. No master merge was needed: current master had no code overlap with these paths at inspection. Preserve pending CI unless a conflict/code overlap or coordinator instruction requires a new source change.
 
-Owner/coordinator arranges official UX review and any applicable GK review of the exact head. No official GK/UX verdict is posted at last inspection. Coordinator retains merge authority; do not merge from this handoff. Refresh metadata/master/checks and run fresh premerge immediately before reporting/merging. A push requires current-head CI and renewed applicable review. Do not rebase, amend or force-push.
+## Evidence and limits
 
-No paid/model/media/weather calls, engine installation, reviewer contact, deployment or merge occurred. Do not start unrelated implementation from this continuation. Existing last-writer sidecar behavior is not a CAS/generation-identity guarantee. Native undo does not restore removed footprint metadata. New building polygon editing, native shunt/STATCOM 3D rendering, sourced default expansion and broader 3D workflow remain unimplemented here.
+See README.md for the six-state matrix and 12 current screenshots. `real-app-browser.json` binds them to the source head. The browser driver uses an isolated authenticated app and ordinary native APIs; fixture secrets/session files remain private outside this branch. The source tree is `/workspace/asset-footprints`; detailed local output is `/workspace/scratch/pr712-ux-20261026`.
+
+The Site status honestly shows external Overpass 502/no imagery availability. No GIS/site survey or broad 3D/provider/performance claim follows. Existing sidecar last-writer concurrency/undo limitations remain unchanged, as do the separate #711 campus/AI/Blender scope and lack of native STATCOM 3D rendering. Independent domain review/real-use calibration remains pending.
+
+No paid model/media calls, reviewer contact, unrelated PR changes, production activation or merge.

@@ -1,0 +1,239 @@
+buses [
+  { name: 'grid', x: 0, y: 0 },
+  { name: 'dc_mv', x: 0, y: 0 },
+  { name: 'it_bus', x: 5.1, y: 52.1 }
+]
+placed bus 200
+DRAWER_EDITOR_COUNT 2
+EDITOR_COUNT 1
+PALETTE Projects
+/
+Footprint UX review
+Ctrl K
+10
+Guided
+Expert
+A step-by-step hub design with the assistant doing the engineering; advanced panels are hidden but reachable through the assistant.
+Every panel and tab, as today.
+Idle
+L
+Footprint UX review
+⚡
+PyPSA Studio
+Hub design
+PROJECT
+Footprint UX review
+Unsaved · last save 18m ago
+Autosave on · 5 min
+QUICK ACTIONS
+
+PREFERENCES
+
+Dark
+Comfy
+ups_battery
+Battery storage — 10 MWh / 40 MW in 3 containers
+Site
+it_bus site
+·
+3 assets
+·
+land 0.1 ha · plot 0.6 ha
+·
+Arrange
+Arrange all
+Reset placement
+Snapshot
+Walk
+
+Library dimensions are estimates unless a user-entered envelope is provided. Fit checks do not certify clearances or compliance.
+
+Battery storage
+Data hall
+Feeder bay
+Switchyard
+Layout · arranged, no findings
+imagery unavailable: no tile loaded · site context unavailable: Overpass at https://overpass-api.de/api/interpreter answered HTTP 502; set PYPSAGUI_OVERPASS_URL to a private endpoint or try again later. · Refresh context · Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community · Models: Kenney (CC0)
+Blank
+Satellite
+Hybrid
+Site 3D
+Results
+Run a simulation to enable
+STORAGE UNIT
+
+ups_battery
+
+View results
+
+CONNECTED TO
+
+Bus
+it_bus
+
+STORAGE PROPERTIES
+
+Carrier
+battery
+Power
+40 MW
+Duration
+0.25 h
+Charging efficiency
+95 %
+Discharging efficiency
+95 %
+Cyclic state of charge
+✓
+Edit Storage
+Clone for vintage
+Footprint (optional)
+ASSISTANT
+Chat
+Activity
+Claude Sonnet
+Claude Opus
+tokens n/a
+🔊
+⚙
+🆕
+Clear
+You’re in Footprint UX review
+3 buses · 168 snapshots
+No study has run yet — start in Hub design.
+Ask me about it, or tell me what to change — I’ll open whatever view we end up talking about.
+Add an Anthropic API key to talk to me
+Access and approvals
+Check answers
+
+Answer checks are not enabled on this server.
+
+The assistant needs an API key for the active model before it can answer.
+
+Paste an Anthropic API key to enable the assistant. It is stored on this machine only, in /workspace/scratch/pr712-ux-20261026/appdata/user.env.
+
+Save
+📎
+📋
+🎙
+Voice
+Send
+Assets & sizing › Storage 'ups_battery' › Capacity
+Open in Expert
+STORAGE UNIT
+
+ups_battery
+
+View results
+
+CONNECTED TO
+
+Bus
+it_bus
+
+STORAGE PROPERTIES
+
+Carrier
+battery
+Power
+40 MW
+Duration
+0.25 h
+Charging efficiency
+95 %
+Discharging efficiency
+95 %
+Cyclic state of charge
+✓
+Edit Storage
+Clone for vintage
+Footprint (optional)
+Back to Assets & sizing
+Idle
+|
+Footprint UX review
+|
+10 unsaved changes
+|
+Autosave on
+|
+168 snapshots
+Obj: —
+ROLES [
+  'Projects',
+  'Footprint UX review',
+  'Ctrl K',
+  '10',
+  '',
+  'Guided',
+  'Expert',
+  '',
+  '',
+  'L',
+  '',
+  '',
+  '',
+  'Hub design',
+  'PROJECT',
+  'Autosave on · 5 min',
+  'dark',
+  'Comfy',
+  'Arrange',
+  'Arrange all',
+  'Reset placement',
+  'Snapshot',
+  'Walk',
+  'Refresh context',
+  'Blank',
+  'Satellite',
+  'Hybrid',
+  'Site 3D',
+  'Results',
+  '',
+  ' View results',
+  ' Edit Storage',
+  '',
+  ' Clone for vintage',
+  'Chat',
+  'Activity',
+  '',
+  '',
+  '🔊',
+  '⚙',
+  '🆕',
+  'Clear',
+  'Add an Anthropic API key to talk to me',
+  'Access and approvals',
+  'Save',
+  '📎',
+  '📋',
+  '🎙',
+  'Voice',
+  'Send',
+  'Open in Expert',
+  '',
+  '',
+  ' View results',
+  ' Edit Storage',
+  '',
+  ' Clone for vintage',
+  'Back to Assets & sizing'
+]
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Site and Properties must expose exactly one footprint editor
+
+2 !== 1
+
+    at file:///workspace/scratch/pr712-ux-20261026/drawer-probe.mjs:41:8 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 2,
+  expected: 1,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

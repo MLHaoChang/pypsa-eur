@@ -1,0 +1,51 @@
+{
+  "sourceHead": "1f7a44ba43ef3dc7a9d4114ce293358bbc3ff329",
+  "application": "Actual React app + native authenticated FastAPI backend; isolated illustrative data-centre project",
+  "networkMocks": false,
+  "storeInjection": false,
+  "cases": [
+    "native save/read-back + height 3/no omitted hint + 72.5 area",
+    "guided: Properties collapsed/open; Site selected battery, exactly one editor, native 3D mesh and estimate note",
+    "Guided component drawer + expanded assistant dock: exactly one foreground footprint editor",
+    "native save/read-back + height 3/no omitted hint + 72.5 area",
+    "expert: Properties collapsed/open; Site selected battery, exactly one editor, native 3D mesh and estimate note",
+    "Expert Properties hide/show: Site overlay fallback moves ownership without duplication",
+    "native save/read-back + height 3/no omitted hint + 72.5 area",
+    {
+      "case": "expert: native lock transition clears saved status and visibly disables both actions",
+      "computedOpacities": [
+        "0.5",
+        "0.5"
+      ]
+    },
+    "native save/read-back + height 3/no omitted hint + 72.5 area",
+    {
+      "case": "guided: native lock transition clears saved status and visibly disables both actions",
+      "computedOpacities": [
+        "0.5",
+        "0.5"
+      ]
+    }
+  ],
+  "screenshots": [
+    "guided-properties-collapsed.png",
+    "guided-properties-open.png",
+    "guided-properties-saved.png",
+    "guided-site.png",
+    "guided-site-drawer.png",
+    "expert-properties-collapsed.png",
+    "expert-properties-open.png",
+    "expert-properties-saved.png",
+    "expert-site.png",
+    "expert-site-overlay.png",
+    "expert-readonly.png",
+    "guided-readonly.png"
+  ],
+  "pageErrors": [],
+  "limitations": [
+    "Illustrative template and fixture coordinates; not a customer/surveyed campus.",
+    "External imagery/context availability is independent of footprint UX; no paid model/media calls.",
+    "Drawer/lock edge cases use existing public app actions after ordinary authentication, never store injection."
+  ],
+  "result": "passed"
+}
