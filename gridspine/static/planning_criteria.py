@@ -34,8 +34,8 @@ shunt walk, while a branch is still above its normal rating,
 ``redispatch_walk`` moves balanced pairs of named units, one up and one
 down by ``redispatch_step_mw`` clipped to both units' ``min_p_mw``/
 ``max_p_mw`` headroom, so the slack takes only the change in losses. Each
-pass keeps the pair that lowers the walk's key (ties: lower priority sum,
-then names), at most ``REDISPATCH_MAX_SOLVES`` solves; a row left
+pass keeps the pair with the lowest (voltage excursion, worst overload)
+(ties: lower priority sum, then names, then MW moved), at most ``REDISPATCH_MAX_SOLVES`` solves; a row left
 overloaded names why (a unit at its limit, no pair improving, the cap). It
 is not cost-optimal (no OPF), and the slack is never a redispatch unit.
 With none named, no redispatch is modelled and every stage-2 row says so.
@@ -132,10 +132,12 @@ PLANNING_LEDGER = (
     "only while a branch is above its normal rating, balanced pairs of named units "
     "move, one up and one down by the same MW: the step, clipped to both units' "
     "headroom within min_p_mw/max_p_mw on the hour's dispatch; each pass keeps the "
-    "pair that lowers the walk's key (ties: lower priority sum, then names), at most "
+    "pair that lowers (voltage excursion, worst overload) most (ties: lower priority "
+    "sum, then names, then MW moved), at most "
     f"{REDISPATCH_MAX_SOLVES} solves (REDISPATCH_MAX_SOLVES); it is not cost-optimal "
-    "(no OPF), the slack is never a redispatch unit, and stage 1 and the angle check "
-    "stay on the pre-redispatch state",
+    "(no OPF), and the slack is never a redispatch unit; stage 1 and the angle check "
+    "are judged before the judged outage's walk, so for N-1-1 and N-M-1 they follow "
+    "the re-adjustment between outages, redispatch included",
     "a bus-section loss takes out the bus and everything on it; the load and "
     "generation lost (p_mw x scaling) are reported, and the lost generation is "
     "picked up by the slack",
@@ -469,6 +471,12 @@ class _Unit:
     def put(self, net, value) -> None:
         net[self.table].at[self.index, "p_mw"] = value
 
+    def room_up(self, net) -> float:
+        return self.hi - self.get(net)
+
+    def room_down(self, net) -> float:
+        return self.get(net) - self.lo
+
     def live(self, net, judged: set) -> bool:
         """In service and on a bus still judged (not out or cut off)."""
         return (bool(net[self.table].at[self.index, "in_service"])
@@ -536,18 +544,20 @@ def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: 
     ``work`` left at its setpoints, and why an overload is left ("" when
     none is)."""
     live = set(judged)
-    on = [u for u in units if u.live(work, live)]
-    start = {u.name: u.get(work) for u in on}
+    start = {u.name: u.get(work) for u in units if u.live(work, live)}
+    on = []
     now = _key(state, bands, 0.0)
     solves = 0
     why = ""
     while now[1] > 0.0 and not why:
+        # liveness is checked before each pass; ``start`` stays the initial setpoints
+        on = [u for u in units if u.name in start and u.live(work, live)]
         best, tried, capped, volts = None, False, False, False
         for up in on:
             for down in on:
                 if up is down:
                     continue
-                d = min(step, up.hi - up.get(work), down.get(work) - down.lo)
+                d = min(step, up.room_up(work), down.room_down(work))
                 if d < REDISPATCH_EPS_MW:
                     continue
                 if solves >= REDISPATCH_MAX_SOLVES:
@@ -559,15 +569,17 @@ def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: 
                 down.put(work, p_down - d)
                 trial = _solve(work, judged)
                 solves += 1
+                moved = sum(abs(u.get(work) - start[u.name]) for u in on)
                 up.put(work, p_up)
                 down.put(work, p_down)
                 if trial is None:
                     continue
-                moved = sum(abs(u.get(work) - start[u.name]) for u in on) + 2 * d
                 key = _key(trial, bands, moved)
                 volts |= key[1] < now[1] and key[0] > now[0] + STEP_TOL
-                order = (up.priority + down.priority, up.name, down.name)
-                if best is None or _better(key, best[0]) or (not _better(best[0], key) and order < best[1]):
+                # (excursion, overload) first; ties go to the lower (priority sum, names), then MW moved
+                order = (up.priority + down.priority, up.name, down.name, moved)
+                k, b = (key[0], key[1], 0), best and (best[0][0], best[0][1], 0)
+                if best is None or _better(k, b) or (not _better(b, k) and order < best[1]):
                     best = (key, order, up, down, d, trial)
             if capped:
                 break
@@ -583,14 +595,15 @@ def redispatch_walk(work, units: list, step: float, bands: dict, judged, state: 
         elif len(on) < 2:
             why = "fewer than two named redispatch units in service"
         elif not tried:
-            ups = [u for u in on if u.hi - u.get(work) >= REDISPATCH_EPS_MW]
+            ups = [u for u in on if u.room_up(work) >= REDISPATCH_EPS_MW]
             why = "no up unit left" if not ups else "no down unit left"
         else:
             why = "every pair that relieves it worsens the voltage excursion" if volts else "no pair improves"
     if now[1] > 0.0:
         at = _limits(work, on)
         why = why + (f" ({at})" if at else "")
-    mw = {u.name: u.get(work) - start[u.name] for u in on if abs(u.get(work) - start[u.name]) >= REDISPATCH_EPS_MW}
+    mw = {u.name: u.get(work) - start[u.name] for u in units
+          if u.name in start and abs(u.get(work) - start[u.name]) >= REDISPATCH_EPS_MW}
     return state, mw, why if now[1] > 0.0 else ""
 
 
@@ -873,8 +886,11 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
                 continue
             first_bands = _bands(work, judged, profile, by_kv)[0]
             s0, pre = remedial_walk(work, knobs, first_bands, judged, s0)
-            pre_mw = redispatch_walk(work, units, step, first_bands, judged, s0)[1] if units else {}
-            notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre, pre_mw)}")
+            pre_mw, pre_why = {}, ""
+            if units:
+                _, pre_mw, pre_why = redispatch_walk(work, units, step, first_bands, judged, s0)
+            notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre, pre_mw)}"
+                         + (f" (redispatch leaves an overload: {pre_why})" if pre_why else ""))
         _apply_outage(work, r, handles)
         out_bus, cut = cut_off(work)
         load_lost, gen_lost = _lost(base, work, out_bus | cut)

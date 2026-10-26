@@ -571,6 +571,24 @@ def test_a_unit_the_contingency_takes_out_does_not_move():
     assert "redispatch: 1 of 2 named units live" in row["note"]
 
 
+def test_a_unit_on_a_bus_the_contingency_takes_out_does_not_move():
+    net = _net16()
+    cset = _set(net, ("bus_section",))
+    row = _one(_screen(net, cset[cset["contingency_id"] == "BUS_C"].reset_index(drop=True),
+                       controls=_rd())[0], "BUS_C")
+    assert "G1" not in row["remedial"]
+    assert "redispatch: 1 of 2 named units live" in row["note"]
+
+
+def test_redispatch_stops_at_the_solve_cap_and_says_so(monkeypatch):
+    monkeypatch.setattr(planning_criteria, "REDISPATCH_MAX_SOLVES", 2)   # one pass of both pairs
+    net = _net16()
+    row = _one(_screen(net, _set(net), controls=_rd())[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "fail"
+    assert row["remedial"] == "G0 -20.0 MW, G1 +20.0 MW"
+    assert "redispatch leaves an overload: solve cap reached" in row["note"]
+
+
 def test_the_first_outage_of_an_n_1_1_re_adjusts_with_redispatch():
     net = _net16()
     cset = n_1_1_contingencies(branch_contingencies(net))
