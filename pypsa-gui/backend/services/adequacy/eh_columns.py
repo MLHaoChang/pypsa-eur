@@ -17,7 +17,8 @@ import numpy as np
 import pandas as pd
 
 from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
-from models.process_unit import CRITICALITY_TIERS, PROCESS_CUSTOM_COLUMNS, PROCESS_GENERATOR_ROLES
+from models.process_unit import (CRITICALITY_TIERS, HARMONIC_SOURCES, PROCESS_CUSTOM_COLUMNS,
+                                 PROCESS_GENERATOR_ROLES)
 
 _ATTR_OF = {"Bus": "buses", "Link": "links", "Generator": "generators"}
 _TRUE = ("true", "1", "yes", "y", "t")
@@ -93,6 +94,24 @@ def coerce_eh_value(component_class: str, col: str, value):
             raise ValueError(
                 f"{col}: {v!r} is not a process role; expected one of {list(PROCESS_GENERATOR_ROLES)} (or empty)")
         return v
+    if kind == "harmonic_source":
+        v = "" if value is None else str(value).strip()
+        if v and v not in HARMONIC_SOURCES:
+            raise ValueError(f"Harmonic source: {v!r} is not one of {', '.join(HARMONIC_SOURCES)}.")
+        return v
+    if kind == "harmonic_spectrum":
+        v = "" if value is None else str(value).strip()
+        try:
+            from gridspine.schema.contracts import ContractError
+            from gridspine.static.harmonics import parse_spectrum
+        except ImportError:  # pragma: no cover - build-shape branch
+            # Stored unchecked; the scorecard reads a malformed spectrum as unknown on its unit.
+            return v
+        try:
+            parse_spectrum(v)
+        except ContractError as exc:  # already names the field by its label
+            raise ValueError(str(exc)) from None
+        return v
     if kind == "text":
         return "" if value is None else str(value).strip()
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
@@ -100,7 +119,7 @@ def coerce_eh_value(component_class: str, col: str, value):
 
 def _default(kind: str):
     return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "process_role": "",
-            "text": ""}[kind]
+            "text": "", "harmonic_source": "", "harmonic_spectrum": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:

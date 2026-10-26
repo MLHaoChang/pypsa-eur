@@ -151,8 +151,9 @@ def _evidence_for(project: AuthorizedProject):
     worksheet = load_worksheet(project.directory)
     evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
                                 worksheet=worksheet, **_current_chapter_sources(project))
-    # The grid-readiness screening (DC 02) alone is not evidence to report on.
-    if not any(s.status == "ok" for s in evidence.sections.values() if s.kind != "grid_readiness"):
+    # Screening and template assumptions alone are not evidence to report on.
+    if not any(s.status == "ok" for s in evidence.sections.values()
+               if s.kind not in ("grid_readiness", "template_ledger")):
         raise HTTPException(400, {
             "error_kind": "no_evidence",
             "message": "Nothing to report on: no Energy Hub reference design, no "

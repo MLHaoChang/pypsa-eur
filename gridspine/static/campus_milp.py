@@ -191,7 +191,8 @@ Jacobian sensitivities to Q are at the tapped point, and a tap change the
 rule makes between iterations is part of the linearisation error that
 ``beta`` backs off. Integer tap variables are not modelled (ledgered).
 
-Steady state only: no dynamics, no harmonics, no tap-changer dynamics.
+Steady state only: no dynamics, no harmonics (the separate screen is
+``static/harmonics.py``), no tap-changer dynamics.
 Allowed to import pandapower, linopy and highspy (``static/``); never pypsa.
 """
 import dataclasses

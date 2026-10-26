@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Plain wording for finance flags, campus assets, island cuts, the fault-level reset and the Back pill; a grid-code limit band with two negative edges; the Grid plan tile counts the rows its table shows.
