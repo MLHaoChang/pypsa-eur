@@ -1,4 +1,4 @@
-import { EditReceiptLine, editReceiptOf } from './EditCard'
+import { EditReceiptLine, editReceiptOf, setLine, type EditCardSet } from './EditCard'
 import { formatElapsed, useElapsed } from '../hooks/useElapsed'
 import { useUIStore } from '../store/uiStore'
 
@@ -81,6 +81,14 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
     </div>}
     {preview && <div data-testid="assistant-change-preview">
       <div className="font-medium">Project change preview · {Number(preview.changes_total ?? 0)} values</div>
+      {Array.isArray(preview.sets) && (preview.sets as EditCardSet[])
+        .filter(g => object(g) && Array.isArray(g.names) && typeof g.words === 'string').map((g, i) => {
+        const diff = (preview.diff as unknown[]).map(object).find(d => d && d.component_class === g.component_class
+          && d.attribute === g.attribute && g.names.includes(String(d.name)))
+        const value = diff ? `\u2192 ${String(diff.after ?? '')}${diff.unit ? ` ${String(diff.unit)}` : ''}` : ''
+        return <div key={i} data-testid="assistant-change-set">
+          {setLine(g, guided, diff && typeof diff.label === 'string' ? diff.label : undefined, value)}</div>
+      })}
       <div className="overflow-x-auto">
         <table aria-label="Project change preview" className="w-full text-left">
           <thead><tr><th>Asset</th><th>Parameter</th><th>Before</th><th>After</th><th>Unit</th></tr></thead>

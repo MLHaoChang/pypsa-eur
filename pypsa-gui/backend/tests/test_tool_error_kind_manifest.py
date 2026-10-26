@@ -124,6 +124,20 @@ def _refuse_helper_kinds(tree: ast.AST) -> set[str]:
     return found
 
 
+def _workflow_refuse_kinds(tree: ast.AST) -> set[str]:
+    """`workflow._refuse("kind", ...)`: the shared helper in workflow_tools,
+    called by attribute from services/assistant_tools.py (the preview/apply
+    tools), so the bare-helper walk above never sees it."""
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "_refuse" and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "workflow" and node.args
+                and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+            found.add(node.args[0].value)
+    return found
+
+
 def derive_tool_error_kinds() -> set[str]:
     """Every `error_kind` that can reach the client on a `tool_error` frame."""
     kinds: set[str] = set(_FORWARDER_FALLBACKS)
@@ -135,6 +149,7 @@ def derive_tool_error_kinds() -> set[str]:
             continue
         kinds |= _yielded_tool_error_kinds(tree)
         kinds |= _error_kind_dict_kinds(tree)
+        kinds |= _workflow_refuse_kinds(tree)
         if path.relative_to(BACKEND).as_posix() in _REFUSE_HELPER_MODULES:
             kinds |= _refuse_helper_kinds(tree)
     return kinds
@@ -219,6 +234,7 @@ def test_the_derivation_finds_the_kinds_it_is_supposed_to_find():
     assert "task_paused_at_card" in derived      # assistant plan helper
     assert "experiment_not_found" in derived     # experiment helper
     assert "evidence_unavailable" in derived     # run evidence helper
+    assert "change_selection_empty" in derived   # workflow._refuse in assistant_tools
     assert len(derived) > 40, f"suspiciously few kinds derived: {len(derived)}"
 
 

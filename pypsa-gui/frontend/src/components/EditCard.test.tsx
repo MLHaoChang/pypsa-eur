@@ -236,3 +236,63 @@ it('the project change preview says "not set" and, in Guided, the field in words
     cleanup()
   }
 })
+
+// LC-16 OJ-22: a selector or scale change shows one set line; the header names the set, not its members.
+const solar = (name: string, old: number) => ({ component_class: 'Generator', name, field: 'p_nom', label: 'Capacity',
+  old, new: old * 1.2, unit: 'MW', role: 'typed' })
+const solarSet = { component_class: 'Generator', attribute: 'p_nom', selector: { carrier: 'solar' },
+  names: ['Solar', 'Solar roof', 'Solar old'], size: 3, inactive: 1,
+  words: 'all Generator with carrier solar, as of this preview', factor: 1.2, factor_words: '× 1.2 (+20 %)' }
+const setCard = { ...card, tool: 'apply_project_changes', says: 'all Generator with carrier solar, as of this '
+  + 'preview · 3 assets · p_nom × 1.2 (+20 %)', rows: [solar('Solar', 80), solar('Solar roof', 10), solar('Solar old', 5)],
+  sets: [solarSet] }
+
+function showSetCard(edit: object) {
+  const pending = useChatStore.getState().pending!
+  useChatStore.setState({ pending: { ...pending, tool_name: 'apply_project_changes', args: { preview_id: 'p' },
+    safety_tier: 'execution', edit_card: edit } })
+  render(<ConfirmationCard />)
+}
+
+it.each([
+  ['guided', 'Every Generator with carrier Solar · 3 assets, 1 inactive · Capacity × 1.2 (+20 %)'],
+  ['expert', 'all Generator with carrier solar, as of this preview · 3 assets, 1 inactive · p_nom × 1.2 (+20 %)'],
+] as const)('a 3-asset set shows one set line and every row in %s mode', (uiMode, line) => {
+  useUIStore.setState({ uiMode })
+  showSetCard(setCard)
+  expect(screen.getByTestId('chat-edit-set').textContent).toBe(line)
+  expect(screen.getByTestId('chat-edit-header').textContent).toBe('Every Generator with carrier Solar')
+  expect(screen.getAllByTestId('chat-edit-row-typed')).toHaveLength(3)
+  if (uiMode === 'guided') expect(screen.getByTestId('chat-confirmation-summary').textContent).toBe(line)
+})
+
+it('a 1-asset set says "1 asset"; a set given a value shows the new value; a bus set on a Link says any port', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  showSetCard({ ...setCard, rows: [{ component_class: 'Link', name: 'HP', field: 'p_nom', label: 'Capacity',
+    old: 4, new: 5, unit: 'MW', role: 'typed' }], sets: [{ ...solarSet, component_class: 'Link',
+    selector: { bus: 'B2' }, names: ['HP'], size: 1, inactive: 0, factor: null, factor_words: null }] })
+  expect(screen.getByTestId('chat-edit-set').textContent)
+    .toBe('Every Link at bus B2 (any port) · 1 asset · Capacity → 5 MW')
+})
+
+it('a names-form scale lists its members in the set line', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  showSetCard({ ...setCard, rows: [solar('Solar', 80)], sets: [{ ...solarSet, selector: null, names: ['Solar'],
+    size: 1, inactive: 0 }] })
+  expect(screen.getByTestId('chat-edit-set').textContent).toBe("Generator 'Solar' · 1 asset · Capacity × 1.2 (+20 %)")
+})
+
+it('a malformed set line cannot be approved', () => {
+  showSetCard({ ...setCard, sets: [{ ...solarSet, names: 'Solar' }] })
+  expect((screen.getByRole('button', { name: 'Approve' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it('the Guided preview result shows the set line above its rows', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  const preview = { preview_id: 'p', valid: true, changes_total: 1, sets: [{ ...solarSet, names: ['Solar'], size: 1,
+    inactive: 0 }], diff: [{ component_class: 'Generator', name: 'Solar', attribute: 'p_nom', label: 'Capacity',
+    before: 80, after: 96, unit: 'MW' }] }
+  render(<AssistantResultCard result={preview} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('assistant-change-set').textContent)
+    .toBe('Every Generator with carrier Solar · 1 asset · Capacity × 1.2 (+20 %)')
+})

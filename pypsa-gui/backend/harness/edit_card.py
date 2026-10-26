@@ -140,7 +140,8 @@ def _number(value) -> str:
 def _says(rows: list[dict], sets: list[dict] = ()) -> str:
     def phrase(group):
         # One phrase per set, never a name per member: a 20-asset set stays one line.
-        count = f"{group['size']} asset{'' if group['size'] == 1 else 's'}"
+        count = (f"{group['size']} asset{'' if group['size'] == 1 else 's'}"
+                 + (f", {group['inactive']} inactive" if group.get("inactive") else ""))
         if group["factor_words"]:
             change = f"{group['attribute']} {group['factor_words']}"
         else:

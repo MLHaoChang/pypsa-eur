@@ -540,7 +540,7 @@ def _resolve_changes(changes, network):
     if total > _PREVIEW_ROWS:
         sizes = "; ".join(f"{words}: {len(names)}" for _, names, words in resolved if words)
         workflow._refuse("invalid_preview", f"One card holds at most {_PREVIEW_ROWS} asset × field rows; this edit "
-                         f"resolves to {total}" + (f" ({sizes})" if sizes else "") + ". Split it into smaller previews.")
+                         f"resolves to {total}" + (f" ({sizes})" if sizes else "") + "; split it into smaller previews.")
     out, sets = [], []
     for change, names, words in resolved:
         static = network.components[change.component_class].static

@@ -88,9 +88,10 @@ def test_all_solar_plus_20_percent_is_computed_by_the_server(grid):
     [pending] = [d for e, d in frames if e == "tool_pending_confirmation"]
     card = pending["edit_card"]
     assert card["sets"] == preview["sets"]
-    assert "+20 %" in card["says"]
+    assert card["says"] == ("all Generator with carrier solar, as of this preview · 3 assets, 1 inactive · "
+                            "p_nom × 1.2 (+20 %)")
     receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
-    assert receipt["outcome"] == "verified" and "+20 %" in receipt["says"]
+    assert receipt["outcome"] == "verified" and receipt["says"] == card["says"]
     assert p_nom() == {**BEFORE, "Solar": 96, "Solar roof": 12, "Solar old": 6}
     chat_tools.undo_last()
     assert p_nom() == BEFORE
