@@ -479,6 +479,171 @@ def test_a_bad_profile_is_refused_before_the_base_solve(bad, match, monkeypatch)
 
 
 # --------------------------------------------------------------------------
+# stage-2 redispatch
+# --------------------------------------------------------------------------
+
+def _net16(g1_max=100.0):
+    """The rated fixture with a second unit G0 at the slack's bus: moving G0
+    down and G1 (at BUS_C) up relieves the surviving A-B line."""
+    net = _rated(_net(), emergency=False)
+    pp.create_gen(net, 0, p_mw=80, vm_pu=1.0, name="G0", min_p_mw=0, max_p_mw=100)
+    net.gen.loc[net.gen["name"] == "G1", ["min_p_mw", "max_p_mw"]] = [0.0, g1_max]
+    return net
+
+
+def _rd(step=20.0, units=(("G0", 1), ("G1", 2))):
+    return Controls(redispatch=units, redispatch_step_mw=step)
+
+
+def test_redispatch_relieves_an_overload_taps_and_shunts_cannot():
+    net = _net16()
+    today = _one(_screen(net, _set(net), controls=BOTH)[0], PARALLEL[1])
+    assert today["stage2_verdict"] == "fail" and today["stage2_loading_pct"] > 100
+    row = _one(_screen(net, _set(net), controls=_rd())[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "pass" and row["stage2_loading_pct"] <= 100
+    assert row["remedial"] == "G0 -60.0 MW, G1 +60.0 MW"
+    assert row["stage1_loading_pct"] == pytest.approx(today["stage1_loading_pct"])  # stage 1 is pre-redispatch
+    assert NO_REDISPATCH not in row["note"] and "redispatch: 2 of 2 named units live" in row["note"]
+
+
+def test_redispatch_never_takes_a_pair_that_worsens_the_voltage_excursion():
+    # with taps and shunts named too, the walk leaves a bus at the band's edge first;
+    # every relieving pair then pushes it out of band, so none is taken
+    net = _net16()
+    both = Controls(oltc=(T1,), switched_shunts=("SH1",), redispatch=(("G0", 1), ("G1", 2)), redispatch_step_mw=20.0)
+    row = _one(_screen(net, _set(net), controls=both)[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "fail" and row["stage2_min_vm_pu"] >= 0.9
+    assert "MW" not in row["remedial"]
+    assert "every pair that relieves it worsens the voltage excursion" in row["note"]
+
+
+def test_a_step_clipped_to_the_headroom_is_what_passes():
+    net = _net16(g1_max=75.0)          # 55 MW of headroom, under the 100 MW step
+    row = _one(_screen(net, _set(net), controls=_rd(step=100.0))[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "pass"
+    assert row["remedial"] == "G0 -55.0 MW, G1 +55.0 MW"
+
+
+def test_redispatch_at_a_unit_limit_still_fails_and_names_the_limit():
+    net = _net16(g1_max=50.0)
+    row = _one(_screen(net, _set(net), controls=_rd())[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "fail" and row["stage2_loading_pct"] > 100
+    assert row["remedial"] == "G0 -30.0 MW, G1 +30.0 MW"
+    assert "redispatch leaves an overload: no pair improves (G1 at max_p_mw)" in row["note"]
+
+
+def test_without_redispatch_named_the_redispatch_walk_never_runs(monkeypatch):
+    net = _net16()
+    before, _ = _screen(net, _set(net, ("branch", "unit")), controls=BOTH)
+    monkeypatch.setattr(planning_criteria, "redispatch_walk", lambda *a, **k: pytest.fail("redispatch ran"))
+    after, _ = _screen(net, _set(net, ("branch", "unit")), controls=BOTH)
+    pd.testing.assert_frame_equal(before, after)
+    assert after.loc[after["converged"], "note"].str.endswith(NO_REDISPATCH).all()
+
+
+def test_redispatch_moves_are_balanced(monkeypatch):
+    seen = []
+    walk = planning_criteria.redispatch_walk
+
+    def spy(work, *a):
+        pp.runpp(work)
+        slack = float(work.res_ext_grid["p_mw"].sum())
+        out = walk(work, *a)
+        pp.runpp(work)
+        seen.append((slack, float(work.res_ext_grid["p_mw"].sum()), out[1]))
+        return out
+
+    monkeypatch.setattr(planning_criteria, "redispatch_walk", spy)
+    net = _net16()
+    _screen(net, _set(net), controls=_rd())
+    moved = [(a, b, mw) for a, b, mw in seen if mw]
+    assert moved
+    for slack_before, slack_after, mw in moved:
+        assert sum(mw.values()) == pytest.approx(0.0, abs=1e-9)
+        assert slack_after == pytest.approx(slack_before, abs=1.0)    # losses only, never an import
+
+
+def test_a_unit_the_contingency_takes_out_does_not_move():
+    net = _net16()
+    res, _ = _screen(net, _set(net, ("unit",)), controls=_rd())
+    row = _one(res, "G1")
+    assert "G1" not in row["remedial"]
+    assert "redispatch: 1 of 2 named units live" in row["note"]
+
+
+def test_a_unit_on_a_bus_the_contingency_takes_out_does_not_move():
+    net = _net16()
+    cset = _set(net, ("bus_section",))
+    row = _one(_screen(net, cset[cset["contingency_id"] == "BUS_C"].reset_index(drop=True),
+                       controls=_rd())[0], "BUS_C")
+    assert "G1" not in row["remedial"]
+    assert "redispatch: 1 of 2 named units live" in row["note"]
+
+
+def test_redispatch_stops_at_the_solve_cap_and_says_so(monkeypatch):
+    monkeypatch.setattr(planning_criteria, "REDISPATCH_MAX_SOLVES", 2)   # one pass of both pairs
+    net = _net16()
+    row = _one(_screen(net, _set(net), controls=_rd())[0], PARALLEL[1])
+    assert row["stage2_verdict"] == "fail"
+    assert row["remedial"] == "G0 -20.0 MW, G1 +20.0 MW"
+    assert "redispatch leaves an overload: solve cap reached" in row["note"]
+
+
+def test_the_first_outage_of_an_n_1_1_re_adjusts_with_redispatch():
+    net = _net16()
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"] == f"{PARALLEL[1]}>BUS_D1-BUS_D2-1"].reset_index(drop=True)
+    row = _screen(net, cset, controls=_rd())[0].iloc[0]
+    assert f"re-adjusted after the first outage ({PARALLEL[1]}): G0 -60.0 MW, G1 +60.0 MW" in row["note"]
+
+
+def test_redispatch_leaves_the_inputs_alone():
+    net = _net16()
+    dispatch, loads, reg = _tables(net)
+    cset = _set(net, ("branch", "unit"))
+    keep = copy.deepcopy((net, dispatch, loads, cset))
+    screen_planning(net, cset, dispatch, loads, 0, reg, controls=_rd())
+    assert pp.nets_equal(net, keep[0], check_only_results=False)
+    for got, was in zip((dispatch, loads, cset), keep[1:]):
+        pd.testing.assert_frame_equal(got, was)
+
+
+@pytest.mark.parametrize("controls, match", [
+    (Controls(redispatch=(("G0", 1), ("G1", 2))), "redispatch_step_mw"),
+    (_rd(step=float("nan")), "redispatch_step_mw"),
+    (_rd(step=0.0), "redispatch_step_mw"),
+    (_rd(units=(("G0", 1), ("GX", 2))), "not a gen or sgen"),
+    (_rd(units=(("G0", 1), ("SLK", 2))), "is the slack"),
+    (_rd(units=(("G0", 1), ("G0", 2))), "named twice"),
+    (_rd(units=(("G0", float("nan")),)), "priority"),
+    (_rd(units=("G0",)), r"\(name, priority\)"),
+])
+def test_a_bad_redispatch_control_is_refused_before_the_base_solve(controls, match, monkeypatch):
+    net = _net16()
+    monkeypatch.setattr(planning_criteria.pp, "runpp", lambda *a, **k: pytest.fail("solved"))
+    with pytest.raises(ContractError, match=match):
+        _screen(net, _set(net), controls=controls)
+
+
+def test_a_slack_gen_is_refused_as_a_redispatch_unit():
+    net = _net16()
+    net.gen.loc[net.gen["name"] == "G0", "slack"] = True
+    with pytest.raises(ContractError, match="G0.*is the slack"):
+        _screen(net, _set(net), controls=_rd())
+
+
+def test_a_redispatch_unit_out_of_service_or_without_limits_is_refused():
+    net = _net16()
+    net.gen.loc[net.gen["name"] == "G0", "in_service"] = False
+    with pytest.raises(ContractError, match="out of service"):
+        _screen(net, _set(net), controls=_rd())
+    net = _net16()
+    net.gen.loc[net.gen["name"] == "G0", "max_p_mw"] = np.nan
+    with pytest.raises(ContractError, match="no finite max_p_mw"):
+        _screen(net, _set(net), controls=_rd())
+
+
+# --------------------------------------------------------------------------
 # the results contract
 # --------------------------------------------------------------------------
 
