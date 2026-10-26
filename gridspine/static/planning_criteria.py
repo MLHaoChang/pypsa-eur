@@ -26,8 +26,9 @@ on-load tap changers and switched shunts on automatic control. They walk
 steps moved)``; a move that does not converge is rejected, and the walk
 stops when no move improves or after ``TAP_ROUNDS`` x the total step range.
 The net is then judged on NORMAL ratings and the voltage band: with a
-grid-code ``profile``, each bus's continuous ``voltage_bands`` entry for its
-nominal kV, else the assumed band; each row and the report say which. No redispatch
+grid-code ``profile``, each bus's continuous ``voltage_bands`` entry for
+its nominal kV, else the assumed band; each row and the report say which.
+No redispatch
 is modelled (owner decision DC13-SCOPE), and every stage-2 row says so.
 
 **Bus sections** (``contingency_set.bus_section_contingencies``): the bus and
@@ -343,11 +344,13 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
     return knobs
 
 
-def _bands(net, judged, profile: dict | None) -> tuple:
-    """``({bus name: (v_min, v_max)}, {bus name: source})`` for the ``judged``
-    buses: the profile's continuous band for each bus's ``vn_kv``, else the
-    assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no band covering that kV)."""
-    bands, used, by_kv = {}, {}, {}
+def _bands(net, judged, profile: dict | None, by_kv: dict) -> tuple:
+    """``({bus name: (v_min, v_max)}, {bus name: (kv, profile band or None)})``
+    for the ``judged`` buses: the profile's continuous band for each bus's
+    ``vn_kv``, else the assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no
+    band covering that kV; ``None``). ``by_kv`` caches the lookup per kV across
+    one screen."""
+    bands, used = {}, {}
     for b in judged:
         name, kv = str(net.bus.at[b, "name"]), float(net.bus.at[b, "vn_kv"])
         if kv not in by_kv:
@@ -355,7 +358,7 @@ def _bands(net, judged, profile: dict | None) -> tuple:
             if profile is not None:
                 try:
                     band = band_for(profile, kv)
-                except ContractError:   # no profile band covers this kV
+                except ContractError:  # no profile band covers this kV
                     band = None
             by_kv[kv] = ((V_MIN_PU, V_MAX_PU) if band is None
                          else (float(band["v_min"]), float(band["v_max"])), band)
@@ -637,7 +640,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
     {...} or "unset", "voltage_band": {"profile": name or "assumed", "buses":
-    {"profile": n, "assumed": n}}, "seconds"}``. Kinds judged: branch (any
+    {"profile": n, "assumed": n}} (the base case's live buses), "seconds"}``. Kinds judged: branch (any
     order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
     (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``)."""
     cset = validate_contingency_set(contingencies)
@@ -671,12 +674,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         raise BaseCaseNotConverged(f"base case at hour {hour} does not converge; nothing to screen") from exc
     cut_before = set(unsupplied_buses(base))
     out_before = set(base.bus.index[~base.bus["in_service"].astype(bool)])
+    by_kv = {}   # nominal kV -> its band, for _bands
 
     def live(work):
         return [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
-
-    def bands_of(work, judged):
-        return _bands(work, judged, profile)[0]
 
     def cut_off(work):
         out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
@@ -701,7 +702,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             if s0 is None:
                 rows.append(_row(r, hour, note=f"load flow does not converge at the first outage ({first})"))
                 continue
-            _, pre = remedial_walk(work, knobs, bands_of(work, judged), judged, s0)
+            _, pre = remedial_walk(work, knobs, _bands(work, judged, profile, by_kv)[0], judged, s0)
             notes.append(f"re-adjusted after the first outage ({first}): {_moved(pre)}")
         _apply_outage(work, r, handles)
         out_bus, cut = cut_off(work)
@@ -716,7 +717,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             rows.append(_row(r, hour, islanded=True, note="; ".join(notes), **lost))
             continue
         judged = live(work)
-        bands, used = _bands(work, judged, profile)
+        bands, used = _bands(work, judged, profile, by_kv)
         s1 = _solve(work, judged)
         if s1 is None:
             notes.append("post-outage load flow does not converge")
@@ -751,7 +752,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             remedial=_moved(moves), note="; ".join(n for n in notes if n), **angle, **lost,
         ))
     results = validate_planning_results(pd.DataFrame(rows, columns=list(PLANNING_RESULT_COLUMNS)))
-    base_used = _bands(base, live(base), profile)[1].values()
+    base_used = _bands(base, live(base), profile, by_kv)[1].values()
     report = {
         "counts": {k: int(n) for k, n in cset["kind"].value_counts().sort_index().items()},
         "skipped": skipped,

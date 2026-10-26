@@ -451,6 +451,17 @@ def test_the_walk_moves_toward_the_profile_band():
     assert row["stage2_verdict"] == "pass" and row["stage2_min_vm_pu"] >= 0.95
 
 
+def test_the_first_outage_re_adjusts_toward_the_profile_band():
+    net = _net()
+    cset = n_1_1_contingencies(branch_contingencies(net))
+    cset = cset[cset["contingency_id"] == f"{PARALLEL[1]}>BUS_D1-BUS_D2-1"].reset_index(drop=True)
+    controls = Controls(switched_shunts=("SH1",))
+    today, _ = _screen(net, cset, controls=controls)
+    res, _ = _screen(net, cset, controls=controls, profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert f"re-adjusted after the first outage ({PARALLEL[1]}): none" in today["note"].iloc[0]
+    assert f"re-adjusted after the first outage ({PARALLEL[1]}): SH1 +" in res["note"].iloc[0]
+
+
 def _malformed():
     p = load_grid_code("generic_assumed", raw=True)
     p["voltage_bands"][0]["v_min"] = 1.05                       # v_min above 1
