@@ -545,3 +545,81 @@ def test_validate_profile_and_the_loader_still_accept_a_profile_with_a_gap(tmp_p
     assert uncovered_kv_ranges(validate_profile("partial", p)) == [(0.0, 110.0, True)]
     (tmp_path / "partial.yaml").write_text(yaml.safe_dump(p))
     assert load_grid_code("partial", extra_dirs=(tmp_path,))["name"] == "partial"
+
+
+# --------------------------------------------------------------------------
+# harmonic limits (grid-to-process issue 17)
+# --------------------------------------------------------------------------
+
+def _harmonic(**over):
+    p = load_grid_code("generic_assumed", raw=True)
+    p.update(over)
+    return p
+
+
+@pytest.mark.parametrize("name", ["eu_rfg_dcc_ce", "generic_assumed"])
+def test_the_european_and_generic_profiles_carry_assumed_iec_harmonic_limits(name):
+    from gridspine.static.harmonics import limits_from_profile
+
+    p = load_grid_code(name)
+    assert p["thd_limit_pct"]["source"] == p["harmonic_limits_pct"]["source"] == "assumed"
+    assert "61000-3-6" in p["thd_limit_pct"]["clause"] and "61000-3-6" in p["harmonic_limits_pct"]["clause"]
+    limits, cited = limits_from_profile(p)
+    assert limits.thd_pct == 3.0
+    assert sorted(limits.orders_pct) == list(range(2, 51))
+    assert (limits.orders_pct[5], limits.orders_pct[7], limits.orders_pct[11], limits.orders_pct[17]) == \
+        (2.0, 2.0, 1.5, 1.2)
+    assert [c["key"] for c in cited] == ["thd_limit_pct", "harmonic_limits_pct"]
+
+
+def test_the_us_profile_sets_no_harmonic_limit():
+    """IEEE 519 judges current distortion, a different quantity; it is not in this screen."""
+    p = load_grid_code("us_ieee2800_nerc")
+    assert "thd_limit_pct" not in p and "harmonic_limits_pct" not in p
+
+
+def test_harmonic_limits_are_optional_and_either_may_stand_alone():
+    base = _harmonic()
+    base.pop("thd_limit_pct")
+    validate_profile("p", base)
+    base = _harmonic()
+    base.pop("harmonic_limits_pct")
+    validate_profile("p", base)
+
+
+def test_string_orders_from_json_are_read_as_orders():
+    from gridspine.static.harmonics import limits_from_profile
+
+    p = validate_profile("p", _harmonic(harmonic_limits_pct={"orders": {"5": 2.0, "7": 2.0}, "clause": "c",
+                                                             "source": "code"}))
+    assert limits_from_profile(p)[0].orders_pct == {5: 2.0, 7: 2.0}
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda p: p["thd_limit_pct"].update(value=0.0), "thd_limit_pct value must be a positive number"),
+    (lambda p: p["thd_limit_pct"].pop("clause"), "thd_limit_pct has no clause"),
+    (lambda p: p["harmonic_limits_pct"].pop("source"), "harmonic_limits_pct has no source"),
+    (lambda p: p["harmonic_limits_pct"].update(orders={}), "non-empty mapping"),
+    (lambda p: p["harmonic_limits_pct"].update(orders=[2.0]), "non-empty mapping"),
+    (lambda p: p["harmonic_limits_pct"]["orders"].update({1: 1.0}), "order 1;"),
+    (lambda p: p["harmonic_limits_pct"]["orders"].update({51: 1.0}), "order 51;"),
+    (lambda p: p["harmonic_limits_pct"]["orders"].update({"5th": 1.0}), "order '5th';"),
+    (lambda p: p["harmonic_limits_pct"]["orders"].update({5: -1.0}), r"orders\[5\] must be a positive number"),
+    (lambda p: p["harmonic_limits_pct"]["orders"].update({5: True}), r"orders\[5\] must be a positive number"),
+])
+def test_bad_harmonic_limits_are_refused(mutate, match):
+    p = _harmonic()
+    mutate(p)
+    with pytest.raises(ContractError, match=match):
+        validate_profile("p", p)
+
+
+def test_an_extracted_harmonic_limit_is_listed_and_confirmed():
+    p = extracted(thd_limit_pct={"value": 2.5, "clause": "section 6.1", "source": "extracted", "page": 9,
+                                 "quote": "THD shall not exceed 2.5 %"})
+    p.pop("harmonic_limits_pct")
+    p = validate_profile("tso", p)
+    assert "thd_limit_pct" in unconfirmed(p)
+    out = confirm_limit(p, "thd_limit_pct")
+    assert out["thd_limit_pct"]["source"] == "code" and out["thd_limit_pct"]["page"] == 9
+    assert "thd_limit_pct" not in unconfirmed(out)
