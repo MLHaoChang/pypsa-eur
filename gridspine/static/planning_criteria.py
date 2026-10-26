@@ -491,6 +491,8 @@ def _units(net, controls: Controls, h) -> list:
     if not _finite_number(step) or step <= 0:
         raise ContractError(f"redispatch_step_mw must be a finite number above 0 MW, got {step!r}")
     slack = {str(n) for n in net.ext_grid["name"]}
+    if "slack" in net.gen:   # a pandapower gen can be the slack too; its p_mw is not held
+        slack |= {str(n) for n in net.gen.loc[net.gen["slack"].fillna(False).astype(bool), "name"]}
     units, seen = [], set()
     for entry in controls.redispatch:
         if not isinstance(entry, tuple) or len(entry) != 2:

@@ -625,6 +625,13 @@ def test_a_bad_redispatch_control_is_refused_before_the_base_solve(controls, mat
         _screen(net, _set(net), controls=controls)
 
 
+def test_a_slack_gen_is_refused_as_a_redispatch_unit():
+    net = _net16()
+    net.gen.loc[net.gen["name"] == "G0", "slack"] = True
+    with pytest.raises(ContractError, match="G0.*is the slack"):
+        _screen(net, _set(net), controls=_rd())
+
+
 def test_a_redispatch_unit_out_of_service_or_without_limits_is_refused():
     net = _net16()
     net.gen.loc[net.gen["name"] == "G0", "in_service"] = False
