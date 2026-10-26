@@ -489,8 +489,9 @@ def load_defaults(version: str | None = None) -> Library:
 
 
 #: The pack U2 WP0's parity was frozen on (2020 EUR). A ledger naming
-#: :data:`LIBRARY_VERSION` (seeded before U2 WP8) reads it: its rows 1-20 are
-#: that pack's (`test_study_ledger_from_pack`), in the same money year.
+#: :data:`LIBRARY_VERSION` (seeded before U2 WP8) reads it, as it did while
+#: this was the study's pin (`load_defaults()` before money-year 01): its rows
+#: 1-20 are that pack's (`test_study_ledger_from_pack`), in the same money year.
 WP0_PACK_VERSION = "2026-10-05"
 
 
@@ -510,10 +511,13 @@ def library_for_ledger(ledger) -> Library:
     label = ledger.ledger_version or ""
     if label == LIBRARY_VERSION:
         return load_defaults(WP0_PACK_VERSION)
-    parts = label.split()
+    parts = label.split(" ")
     if len(parts) != 3 or parts[0] != DEFAULTS_VERSION_PREFIX:
         raise LibraryError(f"the ledger names defaults {label!r}, which no pack provides")
-    library = load_defaults(parts[1])
+    try:
+        library = load_defaults(parts[1])
+    except LookupError as exc:  # the pack loader's unknown version
+        raise LibraryError(f"the ledger names defaults {label!r}: {exc}") from None
     if library.version != label:
         raise LibraryError(f"the ledger was seeded from {label!r}, but pack {parts[1]} "
                            f"now reads {library.version!r}")

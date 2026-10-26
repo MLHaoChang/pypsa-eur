@@ -834,8 +834,10 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
     assert legacy.ledger_version == L.LIBRARY_VERSION
     tariff_id = (study.intake.get("tariff") or {}).get("tariff_id", "de_industrial_illustrative")
     assert next(r for r in legacy.rows if r.key == "tariff").technical_name == tariff_id
+    # Stored before money-year 01, the study's money was the ledger's (2020).
     store.save_study(base, study.model_copy(update={"ledger": legacy,
-                                                    "ledger_version": legacy.ledger_version}))
+                                                    "ledger_version": legacy.ledger_version,
+                                                    "currency_year": 2020}))
     led = client.get(f"/api/projects/run-legacy/studies/{sid}/ledger").json()["ledger"]
     assert led["ledger_version"] == L.LIBRARY_VERSION
     r = client.put(f"/api/projects/run-legacy/studies/{sid}/ledger", json={"rows": [
@@ -863,30 +865,44 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
 
 
 def test_a_study_seeded_on_an_older_pack_runs_on_its_own_tariff(
-        client, api_project, studies_on, fake, project_storage_dir):
+        client, api_project, studies_on, fake, project_row, project_storage_dir):
     """
-    Money-year issue 01: a study stored with a ledger seeded on 2026-10-05
-    (2020 EUR) still runs and values its cases after the pin moved to the
-    2025 pack: the seed tariff is read from the pack the ledger names
-    (`library.library_for_ledger`), never the pin's 2025 one, so nothing is
-    refused ``currency_year_mixed`` and its bills are that pack's — the
-    same dispatch billed on the pin's ledger costs exactly the HICP factor
-    more.
+    Money-year issue 01 (GK B condition 3, plan A C3/C4): a study stored
+    with a ledger seeded on 2026-10-05 (2020 EUR), or with a legacy
+    `LIBRARY_VERSION` one, still runs and values its cases after the pin
+    moved to the 2025 pack. Its seed tariff is read from the pack the ledger
+    names (`library.library_for_ledger`), never the pin's 2025 one: nothing
+    is refused ``currency_year_mixed``, and the run's bill is the one the
+    2026-10-05 defaults give on the same solved meter, while a ledger seeded
+    on the pin bills exactly the HICP factor more.
     """
-    from services.study import library as L
-    from services.study import questions as Q
-    from services.study import store
+    import json
+    from decimal import Decimal
 
-    totals = {}
-    for name, version in (("run-1005", L.WP0_PACK_VERSION), ("run-pin", L.PACK_VERSION)):
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+    from services.study import engine_adapter as A
+    from services.study import library as L
+    from services.study import packs
+    from services.study import questions as Q
+    from services.study import runner as R
+    from services.study import store
+    from tests.u2_targets import legacy_ledger
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    factor = float(Decimal(manifest["money_year_conversion"]["factor"]))
+    old, pin = L.load_defaults(L.WP0_PACK_VERSION), L.load_defaults()
+    for name in ("run-1005", "run-legacy-lv"):
         sid = _setup(client, api_project, name)
         base = project_storage_dir(name)
         study = store.load_study(base, sid)
-        lib = L.load_defaults(version)
-        ledger = L.seed_ledger(Q.get_question(study.question_id), study.intake, lib)
-        year = int(lib.finance["currency_year"])
+        question = Q.get_question(study.question_id)
+        if name == "run-1005":
+            ledger = L.seed_ledger(question, study.intake, old)
+        else:
+            ledger = legacy_ledger("de")
+            assert ledger.ledger_version == L.LIBRARY_VERSION
         store.save_study(base, study.model_copy(update={
-            "ledger": ledger, "ledger_version": ledger.ledger_version, "currency_year": year}))
+            "ledger": ledger, "ledger_version": ledger.ledger_version, "currency_year": 2020}))
         r = client.post(f"/api/projects/{name}/studies/{sid}/run", json={})
         assert r.status_code == 202, r.text
         rec = wait_run(client, name, sid)
@@ -894,11 +910,76 @@ def test_a_study_seeded_on_an_older_pack_runs_on_its_own_tariff(
         run = client.get(f"/api/projects/{name}/studies/{sid}/run").json()
         bill = run["details"]["none"]["bill"]
         assert bill["unavailable"] == {}, bill["unavailable"]
-        totals[version] = (year, bill["total"])
         case = client.get(f"/api/projects/{name}/studies/{sid}/options/bess_2h/case")
         assert case.status_code == 200, case.text
         assert case.json()["engine"] == "finance_engine"
-    assert totals[L.WP0_PACK_VERSION][0] == 2020 and totals[L.PACK_VERSION][0] == 2025
-    factor = 1.257334601  # Eurostat HICP (EEA) 2020->2025, MONEY-YR-SEED-1
-    assert totals[L.PACK_VERSION][1] == pytest.approx(
-        totals[L.WP0_PACK_VERSION][1] * factor, rel=1e-8)
+        if name != "run-1005":
+            continue
+        n, _hash = R.fork_network_from_disk(project_row(f"{name}-opt-none"))
+
+        def components(led, lib, n=n, intake=study.intake):
+            c = A.bill(n, packs.option_commercial(
+                intake, led, lib, n.snapshots, export_series=run.get("export_series")))
+            return {k: getattr(c.by_component, k) for k in A.BILL_COMPONENT_KEYS}
+
+        on_old = components(ledger, old)
+        on_pin = components(L.seed_ledger(question, study.intake, pin), pin)
+        assert any(v for v in on_old.values())
+        for k, v in on_old.items():
+            if v is None:
+                assert on_pin[k] is None, k
+                continue
+            assert bill["by_component"][k] == pytest.approx(v, rel=1e-9, abs=1e-9), k
+            assert on_pin[k] == pytest.approx(v * factor, rel=1e-9, abs=1e-9), k
+
+
+def test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 01 (GK B plan A C1): resetting rows of a stored ledger
+    seeded on 2026-10-05 brings them back from 2026-10-05 (2020 EUR), never
+    the pin's 2025 rows into a 2020 ledger; the ledger keeps its version and
+    still runs. A re-seed in the same request resets from the re-seeded
+    ledger's defaults (the pin).
+    """
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    keys = ("battery_storage_eur_per_kwh", "demand_charge_price")
+    sid = _setup(client, api_project, "reset-1005")
+    base = project_storage_dir("reset-1005")
+    study = store.load_study(base, sid)
+    question = Q.get_question(study.question_id)
+    old, pin = (L.seed_ledger(question, study.intake, lib)
+                for lib in (L.load_defaults(L.WP0_PACK_VERSION), L.load_defaults()))
+    seed = {r.key: r for r in old.rows if r.key in keys}
+    # The pin relabels the battery row 2025 (MONEY-YEAR-1) and converts the demand charge.
+    assert all((seed[k].value, seed[k].currency_year) != next(
+        (r.value, r.currency_year) for r in pin.rows if r.key == k) for k in keys)
+    store.save_study(base, study.model_copy(update={
+        "ledger": old, "ledger_version": old.ledger_version, "currency_year": 2020}))
+    url = f"/api/projects/reset-1005/studies/{sid}/ledger"
+    r = client.put(url, json={"rows": [{"key": k, "value": 1.0, "unit": seed[k].unit} for k in keys]})
+    assert r.status_code == 200, r.text
+    r = client.put(url, json={"reset": list(keys)})
+    assert r.status_code == 200, r.text
+    led = r.json()["ledger"]
+    assert led["ledger_version"] == old.ledger_version
+    rows = {row["key"]: row for row in led["rows"]}
+    for k in keys:
+        assert rows[k]["value"] == seed[k].value and rows[k]["provenance"] == "library", k
+        assert rows[k]["currency_year"] == seed[k].currency_year == 2020, k
+    assert client.post(f"/api/projects/reset-1005/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "reset-1005", sid)["status"] == "done"
+    case = client.get(f"/api/projects/reset-1005/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 200, case.text
+
+    r = client.put(url, json={"reseed": True, "reset": list(keys)})
+    assert r.status_code == 200, r.text
+    led = r.json()["ledger"]
+    assert led["ledger_version"] == pin.ledger_version
+    rows = {row["key"]: row for row in led["rows"]}
+    for k in keys:
+        want = next(r for r in pin.rows if r.key == k)
+        assert (rows[k]["value"], rows[k]["currency_year"]) == (want.value, want.currency_year), k
