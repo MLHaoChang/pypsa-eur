@@ -86,7 +86,7 @@ For group summaries, define a supported quantity and boundary before aggregating
 
 ## UX and behavior
 
-Use the existing Site plan workspace, selection/properties pattern and Guided/Expert vocabulary. Do not add a new top-level workflow card or palette. Guided shows the next relevant task; Expert exposes numeric dimensions, datum, source and binding details in the same scene.
+Use the existing Site 3D workspace, selection/properties pattern and Guided/Expert vocabulary. Do not add a new top-level workflow card or palette. Guided shows the next relevant task; Expert exposes numeric dimensions, datum, source and binding details in the same scene.
 
 Per CODING_STANDARDS.md UI rule 1, extend the server's project `/flow` verdict with source/scene action readiness, blockers and what will be computed for native generation, layout/photo processing, Blender/export and Apply. These action verdicts do not change electrical `run_ready`. The UI renders this server projection only; no browser worker/platform/format table decides capability availability. Server admission rechecks capability, source/revision, permissions and current limits at submit and Apply, including loss of readiness after a previously green preview. Current client-only siteReadiness is legacy evidence to replace for the new action, not an approved availability authority.
 
