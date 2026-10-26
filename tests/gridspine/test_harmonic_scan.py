@@ -35,7 +35,7 @@ def _cases(net):
 def test_the_peak_lands_on_the_parallel_resonance(f_hz):
     net, poc = _net(f_hz=f_hz, s_sc=1000.0, rx=0.05, caps=[(10.0, 1)])
     study = hs.impedance_scan(net, poc, {"max": (1000.0, 0.05)})
-    h_r = math.sqrt(1000.0 / 10.0)                                  # 10
+    h_r = math.sqrt(1000.0 / (1.1 * 10.0))                          # c = 1.1 in the max case: 9.53
     res = study.resonance[study.resonance["cap_state"] == "C1=1/1"]
     assert len(res) == 1
     assert abs(res.iloc[0]["h_r"] - h_r) <= hs.DH + 1e-9
@@ -79,7 +79,7 @@ def test_every_step_count_is_scanned_and_a_part_switched_bank_flags():
     # 3 steps of 10 MVAr on 1000 MVA: h_r = sqrt(1000 / 10 s) = 10, 7.07, 5.77. One step sits 3 orders
     # from 7 and 13; two steps 0.07 from 7 (flag); all three 0.77 from 5 (clear)
     net, poc = _net(s_sc=1000.0, rx=0.02, caps=[(30.0, 3)])
-    study = hs.impedance_scan(net, poc, {"max": (1000.0, 0.02)}, limit_h=0.5)
+    study = hs.impedance_scan(net, poc, {"min": (1000.0, 0.02)}, limit_h=0.5)      # c = 1.0
     assert sorted(study.scan["cap_state"].unique()) == ["C1=0/3", "C1=1/3", "C1=2/3", "C1=3/3"]
     res = study.resonance.set_index("cap_state")
     assert res.at["C1=2/3", "verdict"] == "flag" and res.at["C1=2/3", "nearest_order"] == 7
@@ -108,7 +108,7 @@ def test_the_nearest_order_counts_the_unit_spectra():
 
 def test_a_resonance_nearest_a_demo_order_only_is_assumed():
     net, poc = _net(s_sc=1000.0, rx=0.02, caps=[(10.0, 1)])         # h_r = 10
-    res = hs.impedance_scan(net, poc, {"max": (1000.0, 0.02)}, spectrum_orders=[10], spectrum_demo=True,
+    res = hs.impedance_scan(net, poc, {"min": (1000.0, 0.02)}, spectrum_orders=[10], spectrum_demo=True,
                             limit_h=0.5).resonance
     assert res.iloc[0]["order_set"] == "demo unit spectrum" and bool(res.iloc[0]["assumed"])
     assert res.iloc[0]["verdict"] == "flag"
@@ -170,4 +170,17 @@ def test_cable_capacitance_resonates_with_the_grid():
     q_c = 33.0 ** 2 * 2 * math.pi * 50.0 * 300e-9 * 10.0
     res = hs.impedance_scan(net, poc, {"max": (100.0, 0.02)}).resonance
     assert len(res) == 1
-    assert abs(res.iloc[0]["h_r"] - math.sqrt(100.0 / q_c)) <= hs.DH + 1e-9
+    assert abs(res.iloc[0]["h_r"] - math.sqrt(100.0 / (1.1 * q_c))) <= hs.DH + 1e-9
+
+
+@pytest.mark.parametrize("vn_kv, case, c", [(33.0, "max", 1.1), (33.0, "min", 1.0), (0.4, "min", 0.95),
+                                            (33.0, "normal", 1.0)])
+def test_the_grid_carries_the_voltage_factor(vn_kv, case, c):
+    assert hs.grid_c(vn_kv, case) == c
+
+
+@pytest.mark.parametrize("case, c", [("max", 1.1), ("min", 1.0), ("normal", 1.0)])
+def test_the_resonance_moves_with_the_voltage_factor(case, c):
+    net, poc = _net(s_sc=1000.0, rx=0.02, caps=[(10.0, 1)])         # 33 kV
+    res = hs.impedance_scan(net, poc, {case: (1000.0, 0.02)}).resonance
+    assert abs(res.iloc[0]["h_r"] - math.sqrt(1000.0 / (c * 10.0))) <= hs.DH + 1e-9

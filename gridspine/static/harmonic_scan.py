@@ -15,11 +15,12 @@ Y(h) is built here from the pandapower tables, per order h:
   effect), j h B / 2 at each end, B = 2 pi f0 C;
 * transformer: R sqrt(h) + j h X from vk / vkr at its rated ratio; no
   magnetising branch;
-* grid: Un^2 / S_sc split by the case's R/X, R sqrt(h) + j h X, a shunt at
-  its bus;
+* grid: c Un^2 / S_sc (IEC 60909's equivalent source, c as
+  ``island_sc_seq.c_factor``; 1.0 in the normal case) split by the case's
+  R/X, R sqrt(h) + j h X, a shunt at its bus;
 * capacitor bank: j h B per step in service; shunt reactor: -j B / h.
 
-So one grid and one bank of Q_c at the PoC resonate at h_r = sqrt(S_sc / Q_c).
+So one grid and one bank of Q_c at the PoC resonate at h_r = sqrt(S_sc / (c Q_c)).
 
 **Cases.** One scan per short-circuit case (``max``, ``min``, ``normal``) and
 per capacitor state: each step count 0..max_step of every switched shunt,
@@ -52,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
+from gridspine.static.island_sc_seq import c_factor
 
 H_MAX = 50
 DH = 0.1
@@ -77,8 +79,9 @@ LEDGER = (
     f"each cable is one lumped pi, valid while it is short against a quarter wavelength at h_max * f0; a "
     f"cable longer than {PI_FRACTION} of that is named in a note (PI_FRACTION)",
     "R rises with sqrt(h) (skin effect) on cables, transformers and the grid; X with h",
-    "the grid is Un^2 / S_sc without IEC 60909's voltage factor c, so h_r = sqrt(S_sc / Q_c) holds as in "
-    "the textbook",
+    "the grid is IEC 60909's equivalent source c Un^2 / S_sc (c = 1.1 in the max case, 1.0 in the min "
+    "case above 1 kV, as island_sc_seq.c_factor), so h_r = sqrt(S_sc / (c Q_c)); the normal case takes c = "
+    "1.0 (assumed)",
     "transformers at their rated ratio (no off-nominal correction where a bus's kV differs from the "
     "winding's), without the magnetising branch",
     "a peak at or above h_max is not reported (the scan has no point beyond it)",
@@ -216,10 +219,17 @@ def _component(n: int, edges, start: int) -> list:
     return sorted(seen)
 
 
+def grid_c(vn_kv: float, case: str) -> float:
+    """IEC 60909's voltage factor c for the grid's equivalent source in ``case``; the normal case
+    (not an IEC 60909 case) takes 1.0."""
+    return c_factor(vn_kv, case) if case in ("max", "min") else 1.0
+
+
 def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, state: dict, shunts: pd.DataFrame,
-          hs: np.ndarray, series=None) -> np.ndarray:
+          hs: np.ndarray, series=None, case: str = "normal") -> np.ndarray:
     """Complex Z seen from ``poc_bus`` (ohm at its voltage) at each order in ``hs``, for one grid case
-    and one capacitor state. ``series`` is ``_branches``'s, when already built."""
+    and one capacitor state. ``series`` is ``_branches``'s, when already built. ``case`` sets the
+    grid's voltage factor c (``grid_c``)."""
     if series is None:
         series, _ = _branches(net, float(net.f_hz))
     buses = list(_in_service(net.bus).index)
@@ -252,7 +262,7 @@ def z_poc(net, poc_bus: int, s_sc_mva: float, rx: float, state: dict, shunts: pd
         bus = int(eg["bus"])
         if bus not in pos:
             continue
-        zg = sbase / s_sc_mva
+        zg = grid_c(float(net.bus.at[bus, "vn_kv"]), case) * sbase / s_sc_mva
         xg = zg / math.sqrt(1.0 + rx ** 2)
         shunt(bus, 1.0 / (rx * xg * sq + 1j * hs * xg))
         grid += 1
@@ -345,7 +355,7 @@ def impedance_scan(net, poc_bus: int, cases: dict, *, spectrum_orders=(), spectr
             raise ContractError(f"harmonic scan: case {case} needs S_sc > 0 and R/X >= 0, got {s_sc}, {rx}")
         for state in states:
             label = state_label(shunts, state)
-            z = z_poc(net, poc_bus, float(s_sc), float(rx), state, shunts, hs, series)
+            z = z_poc(net, poc_bus, float(s_sc), float(rx), state, shunts, hs, series, case)
             mag = np.abs(z)
             frames.append(pd.DataFrame({"case": case, "cap_state": label, "h": hs, "f_hz": hs * f0,
                                         "r_ohm": z.real, "x_ohm": z.imag, "z_ohm": mag, "label": LABEL}))
