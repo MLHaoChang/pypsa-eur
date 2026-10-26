@@ -3,6 +3,11 @@
  * (`.scratch/harness/mcp-spec.md` A.1): the list, the enable toggle, each
  * server's keys, the connection test and add/edit/delete.
  *
+ * Only http servers are added, edited, toggled or deleted here. A stdio
+ * server is a program this machine runs, so it is written by hand in
+ * `mcp-servers.json`; its row is read-only (the backend refuses to change it)
+ * but can be tested and keyed.
+ *
  * HOSTING. Rendered from pages/LocalSettings.tsx under AssistantModelSettings
  * and, like it, above that pane's local-only early return: the routes are
  * super-admin gated, not desktop-only. Same four renders as
@@ -43,15 +48,26 @@ const BUTTON = 'rounded border border-border px-2 py-1 text-xs disabled:opacity-
 type TestState = 'running' | 'error' | McpTestResult
 
 function bodyOf(server: McpServerOut, enabled = server.enabled): McpServerIn {
-  return {
-    enabled,
-    transport: server.transport ?? 'stdio',
-    command: server.command,
-    args: server.args,
-    url: server.url,
-    env: server.env.map(e => e.name),
-    tiers: server.tiers as Record<string, McpTier>,
-  }
+  return { enabled, url: server.url ?? '', tiers: server.tiers as Record<string, McpTier> }
+}
+
+/** Why a row's toggle cannot change, or null when it can. */
+function lockedReason(server: McpServerOut): string | null {
+  if (server.id == null || server.problem) return 'Fix this entry in mcp-servers.json'
+  if (server.transport !== 'http') return 'Command servers are edited in mcp-servers.json'
+  return null
+}
+
+function target(server: McpServerOut): string {
+  return server.transport === 'http' ? server.url ?? '' : [server.command, ...server.args].join(' ')
+}
+
+function rowText(server: McpServerOut): string {
+  return `${server.id ?? '(invalid entry)'} · ${server.transport ?? 'unknown'} · ${target(server)}`
+}
+
+function tierWords(tier: McpTier): string {
+  return tier === 'read' ? 'Read only' : 'Asks first'
 }
 
 function errorText(error: unknown, fallback: string): string {
@@ -70,28 +86,49 @@ function KeyField({
   onClear: () => void
 }) {
   const [draft, setDraft] = useState('')
+  const [replacing, setReplacing] = useState(false)
+  const editing = !status.present || replacing
   return (
     <div className="flex items-center gap-2 text-xs" data-testid={testId}>
       <span className="w-40 shrink-0 font-mono truncate" title={label}>{label}</span>
-      <input
-        type="password"
-        autoComplete="off"
-        className={INPUT}
-        placeholder={status.present ? `Stored (${status.hint ?? 'set'}); type to replace` : 'Not set'}
-        aria-label={`${label} value`}
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        data-testid={`${testId}-input`}
-      />
-      <button
-        type="button"
-        className={BUTTON}
-        disabled={pending || !draft}
-        onClick={() => { onSave(draft); setDraft('') }}
-        data-testid={`${testId}-save`}
-      >
-        Save
-      </button>
+      <span className={status.present ? 'shrink-0' : 'shrink-0 text-muted'} data-testid={`${testId}-status`}>
+        {status.present ? `Key set${status.hint ? ` (${status.hint})` : ''}` : 'No key'}
+      </span>
+      {editing && (
+        <>
+          <input
+            type="password"
+            autoComplete="off"
+            className={INPUT}
+            placeholder="Paste the value"
+            aria-label={`${label} value`}
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            data-testid={`${testId}-input`}
+          />
+          <button
+            type="button"
+            className={BUTTON}
+            disabled={pending || !draft}
+            onClick={() => { onSave(draft); setDraft(''); setReplacing(false) }}
+            data-testid={`${testId}-save`}
+          >
+            Save
+          </button>
+        </>
+      )}
+      {status.present && !replacing && (
+        <button type="button" className="text-xs text-muted underline" onClick={() => setReplacing(true)}
+          data-testid={`${testId}-replace`}>
+          Replace
+        </button>
+      )}
+      {replacing && (
+        <button type="button" className="text-xs text-muted underline"
+          onClick={() => { setDraft(''); setReplacing(false) }} data-testid={`${testId}-cancel`}>
+          Cancel
+        </button>
+      )}
       {status.present && (
         <button type="button" className="text-xs text-muted underline" onClick={onClear}
           data-testid={`${testId}-clear`}>
@@ -116,7 +153,7 @@ function TestOutput({ state }: { state: TestState }) {
       <p className="text-xs text-muted">
         {state.tools.length} tool{state.tools.length === 1 ? '' : 's'} offered to the model
         {state.skipped > 0 && `, ${state.skipped} skipped (name, schema or collision)`}.
-        Tools marked read run without asking; every other tier asks first.
+        Read-only tools run without asking; every other tool asks first.
       </p>
       <table className="w-full text-xs">
         <thead>
@@ -130,8 +167,12 @@ function TestOutput({ state }: { state: TestState }) {
           {state.tools.map(t => (
             <tr key={t.name} className="align-top border-t border-border">
               <td className="pr-2 font-mono break-all">{t.name}</td>
-              <td className="pr-2">{t.tier}</td>
-              <td className="break-words">{t.description}</td>
+              <td className="pr-2 whitespace-nowrap" title={t.tier}>{tierWords(t.tier)}</td>
+              <td>
+                <pre className="whitespace-pre-wrap break-words font-mono text-[11px] text-muted bg-bg-2 rounded p-1">
+                  {t.description}
+                </pre>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -150,11 +191,7 @@ function ServerForm({
   onCancel: () => void
 }) {
   const [id, setId] = useState(initial?.id ?? '')
-  const [transport, setTransport] = useState<'stdio' | 'http'>(initial?.transport ?? 'stdio')
-  const [command, setCommand] = useState(initial?.command ?? '')
-  const [args, setArgs] = useState((initial?.args ?? []).join('\n'))
   const [url, setUrl] = useState(initial?.url ?? '')
-  const [env, setEnv] = useState((initial?.env ?? []).map(e => e.name).join(', '))
   const [tiers, setTiers] = useState(
     Object.entries(initial?.tiers ?? {}).map(([tool, tier]) => `${tool} = ${tier}`).join('\n'),
   )
@@ -172,63 +209,34 @@ function ServerForm({
     }
     parsedTiers[tool] = tier
   }
-  const ready = ID_RE.test(id) && !idError && !tierError &&
-    (transport === 'stdio' ? command.trim() !== '' : url.trim() !== '')
+  const ready = ID_RE.test(id) && !idError && !tierError && url.trim() !== ''
 
   function submit() {
     onSubmit(id, {
       enabled: initial?.enabled ?? false,
-      transport,
-      command: transport === 'stdio' ? command.trim() : null,
-      args: transport === 'stdio' ? args.split('\n').map(a => a.trim()).filter(Boolean) : [],
-      url: transport === 'http' ? url.trim() : null,
-      env: env.split(',').map(v => v.trim()).filter(Boolean),
+      url: url.trim(),
       tiers: parsedTiers as Record<string, McpTier>,
     })
   }
 
   return (
     <div className="rounded border border-border p-3 space-y-2" data-testid="mcp-server-form">
-      <div className="flex gap-2">
-        <input
-          className={INPUT}
-          placeholder="Server id (e.g. tariffs)"
-          aria-label="Server id"
-          value={id}
-          disabled={initial != null}
-          onChange={e => setId(e.target.value)}
-          data-testid="mcp-form-id"
-        />
-        <select
-          className="rounded border border-border bg-bg px-2 py-1 text-xs"
-          aria-label="Transport"
-          value={transport}
-          onChange={e => setTransport(e.target.value as 'stdio' | 'http')}
-          data-testid="mcp-form-transport"
-        >
-          <option value="stdio">Local command (stdio)</option>
-          <option value="http">URL (Streamable HTTP)</option>
-        </select>
-      </div>
+      <input
+        className={INPUT}
+        placeholder="Server id (e.g. tariffs)"
+        aria-label="Server id"
+        value={id}
+        disabled={initial != null}
+        onChange={e => setId(e.target.value)}
+        data-testid="mcp-form-id"
+      />
       {idError && <p className="text-xs text-danger">{idError}</p>}
-      {transport === 'stdio' ? (
-        <>
-          <input className={INPUT} placeholder="Command (full path)" aria-label="Command"
-            value={command} onChange={e => setCommand(e.target.value)} data-testid="mcp-form-command" />
-          <textarea className={INPUT} rows={2} placeholder="Arguments, one per line" aria-label="Arguments"
-            value={args} onChange={e => setArgs(e.target.value)} data-testid="mcp-form-args" />
-          <input className={INPUT} placeholder="Variables the server needs, comma-separated (e.g. TARIFF_TOKEN)"
-            aria-label="Environment variables" value={env} onChange={e => setEnv(e.target.value)}
-            data-testid="mcp-form-env" />
-          <p className="text-xs text-muted">
-            The server process sees only these variables (set their values after saving) plus PATH, HOME and
-            the locale, never the app&apos;s own keys.
-          </p>
-        </>
-      ) : (
-        <input className={INPUT} placeholder="https://…/mcp (http only on this machine)" aria-label="URL"
-          value={url} onChange={e => setUrl(e.target.value)} data-testid="mcp-form-url" />
-      )}
+      <input className={INPUT} placeholder="https://…/mcp (http only on this machine)" aria-label="URL"
+        value={url} onChange={e => setUrl(e.target.value)} data-testid="mcp-form-url" />
+      <p className="text-xs text-muted">
+        URL servers only. A server that runs as a command on this machine is added by editing
+        mcp-servers.json by hand.
+      </p>
       <textarea className={INPUT} rows={2} aria-label="Tier overrides"
         placeholder="Optional tier overrides, one per line: tool = destructive (can only raise a tier)"
         value={tiers} onChange={e => setTiers(e.target.value)} data-testid="mcp-form-tiers" />
@@ -309,15 +317,14 @@ export default function McpServerSettings() {
     <div id="mcp-servers" data-testid="mcp-settings" className="space-y-3">
       <div>
         <h3 className="text-sm font-semibold">External tools (MCP servers)</h3>
-        <p className="text-xs text-muted">
+        <p className="rounded border border-warn/40 bg-warn/5 p-2 text-xs mt-1" data-testid="mcp-warning">
+          Add only servers you trust: their tool descriptions and results reach the model, and the assistant
+          asks before every tool a server does not mark read-only.
+        </p>
+        <p className="text-xs text-muted mt-1">
           Tools from these servers join the assistant&apos;s catalogue for every model, starting with the next chat.
         </p>
       </div>
-      <p className="rounded border border-warn/40 bg-warn/5 p-2 text-xs" data-testid="mcp-warning">
-        A server&apos;s tool descriptions and results reach the model, and a local server runs as a program on
-        this machine. Add only servers you trust. Unless a server marks a tool read-only, the assistant asks
-        before every call to it, in Expert and Guided alike.
-      </p>
       {data.file_error && (
         <p className="text-xs text-danger" data-testid="mcp-file-error">
           {data.file_error}. Fix or remove the file; nothing is written while it is unreadable.
@@ -332,28 +339,29 @@ export default function McpServerSettings() {
           <li key={s.id ?? `invalid-${index}`} className="rounded border border-border p-2 space-y-2"
             data-testid={`mcp-server-${s.id ?? 'invalid'}`}>
             <div className="flex items-center gap-2 text-xs">
-              <label className="flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={s.enabled}
-                  disabled={s.id == null || saveMutation.isPending}
-                  onChange={e => s.id && saveMutation.mutate({ id: s.id, body: bodyOf(s, e.target.checked) })}
-                  aria-label={`Enable ${s.id ?? 'server'}`}
-                  data-testid={`mcp-enable-${s.id}`}
-                />
+              <input
+                type="checkbox"
+                checked={s.enabled}
+                disabled={lockedReason(s) != null || saveMutation.isPending}
+                onChange={e => s.id && saveMutation.mutate({ id: s.id, body: bodyOf(s, e.target.checked) })}
+                aria-label={`Enable ${s.id ?? 'server'}`}
+                aria-describedby={lockedReason(s) ? `mcp-locked-${index}` : undefined}
+                data-testid={`mcp-enable-${s.id}`}
+              />
+              <span className="min-w-0 flex-1 truncate" title={rowText(s)} data-testid={`mcp-row-${s.id}`}>
                 <span className="font-semibold">{s.id ?? '(invalid entry)'}</span>
-              </label>
-              <span className="text-muted">{s.transport === 'http' ? 'URL' : 'command'}</span>
-              <span className="font-mono truncate min-w-0 flex-1"
-                title={s.transport === 'http' ? s.url ?? '' : [s.command, ...s.args].join(' ')}>
-                {s.transport === 'http' ? s.url : [s.command, ...s.args].join(' ')}
+                <span className="text-muted"> · {s.transport ?? 'unknown'} · </span>
+                <span className="font-mono">{target(s)}</span>
               </span>
               {s.id && (
+                <button type="button" className={BUTTON} onClick={() => void runTest(s.id!)}
+                  disabled={tests[s.id] === 'running' || s.problem != null}
+                  aria-label={`Test ${s.id}`} data-testid={`mcp-test-${s.id}`}>
+                  Test
+                </button>
+              )}
+              {s.id && s.transport === 'http' && (
                 <>
-                  <button type="button" className={BUTTON} onClick={() => void runTest(s.id!)}
-                    disabled={tests[s.id] === 'running'} aria-label={`Test ${s.id}`} data-testid={`mcp-test-${s.id}`}>
-                    Test
-                  </button>
                   <button type="button" className="text-xs text-muted underline" onClick={() => setForm(s)}
                     aria-label={`Edit ${s.id}`} data-testid={`mcp-edit-${s.id}`}>
                     Edit
@@ -365,6 +373,11 @@ export default function McpServerSettings() {
                 </>
               )}
             </div>
+            {lockedReason(s) && (
+              <p id={`mcp-locked-${index}`} className="text-xs text-muted" data-testid={`mcp-locked-${s.id}`}>
+                {lockedReason(s)}
+              </p>
+            )}
             {s.problem && <p className="text-xs text-danger">{s.problem}</p>}
             {s.id && s.key && (
               <KeyField label="Bearer token" status={s.key} testId={`mcp-key-${s.id}-bearer`}
@@ -405,7 +418,7 @@ export default function McpServerSettings() {
         message={deleteTarget
           ? `Delete "${deleteTarget}" and its stored keys? Its tools leave the assistant from the next chat.`
           : ''}
-        confirmLabel="Delete"
+        confirmLabel="Delete server"
         danger
         pending={deleteMutation.isPending}
         onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}

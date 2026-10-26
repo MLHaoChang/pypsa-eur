@@ -4,9 +4,10 @@
  *
  * SECURITY. Like api/llmSettings.ts, nothing here ever receives a key value:
  * `McpKeyStatus` is presence, a last-four hint and redactability. The body
- * of `putMcpServer` names a server's environment VARIABLES; the backend
- * derives the managed key behind each, so a client cannot point a server at
- * another server's credential.
+ * of `putMcpServer` is an http server's URL, toggle and tier overrides; the
+ * backend derives its bearer slot, so a client cannot point a server at
+ * another server's credential. A stdio server is written by hand in
+ * `mcp-servers.json`: these routes list, test and key it, never change it.
  */
 import axios from 'axios'
 import { client } from './client'
@@ -34,13 +35,10 @@ export interface McpServerOut {
   problem: string | null
 }
 
+/** An http server only; the backend refuses any other transport. */
 export interface McpServerIn {
   enabled: boolean
-  transport: 'stdio' | 'http'
-  command?: string | null
-  args?: string[]
-  url?: string | null
-  env?: string[]
+  url: string
   tiers?: Record<string, McpTier>
 }
 

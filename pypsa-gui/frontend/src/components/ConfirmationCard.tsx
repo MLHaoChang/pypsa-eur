@@ -382,7 +382,7 @@ export function ConfirmationCard() {
       </div>
       {pending.external && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-external">
-          External tool from MCP server &ldquo;{pending.external.server}&rdquo;
+          External tool · MCP server {pending.external.server}
         </div>
       )}
       {guidedWording?.note && (

@@ -61,7 +61,12 @@ SCHEMA_MAX_DEPTH = 6
 KEY_PREFIX = "PYPSA_GUI_MCP_KEY__"
 _ID = re.compile(r"[a-z0-9]{1,16}")
 _CHILD_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "SYSTEMROOT", "TEMP", "TMP")
-CHILD_ENV = _CHILD_ENV   # what a stdio server receives besides its mapped keys
+# A variable an entry may map: never one the child already receives, nor one
+# that changes how a loader or interpreter starts (a stdio server is a process
+# this backend runs; the value is a managed key, the name must not be a lever).
+_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,31}")
+_ENV_REFUSED = frozenset({"NODE_OPTIONS", "PATH", "HOME", "SHELL", *_CHILD_ENV})
+_ENV_REFUSED_PREFIXES = ("LD_", "DYLD_", "PYTHON")
 _TIER_ORDER = ("read", "write", "destructive", "execution", "execution_long_running")
 
 # The refusals, as `{"error_kind": ...}` literals so
@@ -126,6 +131,11 @@ def _parse_one(entry: Any) -> tuple[ServerConfig | None, str | None]:
     return cfg, problem
 
 
+def env_name_allowed(var: Any) -> bool:
+    return (isinstance(var, str) and bool(_ENV_NAME.fullmatch(var))
+            and var not in _ENV_REFUSED and not var.startswith(_ENV_REFUSED_PREFIXES))
+
+
 def validate_entry(entry: Any) -> tuple[ServerConfig | None, str | None]:
     """The entry's config, or the reason it is refused; `enabled` aside, so a
     disabled entry is checked as strictly as a live one."""
@@ -142,6 +152,10 @@ def validate_entry(entry: Any) -> tuple[ServerConfig | None, str | None]:
             isinstance(k, str) and isinstance(v, str) and v.startswith(KEY_PREFIX)
             for k, v in env.items()):
         return None, f"{sid}: env values must name keys starting {KEY_PREFIX}"
+    for var in env:
+        if not env_name_allowed(var):
+            return None, (f"{sid}: {var!r} is not a variable a server may be given "
+                          "(up to 32 characters of [A-Z0-9_]; not PATH, HOME, LD_*, PYTHON*, ...)")
     key = entry.get("key")
     if key is not None and not (isinstance(key, str) and key.startswith(KEY_PREFIX)):
         return None, f"{sid}: key must name a key starting {KEY_PREFIX}"
@@ -525,7 +539,9 @@ class _HttpConnection(_Connection):
                 except _Failure:
                     pass
             raise
-        if response.status_code >= 400:
+        if response.status_code >= 300:
+            # A 3xx too: redirects are never followed (`_http_client`), so the
+            # URL the admin entered is the only host this server ever reaches.
             raise _Failure(_UNAVAILABLE, f"{self.cfg.id}: HTTP {response.status_code}")
         text = response.content.decode("utf-8", errors="replace")
         if "text/event-stream" in response.header("Content-Type"):

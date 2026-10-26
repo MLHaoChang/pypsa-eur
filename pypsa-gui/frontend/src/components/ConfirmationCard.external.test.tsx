@@ -26,7 +26,7 @@ it.each(['expert', 'guided'] as const)('labels an external tool in %s', (uiMode)
   setPending({ server: 'tariffs' })
   render(<ConfirmationCard />)
   expect(screen.getByTestId('chat-confirmation-external').textContent)
-    .toBe('External tool from MCP server “tariffs”')
+    .toBe('External tool · MCP server tariffs')
 })
 
 it('leaves a built-in tool unlabelled', () => {

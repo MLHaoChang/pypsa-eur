@@ -9,8 +9,10 @@ Chat harness issue 19, slice 2 — the MCP server settings routes
     PUT    /api/chat/settings/mcp/servers/{id}/keys/{name}
     DELETE /api/chat/settings/mcp/servers/{id}/keys/{name}
 
-Super-admin only, like the LLM keys. The body names variables, never keys;
-no response and no log line carries a key value. Fixtures and isolation
+Super-admin only, like the LLM keys. The web adds and edits http entries
+only; stdio entries are written by hand and given back as they were. The
+body never names a key; no response, log line or file byte carries a key
+value. Fixtures and isolation
 mirror `test_llm_settings_api.py`.
 """
 from __future__ import annotations
@@ -20,8 +22,10 @@ import logging
 import os
 import stat
 import sys
+import threading
 import uuid
 from datetime import datetime, timezone
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
@@ -77,11 +81,24 @@ def admin(_auth_db, seeded_identity):
                 db.commit()
 
 
-def _stdio(**over):
-    body = {"enabled": False, "transport": "stdio", "command": sys.executable,
-            "args": [str(STUB)], "env": []}
+def _http(**over):
+    body = {"enabled": False, "url": "https://example.com/mcp"}
     body.update(over)
     return body
+
+
+def _stdio_entry(sid="stub", **over):
+    """A stdio entry as an admin writes it by hand: the web never makes one."""
+    entry = {"id": sid, "transport": "stdio", "command": sys.executable, "args": [str(STUB)]}
+    entry.update(over)
+    return entry
+
+
+def _hand(*entries) -> str:
+    mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
+    text = json.dumps({"servers": list(entries)})
+    mcp_client.config_path().write_text(text)
+    return text
 
 
 def _file() -> dict:
@@ -98,13 +115,13 @@ def _file() -> dict:
 def test_an_org_admin_and_anonymous_are_refused(client, anon_client, method, path):
     kwargs = {}
     if method == "put":
-        kwargs["json"] = {"value": "x"} if path.endswith("bearer") else _stdio()
+        kwargs["json"] = {"value": "x"} if path.endswith("bearer") else _http()
     assert getattr(client, method)(path, **kwargs).status_code == 403
     assert getattr(anon_client, method)(path, **kwargs).status_code == 401
     assert not mcp_client.config_path().exists()
 
 
-# ── the list ───────────────────────────────────────────────────────────────
+# ── the list and http entries ──────────────────────────────────────────────
 
 def test_no_file_lists_nothing(admin):
     r = admin.get(BASE)
@@ -112,39 +129,32 @@ def test_no_file_lists_nothing(admin):
     assert r.json() == {"servers": [], "file_error": None}
 
 
-def test_put_writes_the_file_at_0600_with_derived_keys(admin):
-    r = admin.put(f"{BASE}/tariffs", json=_stdio(env=["TARIFF_TOKEN"], tiers={"lookup": "destructive"}))
+def test_put_writes_an_http_entry_at_0600_with_a_derived_bearer_slot(admin):
+    r = admin.put(f"{BASE}/feed", json=_http(tiers={"lookup": "destructive"}))
     assert r.status_code == 200, r.text
     out = r.json()
-    assert out["env"] == [{"name": "TARIFF_TOKEN", "present": False, "hint": None, "redactable": None}]
-    assert out["key"] is None and out["problem"] is None and out["enabled"] is False
-    entry = _file()["servers"][0]
-    assert entry["env"] == {"TARIFF_TOKEN": "PYPSA_GUI_MCP_KEY__TARIFFS__TARIFF_TOKEN"}
-    assert entry["tiers"] == {"lookup": "destructive"}
+    assert out["key"] == {"present": False, "hint": None, "redactable": None}
+    assert out["env"] == [] and out["problem"] is None and out["enabled"] is False
+    assert _file()["servers"] == [{
+        "id": "feed", "enabled": False, "transport": "http", "url": "https://example.com/mcp",
+        "key": "PYPSA_GUI_MCP_KEY__FEED", "tiers": {"lookup": "destructive"}}]
     if os.name == "posix":
         assert stat.S_IMODE(mcp_client.config_path().stat().st_mode) == 0o600
     assert not list(mcp_client.config_path().parent.glob("*.tmp"))
 
 
-def test_an_http_server_gets_a_bearer_slot(admin):
-    r = admin.put(f"{BASE}/feed", json={"transport": "http", "url": "https://example.com/mcp"})
-    assert r.status_code == 200, r.text
-    assert r.json()["key"] == {"present": False, "hint": None, "redactable": None}
-    assert _file()["servers"][0]["key"] == "PYPSA_GUI_MCP_KEY__FEED"
-
-
 @pytest.mark.parametrize("sid,body", [
-    ("Bad", _stdio()),
-    ("toolongserverid12345", _stdio()),
-    ("a", {"transport": "http", "url": "http://example.com/mcp"}),       # http off loopback
-    ("a", {"transport": "http", "url": "file:///etc/passwd"}),
-    ("a", _stdio(command="")),
-    ("a", _stdio(env=["lower"])),
-    ("a", _stdio(env=["PATH"])),                                        # already given
-    ("a", _stdio(env=["X", "X"])),
-    ("a", _stdio(tiers={"lookup": "harmless"})),
-    ("a", _stdio(key="PYPSA_GUI_LLM_KEY__OTHER")),                       # keys are never named
-    ("a", _stdio(enabled="yes")),
+    ("Bad", _http()),
+    ("toolongserverid12345", _http()),
+    ("a", _http(url="http://example.com/mcp")),                         # http off loopback
+    ("a", _http(url="file:///etc/passwd")),
+    ("a", {"enabled": False}),                                          # no URL
+    ("a", _http(transport="stdio")),                                    # the web makes http only
+    ("a", _http(command=sys.executable, args=[str(STUB)])),
+    ("a", _http(env=["TOKEN"])),
+    ("a", _http(tiers={"lookup": "harmless"})),
+    ("a", _http(key="PYPSA_GUI_LLM_KEY__OTHER")),                       # keys are never named
+    ("a", _http(enabled="yes")),
 ])
 def test_invalid_bodies_are_refused_and_nothing_is_written(admin, sid, body):
     assert admin.put(f"{BASE}/{sid}", json=body).status_code == 422
@@ -152,37 +162,75 @@ def test_invalid_bodies_are_refused_and_nothing_is_written(admin, sid, body):
 
 
 def test_loopback_http_is_allowed(admin):
-    assert admin.put(f"{BASE}/local", json={"transport": "http",
-                                             "url": "http://127.0.0.1:9000/mcp"}).status_code == 200
+    assert admin.put(f"{BASE}/local", json=_http(url="http://127.0.0.1:9000/mcp")).status_code == 200
 
 
 def test_put_replaces_in_place_and_keeps_other_entries_as_written(admin):
-    mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
-    hand = [{"id": "first", "transport": "stdio", "command": "x"},
+    hand = [{"id": "first", "transport": "http", "url": "https://a.example/mcp"},
             {"id": "BROKEN"}, "not an object",
-            {"id": "last", "transport": "stdio", "command": "y"}]
-    mcp_client.config_path().write_text(json.dumps({"servers": hand}))
+            {"transport": "stdio", "id": "last", "command": "y", "env": {}, "args": ["-q"]}]
+    _hand(*hand)
     listed = admin.get(BASE).json()["servers"]
     assert [s["id"] for s in listed] == ["first", None, None, "last"]
     assert listed[1]["problem"] and listed[2]["problem"]
-    assert admin.put(f"{BASE}/first", json=_stdio(command="z")).status_code == 200
+    assert admin.put(f"{BASE}/first", json=_http(url="https://b.example/mcp")).status_code == 200
+    assert admin.put(f"{BASE}/added", json=_http()).status_code == 200
+    assert admin.delete(f"{BASE}/added").status_code == 200
     written = _file()["servers"]
     assert written[1:] == hand[1:]
-    assert written[0]["command"] == "z"
+    assert list(written[3]) == list(hand[3])                  # key order too
+    assert written[0]["url"] == "https://b.example/mcp"
+
+
+# ── stdio entries are the file's alone ─────────────────────────────────────
+
+@pytest.mark.parametrize("entry", [
+    _stdio_entry("tool"),
+    {"id": "tool", "transport": "carrier-pigeon"},
+    {"id": "tool"},
+])
+def test_an_entry_that_is_not_http_is_never_replaced_or_removed(admin, entry):
+    text = _hand(entry)
+    assert admin.put(f"{BASE}/tool", json=_http()).status_code == 409
+    assert admin.delete(f"{BASE}/tool").status_code == 409
+    assert mcp_client.config_path().read_text() == text
+    listed = admin.get(BASE).json()["servers"][0]
+    assert listed["id"] == "tool"
+
+
+@pytest.mark.parametrize("var", [
+    "LD_PRELOAD", "LD_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "PYTHONPATH", "PYTHONSTARTUP",
+    "PYTHONHOME", "NODE_OPTIONS", "PATH", "HOME", "SHELL", "LANG", "LC_ALL", "SYSTEMROOT",
+    "TEMP", "TMP", "lower", "A-B", "V" * 33,
+])
+def test_a_variable_that_steers_the_child_is_refused_everywhere(admin, var):
+    slot = mcp_client.key_slot("tool", "X")
+    entry = _stdio_entry("tool", env={var: slot})
+    _hand(entry)
+    assert mcp_client.validate_entry(entry)[1]
+    assert mcp_client.parse_servers(_file())[0] == []           # never started
+    assert admin.get(BASE).json()["servers"][0]["problem"]
+    assert admin.post(f"{BASE}/tool/test").status_code == 422
+    if var.isupper() and len(var) <= 32 and "-" not in var:
+        assert admin.put(f"{BASE}/tool/keys/{var}", json={"value": SECRET}).status_code == 422
+    assert app_secrets.get_stored(slot) is None
+
+
+def test_an_allowed_variable_passes():
+    assert mcp_client.env_name_allowed("TARIFF_TOKEN")
+    assert mcp_client.env_name_allowed("_PRIVATE")
 
 
 def test_an_unreadable_file_is_reported_and_never_overwritten(admin):
     mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
     mcp_client.config_path().write_text("{not json")
     assert admin.get(BASE).json()["file_error"]
-    assert admin.put(f"{BASE}/a", json=_stdio()).status_code == 409
+    assert admin.put(f"{BASE}/a", json=_http()).status_code == 409
     assert mcp_client.config_path().read_text() == "{not json"
 
 
 def test_a_disabled_entry_is_still_validated(admin):
-    mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
-    mcp_client.config_path().write_text(json.dumps({"servers": [
-        {"id": "off", "enabled": False, "transport": "http", "url": "http://example.com"}]}))
+    _hand({"id": "off", "enabled": False, "transport": "http", "url": "http://example.com"})
     assert admin.get(BASE).json()["servers"][0]["problem"]
     assert mcp_client.parse_servers(_file())[0] == []         # disabled: never connected
 
@@ -191,7 +239,7 @@ def test_a_disabled_entry_is_still_validated(admin):
 
 def test_a_key_is_stored_hinted_and_never_echoed(admin, caplog):
     caplog.set_level(logging.DEBUG)
-    admin.put(f"{BASE}/feed", json={"transport": "http", "url": "https://example.com/mcp"})
+    admin.put(f"{BASE}/feed", json=_http())
     r = admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET})
     assert r.status_code == 200, r.text
     assert r.json()["present"] is True and r.json()["hint"] == f"…{SECRET[-4:]}"
@@ -203,8 +251,28 @@ def test_a_key_is_stored_hinted_and_never_echoed(admin, caplog):
     assert SECRET not in mcp_client.config_path().read_text()
 
 
+def test_a_key_value_reaches_no_response_log_or_file(admin, caplog):
+    caplog.set_level(logging.DEBUG)
+    _hand(_stdio_entry("stub", env={"TOKEN": mcp_client.key_slot("stub", "TOKEN")}))
+    texts = [
+        admin.put(f"{BASE}/stub/keys/TOKEN", json={"value": SECRET}).text,
+        admin.put(f"{BASE}/feed", json=_http(url="http://127.0.0.1:9/mcp")).text,
+        admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET}).text,
+        admin.get(BASE).text,
+        admin.post(f"{BASE}/stub/test").text,
+        admin.post(f"{BASE}/feed/test").text,
+        admin.put(f"{BASE}/feed", json=_http(url="http://127.0.0.1:9/other")).text,
+    ]
+    file_text = mcp_client.config_path().read_text()
+    texts.append(admin.delete(f"{BASE}/feed").text)
+    texts.append(admin.delete(f"{BASE}/stub/keys/TOKEN").text)
+    assert all(SECRET not in t for t in texts)
+    assert SECRET not in caplog.text
+    assert SECRET not in file_text and SECRET not in mcp_client.config_path().read_text()
+
+
 def test_a_key_name_the_server_does_not_list_is_404(admin):
-    admin.put(f"{BASE}/tool", json=_stdio(env=["TOKEN"]))
+    _hand(_stdio_entry("tool", env={"TOKEN": mcp_client.key_slot("tool", "TOKEN")}))
     assert admin.put(f"{BASE}/tool/keys/bearer", json={"value": SECRET}).status_code == 404
     assert admin.put(f"{BASE}/tool/keys/OTHER", json={"value": SECRET}).status_code == 404
     assert admin.put(f"{BASE}/none/keys/TOKEN", json={"value": SECRET}).status_code == 404
@@ -213,26 +281,26 @@ def test_a_key_name_the_server_does_not_list_is_404(admin):
 
 
 def test_a_hand_written_key_outside_the_family_is_never_touched(admin):
-    mcp_client.config_path().parent.mkdir(parents=True, exist_ok=True)
-    mcp_client.config_path().write_text(json.dumps({"servers": [
-        {"id": "x", "transport": "stdio", "command": "c", "env": {"T": "ANTHROPIC_API_KEY"}}]}))
+    _hand({"id": "x", "transport": "stdio", "command": "c", "env": {"T": "ANTHROPIC_API_KEY"}})
     assert admin.put(f"{BASE}/x/keys/T", json={"value": SECRET}).status_code == 404
     assert admin.delete(f"{BASE}/x/keys/T").status_code == 404
     assert admin.get(BASE).json()["servers"][0]["env"][0]["present"] is False
 
 
-def test_dropping_a_variable_or_deleting_the_server_clears_its_slots(admin):
-    admin.put(f"{BASE}/tool", json=_stdio(env=["A", "B"]))
-    admin.put(f"{BASE}/tool/keys/A", json={"value": SECRET})
-    admin.put(f"{BASE}/tool/keys/B", json={"value": SECRET + "b"})
-    admin.put(f"{BASE}/tool", json=_stdio(env=["B"]))
-    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__TOOL__A") is None
-    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__TOOL__B") == SECRET + "b"
-    assert admin.delete(f"{BASE}/tool").status_code == 200
-    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__TOOL__B") is None
-    assert "PYPSA_GUI_MCP_KEY__TOOL__B" not in os.environ
+def test_replacing_or_deleting_an_http_server_clears_its_slots(admin):
+    var_slot = mcp_client.key_slot("feed", "A")
+    _hand({"id": "feed", "transport": "http", "url": "https://example.com/mcp",
+           "key": mcp_client.key_slot("feed"), "env": {"A": var_slot}})
+    admin.put(f"{BASE}/feed/keys/A", json={"value": SECRET})
+    admin.put(f"{BASE}/feed/keys/bearer", json={"value": SECRET + "b"})
+    assert admin.put(f"{BASE}/feed", json=_http()).status_code == 200
+    assert app_secrets.get_stored(var_slot) is None
+    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__FEED") == SECRET + "b"
+    assert admin.delete(f"{BASE}/feed").status_code == 200
+    assert app_secrets.get_stored("PYPSA_GUI_MCP_KEY__FEED") is None
+    assert "PYPSA_GUI_MCP_KEY__FEED" not in os.environ
     assert _file() == {"servers": []}
-    assert admin.delete(f"{BASE}/tool").status_code == 404
+    assert admin.delete(f"{BASE}/feed").status_code == 404
 
 
 def test_the_family_is_managed_and_bounded():
@@ -247,7 +315,7 @@ def test_the_family_is_managed_and_bounded():
 # ── the test route ─────────────────────────────────────────────────────────
 
 def test_test_lists_shaped_tools_without_enabling(admin):
-    admin.put(f"{BASE}/stub", json=_stdio(args=[str(STUB), "--forged"]))
+    _hand(_stdio_entry("stub", enabled=False, args=[str(STUB), "--forged"]))
     r = admin.post(f"{BASE}/stub/test")
     assert r.status_code == 200, r.text
     out = r.json()
@@ -263,7 +331,7 @@ def test_test_lists_shaped_tools_without_enabling(admin):
 
 
 def test_a_failing_server_gets_a_fixed_message(admin):
-    admin.put(f"{BASE}/gone", json=_stdio(command="/nonexistent/mcp-server"))
+    _hand(_stdio_entry("gone", command="/nonexistent/mcp-server", args=[]))
     out = admin.post(f"{BASE}/gone/test").json()
     assert out == {"ok": False, "error_kind": "mcp_unavailable",
                    "message": "The server could not be started or reached."}
@@ -271,3 +339,49 @@ def test_a_failing_server_gets_a_fixed_message(admin):
 
 def test_test_of_an_unknown_server_is_404(admin):
     assert admin.post(f"{BASE}/nobody/test").status_code == 404
+
+
+@pytest.fixture
+def redirecting():
+    """A loopback server that answers every POST with a 307 to a second one,
+    which counts what reaches it."""
+    hits: list[str] = []
+
+    class Target(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    target = HTTPServer(("127.0.0.1", 0), Target)
+
+    class Redirect(Target):
+        def do_POST(self):  # noqa: N802
+            self.send_response(307)
+            self.send_header("Location", f"http://127.0.0.1:{target.server_port}/mcp")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+    origin = HTTPServer(("127.0.0.1", 0), Redirect)
+    for server in (target, origin):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{origin.server_port}/mcp", hits
+    finally:
+        for server in (origin, target):
+            server.shutdown()
+            server.server_close()
+
+
+def test_a_redirect_is_never_followed(admin, redirecting):
+    url, hits = redirecting
+    assert admin.put(f"{BASE}/hop", json=_http(url=url)).status_code == 200
+    out = admin.post(f"{BASE}/hop/test").json()
+    assert out == {"ok": False, "error_kind": "mcp_unavailable",
+                   "message": "The server could not be started or reached."}
+    assert hits == []

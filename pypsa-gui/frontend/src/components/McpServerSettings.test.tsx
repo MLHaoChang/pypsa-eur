@@ -75,11 +75,28 @@ it('lists servers with the warning and never seeds a key input', async () => {
   vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
   renderSection()
   expect(await screen.findByTestId('mcp-warning')).toBeTruthy()
+  expect(screen.getByTestId('mcp-row-tariffs').textContent).toBe('tariffs · stdio · /usr/bin/tariff-mcp --ro')
+  expect(screen.getByTestId('mcp-row-feed').getAttribute('title')).toBe('feed · http · https://example.com/mcp')
+  expect(screen.getByTestId('mcp-key-tariffs-TARIFF_TOKEN-status').textContent).toBe('Key set (…wxyz)')
+  expect(screen.queryByTestId('mcp-key-tariffs-TARIFF_TOKEN-input')).toBeNull()
+  await userEvent.click(screen.getByTestId('mcp-key-tariffs-TARIFF_TOKEN-replace'))
   const input = screen.getByTestId('mcp-key-tariffs-TARIFF_TOKEN-input') as HTMLInputElement
   expect(input.value).toBe('')
   expect(input.type).toBe('password')
-  expect(input.placeholder).toContain('…wxyz')
-  expect(screen.getByTestId('mcp-key-feed-bearer')).toBeTruthy()
+  expect(input.placeholder).not.toContain('wxyz')
+  expect(screen.getByTestId('mcp-key-feed-bearer-status').textContent).toBe('No key')
+})
+
+it('keeps a stdio server read-only and says why', async () => {
+  vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
+  renderSection()
+  const toggle = await screen.findByTestId('mcp-enable-tariffs') as HTMLInputElement
+  expect(toggle.disabled).toBe(true)
+  expect(screen.getByTestId('mcp-locked-tariffs').textContent).toBe('Command servers are edited in mcp-servers.json')
+  expect(screen.queryByTestId('mcp-edit-tariffs')).toBeNull()
+  expect(screen.queryByTestId('mcp-delete-tariffs')).toBeNull()
+  expect(screen.getByTestId('mcp-test-tariffs')).toBeTruthy()
+  expect(screen.queryByTestId('mcp-locked-feed')).toBeNull()
 })
 
 it('says when there are no servers', async () => {
@@ -92,10 +109,9 @@ it('toggling enable resends the whole entry', async () => {
   vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
   vi.mocked(putMcpServer).mockResolvedValue(payload().servers[0])
   renderSection()
-  await userEvent.click(await screen.findByTestId('mcp-enable-tariffs'))
-  expect(putMcpServer).toHaveBeenCalledWith('tariffs', {
-    enabled: true, transport: 'stdio', command: '/usr/bin/tariff-mcp', args: ['--ro'], url: null,
-    env: ['TARIFF_TOKEN'], tiers: { upload: 'destructive' },
+  await userEvent.click(await screen.findByTestId('mcp-enable-feed'))
+  expect(putMcpServer).toHaveBeenCalledWith('feed', {
+    enabled: false, url: 'https://example.com/mcp', tiers: {},
   })
 })
 
@@ -114,6 +130,7 @@ it('shows the tools a test lists, as text', async () => {
   vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
   vi.mocked(postMcpTest).mockResolvedValue({ ok: true, skipped: 1, tools: [
     { name: 'mcp__tariffs__lookup', tier: 'read', description: '<b>External tool</b> Safety: read' },
+    { name: 'mcp__tariffs__upload', tier: 'destructive', description: 'Uploads.' },
   ] })
   renderSection()
   await userEvent.click(await screen.findByTestId('mcp-test-tariffs'))
@@ -122,6 +139,8 @@ it('shows the tools a test lists, as text', async () => {
   expect(within(tools).getByText('<b>External tool</b> Safety: read')).toBeTruthy()
   expect(tools.querySelector('b')).toBeNull()
   expect(tools.textContent).toContain('1 skipped')
+  expect(within(tools).getByText('Read only')).toBeTruthy()
+  expect(within(tools).getByText('Asks first').getAttribute('title')).toBe('destructive')
 })
 
 it('shows a failed test with the fixed message', async () => {
@@ -133,28 +152,27 @@ it('shows a failed test with the fixed message', async () => {
   expect((await screen.findByTestId('mcp-test-failed')).textContent).toBe('The server did not answer in time.')
 })
 
-it('adds a stdio server, disabled, with variables and tiers', async () => {
+it('adds an http server, disabled, with tiers; no command form', async () => {
   vi.mocked(fetchMcpServersOrNull).mockResolvedValue(payload())
-  vi.mocked(putMcpServer).mockResolvedValue(payload().servers[0])
+  vi.mocked(putMcpServer).mockResolvedValue(payload().servers[1])
   renderSection()
   await userEvent.click(await screen.findByTestId('mcp-add-open'))
+  expect(screen.queryByTestId('mcp-form-command')).toBeNull()
+  expect(screen.queryByTestId('mcp-form-transport')).toBeNull()
   const submit = screen.getByTestId('mcp-form-submit') as HTMLButtonElement
   await userEvent.type(screen.getByTestId('mcp-form-id'), 'tariffs')
   expect(screen.getByText('That id is taken.')).toBeTruthy()
   await userEvent.clear(screen.getByTestId('mcp-form-id'))
   await userEvent.type(screen.getByTestId('mcp-form-id'), 'weather')
   expect(submit.disabled).toBe(true)
-  await userEvent.type(screen.getByTestId('mcp-form-command'), '/opt/weather-mcp')
-  await userEvent.type(screen.getByTestId('mcp-form-args'), '--a{enter}--b')
-  await userEvent.type(screen.getByTestId('mcp-form-env'), 'W_TOKEN, W_USER')
+  await userEvent.type(screen.getByTestId('mcp-form-url'), 'https://weather.example/mcp')
   await userEvent.type(screen.getByTestId('mcp-form-tiers'), 'forecast = harmless')
   expect(submit.disabled).toBe(true)
   await userEvent.clear(screen.getByTestId('mcp-form-tiers'))
   await userEvent.type(screen.getByTestId('mcp-form-tiers'), 'forecast = destructive')
   await userEvent.click(submit)
   expect(putMcpServer).toHaveBeenCalledWith('weather', {
-    enabled: false, transport: 'stdio', command: '/opt/weather-mcp', args: ['--a', '--b'],
-    url: null, env: ['W_TOKEN', 'W_USER'], tiers: { forecast: 'destructive' },
+    enabled: false, url: 'https://weather.example/mcp', tiers: { forecast: 'destructive' },
   })
 })
 
@@ -163,7 +181,7 @@ it('deletes through the confirm dialog', async () => {
   vi.mocked(deleteMcpServer).mockResolvedValue()
   renderSection()
   await userEvent.click(await screen.findByTestId('mcp-delete-feed'))
-  await userEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Delete server' }))
   expect(deleteMcpServer).toHaveBeenCalledWith('feed')
 })
 

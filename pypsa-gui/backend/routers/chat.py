@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import threading
 from typing import Annotated, Any, Literal
 from uuid import UUID
@@ -680,15 +679,16 @@ def post_llm_profile_test(
 
 # ── Issue 19 slice 2 — MCP servers (`harness/mcp_client.py`) ────────────────
 #
-# The same super-admin gate as the LLM keys: servers are per install, and a
-# stdio server is a process this backend starts. The body names a server's
-# environment VARIABLES only; the managed key behind each is derived here
+# The same super-admin gate as the LLM keys: servers are per install. The web
+# adds and edits http entries only. A stdio entry is a process this backend
+# starts, so it is written by hand in `mcp-servers.json`; these routes list,
+# test and key it but never create, change or remove it, and every write
+# gives it back as it was. A bearer slot is derived here
 # (`mcp_client.key_slot`), for the same reason `ProfileIn` carries no
 # `key_env`: a client-chosen slot would let a server be pointed at another
 # server's credential. Values travel only through the `/keys/{name}` routes
 # into `app_secrets`; no response carries one.
 
-_MCP_ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]{0,31}")
 _MCP_TIER = Literal["read", "write", "destructive", "execution", "execution_long_running"]
 
 
@@ -698,11 +698,7 @@ class McpServerIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: StrictBool = False
-    transport: Literal["stdio", "http"]
-    command: str | None = Field(default=None, max_length=4096)
-    args: list[Annotated[str, Field(max_length=4096)]] = Field(default_factory=list, max_length=64)
-    url: str | None = Field(default=None, max_length=2048)
-    env: list[str] = Field(default_factory=list, max_length=32)
+    url: str = Field(max_length=2048)
     tiers: dict[Annotated[str, Field(max_length=128)], _MCP_TIER] = Field(
         default_factory=dict, max_length=64)
 
@@ -770,11 +766,27 @@ def _mcp_entry_or_404(server_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail=f"no MCP server named {server_id!r}")
 
 
+class _NotWebEditable(Exception):
+    pass
+
+
+def _mcp_refuse_unless_http(entries: list[Any], server_id: str) -> None:
+    """Raise when the file already holds `server_id` as anything but an http
+    entry: that entry stays as it was written."""
+    for e in entries:
+        if isinstance(e, dict) and e.get("id") == server_id and e.get("transport") != "http":
+            raise _NotWebEditable
+
+
 def _mcp_update(change: Any) -> list[Any]:
     try:
         return mcp_client.update_entries(change)
     except mcp_client.ConfigUnreadable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except _NotWebEditable as exc:
+        raise HTTPException(
+            status_code=409,
+            detail="this server is not an http server; edit it in mcp-servers.json") from exc
 
 
 def _mcp_referenced_keys(entries: list[Any]) -> set[str]:
@@ -817,32 +829,21 @@ def put_mcp_server(
     body: McpServerIn,
     user: User | None = Depends(optional_user),
 ) -> dict[str, Any]:
-    """Create or replace one server. Its keys are derived from its id; a
-    changed transport or a dropped variable clears the slot it leaves."""
+    """Create or replace one http server; an id the file holds as anything
+    else is 409. Its bearer slot is derived from its id; a slot the old entry
+    named and this one does not is cleared."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
-    for var in body.env:
-        if not _MCP_ENV_NAME.fullmatch(var) or var in mcp_client.CHILD_ENV:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{var!r}: a variable is up to 32 characters of [A-Z0-9_], "
-                       "not one the server already receives (PATH, HOME, ...)")
-    if len(set(body.env)) != len(body.env):
-        raise HTTPException(status_code=422, detail="each variable is listed once")
     entry: dict[str, Any] = {
-        "id": server_id, "enabled": body.enabled, "transport": body.transport,
-        "env": {var: mcp_client.key_slot(server_id, var) for var in body.env},
-        "tiers": dict(body.tiers),
+        "id": server_id, "enabled": body.enabled, "transport": "http", "url": body.url,
+        "key": mcp_client.key_slot(server_id), "tiers": dict(body.tiers),
     }
-    if body.transport == "stdio":
-        entry.update(command=body.command, args=list(body.args))
-    else:
-        entry.update(url=body.url, key=mcp_client.key_slot(server_id))
     _, problem = mcp_client.validate_entry(entry)
     if problem:
         raise HTTPException(status_code=422, detail=problem)
 
     def replace(entries: list[Any]) -> list[Any]:
+        _mcp_refuse_unless_http(entries, server_id)
         # In place, so the list keeps its order; other entries, valid or
         # not, are written back as they were.
         out, placed = [], False
@@ -866,12 +867,14 @@ def delete_mcp_server(
     server_id: str,
     user: User | None = Depends(optional_user),
 ) -> dict[str, Any]:
-    """Remove one server, close its connection and clear its derived keys."""
+    """Remove one http server, close its connection and clear its derived
+    keys; any other entry is 409 and stays in the file."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
     _mcp_entry_or_404(server_id)
 
     def remove(entries: list[Any]) -> list[Any]:
+        _mcp_refuse_unless_http(entries, server_id)
         return [e for e in entries if not (isinstance(e, dict) and e.get("id") == server_id)]
 
     before = _mcp_update(remove)
@@ -886,7 +889,9 @@ def post_mcp_server_test(
     user: User | None = Depends(optional_user),
 ) -> dict[str, Any]:
     """Connect, list the tools and close, enabled or not: the names, tiers and
-    descriptions the model would see. A failure carries a fixed message."""
+    descriptions the model would see. Only an entry already in the file and
+    valid is tried; nothing in a request is ever started. A failure carries a
+    fixed message."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
     cfg, problem = mcp_client.validate_entry(_mcp_entry_or_404(server_id))
@@ -895,7 +900,9 @@ def post_mcp_server_test(
     return mcp_client.probe(cfg)
 
 
-def _mcp_key_name(server_id: str, name: str) -> str:
+def _mcp_key_name(server_id: str, name: str, *, valid: bool = False) -> str:
+    """The managed key behind `name` on this server; with `valid`, also 422
+    for an entry the client refuses (a value is never stored for it)."""
     entry = _mcp_entry_or_404(server_id)
     if name == "bearer":
         key = entry.get("key") if entry.get("transport") == "http" else None
@@ -905,6 +912,10 @@ def _mcp_key_name(server_id: str, name: str) -> str:
     if not _mcp_managed(key):
         raise HTTPException(status_code=404,
                             detail=f"server {server_id!r} takes no key named {name!r}")
+    if valid:
+        _, problem = mcp_client.validate_entry(entry)
+        if problem:
+            raise HTTPException(status_code=422, detail=problem)
     return key
 
 
@@ -919,7 +930,7 @@ def put_mcp_server_key(
     apply it to this process (see `app_secrets.set_secret`)."""
     _require_super_admin(user)
     _mcp_valid_id(server_id)
-    key = _mcp_key_name(server_id, name)
+    key = _mcp_key_name(server_id, name, valid=True)
     try:
         app_secrets.set_secret(key, body.value)
     except app_secrets.SecretValueError as exc:
