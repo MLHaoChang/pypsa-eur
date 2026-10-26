@@ -206,7 +206,7 @@ def test_complete_preview_uses_owned_http_approval_and_single_use_token(baseline
             if event == 'tool_pending_confirmation':
                 assert data['args']['changes_total'] == 1
                 assert data['args']['reviewed_changes'] == [{
-                    'component_class': 'Generator', 'name': 'G1', 'attribute': 'marginal_cost',
+                    'component_class': 'Generator', 'name': 'G1', 'attribute': 'marginal_cost', 'label': 'Marginal cost',
                     'before': 10.0, 'after': 20, 'unit': 'EUR/MWh'}]
                 route = f'/api/chat/{session.session_id}/confirm'
                 body = {'token': data['confirmation_token'], 'decision': 'approve'}
