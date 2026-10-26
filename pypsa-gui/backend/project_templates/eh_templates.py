@@ -66,10 +66,10 @@ def _day_shape(base: float, peak: float, peak_hour: float = 15.0,
     return base + (peak - base) * np.exp(-((_HOD - peak_hour) ** 2) / (2 * width ** 2))
 
 
-def _base(name: str) -> pypsa.Network:
+def _base(name: str, snapshots=SNAPSHOTS) -> pypsa.Network:
     n = pypsa.Network()
     n.name = name
-    n.set_snapshots(SNAPSHOTS)
+    n.set_snapshots(snapshots)
     n.snapshot_weightings.loc[:, ["objective", "generators"]] = WEIGHT
     n.snapshot_weightings.loc[:, "stores"] = 1.0          # hours per snapshot (S0)
     return n
@@ -112,7 +112,7 @@ def _price(n, component: str, name: str, technology: str) -> None:
 # ── Data Center Energy Hub (weak_flexible) ─────────────────────────────────
 
 
-def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
+def build_eh_datacenter(phases=None, load_spec=None, planning=None) -> pypsa.Network:
     """A 50 MW hyperscale campus behind a weak, capped grid connection.
 
     Critical IT sits on its own bus behind the site transformer (a near
@@ -124,8 +124,10 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     (``_staged_datacenter``); None is the single-year template, unchanged.
     ``load_spec`` (a checked ``DataCentreLoadSpec``, ``dc_load_spec``) opts in
     to the AI-training profile; None keeps today's load bit for bit.
+    ``planning`` (single-year, E1d) dates the week in its start year.
     """
-    n = _base("Data Center Energy Hub")
+    snaps = _week(planning)
+    n = _base("Data Center Energy Hub", snaps)
     for c, co2 in (("AC", 0.0), ("gas", 0.20), ("solar", 0.0),
                    ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
@@ -138,7 +140,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=500.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
-        {"grid_supply": price}, index=SNAPSHOTS)
+        {"grid_supply": price}, index=snaps)
 
     # The weak connection: 40 MW is the physical rating, so the FMEA
     # worksheet (saved network) and the EH study (pack cap) see one system.
@@ -156,7 +158,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
         "it_load": it,
         "cooling": _day_shape(8.0, 14.0),
         "offices": _day_shape(0.4, 1.6, peak_hour=12.0, width=3.0),
-    }, index=SNAPSHOTS)
+    }, index=snaps)
 
     for i in range(1, 5):
         g = f"genset_{i}"
@@ -166,7 +168,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     n.add("Generator", "rooftop_pv", bus="dc_mv", carrier="solar", p_nom=4.0,
           marginal_cost=0.0)
     n.generators_t.p_max_pu = pd.DataFrame(
-        {"rooftop_pv": _solar()}, index=SNAPSHOTS)
+        {"rooftop_pv": _solar()}, index=snaps)
     # The UPS carries the IT load it protects (about 36 MW) for a realistic
     # 15 minutes: 40 MW / 10 MWh, enough for the island plan's 600 s bridge
     # (owner decision, plan 2026-10-07 campus island, S0).
@@ -204,7 +206,7 @@ def build_eh_datacenter(phases=None, load_spec=None) -> pypsa.Network:
     if phases is not None:
         return _staged_datacenter(n, phases, load_spec)
     if load_spec is not None:
-        _apply_dc_profile(n, load_spec, SNAPSHOTS, _single_year_phase(load_spec).it_mw,
+        _apply_dc_profile(n, load_spec, snaps, _single_year_phase(load_spec, planning).it_mw,
                           timezone=_dc_timezone("eh_datacenter"))
     return n
 
@@ -257,10 +259,28 @@ class Planning(NamedTuple):
         return {y: e - y for y, e in zip(self.years, (*self.years[1:], self.end_year))}
 
 
-#: The years each staged example is built for when no ``planning`` is entered.
+#: The single-year examples' horizon end: the staged templates' (E1d).
+SINGLE_YEAR_HORIZON_END = 2045
+
+#: The years each example is built for when no ``planning`` is entered.
 NATIVE_PLANNING: dict[str, Planning] = {
     "eh_datacenter_staged": Planning((2027, 2030, 2035), 2045),
+    **{tid: Planning((int(SNAPSHOTS[0].year),), SINGLE_YEAR_HORIZON_END)
+       for tid in ("eh_datacenter", "eh_h2_hub", "eh_microgrid")},
 }
+#: The single-year examples (E1d): one period, the start year, which dates the
+#: modelled week (or year); the end year is the horizon. True where the
+#: example ships an investment case, which needs a later end year.
+SINGLE_YEAR: dict[str, bool] = {"eh_datacenter": False, "eh_h2_hub": False,
+                                "eh_microgrid": True}
+
+
+def _week(planning: Planning | None = None) -> pd.DatetimeIndex:
+    """The representative week: ``SNAPSHOTS``, or the same week (1 July on)
+    in the entered start year of a single-year example (E1d)."""
+    if planning is None or planning.start_year == SNAPSHOTS[0].year:
+        return SNAPSHOTS
+    return pd.date_range(f"{planning.start_year}-07-01", periods=HOURS, freq="h")
 
 
 def _planning_year(raw: dict, key: str) -> int:
@@ -276,7 +296,7 @@ def _planning_year(raw: dict, key: str) -> int:
 
 
 def planning_spec(template_id: str, raw) -> Planning:
-    """The checked ``planning`` entry for a staged example, or ``PlanningError``."""
+    """The checked ``planning`` entry for an example, or ``PlanningError``."""
     if not isinstance(raw, dict):
         raise PlanningError("planning: must be an object {start_year, end_year, dates?}",
                             "planning")
@@ -284,6 +304,8 @@ def planning_spec(template_id: str, raw) -> Planning:
     if extra:
         raise PlanningError(f"planning.{extra[0]}: unknown key", f"planning.{extra[0]}")
     start, end = _planning_year(raw, "start_year"), _planning_year(raw, "end_year")
+    if template_id in SINGLE_YEAR:
+        return _single_year_planning(template_id, raw, start, end)
     if end == start:
         raise PlanningError("planning.end_year: one year is a single-period study; this is a "
                             "staged example, so use the single-year example or a later end year",
@@ -309,6 +331,22 @@ def planning_spec(template_id: str, raw) -> Planning:
         raise PlanningError(f"planning.dates: increasing years after the start year ({start}) "
                             f"and before the end year ({end}), got {dates}", "planning.dates")
     return Planning(years, end)
+
+
+def _single_year_planning(template_id: str, raw: dict, start: int, end: int) -> Planning:
+    """A single-year example: no dates; the end year at or after the start
+    year, after it where the example's investment case runs to it (E1d)."""
+    if "dates" in raw:
+        raise PlanningError("planning.dates: a single-year example has one period, the start "
+                            "year; use its staged example for investment dates", "planning.dates")
+    if SINGLE_YEAR[template_id] and end <= start:
+        raise PlanningError(f"planning.end_year: the investment case runs from the start year "
+                            f"to the end year, so it must be after the start year ({start}), "
+                            f"got {end}", "planning.end_year")
+    if end < start:
+        raise PlanningError(f"planning.end_year: the start year ({start}) or later, got {end}",
+                            "planning.end_year")
+    return Planning((start,), end)
 
 
 def _is_native(template_id: str, planning: Planning | None) -> bool:
@@ -537,19 +575,20 @@ def _dc_timezone(template_id: str) -> str | None:
     return commercial.get("timezone") or None
 
 
-def dc_load_preset(template_id: str) -> dict:
+def dc_load_preset(template_id: str, planning: Planning | None = None) -> dict:
     """The opt-in spec's defaults for ``template_id`` (all assumed): today's
-    phases, PUE 1.3 at or below 20 °C plus 0.02 per K above, 75 % critical."""
+    phases, PUE 1.3 at or below 20 °C plus 0.02 per K above, 75 % critical.
+    The single-year campus's phase is in service from its week's year."""
     phases = ([{"cod": f"{y}-01-01", "it_mw": it} for y, it, _pue in DC_PHASES]
               if template_id == "eh_datacenter_staged"
-              else [{"cod": "2030-01-01", "it_mw": _DC_IT_MW}])
+              else [{"cod": f"{_week(planning)[0].year}-01-01", "it_mw": _DC_IT_MW}])
     return {"phases": phases, "utilisation": "ai_training", "pue_at_design": 1.3,
             "pue_temperature_slope_per_k": 0.02, "redundancy": "N+1",
             "critical_share": 0.75, "curtailable_share": 0.0}
 
 
-def _single_year_phase(spec):
-    week = SNAPSHOTS[0].date()
+def _single_year_phase(spec, planning: Planning | None = None):
+    week = _week(planning)[0].date()
     live = [p for p in spec.phases if p.cod <= week]
     return live[-1] if live else None
 
@@ -575,7 +614,7 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
 
     if not isinstance(raw, dict):
         raise DcLoadError("dc_load: must be an object", "dc_load")
-    merged = {**dc_load_preset(template_id), **raw}
+    merged = {**dc_load_preset(template_id, planning), **raw}
     merged.setdefault("ai_workload", None)
     if merged["ai_workload"] is None:
         merged["ai_workload"] = {}
@@ -598,9 +637,9 @@ def dc_load_spec(template_id: str, raw: dict | None, planning: Planning | None =
             raise DcLoadError(f"dc_load.phases: the staged template's periods are {expected}; "
                               f"one phase per period with that COD year is needed, got {got}",
                               "dc_load.phases")
-    elif _single_year_phase(spec) is None:
+    elif _single_year_phase(spec, planning) is None:
         raise DcLoadError(f"dc_load.phases: no phase is in service by the modelled week "
-                          f"({SNAPSHOTS[0].date()})", "dc_load.phases")
+                          f"({_week(planning)[0].date()})", "dc_load.phases")
     _check_dc_peak(template_id, spec, planning)
     return spec
 
@@ -648,14 +687,16 @@ def dc_load_meta(template_id: str, spec) -> dict:
 # ── Industrial Hydrogen Hub (strong_grid) ──────────────────────────────────
 
 
-def build_eh_h2_hub() -> pypsa.Network:
+def build_eh_h2_hub(load_spec=None, planning=None) -> pypsa.Network:
     """Grid-connected industrial site with wind, PV and an H₂ chain.
 
     Electrolyser → H₂ store → fuel cell carry the ``eh_role`` conversion
     roles (redundancy scenarios, multi-energy report); the process load is
     the critical demand and an H₂ offtake is the second energy carrier.
+    ``planning`` (E1d) dates the week in its start year; ``load_spec`` is unused.
     """
-    n = _base("Industrial Hydrogen Hub")
+    snaps = _week(planning)
+    n = _base("Industrial Hydrogen Hub", snaps)
     for c, co2 in (("AC", 0.0), ("H2", 0.0), ("wind", 0.0), ("solar", 0.0),
                    ("grid", 0.35), ("electrolysis", 0.0), ("fuel cell", 0.0)):
         n.add("Carrier", c, co2_emissions=co2)
@@ -667,7 +708,7 @@ def build_eh_h2_hub() -> pypsa.Network:
     n.add("Generator", "grid_supply", bus="grid", carrier="grid",
           p_nom=1000.0, marginal_cost=0.0)
     n.generators_t.marginal_cost = pd.DataFrame(
-        {"grid_supply": price}, index=SNAPSHOTS)
+        {"grid_supply": price}, index=snaps)
     n.add("Link", "grid_import", bus0="grid", bus1="hub", p_nom=200.0,
           efficiency=0.995, carrier="AC")
 
@@ -684,7 +725,7 @@ def build_eh_h2_hub() -> pypsa.Network:
     wind, sun = _wind(), _solar()
     n.generators_t.p_max_pu = pd.DataFrame(
         {"wind_farm": wind, "wind_new": wind,
-         "solar_park": sun, "solar_new": sun}, index=SNAPSHOTS)
+         "solar_park": sun, "solar_new": sun}, index=snaps)
 
     n.add("Link", "electrolyser", bus0="hub", bus1="h2", p_nom=60.0,
           efficiency=0.68, carrier="electrolysis")
@@ -710,7 +751,7 @@ def build_eh_h2_hub() -> pypsa.Network:
     n.add("Load", "h2_offtake", bus="h2", carrier="H2", p_set=25.0)
     rng = np.random.default_rng(5)
     n.loads_t.p_set = pd.DataFrame(
-        {"process_load": 40.0 + rng.normal(0.0, 1.5, HOURS)}, index=SNAPSHOTS)
+        {"process_load": 40.0 + rng.normal(0.0, 1.5, HOURS)}, index=snaps)
 
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
@@ -742,34 +783,49 @@ MG_HORIZON_END = 2045
 #: The staged microgrid's finance inputs (`eh_staged_hubs._mg_finance`) on
 #: the plain network's names, one COD for every asset (a single period has
 #: no stage). Synthetic illustrative numbers; the ledger says what each is.
-MG_FINANCE: dict = {
-    "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
-    "financial_close": f"{MG_FIRST_YEAR - 1}-01-01",
-    "cod_by_asset": {a: f"{MG_FIRST_YEAR}-01-01" for a in (*MG_EXISTING, *MG_CANDIDATES)},
-    "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
-    "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
-    # Every owned generator and battery: PV 0.5 %/yr, the rest none.
-    "degradation_by_asset": {
-        **{a: (0.005 if a == "pv_plant" else 0.0) for a in MG_EXISTING if a != "hospital_feeder"},
-        **{a: 0.0 for a in MG_CANDIDATES}},
-    "analysis_years": MG_HORIZON_END - MG_FIRST_YEAR,             # 2030-2044
-    "annualise": False,                                           # the week weighs 8,760 h
-    "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
-    "replacement_rule": "part_lifetimes",
-    "terminal_value": {"method": "remaining_life_annuity"},
-    "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
-}
+def _mg_years(planning: Planning | None) -> tuple[int, int]:
+    """(first operating year, horizon end) of the single-year microgrid."""
+    return ((MG_FIRST_YEAR, MG_HORIZON_END) if planning is None
+            else (planning.start_year, planning.end_year))
 
 
-def build_eh_microgrid() -> pypsa.Network:
+def _mg_finance(planning: Planning | None = None) -> dict:
+    """``MG_FINANCE`` for an entered start and end year (E1d): close a year
+    before the start, every COD the start, the case to the end year."""
+    first, end = _mg_years(planning)
+    return {
+        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "financial_close": f"{first - 1}-01-01",
+        "cod_by_asset": {a: f"{first}-01-01" for a in (*MG_EXISTING, *MG_CANDIDATES)},
+        "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
+        "escalation": {c: 0.02 for c in ("opex", "fuel", "tariff", "ppa", "export", "capex")},
+        # Every owned generator and battery: PV 0.5 %/yr, the rest none.
+        "degradation_by_asset": {
+            **{a: (0.005 if a == "pv_plant" else 0.0) for a in MG_EXISTING if a != "hospital_feeder"},
+            **{a: 0.0 for a in MG_CANDIDATES}},
+        "analysis_years": end - first,                                # 2030-2044 natively
+        "annualise": False,                                           # the week weighs 8,760 h
+        "tax_losses": "offset_other_income", "financing_fee_tax": "not_deducted",
+        "replacement_rule": "part_lifetimes",
+        "terminal_value": {"method": "remaining_life_annuity"},
+        "wacc_nominal": 0.07, "cost_of_equity": 0.07, "inflation": 0.02,
+    }
+
+
+MG_FINANCE: dict = _mg_finance()
+
+
+def build_eh_microgrid(load_spec=None, planning=None) -> pypsa.Network:
     """A small island system that must run without its mainland tie.
 
     The ``off_grid`` pack islands the tagged tie Link; PV, wind, a battery
     and a diesel fleet (with outage data) must carry a critical hospital
     feeder and residential demand. The hospital sits behind a feeder Link
     (η = 0.98 ≥ 1/1.05, so the P16 per-Load priority stays exact).
+    ``planning`` (E1d) dates the week in its start year; ``load_spec`` is unused.
     """
-    n = _base("Island Microgrid")
+    snaps = _week(planning)
+    n = _base("Island Microgrid", snaps)
     for c, co2 in (("AC", 0.0), ("solar", 0.0), ("wind", 0.0),
                    ("diesel", 0.27), ("battery", 0.0), ("grid", 0.35)):
         n.add("Carrier", c, co2_emissions=co2)
@@ -791,7 +847,7 @@ def build_eh_microgrid() -> pypsa.Network:
     n.add("Generator", "wind_turbines", bus="island", carrier="wind", p_nom=6.0)
     n.generators_t.p_max_pu = pd.DataFrame(
         {"pv_plant": _solar(), "wind_turbines": _wind(mean=0.33, seed=3)},
-        index=SNAPSHOTS)
+        index=snaps)
     for i in range(1, 4):
         g = f"diesel_{i}"
         n.add("Generator", g, bus="island", carrier="diesel", p_nom=3.0,
@@ -815,7 +871,7 @@ def build_eh_microgrid() -> pypsa.Network:
     n.loads_t.p_set = pd.DataFrame({
         "residential": _day_shape(3.5, 7.5, peak_hour=19.0, width=3.5),
         "hospital_load": 1.5 + 0.2 * np.sin(2 * np.pi * _HOD / 24.0),
-    }, index=SNAPSHOTS)
+    }, index=snaps)
 
     _tag_columns(n)
     n.buses.at["mainland", "eh_poc"] = True
@@ -1129,6 +1185,126 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
     return meta
 
 
+def _mg_single_meta(planning: Planning | None = None) -> dict:
+    """The single-year microgrid's metadata for ``planning`` (None: the
+    example's week in 2030 and its case to 2045)."""
+    first, end = _mg_years(planning)
+    return {
+        "id": "eh_microgrid",
+        "name": "Island Microgrid",
+        "description": (
+            "Island system that must run without its 20 MW subsea tie: PV, "
+            "wind, battery, three diesel units, a critical hospital feeder "
+            "and residential demand. Tagged for an off-grid study."),
+        "recommended_archetype": "off_grid",
+        "pack_overrides": {},
+        "stages": None,
+        "dtc_attribution": None,
+        "study_notes": [
+            "The off_grid pack islands the subsea tie; the island must be "
+            "adequate on its own resources.",
+            "The subsea tie is normally open (p_max_pu = 0), so the FMEA "
+            "worksheet sweeps the same islanded system; set it to 1 to "
+            "study tie-connected operation.",
+            "Class-C stress scenarios (dunkelflaute, heatwave) are "
+            "preloaded for the FMEA sweep.",
+            "After a solve the investment case compares the plan with the island as it stands "
+            "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
+            "candidates. The representative week stands for each of the "
+            f"{end - first} operating years ({first}-{end - 1}).",
+        ],
+        "ledger": [
+            *([] if planning is None else [
+                {"item": "planning period",
+                 "value": f"{first} → {end} (entered)", "source": "entered",
+                 "note": f"the example is built for {MG_FIRST_YEAR} → {MG_HORIZON_END}; the "
+                         "week is dated in the start year and the case runs to the end year"}]),
+            {"item": "investment case",
+             "value": "compared with the island as it stands today: the existing diesels, PV, "
+                      "wind and battery, without the candidates, and no grid",
+             "source": "assumed",
+             "note": "the staged microgrid's basis (owner decision M2e a); the investment-case "
+                     "route re-solves the island without the candidates"},
+            {"item": "point of connection", "value": "subsea_tie, normally open (p_max_pu 0), "
+                                                     "no tariff, clock UTC",
+             "source": "assumed",
+             "note": "as the staged microgrid: it seeds the site/grid split and carries nothing"},
+            {"item": "single-year horizon",
+             "value": f"one representative week weighted 8,760/168 h, repeated for each of the "
+                      f"{end - first} operating years "
+                      f"{first}-{end - 1}, escalated and degraded",
+             "source": "assumed",
+             "note": f"the week is dated {first}, the first operating year; the case "
+                     f"ends in {end}, "
+                     + ("the staged templates' horizon end" if planning is None
+                        else "the entered end year")
+                     + ". The week "
+                     "already weighs a year, so nothing is annualised"},
+            {"item": "dates", "value": f"every COD {first}-01-01, financial close "
+                                       f"{first - 1}-01-01",
+             "source": "assumed",
+             "note": "a single period has no stage, so every asset shares one COD; close one year "
+                     "before it and capex paid then, as the staged templates"},
+            {"item": "existing island", "value": ", ".join(MG_EXISTING)
+                                                 + ": overnight cost 0, lifetime unlimited",
+             "source": "assumed",
+             "note": "in service and sunk: no capex in the case; only the candidates the plan "
+                     "builds are investments. The solve is unchanged"},
+            {"item": "finance inputs",
+             "value": f"the staged microgrid's: pack prices (2020 price data) taken as real "
+                      f"{first} EUR (the base year), escalation 2 %/yr from "
+                      f"{first}, inflation 2 %, all equity at 7 %, pre-tax; PV degrades "
+                      "0.5 %/yr, the rest not",
+             "source": "assumed",
+             "note": f"the week's running costs and the pack's capex are held flat to "
+                     f"{first} (the first operating year) and escalate from there, the "
+                     "staged microgrid's rule from its first period (2027); the terminal value "
+                     "is the remaining-life annuity of each part"},
+            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
+             "source": "assumed",
+             "note": (f"bess_new's inverter is re-bought in {first + 9} (replacement_rule "
+                      "part_lifetimes); the cash then changes sign twice, so the IRR is flagged "
+                      "irr_multiple_sign_changes. The NPV is unaffected") if end > first + 9
+                     else f"the case ends in {end}, before bess_new's inverter is re-bought"},
+            {"item": "island sidecar",
+             "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel "
+                      "droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so "
+                      "there is no import to lose",
+             "source": "assumed",
+             "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the "
+                     "island checks and the report's islanding chapter read it"},
+            {"item": "island unit data",
+             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, "
+                      "tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
+                      "pf 0.95; sustained 24 h, bridge 600 s",
+             "source": "assumed",
+             "note": "demo values copied from the staged microgrid, not from a datasheet or a "
+                     "grid code"},
+            {"item": "transition RoCoF limit",
+             "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
+             "source": "assumed",
+             "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), "
+                     "relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can "
+                     "meet it; not taken from a grid code"},
+            {"item": "island rows", "value": "off (island_constraints false)",
+             "source": "assumed",
+             "note": "the plan is not sized for the island requirements; the island checks "
+                     "report what islanding would need. Turn them on to plan for it (owner: "
+                     "island data on, rows off, the user opts in)"},
+            {"item": "island break-even", "value": "not applicable",
+             "source": "assumed",
+             "note": "the island rows are off, so the comparison is not relaxed for them and the "
+                     "case does not price an island capability"},
+            {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
+             "source": "synthetic",
+             "note": f"the template's marginal cost, in {first} money, escalating "
+                     "2 %/yr (the case books it as opex); replace with the island's fuel "
+                     "contract"},
+        ],
+        "provenance": PROVENANCE,
+    }
+
+
 TEMPLATE_META: dict[str, dict] = {
     "eh_datacenter": {
         "id": "eh_datacenter",
@@ -1185,113 +1361,30 @@ TEMPLATE_META: dict[str, dict] = {
         ],
         "provenance": PROVENANCE,
     },
-    "eh_microgrid": {
-        "id": "eh_microgrid",
-        "name": "Island Microgrid",
-        "description": (
-            "Island system that must run without its 20 MW subsea tie: PV, "
-            "wind, battery, three diesel units, a critical hospital feeder "
-            "and residential demand. Tagged for an off-grid study."),
-        "recommended_archetype": "off_grid",
-        "pack_overrides": {},
-        "stages": None,
-        "dtc_attribution": None,
-        "study_notes": [
-            "The off_grid pack islands the subsea tie; the island must be "
-            "adequate on its own resources.",
-            "The subsea tie is normally open (p_max_pu = 0), so the FMEA "
-            "worksheet sweeps the same islanded system; set it to 1 to "
-            "study tie-connected operation.",
-            "Class-C stress scenarios (dunkelflaute, heatwave) are "
-            "preloaded for the FMEA sweep.",
-            "After a solve the investment case compares the plan with the island as it stands "
-            "today (the existing diesels, PV, wind and battery, no grid), re-solved without the "
-            "candidates. The representative week stands for each of the 15 operating years "
-            f"({MG_FIRST_YEAR}-{MG_HORIZON_END - 1}).",
-        ],
-        "ledger": [
-            {"item": "investment case",
-             "value": "compared with the island as it stands today: the existing diesels, PV, "
-                      "wind and battery, without the candidates, and no grid",
-             "source": "assumed",
-             "note": "the staged microgrid's basis (owner decision M2e a); the investment-case "
-                     "route re-solves the island without the candidates"},
-            {"item": "point of connection", "value": "subsea_tie, normally open (p_max_pu 0), "
-                                                     "no tariff, clock UTC",
-             "source": "assumed",
-             "note": "as the staged microgrid: it seeds the site/grid split and carries nothing"},
-            {"item": "single-year horizon",
-             "value": f"one representative week weighted 8,760/168 h, repeated for each of the "
-                      f"{MG_HORIZON_END - MG_FIRST_YEAR} operating years "
-                      f"{MG_FIRST_YEAR}-{MG_HORIZON_END - 1}, escalated and degraded",
-             "source": "assumed",
-             "note": f"the week is dated {MG_FIRST_YEAR}, the first operating year; the case "
-                     f"ends in {MG_HORIZON_END}, the staged templates' horizon end. The week "
-                     "already weighs a year, so nothing is annualised"},
-            {"item": "dates", "value": f"every COD {MG_FIRST_YEAR}-01-01, financial close "
-                                       f"{MG_FIRST_YEAR - 1}-01-01",
-             "source": "assumed",
-             "note": "a single period has no stage, so every asset shares one COD; close one year "
-                     "before it and capex paid then, as the staged templates"},
-            {"item": "existing island", "value": ", ".join(MG_EXISTING)
-                                                 + ": overnight cost 0, lifetime unlimited",
-             "source": "assumed",
-             "note": "in service and sunk: no capex in the case; only the candidates the plan "
-                     "builds are investments. The solve is unchanged"},
-            {"item": "finance inputs",
-             "value": f"the staged microgrid's: pack prices (2020 price data) taken as real "
-                      f"{MG_FIRST_YEAR} EUR (the base year), escalation 2 %/yr from "
-                      f"{MG_FIRST_YEAR}, inflation 2 %, all equity at 7 %, pre-tax; PV degrades "
-                      "0.5 %/yr, the rest not",
-             "source": "assumed",
-             "note": f"the week's running costs and the pack's capex are held flat to "
-                     f"{MG_FIRST_YEAR} (the first operating year) and escalate from there, the "
-                     "staged microgrid's rule from its first period (2027); the terminal value "
-                     "is the remaining-life annuity of each part"},
-            {"item": "battery inverter replacement", "value": "after 10 years (inv_power_lifetime)",
-             "source": "assumed",
-             "note": "bess_new's inverter is re-bought in 2039 (replacement_rule part_lifetimes); "
-                     "the cash then changes sign twice, so the IRR is flagged "
-                     "irr_multiple_sign_changes. The NPV is unaffected"},
-            {"item": "island sidecar",
-             "value": "seamless: the staged microgrid's blocks on the plain unit names (diesel "
-                      "droop, grid-forming batteries, PV and wind Q(U)); the tie is open, so "
-                      "there is no import to lose",
-             "source": "assumed",
-             "note": "eh_staged_hubs._mg_island_single_year (UX review N2, decision F); the "
-                     "island checks and the report's islanding chapter read it"},
-            {"item": "island unit data",
-             "value": "the staged microgrid's: diesel droop 4 %, H 1.5 s; batteries droop 4 %, "
-                      "tau_f 0.1 s, i_max 1.2 pu, k_gfm_min 1.0, pf 0.95; PV and wind Q(U), "
-                      "pf 0.95; sustained 24 h, bridge 600 s",
-             "source": "assumed",
-             "note": "demo values copied from the staged microgrid, not from a datasheet or a "
-                     "grid code"},
-            {"item": "transition RoCoF limit",
-             "value": "2 Hz/s over 500 ms (the steady island keeps 1 Hz/s)",
-             "source": "assumed",
-             "note": "the staged microgrid's demo value (eh_staged_hubs.MG_TRANSITION_ROCOF), "
-                     "relaxed from the data center's 1 Hz/s so a tuned grid-forming battery can "
-                     "meet it; not taken from a grid code"},
-            {"item": "island rows", "value": "off (island_constraints false)",
-             "source": "assumed",
-             "note": "the plan is not sized for the island requirements; the island checks "
-                     "report what islanding would need. Turn them on to plan for it (owner: "
-                     "island data on, rows off, the user opts in)"},
-            {"item": "island break-even", "value": "not applicable",
-             "source": "assumed",
-             "note": "the island rows are off, so the comparison is not relaxed for them and the "
-                     "case does not price an island capability"},
-            {"item": "diesel running cost", "value": "260 EUR/MWh (fuel and variable O&M)",
-             "source": "synthetic",
-             "note": f"the template's marginal cost, in {MG_FIRST_YEAR} money, escalating "
-                     "2 %/yr (the case books it as opex); replace with the island's fuel "
-                     "contract"},
-        ],
-        "provenance": PROVENANCE,
-    },
+    "eh_microgrid": None,                   # _mg_single_meta, below
 }
 TEMPLATE_META["eh_datacenter_staged"] = _dc_staged_meta(_dc_plan())
+TEMPLATE_META["eh_microgrid"] = _mg_single_meta()
+#: The data center's and H2 hub's own metadata, before the grid-readiness rows
+#: are added below (a planned copy gets them again from ``template_meta``).
+_SINGLE_YEAR_META = {tid: dict(TEMPLATE_META[tid]) for tid in ("eh_datacenter", "eh_h2_hub")}
+
+
+def _single_year_meta(template_id: str, planning: Planning) -> dict:
+    """The data center's or H2 hub's metadata for entered years (E1d): the
+    shipped metadata and a ledger row for the dated week. One period and no
+    investment case, so the end year is recorded only."""
+    import copy
+
+    meta = copy.deepcopy(_SINGLE_YEAR_META[template_id])
+    meta["ledger"] = [
+        {"item": "planning period",
+         "value": f"{planning.start_year} → {planning.end_year} (entered)", "source": "entered",
+         "note": f"the representative week is dated {_week(planning)[0].date()} (the "
+                 f"example's {SNAPSHOTS[0].date()}); a single period with no investment case, "
+                 "so the end year is recorded only"},
+        *meta.get("ledger", [])]
+    return meta
 
 # Preloaded Class-C registry per template (the stress.py schema).
 STRESS_SCENARIOS: dict[str, list[dict]] = {
@@ -1366,7 +1459,7 @@ def _staged_commercial_and_finance(planning: Planning | None = None) -> dict:
             "finance": FinanceInputs.model_validate(_dc_finance(plan)).model_dump(mode="json")}
 
 
-def _microgrid_commercial_and_finance() -> dict:
+def _microgrid_commercial_and_finance(planning: Planning | None = None) -> dict:
     """The single-year island's commercial config: the open subsea tie is the
     PoC (it carries nothing), no tariff, the single-owner value flows on the
     plain network. The case compares against the island as it stands today,
@@ -1376,10 +1469,11 @@ def _microgrid_commercial_and_finance() -> dict:
     from services.commercial import value_flow_templates as VFT
 
     base = CommercialConfig.model_validate({"poc_link": "subsea_tie", "timezone": "UTC"})
-    vf = VFT.build("single_owner", build_eh_microgrid(), base).config
+    vf = VFT.build("single_owner", build_eh_microgrid(planning=planning), base).config
     commercial = base.model_copy(update={"value_flows": vf.model_dump(mode="json")})
     return {"commercial": commercial.model_dump(mode="json"),
-            "finance": FinanceInputs.model_validate(MG_FINANCE).model_dump(mode="json")}
+            "finance": FinanceInputs.model_validate(_mg_finance(planning))
+                                    .model_dump(mode="json")}
 
 
 #: Template blocks that need the backend's models (built on first use).
@@ -1522,7 +1616,10 @@ ISLAND_CONFIG["eh_datacenter_staged"] = _staged_island(ISLAND_CONFIG["eh_datacen
 
 #: Staged examples built for entered years: id → (meta, island) for a Planning
 #: (the staged hubs add theirs when they register).
-_PLANNED_META = {"eh_datacenter_staged": lambda p, spec: _dc_staged_meta(_dc_plan(p), spec)}
+_PLANNED_META = {"eh_datacenter_staged": lambda p, spec: _dc_staged_meta(_dc_plan(p), spec),
+                 "eh_datacenter": lambda p, _spec: _single_year_meta("eh_datacenter", p),
+                 "eh_h2_hub": lambda p, _spec: _single_year_meta("eh_h2_hub", p),
+                 "eh_microgrid": lambda p, _spec: _mg_single_meta(p)}
 _PLANNED_ISLAND = {"eh_datacenter_staged":
                    lambda p: _staged_island(ISLAND_CONFIG["eh_datacenter"], p.years)}
 
@@ -1720,7 +1817,7 @@ def write_sidecars(out_dir, template_id: str, planning: Planning | None = None, 
     (out_dir / SOLVER_FILE).write_text(
         json.dumps(solver_config(template_id, planning), indent=2, sort_keys=True) + "\n")
     if template_id in PRICE_SERIES:
-        PRICE_SERIES[template_id](out_dir)
+        PRICE_SERIES[template_id](out_dir, _planned(template_id, planning))
     if template_id in CASES:
         (out_dir / CASES_FILE).write_text(
             json.dumps(CASES[template_id](), indent=1, ensure_ascii=False) + "\n")
