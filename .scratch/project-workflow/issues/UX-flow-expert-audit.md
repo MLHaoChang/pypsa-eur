@@ -79,3 +79,5 @@ Audited code: `master` @ 66e5f44c, frontend `pypsa-gui/frontend/src/`. File path
 Each fix PR is gated on the three rules above, with screenshots of the old place and the new one.
 
 ## Comments
+
+- 2026-10-26, R1-single-run (finding 4), done in #719: the AC PF Run had already left Solver settings (W4b, 67d42bb); #719 removes its unused frontend client, makes "Apply clustering…" ask first (ConfirmDialog) and adds a "Run the solve ›" next step through `requestRunSolve`. Open: the assistant's `run_ac_pf_stage` path, `.scratch/harness/issues/24` (#715).
