@@ -105,9 +105,17 @@ export default function SnapshotPicker() {
   // snapshot set) changes underneath us.
   useEffect(() => {
     if (count === 0) return
+    if (periodInfo) {
+      const match = [...periodInfo.ranges.entries()].find(([, r]) =>
+        resultsSnapshotIdx >= r.start && resultsSnapshotIdx <= r.end)
+      if (match) {
+        if (selectedPeriodKey !== match[0]) setSelectedPeriodKey(match[0])
+        return
+      }
+    }
     if (resultsSnapshotIdx < activeRange.start) setResultsSnapshotIdx(activeRange.start)
     else if (resultsSnapshotIdx > activeRange.end) setResultsSnapshotIdx(activeRange.end)
-  }, [count, resultsSnapshotIdx, setResultsSnapshotIdx, activeRange.start, activeRange.end])
+  }, [count, resultsSnapshotIdx, setResultsSnapshotIdx, activeRange.start, activeRange.end, periodInfo, selectedPeriodKey])
 
   // ── Playback state ─────────────────────────────────────────────────────
   // `playing` toggles a setInterval that advances idx every BASE_TICK_MS / speed.

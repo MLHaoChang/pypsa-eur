@@ -1,0 +1,175 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+# SPDX-License-Identifier: CC-BY-4.0
+
+schema_version: 1
+kind: implementation_planning_index
+status: proposed_not_implemented
+spec_source: 'PR #711; resolve actual full head before use'
+normative_documents: [spec.md, contracts.md, optional-site-workflow.md, ai-guided-project-flow.md, validation-matrix.md]
+instructions: execution-guide.md
+decision_register: decision-register.md
+fixture_contract: fixtures-and-oracles.md
+evidence_template: implementation-record-template.md
+case_status_default: planned
+case_ownership_rule: Exactly one primary owner per V row. Additional cases require applicable assertions in that
+  unit. Primary ownership is bookkeeping, not sole coverage; mixed-engine rows remain partial until every claimed
+  assertion has evidence. Prototype probes never mark downstream cases passed.
+case_evidence_required_fields: [case_id, assertion, unit_id, test_node, fixture_hash, source_sha, command, exit_status,
+  evidence_url, status, exclusions]
+units:
+- id: SC-00-N
+  ticket: issues/01-prototype-and-contracts.md
+  depends_on: []
+  decision_gates: []
+  status: not_started
+  accepted_evidence: null
+  primary_cases: []
+  additional_applicable_cases: [V05, V06, V07, V08, V49, V53, V54, V55, V56, V57, V58, V59, V60, V64, V65, V67,
+    V73, V74, V79, V91]
+  deliverable: Native prototype/contracts and measured limits; bounded probes, not completion of downstream acceptance
+    cases. No optional engine required.
+  close_decisions_for_acceptance: [D01, D02, D03, D04, D05, D08, D11, D12]
+- id: SC-01
+  ticket: issues/02-editable-native-scene.md
+  depends_on: [SC-00-N]
+  decision_gates: []
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V01, V02, V03, V04, V05, V06, V07, V08, V09, V10, V45, V46, V47, V48, V49, V51, V52, V53, V54,
+    V55, V56, V58, V59, V60, V73, V74, V75, V76, V77, V78, V79, V84, V90]
+  additional_applicable_cases: [V50, V62, V63, V64, V65, V66, V67, V70, V71, V72, V89, V91, V92]
+  deliverable: Editable canonical geometry/adoption/flow, buildings-only pause/resume, private-media policy and
+    closure copy; native portions of mixed-engine cases.
+- id: SC-07-foundation
+  ticket: issues/08-ai-guided-project-flow.md
+  depends_on: [SC-01]
+  decision_gates: [D11]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V50, V62, V63, V64, V65, V66, V67, V68, V70, V71, V72, V89, V91, V92]
+  additional_applicable_cases: [V47, V53, V54, V56, V59, V73, V74, V75, V78, V79, V90]
+  deliverable: Existing companion context, scene prepare/apply, ordinary approvals/recovery and geometry assistance,
+    delivered with native scene work.
+- id: SC-02
+  ticket: issues/03-bindings-and-placement.md
+  depends_on: [SC-01, SC-07-foundation]
+  decision_gates: [D06]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V11, V12, V13, V14, V15, V16, V17, V18, V19, V20, V21, V80, V81, V82, V83, V85, V86]
+  additional_applicable_cases: [V02, V03, V04, V09, V45, V46, V47, V49, V50, V51, V54, V59, V60, V64, V65, V66,
+    V68, V71, V84, V90]
+  deliverable: Exact target identity, multi-energy associations, placement and native graph projection; no scene
+    topology writer.
+- id: SC-07-bindings
+  ticket: issues/08-ai-guided-project-flow.md
+  depends_on: [SC-02, SC-07-foundation]
+  decision_gates: [D06]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V93, V94, V95, V96, V98]
+  additional_applicable_cases: [V61, V62, V63, V64, V65, V66, V67, V68, V70, V71, V72, V80, V81, V82, V83, V86]
+  deliverable: Conversational exact Load/asset/process association and supported native edits with separate model/scene
+    receipts; no generic writer.
+- id: SC-03
+  ticket: issues/04-result-projection.md
+  depends_on: [SC-02]
+  decision_gates: [D07]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V22, V23, V24, V25, V26, V27, V28, V57, V87, V88]
+  additional_applicable_cases: [V15, V16, V38, V48, V49, V51, V62, V69, V71, V82, V85, V86]
+  deliverable: Native result quantities, allocation/group boundaries, exact nulls/freshness and shared actual-cadence
+    timeline.
+- id: SC-07-results
+  ticket: issues/08-ai-guided-project-flow.md
+  depends_on: [SC-03, SC-07-bindings]
+  decision_gates: [D07]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V61, V69, V97]
+  additional_applicable_cases: [V26, V27, V57, V62, V63, V64, V65, V66, V67, V68, V69, V70, V71, V72, V87, V88,
+    V89, V98]
+  deliverable: Integrated whole native journey, grounded explanations/channel mapping and final native/manual domain
+    acceptance.
+- id: SC-04
+  ticket: issues/05-blender-export.md
+  depends_on: [SC-01]
+  decision_gates: []
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V29, V30, V31]
+  additional_applicable_cases: [V06, V38, V45, V49, V51, V55, V59, V60, V67, V90]
+  deliverable: Native GLB/manifest artifact independent of Blender; V30 and any compatibility claim remain blocked
+    until SC-00-B.
+- id: SC-00-B
+  ticket: issues/01-prototype-and-contracts.md
+  depends_on: [SC-00-N]
+  decision_gates: []
+  status: not_started
+  accepted_evidence: null
+  primary_cases: []
+  additional_applicable_cases: [V06, V29, V30, V32, V33, V34, V35, V36, V37, V38, V45, V48, V49, V55, V56, V58,
+    V90]
+  deliverable: Separate real pinned Blender exchange/worker experiment and accepted limits. It does not block native
+    or outbound artifact work.
+  close_decisions_for_acceptance: [D09]
+- id: SC-05
+  ticket: issues/06-blender-worker-and-refinement.md
+  depends_on: [SC-04, SC-00-B]
+  decision_gates: [D09]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V32, V33, V34, V35, V36, V37, V38]
+  additional_applicable_cases: [V29, V30, V45, V46, V47, V48, V49, V50, V51, V52, V55, V56, V58, V59, V60, V64,
+    V65, V66, V67, V68, V71, V72, V78, V84, V90]
+  deliverable: Configured trusted Blender worker/return proposals, original rights, bounded jobs and no automatic
+    apply.
+- id: SC-06-layout
+  ticket: issues/07-layout-and-photo-proposals.md
+  depends_on: [SC-01]
+  decision_gates: [D05, D08]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V39, V40]
+  additional_applicable_cases: [V06, V08, V34, V35, V36, V37, V38, V43, V44, V45, V46, V47, V48, V49, V50, V51,
+    V52, V55, V56, V58, V60, V64, V65, V67, V68, V72, V77, V78, V90]
+  deliverable: Calibrated supported raster/GeoJSON/manual layout through native proposals; no photo/Blender prerequisite,
+    no unreviewed CAD adapter.
+- id: SC-00-P
+  ticket: issues/01-prototype-and-contracts.md
+  depends_on: [SC-00-N]
+  decision_gates: []
+  status: not_started
+  accepted_evidence: null
+  primary_cases: []
+  additional_applicable_cases: [V39, V40, V41, V42, V43, V44, V45, V48, V49, V55, V56, V58, V90]
+  deliverable: Separate genuine reconstruction/texturing/registration experiment and supported-hardware/resource
+    evidence; not a native prerequisite.
+  close_decisions_for_acceptance: [D10]
+- id: SC-06-photo
+  ticket: issues/07-layout-and-photo-proposals.md
+  depends_on: [SC-01, SC-00-P]
+  decision_gates: [D05, D08, D10]
+  status: not_started
+  accepted_evidence: null
+  primary_cases: [V41, V42, V43, V44]
+  additional_applicable_cases: [V06, V08, V34, V35, V36, V37, V38, V39, V40, V45, V46, V47, V48, V49, V50, V51,
+    V52, V55, V56, V57, V58, V60, V64, V65, V66, V67, V68, V71, V72, V77, V78, V90]
+  deliverable: One admitted photo adapter on supported hardware; reference-only until metric/semantic gates pass;
+    shared upload policy must be proven even without layout.
+release_gates:
+  native_integrated:
+    requires: [SC-01, SC-02, SC-03, SC-07-foundation, SC-07-bindings, SC-07-results]
+    additional: [all eight domain fixtures on applicable native seams, packaged-device native evidence and applicable
+        cross-cutting assertions, ordinary current-head CI/premerge and required reviews, no all-98-pass claim from
+        native-only evidence]
+  blender:
+    requires: [SC-04, SC-00-B, SC-05]
+    additional: [real exchange/worker evidence and affected cross-cutting assertions]
+  layout:
+    requires: [SC-06-layout]
+    additional: [file-policy/calibration evidence and affected cross-cutting assertions]
+  photo:
+    requires: [SC-00-P, SC-06-photo]
+    additional: [genuine reconstruction/registration evidence and affected cross-cutting assertions]

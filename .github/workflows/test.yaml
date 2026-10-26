@@ -283,6 +283,94 @@ jobs:
       if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
       run: npx vitest --run
 
+  # Tier A owner journeys in a real browser (LC-13): the built app against the
+  # authenticated native backend, with the scripted loopback wire for the model.
+  # No network call to any paid model. Not part of "GUI backend": a browser
+  # flake must not hold the backend gate, and it has its own paths filter.
+  gui-owner-journeys:
+    name: GUI owner journeys (browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        shell: bash -l {0}
+
+    env:
+      # Pinned: the browser build follows this version.
+      PLAYWRIGHT_VERSION: "1.63.0"
+      OJ01_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj01
+      OJ05_ARTIFACTS: ${{ github.workspace }}/oj-artifacts/oj05
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          gui:
+            - 'pypsa-gui/backend/**'
+            - 'pypsa-gui/frontend/**'
+            - 'pixi.toml'
+            - 'pixi.lock'
+            - '.github/workflows/test.yaml'
+
+    - name: Skip - no GUI changes
+      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+      run: echo "Skipping owner journeys because no GUI changes detected"
+
+    - name: Setup Pixi
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.68.1
+        environments: test
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'master' }}
+
+    - name: Setup Node
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+
+    - name: Build the frontend
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      working-directory: pypsa-gui/frontend
+      run: |
+        npm ci --no-audit --no-fund
+        npm run build
+
+    - name: Install Playwright and its Chromium
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: |
+        npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" "playwright@$PLAYWRIGHT_VERSION"
+        "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+
+    - name: Run the owner journeys (OJ-01, OJ-05)
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      working-directory: pypsa-gui/frontend
+      env:
+        PLAYWRIGHT_MODULE_PATH: ${{ runner.temp }}/pw/node_modules/playwright/package.json
+        PYPSA_COMPOSER_PYTHON: ${{ github.workspace }}/.pixi/envs/test/bin/python
+      run: |
+        mkdir -p "$OJ01_ARTIFACTS" "$OJ05_ARTIFACTS"
+        status=0
+        node scripts/smoke-copilot-oj01.mjs || status=1
+        node scripts/smoke-copilot-oj05.mjs || status=1
+        exit $status
+
+    - name: Upload journey screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: gui-owner-journeys
+        path: oj-artifacts/
+        if-no-files-found: ignore
+
   integration-tests:
     name: Integration
     runs-on: ${{ matrix.os }}-latest
