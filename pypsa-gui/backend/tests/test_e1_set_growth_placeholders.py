@@ -37,10 +37,11 @@ HUB_SHIFTED = {"start_year": 2029, "end_year": 2047}
 
 # ── the kinds and the units ─────────────────────────────────────────
 
-def test_the_kinds_are_the_templates_growth_kinds():
+def test_the_kinds_and_file_are_the_templates():
     plural = {"Load": "loads", "Link": "links"}
     assert GP.KINDS == {k: (plural[c], entity, field)
                         for k, (_l, _u, _s, c, entity, field) in T._GROWTH_KINDS.items()}
+    assert GP.META_FILE == T.META_FILE
 
 
 def test_nh3_delivery_round_trips_the_builds_tpd_to_mwh_per_h():

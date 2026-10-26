@@ -102,7 +102,7 @@ def apply_undo():
     from services import undo_service
 
     # ★ Precheck BEFORE the destructive pop (Phase 11 review, BLOCKER 1).
-    # `undo_service.pop()` removes the entry from the stack and returns it; a
+    # `undo_service.pop_entry()` removes the entry from the stack and returns it; a
     # 409 raised after it discards that entry, so two refused Ctrl-Z presses
     # during a study emptied a two-deep undo stack while changing nothing.
     # /api/network/undo is in `_UNDO_EXCLUDE`, so the middleware's
