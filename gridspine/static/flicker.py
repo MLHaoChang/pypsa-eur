@@ -57,7 +57,8 @@ LABEL = "static screen; binding answer is a flicker-meter study (IEC 61000-4-15)
 
 LEDGER = (
     "d = step / S_k is an upper bound on (dP * R + dQ * X) / U^2, so ignoring the grid's X/R is "
-    "conservative (assumed scope)",
+    "conservative (assumed scope); S_k is the caller's S_k'', which an IEC 60909 c factor may overstate, "
+    "so d may be understated by up to 1.1",
     "every change is a rectangular step (shape factor F = 1), the conservative case (assumed)",
     "r counts voltage changes, switch-on and switch-off each, so one on/off cycle is two changes",
     "the step pattern repeats steadily over 2 h, so Plt equals Pst (assumed)",
@@ -151,7 +152,7 @@ def _sk_of(sk_mva_by_poc, poc):
 
 
 NO_SK = "No short-circuit level at the point of connection"
-STEP_LABEL, RATE_LABEL = "Largest power step", "Voltage changes per minute"
+STEP_LABEL, RATE_LABEL = "Largest power step", "Changes per minute"
 
 
 def _out_of_range(d: float, r: float) -> str | None:
@@ -198,7 +199,8 @@ def flicker_table(units: pd.DataFrame, sk_mva_by_poc: dict, limits: Limits) -> F
         else:
             d = 100.0 * step / sk
             row["d_pct"] = d
-            outside = _out_of_range(d, rate)
+            # A steady load (step or rate 0) has no flicker, so the method's range does not bind it.
+            outside = None if step == 0 or rate == 0 else _out_of_range(d, rate)
             if outside:
                 row.update(_empty_judgement(limits), note=outside)
                 entry["outside"].append(name)

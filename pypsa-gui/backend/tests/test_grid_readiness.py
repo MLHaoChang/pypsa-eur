@@ -1024,8 +1024,10 @@ def test_without_a_flicker_limit_the_row_is_unknown(tmp_path):
 
 def test_a_burst_heater_over_the_limit_warns(tmp_path):
     row = _flicker_row_of(tmp_path, _flicker_site())
-    assert row["verdict"] == "warn" and row["limit"] == 0.8 and row["unit"] == "Pst"
-    assert row["project_value"] == pytest.approx(0.8963, abs=1e-4) == row["flicker"]["pst"]
+    # Plt equals Pst, so the demo Plt 0.6 binds before Pst 0.8 and the row shows Plt.
+    assert row["verdict"] == "warn" and row["limit"] == 0.6 and row["unit"] == "Plt"
+    assert row["project_value"] == pytest.approx(0.8963, abs=1e-4) == row["flicker"]["plt"]
+    assert "Plt binds" in row["note"] and "alpha 3" in row["note"]
     assert row["source"].count("61000-3-7") == 2 and "Pst: " in row["source"] and "; Plt: " in row["source"]
     assert "c factor" in row["note"] and row["assumed"] is True
     assert row["target"] == {**row["target"], "entity": "compressor", "field": "flicker_step_mva"}

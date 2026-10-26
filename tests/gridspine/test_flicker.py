@@ -72,7 +72,7 @@ def test_a_steady_load_passes_with_no_flicker(step, rate):
 
 
 @pytest.mark.parametrize("step, rate, missing", [(None, 2.0, "Largest power step"),
-                                                  (20.0, math.nan, "Voltage changes per minute")])
+                                                  (20.0, math.nan, "Changes per minute")])
 def test_a_unit_without_its_inputs_is_no_input_and_blocks_a_pass(step, rate, missing):
     st = fl.flicker_table(_units(("H1", "PoC", step, rate), ("H2", "PoC", 1.0, 0.1)), {"PoC": 1000.0}, LIMITS)
     row = st.units.iloc[0]
@@ -98,9 +98,17 @@ def test_changes_one_second_apart_are_in_range_and_faster_is_unknown():
 
 
 def test_a_step_above_the_range_is_unknown_never_pass():
-    assert _one(100.0, 0.001).units.iloc[0]["verdict"] in ("pass", "fail")      # d 10 %, in range
+    edge = _one(100.0, 0.001).units.iloc[0]                                      # d 10 %, in range
+    assert edge["d_pct"] == pytest.approx(10.0) and edge["pst"] == pytest.approx(fl.pst(10.0, 0.001))
+    assert edge["verdict"] == "pass"
     row = _one(100.5, 0.001).units.iloc[0]
     assert row["verdict"] == "unknown" and "above the analytic method's 10 %" in row["note"]
+
+
+def test_a_steady_load_is_not_bound_by_the_range():
+    for step, rate in ((0.0, 120.0), (200.0, 0.0)):
+        row = _one(step, rate).units.iloc[0]
+        assert row["verdict"] == "pass" and row["pst"] == 0.0, (step, rate)
 
 
 # --- limits and inputs ---------------------------------------------------------
@@ -141,6 +149,6 @@ def test_a_poc_with_no_unit_to_compute_shows_no_pst():
 
 def test_the_ledger_states_the_screens_assumptions():
     text = " ".join(fl.LEDGER)
-    for phrase in ("X/R is conservative", "F = 1", "Plt equals Pst", "alpha 3", "alpha 1",
+    for phrase in ("X/R is conservative", "c factor", "F = 1", "Plt equals Pst", "alpha 3", "alpha 1",
                    "on/off cycle is two changes", "flicker-meter study", "margin is overstated"):
         assert phrase in text, phrase

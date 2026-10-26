@@ -605,7 +605,8 @@ def _harmonic_row(inp: _Inputs) -> dict:
 
 _FLICKER_SCREENING = ("a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, "
                       "Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the "
-                      "planning level; S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated "
+                      "planning level; units summed with alpha 3 (assumed; units stepping together are not "
+                      "covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated "
                       "by up to 1.1; above the limit a flicker-meter study is needed")
 
 
@@ -629,7 +630,8 @@ def _flicker_row(inp: _Inputs) -> dict:
                     verdict="unknown", assumed=True, note="The grid code sets no flicker limit",
                     section="assets", target=unit_target)
     lim_assumed = any(c["source"] != "code" for c in cited)
-    by_pst = limits.pst is not None
+    # Plt equals Pst in this screen, so the smaller limit binds: the row shows that quantity.
+    by_pst = limits.pst is not None and (limits.plt is None or limits.pst <= limits.plt)
     limit, unit = (limits.pst, "Pst") if by_pst else (limits.plt, "Plt")
     part = {"pst_limit": "Pst", "plt_limit": "Plt"}
     source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
@@ -648,7 +650,7 @@ def _flicker_row(inp: _Inputs) -> dict:
                     section="assets",
                     target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                                    "eh_sk_mva"))
-    labels = {"flicker_step_mva": "Largest power step", "flicker_changes_per_min": "Changes per minute"}
+    labels = {"flicker_step_mva": fl.STEP_LABEL, "flicker_changes_per_min": fl.RATE_LABEL}
     for rec in units.to_dict("records"):
         for field, col in (("flicker_step_mva", "step_mva"), ("flicker_changes_per_min", "changes_per_min")):
             v = _num(rec[col])
@@ -672,7 +674,7 @@ def _flicker_row(inp: _Inputs) -> dict:
                      + (" is" if len(fields) == 1 else " are") + " not set")
     for name in outside:
         u = by_unit.loc[name]
-        too_fast = 60.0 / u["changes_per_min"] < fl.MIN_INTERVAL_S if u["changes_per_min"] else False
+        too_fast = 60.0 / u["changes_per_min"] < fl.MIN_INTERVAL_S - fl.TOLERANCE if u["changes_per_min"] else False
         first = first or (name, "flicker_changes_per_min" if too_fast else "flicker_step_mva")
         notes.append(f"{name}: outside the analytic method ({u['note']})")
     known = study.units.dropna(subset=["pst"])
@@ -685,6 +687,8 @@ def _flicker_row(inp: _Inputs) -> dict:
                      + f", Plt {plt:.4g}" + (f" (limit {limits.plt:g})" if limits.plt is not None else ""))
     if limits.pst is None or limits.plt is None:
         notes.append(f"judged on {unit} only: the grid code sets no {'Plt' if by_pst else 'Pst'} limit")
+    else:
+        notes.append(f"{unit} binds: Plt equals Pst for a steady pattern")
     if missing or outside:
         notes.append("a unit without its inputs or outside the method blocks a pass")
     notes.append(f"S_k {sk:g} MVA; {_FLICKER_SCREENING}")
