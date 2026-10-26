@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import os
 import pathlib
 import pickle
@@ -1327,6 +1328,7 @@ async def import_bundle(
     cfg_path = dest / "solver_config.json"
     from routers.simulation import _state
     stripped_fields: list[str] = []
+    dropped_goal: list[dict] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
         # `extra_functionality_code` is exec()-ed in-process with full FS and
@@ -1365,6 +1367,9 @@ async def import_bundle(
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
         _state["solver_config"] = _solver_config_from_dict(cfg_data)
+        from services.reliability_goal import invalid_goal_fields
+        dropped_goal = [{"field": k, "value": v if _json_finite(v) else str(v)}
+                        for k, v in invalid_goal_fields(cfg_data).items()]
     else:
         # Defaults, not the previously open project's config (WP1.1c review #2).
         from services.solver_service import SolverConfig
@@ -1447,6 +1452,9 @@ async def import_bundle(
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
         **({"stripped": stripped_fields} if stripped_fields else {}),
+        # Likewise each reliability-goal value the bundle carried that PUT
+        # would refuse: imported as "not set" (W3b-R), named here.
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
@@ -1600,14 +1608,18 @@ def _solver_config_from_dict(data: dict):
     if clean.get("mode") == "lpf":
         clean["mode"] = "lopf"
     # The reliability goal (W3b-R) is validated as PUT validates it; a value
-    # PUT would refuse loads as "not set" (logged), never as a bad goal.
-    from services import reliability_goal as G
-    for key, ok in (("target_lole_h", G.valid_lole), ("mc_draws", G.valid_draws),
-                    ("site_archetype", G.valid_archetype)):
-        if clean.get(key) is not None and not ok(clean[key]):
-            logger.warning("solver_config: ignoring invalid %s=%r", key, clean[key])
-            clean[key] = None
+    # PUT would refuse loads as "not set" (logged; bundle import also names
+    # it in its response), never as a bad goal.
+    from services.reliability_goal import invalid_goal_fields
+    for key, value in invalid_goal_fields(clean).items():
+        logger.warning("solver_config: ignoring invalid %s=%r", key, value)
+        clean[key] = None
     return SolverConfig(**clean)
+
+
+def _json_finite(v) -> bool:
+    """A value a JSON response can carry as-is (no NaN / inf)."""
+    return not (isinstance(v, float) and not math.isfinite(v))
 
 
 def _unique_project_name(base: str) -> str:

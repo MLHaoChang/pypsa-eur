@@ -57,6 +57,16 @@ def valid_archetype(v: Any) -> bool:
     return v in ARCHETYPES
 
 
+def invalid_goal_fields(data: dict) -> dict[str, Any]:
+    """The goal fields in a stored config that ``PUT /solver_config`` would
+    refuse, with their values. A load or bundle import drops them to None
+    (the resolver then falls back) and names them, never refuses the file."""
+    checks = (("target_lole_h", valid_lole), ("mc_draws", valid_draws),
+              ("site_archetype", valid_archetype))
+    return {k: data[k] for k, ok in checks
+            if (data or {}).get(k) is not None and not ok(data[k])}
+
+
 def effective_goal(cfg: Any, template: dict | None) -> dict[str, dict[str, Any]]:
     """``{field: {"value", "source"}}`` for ``target_lole_h`` (h/yr),
     ``ens_cap_permyriad`` (‱), ``mc_draws`` and ``site_archetype``.
@@ -151,7 +161,9 @@ def loop_goal(body: Any, goal: dict, nyears: float | None) -> tuple[float | None
     """``(target, draws, sources)`` for the coupling and margin loops. A
     request's own ``target_lole_h`` is HORIZON-basis hours and wins; the
     goal's h/yr target goes on the horizon basis here (× ``nyears``, the
-    identity when the horizon is unknown, as the panel's `wireTarget`)."""
+    identity when the horizon is unknown, as the panel's `wireTarget`).
+    ``sources`` names only the two fields a loop reads: the margin loop's
+    payload carries no ENS-space key."""
     overridden: set[str] = set()
     target = getattr(body, "target_lole_h", None)
     if target is not None:
@@ -165,7 +177,8 @@ def loop_goal(body: Any, goal: dict, nyears: float | None) -> tuple[float | None
         overridden.add("mc_draws")
     else:
         draws = goal["mc_draws"]["value"]
-    return target, int(draws), goal_sources(goal, overridden)
+    sources = goal_sources(goal, overridden)
+    return target, int(draws), {k: sources[k] for k in ("target_lole_h", "mc_draws")}
 
 
 def stored_config(project_dir) -> dict | None:

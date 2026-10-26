@@ -3430,7 +3430,7 @@ def run_mc_study(
 
 
 def run_coupling_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     eps0: float | None = None,
@@ -3443,6 +3443,8 @@ def run_coupling_loop(
 
     `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
     on a multi-year horizon, and say which basis you used when reporting.
+    Omitted, it and `draws` are the project's reliability goal (W3b-R); the
+    result's `goal_sources` names where each came from.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
     return _campaign_gated(
@@ -3459,7 +3461,7 @@ def run_coupling_loop(
 
 
 def run_margin_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     max_solves: int | None = None,
@@ -3473,6 +3475,8 @@ def run_margin_loop(
     There is deliberately no starting-margin parameter: the start is a
     MEASUREMENT taken by a probing solve, and a user-supplied one is the
     single number here that can silently make the study worthless.
+    An omitted `target_lole_h` or `draws` is the project's reliability goal
+    (W3b-R), named in the result's `goal_sources`.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
     return _campaign_gated(
@@ -3488,7 +3492,7 @@ def run_margin_loop(
 
 
 def run_eh_study(
-    archetype: str,
+    archetype: str | None = None,
     stages: list | None = None,
     budget_solves: int | None = None,
     pack_overrides: dict | None = None,
@@ -3503,6 +3507,9 @@ def run_eh_study(
     Applies the pack, runs the EH pipeline, and persists a
     ``ReferenceDesignReport`` for ``get_adequacy_results('eh_reference_design')``.
     Poll ``get_adequacy_results('eh_study')`` while it runs.
+    An omitted ``archetype``, ``pack_overrides`` LOLE / ENS target or
+    ``mc.draws`` is the project's reliability goal (W3b-R); a value passed
+    here wins for this run, and ``goal_sources`` names each one's source.
     """
     from routers.results import EhStudyRequest, post_eh_study as _h
     return _campaign_gated(

@@ -472,4 +472,5 @@ def start_eh_study(
         "study": "eh_study",
         "archetype": archetype,
         "budget_solves": budget,
+        "goal_sources": plan["goal_sources"],
     }

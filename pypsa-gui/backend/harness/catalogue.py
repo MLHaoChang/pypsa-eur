@@ -1151,7 +1151,10 @@ TOOLS: list[dict[str, Any]] = [
         "solve at an ENS cap, measure LOLE by Monte Carlo, adjust the cap, "
         "repeat until the plan meets `target_lole_h`. `target_lole_h` is "
         "HORIZON-basis hours, NOT h/yr — convert first on a multi-year "
-        "horizon and state the basis when reporting. `restore` decides where "
+        "horizon and state the basis when reporting. Omit `target_lole_h` / "
+        "`draws` to use the project's reliability goal; the result's "
+        "`goal_sources` says which values came from the goal (stored / "
+        "template / default) and which you overrode. `restore` decides where "
         "the network is left: 'base' (default) or 'final'. Many solves, "
         "returns {status:'running'} — poll "
         "get_adequacy_results('coupling_loop') for iterations. 409 while "
@@ -1164,13 +1167,14 @@ TOOLS: list[dict[str, Any]] = [
             "max_solves": {"type": "integer"},
             "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
         },
-        ["target_lole_h"],
     ),
     _t(
         "run_margin_loop",
         "Start the reliability-targeted planning loop on the FIRM-CAPACITY "
         "lever: raise the planning reserve margin until the plan meets "
-        "`target_lole_h` (horizon-basis hours, as run_coupling_loop). There "
+        "`target_lole_h` (horizon-basis hours, as run_coupling_loop; omit it "
+        "and `draws` to use the project's reliability goal, named in "
+        "`goal_sources`). There "
         "is deliberately NO starting-margin parameter — the start is measured "
         "by a probing solve. Many solves, returns {status:'running'} — poll "
         "get_adequacy_results('margin_loop'). 409 while another study or a "
@@ -1182,7 +1186,6 @@ TOOLS: list[dict[str, Any]] = [
             "max_solves": {"type": "integer"},
             "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
         },
-        ["target_lole_h"],
     ),
     _t(
         "run_eh_study",
@@ -1203,7 +1206,11 @@ TOOLS: list[dict[str, Any]] = [
         "of unit outages on the same plan), then any enabled redundancy / "
         "lever / DtC stages — and persists a ReferenceDesignReport whose TEA "
         "carries LCOE and, where the network "
-        "has electrolyser Links, LCOH. `archetype` is required; omit "
+        "has electrolyser Links, LCOH. Omit `archetype`, the LOLE / ENS "
+        "targets in `pack_overrides` and `mc.draws` to use the project's "
+        "reliability goal (site type, allowed shortfall, energy strictness, "
+        "draws); a value you pass wins for this run, and the result's "
+        "`goal_sources` names each one's source. Omit "
         "`stages` for the pack's default pipeline, or pass a non-empty list "
         "to override (it must include apply_pack and ens_solve). "
         "`frontier` sweeps cost vs ENS target around the pack target (the "
@@ -1323,7 +1330,6 @@ TOOLS: list[dict[str, Any]] = [
                 },
             },
         },
-        ["archetype"],
     ),
     _t(
         "build_study_report",

@@ -535,7 +535,8 @@ def start_coupling_loop(
                 return (
                     f"A plan meeting {target:g} h was verified at ε* = "
                     f"{cap_text}‱, and that cap has been APPLIED to your "
-                    f"solver settings (ens_cap_permyriad = {cap_text}) and "
+                    f"reliability goal's energy strictness (solver settings "
+                    f"ens_cap_permyriad = {cap_text}) and "
                     "re-solved — the network you are holding is the certified "
                     "plan.")
             return (

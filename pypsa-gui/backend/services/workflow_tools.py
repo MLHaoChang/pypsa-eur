@@ -14,7 +14,6 @@ import threading
 import time
 from collections import Counter, OrderedDict
 from contextlib import contextmanager
-from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
