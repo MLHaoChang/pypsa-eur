@@ -25,7 +25,9 @@ on-load tap changers and switched shunts on automatic control. They walk
 ``campus_taps._better`` on ``(voltage excursion, worst overload above normal,
 steps moved)``; a move that does not converge is rejected, and the walk
 stops when no move improves or after ``TAP_ROUNDS`` x the total step range.
-The net is then judged on NORMAL ratings and the voltage band. No redispatch
+The net is then judged on NORMAL ratings and the voltage band: with a
+grid-code ``profile``, each bus's continuous ``voltage_bands`` entry for its
+nominal kV, else the assumed band; each row and the report say which. No redispatch
 is modelled (owner decision DC13-SCOPE), and every stage-2 row says so.
 
 **Bus sections** (``contingency_set.bus_section_contingencies``): the bus and
@@ -86,6 +88,7 @@ from gridspine.static.contingency import (
 )
 from gridspine.static.contingency_set import branch_contingencies
 from gridspine.static.loadflow import branch_keys, check_net_carries_hour
+from gridspine.templates.grid_codes import band_for, validate_profile
 
 LINE_EMERGENCY = "max_i_ka_emergency"
 TRAFO_EMERGENCY = "sn_mva_emergency"
@@ -100,8 +103,11 @@ PLANNING_LEDGER = (
     "is given, against its normal rating (conservative)",
     "loading is the from/HV-side definition of static/contingency.py; the "
     "emergency figure replaces the normal one, df and parallel kept",
-    f"stage 2 judges loading against the normal rating and bus voltages against "
-    f"[{V_MIN_PU}, {V_MAX_PU}] pu (the assumed band of static/contingency.py), "
+    f"stage 2 judges loading against the normal rating and each bus voltage against "
+    "the selected grid-code profile's continuous voltage band for its nominal kV "
+    f"(v_min/v_max; v_max_30min is not judged), else the assumed [{V_MIN_PU}, {V_MAX_PU}] pu "
+    "band of static/contingency.py; the report names the profile, or says assumed, "
+    "and counts the buses on each, "
     "after the named on-load tap changers and switched shunts walk one step at "
     "a time to lower (voltage excursion, worst overload, steps moved)",
     "stage 2 models no redispatch: a branch above "
@@ -334,6 +340,43 @@ def _knobs(work, controls: Controls, trafo_pos: dict) -> list:
                 raise ContractError(f"switched shunt {name!r} has no finite {col} (got {v!r})")
         knobs.append(_Knob(name, "shunt", i, "step", 0, int(work.shunt.at[i, "max_step"])))
     return knobs
+
+
+def _bands(net, judged, profile: dict | None) -> tuple:
+    """``({bus name: (v_min, v_max)}, {bus name: source})`` for the ``judged``
+    buses: the profile's continuous band for each bus's ``vn_kv``, else the
+    assumed ``(V_MIN_PU, V_MAX_PU)`` (no profile, or no band covering that kV)."""
+    bands, used = {}, {}
+    for b in judged:
+        name, kv = str(net.bus.at[b, "name"]), float(net.bus.at[b, "vn_kv"])
+        band = None
+        if profile is not None:
+            try:
+                band = band_for(profile, kv)
+            except ContractError:
+                band = None
+        if band is None:
+            bands[name], used[name] = (V_MIN_PU, V_MAX_PU), (kv, None)
+        else:
+            bands[name], used[name] = (float(band["v_min"]), float(band["v_max"])), (kv, band)
+    return bands, used
+
+
+def _band_note(used: dict, profile: dict | None) -> str:
+    """``"voltage band: 110 kV 0.95-1.05 pu (profile p, <clause>, code); 20 kV
+    0.9-1.1 pu (assumed)"``, one entry per nominal kV judged."""
+    by_kv = {}
+    for kv, band in used.values():
+        by_kv.setdefault(kv, band)
+    parts = []
+    for kv in sorted(by_kv, reverse=True):
+        band = by_kv[kv]
+        if band is None:
+            parts.append(f"{kv:g} kV {V_MIN_PU:g}-{V_MAX_PU:g} pu (assumed)")
+        else:
+            parts.append(f"{kv:g} kV {float(band['v_min']):g}-{float(band['v_max']):g} pu "
+                         f"(profile {profile['name']}, {band['clause']}, {band['source']})")
+    return "voltage band: " + "; ".join(parts)
 
 
 def _key(state: _State, bands: dict, moved: int):
@@ -587,12 +630,15 @@ def _summary(results: pd.DataFrame, kinds, skipped: dict) -> dict:
 
 
 def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, controls: Controls | None = None,
-                    max_compound: int | None = None, angle_limit: AngleLimit | None = None):
+                    max_compound: int | None = None, angle_limit: AngleLimit | None = None,
+                    profile: dict | None = None):
     """``(results, report)``: one ``validate_planning_results`` row per
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
-    {...} or "unset", "seconds"}``. Kinds judged: branch (any order), unit,
-    bus_section, n_m_1, n_1_1."""
+    {...} or "unset", "voltage_band": {"profile": name or "assumed", "buses":
+    {"profile": n, "assumed": n}}, "seconds"}``. Kinds judged: branch (any
+    order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
+    (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``)."""
     cset = validate_contingency_set(contingencies)
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
@@ -600,6 +646,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     controls = controls or Controls()
     if angle_limit is not None and not isinstance(angle_limit, AngleLimit):
         raise ContractError(f"angle_limit must be an AngleLimit or None, got {type(angle_limit).__name__}")
+    if profile is not None:
+        if not isinstance(profile, dict) or not profile.get("name"):
+            raise ContractError("profile must be a grid-code profile (load_grid_code) with its name, or None")
+        profile = validate_profile(profile["name"], profile)
     check_net_carries_hour(net, dispatch, loads, hour, registry)
     validate_emergency_ratings(net)
     kinds = set(cset["kind"])
@@ -625,7 +675,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         return [b for b in work.bus.index if bool(work.bus.at[b, "in_service"]) and b not in cut_before]
 
     def bands_of(work, judged):
-        return {str(work.bus.at[b, "name"]): (V_MIN_PU, V_MAX_PU) for b in judged}
+        return _bands(work, judged, profile)[0]
 
     def cut_off(work):
         out_bus = set(work.bus.index[~work.bus["in_service"].astype(bool)]) - out_before
@@ -665,7 +715,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             rows.append(_row(r, hour, islanded=True, note="; ".join(notes), **lost))
             continue
         judged = live(work)
-        bands = bands_of(work, judged)
+        bands, used = _bands(work, judged, profile)
         s1 = _solve(work, judged)
         if s1 is None:
             notes.append("post-outage load flow does not converge")
@@ -675,6 +725,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         stage1 = {"stage1_loading_pct": s1_pct, "stage1_branch": s1_branch, "stage1_verdict": _verdict(s1_pct)}
         angle = _angle_fields(work, pairs, set(judged), angle_limit, notes)
         notes.append(_rating_note(work))
+        notes.append(_band_note(used, profile))
         notes.append(NO_CONTROLS if not knobs else
                      NO_REDISPATCH if any(k.in_service(work) for k in knobs) else NO_CONTROLS_ON)
         s2, moves = remedial_walk(work, knobs, bands, judged, s1)
@@ -699,11 +750,15 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             remedial=_moved(moves), note="; ".join(n for n in notes if n), **angle, **lost,
         ))
     results = validate_planning_results(pd.DataFrame(rows, columns=list(PLANNING_RESULT_COLUMNS)))
+    base_used = _bands(base, live(base), profile)[1].values()
     report = {
         "counts": {k: int(n) for k, n in cset["kind"].value_counts().sort_index().items()},
         "skipped": skipped,
         "summary": _summary(results, kinds, skipped),
         "angle_limit": angle_limit.ledger() if angle_limit is not None else "unset",
+        "voltage_band": {"profile": profile["name"] if profile is not None else "assumed",
+                         "buses": {"profile": sum(band is not None for _, band in base_used),
+                                   "assumed": sum(band is None for _, band in base_used)}},
         "seconds": round(time.perf_counter() - t0, 3),
     }
     return results, report

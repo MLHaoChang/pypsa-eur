@@ -50,6 +50,7 @@ from gridspine.static.planning_criteria import (
     screen_planning,
     validate_emergency_ratings,
 )
+from gridspine.templates.grid_codes import load_grid_code, validate_profile
 from tests.gridspine.test_shortcircuit import HOUR, _hour_tables
 
 PARALLEL = ["BUS_A-BUS_B-1", "BUS_A-BUS_B-2"]
@@ -388,6 +389,62 @@ def test_ledgers_state_the_assumptions():
     assert any("split busbar" in s for s in BUS_SECTION_LEDGER)
     assert any("thermal loading only" in s for s in PLANNING_LEDGER)
     assert any("no redispatch" in s for s in PLANNING_LEDGER)
+
+
+# --------------------------------------------------------------------------
+# the stage-2 voltage band from the grid-code profile
+# --------------------------------------------------------------------------
+
+def _profile(*bands):
+    """A validated profile whose voltage_bands are ``(kv_min, kv_max, v_min, v_max)``."""
+    p = load_grid_code("generic_assumed", raw=True)
+    p["voltage_bands"] = [{"kv_min": lo, "kv_max": hi, "v_min": vmin, "v_max": vmax,
+                           "clause": "test clause", "source": "code"} for lo, hi, vmin, vmax in bands]
+    return validate_profile("test_band", p)
+
+
+def test_a_profile_band_narrower_than_the_assumed_one_fails_a_bus_that_passes_today():
+    net = _net()
+    today, _ = _screen(net, _set(net))
+    res, report = _screen(net, _set(net), profile=_profile((0.0, 200.0, 0.95, 1.05)))
+    assert _one(today, PARALLEL[1])["stage2_verdict"] == "pass"
+    row = _one(res, PARALLEL[1])
+    assert row["stage2_min_vm_pu"] < 0.95
+    assert row["stage2_verdict"] == "fail"
+    assert "110 kV 0.95-1.05 pu (profile test_band, test clause, code)" in row["note"]
+    assert report["voltage_band"] == {"profile": "test_band", "buses": {"profile": 6, "assumed": 0}}
+
+
+def test_no_profile_gives_todays_band_labelled_assumed():
+    net = _net()
+    res, report = _screen(net, _set(net))
+    same, _ = _screen(net, _set(net), profile=_profile((0.0, 200.0, 0.9, 1.1)))
+    cols = [c for c in res.columns if c != "note"]
+    pd.testing.assert_frame_equal(res[cols], same[cols])
+    assert report["voltage_band"] == {"profile": "assumed", "buses": {"profile": 0, "assumed": 6}}
+    row = _one(res, PARALLEL[1])
+    assert "voltage band: 110 kV 0.9-1.1 pu (assumed); 20 kV 0.9-1.1 pu (assumed)" in row["note"]
+    assert row["note"].endswith(NO_REDISPATCH)
+    assert any("assumed [0.9, 1.1] pu" in s for s in PLANNING_LEDGER)
+
+
+def test_a_kv_level_no_profile_band_covers_keeps_the_assumed_band():
+    net = _net()
+    # 110 kV covered (tight), 20 kV not: the 20 kV buses stay on 0.9-1.1
+    res, report = _screen(net, _set(net), profile=_profile((100.0, 200.0, 0.95, 1.05)))
+    assert report["voltage_band"] == {"profile": "test_band", "buses": {"profile": 4, "assumed": 2}}
+    row = _one(res, PARALLEL[1])
+    assert "110 kV 0.95-1.05 pu (profile test_band, test clause, code); 20 kV 0.9-1.1 pu (assumed)" in row["note"]
+    # the low bus is at 20 kV (~0.946 pu): in the assumed band, though outside the profile's 0.95
+    assert row["stage2_min_vm_pu"] < 0.95
+    assert row["stage2_verdict"] == "pass"
+
+
+@pytest.mark.parametrize("bad", [{"name": "x", "voltage_bands": []}, "test_band", {"title": "no name"}])
+def test_a_bad_profile_is_refused(bad):
+    net = _net()
+    with pytest.raises(ContractError, match="profile"):
+        _screen(net, _set(net), profile=bad)
 
 
 # --------------------------------------------------------------------------
