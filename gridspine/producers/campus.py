@@ -51,7 +51,11 @@ Translation, in the order the draft is built:
   (the backend's ``services/solver/island.py``) gives GFM credit to
   batteries only; neither the fuel cell nor its H2 Store enters the island
   energy or fuel-autonomy checks.
-* **Lines** become cables with their own r, x and b.
+* **Lines** become cables with their own r, x and b, the capacitance taken
+  from b at the network's frequency.
+* **Frequency**: ``f_hz`` as stated, else the network's ``meta["f_hz"]``,
+  else 50 (``campus_f_hz``'s rule: 50 or 60). It sets both the campus's
+  ``f_hz`` and the b-to-capacitance conversion, so the two agree.
 * **Generators** are typed by carrier (``CARRIER_KIND``). An unknown carrier
   is refused with its name, so the user can add it rather than have it
   silently become something else.
@@ -64,8 +68,8 @@ Translation, in the order the draft is built:
   results find it (plan C2).
 
 Duck-typed on the network object: only ``buses``, ``generators``,
-``storage_units``, ``loads``, ``links``, ``lines`` and ``loads_t.p_set`` are
-read, and pypsa is never imported here. ``producers/pypsa_nodal.py`` stays
+``storage_units``, ``loads``, ``links``, ``lines``, ``loads_t.p_set`` and
+``meta`` are read, and pypsa is never imported here. ``producers/pypsa_nodal.py`` stays
 the only module that loads a network file.
 """
 import dataclasses
@@ -75,6 +79,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from gridspine.ingest.campus import campus_f_hz
 from gridspine.schema.campus import STANDARD_MVA, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.schema.island import ffr_sizing, preset_block
@@ -355,11 +360,14 @@ def _source_unit(links, lname, bus, p, carrier_in):
     return u
 
 
-def draft_campus(n, island=None) -> CampusDraft:
+def draft_campus(n, island=None, f_hz=None) -> CampusDraft:
     """The campus description for a solved hub network ``n`` (see the module
     docstring for what becomes what). ``island`` is the hub sidecar as
     ``schema.island.validate_island_config`` returns it; with it, the draft
-    carries the island data (``_attach_island``)."""
+    carries the island data (``_attach_island``). ``f_hz`` is the nominal
+    frequency; unstated, the network's ``meta["f_hz"]``, else 50."""
+    stated = {"f_hz": f_hz} if f_hz is not None else (getattr(n, "meta", None) or {})
+    f_hz = int(campus_f_hz(stated))
     buses = n.buses
     carrier = buses["carrier"].fillna("AC") if "carrier" in buses.columns else pd.Series("AC", index=buses.index)
     ac = [b for b in buses.index if carrier[b] in _AC]
@@ -378,7 +386,7 @@ def draft_campus(n, island=None) -> CampusDraft:
     sk = float(sk_given) if pd.notna(sk_given) and float(sk_given) > 0 else sk_typ
     spec = {
         "name": short_names([getattr(n, "name", "") or "CAMPUS"])[0],
-        "f_hz": 50,
+        "f_hz": f_hz,
         "pcc": {"bus": bus_ids[pcc], "vn_kv": pcc_kv, "pypsa_name": pcc, "vm_pu": _t(1.0),
                 "sk_max_mva": _t(sk), "sk_min_mva": _t(sk), "rx_max": _t(rx_typ), "rx_min": _t(rx_typ)},
         "buses": {bus_ids[b]: {"vn_kv": float(buses.at[b, "v_nom"]), "pypsa_name": b} for b in ac if b != pcc},
@@ -443,7 +451,7 @@ def draft_campus(n, island=None) -> CampusDraft:
             "from_bus": bus_ids[b0], "to_bus": bus_ids[b1], "pypsa_name": lname,
             "length_km": _t(length), "r_ohm_per_km": _t(float(ln.at[lname, "r"]) / length),
             "x_ohm_per_km": _t(float(ln.at[lname, "x"]) / length),
-            "c_nf_per_km": _t(float(ln.at[lname, "b"]) / (2 * math.pi * 50) / length * 1e9),
+            "c_nf_per_km": _t(float(ln.at[lname, "b"]) / (2 * math.pi * f_hz) / length * 1e9),
             "max_i_ka": _t(s_nom / (math.sqrt(3) * kv)),
         }
 

@@ -1,0 +1,1 @@
+* Fix(gridspine): The campus draft takes its nominal frequency from the caller or the network's `meta["f_hz"]` (50 when unstated, 50 or 60 only), writes it as the campus's `f_hz`, and converts each line's susceptance to capacitance at that frequency, so a 60 Hz project no longer drafts its cable capacitance 1.2× too high. The 60 Hz constant scan now covers `gridspine/producers`.

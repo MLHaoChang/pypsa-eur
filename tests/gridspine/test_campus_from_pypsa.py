@@ -320,3 +320,42 @@ def test_a_gui_drawn_fuel_cell_is_typed_by_its_role_or_its_h2_input(extra):
         n.links.loc["fc", "eh_role"] = extra["eh_role"]
     _, fc = _by_pypsa(draft_campus(n).spec["campus"]["units"])["fc"]
     assert fc["kind"] == "fuel_cell" and fc["p_mw"]["value"] == pytest.approx(2.0)
+
+
+C_NF_PER_KM = 250.0
+
+
+def _feeder(f_hz):
+    """``hub()`` with a 2 km cable whose susceptance is ``2π f_hz · C``."""
+    n = hub()
+    n.add("Line", "feeder", bus0="grid", bus1="dc_mv", s_nom=60.0, x=0.5, r=0.1, length=2.0,
+          b=2 * math.pi * f_hz * C_NF_PER_KM * 1e-9 * 2.0)
+    return n
+
+
+@pytest.mark.parametrize("f_hz", [50, 60])
+def test_a_line_keeps_its_capacitance_at_the_networks_frequency(f_hz):
+    n = _feeder(f_hz)
+    if f_hz != 50:
+        n.meta["f_hz"] = f_hz
+    spec = draft_campus(n).spec["campus"]
+    _, cable = _by_pypsa(spec["cables"])["feeder"]
+    assert spec["f_hz"] == f_hz
+    assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
+
+
+def test_a_stated_frequency_wins_over_the_networks():
+    n = _feeder(60)
+    n.meta["f_hz"] = 50
+    spec = draft_campus(n, f_hz=60).spec["campus"]
+    _, cable = _by_pypsa(spec["cables"])["feeder"]
+    assert spec["f_hz"] == 60
+    assert cable["c_nf_per_km"]["value"] == pytest.approx(C_NF_PER_KM, rel=1e-12)
+
+
+@pytest.mark.parametrize("bad", [7, "60", True, 60.5])
+def test_a_frequency_other_than_50_or_60_is_refused(bad):
+    n = _feeder(50)
+    n.meta["f_hz"] = bad
+    with pytest.raises(ContractError, match="f_hz"):
+        draft_campus(n)
