@@ -210,3 +210,12 @@ def test_a_limits_edit_during_the_read_is_refused_by_name(hub, checked, monkeypa
     frames = ask(checked, ctx, {})
     reasons = {s["reason"] for s in approval(frames)["receipt"]["result_slots"] if s["disposition"] != "answered"}
     assert reasons == {"limits_changed_during_read"}
+
+
+@pytest.mark.parametrize("step", [20.0, 10.0])
+def test_the_flicker_row_is_not_scalar_since_its_verdict_reads_pst_and_plt(tmp_path, step):
+    from tests.test_grid_readiness import _flicker_site
+
+    row = _rows(G.grid_readiness(tmp_path, _flicker_site(step=step), PROFILE))["flicker"]
+    assert row["project_value"] is not None
+    assert R.disposition(row)[0] == "not_scalar"

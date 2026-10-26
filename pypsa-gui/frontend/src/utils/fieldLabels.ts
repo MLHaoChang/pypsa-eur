@@ -12,6 +12,8 @@ export const FIELD_LABELS: Record<string, string> = {
   rated_mva: 'Rated apparent power',
   harmonic_source: 'Harmonic source',
   harmonic_spectrum: 'Harmonic spectrum',
+  flicker_step_mva: 'Largest power step',
+  flicker_changes_per_min: 'Changes per minute',
   single_phase_share: 'Single-phase share',
 }
 
