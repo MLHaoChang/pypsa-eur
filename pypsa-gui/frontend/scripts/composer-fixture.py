@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--storage", type=Path, required=True)
     parser.add_argument("--decisions", action="store_true")
     parser.add_argument("--no-model", action="store_true", help="configure no model profile (the no-key path)")
-    parser.add_argument("--journey", choices=["oj01", "oj05"],
+    parser.add_argument("--journey", choices=["oj01", "oj05", "oj21", "oj22"],
                         help="script a finite owner journey on the loopback wire (LC-03 OJ-01)")
     args = parser.parse_args()
     storage = args.storage.resolve()
@@ -71,6 +71,35 @@ def main():
                 steps = [("resolve_reference", {"target": "component", "component_class": "Line"}),
                          ("update_component", {"component_class": target.get("component_class"),
                                                "name": target.get("name"), "attrs": {"s_nom": 400}})]
+            elif "and the battery's overnight power cost" in said:
+                # LC-16 OJ-21: one preview for three assets of two classes, then one apply card.
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Line", "names": ["L1"], "attribute": "s_nom", "value": 500},
+                    {"component_class": "Line", "names": ["L2"], "attribute": "s_nom", "value": 450},
+                    {"component_class": "StorageUnit", "names": ["Battery"], "attribute": "inv_power_overnight",
+                     "value": 150000}]}),
+                         ("apply_project_changes", {"preview_id": results[0].get("preview_id") if results else None})]
+                if results and not results[0].get("preview_id"):
+                    steps = steps[:1]  # a refused preview ends the turn; nothing to apply
+            elif "solar capacity by 20 %" in said or "Halve the gas capacity" in said:
+                # LC-16 OJ-22: the server resolves the set and computes every value; one apply card.
+                carrier, factor = ("solar", 1.2) if "solar" in said else ("gas", 0.5)
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Generator", "select": {"carrier": carrier}, "attribute": "p_nom",
+                     "operation": {"scale": factor}}]}),
+                         ("apply_project_changes", {"preview_id": results[0].get("preview_id") if results else None})]
+                if results and not results[0].get("preview_id"):
+                    steps = steps[:1]
+            elif "wind capacity by 20 %" in said:
+                # LC-16 OJ-22: an empty set is a refusal in words; nothing is previewed.
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Generator", "select": {"carrier": "wind"}, "attribute": "p_nom",
+                     "operation": {"scale": 1.2}}]})]
+            elif "and L3 to 400" in said:
+                # LC-16 OJ-23: one member does not exist; nothing is previewed.
+                steps = [("preview_project_changes", {"changes": [
+                    {"component_class": "Line", "names": ["L1", "L2"], "attribute": "s_nom", "value": 500},
+                    {"component_class": "Line", "names": ["L3"], "attribute": "s_nom", "value": 400}]})]
             elif "Undo that change" in said:
                 steps = [("undo_last", {})]
             elif "NH3 tank" in said:
@@ -104,7 +133,13 @@ def main():
                 text = (f"OJ03_ANSWER {verb} {offered[0] if offered else 'nothing'}; "
                         f"also with data: {', '.join(offered[1:]) or 'none'}; "
                         f"already shown: {', '.join(listing.get('shown', []))}.")
-            elif steps[-1][0] in ("update_component", "undo_last"):
+            elif steps[-1][0] == "preview_project_changes" and "wind" in said:
+                # A refusal comes back as "kind\n<untrusted_data>\nmessage\n</untrusted_data>": say the message.
+                raw = results[0].get("message") or results[0].get("unparsed") or json.dumps(results[0])
+                text = f"OJ22_EMPTY {raw.split('<untrusted_data>')[-1].split('</untrusted_data>')[0].strip()[:600]}"
+            elif steps[-1][0] == "preview_project_changes":
+                text = f"OJ23_ANSWER {json.dumps(results[0])[:600]}"
+            elif steps[-1][0] in ("update_component", "undo_last", "apply_project_changes"):
                 receipt = results[-1].get("_edit_receipt") or {}
                 text = (f"OJ05_ANSWER {receipt.get('says') or results[-1]}; "
                         f"{'read back' if receipt.get('outcome') == 'verified' else 'not confirmed'}; "
@@ -253,11 +288,15 @@ with SessionLocal() as db:
             else:
                 raise RuntimeError("Backend readiness timeout")
             ready = {"base": f"http://127.0.0.1:{port}", "credentials_file": str(credentials)}
-            if args.journey in ("oj01", "oj05"):
+            if args.journey in ("oj01", "oj05", "oj21", "oj22"):
                 # The same oj-grid the Tier A tests use (tests/oj_grid.py), as NetCDF.
                 network = storage / "oj-grid.nc"
+                # OJ-22 adds two more solar units, one inactive, so "all solar" is a set of three.
+                more = ("n.add('Generator', 'Solar roof', bus='B2', p_nom=10, carrier='solar'); "
+                        "n.add('Generator', 'Solar old', bus='B1', p_nom=5, carrier='solar', active=False); "
+                        if args.journey == "oj22" else "")
                 subprocess.run([sys.executable, "-c", "import sys; from tests.oj_grid import build_oj_grid; "
-                                "build_oj_grid().export_to_netcdf(sys.argv[1])", str(network)],
+                                f"n = build_oj_grid(); {more}n.export_to_netcdf(sys.argv[1])", str(network)],
                                cwd=backend_dir, env=env, check=True, capture_output=True)
                 ready["network_file"] = str(network)
             print(json.dumps(ready), flush=True)

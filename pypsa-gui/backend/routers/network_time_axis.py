@@ -38,7 +38,7 @@ from models.schemas import (
     SampleWeeksConfig,
     SnapshotConfig,
 )
-from services import change_log_service
+from services import change_log_service, growth_placeholders
 from services.transient_rows import filter_transient_names
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
@@ -1203,6 +1203,7 @@ def set_timeseries(component: str, attribute: str, body: dict):
         # Phase 12f: refuse before the store is touched, so a rejected write
         # leaves nothing behind.
         _reject_nonfinite_timeseries(df, component, attribute)
+        prior = growth_placeholders.before(n, component, attribute, df.columns)
         ts_store[attribute] = df
         # Persist edits in _user_ts so they survive project reload.
         # Hold _user_ts_lock for the mutation — autosave's
@@ -1212,6 +1213,9 @@ def set_timeseries(component: str, attribute: str, body: dict):
         with _user_ts_lock:
             for col in df.columns:
                 _user_ts[(component, attribute, col)] = df[col].copy()
+        # A user edit sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, component, attribute,
+                                     {c: df[c] for c in df.columns}, prior)
     cols_preview = ", ".join(list(df.columns)[:3]) + ("…" if len(df.columns) > 3 else "")
     change_log_service.log(
         "timeseries", component.capitalize(), cols_preview,
@@ -1311,6 +1315,7 @@ async def upload_timeseries(
     unmatched = [str(c) for c in df.columns if str(c) not in known]
 
     with PyPSAService.get_lock():
+        prior = growth_placeholders.before(n, component, attribute, matched)
         with _user_ts_lock:
             for col in matched:
                 new_s = df[col]
@@ -1327,6 +1332,10 @@ async def upload_timeseries(
                         _user_ts[(component, attribute, col)] = new_s.copy()
                 else:
                     _user_ts[(component, attribute, col)] = new_s.copy()
+        # A user upload sets the growth placeholders its periods cover (E1
+        # follow-up); a `period=` upload covers that period only.
+        growth_placeholders.mark_set(n, component, attribute,
+                                     {c: df[c] for c in matched}, prior)
         # Grow n.snapshots if the upload covers more rows than the current
         # operational range. Matches the behaviour of the component-specific
         # upload routes (/generators/upload_profile, /loads/upload_profile)
