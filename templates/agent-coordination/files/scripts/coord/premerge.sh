@@ -289,7 +289,7 @@ if verdicts=$(command -v gh >/dev/null &&
     elif verdict_carries "$full"; then
       echo "$who OK @$full: carries (clean $base_branch merge)"
     else
-      files=$(git diff --name-only "$full" "$head" 2>/dev/null | head -15 | paste -sd' ')
+      files=$(git diff --name-only "$full" "$head" 2>/dev/null | sed -n 1,15p | paste -sd' ')
       echo "$who OK @$full: stale: changed since: ${files:-unreadable}"
     fi
   done
