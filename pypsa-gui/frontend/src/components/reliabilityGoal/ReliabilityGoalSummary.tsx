@@ -49,7 +49,11 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
       if (it === 'target') parts.push(`allowed shortfall ${goalWords(goal, 'target_lole_h')}`)
       else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
       else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
-      else parts.push(`site type: ${siteTypeLabel(goal.site_archetype.value)}${sourceNote(goal.site_archetype)}`)
+      else {
+        // The select's own label and wording ("Grid connection: None — …").
+        const l = siteTypeLabel(goal.site_archetype.value)
+        parts.push(`grid connection: ${l[0].toLowerCase()}${l.slice(1)}${sourceNote(goal.site_archetype)}`)
+      }
     }
   }
   // Inline text, not a wrapping flex row: a long row wraps inside its words

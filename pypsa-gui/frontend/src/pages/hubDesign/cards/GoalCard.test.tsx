@@ -135,6 +135,10 @@ describe('GoalCard goal (W3b-R: the one stored goal)', () => {
     await user.type(input('hub-goal-ens'), '2')
     await user.click(screen.getByTestId('hub-goal-save'))
     await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledWith({ ens_cap_permyriad: 2 }))
+    // A save says it landed; the next edit clears the note.
+    expect((await screen.findByTestId('hub-goal-saved')).textContent).toBe('Saved.')
+    await user.type(input('hub-goal-ens'), '3')
+    expect(screen.queryByTestId('hub-goal-saved')).toBeNull()
   })
 
   it('takes a "set the goal" request from a Results study (Guided home of the goal)', async () => {

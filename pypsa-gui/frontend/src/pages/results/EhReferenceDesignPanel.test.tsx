@@ -333,7 +333,7 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.queryByTestId('eh-abort')).toBeNull()
     // The goal, read-only, with "›" links to its editors (W3b-R).
     await waitFor(() => expect(screen.getByTestId('eh-goal-values').textContent)
-      .toBe('site type: Strong — import whenever needed (default) · allowed shortfall not set · '
+      .toBe('grid connection: strong — import whenever needed (default) · allowed shortfall not set · '
         + 'ENS target off · MC draws 500 (default)'))
     expect(screen.getByTestId('eh-archetype').textContent).toMatch(/^Strong grid: /)
     expect(screen.queryByRole('combobox', { name: /archetype/i })).toBeNull()
