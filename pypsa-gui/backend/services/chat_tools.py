@@ -8515,13 +8515,8 @@ def _b2b_body_request(data: bytes, path: str):
                     "query_string": b""}, receive)
 
 
-def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
-    """
-    An UPLOADED GeoJSON/KML file of the active project through the map's import
-    route. The bytes are the upload's (never model-emitted); the route parses,
-    caps, lock-checks on apply and writes.
-    """
-    from routers.projects import import_map_geometry as _h
+def _map_geometry_upload(name: str, file_id: str) -> tuple[str, bytes]:
+    """`(active project, bytes)` of the geometry upload `file_id`; the edit card reads it the same way."""
     from services import upload_service
 
     with _acting():   # identity before the file is read
@@ -8534,7 +8529,18 @@ def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_
             "error_kind": "upload_project_mismatch",
             "message": f"file_id is an upload of the active project {active!r}; "
                        f"import into that project, or switch to {name!r} and upload there"})
-    data = upload_service.get_upload_bytes(active, file_id)
+    return active, upload_service.get_upload_bytes(active, file_id)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+
+    active, data = _map_geometry_upload(name, file_id)
     request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
     with _acting() as (db, user):
         # Async handler: driven inside the identity scope, so its db stays open.

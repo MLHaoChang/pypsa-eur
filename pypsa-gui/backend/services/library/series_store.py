@@ -162,6 +162,18 @@ def _write_payload(target: Path, data: bytes, digest: str) -> None:
             os.unlink(tmp)
 
 
+def prepare_series(name: str, series: pd.Series, meta: dict | None) -> tuple[SeriesMeta, bytes, str | None, str]:
+    """Every check `put_series` makes before it touches storage: `(meta, canonical bytes,
+    zone, sha256)`. Pure: the edit card calls it, so it shows what the write stores."""
+    _validate(name, series)
+    try:
+        meta_ok = SeriesMeta.model_validate(meta or {})
+    except ValidationError as exc:
+        raise ValueError(f"invalid series meta: {exc.errors()[0]['msg']}") from exc
+    data, tz = _canonical(series)
+    return meta_ok, data, tz, hashlib.sha256(data).hexdigest()
+
+
 def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: dict,
                *, created_by: UUID | None = None, root: Path | None = None) -> PriceSeriesRef:
     """Store `series` as `name` in the org's Library; idempotent on content.
@@ -172,13 +184,7 @@ def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: 
     The retry ROLLS BACK `db`, so a caller must not hold other unsaved work in
     the same session when calling this.
     """
-    _validate(name, series)
-    try:
-        meta_ok = SeriesMeta.model_validate(meta or {})
-    except ValidationError as exc:
-        raise ValueError(f"invalid series meta: {exc.errors()[0]['msg']}") from exc
-    data, tz = _canonical(series)
-    digest = hashlib.sha256(data).hexdigest()
+    meta_ok, data, tz, digest = prepare_series(name, series, meta)
     rel = Path("series") / f"{_slug(name)}-{digest[:16]}.csv.gz"
     _write_payload(library_file(root or _default_root(), org_id, rel), data, digest)
     meta_json = json.dumps({**meta_ok.model_dump(), "tz": tz}, sort_keys=True)
