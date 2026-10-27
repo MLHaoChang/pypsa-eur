@@ -171,7 +171,7 @@ from services.solver_service import (
 )
 from services import study_state as _study_state
 from services.ac_pf_service import run_ac_pf_stage
-from services.validation_service import has_errors, validate_for_run
+from services.validation_service import has_errors, rolling_window_problems, validate_for_run
 from starlette.responses import StreamingResponse
 
 
@@ -621,6 +621,14 @@ def update_solver_config(
             submitted["commercial"]["value_flows"] = (
                 current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
+        # Checked on the MERGED pair (a partial PUT may set one of the two),
+        # and only when this PUT sets one: a stored legacy pair must not block
+        # unrelated edits (the pre-flight check still refuses it at solve).
+        if {"rolling_horizon", "rolling_overlap"} & submitted.keys():
+            problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]))
+            if problems:
+                kind, message = problems[0]
+                raise HTTPException(422, {"code": kind, "message": message})
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
 

@@ -244,6 +244,9 @@ async def post_upload(
     # the multipart Content-Type is treated as an UNVERIFIED hint.
     declared_mime = file.content_type or mimetypes.guess_type(filename)[0]
     sniffed_mime = _sniff_mime(blob_bytes, declared_mime, filename)
+    # GeoJSON / KML sniff as plain JSON / XML / text: upgraded only when the
+    # bytes parse as the map import reads them (`resolve_geo_mime`).
+    sniffed_mime = upload_service.resolve_geo_mime(blob_bytes, filename, sniffed_mime, declared_mime)
 
     # The SNIFFED MIME is authoritative — that's what determines how the
     # downstream tools (and Anthropic) treat the bytes. We allowlist-check

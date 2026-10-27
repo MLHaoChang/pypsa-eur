@@ -1,0 +1,3 @@
+* Feat(pypsa-gui): Uploads accept GeoJSON (`application/geo+json`) and KML (`application/vnd.google-earth.kml+xml`), but only when the bytes parse the way the map-geometry import reads them. A file named or declared as GeoJSON/KML that doesn't parse is refused, and so is a KML that declares a DOCTYPE or entity (the map import refuses those too). Geo uploads are capped at the import's 8 MB.
+
+* Fix(pypsa-gui): `PUT /api/simulation/solver_config` refuses a rolling-horizon overlap that is not shorter than the window, and a window under 1 or a negative overlap, with a 422 that says what to change. It checks the pair the save would store, using the same rule as the pre-flight check.

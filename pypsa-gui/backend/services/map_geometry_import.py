@@ -15,7 +15,9 @@ tables the route reads from the live network, and `apply_report` takes the
 project directory. No FastAPI, no PyPSA, no network I/O. The KML parser is
 stdlib `xml.etree` only — no new dependency — and reads the subset a
 surveyor's export carries: Placemark name, LineString, Polygon outer ring,
-MultiGeometry.
+MultiGeometry. A document that declares a DOCTYPE or an entity is refused
+before parsing (no entity expansion, no external entities), whether or not
+defusedxml is installed.
 
 Coordinates are GeoJSON `[lng, lat]` throughout, the order `map_layout.json`
 stores. A route's stored `points` are its INTERIOR vertices: an end vertex
@@ -27,6 +29,7 @@ from __future__ import annotations
 import json
 import math
 import pathlib
+import re
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -189,12 +192,17 @@ def _kml_coords(text: str | None, where: str) -> list[list[float]]:
     return out
 
 
+_DTD = re.compile(r"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
+
+
 def parse_kml(text: str) -> list[Feature]:
     """
     KML Placemarks → the same features a GeoJSON parse yields: a LineString's
     coordinates, a Polygon's outer ring, each geometry of a MultiGeometry.
     Namespace-agnostic (surveyor exports mix KML 2.0, 2.2 and none).
     """
+    if _DTD.search(text):
+        raise GeometryImportInvalid("KML declares a DOCTYPE or entity; remove it and upload the file again.")
     try:
         root = ET.fromstring(text)
     except ET.ParseError as exc:

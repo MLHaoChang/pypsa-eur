@@ -886,6 +886,29 @@ def _check_loss_magnitude(n, cfg) -> list[Issue]:
     return out
 
 
+def rolling_window_problems(horizon: int, overlap: int) -> list[tuple[str, str]]:
+    """
+    `(kind, message)` for each way a rolling window is unusable: horizon <= 0,
+    overlap < 0, overlap >= horizon (PyPSA rejects it). Empty when usable.
+    The one rule for every writer: the pre-flight check below, `PUT
+    /api/simulation/solver_config`, and (follow-up) the EditCard path.
+    """
+    out: list[tuple[str, str]] = []
+    if horizon <= 0:
+        out.append(("rolling_horizon_invalid",
+            f"The rolling-horizon window must be at least 1 snapshot (it is {horizon}). "
+            "Set Horizon to 1 or more."))
+    if overlap < 0:
+        out.append(("rolling_overlap_invalid",
+            f"The rolling-horizon overlap can't be negative (it is {overlap}). "
+            "Set Overlap to 0 or more."))
+    if horizon > 0 and overlap >= horizon:
+        out.append(("rolling_overlap_exceeds_horizon",
+            f"The rolling-horizon overlap ({overlap} snapshots) must be shorter than the "
+            f"window ({horizon} snapshots per window). Lower Overlap or raise Horizon."))
+    return out
+
+
 def _check_rolling_horizon(n, cfg) -> list[Issue]:
     """
     Pre-flight checks for the rolling-horizon LOPF strategy.
@@ -907,15 +930,7 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
     out: list[Issue] = []
     H = int(getattr(cfg, "rolling_horizon", 168) or 0)
     O = int(getattr(cfg, "rolling_overlap", 24) or 0)
-    if H <= 0:
-        out.append(_err("rolling_horizon_invalid", "", "",
-            f"rolling_horizon must be > 0 (got {H})."))
-    if O < 0:
-        out.append(_err("rolling_overlap_invalid", "", "",
-            f"rolling_overlap must be >= 0 (got {O})."))
-    if H > 0 and O >= H:
-        out.append(_err("rolling_overlap_exceeds_horizon", "", "",
-            f"rolling_overlap ({O}) must be strictly less than rolling_horizon ({H})."))
+    out += [_err(kind, "", "", msg) for kind, msg in rolling_window_problems(H, O)]
     if getattr(cfg, "sclopf", False):
         out.append(_err("rolling_with_sclopf", "", "",
             "N-1 security can't run with the rolling-horizon "
