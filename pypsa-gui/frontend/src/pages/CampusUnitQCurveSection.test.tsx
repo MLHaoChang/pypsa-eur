@@ -42,7 +42,9 @@ describe('CampusUnitQCurveSection', () => {
     expect(tr.textContent).toContain('−19 to +19 Mvar')
     expect(tr.textContent).toContain('±18.5 Mvar')
     expect(tr.textContent).toContain('0.534 Mvar')
-    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent).toBe(fail.detail)
+    expect(screen.getByText(/Basis: screening at unit terminals: √\(S² − P²\)/)).toBeTruthy()
+    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
+      .toBe('±18.47 Mvar available for −19.00 to +19.00 Mvar: 0.53 Mvar short')
   })
 
   it('shows a pass with no shortfall as a dash and its detail only as a tooltip', () => {

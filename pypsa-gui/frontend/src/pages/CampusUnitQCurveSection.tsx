@@ -8,7 +8,8 @@ import { VerdictChip } from '../components/gridReadiness/GridReadinessScorecard'
 import { TableScroll } from './CampusInvestmentSection'
 
 const TITLE = 'Unit reactive capability'
-const HINT = "Each inverter against the grid code's per-unit curve, at its terminals."
+const BASIS = "screening at unit terminals: √(S² − P²) per inverter against the grid code's per-unit curve × rated P, "
+  + 'at each checked active power; collector and transformer reactive losses are not included.'
 
 function fig(v: number | null | undefined, digits = 3): string {
   return v == null || !isFinite(v) ? '—' : `${Number(v.toPrecision(digits))}`
@@ -18,6 +19,23 @@ function fig(v: number | null | undefined, digits = 3): string {
 function signed(v: number): string {
   const f = fig(Math.abs(v))
   return v > 0 ? `+${f}` : v < 0 ? `−${f}` : f
+}
+
+/** Two decimals, as the Available column and the engine's detail line. */
+function mvar(v: number): string {
+  return v.toFixed(2)
+}
+
+function signed2(v: number): string {
+  return v > 0 ? `+${mvar(v)}` : v < 0 ? `−${mvar(-v)}` : mvar(v)
+}
+
+/** A fail row's detail in the table's own number style; the other rows keep the engine's words. */
+function detailText(r: IbrQCurveRow): string {
+  if (r.status !== 'fail' || r.available_mvar == null || r.shortfall_mvar == null
+    || r.q_min_req_mvar == null || r.q_max_req_mvar == null) return r.detail
+  return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: `
+    + `${mvar(r.shortfall_mvar)} Mvar short`
 }
 
 function power(r: IbrQCurveRow): string {
@@ -65,7 +83,7 @@ function Row({ r }: { r: IbrQCurveRow }) {
       </tr>
       {shown && (
         <tr data-testid={`qcurve-detail-${r.unit}-${r.p_pu ?? 'none'}`}>
-          <td colSpan={6} className="pb-1 text-[11px] text-muted">{r.detail}</td>
+          <td colSpan={6} className="pb-1 text-[11px] text-muted">{detailText(r)}</td>
         </tr>
       )}
     </>
@@ -79,7 +97,7 @@ export default function CampusUnitQCurveSection({ rows, notComputed }: {
   if (rows == null || rows.length === 0) {
     if (!notComputed) return null
     return (
-      <PageSection title={TITLE} hint={HINT}>
+      <PageSection title={TITLE}>
         <p data-testid="qcurve-not-computed" className="px-4 py-3 text-[12px] text-muted">
           Not computed for this run. Rerun the study to add the check.
         </p>
@@ -89,8 +107,8 @@ export default function CampusUnitQCurveSection({ rows, notComputed }: {
   const short = rows.filter(r => r.status === 'fail').length
   const first = rows[0]
   return (
-    <PageSection title={TITLE} hint={HINT}
-      count={`${rows.length} ${rows.length === 1 ? 'check' : 'checks'} · ${short} short`}>
+    <PageSection title={TITLE}
+      hint={`${rows.length} ${rows.length === 1 ? 'check' : 'checks'} · ${short} short`}>
       <div className="px-4 py-3 flex flex-col gap-2">
         <TableScroll>
           <table className="w-full text-[12px]">
@@ -110,7 +128,7 @@ export default function CampusUnitQCurveSection({ rows, notComputed }: {
           <Tag tone={first.source === 'code' ? 'accent' : 'warn'}>{first.source}</Tag>
           <span>Curve: {first.clause}</span>
         </div>
-        <p className="text-[11px] text-muted">Basis: {first.basis}</p>
+        <p className="text-[11px] text-muted">Basis: {BASIS}</p>
       </div>
     </PageSection>
   )
