@@ -3538,7 +3538,8 @@ def run_simulation(rerun_current: bool = False) -> dict:
     return _h()
 
 
-def run_ac_pf_stage() -> dict:
+def run_ac_pf_stage(rerun_current: bool = False) -> dict:
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # Same shape as run_simulation — `run_ac_pf` is the route handler. The
     # router module re-exports `run_ac_pf_stage` from solver_service as the
     # service-level entry point; we want the HTTP-equivalent handler.

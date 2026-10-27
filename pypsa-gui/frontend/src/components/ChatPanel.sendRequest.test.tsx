@@ -686,6 +686,8 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
     ['run_simulation', {}, 'Run a full calculation of the network'],
     ['run_simulation', { rerun_current: true },
       'Run the full calculation again; the results already match the inputs, so it gives the same answer'],
+    ['run_ac_pf_stage', { rerun_current: true },
+      'Run the power-flow check again; its results already match the network, so it gives the same answer'],
     ['solve_queue_requeue', { job_id: 'j1' }, 'Run the finished calculation j1 again as a new job'],
     ['solve_queue_requeue', { job_id: 'j1', rerun_current: true },
       'Run the finished calculation j1 again as a new job; its results already match the inputs'],

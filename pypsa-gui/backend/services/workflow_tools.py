@@ -200,13 +200,14 @@ def _study_state(project):
                           "note": "Freshness uses the saved config and artifact/source file timestamps; this is steady-state evidence, not dynamic compliance."}
 
 
-def _network_engines(ready, dispatch_fresh, results_current):
+def _network_engines(ready, dispatch_fresh, results_current, loadflow_current):
     """LC-19 item 4: the engines a network project can start from chat, named
     from the separability matrix. The load flow seeds from the optimisation's
-    dispatch, so it is ready only while that dispatch is fresh."""
+    dispatch, so it is ready only while that dispatch is fresh; its own results
+    are current while the project flow's `freshness_by_kind.loadflow` is fresh."""
     from services.run_separability import MATRIX
     loadflow = {"kind": "loadflow", "label": MATRIX["loadflow"].label, "tool": "run_ac_pf_stage",
-                "ready": ready and dispatch_fresh}
+                "ready": ready and dispatch_fresh, "results_current": bool(loadflow_current)}
     if not dispatch_fresh:
         loadflow["needs"] = "a current optimisation dispatch (run the optimisation first)"
     return [{"kind": "optimisation", "label": MATRIX["optimisation"].label, "tool": "run_simulation",
@@ -252,6 +253,8 @@ def project_readiness(project_id: str | None = None) -> dict:
             solvers = chat_tools.check_solver_availability()
             status = chat_tools.get_simulation_status()
             freshness = chat_tools.dispatch_status()
+            from harness.run_lifecycle import loadflow_current
+            lf_current = loadflow_current(ctx)
         blockers = []
         if validation.get("deferred"):
             blockers.append("Validation is deferred while a solver or study is active.")
@@ -263,7 +266,7 @@ def project_readiness(project_id: str | None = None) -> dict:
             blockers.append("The saved user time-series store cannot be read.")
         dirty = dirty_state.is_dirty(ctx)
         engines = _network_engines(not blockers, freshness.get("state") == "fresh",
-                                   solve_freshness(ctx)["results_current"])
+                                   solve_freshness(ctx)["results_current"], lf_current)
         return {**identity, "saved": saved, "dirty": dirty, "ready": not blockers, **_engine_choice(engines),
                 "blockers": blockers, "validation": {**validation, "issues": validation.get("issues", [])[:12]},
                 "validation_issue_count": len(validation.get("issues", [])), "solvers": solvers,

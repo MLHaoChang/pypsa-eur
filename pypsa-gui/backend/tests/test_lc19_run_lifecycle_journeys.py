@@ -163,6 +163,29 @@ def test_oj32_queueing_the_open_saved_project_is_asked_too(oj_grid):
     assert solve_queue.list_jobs() == []
 
 
+def test_oj32_a_current_load_flow_is_asked_about_too(oj_grid):
+    from harness import run_lifecycle
+    from services import dirty_state
+
+    # The load flow ran on the current dispatch and nothing was edited since:
+    # its results row reads fresh, so a re-run is asked about before any card.
+    with PyPSAService.get_solver_state_lock():
+        PyPSAService.get_solver_state().update(ac_pf_results={'converged': True},
+                                               ac_pf_network_revision=dirty_state.revision())
+    loadflow = next(e for e in chat_tools.project_readiness()['engines'] if e['kind'] == 'loadflow')
+    assert loadflow['results_current'] is True
+    calls, results, frames, _ = run_journey(
+        *PROVIDERS[1], [lambda r: ('run_ac_pf_stage', {}), lambda r: (None, {})], 'Run the load flow again.')
+    assert 'results_current' in results[0]['error'] and 'rerun_current: true' in results[0]['error']
+    assert not _cards(frames) and oj_grid.starts == []
+    assert run_lifecycle.check_rerun('run_ac_pf_stage', {'rerun_current': True}) is None
+    # An edit makes the load flow stale: no question, the ordinary card decides.
+    chat_tools.update_component('Line', 'L1', {'s_nom': 500})
+    assert run_lifecycle.check_rerun('run_ac_pf_stage', {}) is None
+    loadflow = next(e for e in chat_tools.project_readiness()['engines'] if e['kind'] == 'loadflow')
+    assert loadflow['results_current'] is False
+
+
 def test_oj32_a_plan_run_step_takes_the_flagged_rerun(oj_grid):
     """A plan's run step on current results is asked about too; the flagged
     call is still that step (the flag is no input), behind its own card."""

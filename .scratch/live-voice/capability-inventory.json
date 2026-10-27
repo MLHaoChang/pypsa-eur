@@ -1546,10 +1546,12 @@
           "/api/simulation/run_ac_pf"
         ]
       ],
-      "input_keys": [],
+      "input_keys": [
+        "rerun_current"
+      ],
       "required": [],
       "safety_tier": "execution",
-      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "schema_sha256": "6d81193c202e8c50279473b084384641f64bf5873e3d2db9a68078694f222d49",
       "behavioral_fixture": "pending"
     },
     {

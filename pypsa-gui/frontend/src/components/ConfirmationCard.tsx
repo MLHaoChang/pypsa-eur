@@ -145,7 +145,9 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
   delete_vintage_bounds: (a) => `Remove the build-year limits of ${_str(a.name) ?? 'a component'}`,
   delete_timeseries: (a) => `Delete ${_str(a.attribute) ? `the ${a.attribute}` : 'a'} time series of ${
     _str(a.name) ?? 'a component'}`,
-  run_ac_pf_stage: () => 'Run the power-flow check on the network',
+  run_ac_pf_stage: (a) => a.rerun_current === true
+    ? 'Run the power-flow check again; its results already match the network, so it gives the same answer'
+    : 'Run the power-flow check on the network',
   abort_simulation: () => 'Stop the running calculation',
   force_reset_simulation: () => 'Force-reset the calculation state (stops anything running)',
   run_frontier_study: () => 'Run the cost-versus-reliability check',

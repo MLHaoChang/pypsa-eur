@@ -211,7 +211,7 @@ def _empty(name: str, description: str) -> dict[str, Any]:
     return _t(name, description, {}, [])
 
 
-# LC-19: the re-run rule the three optimisation solve tools share (harness/run_lifecycle.py).
+# LC-19: the re-run rule the solve tools and the load flow share (harness/run_lifecycle.py).
 _RERUN_NOTE = (
     "When the open project's results already match its inputs, the call is refused with "
     "results_current before any card: tell the user and ask; only on their yes call it again "
@@ -906,11 +906,12 @@ TOOLS: list[dict[str, Any]] = [
         "progress SSE bridge. " + _RERUN_NOTE + "Safety: execution.",
         {"rerun_current": {"type": "boolean"}},
     ),
-    _empty(
+    _t(
         "run_ac_pf_stage",
         "Run Stage 2 AC PF using the most recent LOPF dispatch as the seed. "
         "Long-running. dispatch_status must be 'fresh' before calling. "
-        "Safety: execution.",
+        + _RERUN_NOTE + "Safety: execution.",
+        {"rerun_current": {"type": "boolean"}},
     ),
     _empty(
         "abort_simulation",

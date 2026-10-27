@@ -69,13 +69,17 @@ Source: draft PR #567 `.scratch/high-value-ai-study/` (commit e8d53410), researc
   and `solve_queue_requeue` aimed at the open project whose results match its
   inputs (`calculations.solve_matches_inputs`) are refused before any frame
   with `results_current`, naming the latest run. The user's yes comes back as
-  `rerun_current: true`, which shows the ordinary run card.
+  `rerun_current: true`, which shows the ordinary run card. `run_ac_pf_stage`
+  is refused the same way while the project flow's
+  `freshness_by_kind.loadflow` (W4b, #780) reads fresh.
 - Item 3: a failed solve's `wait_for_job` result carries `triage` (the job's
   log, `diagnose_network`, `validate_network`, then what to say), and a failed
   plan job's continuation message carries the same rule in one line. Nothing
   re-runs: a run still needs its own request and card.
 - Item 4: `project_readiness` returns `engines` (named from the separability
-  matrix) and `ask_engine`, the ready kinds when there is more than one.
+  matrix) and `ask_engine`, the ready kinds when there is more than one. The
+  load flow is ready while the dispatch is fresh; its `results_current` is
+  `freshness_by_kind.loadflow == "fresh"`.
 
 ## Cases adopted from #567 (HV-S), with their limits
 

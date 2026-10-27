@@ -24,6 +24,9 @@ from typing import Any
 
 # The tools that solve the optimisation again, and how each names its project.
 RERUN_TOOLS = frozenset(["run_simulation", "solve_queue_enqueue", "solve_queue_requeue"])
+# The load flow re-runs on the open project only; its results are current while
+# the project flow's `freshness_by_kind.loadflow` reads fresh.
+LOADFLOW_TOOL = "run_ac_pf_stage"
 
 FLAG = "rerun_current"
 
@@ -65,7 +68,11 @@ def _latest_completed_run() -> dict | None:
 
 def check_rerun(tool_name: str, args: dict[str, Any]) -> dict | None:
     """The refusal detail for a re-solve of current results, or None."""
-    if tool_name not in RERUN_TOOLS or args.get(FLAG) is True:
+    if args.get(FLAG) is True:
+        return None
+    if tool_name == LOADFLOW_TOOL:
+        return _check_loadflow_rerun()
+    if tool_name not in RERUN_TOOLS:
         return None
     from harness.calculations import solve_matches_inputs
     from services.pypsa_service import PyPSAService
@@ -85,6 +92,30 @@ def check_rerun(tool_name: str, args: dict[str, Any]) -> dict | None:
                     "Solving again gives the same answer. Tell the user and ask whether to solve again "
                     f"anyway; only on their yes call {tool_name} again with {FLAG}: true."),
         "latest_run": run,
+    }
+
+
+def loadflow_current(ctx) -> bool:
+    """The load flow's results still describe the open network: the same word
+    the project flow's results row shows (`freshness_by_kind.loadflow`)."""
+    from services.dispatch_status import dispatch_status
+    from services.flow_service import _loadflow_freshness
+    with ctx.solver_state_lock:
+        return _loadflow_freshness(dispatch_status(ctx.network), running=False) == "fresh"
+
+
+def _check_loadflow_rerun() -> dict | None:
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_active_context()
+    if ctx.project_uuid is None or not loadflow_current(ctx):
+        return None
+    return {
+        "error_kind": "results_current",
+        "message": ("The load flow results are current: the network and the dispatch it read have not "
+                    "changed since it ran. Running it again gives the same answer. Tell the user and ask "
+                    f"whether to run it again anyway; only on their yes call {LOADFLOW_TOOL} again with {FLAG}: true."),
+        "latest_run": None,
     }
 
 
