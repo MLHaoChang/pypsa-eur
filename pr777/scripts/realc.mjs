@@ -1,0 +1,30 @@
+import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs'
+import fs from 'fs'
+const pw = fs.readFileSync(process.env.HOME + '/.local/share/PyPSA Studio/dev-admin-password', 'utf8').trim()
+const [out, tag] = process.argv.slice(2)
+fs.mkdirSync(out, { recursive: true })
+const b = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' })
+const ctx = await b.newContext({ viewport: { width: 1800, height: 1400 } })
+await ctx.addInitScript(() => {
+  localStorage.setItem('network-diagram:ui-mode', 'expert'); localStorage.setItem('network-diagram:ui-mode-explicit', '1')
+  localStorage.setItem('network-diagram:current-project', 'dcsurf-demo')
+})
+const p = await ctx.newPage()
+await p.goto('http://127.0.0.1:' + (process.env.PORT||5173) + '/'); await p.waitForTimeout(6000)
+if (await p.locator('input[type=password]').count()) {
+  await p.locator('input[type=email], input[name=email]').first().fill('admin@example.com')
+  await p.locator('input[type=password]').fill(pw); await p.keyboard.press('Enter'); await p.waitForTimeout(3000)
+}
+await p.getByText('Resume project').first().click(); await p.waitForTimeout(5000)
+await p.getByText('Grid connection', { exact: true }).first().click(); await p.waitForTimeout(4000)
+await p.screenshot({ path: out + '/dbg.png', fullPage: false }); const li = p.getByTestId('connection-limit-scr')
+console.log('scr rows', await li.count(), 'limits', await p.getByTestId('connection-limits').count(), await p.getByTestId('connection-limits').innerText().catch(()=>'-'))
+await li.scrollIntoViewIfNeeded()
+const inp = li.getByLabel(/Fault level value/).first()
+await inp.fill('180'); await p.waitForTimeout(300)
+await li.getByLabel(/Fault level source/).selectOption('measured'); await li.getByRole('button', { name: /^Save/ }).click(); await p.waitForTimeout(2500)
+const li2 = p.getByTestId('connection-limit-scr'); await li2.scrollIntoViewIfNeeded()
+console.log((await li2.innerText()).replace(/\n/g, ' | '))
+await li2.screenshot({ path: `${out}/${tag}-c-fault-level.png` })
+await li2.getByRole('button', { name: /^Reset to/ }).click(); await p.waitForTimeout(2000)
+await b.close()
