@@ -198,3 +198,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-26: coordinator habits lived only in the coordinator's head.** Merge titles, the premerge worktree, ciwait's first-hit exit, re-OK after a push, session-opening arguments, rotation notices and tool-output overflows were learned by repetition and lost at each rotation.
   - Fix: each is now a line in the coordinator skill, in the section it belongs to; the live skill also cites the owner decisions on rotation depth, the gatekeeper split and merge authority.
   - Lives in: coordinator (Rotation, Opening a session, Merging, Tool hygiene).
+- **2026-10-27: sessions rotated every 20–45 minutes at a 200k limit.** On 1M-context models about 20 builders and reviewers hit the hand-off overnight; each rotation cost a new brief, peer messages and a re-read of the same files.
+  - Fix: the context-guard hook and `sessions.py` hand off at 300k for every session (owner decision USE-2); the coordinator stays at 300k.
+  - Lives in: `context-guard.sh` and its test, `sessions.py`, steward and coordinator (live and template copies).

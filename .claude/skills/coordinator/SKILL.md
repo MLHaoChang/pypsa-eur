@@ -5,7 +5,7 @@ description: The coordinator session's own procedure (the other side of steward)
 
 The **coordinator** relays the owner's decisions to the work sessions, does every merge and keeps the owner's dashboard current. PR sessions follow `.claude/skills/steward/SKILL.md`. This skill is the coordinator's side of the same rules. Owner decisions that change a rule land here or in steward; the sweep routine's prompt only points at this file.
 
-At start, `touch ~/.claude-coordinator`: the context-guard hook then warns at 300k instead of 200k (owner decision COORD-CTX-1).
+At start, `touch ~/.claude-coordinator`: the context-guard hook warns the coordinator at 300k (owner decision COORD-CTX-1); every other session has warned at 300k too since USE-2.
 
 Work from a checkout of current master. Before a sweep, run `git switch master && git pull --ff-only`. A stale checkout loads stale `AGENTS.md`, steward and `scripts/coord/`.
 
@@ -15,7 +15,7 @@ Work from a checkout of current master. Before a sweep, run `git switch master &
 2. **Sessions.** Have a Haiku subagent ([Tool hygiene](#tool-hygiene)) save the `list_sessions` output and return the `python3 scripts/coord/sessions.py <file>` summary.
    - A session waiting on an `AskUserQuestion` in its own window: fetch the question and bring it to the owner as options.
    - Check [Rotation](#rotation)'s trigger.
-   - A session flagged `ROTATE` (over 200k context, owner decision USE-1): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
+   - A session flagged `ROTATE` (over 300k context, owner decisions USE-1, USE-2): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
    - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state file lists as pending.
    Done when each one is merged or has a named blocker in the log.

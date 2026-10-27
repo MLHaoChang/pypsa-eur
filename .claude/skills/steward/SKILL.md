@@ -87,7 +87,7 @@ Run read-only helper agents (log reading, file sweeps, summaries of saved tool o
 ## Rotation
 
 A long context is a session's largest cost: every tool call re-reads it. Rotate when either holds:
-- the context-guard hook says "Context at <N>k (limit 200k)" (owner decision USE-1; it repeats every +20k, so don't poll `get_session`);
+- the context-guard hook says "Context at <N>k (limit 300k)" (owner decisions USE-1, USE-2; it repeats every +20k, so don't poll `get_session`);
 - a package's PR has merged and more slices remain.
 
 Write the hand-off note as under [Finishing a package](#finishing-a-package), `send_message` it to the coordinator, ask for a fresh session for the rest, then stop.
