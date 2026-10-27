@@ -10,7 +10,7 @@ The **coordinator**:
 
 PR sessions follow `.claude/skills/steward/SKILL.md`, and this skill is the coordinator's side of the same rules. When an owner decision changes a rule, the change lands here or in steward. The sweep routine's prompt only points at this file. `docs/agents/roles.md` holds the session ids, the dashboard link and the routine id.
 
-At start, `touch ~/.claude-coordinator`: the context-guard hook then warns at 300k instead of 200k (owner decision COORD-CTX-1).
+At start, `touch ~/.claude-coordinator`: the context-guard hook warns at 300k, the same limit as every other session (owner decision COORD-CTX-1).
 
 Work from a checkout of current `{{BASE_BRANCH}}`. Before a sweep, run `git switch {{BASE_BRANCH}} && git pull --ff-only`, because a stale checkout loads stale rules.
 
@@ -64,7 +64,7 @@ Done when every package is running, queued with a named reason, or merged.
 2. **Sessions.** Have a Haiku subagent ([Tool hygiene](#tool-hygiene)) save the `list_sessions` output and return the `python3 scripts/coord/sessions.py <file>` summary.
    - A session waiting on an `AskUserQuestion` in its own window: fetch the question and bring it to the owner as options.
    - Check [Rotation](#rotation)'s trigger.
-   - A session flagged `ROTATE` (over 200k context): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
+   - A session flagged `ROTATE` (over 300k context): ask it for its hand-off note (steward's Rotation), `archive_session` it and open the rest fresh from the note.
    - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state log lists as pending.
    Done when each one is merged or has a named blocker in the log.

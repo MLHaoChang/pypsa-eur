@@ -14,6 +14,7 @@ export const FIELD_LABELS: Record<string, string> = {
   harmonic_spectrum: 'Harmonic spectrum',
   flicker_step_mva: 'Largest power step',
   flicker_changes_per_min: 'Changes per minute',
+  single_phase_share: 'Single-phase share',
 }
 
 /** The ledger's label for each field its rows point at (DC-02: the grid

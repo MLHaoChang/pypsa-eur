@@ -12,7 +12,7 @@ the tool-results file as saved, wrapper included), then run::
 
 Each line shows the id suffix, status, last update, title, status category,
 status detail, context used (``context_usage.used_tokens``) and whether the
-session needs action. A session past 200k tokens of context is flagged
+session needs action. A session past 300k tokens of context is flagged
 ``ROTATE``: the coordinator asks it for a hand-off note and a fresh session.
 ``list_sessions`` does not report context reliably: ``?`` means unknown.
 Before deciding on rotation, the coordinator must read ``get_session``'s
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 
 ARCHIVED = {"SESSION_STATUS_ARCHIVED", "archived"}
-ROTATE_TOKENS = 200_000
+ROTATE_TOKENS = 300_000
 
 
 def strip_prefix(value, prefix):

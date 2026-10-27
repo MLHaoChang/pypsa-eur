@@ -501,7 +501,7 @@ def _limits(profile: dict):
         yield f"voltage_bands[{i}]", b
     for key in ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
                 "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
-                "harmonic_resonance_clearance_h",
+                "unbalance_limit_pct", "harmonic_resonance_clearance_h",
                 "q_capability_unit", "voltage_deadband_pct"):
         if isinstance(profile.get(key), dict):
             yield key, profile[key]

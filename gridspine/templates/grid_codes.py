@@ -88,6 +88,10 @@ A profile may carry these optional keys:
     which a unit in voltage control does not change its reactive output; a
     positive number. Reported (``reported_requirements``), never checked:
     the static study has no voltage-control loop.
+``unbalance_limit_pct``
+    The negative-sequence voltage unbalance limit at the connection point,
+    % of the positive sequence (datacenter grid readiness issue 12), a
+    positive number.
 ``current_tdd_standard``
     The standard whose current-distortion limits the TDD screen applies at
     the connection point (datacenter readiness 12), one of
@@ -141,14 +145,20 @@ _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
                   "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
-                  "current_tdd_standard", "q_capability_unit", "voltage_deadband_pct")
+                  "unbalance_limit_pct",
+                  "current_tdd_standard",
+                  "q_capability_unit",
+                  "voltage_deadband_pct")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
                           "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
                           "dynamic_requirements", "notes",
                           "document", "name", "pst_limit", "plt_limit",
-                          "current_tdd_standard", "q_capability_unit", "voltage_deadband_pct"})
+                          "unbalance_limit_pct",
+                          "current_tdd_standard",
+                          "q_capability_unit",
+                          "voltage_deadband_pct"})
 #: The standards ``current_tdd_standard`` may name (``static/current_tdd.py``).
 CURRENT_TDD_STANDARDS = ("ieee519-2014",)
 #: Every key a voltage band may carry.
@@ -248,7 +258,9 @@ def _check_profile(name, p):
     if missing:
         raise ContractError(f"{where} is missing {missing}")
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
-                "harmonic_resonance_clearance_h", "pst_limit", "plt_limit", "voltage_deadband_pct"):
+                "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
+                "unbalance_limit_pct",
+                "voltage_deadband_pct"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
