@@ -34,7 +34,7 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
              "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
              "spectrum_post_filter": "bool", "flicker_step_mva": "float_nonneg",
              "flicker_changes_per_min": "float_nonneg",
-              "single_phase_share": "fraction"},
+             "single_phase_share": "fraction"},
 }
 
 
