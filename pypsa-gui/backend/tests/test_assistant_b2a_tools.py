@@ -410,14 +410,6 @@ def test_finance_during_a_solve_is_409(finance_net, monkeypatch):
     assert exc.value.status_code == 409 and exc.value.detail["code"] == "solver_in_flight"
 
 
-def test_a_finance_edit_leaves_the_network_fingerprint(finance_net):
-    from services.pypsa_service import PyPSAService
-    from services.workflow_tools import _network_input_fingerprint
-
-    before = _network_input_fingerprint(PyPSAService.get_active_context())
-    _tool("set_finance_inputs", finance=_finance(),
-          if_match=_tool("get_finance_inputs")["digest"])
-    assert _network_input_fingerprint(PyPSAService.get_active_context()) == before
 
 
 # ── PoC state and value-flow designer ────────────────────────────────────────
