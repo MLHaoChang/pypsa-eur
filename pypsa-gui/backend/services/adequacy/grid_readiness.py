@@ -689,11 +689,17 @@ def _tdd_row(inp: _Inputs) -> dict:
     tdd, limit = _num(poc["tdd_pct"]), _num(poc["tdd_limit_pct"])
     missing = list(poc["no_input_units"] or [])
     if poc["verdict"] == "unknown" and poc["band"] is None:
-        # tdd_table's own guards: no voltage, or no load current at the PoC.
+        # tdd_table's own guards: no voltage, or no load current at the PoC. Without a connection rating I_L
+        # is the process units' rated load, so Go to field opens the first unit without a rating.
+        unrated = units.loc[pd.to_numeric(units["rated_mva"], errors="coerce").isna(), "unit"]
+        if _poc_vn_kv(inp.n) is None:
+            target = _target("connection", "Bus", None, "v_nom")
+        elif i_l_note == _TDD_IL_PROCESS and len(unrated):
+            target = _target("assets", "Link", unrated.iloc[0], "rated_mva")
+        else:
+            target = _target("connection", "Link", inp.link, "p_nom")
         return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
-                    verdict="unknown", assumed=True, note=str(poc["note"]), section="assets",
-                    target=_target("connection", "Bus", None, "v_nom") if _poc_vn_kv(inp.n) is None
-                    else _target("connection", "Link", inp.link, "p_nom"))
+                    verdict="unknown", assumed=True, note=str(poc["note"]), section="assets", target=target)
     if missing:
         first = missing[0]
         rated = pd.to_numeric(units.set_index("unit")["rated_mva"], errors="coerce").get(first)

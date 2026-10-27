@@ -926,7 +926,7 @@ def test_a_profile_without_the_key_still_gives_unknown():
 def test_an_extracted_angle_limit_is_assumed_and_named_unconfirmed_on_pass_and_fail_rows():
     net = _net()
     cset = _set(net)
-    for value, verdict in ((180.0, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
+    for value, verdict in ((89.9, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
         res, report = _screen(net, cset, profile=_angle_profile(value, "extracted", page=12, quote="placeholder"))
         solved = res[res["stage1_verdict"] != "not_solved"]
         judged = solved[solved["angle_verdict"] == verdict]

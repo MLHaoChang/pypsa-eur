@@ -98,7 +98,7 @@ A profile may carry these optional keys:
     ``CURRENT_TDD_STANDARDS``. Without it the TDD screen reads unknown.
 ``angle_limit_deg``
     The voltage-angle limit across a branch, in degrees (datacenter grid
-    readiness issue 18), a positive number. The planning-criteria screen
+    readiness issue 18), a positive number below 90. The planning-criteria screen
     judges its angle check on it when no ``AngleLimit`` is passed; without
     either, the angle verdict reads unknown.
 ``dynamic_requirements``
@@ -274,6 +274,10 @@ def _check_profile(name, p):
         _check_limit(key, p[key], where)
         if not _is_number(p[key].get("value")) or p[key]["value"] <= 0:
             raise ContractError(f"{where}: {key} value must be a positive number, got {p[key].get('value')!r}")
+    # Past 90 degrees a branch is beyond its steady-state transfer limit (P = V1 V2 / X sin delta peaks at 90).
+    if "angle_limit_deg" in p and p["angle_limit_deg"]["value"] >= 90.0:
+        raise ContractError(f"{where}: angle_limit_deg value must be an angle below 90 degrees, "
+                            f"got {p['angle_limit_deg']['value']!r}")
     if "rvc_limit_infrequent_pct" in p and p["rvc_limit_infrequent_pct"]["value"] < p["rvc_limit_pct"]["value"]:
         raise ContractError(
             f"{where}: rvc_limit_infrequent_pct ({p['rvc_limit_infrequent_pct']['value']:g} %) is below "
