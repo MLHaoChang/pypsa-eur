@@ -1,7 +1,8 @@
 #!/bin/bash
 # PostToolUse hook: tells the agent to hand off once its context passes the
-# rotation limit (200k tokens; 300k in the coordinator session, which creates
-# ~/.claude-coordinator at start), then again at every further +20k.
+# rotation limit (300k tokens for every session on a 1M-context model, owner
+# decision USE-2; the coordinator, which creates ~/.claude-coordinator at
+# start, keeps 300k too), then again at every further +20k.
 # Reads the latest assistant `usage` from the transcript. Silent and fast
 # below the limit; fails open (no output, exit 0) on any error.
 # Test overrides: CONTEXT_GUARD_LIMIT (tokens), CONTEXT_GUARD_STATE_DIR.
@@ -16,7 +17,7 @@ session=$(jq -r '.session_id // "x"' <<<"$input" | tr -c 'A-Za-z0-9_-' '_')
 
 if [[ -n ${CONTEXT_GUARD_LIMIT:-} ]]; then limit=$CONTEXT_GUARD_LIMIT
 elif [[ -e $HOME/.claude-coordinator ]]; then limit=300000
-else limit=200000; fi
+else limit=300000; fi
 
 # Only the tail: the newest assistant line is near the end. The first line of
 # the window may be cut, so it is dropped.
