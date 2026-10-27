@@ -244,7 +244,7 @@ component (`frontend/src/components/EditCard.tsx`).
   record and changes nothing, so Guided gates it as Expert does and the apply
   card is the one approval (OJ-21).
 - **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
-  says, complete, binding, digest}`, or refuses before any card (`unknown_field`,
+  says, complete, binding, sets, digest}`, or refuses before any card (`unknown_field`,
   `derived_field`, `read_only_field`, `invalid_edit_value`,
   `component_not_found`, `edit_refused`). Component rows come from running the
   NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
@@ -259,13 +259,18 @@ component (`frontend/src/components/EditCard.tsx`).
 - **Receipt.** The tool result gains `_edit_receipt`: each row read back
   natively, `outcome: verified` only when every value equals the card's `new`
   (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
-  differs from now) and `undo: {tool: 'undo_last', available}`.
+  differs from now) and `undo: {tool: 'undo_last', available}`. A card with
+  `sets` passes them on, so Guided words the receipt as the card did; each set
+  also lists `inactive_names`, which the table marks "(inactive)".
 - **Adding an edit kind** (TS-04's series refinement, a new settings tool):
   `edit_card.register(tool, Adapter(kind, preview, readback))`, where
   `preview(args)` returns rows `{component_class, name, field, label, old,
   new, unit, role}` and `readback(args, rows)` the stored values in row order.
   An optional `Adapter.binding(args)` returns a dict the card carries as
   `binding` and its digest covers (a stored record the edit applies).
+  An optional `Adapter.sets(args)` returns the set lines the card carries as
+  `sets` (LC-16 OJ-22), also under its digest; `says` then names each set
+  once ("selector · N assets · field × 1.2 (+20 %)") instead of its members.
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
@@ -849,6 +854,16 @@ an edit card (`parameter_edit`) whose `binding` is `{preview_id,
 review_sha256}`; the loop refuses `invalid_preview` when the approved card's
 binding is not the record the handler applies. Records are version 2 (with
 `rows`); older records fail closed. One apply is one `undo_last` step.
+A change may give `select` (`carrier`, `bus` — any `bus*` port — and/or
+`all: true`, inactive members included) instead of `names`, and `operation
+{scale: f}` (0 < f ≤ 1000) instead of `value`; `_resolve_changes` resolves
+both on the server into per-name absolute changes before the ordinary checks,
+so the record stores resolved rows and the input fingerprint refuses an apply
+after a member was added or removed. Refusals, all before any record:
+`change_selection_empty`, `invalid_change_selector`, `invalid_change_value`
+(non-whole integer, unset old value, per-unit share scaled above 1 except Link
+efficiencies) and `change_series_shadowed` (a member's field has a time
+series; absolute rows too). The record keeps `sets` for the card.
 Previews are limited to a complete review of at most 20 values fitting a
 3800-character card; larger changes must be split. Legacy/clipped records need
 a new preview. The card renders an old/new/unit table on both surfaces and
