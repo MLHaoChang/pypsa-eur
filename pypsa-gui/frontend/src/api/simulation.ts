@@ -1559,9 +1559,10 @@ export const resultsApi = {
   getCouplingLoop: () => client.get('/results/coupling_loop')
     .then(r => (r.status === 204 ? null : r.data as CouplingLoopPayload)),
   // Starts the loop in a backend worker thread and returns immediately; poll
-  // getCouplingLoop for progress. `target_lole_h` is REQUIRED and is the
-  // horizon-basis number (LoopPanel's `wireTarget` does the conversion) —
-  // every other field has an engine-side default this client must not fork.
+  // getCouplingLoop for progress. `target_lole_h`, when sent, is the
+  // horizon-basis number; omitted, the backend fills it (converted) and the
+  // draws from the stored reliability goal (W3b-R). Every other field has an
+  // engine-side default this client must not fork.
   // Rejects with the axios error on 409 (a solve/sweep/frontier/MC/loop is
   // running) and on the route's 422 set; the detail string NAMES the blocker
   // and the panel renders it through McPanel's `blockerMessage`.

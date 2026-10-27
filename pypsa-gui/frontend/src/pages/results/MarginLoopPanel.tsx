@@ -7,7 +7,7 @@ import type {
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
-import { hasTarget, NO_GOAL, ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
+import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
@@ -144,8 +144,6 @@ export function MarginLoopPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  // Empty by default, exactly as the cap loop: the target is the ONE required
-  // field and the study is up to eight full capacity expansions plus a probe.
   // The target and the draws are the project's one reliability goal
   // (W3b-R): shown read-only and left out of the request, which the backend
   // fills from the stored goal (the h/yr target on the horizon basis).
@@ -255,7 +253,7 @@ export function MarginLoopPanel() {
               data-testid="margin-loop-run"
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"
               title={blocked ?? (targetValid ? undefined
-                : `${NO_GOAL} The allowed shortfall is the standard the `
+                : `${goalTarget === 0 ? ZERO_TARGET : NO_GOAL} The allowed shortfall is the standard the `
                   + 'loop searches for a plan against.')}
             >
               Run loop

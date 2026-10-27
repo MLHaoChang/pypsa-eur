@@ -8,7 +8,7 @@ import type {
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
-import { hasTarget, NO_GOAL, ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
+import { hasTarget, NO_GOAL, ReliabilityGoalSummary, ZERO_TARGET } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
@@ -137,26 +137,6 @@ export function entryHorizonYears(
   const fromMc = mc?.result?.metrics?.horizon_years
   if (fromMc != null && isFinite(fromMc) && fromMc > 0) return fromMc
   return null
-}
-
-/**
- * ★ [S12] The number that actually goes on the wire: HORIZON-basis hours.
- *
- * The route's `target_lole_h` is compared against `mc_adequacy`'s
- * `lole_hours`, which is a sum over the modelled horizon. Sending the h/yr
- * figure unconverted is not a rounding error — on a representative week it
- * loosens the standard by the horizon's reciprocal.
- *
- * Identity when the horizon is a year or unknown: with nothing to convert
- * through, the honest conversion is none at all, and `targetEcho` says so.
- */
-export function wireTarget(
-  hYr: number, horizonYears: number | null | undefined,
-): number {
-  if (horizonYears == null || !isFinite(horizonYears) || horizonYears <= 0) {
-    return hYr
-  }
-  return hYr * horizonYears
 }
 
 /**
@@ -290,9 +270,6 @@ export function LoopPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const [open, setOpen] = useState(false)
-  // Empty by default, deliberately: the target is the ONE required field and
-  // the loop is up to eight full capacity expansions. A pre-filled 3 would
-  // make "run" a one-click commitment to a standard the user never typed.
   // The target and the draws are the project's one reliability goal
   // (W3b-R): shown read-only and left out of the request, which the backend
   // fills from the stored goal (the h/yr target on the horizon basis).
@@ -347,9 +324,8 @@ export function LoopPanel() {
 
   const run = useMutation({
     mutationFn: () => {
-      // `target_lole_h` is horizon-basis and `restore` is an explicit user
-      // choice, so both always ride. `draws` is omitted when blank: the
-      // engine's default is 500 and inventing a frontend one would fork it.
+      // Only `restore`, an explicit user choice: the backend fills the target
+      // (converted to the horizon basis) and the draws from the stored goal.
       const body: CouplingLoopRequestBody = {
         restore,
       }
@@ -404,7 +380,7 @@ export function LoopPanel() {
               data-testid="loop-run"
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"
               title={blocked ?? (targetValid ? undefined
-                : `${NO_GOAL} The allowed shortfall is the standard the `
+                : `${goalTarget === 0 ? ZERO_TARGET : NO_GOAL} The allowed shortfall is the standard the `
                   + 'loop searches for a plan against.')}
             >
               Run loop

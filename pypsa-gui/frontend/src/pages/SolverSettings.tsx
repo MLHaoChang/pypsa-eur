@@ -1543,6 +1543,9 @@ export function ReliabilityAssumptions({
 }) {
   const [ownEdits, setOwnEdits] = useState<GoalEdits>({})
   const edits = onGoalEdits ? goalEdits : ownEdits
+  // The ENS the run uses: the draft's, else the template's (an ENS of 0 or
+  // none lets the template's stand; W3b-R PR1).
+  const ensShown = draft.ens_cap_permyriad || goal?.ens_cap_permyriad.value
   const onEdits = onGoalEdits ?? ((e: GoalEdits) => {
     setOwnEdits(e)
     const { patch: p, error } = goalPatchFromEdits(e)
@@ -1580,9 +1583,9 @@ export function ReliabilityAssumptions({
             <ReliabilityGoalEditor mode="expert"
               goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits} />
           </div>
-          {ensTargetWarning(draft.ens_cap_permyriad) && (
+          {ensTargetWarning(ensShown) && (
             <p className="text-[10px] text-danger mt-1">
-              {ensTargetWarning(draft.ens_cap_permyriad)}
+              {ensTargetWarning(ensShown)}
             </p>
           )}
           <NumberField

@@ -17,7 +17,7 @@ import { useUIStore } from '../../store/uiStore'
 import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
 import {
-  LoopPanel, targetEcho, wireTarget, loleCell, restoreSentence, entryHorizonYears,
+  LoopPanel, targetEcho, loleCell, restoreSentence, entryHorizonYears,
   CAP_LEVER, compact, leverSpelling,
 } from './LoopPanel'
 import type {
@@ -299,22 +299,6 @@ describe('entryHorizonYears', () => {
   })
 })
 
-describe('wireTarget', () => {
-  // ★ Bite: `wireTarget` returns the h/yr number unconverted — the POST then
-  // asks a 168 h study to meet 3 h, a target it meets trivially, and the
-  // verdict certifies a plan against a standard 52x too loose.
-  it('sends the HORIZON-BASIS number, never the h/yr one', () => {
-    expect(wireTarget(3, WEEK_YEARS)).toBeCloseTo(0.05753424, 7)
-    expect(wireTarget(3, WEEK_YEARS)).not.toBe(3)
-  })
-
-  it('is the identity on an annual horizon and on an unknown one', () => {
-    expect(wireTarget(3, 1)).toBe(3)
-    expect(wireTarget(3, null)).toBe(3)
-    expect(wireTarget(3, 0)).toBe(3)
-  })
-})
-
 describe('loleCell', () => {
   const mc = iterate(1).mc!
 
@@ -433,6 +417,27 @@ describe('LoopPanel target entry', () => {
       activeSection: 'scenarios', solverBlockRequest: 'goal' })
     expect(useUIStore.getState().flowReturn).toMatchObject({ mode: 'guided', panel: 'results' })
     expect(resultsApi.startCouplingLoop).not.toHaveBeenCalled()
+  })
+
+  // A stored 0 h/yr is a valid goal (the EH study certifies against it), but
+  // the loop needs a shortfall above zero: say that, not "no goal".
+  it('with a 0 h/yr goal, Run is disabled and says the loop needs more than 0', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [0, 'stored'] }))
+    await openPanel()
+    const run = screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement
+    expect((await screen.findByTestId('loop-goal-no-goal')).textContent)
+      .toBe('The loop needs an allowed shortfall above 0 h/yr.')
+    expect(run.disabled).toBe(true)
+    expect(run.title).toMatch(/^The loop needs an allowed shortfall above 0 h\/yr\./)
+  })
+
+  it('a goal that cannot be read says so, not "no goal"', async () => {
+    getReliabilityGoal.mockRejectedValue(new Error('boom'))
+    await openPanel()
+    await waitFor(() => expect(screen.getByTestId('loop-goal-values').textContent)
+      .toBe('could not be read'))
+    expect(screen.queryByTestId('loop-goal-no-goal')).toBeNull()
+    expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   // The COPT needs no solve at all, so it is the horizon source that exists

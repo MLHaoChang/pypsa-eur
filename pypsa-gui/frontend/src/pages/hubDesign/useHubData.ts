@@ -18,7 +18,7 @@ import {
   type PackForm,
 } from '../results/EhReferenceDesignPanel'
 import { dispatchSolved } from './chapters'
-import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 
 /** The study record (`nk(project,'results','eh_study')`, 2 s poll while running). */
 export function useHubStudy() {
@@ -80,7 +80,9 @@ export function templateForm(template: EhTemplateMeta | null): PackForm {
 }
 
 /** Readiness for the chosen site type with the template's recommended
- *  overrides — "the site as it is", independent of the Goal card's typing.
+ *  overrides and the stored goal's LOLE and ENS targets, as the study will
+ *  run them (W3b-R; the same preview as Expert's EH panel) — independent of
+ *  the Goal card's unsaved typing.
  *  Paused while a study runs (it copies the network under the study lock);
  *  `ready` = the study record and the template have been read, so the first
  *  request already carries the right overrides. */
@@ -89,8 +91,11 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
   const project = useUIStore(s => s.currentProject)
   // The stored site type (W3b-R); read before the first request so it never
   // asks for the default type's readiness first.
-  const { archetype, isPending: goalPending } = useReliabilityGoal()
-  const overrides = buildEhStudyBody(archetype, templateForm(template)).body?.pack_overrides
+  const { goal, archetype, isPending: goalPending } = useReliabilityGoal()
+  const overrides = buildEhStudyBody(archetype, {
+    ...templateForm(template), loleTarget: goalText(goal, 'target_lole_h'),
+    ensCap: goalText(goal, 'ens_cap_permyriad'), draws: '',
+  }).body?.pack_overrides
   const q = useQuery({
     queryKey: [...nk(project, 'results', 'eh_readiness'), archetype, 'hub-design',
       JSON.stringify(overrides ?? null)],

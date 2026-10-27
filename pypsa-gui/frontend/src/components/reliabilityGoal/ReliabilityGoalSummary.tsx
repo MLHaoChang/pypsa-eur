@@ -8,6 +8,9 @@ import { goalWords, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { siteTypeLabel } from './SiteTypeSelect'
 
 export const NO_GOAL = 'No reliability goal set.'
+/** A stored 0 h/yr is a valid goal (the EH study certifies against it), but a
+ *  loop searches for the margin that meets a shortfall above zero. */
+export const ZERO_TARGET = 'The loop needs an allowed shortfall above 0 h/yr.'
 
 export type GoalItem = 'target' | 'ens' | 'draws' | 'site'
 
@@ -23,15 +26,17 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
   items: GoalItem[]
   testId: string
   /** A study that cannot run without a shortfall target (the loops): with
-   *  none, say so and link to where it is set instead of the values. */
+   *  none (or 0), say so and link to where it is set instead of the values.
+   *  A goal that could not be read falls through to "could not be read". */
   requireTarget?: boolean
 }) {
   const { goal, target, isPending, isError } = useReliabilityGoal()
   const link = 'text-accent hover:underline'
-  if (requireTarget && !isPending && !hasTarget(target)) {
+  if (requireTarget && goal && !hasTarget(target)) {
     return (
       <div data-testid={testId} className="flex flex-wrap items-center gap-x-2 text-[10px]">
-        <span data-testid={`${testId}-no-goal`} className="text-warn">{NO_GOAL}</span>
+        <span data-testid={`${testId}-no-goal`} className="text-warn">
+          {target === 0 ? ZERO_TARGET : NO_GOAL}</span>
         <button type="button" data-testid={`${testId}-set`} className={link}
           onClick={openReliabilityGoal}>Set it in Scenarios &amp; optimisation ›</button>
       </div>
