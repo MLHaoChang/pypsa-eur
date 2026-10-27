@@ -47,6 +47,7 @@ import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
+import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
@@ -768,6 +769,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </table>
         </TableScroll>
       </PageSection>
+
+      <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />
 
       <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
         <TableScroll>
