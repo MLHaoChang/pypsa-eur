@@ -140,7 +140,7 @@ The owner has three dashboards. Each keeps its data, and any state needed to reb
 |---|---|---|---|
 | Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | With each owner report that changes a PR or a session |
 | Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | After a merge that finishes an issue, and on every sweep |
-| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | On every sweep |
+| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | Frozen (owner decision USAGE-FREEZE-1) |
 
 Every refresh uploads a file (Artifact `publish`, `asset: true`, `url` set to that dashboard) and points the dataset at it: an `ArtifactData` update that sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result (after a rotation, a `get` returns it).
 
@@ -154,6 +154,8 @@ Each refresh is three calls, made at most once per owner report:
 **Feature progress.** One row per subcomponent: each `.scratch/<feature>/issues/*.md` on master, plus the polish backlog, with a `stage` (Done, In review, In progress, Ready, Needs triage, Needs owner, Won't do) and a `note`. The owner wants it high level: core feature, area, percentage built and the names of what is missing. Status lines on master lag merges, so in-flight stages come from the state file. To refresh, download the current file (Artifact `read`, `path` set to the asset id in `datasets/tasks`'s `source.url`), change the rows' `stage` and `note` with a short Python edit, upload it and update `datasets/tasks`.
 
 **Token usage.** Tokens and API-equivalent cost per Berlin day, over every Claude Code session on the account (Cowork sessions are not listed).
+
+Frozen at 26 Oct 19:30 CET (owner decision USAGE-FREEZE-1): `list_sessions` no longer returns per-session usage totals. Skip this refresh until the totals come back; the steps below apply then.
 1. A Haiku subagent saves each `list_sessions` page (`mine: true`, `limit: 100`, following `after_id`) verbatim to `<scratchpad>/usage/page-N.json`. If a page comes back inline with no saved file, note its cursor in the log and continue; older sessions keep their snapshot totals.
 2. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
 3. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
