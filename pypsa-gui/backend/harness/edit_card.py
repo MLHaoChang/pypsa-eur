@@ -1609,25 +1609,25 @@ def _decision_study_preview(args: dict) -> list[dict]:
     new = _study_after(args, old)
     rows = []
 
-    def add(name, field, label, before, after):
+    def add(field, label, before, after):
         if not _same(before, after):
-            rows.append(_study_row(name, field, label, before, after, says_name=label))
+            rows.append(_study_row("Study", field, label, before, after, says_name=f"Study {label[0].lower()}{label[1:]}"
+                                   if not label.startswith("Intake") else label))
 
     if args.get("name") is not None:
-        add("Study", "name", "Study name", old.get("name"), new.get("name"))
+        add("name", "Name", old.get("name"), new.get("name"))
     intake = args.get("intake")
     if isinstance(intake, dict):
         changed = [k for k in intake if not _same(old["intake"].get(k), new["intake"].get(k))]
         for k in changed[:STUDY_LEAF_CAP]:
-            add("Study intake", f"intake.{k}", f"Intake \u203a {k}", old["intake"].get(k), new["intake"].get(k))
+            add(f"intake.{k}", f"Intake \u203a {k}", old["intake"].get(k), new["intake"].get(k))
         if len(changed) > STUDY_LEAF_CAP:
             rows.append(_note("", "", "intake", f"{len(changed) - STUDY_LEAF_CAP} more intake answers change."))
     settings = args.get("settings")
     if isinstance(settings, dict):
         for key in settings:
             if settings[key] is not None:
-                label = f"Study {key.replace('_', ' ')}"
-                add("Study settings", f"settings.{key}", label, old.get(key), new.get(key))
+                add(f"settings.{key}", key.replace("_", " ").capitalize(), old.get(key), new.get(key))
     if not rows:
         _refuse("empty_edit", "The study already has these values.")
     return rows
