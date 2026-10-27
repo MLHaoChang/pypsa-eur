@@ -208,22 +208,16 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
     },
     {
         'id': 'library_uploads_and_tariff_edit',
-        'title': 'Meter data and commercial library editing',
+        'title': 'Library series sent as JSON values',
         'disposition': 'manual',
-        'reason': 'Edit library items and upload meter files in the Commercial library. From chat you can list library items, import a URDB tariff and attach a tariff.',
+        'reason': 'A series sent as JSON values is entered in the Commercial library. From chat, upload a file and import it with import_library_series or import_meter_data.',
         'page': 'Commercial library',
         'panel': 'library',
         'keywords': frozenset({
-            'meter',
-            'metering',
+            'json',
         }),
         'routes': frozenset({
-            ('GET', '/api/library/series'),
-            ('GET', '/api/library/series/{name}'),
-            ('POST', '/api/library/meter_data'),
             ('POST', '/api/library/series'),
-            ('POST', '/api/library/series/upload'),
-            ('PUT', '/api/library/items/{kind}/{name}'),
         }),
     },
     {

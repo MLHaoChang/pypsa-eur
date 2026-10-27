@@ -449,6 +449,11 @@ export interface GridCodeProfile {
   /** Short-term and long-term flicker severity limits at the PCC. */
   pst_limit?: GridLimit
   plt_limit?: GridLimit
+  /** Each generating unit's reactive capability: `points` [p_pu, q_min_pu, q_max_pu], per unit of the unit's
+   * rated P, + = the unit delivers (over-excited). Not the PCC band above. */
+  q_capability_unit?: GridLimit & { points: [number, number, number][] }
+  /** Voltage-control deadband, % of nominal voltage either side. Reported, never checked. */
+  voltage_deadband_pct?: GridLimit
   document?: { sha256: string; filename: string; title: string }
 }
 
