@@ -81,7 +81,8 @@ def test_sessions_distinguishes_unknown_from_reported_context(directory):
         assert sessions.context_tokens(session) is None
     assert sessions.context_tokens({'context_usage': {'used_tokens': 120000}}) == 120000
     assert sessions.fmt_context(120000) == '120k'
-    assert sessions.fmt_context(250000) == '250k ROTATE'
+    assert sessions.fmt_context(250000) == '250k'
+    assert sessions.fmt_context(310000) == '310k ROTATE'
     row = sessions.row({'id': 'abc', 'context_usage': {'used_tokens': 0}})
     assert '?' in row and 'ROTATE' not in row
     assert 'get_session' in sessions.__doc__
