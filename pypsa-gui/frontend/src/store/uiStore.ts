@@ -523,6 +523,10 @@ interface UIStore {
    *  loading table. Cleared by the next navigation, a tab, source or project
    *  change, or a row click in that table. */
   resultsHighlight: { component: string; name: string } | null
+  /** LC-17: the scenario rows (project ids) the assistant pointed at, e.g. a
+   *  sweep's new cases. Cleared by the next navigation, a project change or the
+   *  user's next click in the Scenarios panel. */
+  scenariosHighlight: string[] | null
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
@@ -679,6 +683,7 @@ interface UIStore {
   clearResultsSectionRequest: () => void
   requestResultsWindow: (window: { start: string; end: string } | { fromIndex: number; toIndex: number }) => void
   setResultsHighlight: (highlight: { component: string; name: string } | null) => void
+  setScenariosHighlight: (ids: string[] | null) => void
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
@@ -777,6 +782,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   resultsSectionRequest: null,
   resultsWindowRequest: null,
   resultsHighlight: null,
+  scenariosHighlight: null,
   economicsTabRequest: null,
   solverBlockRequest: null,
   gridReadinessRequest: false,
@@ -1035,6 +1041,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   requestResultsWindow: (window) => set({ resultsWindowRequest: window }),
   clearResultsWindowRequest: () => set({ resultsWindowRequest: null }),
   setResultsHighlight: (highlight) => set({ resultsHighlight: highlight }),
+  setScenariosHighlight: (ids) => set({ scenariosHighlight: ids }),
   requestEconomicsTab: (tab) => set({ economicsTabRequest: tab }),
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
@@ -1122,6 +1129,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
         // Issue 06 — discussed run ids are project-scoped; drop on switch.
         discussedRun: null,
         resultsHighlight: null,
+        scenariosHighlight: null,
         // P30 gate S-2: the same hazard for a pending Edit request — it must
         // not open project B's same-named bus in Edit.
         propertiesEditRequest: null,

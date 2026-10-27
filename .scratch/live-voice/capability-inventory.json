@@ -3671,13 +3671,14 @@
         "loadflow_source",
         "window_from",
         "window_to",
-        "highlight_branch"
+        "highlight_branch",
+        "highlight_projects"
       ],
       "required": [
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "9a02006e15a17ce62e468c2322b677fe4b6b3a862c435332c7858b6c4d3c4ba3",
+      "schema_sha256": "93e4ba6a83996226176f7ca0cf7798c8bb96bcd0c67da8819140f4b565f61cba",
       "behavioral_fixture": "pending"
     },
     {
@@ -3814,7 +3815,7 @@
         "cases"
       ],
       "safety_tier": "execution",
-      "schema_sha256": "1bfb6701f7b93e7cc7eda41603ea006e52aa7ab890d78f7e4f6f57342b60aed9",
+      "schema_sha256": "cd776670ffb897fbd3ff1be7c75ef361592583067edb2ddbe253d29c421074d9",
       "behavioral_fixture": "pending"
     },
     {

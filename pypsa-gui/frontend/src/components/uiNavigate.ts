@@ -91,6 +91,8 @@ type NavigationRequest = {
   window_from?: number | null
   window_to?: number | null
   highlight?: { component?: string; name?: string } | null
+  /** LC-17: scenario rows to highlight (project ids), with panel scenarios. */
+  highlight_projects?: string[]
 }
 
 export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
@@ -105,6 +107,7 @@ function apply(d: NavigationRequest) {
   const ui = useUIStore.getState()
   // A highlight lasts until the next navigation.
   ui.setResultsHighlight(null)
+  ui.setScenariosHighlight(null)
   const closePanelWithReturn = () => withReturnFrom(() => useUIStore.getState().setSlidePanel(null))
   if (d.kind === 'select_component' && d.component_class && d.name) {
     if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
@@ -201,6 +204,9 @@ function apply(d: NavigationRequest) {
     if (d.highlight?.component && d.highlight.name) {
       ui.setResultsHighlight({ component: d.highlight.component, name: d.highlight.name })
     }
+  }
+  if (panel === 'scenarios' && Array.isArray(d.highlight_projects) && d.highlight_projects.length) {
+    ui.setScenariosHighlight(d.highlight_projects.filter((id): id is string => typeof id === 'string'))
   }
   if (d.bottom_tab) ui.requestBottomTab(d.bottom_tab)
   if (typeof d.compare_rail === 'boolean') ui.setCompareRailOpen(d.compare_rail)

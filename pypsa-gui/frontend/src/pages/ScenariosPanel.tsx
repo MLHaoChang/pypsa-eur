@@ -309,6 +309,8 @@ export default function ScenariosPanel() {
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const setSlidePanel     = useUIStore(s => s.setSlidePanel)
+  const hasHighlight      = useUIStore(s => (s.scenariosHighlight?.length ?? 0) > 0)
+  const clearHighlight    = () => { if (hasHighlight) useUIStore.getState().setScenariosHighlight(null) }
   const setCompareRailOpen = useUIStore(s => s.setCompareRailOpen)
   const setProjectSwitchInProgress = useUIStore(s => s.setProjectSwitchInProgress)
   // Read-only when another user holds the active project's edit lock (auth
@@ -689,7 +691,8 @@ export default function ScenariosPanel() {
   ).length
 
   return (
-    <div className="flex flex-col h-full">
+    // LC-17: the user's next click here ends the assistant's highlight.
+    <div className="flex flex-col h-full" onPointerDownCapture={clearHighlight}>
       <PageBody>
         <RowGrid cols={2}>
           <StatCard accent eyebrow="Scenarios" value={projectList.length} sub="project variants" />
@@ -916,14 +919,17 @@ function ScenarioNodeRow({
   const hasChildren = node.children.length > 0
   const isCollapsed = collapsed.has(node.project.name)
   const isSelected = selected.has(node.project.name)
+  // LC-17: a row the assistant pointed at (a sweep's new case).
+  const highlighted = useUIStore(s => !!node.project.id && !!s.scenariosHighlight?.includes(node.project.id))
   return (
     <>
       <div
+        data-testid={highlighted ? 'scenario-row-highlighted' : undefined}
         className={`group flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-colors ${
           isCurrent
             ? 'border-accent-100 bg-accent-50'
             : 'border-border bg-bg hover:bg-bg-2'
-        }`}
+        }${highlighted ? ' ring-2 ring-accent' : ''}`}
         style={{ marginLeft: indent }}
       >
         {/* Fixed-width slot whether or not there is a chevron, so names in a

@@ -128,7 +128,7 @@ function show(value: Scalar | undefined, known = true): string {
 
 /** A card cell's number without a display value: six significant digits, never fewer than its whole
  * part, no grouping ("2030" stays a year); "no limit", "not set" and "Not read" stay `show`'s. */
-function cellValue(value: Scalar | undefined, known = true): string {
+export function cellValue(value: Scalar | undefined, known = true): string {
   if (typeof value !== 'number' || !known || !Number.isFinite(value)) return show(value, known)
   return String(Number(value.toPrecision(Math.max(6, Math.trunc(Math.abs(value)).toString().length))))
 }
@@ -140,13 +140,13 @@ function clip(quote: string): string {
 }
 
 /** A value in its display unit, rounded for reading (the stored value stays in the small line). */
-function showDisplay(value: number | null | undefined): string {
+export function showDisplay(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'not set'
   return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })
 }
 
 /** "Generator 'pv'": the class in the user's words and the component's name. */
-function assetWords(componentClass: string, name: string): string {
+export function assetWords(componentClass: string, name: string): string {
   // "Settings" is a bucket, not a thing: the unit or item is named as it is ("BESS_NEW")
   if (componentClass === 'Settings') return name
   return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
