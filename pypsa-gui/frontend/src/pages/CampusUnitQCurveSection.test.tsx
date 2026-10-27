@@ -47,6 +47,11 @@ describe('CampusUnitQCurveSection', () => {
       .toBe('±18.47 Mvar available for −19.00 to +19.00 Mvar: 0.53 Mvar short')
   })
 
+  it('fails closed: a status other than pass, fail or reported shows Fail', () => {
+    render(<CampusUnitQCurveSection rows={[row({ status: 'weird' as never })]} />)
+    expect(within(screen.getByTestId('qcurve-BESS1-1')).getByTestId('gr-verdict').dataset.verdict).toBe('fail')
+  })
+
   it('shows a pass with no shortfall as a dash and its detail only as a tooltip', () => {
     render(<CampusUnitQCurveSection rows={[row()]} />)
     const tr = screen.getByTestId('qcurve-BESS1-1')

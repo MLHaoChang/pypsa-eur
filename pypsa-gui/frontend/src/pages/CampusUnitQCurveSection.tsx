@@ -62,7 +62,8 @@ export function orderRows(rows: IbrQCurveRow[]): IbrQCurveRow[] {
 }
 
 function Row({ r }: { r: IbrQCurveRow }) {
-  const shown = r.status !== 'pass'      // the detail of a fail or a not-checked row is text, not a tooltip
+  const shown = r.status !== 'pass'      // (only 'pass' shows Pass; an unknown status fails closed)
+  // the detail of a fail or a not-checked row is text, not a tooltip
   return (
     <>
       <tr data-testid={`qcurve-${r.unit}-${r.p_pu ?? 'none'}`} data-status={r.status}
@@ -76,7 +77,7 @@ function Row({ r }: { r: IbrQCurveRow }) {
           <span className="inline-flex items-center gap-1.5">
             {r.status === 'reported'
               ? <Tag tone="neutral">Not checked · reported only</Tag>
-              : <VerdictChip verdict={r.status === 'fail' ? 'fail' : 'pass'} />}
+              : <VerdictChip verdict={r.status === 'pass' ? 'pass' : 'fail'} />}
             {r.source !== 'code' && <Tag tone="warn">{r.source}</Tag>}
           </span>
         </td>
