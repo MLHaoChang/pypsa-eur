@@ -201,6 +201,8 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   // hand the work to a queue / a worker).
   run_eh_study: 'start the reliability study',
   run_fmea_sweep: 'start the equipment-failure check',
+  // LC-17: creates the cases, then queues their solves in the background.
+  run_sensitivity_sweep: 'start the sensitivity cases',
   run_simulation: 'start a solve',
   run_ac_pf_stage: 'start the power-flow check',
   run_frontier_study: 'start the cost-versus-reliability study',

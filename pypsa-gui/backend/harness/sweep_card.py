@@ -169,8 +169,7 @@ def preview(args: dict) -> dict:
             resident = PyPSAService.get_active_context()
         if resident is not None and dirty_state.is_dirty(resident):
             _refuse("baseline_not_saved", f"The baseline {base.name!r} has unsaved changes and a sweep branches the saved "
-                    "file. Ask the user whether to save it first (save_project shows its own card); never save "
-                    "without that card.")
+                    "file. Save it first (save_project shows its own card); nothing was saved or created.")
         try:
             network = wt._load_context(base).network
         except Exception:  # noqa: BLE001 — an unreadable saved baseline shows no card
@@ -190,7 +189,7 @@ def preview(args: dict) -> dict:
                 old = wt._read_json(project_registry.project_dir(existing) / wt.SENSITIVITY_CASE_FILE)
                 if existing.parent_project_id != base.id or old.get("case") != {"new_name": case["new_name"], "changes": case["changes"]}:
                     _refuse("sensitivity_name_conflict", f"A project named {case['new_name']!r} already exists with other "
-                            f"inputs. Ask the user for another name (for example {case['new_name'] + '-2'!r}).")
+                            f"inputs. The case needs another name (for example {case['new_name'] + '-2'!r}).")
                 entry["existing"] = True
                 saved = wt._load_context(existing).network
                 queues = not (dispatch_status(saved) == "fresh" and getattr(saved, "objective", None) is not None
