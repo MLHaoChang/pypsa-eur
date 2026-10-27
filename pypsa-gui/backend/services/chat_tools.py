@@ -4507,17 +4507,22 @@ def gridspine_create_study(name: str, config: dict | None = None) -> dict:
         return _h(db, user, name, config=config)
 
 
+def dispatch_source_arg(from_dispatch: str | None, from_project: str | None):
+    """The `source` the service takes, from the tool's two optional arguments (the
+    edit card reads it the same way)."""
+    if from_project is not None:
+        return {"from_project": from_project}
+    if from_dispatch is not None:
+        return {"from_dispatch": from_dispatch}
+    return "generate"
+
+
 def gridspine_set_dispatch_source(
     project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
 ) -> dict:
     from services.gridspine_service import set_dispatch_source as _h
     with _acting() as (db, user):
-        if from_project is not None:
-            source = {"from_project": from_project}
-        elif from_dispatch is not None:
-            source = {"from_dispatch": from_dispatch}
-        else:
-            source = "generate"
+        source = dispatch_source_arg(from_dispatch, from_project)
         return _h(db, _gridspine_project(db, user, project_id), source, user=user)
 
 

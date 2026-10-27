@@ -1024,17 +1024,15 @@ def owner_assets_response(project, replacements: bool = False) -> dict:
             "study_method": method if assets else None, "unresolved": _owner_unresolved(run_dir)}
 
 
-def draft(project, overwrite: bool = False) -> dict:
-    """Write the campus file from the project's solved network, with the
-    island data of the project's island sidecar when it has one (campus
-    island plan I9b; owner, 2026-10-14). A redraft keeps the frequency of the
-    campus file it replaces, so a 60 Hz campus gets 60 Hz line capacitance."""
+def planned_draft(project, overwrite: bool = False) -> tuple[str, list]:
+    """`(campus yaml, skipped)` for `draft`: every check it makes, nothing written.
+    The edit card calls this too, so its new values are the ones the write stores."""
     from services.solver.island import IslandRefusal, campus_f_hz
     from services.adequacy.island_config import SIDECAR_NAME, load_island_config
 
     require_capacity_expansion(project)
     nc = _network(project)
-    d = campus_dir(project)
+    d = project_registry.project_dir(project) / SUBDIR
     if (d / CAMPUS_FILE).is_file() and not overwrite:
         raise HTTPException(status_code=409, detail="a campus file already exists; draft again with overwrite to replace your edits")
     with _netcdf_lock():
@@ -1050,10 +1048,19 @@ def draft(project, overwrite: bool = False) -> dict:
             result = cs.draft_from_project(nc, island=island, f_hz=f_hz)
         except ContractError as exc:
             raise _unprocessable(exc)
-    text = yaml.safe_dump(result.spec, sort_keys=False)
+    return yaml.safe_dump(result.spec, sort_keys=False), result.skipped
+
+
+def draft(project, overwrite: bool = False) -> dict:
+    """Write the campus file from the project's solved network, with the
+    island data of the project's island sidecar when it has one (campus
+    island plan I9b; owner, 2026-10-14). A redraft keeps the frequency of the
+    campus file it replaces, so a 60 Hz campus gets 60 Hz line capacitance."""
+    text, skipped = planned_draft(project, overwrite)
+    d = campus_dir(project)
     _write_campus(project, text)
-    (d / NOTES_FILE).write_text(json.dumps(result.skipped))
-    return {"campus_yaml": text, "skipped": result.skipped}
+    (d / NOTES_FILE).write_text(json.dumps(skipped))
+    return {"campus_yaml": text, "skipped": skipped}
 
 
 def save_campus(project, text: str) -> dict:
@@ -1109,24 +1116,43 @@ def get_library(project) -> dict:
     return {"yaml": text, "is_default": is_default}
 
 
+def _check_library_size(project, text: str) -> None:
+    require_capacity_expansion(project)
+    if len(text.encode()) > MAX_LIBRARY_BYTES:
+        raise HTTPException(status_code=413, detail=f"the asset library is larger than {MAX_LIBRARY_BYTES} bytes")
+
+
+def _load_library_file(path) -> dict:
+    """The engine's loader on a file, its refusals as the route's 422."""
+    try:
+        return cs.load_asset_library(path)
+    except yaml.YAMLError as exc:
+        raise HTTPException(status_code=422, detail=f"the asset library is not valid YAML: {exc}")
+    except ContractError as exc:
+        raise _unprocessable(exc)
+
+
+def checked_library(project, text: str) -> dict:
+    """The library `save_library` would keep, after every check it makes, loaded from a
+    scratch copy outside the project; nothing of the project is written. The edit card calls this."""
+    _check_library_size(project, text)
+    with tempfile.TemporaryDirectory(prefix="library-check-") as scratch:
+        path = Path(scratch) / "library.yaml"
+        path.write_text(text)
+        return _load_library_file(path)
+
+
 def save_library(project, text: str) -> dict:
     """Validate the text with the engine's loader, then keep it as the
     project's copy. The loader's message names the entry and the field. A
     refused text leaves the previous copy as it was."""
-    require_capacity_expansion(project)
-    if len(text.encode()) > MAX_LIBRARY_BYTES:
-        raise HTTPException(status_code=413, detail=f"the asset library is larger than {MAX_LIBRARY_BYTES} bytes")
+    _check_library_size(project, text)
     d = campus_dir(project)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".library-", suffix=".yaml")
     try:
         with os.fdopen(fd, "w") as f:
             f.write(text)
-        try:
-            cs.load_asset_library(tmp)
-        except yaml.YAMLError as exc:
-            raise HTTPException(status_code=422, detail=f"the asset library is not valid YAML: {exc}")
-        except ContractError as exc:
-            raise _unprocessable(exc)
+        _load_library_file(tmp)
         os.replace(tmp, d / LIBRARY_FILE)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)
@@ -1266,13 +1292,10 @@ def select_island_preset(project, preset: str | None) -> dict:
     return {**save_island(project, raw), "skipped": skipped}
 
 
-def save_island(project, config: dict) -> dict:
-    """Validate the island sidecar with gridspine's schema and write it; a
-    bad one is a 422 naming the field and leaves the previous file. The
-    last study was made with the old sidecar, so it goes. Returns
-    ``get_island``."""
+def checked_island_text(project, config: dict) -> str:
+    """The sidecar text `save_island` would keep, after every check it makes;
+    nothing is written. The edit card calls this too."""
     from services.adequacy.island_config import validate
-    from services.atomic_io import atomic_write_text
 
     require_capacity_expansion(project)
     text = json.dumps(config, indent=2)
@@ -1283,6 +1306,17 @@ def save_island(project, config: dict) -> dict:
         validate(config)
     except ContractError as exc:
         raise _unprocessable(exc)
+    return text
+
+
+def save_island(project, config: dict) -> dict:
+    """Validate the island sidecar with gridspine's schema and write it; a
+    bad one is a 422 naming the field and leaves the previous file. The
+    last study was made with the old sidecar, so it goes. Returns
+    ``get_island``."""
+    from services.atomic_io import atomic_write_text
+
+    text = checked_island_text(project, config)
     sidecar, study = _island_paths(project)
     atomic_write_text(sidecar, text)
     study.unlink(missing_ok=True)
