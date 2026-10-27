@@ -162,6 +162,28 @@ export function openEconomicAssumptions(): void {
   withReturn(null, () => openSectionInExpert('scenarios'))
 }
 
+/** Show the reliability goal's editor (W3b-R): Guided's Goal card (section 8),
+ *  or Expert's Solver settings › Network, scrolled to the Reliability block.
+ *  Never flips the mode; Back returns to the view it left. */
+export function openReliabilityGoal(): void {
+  withReturn(null, () => {
+    const ui = useUIStore.getState()
+    ui.requestSolverBlock('goal')
+    if (ui.uiMode === 'guided') openSectionInGuided('scenarios')
+    else openSectionInExpert('scenarios')
+  })
+}
+
+/** Show the site type select (W3b-R): Guided's Site card (section 3), or the
+ *  top of Expert's Connection & grid panel. Never flips the mode; Back
+ *  returns to the view it left. */
+export function openSiteType(): void {
+  withReturn(null, () => {
+    if (useUIStore.getState().uiMode === 'guided') openSectionInGuided('connection')
+    else openSectionInExpert('connection')
+  })
+}
+
 /** Show the Profile Studio (Expert's renewable-profile generator); Back returns to the view it left. */
 export function openProfileStudio(): void {
   withReturn(null, () => useUIStore.getState().setSlidePanel('profiles'))

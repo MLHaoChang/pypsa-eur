@@ -14,9 +14,10 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
+import { goal } from '../../test/fixtures/reliabilityGoal'
 import { resultsApi } from '../../api/simulation'
 import {
-  LoopPanel, targetEcho, wireTarget, loleCell, restoreSentence, entryHorizonYears,
+  LoopPanel, targetEcho, loleCell, restoreSentence, entryHorizonYears,
   CAP_LEVER, compact, leverSpelling,
 } from './LoopPanel'
 import type {
@@ -36,6 +37,14 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getCopt: vi.fn(),
     },
   }
+})
+
+// The target and the draws are the project's one stored goal (W3b-R): shown
+// read-only, never sent; the backend puts the h/yr target on the horizon basis.
+const getReliabilityGoal = vi.fn()
+vi.mock('../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/flow')>()
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 // A representative week: 168 weighted hours, so `horizon_years` is well under
@@ -193,6 +202,7 @@ afterEach(() => cleanup())
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  getReliabilityGoal.mockReset().mockResolvedValue(goal({ target_lole_h: [3, 'stored'] }))
   vi.mocked(resultsApi.getCouplingLoop).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.startCouplingLoop).mockReset()
     .mockResolvedValue({ status: 'running' })
@@ -289,22 +299,6 @@ describe('entryHorizonYears', () => {
   })
 })
 
-describe('wireTarget', () => {
-  // ★ Bite: `wireTarget` returns the h/yr number unconverted — the POST then
-  // asks a 168 h study to meet 3 h, a target it meets trivially, and the
-  // verdict certifies a plan against a standard 52x too loose.
-  it('sends the HORIZON-BASIS number, never the h/yr one', () => {
-    expect(wireTarget(3, WEEK_YEARS)).toBeCloseTo(0.05753424, 7)
-    expect(wireTarget(3, WEEK_YEARS)).not.toBe(3)
-  })
-
-  it('is the identity on an annual horizon and on an unknown one', () => {
-    expect(wireTarget(3, 1)).toBe(3)
-    expect(wireTarget(3, null)).toBe(3)
-    expect(wireTarget(3, 0)).toBe(3)
-  })
-})
-
 describe('loleCell', () => {
   const mc = iterate(1).mc!
 
@@ -388,19 +382,62 @@ describe('restoreSentence', () => {
 
 describe('LoopPanel target entry', () => {
   // ★ [S12] Bite: POST the raw h/yr field.
-  it('converts the typed h/yr target through the MC horizon before POSTing', async () => {
+  it('echoes the goal\'s h/yr target on the MC horizon, and POSTs no target or draws', async () => {
     vi.mocked(resultsApi.getMc).mockResolvedValue(MC_WEEK)
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    expect(screen.queryByLabelText(/target/i)).toBeNull()
+    expect(screen.queryByLabelText(/draws/i)).toBeNull()
     await waitFor(() => expect(screen.getByTestId('loop-target-echo').textContent)
       .toBe('3 h/yr = 0.058 h / 168 h horizon'))
+    expect(screen.getByTestId('loop-goal-values').textContent)
+      .toBe('allowed shortfall 3 h/yr · MC draws 500 (default)')
+    expect(screen.getByTestId('loop-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startCouplingLoop).toHaveBeenCalled())
-    const body = vi.mocked(resultsApi.startCouplingLoop).mock.calls[0][0]
-    expect(body.target_lole_h).toBeCloseTo(0.05753424, 7)
-    expect(body.target_lole_h).not.toBe(3)
+    // The backend converts the stored goal (`reliability_goal.loop_goal`).
+    expect(vi.mocked(resultsApi.startCouplingLoop).mock.calls[0][0]).toEqual({ restore: 'base' })
+  })
+
+  it('with no goal, Run is disabled and says so, with a link to set it', async () => {
+    getReliabilityGoal.mockResolvedValue(goal())
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results', activeSection: 'results',
+      flowReturn: null, solverBlockRequest: null, fieldDrawer: null })
+    const { user } = await openPanel()
+    const run = screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement
+    expect((await screen.findByTestId('loop-goal-no-goal')).textContent).toBe('No reliability goal set.')
+    expect(run.disabled).toBe(true)
+    expect(run.title).toMatch(/^No reliability goal set\./)
+    const link = screen.getByTestId('loop-goal-set')
+    expect(link.textContent).toBe('Set it in Scenarios & optimisation ›')
+    // "·" separates data only: the link is its own element.
+    expect(link.parentElement!.textContent).not.toMatch(/·/)
+    await user.click(link)
+    // Guided: the Goal card, in place, with a way back (never flips the mode).
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'guided', activeSlidePanel: 'hubDesign',
+      activeSection: 'scenarios', solverBlockRequest: 'goal' })
+    expect(useUIStore.getState().flowReturn).toMatchObject({ mode: 'guided', panel: 'results' })
+    expect(resultsApi.startCouplingLoop).not.toHaveBeenCalled()
+  })
+
+  // A stored 0 h/yr is a valid goal (the EH study certifies against it), but
+  // the loop needs a shortfall above zero: say that, not "no goal".
+  it('with a 0 h/yr goal, Run is disabled and says the loop needs more than 0', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [0, 'stored'] }))
+    await openPanel()
+    const run = screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement
+    expect((await screen.findByTestId('loop-goal-no-goal')).textContent)
+      .toBe('The loop needs an allowed shortfall above 0 h/yr.')
+    expect(run.disabled).toBe(true)
+    expect(run.title).toMatch(/^The loop needs an allowed shortfall above 0 h\/yr\./)
+  })
+
+  it('a goal that cannot be read says so, not "no goal"', async () => {
+    getReliabilityGoal.mockRejectedValue(new Error('boom'))
+    await openPanel()
+    await waitFor(() => expect(screen.getByTestId('loop-goal-values').textContent)
+      .toBe('could not be read'))
+    expect(screen.queryByTestId('loop-goal-no-goal')).toBeNull()
+    expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   // The COPT needs no solve at all, so it is the horizon source that exists
@@ -409,9 +446,8 @@ describe('LoopPanel target entry', () => {
   it('falls back to the COPT horizon when no MC study has run', async () => {
     vi.mocked(resultsApi.getCopt).mockResolvedValue(COPT_WEEK as never)
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await waitFor(() => expect(screen.getByTestId('loop-target-echo').textContent)
       .toMatch(/168 h horizon/))
   })
@@ -423,9 +459,8 @@ describe('LoopPanel restore affordance', () => {
   // their original one back.
   it('sends restore:"final" when the user asks to keep the certified plan', async () => {
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByTestId('loop-restore-toggle'))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startCouplingLoop).toHaveBeenCalled())
@@ -435,9 +470,8 @@ describe('LoopPanel restore affordance', () => {
 
   it('defaults to "base" — the loop never applies an unasked-for cap', async () => {
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startCouplingLoop).toHaveBeenCalled())
     expect(vi.mocked(resultsApi.startCouplingLoop).mock.calls[0][0].restore)
@@ -659,9 +693,8 @@ describe('LoopPanel run controls', () => {
     vi.mocked(resultsApi.startCouplingLoop).mockRejectedValue(
       httpError(409, 'a frontier study is running — wait for it to finish'))
     const { user } = await openPanel()
-    const input = await screen.findByLabelText(/target/i) as HTMLInputElement
-    await user.clear(input)
-    await user.type(input, '3')
+    await waitFor(() => expect((screen.getByRole('button', { name: /run loop/i }) as HTMLButtonElement)
+      .disabled).toBe(false))
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     const msg = await screen.findByTestId('loop-blocked')
     expect(msg.textContent).toMatch(/frontier study is running/)
@@ -694,7 +727,9 @@ describe('LoopPanel run controls', () => {
   // A target is the ONE required field, and the backend refuses a missing one
   // with a 422 — asking for it here costs a round-trip and an error banner.
   it('refuses to start without a target rather than POSTing an empty body', async () => {
+    getReliabilityGoal.mockResolvedValue(goal())
     const { user } = await openPanel()
+    await screen.findByTestId('loop-goal-no-goal')
     const btn = await screen.findByTestId('loop-run')
     expect((btn as HTMLButtonElement).disabled).toBe(true)
     await user.click(btn)

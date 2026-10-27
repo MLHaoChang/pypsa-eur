@@ -204,6 +204,18 @@ def test_a_row_with_its_own_target_is_filed_there():
     assert got["assumed_default"][0]["entity"] == "discount rate"
 
 
+def test_a_stored_goal_retires_its_assumed_row():
+    """W3b-R: once the project stores its reliability goal, the template's
+    assumed LOLE row no longer stands for the run, so it is not raised; the
+    other rows stay."""
+    items = S._assumed_items({"ledger": DC02_ROWS}, {"target_lole_h": 4.0})
+    codes = {i["code"] for i in items}
+    assert "assumed_lole_goal" not in codes
+    assert "assumed_connection_ramp" in codes
+    # No goal stored (or a config with other fields only): the row stays.
+    assert "assumed_lole_goal" in {i["code"] for i in S._assumed_items({"ledger": DC02_ROWS}, {})}
+
+
 def test_two_rows_on_one_entity_keep_separate_acks(tmp_path):
     items = S._assumed_items({"ledger": DC02_ROWS})
     S.acknowledge(tmp_path, items, "assumed_connection_ramp", "grid_import")

@@ -210,3 +210,23 @@ export function inScope(scope: FlowScopeValue | null | undefined, card: ScopeCar
   const chosen = scope.options[card] ?? []
   return option === undefined ? chosen.length > 0 : chosen.includes(option)
 }
+
+/** Where a goal value comes from: saved by the user, the project template's,
+ *  or the study's own default (`services/reliability_goal.py`). */
+export type GoalSource = 'stored' | 'template' | 'default'
+export interface GoalValue<T> { value: T; source: GoalSource }
+
+/** The project's one reliability goal (W3b-R) as every study resolves it.
+ *  A `default` target or ENS of null is "the site type's own value". */
+export interface ReliabilityGoal {
+  target_lole_h: GoalValue<number | null>
+  ens_cap_permyriad: GoalValue<number | null>
+  mc_draws: GoalValue<number>
+  site_archetype: GoalValue<'strong_grid' | 'weak_flexible' | 'off_grid'>
+}
+
+/** Read the goal. Written through `PUT /simulation/solver_config` (partial). */
+export function getReliabilityGoal(project: string): Promise<ReliabilityGoal> {
+  return client.get<ReliabilityGoal>(`${flowPath(project)}/reliability_goal`, { skipErrorToast: true })
+    .then(r => r.data)
+}

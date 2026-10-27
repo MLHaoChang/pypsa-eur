@@ -494,9 +494,9 @@ export interface CouplingLoopPayload {
 export const MAX_LOOP_SOLVES = 8
 
 export interface CouplingLoopRequestBody {
-  /** REQUIRED and horizon-basis. The h/yr → horizon conversion is the
-   *  panel's job (plan [S12]); the wire stays unit-safe. */
-  target_lole_h: number
+  /** Horizon-basis when sent. W3b-R: the panel omits it, and the backend
+   *  takes the stored goal's h/yr target on the horizon basis. */
+  target_lole_h?: number
   draws?: number
   seed?: number
   eps0?: number
@@ -613,8 +613,9 @@ export interface MarginLoopPayload {
 }
 
 export interface MarginLoopRequestBody {
-  /** REQUIRED and horizon-basis; the h/yr conversion is the panel's job. */
-  target_lole_h: number
+  /** Horizon-basis when sent. W3b-R: the panel omits it, and the backend
+   *  takes the stored goal's h/yr target on the horizon basis. */
+  target_lole_h?: number
   draws?: number
   seed?: number
   max_solves?: number
@@ -629,7 +630,8 @@ export interface MarginLoopRequestBody {
 export type EhArchetype = 'strong_grid' | 'weak_flexible' | 'off_grid'
 
 export interface EhStudyRequestBody {
-  archetype: EhArchetype
+  /** W3b-R: omitted, the project's stored site type. */
+  archetype?: EhArchetype
   stages?: string[]
   budget_solves?: number
   /** P13: validated server-side (422 names the field). Omit blank knobs. */
@@ -1557,9 +1559,10 @@ export const resultsApi = {
   getCouplingLoop: () => client.get('/results/coupling_loop')
     .then(r => (r.status === 204 ? null : r.data as CouplingLoopPayload)),
   // Starts the loop in a backend worker thread and returns immediately; poll
-  // getCouplingLoop for progress. `target_lole_h` is REQUIRED and is the
-  // horizon-basis number (LoopPanel's `wireTarget` does the conversion) —
-  // every other field has an engine-side default this client must not fork.
+  // getCouplingLoop for progress. `target_lole_h`, when sent, is the
+  // horizon-basis number; omitted, the backend fills it (converted) and the
+  // draws from the stored reliability goal (W3b-R). Every other field has an
+  // engine-side default this client must not fork.
   // Rejects with the axios error on 409 (a solve/sweep/frontier/MC/loop is
   // running) and on the route's 422 set; the detail string NAMES the blocker
   // and the panel renders it through McPanel's `blockerMessage`.
