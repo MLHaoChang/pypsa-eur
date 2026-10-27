@@ -130,7 +130,9 @@ def _pin_wp0_pack() -> None:
     The study seeds from the WP0 pack (2026-10-05, 2020 money): every figure is
     judged against the frozen WP0 record (§4), as `tests/golden/site_fixture.py`
     is (money-year 01 rider 3). The live pin is run end to end by
-    `test_library_defaults_pack_money_year_2025`.
+    `test_library_defaults_pack_money_year_2025`. The patch is process-local:
+    `run_qa_drivers.py` runs each driver in its own subprocess, so importing
+    `main_` in-process would leak it.
     """
     from services.study import library as L
 
