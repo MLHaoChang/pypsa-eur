@@ -210,6 +210,7 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
   // campus island I7: the frequency-cut loop runs in the background (poll campus_island_cuts)
   campus_apply_island_cuts: 'start applying the frequency cuts',
   campus_island_cuts: 'read the frequency cuts',
+  reset_network: 'start a new, empty network',
   solve_queue_enqueue: 'add the project to the solve queue',
   abort_adequacy_study: 'ask the running study to stop',
   // The finance engine runs in the background (poll get_investment_case).
