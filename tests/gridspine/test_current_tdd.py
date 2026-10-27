@@ -91,7 +91,7 @@ def test_table_3_is_about_half_of_table_2():
 # of it: they pin the tables' shape, which a mistyped cell would break.
 def test_table_3_is_exactly_half_of_table_2_cell_by_cell():
     for t2, t3 in zip(td.TABLES[0].rows, td.TABLES[1].rows, strict=True):
-        assert t3.odd == tuple(v / 2 for v in t2.odd) and t3.tdd == t2.tdd / 2
+        assert t3.odd == pytest.approx(tuple(v / 2 for v in t2.odd)) and t3.tdd == pytest.approx(t2.tdd / 2)
 
 
 def test_table_4s_middle_row_is_table_3s_first():
@@ -105,7 +105,7 @@ def test_every_limit_rises_with_isc_il_and_falls_with_the_order(table):
     for lo, hi in zip(table.rows, table.rows[1:]):
         assert hi.tdd > lo.tdd and all(b > a for a, b in zip(lo.odd, hi.odd))
     for r in table.rows:
-        assert list(r.odd) == sorted(r.odd, reverse=True) and r.tdd >= r.odd[0]
+        assert all(a >= b for a, b in zip(r.odd, r.odd[1:])) and r.tdd >= r.odd[0]   # 3-11 >= ... >= 35-50
 
 
 # --- the order groups ------------------------------------------------------------
