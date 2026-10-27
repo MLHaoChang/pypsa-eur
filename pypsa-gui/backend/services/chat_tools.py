@@ -3596,10 +3596,10 @@ def solve_queue_clear_finished() -> dict:
     return _route(_h)
 
 
-# ── Solve queue controls (live-voice 08 B3) (6) ─────────────────────────────
+# ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────────
 #
 # One wrapper per Solve Queue panel route, through `_route`: the routes own
-# the visibility, per-user and super-admin checks and requeue's holder check.
+# the visibility and per-user checks and requeue's holder check.
 
 _JOB_LOG_DEFAULT_LINES = 200
 
@@ -3615,16 +3615,6 @@ def solve_queue_job_log(job_id: str, max_lines: int | None = None) -> dict:
 
 def solve_queue_cancel_queued() -> dict:
     from routers.solve_queue import cancel_queued as _h
-    return _route(_h)
-
-
-def solve_queue_pause() -> dict:
-    from routers.solve_queue import pause_queue as _h
-    return _route(_h)
-
-
-def solve_queue_resume() -> dict:
-    from routers.solve_queue import resume_queue as _h
     return _route(_h)
 
 
@@ -8154,8 +8144,6 @@ DISPATCHERS: dict[str, Any] = {
     # live-voice 08 B3
     "solve_queue_job_log": solve_queue_job_log,
     "solve_queue_cancel_queued": solve_queue_cancel_queued,
-    "solve_queue_pause": solve_queue_pause,
-    "solve_queue_resume": solve_queue_resume,
     "solve_queue_dismiss": solve_queue_dismiss,
     "solve_queue_requeue": solve_queue_requeue,
     "save_fmea_worksheet": save_fmea_worksheet,
@@ -8408,8 +8396,6 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     # reach. `requeue` is exempt there BECAUSE `requeue_job` runs its own
     # holder check on the project it resolves from the job (main.py's "pair"),
     # so a foreign lock still refuses it, in the handler.
-    "/api/simulation/queue/pause",
-    "/api/simulation/queue/resume",
     "/api/simulation/queue/cancel_queued",
     "/api/simulation/queue/{job_id}/dismiss",
     "/api/simulation/queue/{job_id}/requeue",

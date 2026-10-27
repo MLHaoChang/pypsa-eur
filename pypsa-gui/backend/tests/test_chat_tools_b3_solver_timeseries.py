@@ -1,13 +1,16 @@
 """Live-voice 08 slice B3: typed tools for the solver-simulation and
 timeseries-horizon GUI routes.
 
-Thirteen new wrappers over the Solve Queue panel, FMEA worksheet and Time
+Eleven new wrappers over the Solve Queue panel, FMEA worksheet and Time
 Series routes, plus two catalogue fixes:
 
   * `solve_queue_clear_finished` was read-tier on a POST, which the route
     parity tier rule (V4) refuses; it is write-tier now;
   * `upload_timeseries` calls the multipart upload route, so TOOL_ROUTES names
     that route, not the JSON PUT its handler never reaches.
+
+Queue pause and resume get no tool: they stay "out of chat"
+(`services/not_via_chat.py`) and are an `admin` limitation in route parity.
 
 Each wrapper goes through the route handler, so the route's ACL, foreign-lock
 and super-admin checks apply; the tests pin that they do through the chat
@@ -30,8 +33,6 @@ from services.solve_queue import SolveJob, solve_queue
 B3_TOOLS = {
     "solve_queue_job_log": ("read", ("GET", "/api/simulation/queue/{job_id}/log_history")),
     "solve_queue_cancel_queued": ("destructive", ("POST", "/api/simulation/queue/cancel_queued")),
-    "solve_queue_pause": ("write", ("POST", "/api/simulation/queue/pause")),
-    "solve_queue_resume": ("execution", ("POST", "/api/simulation/queue/resume")),
     "solve_queue_dismiss": ("write", ("POST", "/api/simulation/queue/{job_id}/dismiss")),
     "solve_queue_requeue": ("execution", ("POST", "/api/simulation/queue/{job_id}/requeue")),
     "save_fmea_worksheet": ("destructive", ("PUT", "/api/projects/{name}/worksheet")),
@@ -93,8 +94,7 @@ def test_upload_timeseries_stays_a_gated_undoable_network_edit():
 
 
 @pytest.mark.parametrize("name", [
-    "solve_queue_cancel_queued", "solve_queue_pause", "solve_queue_resume",
-    "solve_queue_dismiss", "solve_queue_requeue", "solve_queue_clear_finished",
+    "solve_queue_cancel_queued", "solve_queue_dismiss", "solve_queue_requeue", "solve_queue_clear_finished",
 ])
 def test_queue_tools_are_exempt_from_the_chat_lock_seam_like_http(name):
     _method, path = TOOL_ROUTES[name][0]
@@ -189,27 +189,28 @@ def test_job_log_keeps_only_the_last_lines(monkeypatch):
                    "total_lines": 10, "truncated": True}
 
 
-def test_pause_and_clear_finished_are_super_admin_only_for_a_plain_caller(
+def test_clear_finished_is_super_admin_only_for_a_plain_caller(
         client, seeded_identity, acting, clean_queue):
     acting(seeded_identity["user_id"])
-    for name in ("solve_queue_pause", "solve_queue_resume", "solve_queue_clear_finished"):
-        with pytest.raises(HTTPException) as err:
-            chat_tools.DISPATCHERS[name]()
-        assert err.value.status_code == 403, name
-    assert not solve_queue.is_paused()
+    with pytest.raises(HTTPException) as err:
+        chat_tools.DISPATCHERS["solve_queue_clear_finished"]()
+    assert err.value.status_code == 403
 
 
-def test_pause_and_resume_round_trip_for_a_super_admin(
-        client, _auth_db, seeded_identity, acting, clean_queue):
-    from db.models import User
+def test_pause_and_resume_have_no_tool_and_are_an_admin_limitation():
+    """Owner call (coordinator, LV08 B3): the instance-wide controls stay
+    out of chat, as `not_via_chat.solve_queue_instance_controls` says."""
+    import json
+    from smoke import assistant_route_parity as parity
 
-    _engine, session_local = _auth_db
-    with session_local() as db:
-        db.get(User, seeded_identity["user_id"]).is_super_admin = True
-        db.commit()
-    acting(seeded_identity["user_id"])
-    assert chat_tools.DISPATCHERS["solve_queue_pause"]() == {"paused": True}
-    assert chat_tools.DISPATCHERS["solve_queue_resume"]() == {"paused": False}
+    names = {t["name"] for t in TOOLS}
+    rows = {(r["method"], r["path"]): r
+            for r in json.loads(parity.DEFAULT_OUTPUT.read_text())["rows"]}
+    for verb in ("pause", "resume"):
+        assert f"solve_queue_{verb}" not in names
+        route = ("POST", f"/api/simulation/queue/{verb}")
+        assert not any(route in routes for routes in TOOL_ROUTES.values())
+        assert rows[route]["class"] == "limitation" and rows[route]["reason"] == "admin"
 
 
 def test_cancel_queued_cancels_only_the_callers_queued_jobs(

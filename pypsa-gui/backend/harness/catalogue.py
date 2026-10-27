@@ -1435,8 +1435,9 @@ TOOLS: list[dict[str, Any]] = [
         "Safety: write.",
     ),
 
-    # ── Solve queue controls (live-voice 08 B3) (6) ─────────────────────────
-    # The Solve Queue panel's remaining controls, one tool per route.
+    # ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────
+    # The Solve Queue panel's remaining controls, one tool per route. Pause
+    # and resume stay out of chat (services/not_via_chat.py): instance-wide.
 
     _t(
         "solve_queue_job_log",
@@ -1455,19 +1456,6 @@ TOOLS: list[dict[str, Any]] = [
         "Cancel every QUEUED job you could cancel one at a time; running jobs "
         "are left alone (stop one with solve_queue_abort). Returns "
         "{cancelled: <count>}. Safety: destructive.",
-    ),
-    _empty(
-        "solve_queue_pause",
-        "Start no more queue jobs; jobs already running finish normally. "
-        "Acts on the one queue every organization shares, so it is "
-        "super-admin only (403 otherwise; a local install is exempt). "
-        "Returns {paused}. Safety: write.",
-    ),
-    _empty(
-        "solve_queue_resume",
-        "Resume a paused queue: queued jobs start solving again in FIFO "
-        "order. Super-admin only, like solve_queue_pause. Returns {paused}. "
-        "Safety: execution.",
     ),
     _t(
         "solve_queue_dismiss",
@@ -4688,8 +4676,6 @@ TOOL_ROUTES: dict[str, list] = {
     # live-voice 08 B3: queue controls, FMEA worksheet write, time series/weather
     "solve_queue_job_log": [("GET", "/api/simulation/queue/{job_id}/log_history")],
     "solve_queue_cancel_queued": [("POST", "/api/simulation/queue/cancel_queued")],
-    "solve_queue_pause": [("POST", "/api/simulation/queue/pause")],
-    "solve_queue_resume": [("POST", "/api/simulation/queue/resume")],
     "solve_queue_dismiss": [("POST", "/api/simulation/queue/{job_id}/dismiss")],
     "solve_queue_requeue": [("POST", "/api/simulation/queue/{job_id}/requeue")],
     "save_fmea_worksheet": [("PUT", "/api/projects/{name}/worksheet")],

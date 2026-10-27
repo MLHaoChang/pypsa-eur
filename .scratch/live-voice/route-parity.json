@@ -2,9 +2,9 @@
  "counts": {
   "backend_routes": 506,
   "gui_routes": 466,
-  "limitation": 84,
+  "limitation": 86,
   "needs-tool": 87,
-  "tool": 295,
+  "tool": 293,
   "unclassified": 0
  },
  "format_version": 1,
@@ -4968,28 +4968,22 @@
    "via": "tool_routes"
   },
   {
-   "class": "tool",
+   "class": "limitation",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
    "path": "/api/simulation/queue/pause",
-   "tools": [
-    "solve_queue_pause"
-   ],
-   "via": "tool_routes"
+   "reason": "admin"
   },
   {
-   "class": "tool",
+   "class": "limitation",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
    "path": "/api/simulation/queue/resume",
-   "tools": [
-    "solve_queue_resume"
-   ],
-   "via": "tool_routes"
+   "reason": "admin"
   },
   {
    "class": "tool",

@@ -4632,14 +4632,14 @@
     "counts": {
       "backend_routes": 506,
       "gui_routes": 466,
-      "limitation": 84,
+      "limitation": 86,
       "needs-tool": 87,
-      "tool": 295,
+      "tool": 293,
       "unclassified": 0
     },
     "limitations_by_reason": {
       "account-auth": 7,
-      "admin": 13,
+      "admin": 15,
       "app-shell": 7,
       "assistant-self-config": 19,
       "binary-transfer": 7,

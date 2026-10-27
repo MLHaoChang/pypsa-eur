@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 302,
+  "tool_count": 300,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -2217,42 +2217,6 @@
       "input_keys": [],
       "required": [],
       "safety_tier": "destructive",
-      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
-      "behavioral_fixture": "pending"
-    },
-    {
-      "name": "solve_queue_pause",
-      "toolsets": [
-        "simulation",
-        "gridspine"
-      ],
-      "route": [
-        [
-          "POST",
-          "/api/simulation/queue/pause"
-        ]
-      ],
-      "input_keys": [],
-      "required": [],
-      "safety_tier": "write",
-      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
-      "behavioral_fixture": "pending"
-    },
-    {
-      "name": "solve_queue_resume",
-      "toolsets": [
-        "simulation",
-        "gridspine"
-      ],
-      "route": [
-        [
-          "POST",
-          "/api/simulation/queue/resume"
-        ]
-      ],
-      "input_keys": [],
-      "required": [],
-      "safety_tier": "execution",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
       "behavioral_fixture": "pending"
     },

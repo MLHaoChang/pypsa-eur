@@ -502,6 +502,16 @@
    "reason": "live-stream"
   },
   {
+   "method": "POST",
+   "path": "/api/simulation/queue/pause",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/resume",
+   "reason": "admin"
+  },
+  {
    "method": "GET",
    "path": "/api/simulation/queue/{job_id}/log_stream",
    "reason": "live-stream"
