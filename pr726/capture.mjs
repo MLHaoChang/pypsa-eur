@@ -1,5 +1,7 @@
 import { open, OUT } from './lib.mjs'
-const CASES = { pass: 'unb-pass', warn: 'unb-warn', empty: 'unb-empty', balanced: 'unb-balanced' }
+const CASES = { pass: 'unb-pass', warn: 'unb-warn', empty: 'unb-empty', partial: 'unb-partial', balanced: 'unb-balanced' }
+// ONLY=warn,empty,partial re-shoots just those scorecard rows (steps 1 and 3 skipped).
+const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null
 const FIELD = 'Single-phase share (%)'
 const log = []
 for (const mode of ['guided', 'expert']) {
@@ -20,7 +22,7 @@ for (const mode of ['guided', 'expert']) {
     await page.waitForSelector('[data-testid=asset-group-performance]'); await page.waitForTimeout(500)
   }
   // 1: Link card, field empty then filled
-  for (const [tag, proj] of [['1a-field-empty', 'unb-empty'], ['1b-field-filled', 'unb-pass']]) {
+  for (const [tag, proj] of ONLY ? [] : [['1a-field-empty', 'unb-empty'], ['1b-field-filled', 'unb-pass']]) {
     const { b, page } = await open(proj, mode)
     await openLink(page, 'compressor')
     await show(page, FIELD); await side(page, `${mode}-${tag}.png`)
@@ -28,7 +30,7 @@ for (const mode of ['guided', 'expert']) {
     await b.close()
   }
   // 2: scorecard row
-  for (const [c, proj] of Object.entries(CASES)) {
+  for (const [c, proj] of Object.entries(CASES).filter(([c]) => !ONLY || ONLY.includes(c))) {
     const { b, page } = await open(proj, mode)
     if (mode === 'guided') { await page.getByTestId('hub-rail-step-site').click(); await page.getByText('Grid readiness:').first().click() }
     else await page.evaluate(async () => { (await import('/src/layout/flowNavigation.ts')).showGridReadiness() })
@@ -39,7 +41,7 @@ for (const mode of ['guided', 'expert']) {
     await row.screenshot({ path: `${OUT}/${mode}-2-scorecard-${c}.png` })
     log.push(mode + ' ' + c + ': ' + (await row.innerText()).replace(/\s+/g, ' ').slice(0, 300))
     // 3: Go to field (empty case)
-    if (c === 'empty' && mode === 'expert') {
+    if (c === 'empty' && mode === 'expert' && !ONLY) {
       await page.getByTestId('gr-jump-voltage_unbalance').click(); await page.waitForTimeout(2500)
       await page.getByTestId('props-edit-link').click().catch(() => {})
       await page.waitForSelector('[data-testid=asset-group-performance]'); await show(page, FIELD)

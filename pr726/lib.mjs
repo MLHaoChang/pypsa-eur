@@ -1,7 +1,7 @@
 import { chromium } from '/opt/node-tools/node_modules/playwright/index.mjs'
 import fs from 'node:fs'
 export const S = new URL('.', import.meta.url).pathname
-export const OUT = '/home/user/pypsa-eur/pr726'
+export const OUT = new URL('.', import.meta.url).pathname
 export async function open(name, mode = 'guided') {
   const b = await chromium.launch()
   const ctx = await b.newContext({ viewport: { width: 1600, height: 1000 } })

@@ -7,7 +7,12 @@ from tests.test_grid_readiness_unbalance import _site
 from gridspine.templates.grid_codes import load_grid_code
 out = os.path.dirname(os.path.abspath(__file__)) + '/'
 cases = {"unb-pass": _site(0.5), "unb-warn": _site(1.0, sk=1000.0), "unb-empty": _site(math.nan),
-         "unb-balanced": _site(0.0)}
+         "unb-balanced": _site(0.0), "unb-partial": _site(0.5)}
+# A second unit, rated but without its share: the row is unknown and says the partial sum as a floor.
+cases["unb-partial"].add("Link", "pump", bus0="mv", bus1="nh3", p_nom=1.0)
+cases["unb-partial"].links.loc["pump", "eh_process"] = True
+cases["unb-partial"].links.loc["pump", "rated_mva"] = 5.0
+cases["unb-partial"].links["eh_process"] = cases["unb-partial"].links["eh_process"].astype(bool)
 c = httpx.Client(base_url='http://127.0.0.1:8000', timeout=120)
 pw = open(os.path.expanduser('~/.local/share/PyPSA Studio/dev-admin-password')).read().strip()
 r = c.post('/api/auth/login', json={'email': 'admin@example.com', 'password': pw}); r.raise_for_status()
@@ -20,6 +25,9 @@ for name, n in cases.items():
     f = out + name + '.nc'; n.export_to_netcdf(f)
     print(name, 'import', c.post('/api/io/import/netcdf', files={'file': (name + '.nc', open(f, 'rb'))}, headers=h).status_code)
     r = c.post('/api/projects/' + name, headers=h); print(name, 'save', r.status_code, r.text[:120])
+    # The scorecard reads the campus study's last-run profile; stand in for a study run with this profile.
+    st = pathlib.Path(r.json()['path']) / 'campus_electrical'; st.mkdir(parents=True, exist_ok=True)
+    (st / 'settings.json').write_text(json.dumps({'profile': 'eu_unbalance'}))
     base = '/api/campus-electrical/' + name + '/grid-codes'
     print(' draft', c.post(base + '/drafts', json={'profile_id': 'eu_unbalance', 'title': raw['title'], 'overwrite': True}, headers=h).status_code,
           c.put(base + '/drafts/eu_unbalance', json={'yaml': yaml.safe_dump(p, sort_keys=False, allow_unicode=True)}, headers=h).status_code)
