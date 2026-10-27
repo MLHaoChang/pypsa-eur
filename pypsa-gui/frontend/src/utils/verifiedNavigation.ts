@@ -10,7 +10,7 @@ export interface NavigationAcknowledgement {
   project_name: string
   project_id: string
   input_sha256: string
-  target: { panel_id: string; results_tab?: string }
+  target: { panel_id: string; results_tab?: string; highlight?: { component: string; name: string } }
   source_binding?: ResultsSourceBinding
 }
 
@@ -33,6 +33,10 @@ export function acknowledgeMountedView(
         const data = displayedResultsSource(expected.target.results_tab ?? '', element)
         if (!data || !expected.source_binding || !sameResultsSource(data, expected.source_binding)) return false
       }
+      // Live-voice 07: a highlighted branch counts only once its row is shown and marked.
+      const highlight = expected.target.highlight
+      if (highlight && !Array.from(element.querySelectorAll<HTMLElement>('[data-branch-row][aria-current="true"]'))
+        .some(row => row.dataset.branchClass === highlight.component && row.dataset.branchName === highlight.name)) return false
       return !expected.target.results_tab || Array.from(element.querySelectorAll<HTMLElement>('[data-assurance-tab]'))
         .some(tab => tab.dataset.assuranceTab === expected.target.results_tab)
     })

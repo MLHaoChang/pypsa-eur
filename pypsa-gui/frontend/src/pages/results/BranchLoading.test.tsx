@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, expect, it, vi } from 'vitest'
 import BranchLoading from './BranchLoading'
@@ -15,7 +15,7 @@ function renderView() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}><BranchLoading from={1} to={2} enabled /></QueryClientProvider>)
 }
-beforeEach(() => { vi.clearAllMocks(); useUIStore.setState({ currentProject: 'Demo', resultSource: 'lopf' }); vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(view) })
+beforeEach(() => { vi.clearAllMocks(); useUIStore.setState({ currentProject: 'Demo', resultSource: 'lopf', resultsHighlight: null }); vi.mocked(resultsEvidenceApi.loadflow).mockResolvedValue(view) })
 it('renders the shared terminal/weighted values and exact window, with unavailable branches separate', async () => {
   renderView()
   const row = await screen.findByText('Line: L_p1')
@@ -53,4 +53,23 @@ it('removes the old data marker while a new source is fetching', async () => {
   await act(async () => release({ ...view, status: 'unavailable', message: 'AC convergence unavailable.' }))
   await screen.findByText('AC convergence unavailable.')
   expect(document.querySelector('[data-result-binding]')).toBeNull()
+})
+it('marks the assistant branch until a row click, and a source change clears it', async () => {
+  useUIStore.setState({ resultsHighlight: { component: 'Line', name: 'L_p1' } })
+  renderView()
+  const row = (await screen.findByText('Line: L_p1')).closest('tr')!
+  expect(row.getAttribute('aria-current')).toBe('true')
+  expect(row.dataset.branchClass).toBe('Line')
+  fireEvent.click(row)
+  expect(useUIStore.getState().resultsHighlight).toBeNull()
+  expect(row.getAttribute('aria-current')).toBeNull()
+  useUIStore.setState({ resultsHighlight: { component: 'Line', name: 'L_p1' } })
+  act(() => useUIStore.getState().setResultSource('ac_pf'))
+  expect(useUIStore.getState().resultsHighlight).toBeNull()
+})
+it('marks no row for a branch of another class with the same name', async () => {
+  useUIStore.setState({ resultsHighlight: { component: 'Transformer', name: 'L_p1' } })
+  renderView()
+  await screen.findByText('Line: L_p1')
+  expect(document.querySelector('[aria-current="true"]')).toBeNull()
 })
