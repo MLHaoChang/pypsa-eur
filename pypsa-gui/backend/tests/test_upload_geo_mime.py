@@ -102,6 +102,28 @@ def test_bare_json_and_xml_stay_refused():
     assert "application/octet-stream" not in upload_service.ALLOWED_MIME_TYPES
 
 
-def test_kml_with_a_doctype_is_refused_by_the_import_parser():
-    with pytest.raises(mgi.GeometryImportInvalid, match="DOCTYPE or entity"):
-        mgi.parse_features(BILLION_LAUGHS, "routes.kml")
+@pytest.mark.parametrize("data,match", [
+    (BILLION_LAUGHS, "DOCTYPE or entity"),
+    (b'<?xml version="1.0"?><!doctype kml SYSTEM "file:///etc/passwd"><kml/>', "DOCTYPE or entity"),
+    (b'<kml><!eNtItY x "y"></kml>', "DOCTYPE or entity"),
+    (BILLION_LAUGHS.decode().encode("utf-16"), "not UTF-8"),
+    (b'<?xml version="1.0" encoding="UTF-16"?><kml/>', "UTF-16 encoding"),
+    (b'<?xml version="1.0" encoding="iso-8859-1"?><!DOCTYPE kml><kml/>', "encoding"),
+])
+def test_kml_the_import_parser_must_not_expand_is_refused(data, match):
+    with pytest.raises(mgi.GeometryImportInvalid, match=match):
+        mgi.parse_features(data, "routes.kml")
+
+
+def test_utf16_kml_upload_is_refused(client, route_project):
+    r = _post(client, route_project, "routes.kml", BILLION_LAUGHS.decode().encode("utf-16"),
+              "application/vnd.google-earth.kml+xml")
+    assert r.status_code == 400, r.text
+    assert r.json()["detail"]["error_kind"] == "unsupported_mime"
+
+
+def test_the_size_cap_is_checked_before_any_parse(client, route_project, monkeypatch):
+    monkeypatch.setattr(mgi, "MAX_IMPORT_BYTES", len(KML) - 1)
+    monkeypatch.setattr(mgi, "parse_features", lambda *a, **k: pytest.fail("parsed over the cap"))
+    r = _post(client, route_project, "routes.kml", KML, "application/vnd.google-earth.kml+xml")
+    assert r.status_code == 413, r.text

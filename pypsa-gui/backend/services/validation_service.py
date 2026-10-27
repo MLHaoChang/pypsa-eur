@@ -886,14 +886,18 @@ def _check_loss_magnitude(n, cfg) -> list[Issue]:
     return out
 
 
-def rolling_window_problems(horizon: int, overlap: int) -> list[tuple[str, str]]:
+def rolling_window_problems(horizon: int, overlap: int, strategy: str = "rolling") -> list[tuple[str, str]]:
     """
     `(kind, message)` for each way a rolling window is unusable: horizon <= 0,
-    overlap < 0, overlap >= horizon (PyPSA rejects it). Empty when usable.
-    The one rule for every writer: the pre-flight check below, `PUT
-    /api/simulation/solver_config`, and (follow-up) the EditCard path.
+    overlap < 0, overlap >= horizon (PyPSA rejects it). Empty when usable, and
+    always empty when `strategy` is not "rolling" (the window is not used, so
+    turning rolling off is never refused). The one rule for every writer: the
+    pre-flight check below, `PUT /api/simulation/solver_config`, and through
+    that route the chat tool and the EditCard preview.
     """
     out: list[tuple[str, str]] = []
+    if strategy != "rolling":
+        return out
     if horizon <= 0:
         out.append(("rolling_horizon_invalid",
             f"The rolling-horizon window must be at least 1 snapshot (it is {horizon}). "

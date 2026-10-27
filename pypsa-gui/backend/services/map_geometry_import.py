@@ -193,6 +193,12 @@ def _kml_coords(text: str | None, where: str) -> list[list[float]]:
 
 
 _DTD = re.compile(r"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
+_DECLARED_ENCODING = re.compile(r"""^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+try:  # Hardened when defusedxml is importable (the frozen app pins it); the DOCTYPE refusal holds either way.
+    from defusedxml.ElementTree import fromstring as _xml_fromstring
+except ImportError:
+    _xml_fromstring = ET.fromstring
 
 
 def parse_kml(text: str) -> list[Feature]:
@@ -201,11 +207,15 @@ def parse_kml(text: str) -> list[Feature]:
     coordinates, a Polygon's outer ring, each geometry of a MultiGeometry.
     Namespace-agnostic (surveyor exports mix KML 2.0, 2.2 and none).
     """
+    declared = _DECLARED_ENCODING.match(text)
+    if declared and declared.group(1).lower().replace("_", "-") not in ("utf-8", "utf8"):
+        raise GeometryImportInvalid(
+            f"KML declares the {declared.group(1)} encoding; save it as UTF-8 and upload it again.")
     if _DTD.search(text):
         raise GeometryImportInvalid("KML declares a DOCTYPE or entity; remove it and upload the file again.")
     try:
-        root = ET.fromstring(text)
-    except ET.ParseError as exc:
+        root = _xml_fromstring(text)
+    except (ET.ParseError, ValueError) as exc:
         raise GeometryImportInvalid(f"KML is not well-formed XML: {exc}") from exc
     out: list[Feature] = []
     index = 0

@@ -536,6 +536,16 @@ def _gate_user_code(submitted: dict, db, actor) -> None:
         )
 
 
+_ROLLING_KEYS = frozenset({"solve_strategy", "rolling_horizon", "rolling_overlap"})
+# `error_kind` literals (the tool-error manifest derives kinds from them): the
+# chat forwards the kind, and the EditCard preview re-raises it before a card.
+_ROLLING_REFUSALS = {d["error_kind"]: d for d in (
+    {"error_kind": "rolling_horizon_invalid"},
+    {"error_kind": "rolling_overlap_invalid"},
+    {"error_kind": "rolling_overlap_exceeds_horizon"},
+)}
+
+
 @router.put("/solver_config")
 def update_solver_config(
     cfg: SolverConfigSchema,
@@ -621,14 +631,15 @@ def update_solver_config(
             submitted["commercial"]["value_flows"] = (
                 current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
-        # Checked on the MERGED pair (a partial PUT may set one of the two),
-        # and only when this PUT sets one: a stored legacy pair must not block
+        # Checked on the MERGED values (a partial PUT may set one of them), and
+        # only when this PUT sets one: a stored legacy pair must not block
         # unrelated edits (the pre-flight check still refuses it at solve).
-        if {"rolling_horizon", "rolling_overlap"} & submitted.keys():
-            problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]))
+        if _ROLLING_KEYS & submitted.keys():
+            problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]),
+                                               merged.get("solve_strategy", "full"))
             if problems:
                 kind, message = problems[0]
-                raise HTTPException(422, {"code": kind, "message": message})
+                raise HTTPException(422, {**_ROLLING_REFUSALS[kind], "message": message})
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
 
