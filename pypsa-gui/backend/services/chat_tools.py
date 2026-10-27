@@ -8794,6 +8794,17 @@ def _gridspine_upload(project_id: str, file_id: str):
     return UploadFile(file=upload.file, filename=upload.filename, headers=Headers({"content-type": mime}))
 
 
+@contextlib.contextmanager
+def _closing_uploads(*files):
+    """Close the stored uploads' handles once the route has read them."""
+    try:
+        yield
+    finally:
+        for f in files:
+            if f is not None:
+                f.file.close()
+
+
 def gridspine_upload_external_dispatch(project_id: str, dispatch_file_id: str,
                                        loads_file_id: str | None = None) -> dict:
     """`POST …/dispatch-source/external` with UPLOADED tables (never model bytes)."""
@@ -8801,7 +8812,8 @@ def gridspine_upload_external_dispatch(project_id: str, dispatch_file_id: str,
 
     dispatch = _gridspine_upload(project_id, dispatch_file_id)
     loads = _gridspine_upload(project_id, loads_file_id) if loads_file_id else None
-    return _b2b_fit(_campus_route(_h, project_id, dispatch=dispatch, loads=loads))
+    with _closing_uploads(dispatch, loads):
+        return _b2b_fit(_campus_route(_h, project_id, dispatch=dispatch, loads=loads))
 
 
 def gridspine_upload_readback(project_id: str, hour: int, bus_file_id: str,
@@ -8811,7 +8823,8 @@ def gridspine_upload_readback(project_id: str, hour: int, bus_file_id: str,
 
     bus = _gridspine_upload(project_id, bus_file_id)
     branches = _gridspine_upload(project_id, branches_file_id) if branches_file_id else None
-    return _b2b_fit(_campus_route(_h, project_id, int(hour), bus=bus, branches=branches))
+    with _closing_uploads(bus, branches):
+        return _b2b_fit(_campus_route(_h, project_id, int(hour), bus=bus, branches=branches))
 
 
 # Grid codes (owner decision GRIDCODE-CHAT-1): confirm, publish and the deletes
@@ -8829,7 +8842,8 @@ def campus_upload_grid_code_document(project_id: str, file_id: str, page_ranges:
     from routers.campus_electrical import upload_grid_code_document as _h
 
     pdf = _gridspine_upload(project_id, file_id)
-    return _b2b_fit(_campus_route(_h, project_id, file=pdf, page_ranges=page_ranges))
+    with _closing_uploads(pdf):
+        return _b2b_fit(_campus_route(_h, project_id, file=pdf, page_ranges=page_ranges))
 
 
 def campus_delete_grid_code_document(project_id: str, document_id: str) -> dict:

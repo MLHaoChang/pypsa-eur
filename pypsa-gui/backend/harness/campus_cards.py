@@ -117,7 +117,7 @@ def _yaml_says(what: str):
     def says(args: dict, rows: list[dict]) -> str:
         keys = [r["field"] for r in rows if r["role"] == "typed"]
         name = rows[0]["name"] if rows else what
-        return f"Saves {name}: " + (f"changes {', '.join(keys)}." if keys else "nothing changes.")
+        return f"Saves {name}: " + (f"changes {', '.join(keys)}" if keys else "nothing changes")
     return says
 
 
@@ -242,7 +242,7 @@ def _milp_back(args: dict, rows: list[dict]) -> list:
 
 
 def _milp_says(args: dict, rows: list[dict]) -> str:
-    return f"Starts the campus joint optimisation in the background ({_milp_settings_text(rows[0]['settings'])})."
+    return f"Starts the campus joint optimisation in the background ({_milp_settings_text(rows[0]['settings'])})"
 
 
 # ── grid codes ──────────────────────────────────────────────────────────────
@@ -322,6 +322,22 @@ def _new_pid(args: dict) -> str:
     return gc._profile_id(str(pid))
 
 
+def _stamp(project, pid: str) -> str | None:
+    """The draft file's identity: an atomic write (`gc._write_atomic`) gives it a new
+    inode and mtime even when the bytes are the same, so a rewrite is observable."""
+    from services import campus_grid_code_service as gc
+
+    f = gc._drafts(project) / f"{pid}.yaml"
+    try:
+        st = f.stat()
+    except OSError:
+        return None
+    return f"{st.st_ino}:{st.st_mtime_ns}"
+
+
+_UNWRITTEN = "not written"
+
+
 def _new_draft_preview(args: dict) -> list[dict]:
     """What the draft becomes, and what an overwrite replaces (extract and the blank draft)."""
     def run(project):
@@ -343,6 +359,7 @@ def _new_draft_preview(args: dict) -> list[dict]:
             title = (args.get("title") or "").strip()[:200] or "Project grid code (to be filled in by hand)"
             name = f"Draft “{title}”"
             rows = [{**_row(name, "title", "title", old_title, title), "says_name": "the draft's title"}]
+        rows[0]["prior_stamp"] = _stamp(project, pid)  # the receipt needs the draft rewritten
         if existing is None:
             return rows
         if not args.get("overwrite"):
@@ -355,9 +372,12 @@ def _new_draft_preview(args: dict) -> list[dict]:
 
 def _new_draft_back(args: dict, rows: list[dict]) -> list:
     def run(project):
-        profile = ((_draft_or_none(project, _new_pid(args)) or {}).get("profile")) or {}
-        return [None if row["role"] == "note" else (profile.get("document") or {}).get("sha256")
-                if row["field"] == "document" else profile.get("title") for row in rows]
+        pid = _new_pid(args)
+        written = _stamp(project, pid) not in (None, rows[0]["prior_stamp"])
+        profile = ((_draft_or_none(project, pid) or {}).get("profile")) or {}
+        return [None if row["role"] == "note" else _UNWRITTEN if not written
+                else (profile.get("document") or {}).get("sha256") if row["field"] == "document"
+                else profile.get("title") for row in rows]
 
     return _gc(args, run)
 
@@ -365,9 +385,9 @@ def _new_draft_back(args: dict, rows: list[dict]) -> list:
 def _new_draft_says(args: dict, rows: list[dict]) -> str:
     first = rows[0]
     if first["field"] == "document":
-        return f"Drafts a grid-code profile from {first['name'].removeprefix('Draft from ')} with the extraction provider."
+        return f"Drafts a grid-code profile from {first['name'].removeprefix('Draft from ')} with the extraction provider"
     replaced = f"Replaces the draft “{first['old']}” with" if first["old"] is not None and args.get("overwrite") else "Creates"
-    return f"{replaced} a blank draft “{first['new']}”, every limit assumed until filled in by hand."
+    return f"{replaced} a blank draft “{first['new']}”, every limit assumed until filled in by hand"
 
 
 def _new_draft_binding(args: dict) -> dict:
@@ -426,7 +446,7 @@ def _confirm_says(args: dict, rows: list[dict]) -> str:
     title = _gc(args, lambda project: _title(_draft_or_none(project, str(args.get("profile_id", ""))),
                                              str(args.get("profile_id", ""))))
     return (f"Marks {limit_label(str(args.get('limit', '')))} in draft “{title}” as confirmed against its quoted "
-            "page (source extracted → code).")
+            "page (source extracted → code)")
 
 
 def _publish_preview(args: dict) -> list[dict]:
@@ -466,7 +486,7 @@ def _publish_back(args: dict, rows: list[dict]) -> list:
 def _publish_says(args: dict, rows: list[dict]) -> str:
     old, new = rows[0]["old"], rows[0]["new"]
     return (f"Publishes the draft “{new}” as a grid code"
-            + (f", replacing the published “{old}”." if old is not None else "; studies can then use it."))
+            + (f", replacing the published “{old}”" if old is not None else "; studies can then use it"))
 
 
 def _publish_binding(args: dict) -> dict:
@@ -509,7 +529,7 @@ def _delete_profile(kind: str):
         return _gc(args, run)
 
     def says(args: dict, rows: list[dict]) -> str:
-        return f"Deletes the {kind} grid-code profile {rows[0]['name'].split(' ', 1)[1]}; this cannot be undone."
+        return f"Deletes the {kind} grid-code profile {rows[0]['name'].split(' ', 1)[1]}; this cannot be undone"
 
     return preview, binding, back, says
 
@@ -535,6 +555,18 @@ def _delete_document_preview(args: dict) -> list[dict]:
     return _gc(args, run)
 
 
+def _delete_document_binding(args: dict) -> dict:
+    """What the card shows beside the row: the drafts that cite the document."""
+    def run(project):
+        from services import campus_grid_code_service as gc
+
+        did = str(args.get("document_id", ""))
+        return {"citing": sorted(d["id"] for d in gc.list_grid_codes(project).get("drafts") or []
+                                 if d.get("document") == did)}
+
+    return _gc(args, run)
+
+
 def _delete_document_back(args: dict, rows: list[dict]) -> list:
     def run(project):
         from services import campus_grid_code_service as gc
@@ -547,7 +579,7 @@ def _delete_document_back(args: dict, rows: list[dict]) -> list:
 
 
 def _delete_document_says(args: dict, rows: list[dict]) -> str:
-    return f"Deletes the grid-code document {rows[0]['name'].removeprefix('Document ')}; this cannot be undone."
+    return f"Deletes the grid-code document {rows[0]['name'].removeprefix('Document ')}; this cannot be undone"
 
 
 def _register() -> None:
@@ -570,7 +602,7 @@ def _register() -> None:
         preview, binding, back, says = _delete_profile(kind)
         reg(tool, A("settings_edit", preview, back, binding=binding, says=says))
     reg("campus_delete_grid_code_document", A("settings_edit", _delete_document_preview, _delete_document_back,
-                                              says=_delete_document_says))
+                                              binding=_delete_document_binding, says=_delete_document_says))
 
 
 _register()

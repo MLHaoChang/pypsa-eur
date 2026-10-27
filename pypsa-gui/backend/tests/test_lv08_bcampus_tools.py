@@ -465,7 +465,7 @@ def test_the_publish_card_names_what_it_replaces_and_each_unconfirmed_limit(hub,
     from harness.campus_cards import sha256_text
 
     assert row["draft_sha256"] == sha256_text(_shaped()["yaml"])
-    assert card["says"] == "Publishes the draft “TSO code” as a grid code, replacing the published “Old code”."
+    assert card["says"] == "Publishes the draft “TSO code” as a grid code, replacing the published “Old code”"
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
     assert "Replaces the published profile" in notes and "Reactive range at the PCC is unconfirmed: it stays extracted" in notes
     assert "(409)" not in notes
@@ -624,14 +624,50 @@ GRID_CODE_SERVICE = {"campus_save_grid_code_draft": "save_draft", "campus_new_gr
                      "campus_delete_grid_code_document": "delete_document"}
 
 
-@pytest.mark.parametrize("tool", GRID_CODE_TOOLS)
-def test_a_grid_code_call_whose_effect_is_missing_gets_an_uncertain_receipt(codes, monkeypatch, tool):
+def _overwrites(codes):
+    """Overwrites whose finished state equals the draft already there: only the write itself shows."""
+    return {
+        "same-title-blank-draft": ("campus_new_grid_code_draft", {"profile_id": "tso", "title": "TSO code",
+                                                                  "overwrite": True}),
+        "same-document-extract": ("campus_extract_grid_code", {"profile_id": "tso", "overwrite": True,
+                                                               "document_id": codes["document_id"]}),
+    }
+
+
+GRID_CODE_SERVICE["campus_extract_grid_code"] = "extract"
+
+
+@pytest.mark.parametrize("case", GRID_CODE_TOOLS + ["same-title-blank-draft", "same-document-extract"])
+def test_a_grid_code_call_whose_effect_is_missing_gets_an_uncertain_receipt(codes, monkeypatch, case):
     from services import campus_grid_code_service as gc
 
-    calls = _grid_code_calls(codes)
+    tool, args = _overwrites(codes).get(case) or (case, _grid_code_calls(codes)[case])
+    monkeypatch.setattr(gc, "_client", lambda: pytest.fail("no extraction runs"))
     monkeypatch.setattr(gc, GRID_CODE_SERVICE[tool], lambda *a, **k: {})  # answers, writes nothing
-    kind, receipt = _through_the_loop(tool, calls[tool])
+    kind, receipt = _through_the_loop(tool, args)
     assert kind is None and receipt["outcome"] == "uncertain"
+
+
+def _stub_extraction(monkeypatch, title="Extracted TSO code"):
+    """The extraction's model call only: the rest of `gc.extract` runs."""
+    from types import SimpleNamespace
+
+    from services import campus_grid_code_service as gc
+
+    block = SimpleNamespace(type="tool_use", name=gc.EXTRACTION_TOOL, input={"title": title})
+    monkeypatch.setattr(gc, "_client", lambda: object())
+    monkeypatch.setattr(gc, "_call", lambda client, model, pdf: SimpleNamespace(stop_reason="tool_use", content=[block]))
+
+
+@pytest.mark.parametrize("args", [{}, {"profile_id": "tso", "overwrite": True}], ids=["new-id", "same-document"])
+def test_a_real_extract_receipt_is_verified(codes, monkeypatch, args):
+    from services import campus_grid_code_service as gc
+
+    _stub_extraction(monkeypatch)
+    kind, receipt = _through_the_loop("campus_extract_grid_code", {"document_id": codes["document_id"], **args})
+    assert kind is None and receipt["outcome"] == "verified", receipt
+    pid = args.get("profile_id") or gc.default_profile_id(codes["document_id"])
+    assert (gc._review(codes["project"], pid) or {}).get("extracted_at")  # the real extract wrote its review
 
 
 def test_the_receipts_say_the_effect_in_words(codes):
@@ -639,17 +675,22 @@ def test_the_receipts_say_the_effect_in_words(codes):
 
     calls = _grid_code_calls(codes)
     says = {tool: edit_card.preview(tool, {**P, **calls[tool]}, with_state=False)["says"] for tool in GRID_CODE_TOOLS}
-    assert says["campus_delete_grid_code_draft"] == "Deletes the draft grid-code profile “TSO code”; this cannot be undone."
+    assert says["campus_delete_grid_code_draft"] == "Deletes the draft grid-code profile “TSO code”; this cannot be undone"
     assert says["campus_delete_published_grid_code"] == ("Deletes the published grid-code profile “TSO code”; "
-                                                         "this cannot be undone.")
-    assert says["campus_delete_grid_code_document"] == "Deletes the grid-code document code.pdf; this cannot be undone."
+                                                         "this cannot be undone")
+    assert says["campus_delete_grid_code_document"] == "Deletes the grid-code document code.pdf; this cannot be undone"
     assert says["campus_publish_grid_code"] == ("Publishes the draft “TSO code” as a grid code, replacing the "
-                                                "published “TSO code”.")
+                                                "published “TSO code”")
     assert says["campus_confirm_grid_code_limit"] == ("Marks Voltage band 1 in draft “TSO code” as confirmed against "
-                                                      "its quoted page (source extracted → code).")
+                                                      "its quoted page (source extracted → code)")
     text = " ".join(says.values())
     assert "None" not in text and "'tso'" not in text and "voltage_bands" not in text
-    assert says["campus_new_grid_code_draft"] == "Creates a blank draft “Fresh code”, every limit assumed until filled in by hand."
+    assert says["campus_new_grid_code_draft"] == "Creates a blank draft “Fresh code”, every limit assumed until filled in by hand"
+    # EditCard.tsx appends ". Read back from the project." to a receipt's says
+    says["campus_extract_grid_code"] = edit_card.preview(
+        "campus_extract_grid_code", {**P, "document_id": codes["document_id"]}, with_state=False)["says"]
+    says["campus_save_campus"] = "Saves the campus file: changes a"  # its says is built the same way
+    assert not [t for t, text in says.items() if text[-1] in ".;:,!?"]
 
 
 def test_the_cards_name_limits_as_the_grid_codes_panel_does():
@@ -746,14 +787,14 @@ def test_the_extract_card_says_the_document_goes_to_the_extraction_provider(code
     card = edit_card.preview("campus_extract_grid_code", {**P, "document_id": codes["document_id"]})
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
     assert "Sends the document to the configured extraction provider" in notes and "one API call" in notes
-    assert card["says"] == "Drafts a grid-code profile from code.pdf with the extraction provider."
+    assert card["says"] == "Drafts a grid-code profile from code.pdf with the extraction provider"
     (row,) = [r for r in card["rows"] if r["role"] == "typed"]
     assert (row["field"], row["new"]) == ("document", codes["document_id"])
 
 
 def _fake_milp_start(record_settings=None):
     def start(project, settings):
-        s = {**ce.DEFAULTS, **{k: v for k, v in settings.items() if v is not None or k == "pf"}}
+        s = ce._settings(settings, ce.profiles(project))  # the real start's merge and checks
         basis = ce.campus_dir(project) / ce.MILP_SUBDIR / ce.MILP_BASIS_FILE
         basis.parent.mkdir(parents=True, exist_ok=True)
         basis.write_text(__import__("json").dumps({"settings": {**s, **(record_settings or {})}, "inputs": {}}))
