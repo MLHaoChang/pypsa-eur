@@ -2236,8 +2236,13 @@ def _run_turn_body(
             continue
 
         from harness import edit_routing
+        from services import assistant_tasks
+        # A bound plan's next step runs as that step, with its own card; routing it
+        # to the preview would leave the plan unable to complete.
+        routable = [tu for tu in tool_uses
+                    if not assistant_tasks.is_next_step(session, tu.get("name"), tu.get("input") or {})]
         session.turn_redirects = ({} if session.assurance_turn is not None else
-                                  edit_routing.redirects(tool_uses, session.turn_single_edit_applied))
+                                  edit_routing.redirects(routable, session.turn_single_edit_applied))
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
