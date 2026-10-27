@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 333,
+  "tool_count": 341,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -6615,6 +6615,176 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "18c934a5887147f5321d1c4372785c5dd659273ed260c1cd2ba4850c9542766a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_asset_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/network/asset_costs"
+        ],
+        [
+          "GET",
+          "/api/network/asset_schema/{component}"
+        ],
+        [
+          "GET",
+          "/api/network/catalog/{component}"
+        ]
+      ],
+      "input_keys": [
+        "view",
+        "component"
+      ],
+      "required": [
+        "view"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "2e0a85dcf5c518f50fef1015ab1ff1a90af8244b1ad6996080f859f8b700bbe6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "geocode_place",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/geocode"
+        ]
+      ],
+      "input_keys": [
+        "query"
+      ],
+      "required": [
+        "query"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "601046e05564cdf0199bc4ed39e895c699de12233cc3dfc3ff1e968282452abe",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "derive_lengths_from_geometry",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/lengths/from_geometry"
+        ]
+      ],
+      "input_keys": [
+        "keys"
+      ],
+      "required": [],
+      "safety_tier": "write",
+      "schema_sha256": "407d8dcf750b298333839e26f4726ee9c11c8e0bd2c5eed86aea4f1bcfc80848",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "rescale_line_impedances",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/network/lines/rescale_impedances"
+        ]
+      ],
+      "input_keys": [
+        "lines"
+      ],
+      "required": [
+        "lines"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "745da6bbec52092dd4b2e7d212cce87e7ef36f66d088659918f3ab4722080de5",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "reset_network",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/network/reset"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "destructive",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_sites",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/sites"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/sites/{site_id}/context"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "site_id"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "009e6a7967c4b6dbbaf61018f4e2dd9f65d6b1b021c2fb874b51b687f09939b1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_project_sites",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/sites"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "sites"
+      ],
+      "required": [
+        "name",
+        "sites"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "61cdfdb565cac86a3bdc83706b7ebb6c59cd9503041d4bb6db921802e5102c45",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "fetch_site_context",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/sites/{site_id}/context"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "site_id"
+      ],
+      "required": [
+        "name",
+        "site_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "8ae7f0028f5bcb778eae46c87dee38da20826a6a046eeba1c12d35e954687ac4",
       "behavioral_fixture": "pending"
     },
     {

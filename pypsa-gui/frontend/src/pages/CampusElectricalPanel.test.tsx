@@ -472,6 +472,25 @@ describe('CampusElectricalPanel', () => {
     expect(await screen.findByText(/changed since this run/i)).toBeTruthy()
   })
 
+  it('says the grid code changed since the run in the results banner, once', async () => {
+    api.state.mockResolvedValue({ ...sized(), grid_code_changed: true })
+    renderPanel()
+    const banner = await screen.findByTestId('campus-results-stale')
+    expect(banner.textContent).toBe('Grid code changed since the last campus study run. Rerun the study to update.')
+    expect(screen.getAllByText(/Grid code changed since/)).toHaveLength(1)
+  })
+
+  it('shows the harmonic scan after the PCC compliance, and an empty state for a run without one', async () => {
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    const empty = await screen.findByTestId('scan-not-computed')
+    // After the PCC compliance table, in document order.
+    const compliance = screen.getByTestId('compliance-pcc_reactive')
+    expect(compliance.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('Not computed for this run. Rerun the study to add the scan.')).toBeTruthy()
+    expect(screen.queryByTestId('scan-chart')).toBeNull()
+  })
+
   it('says plainly that this is a steady-state study', async () => {
     renderPanel()
     const intro = await screen.findByTestId('campus-intro')
