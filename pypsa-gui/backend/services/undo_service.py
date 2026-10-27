@@ -104,15 +104,18 @@ def claim_push_slot(window_s: float = COALESCE_WINDOW_S) -> bool:
         return False
 
 
-def push(netcdf_bytes: bytes, user_ts_data: dict) -> None:
+def push(netcdf_bytes: bytes, user_ts_data: dict, template_meta: bytes | None = None) -> None:
     """
     Serialize network + time-series state and push onto the active stack.
+    ``template_meta``: the project's ``eh_template.json`` bytes, which a
+    series edit may change (``growth_placeholders``), restored with them.
 
     Evicts oldest entries when cumulative payload size would exceed MAX_BYTES.
     Always retains at least one entry so a single-step undo is always available
     regardless of network size.
     """
-    payload = pickle.dumps({"netcdf": netcdf_bytes, "user_ts": user_ts_data})
+    payload = pickle.dumps({"netcdf": netcdf_bytes, "user_ts": user_ts_data,
+                            "template_meta": template_meta})
     size = len(payload)
     u = _active()
     with u.lock:
@@ -146,6 +149,12 @@ def push(netcdf_bytes: bytes, user_ts_data: dict) -> None:
 
 def pop() -> tuple[bytes, dict] | None:
     """Pop the active project's most recent snapshot. None when the stack is empty."""
+    data = pop_entry()
+    return None if data is None else (data["netcdf"], data["user_ts"])
+
+
+def pop_entry() -> dict | None:
+    """``pop`` with the whole entry: ``{netcdf, user_ts, template_meta}``."""
     u = _active()
     with u.lock:
         if not u.stack:
@@ -153,7 +162,8 @@ def pop() -> tuple[bytes, dict] | None:
         payload, size = u.stack.pop()
         u.total_bytes -= size
     data = pickle.loads(payload)
-    return data["netcdf"], data["user_ts"]
+    data.setdefault("template_meta", None)
+    return data
 
 
 def peek() -> bytes | None:

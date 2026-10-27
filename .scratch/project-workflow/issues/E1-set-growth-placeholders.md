@@ -1,6 +1,6 @@
 # E1 follow-up. Setting a growth placeholder
 
-Status: ready-for-agent
+Status: done (#733)
 Type: task
 Blocked by: E1a merged (`claude/e1a-planning-years-staged-dc`)
 Gated: yes, gatekeeper (adequacy and the investment case read the result). Send the plan first.
