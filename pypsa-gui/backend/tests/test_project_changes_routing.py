@@ -344,8 +344,8 @@ def test_weightings_card_rows_sorted_by_period(periods):
     frames = _card(periods, "set_investment_period_weightings",
                    {"updates": {"2040": {"years": 10, "objective": 0.5}, "2030": {"years": 10}}})
     card = frame(frames, "tool_pending_confirmation")["edit_card"]
-    assert [(r["label"], r["old"], r["new"]) for r in card["rows"]] == [
-        ("2030 Years", 1.0, 10.0), ("2040 Years", 1.0, 10.0), ("2040 Objective", 1.0, 0.5)]
+    assert [(r["label"], r["old"], r["new"], r["unit"]) for r in card["rows"]] == [
+        ("2030 Years", 1.0, 10.0, "yr"), ("2040 Years", 1.0, 10.0, "yr"), ("2040 Objective", 1.0, 0.5, "")]
     assert frame(frames, "tool_result")["result"]["_edit_receipt"]["outcome"] == "verified"
     df = PyPSAService.get_network().investment_period_weightings
     assert (df.at[2030, "years"], df.at[2040, "objective"]) == (10.0, 0.5)

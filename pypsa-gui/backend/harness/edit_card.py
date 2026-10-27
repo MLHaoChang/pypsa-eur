@@ -1036,6 +1036,7 @@ register("update_meta", Adapter("settings_edit", _meta_preview, _meta_readback))
 # weight) are the card's; one row per period and column, sorted by period.
 
 _WEIGHT_LABELS = {"years": "Years", "objective": "Objective"}
+_WEIGHT_UNITS = {"years": "yr", "objective": ""}  # Years in "yr", like Default lifetime (UX)
 
 
 def _weightings_preview(args: dict) -> list[dict]:
@@ -1057,7 +1058,7 @@ def _weightings_preview(args: dict) -> list[dict]:
             if (int(period), col) in asked or not _same(old, new):
                 rows.append({"component_class": "Settings", "name": "Investment periods",
                              "field": f"{col}.{period}", "label": f"{period} {label}",
-                             "old": old, "new": new, "unit": "", "role": "typed"})
+                             "old": old, "new": new, "unit": _WEIGHT_UNITS[col], "role": "typed"})
     if not rows:
         _refuse("empty_edit", "Name at least one period weighting to change (years or objective).")
     return rows
