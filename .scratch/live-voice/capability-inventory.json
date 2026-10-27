@@ -1527,10 +1527,12 @@
           "/api/simulation/run"
         ]
       ],
-      "input_keys": [],
+      "input_keys": [
+        "rerun_current"
+      ],
       "required": [],
       "safety_tier": "execution",
-      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "schema_sha256": "6d81193c202e8c50279473b084384641f64bf5873e3d2db9a68078694f222d49",
       "behavioral_fixture": "pending"
     },
     {
@@ -2112,13 +2114,14 @@
         ]
       ],
       "input_keys": [
-        "project_id"
+        "project_id",
+        "rerun_current"
       ],
       "required": [
         "project_id"
       ],
       "safety_tier": "execution",
-      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "schema_sha256": "1b9e659055f5a68c563ae985f65b2a63d814a5c39d239fe8c995c614dd98043f",
       "behavioral_fixture": "pending"
     },
     {
@@ -2255,13 +2258,14 @@
         ]
       ],
       "input_keys": [
-        "job_id"
+        "job_id",
+        "rerun_current"
       ],
       "required": [
         "job_id"
       ],
       "safety_tier": "execution",
-      "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
+      "schema_sha256": "4e5bcdd7667e73c347830a90aa3b3122954783dee80b73babf1510ab00c30b46",
       "behavioral_fixture": "pending"
     },
     {

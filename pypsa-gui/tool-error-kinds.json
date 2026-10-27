@@ -1626,6 +1626,10 @@
     "use_project_preview": {
       "surface": "inline",
       "why": "Model-only (LC-16 slice C, harness/edit_routing.py): a chat edit of several assets is refused toward preview_project_changes before any frame, so the client never receives it; listed so the contract holds every kind the backend authors. The message carries the preview's changes; the model retries through the one preview card."
+    },
+    "results_current": {
+      "surface": "inline",
+      "why": "Model-only (LC-19, harness/run_lifecycle.py): a solve tool aimed at the open project whose results already match its inputs is refused before any frame, so the client never receives it; listed so the contract holds every kind the backend authors. The model tells the user the results are current and asks; their yes comes back with rerun_current: true and the ordinary run card."
     }
   }
 }

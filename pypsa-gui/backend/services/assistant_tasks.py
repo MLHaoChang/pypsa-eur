@@ -662,7 +662,8 @@ def due_continuations(session):
 def _continuation_message(task, job):
     # The plan's title carries the request's words, so the turn is offered the
     # tools its remaining steps need (the 128-tool selection reads the message).
-    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']})"
+    from harness.run_lifecycle import continuation_note
+    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){continuation_note(job['outcome'])}"
 
 
 def dismiss_continuation(session, job_id):
@@ -894,7 +895,10 @@ def _late_receipt(path, ticket, result):
 
 
 def _same_args(tool, first, second):
+    from harness.run_lifecycle import FLAG
     from services import chat_tools
+    # LC-19: the re-run flag acknowledges current results; it is not an input.
+    first, second = ({k: v for k, v in args.items() if k != FLAG} for args in (first, second))
     try:
         signature = inspect.signature(chat_tools.DISPATCHERS[tool])
         a, b = signature.bind(**first), signature.bind(**second)

@@ -2501,6 +2501,18 @@ def _dispatch_real_tool_call(
         tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
                                        "content": _error_result_content(detail, None, detail["error_kind"])})
         return
+    # LC-19: a re-solve of current results is asked about first, also for the
+    # model only (harness/run_lifecycle.py); the user's yes comes back with the flag.
+    from harness import run_lifecycle
+    try:
+        current = None if external else run_lifecycle.check_rerun(tool_name, args)
+    except Exception:  # noqa: BLE001 — the run card still asks; never make a tool uncallable
+        logger.exception("chat: re-run check for %r failed; the card decides", tool_name)
+        current = None
+    if current:
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
+                                       "content": _error_result_content(current, None, current["error_kind"])})
+        return
 
     yield "tool_request", {
         "tool_use_id": tool_use_id,

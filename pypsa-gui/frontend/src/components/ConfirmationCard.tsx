@@ -96,7 +96,9 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
     return `Set the assumption ${_str(a.key)?.replace(/_/g, ' ') ?? 'one assumption'}${v != null ? ` to ${v}${_str(a.unit) ? ` ${a.unit}` : ''}` : ''}`
   },
   generate_study_report: (a) => `Write the decision report (${_str(a.format) ?? 'docx'})`,
-  run_simulation: () => 'Run a full calculation of the network',
+  run_simulation: (a) => a.rerun_current === true
+    ? 'Run the full calculation again; the results already match the inputs, so it gives the same answer'
+    : 'Run a full calculation of the network',
   update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
   bulk_update_components: (a) => {
     const n = _count(a.names)
@@ -158,6 +160,10 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
   abort_adequacy_study: (a) => `Stop the running ${_str(a.study) ?? 'reliability'} study`,
   solve_queue_enqueue: (a) => `Queue a calculation of the project ${_str(a.project_id) ?? '(current)'}`,
   solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
+  // LC-19: a retry runs the finished job again as a new one; cancel touches only your queued jobs.
+  solve_queue_requeue: (a) => `Run the finished calculation${_str(a.job_id) ? ` ${a.job_id}` : ''} again as a new job`
+    + (a.rerun_current === true ? '; its results already match the inputs' : ''),
+  solve_queue_cancel_queued: () => 'Cancel every calculation you queued that has not started; running ones go on',
   save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
   save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,
   rename_project: (a) => `Rename the project ${_str(a.name) ?? '(unnamed)'} to ${_str(a.new_name) ?? '(unnamed)'}`,
