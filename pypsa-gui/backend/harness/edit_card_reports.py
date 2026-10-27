@@ -15,7 +15,7 @@ from fastapi import HTTPException
 
 from harness.edit_card import (STUDY_LEAF_CAP, _SECRET_KEY, Adapter, _note, _refuse, _same, _setting,
                                _settings_row, register)
-from harness.edit_card_site import _fingerprint
+from harness import edit_card_site  # noqa: F401  (attribute access at call time: the modules import each other)
 
 _TEXT_CAP = 120  # a free-text string on a card; the rest is "…"
 
@@ -77,7 +77,7 @@ def _hide(row: dict, old, new) -> dict:
     value; the receipt then compares the stored value's fingerprint (`_stored`)."""
     if row["old"] == row["new"] and not _same(old, new):
         row["new"] = f"{row['new']} (changed)"
-        row["fingerprint"] = _fingerprint(new)
+        row["fingerprint"] = edit_card_site._fingerprint(new)
         if isinstance(row.get("words", {}).get("new"), str):
             row["words"] = {**row["words"], "new": f"{row['words']['new']} (changed)"}
     return row
@@ -86,7 +86,7 @@ def _hide(row: dict, old, new) -> dict:
 def _stored(row: dict, cell, value):
     """The stored value's cell, or the row's own "(changed)" cell when the stored value is the one
     the card fingerprinted. An unwritten store reads as its plain cell, which is not the new one."""
-    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == edit_card_site._fingerprint(value):
         return row["new"]
     return cell
 
