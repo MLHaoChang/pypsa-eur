@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The chat's Access and approvals view now names, in Guided, the write tools that skip Guided's approval card (today Preview project changes, whose apply step carries the one approval) and shows the rule that applies to each.
