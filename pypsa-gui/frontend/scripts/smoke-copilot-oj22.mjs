@@ -143,6 +143,7 @@ try {
       : 'all Generator with carrier solar, as of this preview · 3 assets, 1 inactive · p_nom × 1.2 (+20 %)')
     assert.match(three.header, /(^|› )Every Generator with carrier Solar$/)
     assert.equal(three.rows.length, 3, three.rows.join('\n'))
+    assert.equal(three.rows.filter(r => r.includes('(inactive)')).length, 1, 'the inactive member is marked')
     const receipts = await page.getByTestId('chat-edit-receipt').count()
     await page.getByTestId('chat-confirm-approve').last().click()
     const receipt = page.getByTestId('chat-edit-receipt').nth(receipts)
@@ -150,7 +151,9 @@ try {
     const after = await read()
     assert.deepEqual(after, { ...BEFORE, Solar: Number((BEFORE.Solar * 1.2).toPrecision(12)), 'Solar roof': 12, 'Solar old': 6 })
     const words = await receipt.innerText()
-    assert.match(words, /3 assets, 1 inactive · p_nom × 1\.2 \(\+20 %\)\. Read back from the project/)
+    assert.match(words, guided
+      ? /^Every Generator with carrier Solar · 3 assets, 1 inactive · Capacity × 1\.2 \(\+20 %\)\. Read back from the project/
+      : /3 assets, 1 inactive · p_nom × 1\.2 \(\+20 %\)\. Read back from the project/)
     assert.match(words, /Results are now stale/)
     shots[`receipt-${mode}`] = `oj22-receipt-${mode}.png`
     await receipt.screenshot({ path: path.join(artifacts, shots[`receipt-${mode}`]) })

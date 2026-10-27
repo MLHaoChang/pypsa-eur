@@ -553,10 +553,12 @@ def _resolve_changes(changes, network):
         if change.select is None and change.operation is None:
             continue
         present = [n for n in names if n in static.index]
+        inactive = [n for n in present if not bool(static.at[n, "active"])] if "active" in static else []
         sets.append({"component_class": change.component_class, "attribute": change.attribute,
                      "selector": change.select.model_dump(exclude_none=True) if change.select else None,
                      "names": list(names), "size": len(names),
-                     "inactive": int((~static.loc[present, "active"].astype(bool)).sum()) if "active" in static else 0,
+                     "inactive": len(inactive),
+                     "inactive_names": inactive,
                      "words": words or ", ".join(names),
                      "factor": change.operation.scale if change.operation else None,
                      "factor_words": _factor_words(change.operation.scale) if change.operation else None})

@@ -241,7 +241,7 @@ it('the project change preview says "not set" and, in Guided, the field in words
 const solar = (name: string, old: number) => ({ component_class: 'Generator', name, field: 'p_nom', label: 'Capacity',
   old, new: old * 1.2, unit: 'MW', role: 'typed' })
 const solarSet = { component_class: 'Generator', attribute: 'p_nom', selector: { carrier: 'solar' },
-  names: ['Solar', 'Solar roof', 'Solar old'], size: 3, inactive: 1,
+  names: ['Solar', 'Solar roof', 'Solar old'], size: 3, inactive: 1, inactive_names: ['Solar old'],
   words: 'all Generator with carrier solar, as of this preview', factor: 1.2, factor_words: '× 1.2 (+20 %)' }
 const setCard = { ...card, tool: 'apply_project_changes', says: 'all Generator with carrier solar, as of this '
   + 'preview · 3 assets · p_nom × 1.2 (+20 %)', rows: [solar('Solar', 80), solar('Solar roof', 10), solar('Solar old', 5)],
@@ -264,6 +264,24 @@ it.each([
   expect(screen.getByTestId('chat-edit-header').textContent).toBe('Every Generator with carrier Solar')
   expect(screen.getAllByTestId('chat-edit-row-typed')).toHaveLength(3)
   if (uiMode === 'guided') expect(screen.getByTestId('chat-confirmation-summary').textContent).toBe(line)
+})
+
+it('the inactive member is marked in the table', () => {
+  useUIStore.setState({ uiMode: 'guided' })
+  showSetCard(setCard)
+  const assets = screen.getAllByTestId('chat-edit-row-typed').map(r => r.querySelector('td')!.textContent)
+  expect(assets).toEqual(["Generator 'Solar'", "Generator 'Solar roof'", "Generator 'Solar old' (inactive)"])
+})
+
+it.each([
+  ['guided', 'Every Generator with carrier Solar · 3 assets, 1 inactive · Capacity × 1.2 (+20 %). Read back from the project.'],
+  ['expert', 'all Generator with carrier solar, as of this preview · 3 assets · p_nom × 1.2 (+20 %). Read back from the project.'],
+] as const)('the %s receipt words the set as the card did', (uiMode, line) => {
+  useUIStore.setState({ uiMode })
+  const receipt = { version: 1, digest: 'd', outcome: 'verified', rows: setCard.rows, says: setCard.says,
+    results_stale: false, undo: { tool: 'undo_last', available: false }, sets: [solarSet] }
+  render(<AssistantResultCard result={{ _edit_receipt: receipt }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('chat-edit-receipt').textContent).toBe(line)
 })
 
 it('a 1-asset set says "1 asset"; a set given a value shows the new value; a bus set on a Link says any port', () => {

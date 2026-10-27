@@ -48,7 +48,7 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
   // pilot has no approved artifact/task-card contract.
   if (object(data._assurance)) return null
   const receipt = editReceiptOf(data._edit_receipt)
-  if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} />
+  if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} guided={guided} />
   const task = object(data._task) ?? (typeof data.task_id === 'string' ? data : null)
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''

@@ -43,6 +43,8 @@ export interface EditCardSet {
   names: string[]
   size: number
   inactive: number
+  /** The inactive members, marked in the table. */
+  inactive_names?: string[]
   /** The backend's words, in model ids ("all Generator with carrier solar, as of this preview"). */
   words: string
   factor: number | null
@@ -74,6 +76,8 @@ export interface EditReceipt {
   undo: { tool: string; available: boolean }
   /** The section's flow state after the write; `changed` against the card. */
   section?: { id: string; label: string; state: string; changed: boolean }
+  /** The card's set lines, so Guided words the receipt as the card did. */
+  sets?: EditCardSet[]
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -231,7 +235,11 @@ function showInProperties(target: FlowTarget) {
 }
 
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
-  const asset = (r: EditCardRow) => (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
+  const inactive = new Set((card.sets ?? []).flatMap(g => (g.inactive_names ?? []).map(n => `${g.component_class}\u0000${n}`)))
+  const asset = (r: EditCardRow) => {
+    const words = (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
+    return inactive.has(`${r.component_class}\u0000${r.name}`) ? `${words} (inactive)` : words
+  }
   const header = editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
@@ -307,15 +315,18 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
   )
 }
 
-export function EditReceiptLine({ receipt, disabled, onRequest }: {
+export function EditReceiptLine({ receipt, disabled, onRequest, guided = false }: {
   receipt: EditReceipt; disabled: boolean; onRequest: (text: string) => void
+  /** Guided words the receipt as the card's headline did, never in ids. */
+  guided?: boolean
 }) {
   const verified = receipt.outcome === 'verified'
+  const says = guided ? editCardWords({ rows: receipt.rows, sets: receipt.sets } as EditCard) || receipt.says : receipt.says
   return (
     <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="chat-edit-receipt">
       <div className={verified ? '' : 'text-warn'}>
-        {verified ? `${receipt.says}. Read back from the project.`
-          : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
+        {verified ? `${says}. Read back from the project.`
+          : `${says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
       {receipt.section?.changed && <div data-testid="chat-edit-section">
         {receipt.section.label}: {FLOW_STATE_WORDS[receipt.section.state as FlowSectionState] ?? receipt.section.state}.

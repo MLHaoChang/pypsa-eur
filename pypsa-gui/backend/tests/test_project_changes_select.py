@@ -80,7 +80,7 @@ def test_all_solar_plus_20_percent_is_computed_by_the_server(grid):
     assert [(d["name"], d["before"], d["after"]) for d in preview["diff"]] == [
         ("Solar", 80, 96), ("Solar roof", 10, 12), ("Solar old", 5, 6)]
     [selected] = preview["sets"]
-    assert selected["size"] == 3 and selected["inactive"] == 1
+    assert selected["size"] == 3 and selected["inactive"] == 1 and selected["inactive_names"] == ["Solar old"]
     assert selected["factor_words"] == "× 1.2 (+20 %)"
     assert "as of this preview" in selected["words"]
     assert p_nom() == BEFORE
@@ -92,6 +92,7 @@ def test_all_solar_plus_20_percent_is_computed_by_the_server(grid):
                             "p_nom × 1.2 (+20 %)")
     receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
     assert receipt["outcome"] == "verified" and receipt["says"] == card["says"]
+    assert receipt["sets"] == card["sets"]
     assert p_nom() == {**BEFORE, "Solar": 96, "Solar roof": 12, "Solar old": 6}
     chat_tools.undo_last()
     assert p_nom() == BEFORE

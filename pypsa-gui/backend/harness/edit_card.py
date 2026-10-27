@@ -341,6 +341,8 @@ def receipt(card: dict, args: dict) -> dict:
                                         if row["role"] not in ("at_solve", "note"))
     out = {"version": VERSION, "digest": card["digest"], "outcome": "verified" if verified else "uncertain",
            "rows": rows, "says": card["says"], "results_stale": _results_stale(), "undo": _undo(card["tool"])}
+    if card.get("sets"):
+        out["sets"] = card["sets"]
     if card.get("section"):
         after = _section_state(card["section"]["id"])
         if after is not None:
