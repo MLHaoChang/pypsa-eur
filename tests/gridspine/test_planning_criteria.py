@@ -926,7 +926,6 @@ def test_a_profile_without_the_key_still_gives_unknown():
 def test_an_extracted_angle_limit_is_assumed_and_named_unconfirmed_on_pass_and_fail_rows():
     net = _net()
     cset = _set(net)
-    solved = None
     for value, verdict in ((180.0, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
         res, report = _screen(net, cset, profile=_angle_profile(value, "extracted", page=12, quote="placeholder"))
         solved = res[res["stage1_verdict"] != "not_solved"]
@@ -936,7 +935,7 @@ def test_an_extracted_angle_limit_is_assumed_and_named_unconfirmed_on_pass_and_f
             "angle limit extracted, unconfirmed (test_angle: Clause X.1, p. 12)", regex=False).all()
         assert report["angle_limit"]["basis"] == "assumed"
         assert report["angle_limit"]["reference"] == "test_angle: Clause X.1, p. 12, extracted, unconfirmed"
-    assert not res.loc[res["stage1_verdict"] == "not_solved", "note"].str.contains("unconfirmed").any()
+        assert not res.loc[res["stage1_verdict"] == "not_solved", "note"].str.contains("unconfirmed").any()
 
 
 def test_an_assumed_angle_limit_stays_assumed():

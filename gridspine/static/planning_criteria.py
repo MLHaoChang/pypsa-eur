@@ -191,7 +191,8 @@ def _finite_number(v) -> bool:
 class AngleLimit:
     """The voltage-angle limit across a branch or bus pair, in degrees.
     ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
-    SAGC clause in ``reference``. ``pairs`` holds branch ids and (bus, bus)
+    SAGC clause in ``reference`` (one built from a profile reads
+    ``"<profile>: <clause>"``). ``pairs`` holds branch ids and (bus, bus)
     name pairs; empty means every in-service branch on the net. A branch
     pair is measured net of a transformer's phase shift; a (bus, bus) pair
     is measured raw, since it may span several transformers, so name a
@@ -845,7 +846,8 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     """``(results, report)``: one ``validate_planning_results`` row per
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
-    {deg, basis, reference, from: "argument" or "profile <name>"} or "unset", "voltage_band": {"profile": name or "assumed", "buses":
+    {deg, basis, reference, from: "argument" or "profile <name>"} or
+    "unset", "voltage_band": {"profile": name or "assumed", "buses":
     {"profile": n, "assumed": n}} (the base case's live buses), "seconds"}``. Kinds judged: branch (any
     order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
     (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``),
