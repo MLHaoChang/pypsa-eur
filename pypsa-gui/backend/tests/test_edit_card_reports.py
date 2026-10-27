@@ -305,6 +305,25 @@ def test_two_templates_of_one_file_name_are_told_apart_by_the_receipt(project, f
     assert edit_card.receipt(card, args)["outcome"] == "verified"
 
 
+def test_two_template_names_differing_past_the_cap_are_told_apart_by_the_receipt(project, fixtures):
+    rid = _evidence_report()
+    data = fixtures["corporate_untagged.docx"]
+    first = _upload_template(project, "t" * 130 + "a.docx", data)
+    other = Document(io.BytesIO(data))
+    other.core_properties.title = "A second file"
+    buffer = io.BytesIO()
+    other.save(buffer)
+    second = _upload_template(project, "t" * 130 + "b.docx", buffer.getvalue())
+    T.set_report_template(rid, first)
+    args = {"report_id": rid, "file_id": second}
+    card = edit_card.preview("set_report_template", args)
+    row = next(r for r in card["rows"] if r["field"] == "template_file_id")
+    assert row["old"].endswith("\u2026") and row["new"] == row["old"] + " (changed)" and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"
+    T.set_report_template(rid, second)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
 def test_a_long_pending_instruction_is_capped_and_a_difference_past_the_cap_is_marked():
     from types import SimpleNamespace
 

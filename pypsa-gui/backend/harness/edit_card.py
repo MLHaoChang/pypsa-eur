@@ -986,7 +986,7 @@ def _setting(value):
 _SALT = os.urandom(16)  # per process: a fingerprint on a card can not be used to guess a value
 
 
-def _fingerprint(value) -> str:
+def _value_fingerprint(value) -> str:
     return hmac.new(_SALT, json.dumps(value, sort_keys=True, default=str).encode(), "sha1").hexdigest()[:12]
 
 
@@ -996,13 +996,13 @@ def _hide_cut(row: dict, old, new) -> dict:
     a written edit from an unwritten one."""
     if row["old"] == row["new"] and not _same(old, new):
         row["new"] = f"{row['new']} (changed)"
-        row["fingerprint"] = _fingerprint(new)
+        row["fingerprint"] = _value_fingerprint(new)
     return row
 
 
 def _settle(row: dict, value):
     """The stored value as the receipt compares it with the row's `new`."""
-    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _value_fingerprint(value):
         return row["new"]
     return _setting(value)
 
@@ -1389,7 +1389,7 @@ def _settings_row(name: str, field: str, label: str, old, new, unit: str = "", *
            "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
     if says_name:
         row["says_name"] = says_name
-    return _hide_cut(row, old, new)
+    return row
 
 
 def _project_name(args: dict) -> str:
@@ -1539,7 +1539,7 @@ def _scenario_preview(args: dict) -> list[dict]:
             _refuse("invalid_edit_value", str(exc.detail), exc.status_code)
         if not _same(old[key], value):
             label = _SCENARIO_FIELDS[key][1]
-            rows.append(_settings_row("Scenario", key, label, old[key], value, says_name=label))
+            rows.append(_hide_cut(_settings_row("Scenario", key, label, old[key], value, says_name=label), old[key], value))
     if not rows:
         _refuse("empty_edit", "The scenario already has these values.")
     return rows
@@ -1694,7 +1694,7 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
         for part in ([parts[0]] if parts[0] != "settings" else [parts[1]]) if parts[0] != "intake" else parts:
             value = value.get(part) if isinstance(value, dict) else None
         cell = _study_cell(row["field"], value)
-        if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+        if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _value_fingerprint(value):
             out.append(row["new"])
             continue
         out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)

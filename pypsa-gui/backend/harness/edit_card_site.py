@@ -10,8 +10,6 @@ caller's access was checked the way the handler checks it.
 """
 from __future__ import annotations
 
-import hmac
-import os
 import json
 from collections.abc import Callable
 from typing import Any
@@ -20,6 +18,7 @@ from fastapi import HTTPException
 
 from harness.edit_card import (STUDY_LEAF_CAP, _SECRET_KEY, Adapter, _note, _refuse, _sandbox,
                                _setting, _settings_row, register)
+from harness.edit_card import _value_fingerprint as _fingerprint
 
 _TEXT_CAP = 120
 _SECTION = "commercial"  # Commercial & parties, where the flow lists these settings
@@ -39,13 +38,6 @@ def _equal(a, b) -> bool:
 def _blank(value) -> bool:
     """A value the document would omit: nothing, an empty object or an empty list."""
     return value is None or value == {} or value == []
-
-
-_SALT = os.urandom(16)  # per process: a fingerprint on a card can not be used to guess a secret value
-
-
-def _fingerprint(value) -> str:
-    return hmac.new(_SALT, json.dumps(value, sort_keys=True, default=str).encode(), "sha1").hexdigest()[:12]
 
 
 def _short(text: str) -> str:

@@ -271,6 +271,16 @@ def test_a_parts_edit_shows_the_native_clear_of_an_imported_overnight_cost(grid)
     assert PyPSAService.get_network().storage_units["overnight_cost"].isna()["Battery"]
 
 
+def test_a_receipt_after_a_solve_reports_results_stale(grid):
+    """The solve records its input fingerprint; an edit after it makes the receipt say the results are stale."""
+    PyPSAService.get_network().meta["assistant_solve_input_fingerprint"] = edit_card._fingerprint()
+    assert edit_card._results_stale() is False
+    frames, cards, result = _dispatch(grid, "update_component", {"component_class": "Line", "name": "L1",
+                                                                 "attrs": {"s_nom": 400.0}})
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert result["_edit_receipt"]["results_stale"] is True
+
+
 def test_the_receipt_names_a_section_state_that_changed(grid, monkeypatch):
     """PR-2: the card names its flow section; the receipt adds the section's
     state after the write and says when it changed. The section-state read is

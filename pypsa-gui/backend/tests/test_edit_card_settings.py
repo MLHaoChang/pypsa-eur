@@ -280,6 +280,6 @@ def test_a_study_text_differing_only_past_the_cap_is_changed_and_fingerprinted()
     head = "y" * edit_card.TEXT_CAP
     row = edit_card._study_row("intake.site.note", "Note", head + "a", head + "b")
     assert row["new"].endswith(" (changed)")
-    assert row["fingerprint"] == edit_card._fingerprint(head + "b")
+    assert row["fingerprint"] == edit_card._value_fingerprint(head + "b")
     assert edit_card._settle(row, head + "a") != row["new"]
     assert edit_card._settle(row, head + "b") == row["new"]
