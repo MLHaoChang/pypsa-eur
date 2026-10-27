@@ -1,4 +1,3 @@
-import { ArrowRight } from 'lucide-react'
 import ContractsEditor from '../../results/investment/ContractsEditor'
 import FinanceInputsEditor from '../../results/investment/FinanceInputsEditor'
 import ParticipantsDesigner from '../../results/investment/ParticipantsDesigner'
@@ -28,7 +27,7 @@ export function CommercialCard() {
       <div>
         <button type="button" data-testid="section-open-expert-commercial" onClick={() => openSectionInExpert('commercial')}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
-          Open commercial &amp; parties in Expert <ArrowRight size={11} />
+          Open commercial &amp; parties in Expert ›
         </button>
       </div>
     </div>

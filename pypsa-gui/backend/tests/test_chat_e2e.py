@@ -414,6 +414,8 @@ def test_project_exists_propagates_to_tool_error_kind(tmp_projects_dir, install_
     err = [p for ev, p in streamed if ev == "tool_error"]
     kinds = [p["error_kind"] for p in err]
     assert "project_exists" in kinds
+    # The frame carries the refusal's human message, not the detail dict's repr.
+    assert [p["message"] for p in err if p["error_kind"] == "project_exists"] == ["project 'X' already exists"]
 
 
 # ─────────────────────────────────────────────────────────────────────────
