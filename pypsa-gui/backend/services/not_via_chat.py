@@ -190,8 +190,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
         'panel': 'map',
         'keywords': frozenset({
             'layout',
-            'openstreetmap',
-            'osm',
             'thumbnail',
             'thumbnails',
         }),
@@ -199,9 +197,7 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('DELETE', '/api/projects/{name}/sites/{site_id}/context'),
             ('GET', '/api/geocode/status'),
             ('GET', '/api/projects/{name}/map_layout'),
-            ('GET', '/api/projects/{name}/map_layout/osm_suggestions'),
             ('GET', '/api/projects/{name}/sites/{site_id}/thumbnail'),
-            ('POST', '/api/projects/{name}/map_layout/import'),
             ('PUT', '/api/projects/{name}/map_layout'),
             ('PUT', '/api/projects/{name}/sites/{site_id}/thumbnail'),
         }),

@@ -8422,6 +8422,227 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
     "batch_delete_components": _validate_batch_delete_components,
 }
 
+# ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity tools ─────────
+#
+# Each tool calls its GUI route's own router handler in-process (the route in
+# `catalogue.TOOL_ROUTES`), so validation, refusals and writes are the route's.
+# The tool only shapes what comes back so a read stays under the result cap.
+
+# Under `_truncate_result`'s 4000, with room for the `truncated` note itself.
+_B2B_BUDGET = 3500
+
+
+def _b2b_fit(payload: dict, budget: int = _B2B_BUDGET) -> dict:
+    """
+    `payload` under `budget` serialised chars: the largest list (reached through
+    dicts) loses as many tail items as the excess needs, until it fits, and
+    `truncated` names each trimmed list's path with its total and how many are
+    shown. Every list keeps its first item. The input is not mutated.
+    """
+    import copy
+
+    out = copy.deepcopy(payload)
+    trimmed: dict[str, tuple[dict, Any, int]] = {}
+
+    def lists(obj: dict, path: tuple):
+        for key, value in obj.items():
+            if isinstance(value, list) and len(value) > 1:
+                yield path + (str(key),), obj, key, value
+            elif isinstance(value, dict):
+                yield from lists(value, path + (str(key),))
+
+    while (excess := _json_len(out) - budget) > 0:
+        found = [(_json_len(v), p, parent, key, v) for p, parent, key, v in lists(out, ())]
+        if not found:
+            break
+        size, path, parent, key, value = max(found, key=lambda row: row[0])
+        per_item = max(1, size // len(value))
+        drop = min(len(value) - 1, max(1, -(-excess // per_item)))
+        trimmed.setdefault(".".join(path), (parent, key, len(value)))
+        parent[key] = value[: len(value) - drop]
+    if trimmed:
+        out["truncated"] = {path: {"total": total, "shown": len(parent[key])}
+                            for path, (parent, key, total) in trimmed.items()}
+    return out
+
+
+def get_osm_suggestions(name: str, bbox: str, offset: int = 0, limit: int | None = None) -> dict:
+    """The map's OSM suggestion layer for `bbox`, one row per way, without coordinates."""
+    from routers.projects import osm_suggestions as _h
+
+    doc = _route(_h, name, bbox)
+    rows = []
+    for key, points in (("lines", "points"), ("areas", "polygon")):
+        for feature in doc.get(key) or []:
+            tags = feature.get("tags") or {}
+            rows.append({"kind": feature.get("kind"), "osm_id": feature.get("id"),
+                         "name": tags.get("name"), "voltage": tags.get("voltage"),
+                         "operator": tags.get("operator"),
+                         "n_points": len(feature.get(points) or [])})
+    return {"bbox": doc.get("bbox"), "attribution": doc.get("attribution"),
+            "cached": doc.get("cached"), "lines_total": len(doc.get("lines") or []),
+            "areas_total": len(doc.get("areas") or []), **_paginate(rows, offset, limit)}
+
+
+def preview_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                              confirm: list[str] | None = None) -> dict:
+    """The Library reference dialog's preview (`POST /api/library_reference/preview`)."""
+    from routers.network_library_reference import ReferenceApplyIn
+    from routers.network_library_reference import preview_library_reference as _h
+
+    body = ReferenceApplyIn(component_class=component_class, name=name, technology=technology,
+                            projection_year=projection_year, confirm=list(confirm or []))
+    return _b2b_fit(_route(_h, body))
+
+
+def _b2b_body_request(data: bytes, path: str):
+    """A one-shot POST `Request` carrying `data` as its raw body, for a handler
+    that reads its body itself (its own size and format checks then run)."""
+    from starlette.requests import Request
+
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": data, "more_body": False}
+
+    headers = [(b"content-type", b"application/octet-stream"),
+               (b"content-length", str(len(data)).encode())]
+    return Request({"type": "http", "method": "POST", "path": path, "headers": headers,
+                    "query_string": b""}, receive)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+    from services import upload_service
+
+    with _acting():   # identity before the file is read
+        pass
+    active = _require_active_project()
+    if name != active:
+        # The upload is the active project's: writing it into another project
+        # would apply one project's file to the other (GK B follow-up on #769).
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "upload_project_mismatch",
+            "message": f"file_id is an upload of the active project {active!r}; "
+                       f"import into that project, or switch to {name!r} and upload there"})
+    data = upload_service.get_upload_bytes(active, file_id)
+    request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
+    with _acting() as (db, user):
+        # Async handler: driven inside the identity scope, so its db stays open.
+        report = _sync(_h(name, request, apply=apply, tolerance_m=tolerance_m, db=db, user=user))
+    out = {k: v for k, v in report.items() if k not in ("routes", "sites")}
+    routes, sites = report.get("routes") or [], report.get("sites") or []
+    out.update({
+        "routes_total": len(routes), "sites_total": len(sites),
+        "unmatched_total": len(report.get("unmatched") or []),
+        "routes": [{"feature": r.get("feature"), "label": r.get("label"), "key": r.get("key"),
+                    "how": r.get("how"), "reversed": r.get("reversed"),
+                    "n_points": len(r.get("points") or [])} for r in routes],
+        "sites": [{"feature": s.get("feature"), "id": s.get("id"), "name": s.get("name"),
+                   "buses": s.get("buses"), "n_vertices": len(s.get("boundary") or [])} for s in sites],
+    })
+    return _b2b_fit(out)
+
+
+def list_result_assets(offset: int = 0, limit: int | None = None) -> dict:
+    """The Results asset picker's list (`GET /api/results/asset/assets`), paged."""
+    from routers.asset_results import list_assets as _h
+
+    return _paginate(_h()["assets"], offset, limit)
+
+
+def get_curtailment_by_cause(offset: int = 0, limit: int | None = None) -> dict:
+    """`GET /api/results/curtailment/by_cause`, its plants as paged rows."""
+    from routers.results import get_curtailment_by_cause as _h
+
+    body = _h()
+    if getattr(body, "status_code", None) == 204:
+        return _no_data("curtailment_by_cause", _RESULTS_NO_DATA_MESSAGE)
+    plants = body.get("plants") or {}
+    rows = [{"plant": plant, **row} for plant, row in plants.items()]
+    head = {k: v for k, v in body.items() if k != "plants"}
+    return {**head, **_paginate(rows, offset, limit)}
+
+
+def get_eh_readiness(archetype: str, budget_solves: int | None = None, stages: list[str] | str | None = None,
+                     dtc_attribution: str | None = None, pack_overrides: Any = None) -> dict:
+    """
+    `GET /api/results/eh_readiness` with the route's own query values: `stages`
+    comma-joined, `pack_overrides` as its JSON text, so the route validates both.
+    """
+    from routers.results import get_eh_readiness as _h
+
+    if isinstance(stages, (list, tuple)):
+        stages = ",".join(str(s) for s in stages)
+    overrides = None if pack_overrides is None else json.dumps(pack_overrides)
+    return _b2b_fit(_h(archetype, budget_solves=budget_solves, stages=stages or None,
+                       dtc_attribution=dtc_attribution, pack_overrides=overrides))
+
+
+def get_report_capabilities() -> dict:
+    from routers.reports import get_report_capabilities as _h
+
+    return _route(_h, project=_report_project())
+
+
+def get_report_evidence_hash() -> dict:
+    from routers.reports import get_evidence_hash as _h
+
+    return _route(_h, project=_report_project())
+
+
+def _report_section_row(section: dict) -> dict:
+    return {"section_id": section.get("section_id"), "heading": section.get("heading"),
+            "source": section.get("source"), "status": section.get("status")}
+
+
+def get_report_version(report_id: str, version: int, section_id: str | None = None) -> dict:
+    """One stored version: meta + section rows, or one section compacted as `get_report` does."""
+    from routers.reports import get_report_version as _h
+
+    raw = _route(_h, report_id, version, project=_report_project())
+    head = {k: raw.get(k) for k in _REPORT_HEADER_KEYS}
+    sections = list(raw.get("sections") or [])
+    if section_id is None:
+        return _b2b_fit({
+            **head, "sections": [_report_section_row(s) for s in sections],
+            "message": "get_report_version(report_id, version, section_id=...) reads one "
+                       "section; get_report_table pages a table.",
+        })
+    match = next((s for s in sections if s.get("section_id") == section_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "report_section_not_found",
+            "message": (f"Report {report_id} version {version} has no section {section_id!r}; "
+                        "it has: " + ", ".join(str(s.get("section_id")) for s in sections)),
+        })
+    compact = _compact_section(match, raw.get("tables") or {}, raw.get("figures") or {})
+    return _b2b_fit({**head, "section": compact})
+
+
+def create_evidence_report(title: str | None = None) -> dict:
+    """The Reports panel's evidence-only report (`POST …/reports`); the route checks the lock."""
+    from routers.reports import CreateReportBody, create_report as _h
+
+    out = _route(_h, CreateReportBody(title=title), project=_report_project())
+    document = out.pop("document", None) or {}
+    rid = out.get("report_id")
+    return _b2b_fit({
+        **out,
+        "sections": [_report_section_row(s) for s in document.get("sections") or []],
+        "message": f"Stored as report {rid}: get_report('{rid}') reads it.",
+    })
+
+
 # ── Registry entry-point ────────────────────────────────────────────────────
 
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
@@ -8862,6 +9083,20 @@ DISPATCHERS.update({
     "list_stress_profile_packs": list_stress_profile_packs,
 })
 # end LV08 B2a
+# ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity tools ─────────
+# Before the lock/study gating below, which wraps what DISPATCHERS holds.
+DISPATCHERS.update({
+    "get_osm_suggestions": get_osm_suggestions,
+    "preview_library_reference": preview_library_reference,
+    "import_map_geometry": import_map_geometry,
+    "list_result_assets": list_result_assets,
+    "get_curtailment_by_cause": get_curtailment_by_cause,
+    "get_eh_readiness": get_eh_readiness,
+    "get_report_capabilities": get_report_capabilities,
+    "get_report_evidence_hash": get_report_evidence_hash,
+    "get_report_version": get_report_version,
+    "create_evidence_report": create_evidence_report,
+})
 
 
 # ── Foreign-lock gate at the dispatch seam (fix-wave F1) ────────────────────
