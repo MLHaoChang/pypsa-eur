@@ -37,6 +37,7 @@ import {
   type ProbeMessage,
 } from '../api/localSettings'
 import AssistantModelSettings from '../components/AssistantModelSettings'
+import McpServerSettings from '../components/McpServerSettings'
 
 // Tokens defined in src/index.css:71-73 (--color-success / --color-warn /
 // --color-danger). There is no `text-ok`.
@@ -223,6 +224,7 @@ export default function LocalSettings() {
   return (
     <div className="p-4 space-y-6 overflow-y-auto">
       <AssistantModelSettings />
+      <McpServerSettings />
       {state != null && <LocalSettingsBody state={state} invalidate={invalidate} />}
     </div>
   )

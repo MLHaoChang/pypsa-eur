@@ -77,3 +77,29 @@ the gate and the tools payload, without the SDK (spec A.8a says why and what
 differs from A.4: no `TOOL_ROUTES` sentinel, external tools only in the `all`
 toolset, `find_capabilities` unchanged). Slice 2: the settings routes and panel
 section, the `PYPSA_GUI_MCP_KEY__` family in `is_managed_key`, the parity probe.
+
+2026-10-26 (slice 2 in progress, branch `claude/mcp-client-settings`, no PR yet;
+plan sent to the gatekeeper, no verdict yet): built the
+`PYPSA_GUI_MCP_KEY__` family in `is_managed_key`, the
+`mcp_client` config helpers (`validate_entry`, `update_entries`, `probe`,
+`forget`, `key_slot`), the super-admin routes `GET/PUT/DELETE
+/api/chat/settings/mcp/servers[/{id}]`, `POST …/{id}/test` and, beyond A.1's
+list, `PUT/DELETE …/{id}/keys/{name}` (name `bearer` or a listed variable;
+slots are derived server-side and only the MCP family is reachable), the
+settings section (`McpServerSettings.tsx`) and the card's "External tool"
+label. Left: the parity probe in `run_chat_smoke.py --workflow` (register
+the stub through PUT on a fresh session; `Run the tool mcp__<id>__lookup …`
+gets no card, `set_value` gets one; DELETE in cleanup; a unit test in
+`test_harness_provider_parity.py`), the release-note fragment,
+`mp-code-review`, the PR with real-app screenshots, GK/UX OKs, CI.
+
+2026-10-26 (slice 2 reworked to GK B's plan conditions): the web adds, edits,
+toggles and deletes http entries only (PUT body `{enabled, url, tiers}`; an
+id held as anything else is 409 and the file is left alone). Stdio entries are
+written by hand and given back as they were; `/test` and `/keys` still work on
+them. `validate_entry` refuses env names `LD_*`, `DYLD_*`, `PYTHON*`,
+`NODE_OPTIONS`, `PATH`, `HOME`, `SHELL` and `_CHILD_ENV`; any 3xx is a failure
+(redirects never followed); moving a server to another origin clears its bearer
+token. The parity probe deviates from A's "stub stdio server": the stub gains
+`--http PORT` and is registered through PUT, since the routes take http only.
+Done: the probe, the release note, mp-code-review. Left: the PR, GK/UX OKs, CI.

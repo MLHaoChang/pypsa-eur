@@ -847,6 +847,10 @@ describe('P29 gate B1-1: start-only tools never say they finished', () => {
       'run_coupling_loop', 'run_margin_loop', 'run_eh_study']))
   })
 
+  it('names an external MCP tool by the server\'s own tool name', () => {
+    expect(guidedToolPhrase('mcp__tariffs__set_value')).toBe('use set value')
+  })
+
   it.each(START_ONLY)('%s has an explicit "start …" phrase', (tool) => {
     const phrase = guidedToolPhrase(tool)
     expect(phrase).not.toMatch(/^use /)
