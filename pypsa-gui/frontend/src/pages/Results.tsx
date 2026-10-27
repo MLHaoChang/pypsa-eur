@@ -504,10 +504,16 @@ export default function Results() {
   useEffect(() => {
     if (!resultsWindowRequest || !firstSnap16 || !lastSnap16) return
     // Live-voice 07: the assistant names a window by snapshot positions.
-    const request = 'fromIndex' in resultsWindowRequest
+    const byIndex = 'fromIndex' in resultsWindowRequest
+    const request = byIndex
       ? { start: snap?.snapshots?.[resultsWindowRequest.fromIndex], end: snap?.snapshots?.[resultsWindowRequest.toIndex] }
       : resultsWindowRequest
-    if (!request.start || !request.end) { clearResultsWindowRequest(); return }
+    const whose = byIndex ? "The assistant's window" : "The chart's window"
+    if (!request.start || !request.end) {
+      if (byIndex) setWindowNote(`${whose} (snapshots ${resultsWindowRequest.fromIndex + 1}–${resultsWindowRequest.toIndex + 1}) is outside this network's horizon (${snap?.snapshots?.length ?? 0} snapshots), so Results shows the horizon as loaded.`)
+      clearResultsWindowRequest()
+      return
+    }
     const from16 = request.start.replace(' ', 'T').slice(0, 16)
     const to16 = request.end.replace(' ', 'T').slice(0, 16)
     const clampedFrom = from16 < firstSnap16 ? firstSnap16 : from16
@@ -515,14 +521,14 @@ export default function Results() {
     const chartWindow = readableWindow(request.start, request.end)
     const horizon = readableWindow(firstSnap16, lastSnap16)
     if (from16 > to16) {
-      setWindowNote(`The chart's window (${chartWindow}) ends before it starts, so Results shows the horizon as loaded.`)
+      setWindowNote(`${whose} (${chartWindow}) ends before it starts, so Results shows the horizon as loaded.`)
     } else if (clampedFrom > clampedTo) {
-      setWindowNote(`The chart's window (${chartWindow}) is outside this network's horizon (${horizon}), so Results shows the horizon as loaded.`)
+      setWindowNote(`${whose} (${chartWindow}) is outside this network's horizon (${horizon}), so Results shows the horizon as loaded.`)
     } else {
       setFromIso(clampedFrom)
       setToIso(clampedTo)
       setWindowNote(clampedFrom !== from16 || clampedTo !== to16
-        ? `The chart's window (${chartWindow}) reaches past this network's horizon (${horizon}); Results shows the part inside it.`
+        ? `${whose} (${chartWindow}) reaches past this network's horizon (${horizon}); Results shows the part inside it.`
         : null)
     }
     clearResultsWindowRequest()

@@ -58,7 +58,7 @@ describe('the checked window request', () => {
     expect(useUIStore.getState().resultsWindowRequest).toBeNull()
   })
 
-  it('resolves an assistant window by snapshot position, and drops one past the axis', async () => {
+  it('resolves an assistant window by snapshot position, and says so when one is past the axis', async () => {
     useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false, activeSlidePanel: 'results' })
     useUIStore.getState().requestResultsTab('loadflow')
     useUIStore.getState().requestResultsWindow({ fromIndex: 10, toIndex: 20 })
@@ -72,6 +72,8 @@ describe('the checked window request', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 50)) })
     expect(screen.getByTestId('loadflow-window').textContent).toBe(shown)
     expect(useUIStore.getState().resultsWindowRequest).toBeNull()
+    expect(screen.getByTestId('results-window-note').textContent).toContain(
+      `The assistant's window (snapshots 11–${SNAPSHOTS.length + 1}) is outside this network's horizon (${SNAPSHOTS.length} snapshots), so Results shows the horizon as loaded.`)
     view.unmount()
   })
 

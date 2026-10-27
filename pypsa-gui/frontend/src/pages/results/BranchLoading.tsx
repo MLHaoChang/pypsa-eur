@@ -25,7 +25,7 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
   const highlight = useUIStore(s => s.resultsHighlight)
   const setHighlight = useUIStore(s => s.setResultsHighlight)
   const highlightRef = useRef<HTMLTableRowElement | null>(null)
-  useEffect(() => { highlightRef.current?.scrollIntoView?.({ block: 'nearest' }) }, [highlight, data])
+  useEffect(() => { highlightRef.current?.scrollIntoView?.({ block: 'center' }) }, [highlight, data])
   if (!enabled || query.isPending || query.isFetching) return <p role="status">Loading matching load-flow evidence…</p>
   if (query.isError) return <p role="status">Load-flow evidence unavailable. Try again after checking the project and solve.</p>
   if (data?.status !== 'ok') {
