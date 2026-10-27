@@ -140,3 +140,49 @@ def test_discovery_never_bypasses_the_toolset(discovery_session):
     discovery_session.toolset = 'simulation'
     discovery_session.discovered_tools = ('create_component',)
     assert 'create_component' not in {t['name'] for t in wiring._tools_payload_for_profile(profile())}
+
+
+PLAUSIBILITY_TOOLS = {"project_readiness", "validate_network", "diagnose_network"}
+
+
+def _padded_catalogue(count=120):
+    """TOOLS plus distractors whose names and descriptions repeat the VS2 query words.
+
+    Half go before the catalogue, so the core tools' positions move too; 120
+    leaves margin over the ~50 tools the LV08/LC-16 chain adds."""
+    words = "Do these results make sense? Make sense of these results; results that make sense."
+    distractors = [{"name": f"make_sense_of_these_results_{i}", "description": words,
+                    "input_schema": {"type": "object", "properties": {}}} for i in range(count)]
+    return distractors[:count // 2] + list(TOOLS) + distractors[count // 2:]
+
+
+@pytest.mark.parametrize("query", [
+    "Do these results make sense?",
+    "Are these results plausible?",
+    "PLAUSIBILITY, please: are the results realistic",
+    "Sanity check the results",
+])
+def test_result_plausibility_queries_keep_the_input_checks(query):
+    tools = _padded_catalogue()
+    selected = wiring._bounded_tools(tools, query)
+    names = {t["name"] for t in selected}
+    assert PLAUSIBILITY_TOOLS <= names
+    assert len(selected) <= 128
+    assert [t for t in tools if t in selected] == selected
+    assert wiring._HARNESS_TOOL_NAMES <= names
+
+
+def test_unrelated_words_do_not_trigger_an_intent():
+    tools = _padded_catalogue()
+    names = {t["name"] for t in wiring._bounded_tools(tools, "What does this battery make?")}
+    assert not (PLAUSIBILITY_TOOLS - wiring._HARNESS_TOOL_NAMES) & names
+
+
+def test_intent_map_names_existing_read_tools():
+    from harness.catalogue import safety_tier_for
+
+    known = {t["name"] for t in TOOLS}
+    for _, names in wiring._SELECTION_INTENTS:
+        for name in names:
+            assert name in known
+            assert safety_tier_for(name) == "read"

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): With an OpenAI model, asking whether results make sense now always offers the input checks (`project_readiness`, `validate_network`, `diagnose_network`), however many tools the catalogue gains.
