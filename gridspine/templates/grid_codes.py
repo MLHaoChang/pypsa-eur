@@ -96,6 +96,11 @@ A profile may carry these optional keys:
     The standard whose current-distortion limits the TDD screen applies at
     the connection point (datacenter readiness 12), one of
     ``CURRENT_TDD_STANDARDS``. Without it the TDD screen reads unknown.
+``angle_limit_deg``
+    The voltage-angle limit across a branch, in degrees (datacenter grid
+    readiness issue 18), a positive number. The planning-criteria screen
+    judges its angle check on it when no ``AngleLimit`` is passed; without
+    either, the angle verdict reads unknown.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -148,7 +153,8 @@ _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_
                   "unbalance_limit_pct",
                   "current_tdd_standard",
                   "q_capability_unit",
-                  "voltage_deadband_pct")
+                  "voltage_deadband_pct",
+                  "angle_limit_deg")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
@@ -158,7 +164,8 @@ PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit
                           "unbalance_limit_pct",
                           "current_tdd_standard",
                           "q_capability_unit",
-                          "voltage_deadband_pct"})
+                          "voltage_deadband_pct",
+                          "angle_limit_deg"})
 #: The standards ``current_tdd_standard`` may name (``static/current_tdd.py``).
 CURRENT_TDD_STANDARDS = ("ieee519-2014",)
 #: Every key a voltage band may carry.
@@ -260,7 +267,8 @@ def _check_profile(name, p):
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
                 "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
                 "unbalance_limit_pct",
-                "voltage_deadband_pct"):
+                "voltage_deadband_pct",
+                "angle_limit_deg"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
