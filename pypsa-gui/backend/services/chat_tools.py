@@ -3277,6 +3277,17 @@ def get_project_flow(name: str) -> dict:
     return _route(_h, project=_authorized_project(name))
 
 
+def get_reliability_goal(name: str) -> dict:
+    """The project's reliability goal (W3b-R) as every study resolves it,
+    through the same handler as ``GET /api/projects/{name}/flow/reliability_goal``.
+    Reads the open project only (409 otherwise), as ``get_project_flow`` does."""
+    from routers.flow import _require_open, get_reliability_goal as _h
+
+    project = _authorized_project(name)
+    _require_open(project)
+    return _route(_h, project=project)
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -3430,7 +3441,7 @@ def run_mc_study(
 
 
 def run_coupling_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     eps0: float | None = None,
@@ -3443,6 +3454,8 @@ def run_coupling_loop(
 
     `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
     on a multi-year horizon, and say which basis you used when reporting.
+    Omitted, it and `draws` are the project's reliability goal (W3b-R); the
+    result's `goal_sources` names where each came from.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
     return _campaign_gated(
@@ -3459,7 +3472,7 @@ def run_coupling_loop(
 
 
 def run_margin_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     max_solves: int | None = None,
@@ -3473,6 +3486,8 @@ def run_margin_loop(
     There is deliberately no starting-margin parameter: the start is a
     MEASUREMENT taken by a probing solve, and a user-supplied one is the
     single number here that can silently make the study worthless.
+    An omitted `target_lole_h` or `draws` is the project's reliability goal
+    (W3b-R), named in the result's `goal_sources`.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
     return _campaign_gated(
@@ -3488,7 +3503,7 @@ def run_margin_loop(
 
 
 def run_eh_study(
-    archetype: str,
+    archetype: str | None = None,
     stages: list | None = None,
     budget_solves: int | None = None,
     pack_overrides: dict | None = None,
@@ -3503,6 +3518,9 @@ def run_eh_study(
     Applies the pack, runs the EH pipeline, and persists a
     ``ReferenceDesignReport`` for ``get_adequacy_results('eh_reference_design')``.
     Poll ``get_adequacy_results('eh_study')`` while it runs.
+    An omitted ``archetype``, ``pack_overrides`` LOLE / ENS target or
+    ``mc.draws`` is the project's reliability goal (W3b-R); a value passed
+    here wins for this run, and ``goal_sources`` names each one's source.
     """
     from routers.results import EhStudyRequest, post_eh_study as _h
     return _campaign_gated(
@@ -7923,6 +7941,7 @@ DISPATCHERS: dict[str, Any] = {
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
     "get_project_flow": get_project_flow,
+    "get_reliability_goal": get_reliability_goal,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,

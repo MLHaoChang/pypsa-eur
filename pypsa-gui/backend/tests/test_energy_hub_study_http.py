@@ -134,12 +134,36 @@ def test_get_eh_study_is_204_before_any_run(client, install_network):
     assert r.content == b""
 
 
-def test_post_refuses_missing_archetype(client, install_network):
+def test_post_without_archetype_takes_the_goal_default(
+        client, install_network, monkeypatch):
+    # W3b-R: an omitted site type is the project's goal; with none stored
+    # and no template that is the default, and the run names its source.
+    _install_stub(monkeypatch)
     _setup(client, install_network)
-    r = client.post(STUDY_URL, json={})
-    assert r.status_code == 422, r.text
-    assert "archetype" in r.json()["detail"]
-    assert client.get(STUDY_URL).status_code == 204
+    r = client.post(STUDY_URL, json={"stages": ["apply_pack", "ens_solve", "assemble"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["archetype"] == "strong_grid"
+    assert r.json()["goal_sources"]["site_archetype"] == "default"
+    assert _poll(client)["goal_sources"]["site_archetype"] == "default"
+
+
+def test_post_without_archetype_takes_the_stored_goal(
+        client, install_network, monkeypatch):
+    _install_stub(monkeypatch)
+    _setup(client, install_network, site_archetype="weak_flexible")
+    r = client.post(STUDY_URL, json={"stages": ["apply_pack", "ens_solve", "assemble"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["archetype"] == "weak_flexible"
+    assert r.json()["goal_sources"]["site_archetype"] == "stored"
+    _poll(client)
+
+    # An explicit archetype wins for that run and is named an override.
+    r = client.post(STUDY_URL, json={"archetype": "strong_grid",
+                                     "stages": ["apply_pack", "ens_solve", "assemble"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["archetype"] == "strong_grid"
+    assert r.json()["goal_sources"]["site_archetype"] == "override"
+    _poll(client)
 
 
 def test_post_refuses_unknown_archetype(client, install_network):
