@@ -10,9 +10,10 @@ without it refuses with its exact run ID (LC-T08).
 `run_binding` decides when a past run IS the current results (its newest
 completed run, solved from the current inputs) so the live read answers.
 
-One adapter per family; the registry entry (`result_views.ResultView.
-historical_section`) names the section. Adding a family is one `Retained`
-row, its capture, and its read's `run_id` argument.
+One adapter per family. A family is one `Retained` row and its capture, the
+registry entry that names its section (`result_views.ResultView.
+historical_section`, held equal to these rows by tests/test_retained_summary.py)
+and its read's `run_id` argument.
 """
 from __future__ import annotations
 
@@ -39,7 +40,6 @@ class Retained:
     """
 
     section: str
-    view_id: str
     capture: Callable[[dict], dict | None]
     refusal: str
     label: str
@@ -54,15 +54,14 @@ def _capture_loadflow(token: dict) -> dict | None:
     return out if isinstance(out, dict) and out.get('status') == 'ok' else None
 
 
-# The keys get_results adds about the CURRENT inputs (LC-12): never kept, since
-# a past run's answer must not carry today's freshness.
-FRESHNESS_KEYS = frozenset({'inputs_changed_since_solve', 'results_current', 'freshness_note'})
+SUMMARY_SECTION = 'results_summary'
 SUMMARY_KINDS = ('statistics', 'cost_breakdown')
 
 
 def _capture_summary(token: dict) -> dict | None:
-    """The Summary tab's two reads, exactly as get_results answers them, only
-    while they describe this run's own optimal solve of its inputs."""
+    """The Summary tab's two reads as the results API serves them (the route's
+    own payload, so nothing the chat layer adds about the current inputs is
+    kept), only while they describe this run's own optimal solve."""
     from services import chat_tools
     from services.workflow_tools import solve_freshness
 
@@ -70,11 +69,11 @@ def _capture_summary(token: dict) -> dict | None:
         return None
     out = {}
     for kind in SUMMARY_KINDS:
-        payload = chat_tools.get_results(result_kind=kind)
+        payload = chat_tools._payload_or_no_data(
+            kind, chat_tools._resolve_results_handler(kind)(), chat_tools._RESULTS_NO_DATA_MESSAGE)
         if isinstance(payload, dict):
             if payload.get('status') == 'no_data' or payload.get('available') is False:
                 return None
-            payload = {k: v for k, v in payload.items() if k not in FRESHNESS_KEYS}
         elif not isinstance(payload, list) or not payload:
             return None
         out[kind] = payload
@@ -82,9 +81,9 @@ def _capture_summary(token: dict) -> dict | None:
 
 
 ADAPTERS: tuple[Retained, ...] = (
-    Retained('loadflow', 'loadflow', _capture_loadflow,
+    Retained('loadflow', _capture_loadflow,
              'historical_loadflow_unavailable', 'load flow'),
-    Retained('results_summary', 'summary', _capture_summary,
+    Retained(SUMMARY_SECTION, _capture_summary,
              'historical_results_unavailable', 'summary results'),
 )
 

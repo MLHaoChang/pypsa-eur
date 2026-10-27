@@ -156,13 +156,15 @@ Rebaselined on master `926b07d6d`. Branch `claude/lc03-retained-summary`.
   fails, refuses or exceeds `MAX_SECTION_BYTES` (an oversized section used to
   refuse the whole manifest) with `<section>_not_captured`. `historical` and
   `run_binding` are the load-flow code moved, now shared.
-- Load flow ported onto it unchanged (its tests pass untouched, bar the
-  registry pin).
+- Load flow ported onto it; its reads are unchanged (its tests pass, bar the
+  registry pin). One behaviour change: an oversized load-flow section is now
+  dropped with its warning instead of refusing the whole manifest.
 - Summary family: section `results_summary` keeps `get_results`
-  `statistics` and `cost_breakdown` exactly as they answered at completion,
-  minus today's freshness keys, and only while `results_current` is true.
-  `get_results(result_kind, run_id)` answers the run: current read for the
-  current run, the kept section for an older one, typed refusal otherwise;
+  `statistics` and `cost_breakdown` as the results API served them at
+  completion (the route payload, so no chat-layer current pointers), only
+  while `results_current` is true. `get_results(result_kind, run_id)`
+  answers the run: the current read when it is the current run and
+  `results_current` holds, else the kept section, typed refusal otherwise;
   other kinds refuse `historical_scope_mismatch` with `kept_kinds`.
 - RED: `tests/test_retained_summary.py` (oj-grid solved at Gas 50 then 60;
   hand oracle opex = 50 or 60 x sum(90 - 80 pu_t)). On master `get_results`
@@ -179,6 +181,15 @@ Kept, with reasons:
 - A network whose summary exceeds 16 KB keeps no summary section (warned),
   rather than a trimmed one that would not match the read.
 
-Remaining gates: the other families (capacity, dispatch, prices, emissions)
+Self-review (mp-code-review) fixed: current-run answer also gated on
+`results_current`; capture from the route payload (structural allow-list,
+API parity test); one section constant; `Retained.view_id` dropped (tests
+hold the registry and the adapters equal); catalogue says which args
+`run_id` ignores. Kept: a checked turn refuses `get_results`, so historical
+figures never reach checked publication (LC-T19 unchanged); "offer to
+re-run" re-solves the current inputs and restores nothing.
+
+Remaining gates: LC-T08 ACL recheck at navigation and download for past-run
+sections (read is rechecked); the other families (capacity, dispatch, prices, emissions)
 one adapter per PR, which LC-21's chapters read; UI/export parity for past
 runs; LC-T09/T10 browser cases for historical views.

@@ -635,6 +635,8 @@ def _input_fingerprint(ctx: Any) -> str | None:
 
 def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
     """Publish the terminal manifest once the solver state is terminal; else do nothing."""
+    from services import retained_results
+
     if not token:
         return None
     with ctx.solver_state_lock:
@@ -675,20 +677,17 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
         live = _input_fingerprint(ctx)
         solved = (getattr(ctx.network, 'meta', None) or {}).get('assistant_solve_input_fingerprint')
         fingerprint = solved or live
-        from services import retained_results
-
+        # LC-03: each family's retained section (retained_results), read
+        # while this run's results are the current ones. An edit landing
+        # before or during the capture drops them all.
+        missed = [a.section for a in retained_results.ADAPTERS]
         if solved is not None and live != solved:
             warnings.append('inputs_changed_before_publish')
-            missed = [a.section for a in retained_results.ADAPTERS]
         else:
-            # LC-03: each family's retained section (retained_results), read
-            # while this run's results are the current ones. An edit landing
-            # during the capture drops them all.
-            kept, missed = retained_results.capture(ctx, token)
+            kept, not_kept = retained_results.capture(ctx, token)
             if _input_fingerprint(ctx) == fingerprint:
                 sections.update(kept)
-            else:
-                missed = [a.section for a in retained_results.ADAPTERS]
+                missed = not_kept
         warnings.extend(f'{name}_not_captured' for name in missed)
     try:
         return publish_run(

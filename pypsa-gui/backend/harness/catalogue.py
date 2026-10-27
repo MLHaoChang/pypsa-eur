@@ -476,7 +476,7 @@ TOOLS: list[dict[str, Any]] = [
         "any other run answers from the results kept when it finished (scope "
         "historical; the Results tabs still show the current results), or "
         "unavailable for a run without them. Never quote current results for "
-        "another run. "
+        "another run. With run_id, source, detail, offset and limit are ignored. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},

@@ -53,7 +53,7 @@ def test_an_older_run_answers_from_its_own_kept_results(repriced):
     assert _gas(stats['data'])['Supply'] == pytest.approx(GAS_MWH, rel=1e-6)
     assert _gas(stats['data'])['Operational Expenditure'] == pytest.approx(50 * GAS_MWH, rel=1e-6)
     # Today's freshness never rides a past run's answer.
-    assert not set(old['data']) & retained_results.FRESHNESS_KEYS
+    assert not set(old['data']) & {'inputs_changed_since_solve', 'results_current', 'freshness_note'}
 
 
 def test_the_newest_run_is_read_as_current(repriced):
@@ -63,16 +63,24 @@ def test_the_newest_run_is_read_as_current(repriced):
     assert latest['data']['opex'] == pytest.approx(60 * GAS_MWH, rel=1e-6)
 
 
-def test_the_kept_section_is_the_read_at_completion(repriced):
-    """API/chat parity: the section is what get_results answered for that run."""
+def test_the_kept_section_is_the_api_read_at_completion(repriced, client):
+    """API/chat parity: the section is what the results API served for that run."""
     detail = run_evidence.get_run_evidence(repriced['newest']['run_id'])
     assert {'name': 'results_summary', 'available': True} in detail['sections']
     assert {'name': 'loadflow', 'available': True} in detail['sections']
     kept = run_evidence.get_run_evidence(repriced['newest']['run_id'], 'results_summary')['data']
-    assert kept['statistics'] == chat_tools.get_results(result_kind='statistics')
-    live = chat_tools.get_results(result_kind='cost_breakdown')
-    assert kept['cost_breakdown'] == {k: v for k, v in live.items()
-                                      if k not in retained_results.FRESHNESS_KEYS}
+    for kind in retained_results.SUMMARY_KINDS:
+        assert kept[kind] == client.get(f'/api/results/{kind}').json()
+
+
+def test_a_current_run_whose_results_are_not_current_answers_from_its_section(repriced, monkeypatch):
+    from services import workflow_tools
+
+    monkeypatch.setattr(workflow_tools, 'solve_freshness',
+                        lambda ctx=None: {'inputs_changed_since_solve': False, 'results_current': False})
+    out = chat_tools.get_results(result_kind='cost_breakdown', run_id=repriced['newest']['run_id'])
+    assert out['scope'] == 'historical' and out['run']['is_current'] is False
+    assert out['data']['opex'] == pytest.approx(60 * GAS_MWH, rel=1e-6)
 
 
 def test_a_legacy_run_refuses_with_its_id(repriced):
@@ -104,8 +112,6 @@ def test_a_corrupt_section_refuses_with_the_run_id(repriced):
 
 
 def test_the_registry_declares_every_family_it_keeps():
-    for a in retained_results.ADAPTERS:
-        assert rv.view(a.view_id).historical_section == a.section
     assert ({v.historical_section for v in rv.RESULT_VIEWS if v.historical_section}
             == {a.section for a in retained_results.ADAPTERS})
 
