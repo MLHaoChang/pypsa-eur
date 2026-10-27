@@ -1405,7 +1405,7 @@ def _flow_scope_preview(args: dict) -> list[dict]:
         if card == "group":
             label = flow_scope.CARD_BY_ID[option].label
         else:
-            label = f"{flow_scope.CARD_BY_ID[card].label} › {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
+            label = f"{flow_scope.CARD_BY_ID[card].label} \u00b7 {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
         row = _settings_row("Scope", key, label, before.get(key, False), after.get(key, False), says_name=label)
         row["words"] = {"old": "Included" if row["old"] else "Not included",
                         "new": "Included" if row["new"] else "Not included"}

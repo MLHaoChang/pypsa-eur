@@ -352,3 +352,11 @@ it('a long card keeps its Guided headline short and the table lists every row', 
   expect(words.split('; ')).toHaveLength(HEADLINE_CAP + 1)
   expect(words.endsWith('; and 5 more changes')).toBe(true)
 })
+
+it('a card one line over the cap shows every line rather than "and 1 more"', () => {
+  const rows = Array.from({ length: HEADLINE_CAP + 1 }, (_, i) => ({ component_class: 'Settings', name: 'Study',
+    field: `f${i}`, label: `Field ${i}`, old: null, new: i, unit: '', role: 'typed' as const }))
+  const words = editCardWords({ rows, sets: [] } as unknown as EditCard)
+  expect(words.split('; ')).toHaveLength(HEADLINE_CAP + 1)
+  expect(words).not.toContain('more')
+})

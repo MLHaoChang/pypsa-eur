@@ -39,6 +39,7 @@ def test_flow_scope_shows_the_changed_option_old_to_new(client, api_project):
     trial, card = _toggle(name, chat_tools.get_project_flow_scope(name)["scope"])
     assert card["complete"] and card["kind"] == "settings_edit"
     assert [(r["old"], r["new"]) for r in card["rows"]] == [(True, False)]
+    assert "\u203a" not in card["rows"][0]["label"] and " \u00b7 " in card["rows"][0]["label"]  # data, not a link
     assert "Included \u2192 Not included" in card["says"]
     args = {"name": name, "scope": trial}
     chat_tools.update_project_flow_scope(name, trial)
