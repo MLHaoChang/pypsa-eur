@@ -385,7 +385,7 @@ def test_the_flow_states_at_create_hold_spec_8_2(client, tmp_projects_dir):
     assert loads["summary"] == "Generation-only: export through the POI in section 3"
     assert loads["required"] is False
     # No reliability study for a generation-only site; the optimisation verdict is the server's.
-    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
     assert body["verdicts"]["study"] is None
     assert body["run_ready"] is True
     assert body["run_ready"] == client.post("/api/simulation/preflight").json()["ok"]
