@@ -1,7 +1,6 @@
 # 19 — External tools over MCP: the harness as an MCP client
 
-Status: ready-for-agent (spec decided 2026-10-14: `../mcp-spec.md` Part A, build step 2; step 1, the tier fallback, merged as PR #220)
-Progress: mcp_client.py slice 1 on master; slice 2 settings routes, panel section, PYPSA_GUI_MCP_KEY managed-key not found
+Status: done (slice 1 on master; slice 2 merged as PR #725; the last two A.8 tests 2026-10-27)
 Type: research
 Blocked by: 08 (done), the MCP spec (done), PR #220 (done)
 
@@ -77,3 +76,11 @@ the gate and the tools payload, without the SDK (spec A.8a says why and what
 differs from A.4: no `TOOL_ROUTES` sentinel, external tools only in the `all`
 toolset, `find_capabilities` unchanged). Slice 2: the settings routes and panel
 section, the `PYPSA_GUI_MCP_KEY__` family in `is_managed_key`, the parity probe.
+
+2026-10-27 (closed): both slices are on master (slice 2 as PR #725). Two
+A.8 backend items had no test; `tests/test_harness_mcp_client.py` now pins
+them: a checked turn refuses an external tool with `capability_unsupported`
+and the server sees no `tools/call`; an oversized external result is spilled
+behind a `read_result` locator inside the untrusted fence. No code change was
+needed. Left out on purpose (A.8a): the Python MCP SDK; the hand-written
+client stays until its footprint is worth taking.
