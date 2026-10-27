@@ -16,6 +16,12 @@ Post each verdict as a PR comment, with the attribution footer: `UX OK @<full sh
 - Separators: "›" (U+203A) only for links that go somewhere; "·" separates data; a colon in sentences. Disabled reasons are visible text.
 - One entry point per feature, one bulk action, no duplicate buttons (owner decision UX-flow).
 - A UI PR needs screenshots of each state, in Guided and Expert.
+- No Python-repr quotes (`{x!r}`, `Line 'L1'`) in user-visible text, refusals and chat tool results included: plain words, or curly quotes “…”.
+- A colon, not an em dash, joins clauses in a sentence, refusals included.
+- Freshness wording is "out of date" (as `ResultState` says), never "stale".
+- Card labels reuse the owning panel's own word map (for example `FIELD_WORDS`, `CARD_GROUPS`), with a parity test that fails when the two drift.
+- Guided edit cards cap the headline at 4 lines (`HEADLINE_CAP`, #784), and show all lines when the cap would hide only one.
+- A background run never jumps to another panel on its own when it finishes; offer a "›" link through `withReturnFrom` instead.
 
 ## Master merges
 
