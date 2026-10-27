@@ -1332,12 +1332,6 @@ def _settings_row(name: str, field: str, label: str, old, new, unit: str = "", *
     return row
 
 
-def _leaf_rows(name: str, prefix: str, old: dict, new: dict, label) -> list[dict]:
-    """One row per top-level key whose stored value differs."""
-    return [_settings_row(name, f"{prefix}{key}", label(key), old.get(key), new.get(key))
-            for key in dict.fromkeys([*old, *new]) if not _same(old.get(key), new.get(key))]
-
-
 def _project_name(args: dict) -> str:
     name = args.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -1383,8 +1377,10 @@ def _flow_scope_preview(args: dict) -> list[dict]:
             label = flow_scope.CARD_BY_ID[option].label
         else:
             label = f"{flow_scope.CARD_BY_ID[card].label} › {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
-        rows.append(_settings_row("Scope", key, label, before.get(key, False), after.get(key, False),
-                                  says_name=label))
+        row = _settings_row("Scope", key, label, before.get(key, False), after.get(key, False), says_name=label)
+        row["words"] = {"old": "Included" if row["old"] else "Not included",
+                        "new": "Included" if row["new"] else "Not included"}
+        rows.append(row)
     if not rows:
         _refuse("empty_edit", "This scope is already the project's scope.")
     return rows
@@ -1408,6 +1404,7 @@ def _stored_project_setting(args: dict):
     from services import chat_tools, project_registry, project_settings
 
     with chat_tools._acting() as (db, user):
+        project_registry.require_user(user)
         project = project_registry.resolve_project(db, user, _project_name(args))
         project_dir = project_registry.project_dir(project)
     try:
@@ -1424,8 +1421,10 @@ def _project_settings_preview(args: dict) -> list[dict]:
     flag = args.get("derive_lengths_from_geometry")
     if not isinstance(flag, bool):
         _refuse("invalid_edit_value", "Derive lengths from geometry takes true or false.")
-    return [_settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry",
-                          _stored_project_setting(args), flag)]
+    old = _stored_project_setting(args)
+    row = _settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry", old, flag)
+    row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if flag else "Off"}
+    return [row]
 
 
 def _project_settings_readback(args: dict, rows: list[dict]) -> list[Any]:
@@ -1445,8 +1444,13 @@ _SCENARIO_FIELDS = {"description": ("scenario_description", "Scenario descriptio
 def _stored_scenario(args: dict) -> dict:
     from services import chat_tools, project_registry
 
+    from services import project_acl
+
     with chat_tools._acting() as (db, user):
+        project_registry.require_user(user)
         project = project_registry.resolve_project(db, user, _project_name(args))
+        if not project_acl.can_delete_project(db, user, project):  # the handler's own check
+            _refuse("forbidden", f"You do not have permission to edit '{project.name}'", 403)
         return {key: getattr(project, column) for key, (column, _) in _SCENARIO_FIELDS.items()}
 
 
@@ -1475,30 +1479,61 @@ register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_
 
 # update_decision_study: the stored study's name, intake and settings.
 
+STUDY_LEAF_CAP = 12  # intake keys one study card shows; the rest become one summary row
+_SECRET_KEY = ("token", "secret", "password", "api_key", "apikey", "credential")
+
+
 def _study_record(args: dict) -> dict:
-    from routers import studies
     from services import chat_tools
+    from services.study import store
 
     project = chat_tools._authorized_project(args.get("project"))
     study_id = args.get("study_id")
     if not isinstance(study_id, str):
         _refuse("empty_edit", "Name the study to edit.")
-    return studies._load(project, study_id).model_dump(mode="json", by_alias=True)
+    try:
+        return store.load_study(project.directory, study_id).model_dump(mode="json", by_alias=True)
+    except store.StudyNotFound:
+        _refuse("study_not_found", "Study not found.", 404)
+    except store.StudyUnreadable:
+        _refuse("study_unreadable", "The study record on disk cannot be read.", 500)
+
+
+def _study_cell(key: str, value):
+    """A study value as a card cell: a secret-like key only says whether it is set; a list or
+    object is summarised, never dumped."""
+    if any(word in key.lower() for word in _SECRET_KEY):
+        return None if value is None else "set"
+    if isinstance(value, list):
+        return f"{len(value)} items"
+    if isinstance(value, dict):
+        return f"{len(value)} fields"
+    return _setting(value)
+
+
+def _study_row(name: str, field: str, label: str, old, new) -> dict:
+    row = _settings_row(name, field, label, None, None)
+    row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
+    return row
 
 
 def _decision_study_preview(args: dict) -> list[dict]:
     old = _study_record(args)
     rows = []
     if args.get("name") is not None:
-        rows.append(_settings_row("Study", "name", "Study name", old.get("name"), args["name"]))
+        rows.append(_study_row("Study", "name", "Study name", old.get("name"), args["name"]))
     intake = args.get("intake")
     if isinstance(intake, dict):
-        rows += _leaf_rows("Study intake", "intake.", old.get("intake") or {}, {**(old.get("intake") or {}), **intake},
-                           lambda key: f"Intake › {key}")
+        stored = old.get("intake") or {}
+        changed = [k for k in intake if not _same(stored.get(k), intake[k])]
+        rows += [_study_row("Study intake", f"intake.{k}", f"Intake \u203a {k}", stored.get(k), intake[k])
+                 for k in changed[:STUDY_LEAF_CAP]]
+        if len(changed) > STUDY_LEAF_CAP:
+            rows.append(_note("", "", "intake", f"{len(changed) - STUDY_LEAF_CAP} more intake answers change."))
     settings = args.get("settings")
     if isinstance(settings, dict):
-        rows += [_settings_row("Study settings", f"settings.{key}", f"Study {key.replace('_', ' ')}",
-                               old.get(key), value)
+        rows += [_study_row("Study settings", f"settings.{key}", f"Study {key.replace('_', ' ')}",
+                            old.get(key), value)
                  for key, value in settings.items() if value is not None]
     if not rows:
         _refuse("empty_edit", "Name a study field to change.")
@@ -1509,9 +1544,12 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
     record = _study_record(args)
     out = []
     for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+            continue
         head, _, tail = row["field"].partition(".")
-        out.append(_setting((record.get("intake") or {}).get(tail) if head == "intake"
-                            else record.get(tail or head)))
+        value = (record.get("intake") or {}).get(tail) if head == "intake" else record.get(tail or head)
+        out.append(_study_cell(row["field"], value))
     return out
 
 

@@ -16,6 +16,12 @@ def studies_on(monkeypatch):
     yield from enable_studies(monkeypatch)
 
 
+@pytest.fixture
+def outsider(second_identity):
+    chat_tools.set_acting_user(second_identity["user_id"])
+    yield
+
+
 def _cells(card):
     return [(r["field"], r["old"], r["new"]) for r in card["rows"]]
 
@@ -106,3 +112,63 @@ def test_decision_study_shows_name_intake_and_settings_old_to_new(client, api_pr
     with pytest.raises(HTTPException) as empty:
         edit_card.preview("update_decision_study", {"project": project, "study_id": study_id})
     assert empty.value.detail["error_kind"] == "empty_edit"
+
+
+# ── GK B conditions: previews write nothing, ACL first, verified readback, caps ──
+
+def test_previews_write_nothing(client, api_project, project_storage_dir, studies_on):
+    from tests.study_s4_support import dir_hash
+
+    name = api_project("card-nowrite")
+    source = api_project("card-nowrite-src")
+    study_id, study_project = _start(source, "card-nowrite-base")
+    scope = chat_tools.get_project_flow_scope(name)["scope"]
+    chat_tools.update_project_settings(name, True)
+    before = {n: dir_hash(project_storage_dir(n)) for n in (name, study_project)}
+    edit_card.preview("update_project_settings", {"name": name, "derive_lengths_from_geometry": False})
+    edit_card.preview("update_project_scenario_metadata", {"name": name, "description": "x"})
+    _toggle(name, scope)
+    edit_card.preview("update_decision_study", {"project": study_project, "study_id": study_id, "name": "Other"})
+    assert {n: dir_hash(project_storage_dir(n)) for n in before} == before
+
+
+def test_an_outsider_gets_the_handlers_refusal_not_old_values(client, api_project, outsider, studies_on):
+    name = api_project("card-acl")
+    for tool, args in (("update_project_settings", {"name": name, "derive_lengths_from_geometry": True}),
+                       ("update_project_scenario_metadata", {"name": name, "description": "x"}),
+                       ("update_decision_study", {"project": name, "study_id": "s1", "name": "x"})):
+        with pytest.raises(HTTPException) as exc:
+            edit_card.preview(tool, args)
+        assert exc.value.status_code in (403, 404), tool
+
+
+def test_readback_after_the_real_call_equals_new(client, api_project, studies_on):
+    name = api_project("card-readback")
+    for tool, args, call in (
+        ("update_project_settings", {"name": name, "derive_lengths_from_geometry": True},
+         lambda: chat_tools.update_project_settings(name, True)),
+        ("update_project_scenario_metadata", {"name": name, "description": "warm", "scenario_type": "stress"},
+         lambda: chat_tools.update_project_scenario_metadata(name, description="warm", scenario_type="stress")),
+    ):
+        card = edit_card.preview(tool, args)
+        call()
+        assert edit_card.ADAPTERS[tool].readback(args, card["rows"]) == [r["new"] for r in card["rows"]], tool
+    source = api_project("card-readback-src")
+    study_id, project = _start(source, "card-readback-base")
+    args = {"project": project, "study_id": study_id, "name": "Renamed", "settings": {"currency_year": 2030}}
+    card = edit_card.preview("update_decision_study", args)
+    chat_tools.update_decision_study(project, study_id, name="Renamed", settings={"currency_year": 2030})
+    assert edit_card.ADAPTERS["update_decision_study"].readback(args, card["rows"]) == [r["new"] for r in card["rows"]]
+
+
+def test_study_intake_is_capped_summarised_and_redacted(client, api_project, studies_on):
+    source = api_project("card-cap")
+    study_id, project = _start(source, "card-cap-base")
+    intake = {f"k{i}": [1, 2, 3] for i in range(edit_card.STUDY_LEAF_CAP + 3)}
+    intake["api_token"] = "hunter2"
+    card = edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "intake": intake})
+    shown = [r for r in card["rows"] if r["role"] == "typed"]
+    assert len(shown) == edit_card.STUDY_LEAF_CAP
+    assert all(r["new"] in ("3 items", "set") for r in shown)
+    assert "hunter2" not in repr(card)
+    assert any(r["role"] == "note" for r in card["rows"])
