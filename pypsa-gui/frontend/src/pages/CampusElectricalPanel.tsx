@@ -722,6 +722,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
         )}
       </PageSection>}
 
+      {grid && <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />}
+
       {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
 
       {design && <>
@@ -769,8 +771,6 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </table>
         </TableScroll>
       </PageSection>
-
-      <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />
 
       <PageSection title="Short circuit" hint="IEC 60909, every installed unit energised, per period">
         <TableScroll>
