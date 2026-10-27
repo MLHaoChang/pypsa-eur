@@ -125,6 +125,18 @@ def _enable_studies() -> None:
     studies_router.require_decision_studies_enabled = lambda: None
 
 
+def _pin_wp0_pack() -> None:
+    """
+    The study seeds from the WP0 pack (2026-10-05, 2020 money): every figure is
+    judged against the frozen WP0 record (§4), as `tests/golden/site_fixture.py`
+    is (money-year 01 rider 3). The live pin is run end to end by
+    `test_library_defaults_pack_money_year_2025`.
+    """
+    from services.study import library as L
+
+    L.PACK_VERSION = L.WP0_PACK_VERSION
+
+
 def _meter_csv() -> str:
     """The site fixture's evening-spike shape, as a kW meter export."""
     idx = pd.date_range(f"{YEAR}-01-01", periods=8760, freq="h")
@@ -749,6 +761,7 @@ def _judge() -> None:
 def main_() -> int:
     t0 = time.monotonic()
     _enable_studies()
+    _pin_wp0_pack()
     print("QA: the guided decision study, over HTTP with a real LP\n")
     cap = _user_projects_at_the_cap()
     user_before = _hashes()
