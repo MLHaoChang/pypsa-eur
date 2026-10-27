@@ -80,7 +80,8 @@ A profile may carry these optional keys:
     of the unit's own rated active power (``p_mw``), and in the generator
     convention: a ``q`` is positive when the unit delivers reactive power
     (over-excited) and negative when it absorbs. ``q_capability_pq`` is
-    the site's band at the connection point, in the site's convention.
+    the site's band at the connection point, in the site's convention (a
+    ``q`` positive when the grid supplies the site, per unit of ``p_ref``).
     ``campus_reactive.ibr_q_curve`` checks it.
 ``voltage_deadband_pct``
     The voltage-control deadband, % of nominal voltage either side, inside

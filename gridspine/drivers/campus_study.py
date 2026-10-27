@@ -760,7 +760,7 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
     if curve is not None:
         _write_text_atomic(run_dir / IBR_Q_CURVE_CSV, curve.to_csv(index=False))
     else:
-        (run_dir / IBR_Q_CURVE_CSV).unlink(missing_ok=True)
+        (run_dir / IBR_Q_CURVE_CSV).unlink(missing_ok=True)          # an earlier profile's table
     reported = reported_requirements(code)
     _write_text_atomic(run_dir / REPORTED_REQUIREMENTS_JSON, json.dumps(reported, indent=2))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,

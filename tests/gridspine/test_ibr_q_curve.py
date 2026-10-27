@@ -56,6 +56,17 @@ def test_both_sides_of_the_band_are_checked():
     assert "absorb" in got[1.0]["detail"]
 
 
+def test_at_part_load_each_side_has_its_own_shortfall():
+    # At 0.5 pu BESS1 has 18.466 Mvar either way: delivering 1.0 pu (20 Mvar) is 1.53 short,
+    # absorbing 0.95 pu (19 Mvar) is 0.53 short; the row's shortfall is the larger.
+    got = rows(ibr_q_curve(campus(bess_s=21.0), with_curve([[0.0, -0.5, 0.5], [0.5, -0.95, 1.0],
+                                                             [1.0, -0.3, 0.3]])), "BESS1")
+    half = got[0.5]
+    assert half["status"] == "fail" and half["shortfall_mvar"] == pytest.approx(20.0 - 18.466, abs=1e-3)
+    assert "1.53 Mvar short to deliver and 0.53 Mvar short to absorb" in half["detail"]
+    assert got[1.0]["status"] == "pass"
+
+
 def test_only_breakpoints_within_0_to_1_pu_and_rated_p_inside_the_curve_are_checked():
     got = rows(ibr_q_curve(campus(), with_curve([[0.2, -0.1, 0.1], [0.8, -0.2, 0.2], [1.2, -0.3, 0.3]])), "PV1")
     assert sorted(got) == [0.2, 0.8, 1.0]
