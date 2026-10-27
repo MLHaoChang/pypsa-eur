@@ -213,7 +213,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/projects/{name}/reports/evidence_hash'): 'Reports panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/versions/{version}'): 'Reports panel',
-    ('GET', '/api/projects/{name}/stress_profile_packs'): 'Projects page / Workspace panel',
     ('GET', '/api/projects/{name}/studies/'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/library'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/{study_id}'): 'Decision studies panel',
@@ -231,8 +230,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/results/process_uc_check'): 'Results panel',
     ('GET', '/api/results/process_view'): 'Results panel',
     ('GET', '/api/results/run-view'): 'Results panel',
-    ('GET', '/api/simulation/commercial/poc'): 'Simulation and commercial configuration panels',
-    ('GET', '/api/simulation/value_flows/designer'): 'Simulation and commercial configuration panels',
     ('PATCH', '/api/projects/{name}/scenario'): 'Projects page / Workspace panel',
     ('PATCH', '/api/projects/{name}/settings'): 'Projects page / Workspace panel',
     ('PATCH', '/api/projects/{name}/studies/{study_id}'): 'Decision studies panel',
@@ -253,8 +250,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('POST', '/api/projects/{name}/studies/preview'): 'Decision studies panel',
     ('POST', '/api/projects/{name}/studies/{study_id}/findings/tornado/abort'): 'Decision studies panel',
     ('POST', '/api/projects/{name}/studies/{study_id}/run/abort'): 'Decision studies panel',
-    ('POST', '/api/results/billing/preview'): 'Results panel',
-    ('POST', '/api/results/investment_case/abort'): 'Results panel',
     ('POST', '/api/simulation/queue/cancel_queued'): 'Solve queue panel',
     ('POST', '/api/simulation/queue/{job_id}/dismiss'): 'Solve queue panel',
     ('POST', '/api/simulation/queue/{job_id}/requeue'): 'Solve queue panel',
@@ -263,7 +258,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('PUT', '/api/projects/{name}/flow/scope'): 'Projects page / Workspace panel',
     ('PUT', '/api/projects/{name}/profiles/weather'): 'Time series panel',
     ('PUT', '/api/projects/{name}/worksheet'): 'Projects page / Workspace panel',
-    ('PUT', '/api/simulation/finance'): 'Simulation and commercial configuration panels',
 }
 _KNOWN_GAPS_CEILING = 70
 

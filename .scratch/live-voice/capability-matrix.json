@@ -4633,8 +4633,8 @@
       "backend_routes": 506,
       "gui_routes": 466,
       "limitation": 84,
-      "needs-tool": 102,
-      "tool": 280,
+      "needs-tool": 91,
+      "tool": 291,
       "unclassified": 0
     },
     "limitations_by_reason": {
@@ -4656,18 +4656,6 @@
         "GET /api/results/load_shape",
         "GET /api/results/loadflow-view",
         "GET /api/results/run-view"
-      ],
-      "economics-investment": [
-        "GET /api/library/series",
-        "GET /api/library/series/{name}",
-        "GET /api/simulation/commercial/poc",
-        "GET /api/simulation/value_flows/designer",
-        "POST /api/library/meter_data",
-        "POST /api/library/series/upload",
-        "POST /api/results/billing/preview",
-        "POST /api/results/investment_case/abort",
-        "PUT /api/library/items/{kind}/{name}",
-        "PUT /api/simulation/finance"
       ],
       "experiments": [
         "DELETE /api/projects/{name}/studies/{study_id}",
@@ -4743,9 +4731,6 @@
         "PATCH /api/projects/{name}/scenario",
         "PATCH /api/projects/{name}/settings",
         "PUT /api/projects/{name}/flow/scope"
-      ],
-      "reliability-adequacy": [
-        "GET /api/projects/{name}/stress_profile_packs"
       ],
       "reports": [
         "GET /api/projects/{name}/reports/capabilities",
@@ -4887,12 +4872,6 @@
         "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
-        "id": "route-parity:needs-tool:economics-investment",
-        "issue": "08",
-        "family": "economics-investment",
-        "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:experiments",
         "issue": "08",
         "family": "experiments",
@@ -4921,12 +4900,6 @@
         "issue": "08",
         "family": "projects",
         "summary": "5 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:reliability-adequacy",
-        "issue": "08",
-        "family": "reliability-adequacy",
-        "summary": "1 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
         "id": "route-parity:needs-tool:reports",

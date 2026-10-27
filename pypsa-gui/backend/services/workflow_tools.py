@@ -463,8 +463,13 @@ def _network_input_fingerprint(ctx, *, exact=False):
                  n.investment_period_weightings.to_json()]
     # The goal fields the LP never reads stay out (W3b-R), so a saved goal
     # leaves this fingerprint, and every one computed before it, unchanged.
-    parts.append(json.dumps(goal_free_config(ctx.solver_state["solver_config"]),
-                            sort_keys=True, default=str))
+    config = goal_free_config(ctx.solver_state["solver_config"])
+    # The finance inputs never change a design (IC P4 WP4.6b, as the adequacy
+    # report's `_config_hash`): a finance edit leaves this fingerprint. Nulled,
+    # not popped, so a config without finance hashes byte-for-byte as before.
+    if config.get("finance") is not None:
+        config = {**config, "finance": None}
+    parts.append(json.dumps(config, sort_keys=True, default=str))
     for component in n.components:
         defaults = component.defaults
         columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns]

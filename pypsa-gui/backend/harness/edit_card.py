@@ -53,6 +53,8 @@ SETTINGS_EDITS = frozenset({
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
     "apply_commercial_document_values",
+    # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
+    "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
