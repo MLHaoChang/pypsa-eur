@@ -72,6 +72,11 @@ SETTINGS_EDITS = frozenset({
 # Destructive- and execution-tier tools that show a content card too (owner decision
 # GRIDCODE-CHAT-1: panel-only actions get chat tools behind a confirmation card). Their
 # adapters are in `harness/campus_cards.py`; tests/test_edit_card.py pins the tiers.
+# Through `is_edit` they reach: the turn loop's Guided forcing and card preview
+# (harness/loop.py), `require_current` and `receipt`. Their rows are `Settings`
+# rows, so no section state is read; `_results_stale` reports the network's
+# solve state, which none of them changes. A checked (assurance) turn builds no
+# card and `Turn.tool_guard` refuses them there.
 CARDED_ACTIONS = frozenset({
     "campus_start_milp", "campus_confirm_grid_code_limit", "campus_publish_grid_code",
     "campus_delete_grid_code_draft", "campus_delete_published_grid_code", "campus_delete_grid_code_document",
@@ -138,6 +143,9 @@ class Adapter:
     binding: Callable[[dict], dict] | None = None
     # The set lines a card shows above their rows (LC-16 slice B), in its digest.
     sets: Callable[[dict], list[dict]] | None = None
+    # The card's one-line `says` from the args and rows, for an action whose effect an
+    # old → new phrase does not state (a delete, a publish, a started job).
+    says: Callable[[dict, list[dict]], str] | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -245,6 +253,8 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     if sets:
         card["sets"] = sets
         card["says"] = _says(rows, sets)
+    if adapter.says is not None:
+        card["says"] = adapter.says(args or {}, rows)
     if adapter.binding is not None:
         card["binding"] = adapter.binding(args or {})
     if not sections and adapter.section_id:
@@ -326,7 +336,15 @@ def _section_state(section_id: str) -> dict | None:
 
 def require_current(tool_name: str, args: dict, card: dict) -> None:
     """Refuse when the inputs moved since the card was shown."""
-    if preview(tool_name, args, with_state=False)["digest"] != card["digest"]:
+    try:
+        now = preview(tool_name, args, with_state=False)["digest"]
+    except HTTPException as exc:
+        # A whole-file write's base check (campus_cards.require_base) passed for the card; the
+        # file moving after it is this refusal, not a read the model must redo.
+        if not (isinstance(exc.detail, dict) and exc.detail.get("error_kind") == "file_changed_since_read"):
+            raise
+        now = None
+    if now != card["digest"]:
         _refuse("edit_preview_stale", "The values changed since the card was shown; nothing was applied. "
                 "Propose the edit again.", 409)
 

@@ -287,6 +287,23 @@ def test_an_oversized_stored_upload_gets_the_routes_refusal(uploads, monkeypatch
     assert exc.value.status_code == 413
 
 
+def test_oversized_gridspine_uploads_get_the_routes_shared_budget_refusal(uploads, monkeypatch):
+    """GK B condition f: both gridspine uploads read through the route's one UploadBudget."""
+    from routers import gridspine as gs_router
+    from services import upload_guard
+
+    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a: pytest.fail("never reached"))
+    monkeypatch.setattr(gs, "upload_readback", lambda *a: pytest.fail("never reached"))
+    monkeypatch.setattr(gs_router, "TABLE_MAX_BYTES", 10)  # each table fits alone, the pair does not
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.gridspine_upload_external_dispatch("Chat Hub", "d1", "l1")
+    assert exc.value.status_code == 413
+    monkeypatch.setattr(upload_guard, "_DEFAULT_MAX_UPLOAD_BYTES", 4)
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.gridspine_upload_readback("Chat Hub", 12, "b1")
+    assert exc.value.status_code == 413
+
+
 # ── the existing tools now matched to their routes ──────────────────────────
 
 
@@ -368,14 +385,16 @@ def test_save_campus_refuses_a_stale_base_and_its_card_shows_the_change(hub, mon
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text("a: 1\nb: 2\n")
     monkeypatch.setattr(ce, "save_campus", lambda *a: pytest.fail("a stale write never reaches the service"))
+    monkeypatch.setattr(ce, "check_campus_text", lambda text: __import__("yaml").safe_load(text))
     with pytest.raises(HTTPException) as exc:
         chat_tools.campus_save_campus("Chat Hub", "a: 1\nb: 3\n", base_sha256="0" * 64)
     assert exc.value.status_code == 409 and exc.value.detail["error_kind"] == "file_changed_since_read"
     base = campus_cards.sha256_text("a: 1\nb: 2\n")
     card = edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 1\nb: 3\n",
                                                     "base_sha256": base})
-    ((row,),) = [[r for r in card["rows"] if r["role"] == "typed"]]
+    row, sha = [r for r in card["rows"] if r["role"] == "typed"]
     assert (row["field"], row["old"], row["new"]) == ("b", 2, 3)
+    assert (sha["old"], sha["new"]) == (base, campus_cards.sha256_text("a: 1\nb: 3\n"))
     assert card["binding"] == {"sha256": base}
     with pytest.raises(HTTPException):
         edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 2\n"})  # no base
@@ -437,8 +456,12 @@ def test_the_publish_card_names_what_it_replaces_and_each_unconfirmed_limit(hub,
                                                                    "profile": {"title": "Old code"}})
     card = edit_card.preview("campus_publish_grid_code", {"project_id": "Chat Hub", "profile_id": "tso",
                                                            "allow_unconfirmed": True})
-    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    row, sha = [r for r in card["rows"] if r["role"] == "typed"]
     assert (row["old"], row["new"]) == ("Old code", "TSO code")
+    from harness.campus_cards import sha256_text
+
+    assert (sha["old"], sha["new"]) == (sha256_text("old: 1\n"), sha256_text(_shaped()["yaml"]))
+    assert card["says"] == "Publishes draft tso as grid code tso, replacing the published “Old code”."
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
     assert "Replaces the published profile" in notes and "q_range_demand is unconfirmed: it stays extracted" in notes
     assert set(card["binding"]) == {"draft_sha256", "published_sha256"}
@@ -489,3 +512,256 @@ def test_the_pdf_upload_reaches_the_service_with_its_media_type(uploads, monkeyp
     chat_tools.campus_upload_grid_code_document("Chat Hub", "p1", page_ranges="1-3")
     ((_, a, _k),) = calls
     assert a[1:] == (b"%PDF-1.7 grid code", "code.pdf", "application/pdf", "1-3")
+
+
+# ── receipts, stale cards and refusals at preview (GK B plan-delta conditions a–e) ──
+
+
+def _through_the_loop(tool, args, *, before_approval=None):
+    """One chat call through the turn loop, approved: (error kind or None, the
+    receipt the loop built, read where it is built: a long result spills)."""
+    from harness import edit_card
+    from services import chat_service
+
+    session = chat_service.ChatSession()
+    chat_tools.set_chat_session(session)
+    errors, receipts, built = [], [], edit_card.receipt
+    try:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(edit_card, "receipt", lambda *a, **k: receipts.append(built(*a, **k)) or receipts[-1])
+            for event, data in chat_service._dispatch_real_tool_call(
+                    session, {"id": "tu", "name": tool, "input": {**P, **args}}, []):
+                if event == "tool_pending_confirmation":
+                    if before_approval is not None:
+                        before_approval()
+                    session.record_decision(data["confirmation_token"], "approve")
+                elif event == "tool_error":
+                    errors.append(data)
+    finally:
+        chat_tools.set_chat_session(None)
+    if errors:
+        return errors[0]["error_kind"], None
+    (receipt,) = receipts
+    return None, receipt
+
+
+def _pdf() -> bytes:
+    import pypdf
+
+    w, buf = pypdf.PdfWriter(), io.BytesIO()
+    w.add_blank_page(width=200, height=200)
+    w.write(buf)
+    return buf.getvalue()
+
+
+@pytest.fixture
+def codes(hub):
+    """A draft `tso` whose first voltage band is extracted (confirmable), a
+    published `tso`, and one stored document."""
+    from services import campus_grid_code_service as gc
+
+    doc = gc.upload_document(hub, _pdf(), "code.pdf", "application/pdf")
+    gc.new_draft(hub, "tso", title="TSO code")
+    gc.publish(hub, "tso")  # the published profile differs from the draft below
+    profile = gc.get_draft(hub, "tso")["profile"]
+    profile["document"] = {"sha256": doc["id"], "filename": "code.pdf", "title": "TSO code"}
+    profile["voltage_bands"][0].update(source="extracted", page=1, quote="plus or minus ten percent")
+    gc.save_draft(hub, "tso", __import__("yaml").safe_dump(profile))
+    return {"project": hub, "document_id": doc["id"]}
+
+
+def _draft_file(project, pid="tso"):
+    from services import campus_grid_code_service as gc
+
+    return gc._drafts(project) / f"{pid}.yaml"
+
+
+def _published_file(project, pid="tso"):
+    from services import campus_grid_code_service as gc
+
+    return gc.codes_dir(project) / f"{pid}.yaml"
+
+
+def _grid_code_calls(codes):
+    from services import campus_grid_code_service as gc
+
+    text = gc.get_draft(codes["project"], "tso")["yaml"]
+    edited = text.replace("TSO code", "TSO code, edited")
+    return {
+        "campus_save_grid_code_draft": {"profile_id": "tso", "yaml": edited,
+                                        "base_sha256": __import__("harness.campus_cards").campus_cards.sha256_text(text)},
+        "campus_new_grid_code_draft": {"profile_id": "fresh", "title": "Fresh code"},
+        "campus_confirm_grid_code_limit": {"profile_id": "tso", "limit": "voltage_bands[0]"},
+        "campus_publish_grid_code": {"profile_id": "tso", "allow_unconfirmed": True},
+        "campus_delete_grid_code_draft": {"profile_id": "tso"},
+        "campus_delete_published_grid_code": {"profile_id": "tso"},
+        "campus_delete_grid_code_document": {"document_id": codes["document_id"]},
+    }
+
+
+GRID_CODE_TOOLS = ["campus_save_grid_code_draft", "campus_new_grid_code_draft", "campus_confirm_grid_code_limit",
+                   "campus_publish_grid_code", "campus_delete_grid_code_draft",
+                   "campus_delete_published_grid_code", "campus_delete_grid_code_document"]
+
+
+@pytest.mark.parametrize("tool", GRID_CODE_TOOLS)
+def test_each_grid_code_receipt_is_verified_by_reading_the_effect_back(codes, tool):
+    kind, receipt = _through_the_loop(tool, _grid_code_calls(codes)[tool])
+    assert kind is None and receipt["outcome"] == "verified", [r for r in receipt["rows"] if r["role"] != "note"]
+    assert [r for r in receipt["rows"] if r["role"] == "typed"]  # at least one row was read back
+    assert receipt["undo"]["available"] is False  # no undo for these; the card says so
+
+
+GRID_CODE_SERVICE = {"campus_save_grid_code_draft": "save_draft", "campus_new_grid_code_draft": "new_draft",
+                     "campus_confirm_grid_code_limit": "confirm", "campus_publish_grid_code": "publish",
+                     "campus_delete_grid_code_draft": "delete_draft",
+                     "campus_delete_published_grid_code": "delete_published",
+                     "campus_delete_grid_code_document": "delete_document"}
+
+
+@pytest.mark.parametrize("tool", GRID_CODE_TOOLS)
+def test_a_grid_code_call_whose_effect_is_missing_gets_an_uncertain_receipt(codes, monkeypatch, tool):
+    from services import campus_grid_code_service as gc
+
+    calls = _grid_code_calls(codes)
+    monkeypatch.setattr(gc, GRID_CODE_SERVICE[tool], lambda *a, **k: {})  # answers, writes nothing
+    kind, receipt = _through_the_loop(tool, calls[tool])
+    assert kind is None and receipt["outcome"] == "uncertain"
+
+
+def test_the_receipts_say_the_effect_in_words(codes):
+    from harness import edit_card
+
+    calls = _grid_code_calls(codes)
+    says = {tool: edit_card.preview(tool, {**P, **calls[tool]}, with_state=False)["says"] for tool in GRID_CODE_TOOLS}
+    assert says["campus_delete_grid_code_draft"] == ("Deletes the draft grid-code profile tso (“TSO code”); "
+                                                     "this cannot be undone.")
+    assert says["campus_delete_published_grid_code"].startswith("Deletes the published grid-code profile tso")
+    assert says["campus_delete_grid_code_document"] == "Deletes the grid-code document code.pdf; this cannot be undone."
+    assert says["campus_publish_grid_code"] == "Publishes draft tso as grid code tso, replacing the published “TSO code”."
+    assert says["campus_confirm_grid_code_limit"] == ("Marks limit voltage_bands[0] of draft tso as confirmed against "
+                                                      "its quoted page (source extracted → code).")
+    assert "None" not in " ".join(says.values())
+
+
+def _touch(path):
+    return lambda: path.write_text(path.read_text() + "# touched\n")  # same values, other bytes
+
+
+@pytest.mark.parametrize("tool, touched, service", [
+    ("campus_save_grid_code_draft", _draft_file, "save_draft"),
+    ("campus_confirm_grid_code_limit", _draft_file, "confirm"),
+    ("campus_publish_grid_code", _draft_file, "publish"),
+    ("campus_publish_grid_code", _published_file, "publish"),
+    ("campus_delete_grid_code_draft", _draft_file, "delete_draft"),
+    ("campus_delete_published_grid_code", _published_file, "delete_published"),
+])
+def test_a_file_moved_after_the_card_is_edit_preview_stale_and_nothing_is_written(codes, monkeypatch, tool,
+                                                                                  touched, service):
+    from services import campus_grid_code_service as gc
+
+    calls = _grid_code_calls(codes)
+    monkeypatch.setattr(gc, service, lambda *a, **k: pytest.fail("a stale card never reaches the service"))
+    kind, _ = _through_the_loop(tool, calls[tool], before_approval=_touch(touched(codes["project"])))
+    assert kind == "edit_preview_stale"
+
+
+def test_a_campus_file_moved_after_the_card_is_edit_preview_stale(hub, monkeypatch):
+    from harness.campus_cards import sha256_text
+
+    f = ce.campus_dir(hub) / ce.CAMPUS_FILE
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("a: 1\n")
+    monkeypatch.setattr(ce, "check_campus_text", lambda text: __import__("yaml").safe_load(text))
+    monkeypatch.setattr(ce, "save_campus", lambda *a: pytest.fail("a stale card never reaches the service"))
+    kind, _ = _through_the_loop("campus_save_campus", {"yaml": "a: 2\n", "base_sha256": sha256_text("a: 1\n")},
+                                before_approval=_touch(f))
+    assert kind == "edit_preview_stale"
+
+
+def test_save_campus_receipt_reads_the_stored_file_back(hub, monkeypatch):
+    from harness.campus_cards import sha256_text
+
+    f = ce.campus_dir(hub) / ce.CAMPUS_FILE
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("a: 1\n")
+    monkeypatch.setattr(ce, "check_campus_text", lambda text: __import__("yaml").safe_load(text))
+    monkeypatch.setattr(ce, "save_campus", lambda project, text: f.write_text(text) and {"campus_yaml": text})
+    kind, receipt = _through_the_loop("campus_save_campus", {"yaml": "a: 2\n", "base_sha256": sha256_text("a: 1\n")})
+    assert kind is None and receipt["outcome"] == "verified"
+    monkeypatch.setattr(ce, "save_campus", lambda project, text: {"campus_yaml": text})  # writes nothing
+    kind, receipt = _through_the_loop("campus_save_campus", {"yaml": "a: 3\n", "base_sha256": sha256_text("a: 2\n")})
+    assert kind is None and receipt["outcome"] == "uncertain"
+
+
+@pytest.mark.parametrize("tool, args", [
+    ("campus_save_grid_code_draft", {"profile_id": "tso", "yaml": "title: [unclosed\n"}),
+    ("campus_save_campus", {"yaml": "campus: [unclosed\n"}),
+])
+def test_malformed_yaml_gets_the_handlers_refusal_and_no_card(codes, tool, args):
+    from harness import campus_cards, edit_card
+
+    current = (_draft_file(codes["project"]) if tool == "campus_save_grid_code_draft"
+               else ce.campus_dir(codes["project"]) / ce.CAMPUS_FILE)
+    text = current.read_text() if current.is_file() else None
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview(tool, {**P, **args, "base_sha256": campus_cards.sha256_text(text)})
+    assert exc.value.status_code == 422 and "not valid YAML" in str(exc.value.detail)
+
+
+def test_the_extract_card_says_the_document_goes_to_the_extraction_provider(codes):
+    from harness import edit_card
+
+    card = edit_card.preview("campus_extract_grid_code", {**P, "document_id": codes["document_id"]})
+    notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
+    assert "Sends the document to the configured extraction provider" in notes and "one API call" in notes
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    assert (row["field"], row["new"]) == ("document", codes["document_id"])
+
+
+def _fake_milp_start(record_settings=None):
+    def start(project, settings):
+        s = {**ce.DEFAULTS, **{k: v for k, v in settings.items() if v is not None or k == "pf"}}
+        basis = ce.campus_dir(project) / ce.MILP_SUBDIR / ce.MILP_BASIS_FILE
+        basis.parent.mkdir(parents=True, exist_ok=True)
+        basis.write_text(__import__("json").dumps({"settings": {**s, **(record_settings or {})}, "inputs": {}}))
+        ce._MILP_JOBS[ce._milp_key(project)] = {"state": "running", "started_at": 1.0, "project": project.name}
+        return {"state": "running"}
+    return start
+
+
+def test_the_milp_receipt_reads_the_new_job_and_its_recorded_settings(hub, monkeypatch):
+    monkeypatch.setattr(ce, "_MILP_JOBS", {})
+    monkeypatch.setattr(ce, "start_milp_job", _fake_milp_start())
+    kind, receipt = _through_the_loop("campus_start_milp", {"k": 4})
+    assert kind is None and receipt["outcome"] == "verified", [r for r in receipt["rows"] if r["role"] != "note"]
+    job = next(r for r in receipt["rows"] if r["field"] == "job")
+    assert job["readback"] == "running"
+    assert receipt["says"].startswith("Starts the campus joint optimisation in the background (k 4")
+
+
+@pytest.mark.parametrize("fake", ["other_settings", "no_new_job"])
+def test_a_milp_start_whose_job_or_settings_differ_is_uncertain(hub, monkeypatch, fake):
+    monkeypatch.setattr(ce, "_MILP_JOBS", {})
+    if fake == "other_settings":
+        monkeypatch.setattr(ce, "start_milp_job", _fake_milp_start({"k": 9}))
+    else:
+        monkeypatch.setattr(ce, "start_milp_job", lambda project, settings: {"state": "running"})
+    kind, receipt = _through_the_loop("campus_start_milp", {"k": 4})
+    assert kind is None and receipt["outcome"] == "uncertain"
+
+
+# ── CARDED_ACTIONS widens is_edit (GK B condition b) ────────────────────────
+
+
+def test_no_carded_action_is_a_read_and_a_checked_turn_refuses_each():
+    from types import SimpleNamespace
+
+    from harness import assurance, edit_card
+
+    turn = assurance.Turn(SimpleNamespace(owner_user_id="owner", usage_acc={}),
+                          SimpleNamespace(project_uuid="00000000-0000-0000-0000-000000000000"))
+    for tool in edit_card.CARDED_ACTIONS:
+        assert catalogue.safety_tier_for(tool) != "read", tool
+        assert edit_card.is_edit(tool) and tool in edit_card.ADAPTERS, tool
+        assert tool not in assurance.CHECKED_TOOLS and turn.tool_guard(tool, {**P}) is False, tool

@@ -1061,6 +1061,14 @@ def draft(project, overwrite: bool = False) -> dict:
 def save_campus(project, text: str) -> dict:
     """Validate the description by building it, then keep it."""
     require_capacity_expansion(project)
+    check_campus_text(text)
+    _write_campus(project, text)
+    return {"campus_yaml": text}
+
+
+def check_campus_text(text: str) -> dict:
+    """``save_campus``'s checks without the write (the chat card runs them at
+    preview): the parsed description, or the refusal ``save_campus`` gives."""
     if len(text.encode()) > MAX_CAMPUS_BYTES:
         raise HTTPException(status_code=413, detail=f"the campus file is larger than {MAX_CAMPUS_BYTES} bytes")
     try:
@@ -1071,8 +1079,7 @@ def save_campus(project, text: str) -> dict:
         cs.check_campus(spec)
     except ContractError as exc:
         raise _unprocessable(exc)
-    _write_campus(project, text)
-    return {"campus_yaml": text}
+    return spec
 
 
 def _write_campus(project, text: str) -> None:

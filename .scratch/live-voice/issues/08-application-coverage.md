@@ -73,3 +73,9 @@ campus file and grid-code drafts are whole-file writes that refuse a stale read
 (`file_changed_since_read`). route-parity.json: 0 needs-tool of 466 GUI routes. Tests:
 `tests/test_lv08_bcampus_tools.py`, `tests/test_assistant_route_parity.py`. Slice C (behavioral
 journeys on issue 05) remains; the full-coverage claim stays `not_established`.
+GK B plan-delta conditions a–f: every campus card's receipt reads the effect back (stored sha256,
+the limit's `code` source, the profile or document gone, the new MILP job and its basis settings),
+so a missing effect is `uncertain`; delete, publish, confirm and the MILP start say what they do in
+words; a file moved after the card is `edit_preview_stale` (also when a whole-file base check trips
+at confirm); both saves run the service's own YAML checks at preview (`check_campus_text`,
+`check_draft_text`); the extract card names the extraction provider call.
