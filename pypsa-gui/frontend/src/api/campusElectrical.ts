@@ -360,7 +360,8 @@ export interface HarmonicResonance {
   order_set: string
   margin_h: number
   limit_h: number
-  verdict: 'pass' | 'fail'
+  /** gridspine `harmonic_scan.judge`: `flag` when closer than the clearance to an order that counts. */
+  verdict: 'clear' | 'flag'
   assumed: boolean
   note: string | null
 }

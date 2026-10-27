@@ -102,6 +102,7 @@ try:
     from gridspine.drivers import campus_study as cs
     from gridspine.drivers.campus_study import SizingCriteria
     from gridspine.schema.contracts import ContractError
+    from gridspine.static import harmonic_scan as hs
     from gridspine.static import parallel
     from gridspine.static.parallel import Stopped
 
@@ -110,7 +111,7 @@ try:
 except ImportError as exc:                      # pragma: no cover - build-shape branch
     CAMPUS_AVAILABLE = False
     CAMPUS_IMPORT_ERROR = str(exc)
-    cs = SizingCriteria = parallel = None
+    cs = SizingCriteria = parallel = hs = None
 
     class ContractError(Exception):
         """Stand-in so the `except ContractError` clauses below still parse."""
@@ -254,8 +255,6 @@ def _harmonic_scan(run: Path, profile: str, profile_dirs) -> None:
     ``campus_study.harmonic_scan_campus``), its meta in ``HARMONIC_SCAN_META``.
     The scan is screening beside the sizing, so its failure never fails the
     run: the reason goes to ``HARMONIC_SCAN_ERROR`` and no scan file stays."""
-    from gridspine.static import harmonic_scan as hs
-
     files = (cs.HARMONIC_SCAN_CSV, cs.HARMONIC_ENVELOPE_CSV, cs.HARMONIC_RESONANCE_CSV, HARMONIC_SCAN_META,
              HARMONIC_SCAN_ERROR)
 

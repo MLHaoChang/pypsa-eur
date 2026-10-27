@@ -25,5 +25,8 @@ for i, l in enumerate(proc):
     n.links.loc[l, "rated_mva"] = 1.25 * float(n.links.at[l, "p_nom"])
     n.links.loc[l, "harmonic_source"] = "6-pulse"
     n.links.loc[l, "single_phase_share"] = (None if share == "none" and i == len(proc) - 1 else float(share if share != "none" else 0.5))
+for l in n.links.index.difference(proc):
+    n.links.loc[l, "harmonic_source"] = ""
 n.export_to_netcdf(os.path.join(pd_, "network.nc"))
 print("units", n.links.loc[proc, ["rated_mva", "harmonic_source", "single_phase_share"]].to_dict("index"))
+print("activate", s.post(f"{B}/projects/dcsurf-demo/activate").status_code)

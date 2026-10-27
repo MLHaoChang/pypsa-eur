@@ -47,7 +47,7 @@ function ResonanceRow({ r }: { r: HarmonicResonance }) {
       </td>
       <td className="align-top">
         <span className="inline-flex items-center gap-1.5">
-          <VerdictChip verdict={r.verdict} />
+          <VerdictChip verdict={r.verdict === 'flag' ? 'fail' : 'pass'} />
           {r.assumed && <Tag tone="warn">assumed</Tag>}
         </span>
       </td>
@@ -77,7 +77,7 @@ export default function CampusHarmonicScanSection({ scan }: { scan: HarmonicScan
   }
   const hMax = scan.envelope.length ? scan.envelope[scan.envelope.length - 1].h : 50
   const orders = characteristicOrders(hMax)
-  const fails = scan.resonance.filter(r => r.verdict === 'fail').length
+  const fails = scan.resonance.filter(r => r.verdict === 'flag').length
   return (
     <PageSection title={title}
       hint={scan.resonance.length
@@ -100,7 +100,7 @@ export default function CampusHarmonicScanSection({ scan }: { scan: HarmonicScan
                 stroke="var(--color-text)" strokeWidth={1.25} />
               {scan.resonance.map((r, i) => (
                 <ReferenceDot key={i} x={r.h_r} y={r.z_peak_ohm} r={3.5}
-                  fill={r.verdict === 'fail' ? 'var(--color-danger)' : 'var(--color-muted)'} stroke="none" />
+                  fill={r.verdict === 'flag' ? 'var(--color-danger)' : 'var(--color-muted)'} stroke="none" />
               ))}
             </LineChart>
           </ResponsiveContainer>

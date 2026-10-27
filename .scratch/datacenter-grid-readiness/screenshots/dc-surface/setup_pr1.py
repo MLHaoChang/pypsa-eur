@@ -17,4 +17,9 @@ prof["unbalance_limit_pct"] = ext(value=2.0, clause="generic test clause (voltag
                                   quote="the negative-sequence voltage shall not exceed 2 % of the positive-sequence voltage")
 prof["current_tdd_standard"] = ext(value="ieee519-2014", clause="generic test clause (current distortion)", page=42,
                                    quote="current distortion limits as given in IEEE 519")
+prof["q_capability_unit"] = ext(points=[[0.0, -0.4, 0.4], [0.5, -0.5, 0.5], [1.0, -0.3, 0.3]],
+                               clause="generic test clause (reactive capability chart)", page=31,
+                               quote="each generating unit shall provide reactive power within the capability chart")
+prof["voltage_deadband_pct"] = ext(value=0.5, clause="generic test clause (voltage control)", page=32,
+                                   quote="a deadband of 0.5 % of nominal voltage")
 r = s.put(f"{P}/drafts/pq_demo", json={"yaml": yaml.safe_dump(prof, sort_keys=False)}); print("save", r.status_code, r.text[:300])

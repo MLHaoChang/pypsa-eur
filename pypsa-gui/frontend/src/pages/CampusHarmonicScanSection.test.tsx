@@ -7,7 +7,7 @@ afterEach(() => cleanup())
 
 const resonance = (over: Partial<HarmonicResonance> = {}): HarmonicResonance => ({
   case: 'max', cap_state: 'all capacitors in', h_r: 7.3, f_hz: 365, z_peak_ohm: 41.2, prominence: 3,
-  nearest_order: 7, order_set: '6k±1', margin_h: 0.3, limit_h: 0.5, verdict: 'fail', assumed: false, note: null,
+  nearest_order: 7, order_set: '6k±1', margin_h: 0.3, limit_h: 0.5, verdict: 'flag', assumed: false, note: null,
   ...over,
 })
 
@@ -44,7 +44,7 @@ describe('CampusHarmonicScanSection', () => {
 
   it('says the clearance is the screen\'s default when the grid code sets none', () => {
     render(<CampusHarmonicScanSection scan={scan({ limit_source: null, clause: null,
-      resonance: [resonance({ verdict: 'pass', margin_h: 0.8, assumed: true })] })} />)
+      resonance: [resonance({ verdict: 'clear', margin_h: 0.8, assumed: true })] })} />)
     expect(screen.getByTestId('scan-limit').textContent).toContain(
       'The grid code sets no resonance clearance, so the screen takes ±0.5 h.')
     expect(within(screen.getByTestId('scan-resonance')).getByText('assumed')).toBeTruthy()

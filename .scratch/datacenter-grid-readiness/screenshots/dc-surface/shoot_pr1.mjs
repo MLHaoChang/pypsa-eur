@@ -18,7 +18,8 @@ if (await p.locator('input[type=password]').count()) {
 await p.getByText('Resume project').first().click(); await p.waitForTimeout(5000)
 // Guided has no grid-code draft view: it opens this Expert section (openSectionInExpert), the DC 15 precedent.
 await p.getByText('Grid connection', { exact: true }).first().click(); await p.waitForTimeout(4000)
-const paths = ['harmonic_resonance_clearance_h', 'unbalance_limit_pct', 'current_tdd_standard']
+const paths = (process.env.PATHS || 'harmonic_resonance_clearance_h,unbalance_limit_pct,current_tdd_standard').split(',')
+const tag = process.env.TAG || 'dc12'
 const shotRows = async (name) => {
   const rows = p.locator(paths.map(x => `[data-testid="limit-${x}"]`).join(', '))
   const first = rows.first(), last = rows.last()
@@ -32,9 +33,9 @@ const shotRows = async (name) => {
   console.log(name, 'rows', await rows.count())
 }
 await p.getByRole('button', { name: 'Review draft pq_demo' }).click(); await p.waitForTimeout(2500)
-await shotRows('01-dc12-limits-unconfirmed')
+await shotRows(`${process.env.N1 || '01'}-${tag}-limits-unconfirmed`)
 for (const path of paths) {
   await p.locator(`[data-testid="limit-${path}"]`).getByRole('button', { name: /^Confirm/ }).click(); await p.waitForTimeout(1500)
 }
-await shotRows('02-dc12-limits-confirmed')
+await shotRows(`${process.env.N2 || '02'}-${tag}-limits-confirmed`)
 await b.close()

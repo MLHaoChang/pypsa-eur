@@ -5,7 +5,7 @@ const pw = fs.readFileSync(process.env.HOME + '/.local/share/PyPSA Studio/dev-ad
 const [mode, out, name, ...ids] = process.argv.slice(2)
 fs.mkdirSync(out, { recursive: true })
 const b = await chromium.launch()
-const width = mode === 'guided' ? 1280 : 1800
+const width = Number(process.env.WIDTH) || (mode === 'guided' ? 1280 : 1800)
 const ctx = await b.newContext({ viewport: { width, height: 1500 } })
 await ctx.addInitScript(([m]) => {
   localStorage.setItem('network-diagram:ui-mode', m); localStorage.setItem('network-diagram:ui-mode-explicit', '1')
