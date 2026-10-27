@@ -58,6 +58,23 @@ describe('the checked window request', () => {
     expect(useUIStore.getState().resultsWindowRequest).toBeNull()
   })
 
+  it('resolves an assistant window by snapshot position, and drops one past the axis', async () => {
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false, activeSlidePanel: 'results' })
+    useUIStore.getState().requestResultsTab('loadflow')
+    useUIStore.getState().requestResultsWindow({ fromIndex: 10, toIndex: 20 })
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={client}><Results /></QueryClientProvider>)
+    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    const shown = `${SNAPSHOTS[10]}|${SNAPSHOTS[20]}`.replace(/(\d\d:\d\d):\d\d/g, '$1:00')
+    expect(screen.getByTestId('loadflow-window').textContent).toBe(shown)
+    expect(useUIStore.getState().resultsWindowRequest).toBeNull()
+    act(() => useUIStore.getState().requestResultsWindow({ fromIndex: 10, toIndex: SNAPSHOTS.length }))
+    await act(async () => { await new Promise(r => setTimeout(r, 50)) })
+    expect(screen.getByTestId('loadflow-window').textContent).toBe(shown)
+    expect(useUIStore.getState().resultsWindowRequest).toBeNull()
+    view.unmount()
+  })
+
   async function open(start: string, end: string) {
     useUIStore.setState({ uiMode: 'expert', currentProject: 'Demo', compareRailOpen: false, activeSlidePanel: 'results' })
     useUIStore.getState().requestResultsTab('loadflow')
