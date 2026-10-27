@@ -32,13 +32,8 @@ def test_every_write_tool_is_an_edit_or_a_named_non_edit():
 
 # Q3-CARDS-1: every settings edit has its own old → new adapter. Slice 2 moves the rest here.
 _NO_ADAPTER_YET = frozenset({
-    "set_site_connection", "attach_tariff", "import_urdb_tariff", "define_participants",
-    "put_stress_scenarios", "record_asset_health", "set_study_parameter", "update_project_layout",
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
-    "campus_set_island_config", "campus_set_library", "campus_draft_campus", "set_report_mapping",
-    "set_report_template", "import_edited_report", "set_weather_choice", "import_library_series",
-    "import_meter_data", "put_library_item", "set_finance_inputs", "set_project_sites",
-    "import_map_geometry",
+    "campus_set_island_config", "campus_set_library", "campus_draft_campus",
 })
 
 

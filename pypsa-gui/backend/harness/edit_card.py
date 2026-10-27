@@ -1668,3 +1668,7 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 register("update_decision_study", Adapter("settings_edit", _decision_study_preview, _decision_study_readback,
                                           section_id="project"))
+
+
+# Q3-CARDS-1 slice 2: the adapters of the remaining settings edits, one module per area.
+from harness import edit_card_library, edit_card_records, edit_card_reports, edit_card_site  # noqa: E402,F401
