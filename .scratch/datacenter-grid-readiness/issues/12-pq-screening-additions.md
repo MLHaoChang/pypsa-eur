@@ -3,7 +3,7 @@
 
 # Power-quality screening additions: IEEE 519 TDD, unbalance, harmonic impedance scan
 
-Status: ready-for-agent
+Status: done (#726, 262abeff; #728, 138f6f27; #754, a7630347)
 Type: task
 Blocked by: part 1 (TDD): grid-to-process issue 17's harmonics PR; parts 2 and 3: none
 Gated: **yes** (gridspine)
