@@ -14,7 +14,6 @@ import threading
 import time
 from collections import Counter, OrderedDict
 from contextlib import contextmanager
-from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
@@ -22,6 +21,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, ValidationError
 
 from services.pypsa_service import PyPSAService
+from services.reliability_goal import goal_free_config
 
 
 def _refuse(kind, message, status=422):
@@ -461,7 +461,10 @@ def _network_input_fingerprint(ctx, *, exact=False):
         # Preserve existing run/chart/cache identities byte-for-byte.
         parts = [n.snapshots.to_series().to_json(date_format="iso"), n.snapshot_weightings.to_json(),
                  n.investment_period_weightings.to_json()]
-    parts.append(json.dumps(asdict(ctx.solver_state["solver_config"]), sort_keys=True, default=str))
+    # The goal fields the LP never reads stay out (W3b-R), so a saved goal
+    # leaves this fingerprint, and every one computed before it, unchanged.
+    parts.append(json.dumps(goal_free_config(ctx.solver_state["solver_config"]),
+                            sort_keys=True, default=str))
     for component in n.components:
         defaults = component.defaults
         columns = [name for name in defaults.index if "Input" in str(defaults.at[name, "status"]) and name in component.static.columns]

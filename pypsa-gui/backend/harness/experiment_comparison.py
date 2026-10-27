@@ -1,12 +1,12 @@
 """Read two selected owned network-case receipts; no execution or override."""
 import copy
-from dataclasses import asdict
 import math
 import json
 
 from harness.durable import network_guard
 from harness import experiment_execution as engine
 from services import experiments as ex
+from services.reliability_goal import goal_free_config
 
 _ERRORS = {
     'selection': {'error_kind': 'invalid_experiment_comparison',
@@ -32,7 +32,7 @@ def _basis(record, data):
             snapshots_sha256=ex._digest(wt._exact_frame_json(n.snapshots.to_series().to_frame())),
             weights_sha256=ex._digest([wt._exact_frame_json(n.snapshot_weightings),
                 wt._exact_frame_json(n.investment_period_weightings)]),
-            solver_config_sha256=ex._digest(asdict(saved.solver_state['solver_config'])))
+            solver_config_sha256=ex._digest(goal_free_config(saved.solver_state['solver_config'])))
 
 
 def _case(root, record):
