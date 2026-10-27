@@ -34,8 +34,12 @@ function signed2(v: number): string {
 function detailText(r: IbrQCurveRow): string {
   if (r.status !== 'fail' || r.available_mvar == null || r.shortfall_mvar == null
     || r.q_min_req_mvar == null || r.q_max_req_mvar == null) return r.detail
-  return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: `
-    + `${mvar(r.shortfall_mvar)} Mvar short`
+  const deliver = Math.max(0, r.q_max_req_mvar - r.available_mvar)
+  const absorb = Math.max(0, -r.q_min_req_mvar - r.available_mvar)
+  const short = mvar(deliver) === mvar(absorb) && deliver > 0 ? `${mvar(deliver)} Mvar short each way`
+    : [deliver > 0 && `${mvar(deliver)} Mvar short to deliver`, absorb > 0 && `${mvar(absorb)} Mvar short to absorb`]
+      .filter(Boolean).join(' and ') || `${mvar(r.shortfall_mvar)} Mvar short`
+  return `±${mvar(r.available_mvar)} Mvar available for ${signed2(r.q_min_req_mvar)} to ${signed2(r.q_max_req_mvar)} Mvar: ${short}`
 }
 
 function power(r: IbrQCurveRow): string {

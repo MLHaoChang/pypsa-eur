@@ -44,7 +44,14 @@ describe('CampusUnitQCurveSection', () => {
     expect(tr.textContent).toContain('0.534 Mvar')
     expect(screen.getByText(/Basis: screening at unit terminals: √\(S² − P²\)/)).toBeTruthy()
     expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
-      .toBe('±18.47 Mvar available for −19.00 to +19.00 Mvar: 0.53 Mvar short')
+      .toBe('±18.47 Mvar available for −19.00 to +19.00 Mvar: 0.53 Mvar short each way')
+  })
+
+  it('names the failing side of an asymmetric band', () => {
+    const r = row({ p_pu: 0.5, q_min_req_mvar: -5, q_max_req_mvar: 7, available_mvar: 6, shortfall_mvar: 1, status: 'fail' })
+    render(<CampusUnitQCurveSection rows={[r]} />)
+    expect(screen.getByTestId('qcurve-detail-BESS1-0.5').textContent)
+      .toBe('±6.00 Mvar available for −5.00 to +7.00 Mvar: 1.00 Mvar short to deliver')
   })
 
   it('fails closed: a status other than pass, fail or reported shows Fail', () => {
