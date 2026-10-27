@@ -47,9 +47,16 @@ LIMITATION_REASONS = (
     'admin',                 # user/workspace administration: an operator action
     'assistant-self-config', # the assistant's own settings, keys, profiles, MCP servers
     'conversation-transport',# the chat/voice stream itself, not an application capability
-    'app-shell',             # health, changelog polling, local desktop settings
+    'app-shell',             # health, local desktop settings, the project edit-lock heartbeat
+    'live-stream',           # server-sent log streams; the assistant reads the same logs via snapshot tools
     'ui-local-state',        # layout/view persistence with no domain effect
     'binary-transfer',       # raw file bytes the assistant reaches via typed upload/export tools
+)
+# The issue-05 coverage families (capability-matrix.json ``family_journeys``).
+FAMILIES = (
+    'projects', 'network-topology', 'timeseries-horizon', 'solver-simulation', 'all-results',
+    'reliability-adequacy', 'gridspine-campus', 'economics-investment', 'experiments',
+    'import-export', 'reports', 'audit-undo', 'harness-workflows', 'ui-monitoring',
 )
 MUTATING_METHODS = frozenset({'POST', 'PUT', 'PATCH', 'DELETE'})
 
@@ -125,11 +132,15 @@ def _path_matches(gui: list[str], path: str, loose: bool = False) -> bool:
     return len(segs) == len(gui) and all(_segment_matches(g, r, loose) for g, r in zip(gui, segs))
 
 
-def match_binding(binding: dict, routes: list[tuple[str, str]]) -> tuple[tuple[str, str] | None, str | None]:
+def match_binding(
+    binding: dict, routes: list[tuple[str, str]], acknowledged: frozenset[str] = frozenset(),
+) -> tuple[tuple[str, str] | None, str | None]:
     """Resolve like Starlette: routes in registration order, first full match wins.
 
     A literal GUI URL needs no guess. A URL with a GUI parameter that fits more
-    than one distinct route path for its method is ambiguous and fails (V2).
+    than one distinct route path for its method is ambiguous and fails (V2),
+    unless ``acknowledged`` names exactly that set of earlier shadowing paths
+    (a pre-existing route-order shadow the declarations accept).
     """
     gui = _segments(binding['url'])
     hits = [(m, p) for m, p in routes if _path_matches(gui, p)]
@@ -146,8 +157,10 @@ def match_binding(binding: dict, routes: list[tuple[str, str]]) -> tuple[tuple[s
         if m == binding['method'] and _path_matches(gui, p, True)
         and any('{}' in g and not r.startswith('{') for g, r in zip(gui, _segments(p)))
     })
-    if loose:
-        return None, f'ambiguous: {same[0][1]} or {loose}'
+    if set(loose) != acknowledged:
+        if loose:
+            return None, f'ambiguous: {same[0][1]} or {loose}'
+        return None, f'stale acknowledged shadows {sorted(acknowledged)}: nothing shadows {same[0][1]} now'
     return same[0], None
 
 
@@ -285,9 +298,14 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
     route_set = set(routes)
     route_order = [k for k in routes if k[1].startswith('/api/')]  # the SPA catch-all serves no API
 
+    shadows = {(d['method'], d['url']): frozenset(d['shadows']) for d in decl.get('acknowledged_shadows', [])}
     gui_routes: dict[tuple[str, str], set[str]] = {}
+    used_shadows: set[tuple[str, str]] = set()
     for b in bindings:
-        hit, why = match_binding(b, route_order)
+        ack = shadows.get((b['method'], b['url']), frozenset())
+        hit, why = match_binding(b, route_order, ack)
+        if hit is not None and ack:
+            used_shadows.add((b['method'], b['url']))
         if hit is None:
             problems.append(f'binding {b["file"]}: {b["method"]} {b["url"]}: {why}')
             continue
@@ -298,6 +316,9 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             problems.append(f'binding override {o["file"]}: route {key} does not exist')
             continue
         gui_routes.setdefault(key, set()).add(o['file'])
+
+    for key in sorted(shadows.keys() - used_shadows):
+        problems.append(f'stale acknowledged_shadows entry {key}: no GUI binding matches through exactly those shadows')
 
     non_mutating = {(d['method'], d['path']) for d in decl.get('non_mutating_routes', [])}
     allow = {d['service'] for d in decl.get('service_matches', [])}
@@ -320,6 +341,9 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
     for key, d in limitations.items():
         if d.get('reason') not in LIMITATION_REASONS:
             problems.append(f'limitation {key}: reason {d.get("reason")!r} not in {LIMITATION_REASONS}')
+    for key, d in needs.items():
+        if d.get('family') not in FAMILIES:
+            problems.append(f'needs-tool {key}: family {d.get("family")!r} not in {FAMILIES}')
     for key in limitations.keys() & needs.keys():
         problems.append(f'route {key} declared both needs-tool and limitation')
     for key in non_mutating - route_set:
@@ -343,6 +367,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
                 problems.append(f'stale declaration {key}: route is now tool-covered by {sorted(tools)}')
         elif key in needs:
             row |= {'class': 'needs-tool', 'family': needs[key].get('family')}
+            if 'note' in needs[key]:
+                row['note'] = needs[key]['note']
         elif key in limitations:
             row |= {'class': 'limitation', 'reason': limitations[key]['reason']}
         else:

@@ -53,3 +53,11 @@ not flip the claim because standing blockers need an explicit edit. Tests:
 `tests/test_assistant_control_matrix.py` (17 passed, 8 new). Issue 08 stays `claimed`: it is
 done only when issue 05 journeys pass and the blockers are cleared with evidence.
 
+
+2026-10-27: Slice A (GUI-route to tool parity) landed. `smoke/assistant_route_parity.py` scans the GUI
+with the TypeScript checker (`frontend/scripts/api-bindings.mjs`), matches every binding to a
+flattened app route and writes/checks `.scratch/live-voice/route-parity.json`: 466 GUI routes,
+280 tool, 102 needs-tool, 84 limitations (closed reasons), 0 unclassified. `capability-matrix.json`
+carries a `route_parity` summary and one `route-parity:needs-tool:<family>` blocker per family.
+CI: `.github/workflows/assistant-route-parity.yaml`. Tests: `tests/test_assistant_route_parity.py`.
+Slice B adds typed tools for the needs-tool rows; slice C does the rest and the issue-05 journeys.

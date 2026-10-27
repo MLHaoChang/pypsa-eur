@@ -85,9 +85,1157 @@
    "service": "services.llm_config:set_active"
   }
  ],
- "limitations": [],
- "needs_tool": [],
- "non_mutating_routes": [],
- "binding_overrides": [],
- "acknowledged_shadows": []
+ "limitations": [
+  {
+   "method": "GET",
+   "path": "/api/admin/email/status",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/admin/email/test",
+   "reason": "admin"
+  },
+  {
+   "method": "GET",
+   "path": "/api/admin/legacy-projects",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/admin/legacy-projects/{legacy_name}/claim",
+   "reason": "admin"
+  },
+  {
+   "method": "GET",
+   "path": "/api/admin/organizations",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/admin/organizations",
+   "reason": "admin"
+  },
+  {
+   "method": "GET",
+   "path": "/api/admin/users",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/admin/users",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/admin/users/{user_id}/resend-set-password",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/forgot-password",
+   "reason": "account-auth"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/login",
+   "reason": "account-auth"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/logout",
+   "reason": "account-auth"
+  },
+  {
+   "method": "GET",
+   "path": "/api/auth/me",
+   "reason": "account-auth"
+  },
+  {
+   "method": "GET",
+   "path": "/api/auth/org-members",
+   "reason": "account-auth"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/reset-password",
+   "reason": "account-auth"
+  },
+  {
+   "method": "POST",
+   "path": "/api/auth/set-password",
+   "reason": "account-auth"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/access",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/activity",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/answers/{answer_id}",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/answers/{answer_id}/export",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/decisions/{decision_id}",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/evidence/{evidence_id}",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/external/pending",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/health",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/history",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/profiles",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/reliability/capabilities",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/reliability/context",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/restrictions",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/settings/api-key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/settings/api-key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/settings/api-key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/settings/llm",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/settings/llm/profiles/{profile_id}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/settings/llm/profiles/{profile_id}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/settings/llm/profiles/{profile_id}/key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/settings/llm/profiles/{profile_id}/key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/settings/llm/profiles/{profile_id}/test",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/settings/mcp/servers",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/settings/mcp/servers/{server_id}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/settings/mcp/servers/{server_id}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/settings/mcp/servers/{server_id}/keys/{key_name}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/settings/mcp/servers/{server_id}/keys/{key_name}",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/settings/mcp/servers/{server_id}/test",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/stream",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/ui-ack",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/workflows",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/abort",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/confirm",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/{session_id}/continuations",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/continuations/{job_id}/dismiss",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/goal",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/{session_id}/progress",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/{session_id}/rewind",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/dictation/config",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/dictation/transcribe",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/durable-conversations",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/durable-conversations/{thread_id}",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/durable-conversations/{thread_id}/rebind",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "POST",
+   "path": "/api/durable-conversations/{thread_id}/resume",
+   "reason": "conversation-transport"
+  },
+  {
+   "method": "GET",
+   "path": "/api/geocode/status",
+   "reason": "app-shell"
+  },
+  {
+   "method": "GET",
+   "path": "/api/health",
+   "reason": "app-shell"
+  },
+  {
+   "method": "GET",
+   "path": "/api/local-settings",
+   "reason": "app-shell"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/local-settings/anthropic-key",
+   "reason": "assistant-self-config"
+  },
+  {
+   "method": "POST",
+   "path": "/api/local-settings/reveal-log",
+   "reason": "app-shell"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/unclaimed",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/unclaimed/{legacy_name}/import",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/flow/ack",
+   "reason": "ui-local-state"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/map_layout",
+   "reason": "ui-local-state"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/map_layout",
+   "reason": "ui-local-state"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/members",
+   "reason": "admin"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/members",
+   "reason": "admin"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/{report_id}/figures/{figure_id}",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/sites/{site_id}/thumbnail",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/sites/{site_id}/thumbnail",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/{study_id}/ledger.csv",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/uploads",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/uploads/{file_id}/blob",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/projects/{project_id}/lock",
+   "reason": "app-shell"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{project_id}/lock",
+   "reason": "app-shell"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{project_id}/lock/heartbeat",
+   "reason": "app-shell"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/energy_flows.csv",
+   "reason": "binary-transfer"
+  },
+  {
+   "method": "GET",
+   "path": "/api/simulation/log_stream",
+   "reason": "live-stream"
+  },
+  {
+   "method": "GET",
+   "path": "/api/simulation/queue/{job_id}/log_stream",
+   "reason": "live-stream"
+  }
+ ],
+ "needs_tool": [
+  {
+   "method": "PUT",
+   "path": "/api/campus-electrical/{name}/campus",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/draft",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/grid-codes/documents",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/grid-readiness",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/island/cuts",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/island/cuts/apply/cancel",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/island/gfm-settings/card",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/island/report",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/island/study",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/library/reset",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "GET",
+   "path": "/api/campus-electrical/{name}/milp",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/milp",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/milp/cancel",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/campus-electrical/{name}/run",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/commercial/preview",
+   "family": "import-export"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/preview",
+   "family": "import-export"
+  },
+  {
+   "method": "POST",
+   "path": "/api/equipment_table/preview",
+   "family": "import-export"
+  },
+  {
+   "method": "GET",
+   "path": "/api/geocode",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/gridspine/{name}/capacity",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/gridspine/{name}/connection",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/gridspine/{name}/dispatch-source/external",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "POST",
+   "path": "/api/gridspine/{name}/readback/{hour}",
+   "family": "gridspine-campus"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/library/items/{kind}/{name}",
+   "family": "economics-investment"
+  },
+  {
+   "method": "POST",
+   "path": "/api/library/meter_data",
+   "family": "economics-investment"
+  },
+  {
+   "method": "GET",
+   "path": "/api/library/series",
+   "family": "economics-investment"
+  },
+  {
+   "method": "POST",
+   "path": "/api/library/series/upload",
+   "family": "economics-investment"
+  },
+  {
+   "method": "GET",
+   "path": "/api/library/series/{name}",
+   "family": "economics-investment"
+  },
+  {
+   "method": "POST",
+   "path": "/api/library_reference/preview",
+   "family": "import-export"
+  },
+  {
+   "method": "GET",
+   "path": "/api/network/asset_costs",
+   "family": "network-topology"
+  },
+  {
+   "method": "GET",
+   "path": "/api/network/asset_schema/{component}",
+   "family": "network-topology"
+  },
+  {
+   "method": "GET",
+   "path": "/api/network/catalog/{component}",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/network/lengths/from_geometry",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/network/lines/rescale_impedances",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/network/reset",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/network/timeseries/upload",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/from_template/eh_site/form",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/import-folder",
+   "family": "import-export"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/flow/scope",
+   "family": "projects"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/flow/scope",
+   "family": "projects"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/map_layout/import",
+   "family": "import-export"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/map_layout/osm_suggestions",
+   "family": "import-export"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/profiles/current",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/profiles/from-current",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/profiles/loads/upload",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/profiles/series/upload",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/profiles/weather",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/profiles/weather",
+   "family": "timeseries-horizon"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/reports",
+   "family": "reports"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/capabilities",
+   "family": "reports"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/evidence_hash",
+   "family": "reports"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
+   "family": "reports"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/projects/{name}/scenario",
+   "family": "projects"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/projects/{name}/settings",
+   "family": "projects"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/sites",
+   "family": "network-topology"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/sites",
+   "family": "network-topology"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "family": "network-topology"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "family": "network-topology"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/stress_profile_packs",
+   "family": "reliability-adequacy"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/",
+   "family": "experiments"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/library",
+   "family": "experiments"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/studies/preview",
+   "family": "experiments"
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "family": "experiments"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "family": "experiments"
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "family": "experiments"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort",
+   "family": "experiments"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/{study_id}/ledger",
+   "family": "experiments"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case",
+   "family": "experiments"
+  },
+  {
+   "method": "GET",
+   "path": "/api/projects/{name}/studies/{study_id}/report",
+   "family": "experiments"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/studies/{study_id}/run/abort",
+   "family": "experiments"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/projects/{name}/worksheet",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/asset/assets",
+   "family": "all-results"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/billing/preview",
+   "family": "economics-investment"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/curtailment/by_cause",
+   "family": "all-results"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/eh_readiness",
+   "family": "all-results"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/energy_flows",
+   "family": "all-results"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/investment_case/abort",
+   "family": "economics-investment"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/load_shape",
+   "family": "all-results"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/loadflow-view",
+   "family": "all-results"
+  },
+  {
+   "method": "GET",
+   "path": "/api/results/run-view",
+   "family": "all-results"
+  },
+  {
+   "method": "GET",
+   "path": "/api/simulation/commercial/poc",
+   "family": "economics-investment"
+  },
+  {
+   "method": "PUT",
+   "path": "/api/simulation/finance",
+   "family": "economics-investment"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/cancel_queued",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/clear_finished",
+   "family": "solver-simulation",
+   "note": "solve_queue_clear_finished declares this route but is read-tier; the tier rule (V4) refuses a read tool on a mutating route"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/pause",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/resume",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/{job_id}/dismiss",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "GET",
+   "path": "/api/simulation/queue/{job_id}/log_history",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/{job_id}/requeue",
+   "family": "solver-simulation"
+  },
+  {
+   "method": "GET",
+   "path": "/api/simulation/value_flows/designer",
+   "family": "economics-investment"
+  }
+ ],
+ "non_mutating_routes": [
+  {
+   "method": "POST",
+   "path": "/api/profiles/estimate",
+   "reason": "synthetic preview, writes nothing"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/preflight",
+   "reason": "runs the /run validation without solving"
+  }
+ ],
+ "binding_overrides": [
+  {
+   "file": "api/client.ts",
+   "call": "'/api'",
+   "routes": [],
+   "reason": "axios base URL, not a request"
+  },
+  {
+   "file": "utils/projectMismatch.ts",
+   "call": "'/api/'",
+   "routes": [],
+   "reason": "URL prefix test, not a request"
+  },
+  {
+   "file": "pages/reports/DocxPreview.tsx",
+   "call": "fetch(url)",
+   "routes": [
+    [
+     "GET",
+     "/api/projects/{name}/uploads/{file_id}/blob"
+    ]
+   ],
+   "reason": "ReportViewer passes getUploadBlobUrl(project, file_id)"
+  },
+  {
+   "file": "api/network.ts",
+   "method": "GET",
+   "url": "/api/network/{}",
+   "routes": [
+    [
+     "GET",
+     "/api/network/generators"
+    ],
+    [
+     "GET",
+     "/api/network/links"
+    ],
+    [
+     "GET",
+     "/api/network/storage_units"
+    ],
+    [
+     "GET",
+     "/api/network/stores"
+    ],
+    [
+     "GET",
+     "/api/network/transformers"
+    ]
+   ],
+   "reason": "equipmentRows(resource) over FOOTPRINT_RESOURCES"
+  },
+  {
+   "file": "api/network.ts",
+   "method": "DELETE",
+   "url": "/api/network/{}/{}",
+   "routes": [
+    [
+     "DELETE",
+     "/api/network/generators/{name}"
+    ],
+    [
+     "DELETE",
+     "/api/network/links/{name}"
+    ],
+    [
+     "DELETE",
+     "/api/network/storage_units/{name}"
+    ],
+    [
+     "DELETE",
+     "/api/network/stores/{name}"
+    ],
+    [
+     "DELETE",
+     "/api/network/transformers/{name}"
+    ]
+   ],
+   "reason": "deleteEquipment(resource, name) over FOOTPRINT_RESOURCES"
+  }
+ ],
+ "acknowledged_shadows": [
+  {
+   "method": "GET",
+   "url": "/api/chat/{}/continuations",
+   "shadows": [
+    "/api/chat/answers/{answer_id}",
+    "/api/chat/decisions/{decision_id}",
+    "/api/chat/evidence/{evidence_id}",
+    "/api/chat/navigation/{action_id}",
+    "/api/chat/operations/{operation_id}"
+   ],
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+  },
+  {
+   "method": "GET",
+   "url": "/api/chat/{}/progress",
+   "shadows": [
+    "/api/chat/answers/{answer_id}",
+    "/api/chat/decisions/{decision_id}",
+    "/api/chat/evidence/{evidence_id}",
+    "/api/chat/navigation/{action_id}",
+    "/api/chat/operations/{operation_id}"
+   ],
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/from_template/{}",
+   "shadows": [
+    "/api/projects/{name}/reports",
+    "/api/projects/{name}/studies/"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "GET",
+   "url": "/api/projects/{}",
+   "shadows": [
+    "/api/projects/unclaimed"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}",
+   "shadows": [
+    "/api/projects/import-folder",
+    "/api/projects/import_bundle"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/activate",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/lock",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/map_layout/import",
+   "shadows": [
+    "/api/projects/unclaimed/{legacy_name}/import"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/rename",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "GET",
+   "url": "/api/projects/{}/reports/{}",
+   "shadows": [
+    "/api/projects/{name}/reports/capabilities",
+    "/api/projects/{name}/reports/evidence_hash"
+   ],
+   "reason": "reports/capabilities and reports/evidence_hash register before reports/{report_id}; report ids are generated"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/scenarios",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/snapshots",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  },
+  {
+   "method": "GET",
+   "url": "/api/projects/{}/studies/{}",
+   "shadows": [
+    "/api/projects/{name}/studies/library"
+   ],
+   "reason": "studies/library registers before studies/{study_id}; study ids are generated and never equal \"library\""
+  },
+  {
+   "method": "POST",
+   "url": "/api/projects/{}/uploads",
+   "shadows": [
+    "/api/projects/from_template/{template_id}"
+   ],
+   "reason": "a literal project route (from_template, import-folder, import_bundle, unclaimed) registers before the {name} route; project names cannot equal those reserved literals"
+  }
+ ]
 }
