@@ -1497,3 +1497,67 @@ def test_the_state_says_when_a_run_is_in_progress(hub):
         ce.cs.rank_campus = real
     assert seen == [True]
     assert ce.get_state(hub)["run_in_progress"] is False
+
+
+# ── a redraft keeps the campus file's frequency (DC 19b) ─────────────────────
+
+LINE_B_S = 1e-4
+
+
+def _hub_with_line(user_and_db):
+    db, user = user_and_db
+    row = project_registry.create_root(db, user, "Line Hub")
+    n = hub_network(priced=True)
+    n.add("Bus", "mv2", v_nom=20.0)
+    n.add("Line", "tie", bus0="mv", bus1="mv2", length=2.0, r=0.1, x=0.2, b=LINE_B_S, s_nom=30.0)
+    n.add("Load", "far_load", bus="mv2", p_set=1.0)
+    n.loads_t.p = pd.DataFrame({"dc_load": np.full(H, 40.0), "far_load": np.full(H, 1.0)}, index=n.snapshots)
+    n.export_to_netcdf(str(project_registry.ensure_project_dir(row) / "network.nc"))
+    return row
+
+
+def _set_campus_f_hz(project, f_hz):
+    spec = yaml.safe_load(ce.get_state(project)["campus_yaml"])
+    spec["campus"]["f_hz"] = f_hz
+    ce.save_campus(project, yaml.safe_dump(spec))
+
+
+def _cable_c_nf_per_km(campus_yaml):
+    (cable,) = yaml.safe_load(campus_yaml)["campus"]["cables"].values()
+    c = cable["c_nf_per_km"]
+    return c["value"] if isinstance(c, dict) else c
+
+
+@pytest.mark.parametrize("f_hz", [50, 60])
+@pytest.mark.parametrize("via_tool", [False, True])
+def test_a_redraft_gets_line_capacitance_at_the_campus_files_frequency(user_and_db, f_hz, via_tool):
+    from services import chat_tools
+    row = _hub_with_line(user_and_db)
+    ce.draft(row)
+    _set_campus_f_hz(row, f_hz)
+    if via_tool:
+        out = chat_tools.DISPATCHERS["campus_draft_campus"](project_id="Line Hub", overwrite=True)
+    else:
+        out = ce.draft(row, overwrite=True)
+    spec = yaml.safe_load(out["campus_yaml"])
+    assert spec["campus"]["f_hz"] == f_hz
+    expected = LINE_B_S / (2 * np.pi * f_hz) / 2.0 * 1e9
+    assert _cable_c_nf_per_km(out["campus_yaml"]) == pytest.approx(expected, rel=1e-6)
+    assert not any("assumed" in s for s in out["skipped"])
+
+
+def test_a_first_draft_still_assumes_50_hz(user_and_db):
+    row = _hub_with_line(user_and_db)
+    out = ce.draft(row)
+    assert _cable_c_nf_per_km(out["campus_yaml"]) == pytest.approx(LINE_B_S / (2 * np.pi * 50) / 2.0 * 1e9, rel=1e-6)
+    assert any("assumed" in s for s in out["skipped"])
+
+
+def test_a_campus_file_that_states_no_frequency_keeps_the_assumed_note(user_and_db):
+    row = _hub_with_line(user_and_db)
+    ce.draft(row)
+    spec = yaml.safe_load(ce.get_state(row)["campus_yaml"])
+    del spec["campus"]["f_hz"]
+    ce.save_campus(row, yaml.safe_dump(spec))
+    out = ce.draft(row, overwrite=True)
+    assert any("assumed" in s for s in out["skipped"])
