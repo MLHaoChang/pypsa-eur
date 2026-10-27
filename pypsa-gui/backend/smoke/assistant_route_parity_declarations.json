@@ -1,0 +1,93 @@
+{
+ "service_matches": [
+  {
+   "service": "services.campus_electrical_service:get_state"
+  },
+  {
+   "service": "services.campus_grid_code_service:list_grid_codes"
+  },
+  {
+   "service": "services.campus_electrical_service:get_island"
+  },
+  {
+   "service": "services.campus_electrical_service:save_island"
+  },
+  {
+   "service": "services.campus_island_cuts:get_cuts"
+  },
+  {
+   "service": "services.campus_island_cuts:apply_status"
+  },
+  {
+   "service": "services.campus_island_cuts:start_apply_job"
+  },
+  {
+   "service": "services.campus_island_tuning:get_settings"
+  },
+  {
+   "service": "services.campus_island_tuning:enqueue_settings"
+  },
+  {
+   "service": "services.campus_island_tuning:apply_settings"
+  },
+  {
+   "service": "services.campus_electrical_service:get_library"
+  },
+  {
+   "service": "services.campus_electrical_service:save_library"
+  },
+  {
+   "service": "services.gridspine_service:create_study"
+  },
+  {
+   "service": "services.gridspine_service:export_handoff_bundle"
+  },
+  {
+   "service": "services.gridspine_service:get_capacity"
+  },
+  {
+   "service": "services.gridspine_service:get_config"
+  },
+  {
+   "service": "services.gridspine_service:update_config"
+  },
+  {
+   "service": "services.gridspine_service:get_connection"
+  },
+  {
+   "service": "services.gridspine_service:set_dispatch_source"
+  },
+  {
+   "service": "services.gridspine_service:fetch_result_figure"
+  },
+  {
+   "service": "services.gridspine_service:get_assumption_ledger"
+  },
+  {
+   "service": "services.gridspine_service:get_readback"
+  },
+  {
+   "service": "services.gridspine_service:run_pipeline"
+  },
+  {
+   "service": "services.gridspine_service:list_ranked_snapshots"
+  },
+  {
+   "service": "services.gridspine_service:get_stage_status"
+  },
+  {
+   "service": "services.gridspine_service:edit_template_param"
+  },
+  {
+   "service": "services.asset_results.service:build_response"
+  },
+  {
+   "service": "services.llm_config:set_active"
+  }
+ ],
+ "limitations": [],
+ "needs_tool": [],
+ "non_mutating_routes": [],
+ "binding_overrides": [],
+ "acknowledged_shadows": []
+}
