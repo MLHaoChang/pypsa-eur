@@ -506,3 +506,15 @@ def test_get_report_version_errors(project):
         with pytest.raises(HTTPException) as exc:
             T.get_report_version(*args)
         assert exc.value.status_code == status and exc.value.detail["error_kind"] == kind
+
+
+def test_import_map_geometry_refuses_a_project_other_than_the_active_one(geo):
+    """The upload is the active project's: it is never written into another
+    project named in `name` (GK B follow-up on #769)."""
+    from fastapi import HTTPException
+
+    name, file_id, pdir = geo
+    with pytest.raises(HTTPException) as exc:
+        T.import_map_geometry(name + "-other", file_id, apply=True)
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "upload_project_mismatch"
