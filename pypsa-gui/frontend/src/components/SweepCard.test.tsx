@@ -87,3 +87,12 @@ it("the sweep's result opens its cases in Scenarios only on a click, with a way 
   expect(useUIStore.getState().activeSlidePanel).toBe('scenarios')
   expect(useUIStore.getState().scenariosHighlight).toEqual(['p-a', 'p-b'])
 })
+
+it('one hidden case takes the singular verb', () => {
+  const many = Array.from({ length: SWEEP_ROW_CAP }, (_, i) => ({ ...card.cases[0].rows[1], name: `L${i}` }))
+  const cases = ['a', 'b'].map(name => ({ ...card.cases[0], name, rows: many }))
+  const pending = useChatStore.getState().pending!
+  useChatStore.setState({ pending: { ...pending, sweep_card: { ...card, cases, solves: 2 } } })
+  render(<ConfirmationCard />)
+  expect(screen.getByTestId('chat-sweep-more-cases').textContent).toBe('1 more case changes.')
+})

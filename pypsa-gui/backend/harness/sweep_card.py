@@ -76,7 +76,7 @@ def case_name(changes: list[dict], network) -> str:
         names = change["names"]
         bases = [frame.at[n, change["attribute"]] for n in names
                  if n in frame.index and change["attribute"] in frame.columns]
-        entity = _slug(names[0]) if len(names) == 1 else _PLURAL[change["component_class"]]
+        entity = _slug(names[0]) if len(names) == 1 else _PLURAL.get(change["component_class"], _slug(change["component_class"]) + "s")
         field = None if change["attribute"] in _SIZES else _WORDS.get(change["attribute"], change["attribute"])
         parts += [entity, *([field] if field else []), _amount(change, bases)]
     name = _slug("-".join(_slug(p) for p in parts)) or "sensitivity"
@@ -85,8 +85,34 @@ def case_name(changes: list[dict], network) -> str:
     return name
 
 
+def checked(cases) -> list:
+    """The cases, refused (`invalid_sensitivity_cases`) unless each has the
+    sweep's shape: 1–4 cases, an optional string name, 1–20 typed changes."""
+    from pydantic import ValidationError
+
+    from services.workflow_tools import SensitivityChange
+
+    def bad():
+        _refuse("invalid_sensitivity_cases", "Each case needs 1–20 changes, each with component_class, "
+                "names (1–100), attribute and a number or boolean value.", 422)
+    if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
+        _refuse("invalid_sensitivity_cases", "Provide between 1 and 4 cases per sweep.", 422)
+    for case in cases:
+        if (not isinstance(case, dict) or set(case) - {"new_name", "changes"}
+                or not isinstance(case.get("new_name") or "", str)
+                or not isinstance(case.get("changes"), list) or not 1 <= len(case["changes"]) <= 20):
+            bad()
+        try:
+            for change in case["changes"]:
+                SensitivityChange.model_validate(change)
+        except ValidationError:
+            bad()
+    return cases
+
+
 def named(cases: list, network) -> list:
-    """The cases with each missing `new_name` derived from its changes."""
+    """The cases, checked, with each missing `new_name` derived from its changes."""
+    checked(cases)
     return [{**case, "new_name": case_name(case.get("changes") or [], network)}
             if isinstance(case, dict) and not case.get("new_name") else case for case in cases]
 
@@ -133,9 +159,7 @@ def preview(args: dict) -> dict:
     from services.dispatch_status import dispatch_status
     from services.pypsa_service import PyPSAService
 
-    cases = args.get("cases")
-    if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
-        _refuse("invalid_sensitivity_cases", "Provide between 1 and 4 cases per sweep.", 422)
+    cases = checked(args.get("cases"))
     with chat_tools._acting() as (db, user):
         base = project_registry.resolve_project(db, user, str(args.get("baseline_project_id") or ""))
         if gs.kind_of(base) != gs.CAPACITY_EXPANSION:
@@ -147,11 +171,13 @@ def preview(args: dict) -> dict:
             _refuse("baseline_not_saved", f"The baseline {base.name!r} has unsaved changes and a sweep branches the saved "
                     "file. Ask the user whether to save it first (save_project shows its own card); never save "
                     "without that card.")
-        network = wt._load_context(base).network
+        try:
+            network = wt._load_context(base).network
+        except Exception:  # noqa: BLE001 — an unreadable saved baseline shows no card
+            _refuse("sweep_preview_unavailable", f"The saved baseline {base.name!r} could not be read; "
+                    "open and save it, then try again.")
         out, solves, total = [], 0, 0
         for case in named(cases, network):
-            if not isinstance(case, dict) or not isinstance(case.get("changes"), list):
-                _refuse("invalid_sensitivity_cases", "Cases require typed component changes.", 422)
             rows = [row for change in case["changes"] for row in _rows(network, change)]
             total += len(rows)
             if total > MAX_ROWS:

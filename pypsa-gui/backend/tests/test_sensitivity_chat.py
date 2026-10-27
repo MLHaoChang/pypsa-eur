@@ -180,3 +180,27 @@ def test_a_card_whose_saved_baseline_moved_refuses_before_the_sweep(baseline):
     saved.network.generators.at["G1", "marginal_cost"] = 12.0  # saved elsewhere after the card
     saved.network.export_to_netcdf(path / "network.nc")
     refused("sweep_preview_stale", sweep_card.require_current, args, card)
+
+
+@pytest.mark.parametrize("case", [
+    {"changes": [{"component_class": "Generator", "names": [], "attribute": "marginal_cost", "value": 1}]},
+    {"changes": [{"component_class": "Bus", "names": ["B1"], "attribute": "v_nom", "value": 1}]},
+    {"changes": [{"component_class": "Generator", "names": ["G1"], "attribute": "marginal_cost"}]},
+    {"changes": ["not a change"]},
+    {"changes": []},
+    {"new_name": 5, "changes": unnamed()["changes"]},
+    "not a case",
+])
+def test_a_malformed_case_refuses_by_kind_at_preview_and_at_execution(baseline, case):
+    _, project_id, _ = baseline
+    refused("invalid_sensitivity_cases", sweep_card.preview, {"baseline_project_id": project_id, "cases": [case]})
+    refused("invalid_sensitivity_cases", chat_tools.run_sensitivity_sweep, project_id, [case])
+
+
+def test_several_names_of_any_class_name_the_class():
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    n.add("Generator", ["G1", "G2"], bus="B1", marginal_cost=10.0)
+    assert sweep_card.case_name([{"component_class": "Generator", "names": ["G1", "G2"],
+                                  "attribute": "marginal_cost", "value": 20}], n) == "generators-mc-200pct"
+    assert sweep_card._PLURAL.get("ShuntImpedance", sweep_card._slug("ShuntImpedance") + "s") == "shuntimpedances"
