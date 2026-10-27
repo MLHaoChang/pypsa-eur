@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 341,
+  "tool_count": 355,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5371,14 +5371,16 @@
       ],
       "input_keys": [
         "project_id",
-        "document_id"
+        "document_id",
+        "profile_id",
+        "overwrite"
       ],
       "required": [
         "project_id",
         "document_id"
       ],
       "safety_tier": "write",
-      "schema_sha256": "c48b6138d378f30a360404e46c541a4b8fb739291856736d9bdfaeec64587b86",
+      "schema_sha256": "a387ddad6ce9b2fe622db26b97c2156f5f0b15f52fb5e870609977ca5a0668ab",
       "behavioral_fixture": "pending"
     },
     {
@@ -7775,6 +7777,333 @@
       "required": [],
       "safety_tier": "write",
       "schema_sha256": "ef3b1970c8b86eef1d17c7500b88e8495b55e2fef30eff8399783ad924bf07e6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_save_campus",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/campus-electrical/{name}/campus"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "yaml"
+      ],
+      "required": [
+        "project_id",
+        "yaml"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "fe9d2ba36d0bf4c21379a9ea4e5bf91d6545fa39905e997494f46a0ecede8ef0",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_milp_status",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/campus-electrical/{name}/milp"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_start_milp",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/milp"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "k",
+        "pf",
+        "profile",
+        "margin",
+        "n_minus_1",
+        "invest",
+        "pcc_switchgear_by_operator",
+        "pcc_tap_control"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "execution_long_running",
+      "schema_sha256": "fc27e5e0dcb7e0a15f6de584a471132f12ce1f8f11dffcf2e496a850b934d203",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_cancel_milp",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/milp/cancel"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_set_grid_limit",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/campus-electrical/{name}/grid-readiness/limits/{item}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "item",
+        "source",
+        "value",
+        "note"
+      ],
+      "required": [
+        "project_id",
+        "item",
+        "source"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "51a7cc585be2cee5ece29a77ee4705c0a15439f3ab48e23acf2d1d9102f656dd",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_reset_grid_limit",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/grid-readiness/limits/{item}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "item"
+      ],
+      "required": [
+        "project_id",
+        "item"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "695c1f273d8f4dc6a892c8e2e89bc94db527df215c0f9982855034496a540c1e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_island_report",
+      "toolsets": [
+        "results",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/campus-electrical/{name}/island/report"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_cancel_island_cuts",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/island/cuts/apply/cancel"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_remove_island_cut",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "period",
+        "hour",
+        "kind"
+      ],
+      "required": [
+        "project_id",
+        "period",
+        "hour",
+        "kind"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "7f56b9953cc4814e036d733a143117e4f6d16b78d7d3fec152db38e726c206c4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_clear_island_cuts",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/island/cuts"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_gfm_settings_card",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/campus-electrical/{name}/island/gfm-settings/card"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_reset_library",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/library/reset"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_upload_external_dispatch",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/gridspine/{name}/dispatch-source/external"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "dispatch_file_id",
+        "loads_file_id"
+      ],
+      "required": [
+        "project_id",
+        "dispatch_file_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "eadffe859994282da2e0e9e0c96cbd8a24d36a7f082d29e783f135bf8bcae8c6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "gridspine_upload_readback",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/gridspine/{name}/readback/{hour}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "hour",
+        "bus_file_id",
+        "branches_file_id"
+      ],
+      "required": [
+        "project_id",
+        "hour",
+        "bus_file_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "b75bcf22a0ee8f6a1352650051669cffe9135567ca18931e18a4852ffd8209ad",
       "behavioral_fixture": "pending"
     }
   ],

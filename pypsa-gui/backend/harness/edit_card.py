@@ -62,6 +62,9 @@ SETTINGS_EDITS = frozenset({
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
+    # LV08 B-campus: the campus file, the readiness limits, an applied island cut, the study's dispatch
+    "campus_save_campus", "campus_set_grid_limit", "campus_reset_grid_limit", "campus_remove_island_cut",
+    "gridspine_upload_external_dispatch",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -92,6 +95,10 @@ NOT_EDITS = {
     # LV08 B2b
     "create_evidence_report": "a new report record from the current evidence",
     "fetch_site_context": "caches upstream map context for a site; no input changes",
+    # LV08 B-campus
+    "campus_cancel_milp": "stops a running job; it keeps its best point",
+    "campus_cancel_island_cuts": "stops a running job after the trial in hand",
+    "gridspine_upload_readback": "compares an uploaded export with a bundle; no input changes",
     # live-voice 08 B3
     "solve_queue_clear_finished": "drops finished jobs from the queue listing",
     "solve_queue_dismiss": "hides a finished job from your own queue listing",

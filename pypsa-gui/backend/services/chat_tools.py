@@ -4750,12 +4750,13 @@ def campus_list_grid_codes(project_id: str) -> dict:
         return _h(_gridspine_project(db, user, project_id))
 
 
-def campus_extract_grid_code(project_id: str, document_id: str) -> dict:
+def campus_extract_grid_code(project_id: str, document_id: str, profile_id: str | None = None,
+                             overwrite: bool = False) -> dict:
     # No publish or confirm tool exists, on purpose: the copilot drafts, a
     # person confirms each limit and publishes, in the panel (plan C10).
     from services.campus_grid_code_service import extract as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project_for_write(db, user, project_id), document_id)
+        return _h(_gridspine_project_for_write(db, user, project_id), document_id, profile_id, bool(overwrite))
 
 
 def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
@@ -8643,6 +8644,160 @@ def create_evidence_report(title: str | None = None) -> dict:
     })
 
 
+# ── LV08 B-campus (live-voice issue 08 slice B): campus and gridspine routes ──
+#
+# As B2b: each tool calls its GUI route's own handler in-process (the route in
+# `catalogue.TOOL_ROUTES`), so the route's lock check, body validation and
+# refusals are the tool's. The project is NAMED (`project_id`, as the other
+# campus tools), not taken from the session.
+
+
+def _campus_route(handler, project_id: str, /, *args, **kwargs):
+    """Call a campus/gridspine router handler for the project `project_id`
+    names, as the acting user. Async handlers are driven inside the identity
+    scope, so their db stays open until they return."""
+    from routers.deps import require_project_access
+
+    with _acting() as (db, user):
+        project = _gridspine_project(db, user, project_id)
+        proj = require_project_access(project.name, db=db, user=user)
+        params = inspect.signature(handler).parameters
+        injected = {n: v for n, v in (("proj", proj), ("db", db), ("user", user)) if n in params}
+        return _sync(handler(*args, **injected, **kwargs))
+
+
+def campus_save_campus(project_id: str, yaml: str) -> dict:
+    """`PUT …/campus`: the user's campus file, validated by building it."""
+    from routers.campus_electrical import CampusText, save_campus as _h
+
+    return _b2b_fit(_campus_route(_h, project_id, CampusText(yaml=yaml)))
+
+
+def campus_milp_status(project_id: str) -> dict:
+    """`GET …/milp`: the joint optimisation job's record."""
+    from routers.campus_electrical import milp_status as _h
+
+    return _b2b_fit({"job": _campus_route(_h, project_id)})
+
+
+def campus_start_milp(project_id: str, k: int | None = None, pf: float | None = None,
+                      profile: str | None = None, margin: float | None = None,
+                      n_minus_1: bool | None = None, invest: bool | None = None,
+                      pcc_switchgear_by_operator: bool | None = None,
+                      pcc_tap_control: str | None = None) -> dict:
+    """`POST …/milp`: start the joint optimisation with these run settings
+    (omitted ones take the route's defaults)."""
+    from routers.campus_electrical import RunSettings, start_milp as _h
+
+    given = {key: v for key, v in (("k", k), ("pf", pf), ("profile", profile), ("margin", margin),
+                                   ("n_minus_1", n_minus_1), ("invest", invest),
+                                   ("pcc_switchgear_by_operator", pcc_switchgear_by_operator),
+                                   ("pcc_tap_control", pcc_tap_control)) if v is not None}
+    return _campus_route(_h, project_id, RunSettings(**given))
+
+
+def campus_cancel_milp(project_id: str) -> dict:
+    """`POST …/milp/cancel`: the job stops and keeps its best point."""
+    from routers.campus_electrical import cancel_milp as _h
+
+    return _campus_route(_h, project_id)
+
+
+def campus_set_grid_limit(project_id: str, item: str, source: str, value: float | None = None,
+                          note: str = "") -> dict:
+    """`PUT …/grid-readiness/limits/{item}`: the user's own limit."""
+    from routers.campus_electrical import LimitBody, put_grid_readiness_limit as _h
+
+    return _campus_route(_h, project_id, item, LimitBody(value=value, source=source, note=note))
+
+
+def campus_reset_grid_limit(project_id: str, item: str) -> dict:
+    """`DELETE …/grid-readiness/limits/{item}`: back to the template's value."""
+    from routers.campus_electrical import delete_grid_readiness_limit as _h
+
+    return _campus_route(_h, project_id, item)
+
+
+def campus_island_report(project_id: str) -> dict:
+    """`GET …/island/report`, trimmed under the result cap."""
+    from routers.campus_electrical import island_report as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_cancel_island_cuts(project_id: str) -> dict:
+    """`POST …/island/cuts/apply/cancel`: stop after the trial in hand."""
+    from routers.campus_electrical import cancel_island_cuts as _h
+
+    return {"job": _campus_route(_h, project_id)}
+
+
+def campus_remove_island_cut(project_id: str, period: int, hour: int, kind: str) -> dict:
+    """`DELETE …/island/cuts/{period}/{hour}/{kind}`: take one applied cut back."""
+    from routers.campus_electrical import remove_island_cut as _h
+
+    return _b2b_fit(_campus_route(_h, project_id, int(period), int(hour), kind))
+
+
+def campus_clear_island_cuts(project_id: str) -> dict:
+    """`DELETE …/island/cuts`: every cut back, and the trials with them."""
+    from routers.campus_electrical import clear_island_cuts as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_gfm_settings_card(project_id: str) -> dict:
+    """`GET …/island/gfm-settings/card`: the apply card, written nowhere."""
+    from routers.campus_electrical import gfm_settings_card as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def campus_reset_library(project_id: str) -> dict:
+    """`POST …/library/reset`: drop the project's copy of the asset library."""
+    from routers.campus_electrical import reset_library as _h
+
+    return _b2b_fit(_campus_route(_h, project_id))
+
+
+def _gridspine_upload(project_id: str, file_id: str):
+    """An UploadFile of the active project's upload `file_id`, for a gridspine
+    upload route on the project `project_id` names. The upload belongs to the
+    active project, so naming another one is 409 (as import_map_geometry). The
+    gridspine upload routes check no edit lock; the tool does, before it
+    writes (`_gridspine_project_for_write`)."""
+    with _acting() as (db, user):
+        project = _gridspine_project_for_write(db, user, project_id)
+        target = project.name
+    active = _require_active_project()
+    if target != active:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "upload_project_mismatch",
+            "message": f"the file is an upload of the active project {active!r}; "
+                       f"use that project, or switch to {target!r} and upload there"})
+    return _active_upload(file_id)
+
+
+def gridspine_upload_external_dispatch(project_id: str, dispatch_file_id: str,
+                                       loads_file_id: str | None = None) -> dict:
+    """`POST …/dispatch-source/external` with UPLOADED tables (never model bytes)."""
+    from routers.gridspine import upload_external_dispatch as _h
+
+    dispatch = _gridspine_upload(project_id, dispatch_file_id)
+    loads = _gridspine_upload(project_id, loads_file_id) if loads_file_id else None
+    return _b2b_fit(_campus_route(_h, project_id, dispatch=dispatch, loads=loads))
+
+
+def gridspine_upload_readback(project_id: str, hour: int, bus_file_id: str,
+                              branches_file_id: str | None = None) -> dict:
+    """`POST …/readback/{hour}` with the engineer's UPLOADED PowerFactory CSVs."""
+    from routers.gridspine import upload_readback as _h
+
+    bus = _gridspine_upload(project_id, bus_file_id)
+    branches = _gridspine_upload(project_id, branches_file_id) if branches_file_id else None
+    return _b2b_fit(_campus_route(_h, project_id, int(hour), bus=bus, branches=branches))
+
+
 # ── Registry entry-point ────────────────────────────────────────────────────
 
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
@@ -9096,6 +9251,23 @@ DISPATCHERS.update({
     "get_report_evidence_hash": get_report_evidence_hash,
     "get_report_version": get_report_version,
     "create_evidence_report": create_evidence_report,
+})
+# ── LV08 B-campus (live-voice issue 08 slice B): campus and gridspine routes
+DISPATCHERS.update({
+    "campus_save_campus": campus_save_campus,
+    "campus_milp_status": campus_milp_status,
+    "campus_start_milp": campus_start_milp,
+    "campus_cancel_milp": campus_cancel_milp,
+    "campus_set_grid_limit": campus_set_grid_limit,
+    "campus_reset_grid_limit": campus_reset_grid_limit,
+    "campus_island_report": campus_island_report,
+    "campus_cancel_island_cuts": campus_cancel_island_cuts,
+    "campus_remove_island_cut": campus_remove_island_cut,
+    "campus_clear_island_cuts": campus_clear_island_cuts,
+    "campus_gfm_settings_card": campus_gfm_settings_card,
+    "campus_reset_library": campus_reset_library,
+    "gridspine_upload_external_dispatch": gridspine_upload_external_dispatch,
+    "gridspine_upload_readback": gridspine_upload_readback,
 })
 
 

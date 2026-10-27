@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 87,
-  "needs-tool": 31,
-  "tool": 348,
+  "needs-tool": 10,
+  "tool": 369,
   "unclassified": 0
  },
  "format_version": 1,
@@ -167,22 +167,28 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "PUT",
-   "path": "/api/campus-electrical/{name}/campus"
+   "path": "/api/campus-electrical/{name}/campus",
+   "tools": [
+    "campus_save_campus"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/draft"
+   "path": "/api/campus-electrical/{name}/draft",
+   "tools": [
+    "campus_draft_campus"
+   ],
+   "via": "service_call"
   },
   {
    "class": "tool",
@@ -215,13 +221,16 @@
    "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract"
+   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract",
+   "tools": [
+    "campus_extract_grid_code"
+   ],
+   "via": "service_call"
   },
   {
    "class": "needs-tool",
@@ -296,31 +305,40 @@
    "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-readiness"
+   "path": "/api/campus-electrical/{name}/grid-readiness",
+   "tools": [
+    "campus_grid_readiness"
+   ],
+   "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}"
+   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
+   "tools": [
+    "campus_reset_grid_limit"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "PUT",
-   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}"
+   "path": "/api/campus-electrical/{name}/grid-readiness/limits/{item}",
+   "tools": [
+    "campus_set_grid_limit"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -347,13 +365,16 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/island/cuts"
+   "path": "/api/campus-electrical/{name}/island/cuts",
+   "tools": [
+    "campus_clear_island_cuts"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -392,22 +413,28 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/island/cuts/apply/cancel"
+   "path": "/api/campus-electrical/{name}/island/cuts/apply/cancel",
+   "tools": [
+    "campus_cancel_island_cuts"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}"
+   "path": "/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}",
+   "tools": [
+    "campus_remove_island_cut"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -446,31 +473,40 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/island/gfm-settings/card"
+   "path": "/api/campus-electrical/{name}/island/gfm-settings/card",
+   "tools": [
+    "campus_gfm_settings_card"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/island/report"
+   "path": "/api/campus-electrical/{name}/island/report",
+   "tools": [
+    "campus_island_report"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/island/study"
+   "path": "/api/campus-electrical/{name}/island/study",
+   "tools": [
+    "campus_run_island_study"
+   ],
+   "via": "service_call"
   },
   {
    "class": "tool",
@@ -497,49 +533,64 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/library/reset"
+   "path": "/api/campus-electrical/{name}/library/reset",
+   "tools": [
+    "campus_reset_library"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/milp"
+   "path": "/api/campus-electrical/{name}/milp",
+   "tools": [
+    "campus_milp_status"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/milp"
+   "path": "/api/campus-electrical/{name}/milp",
+   "tools": [
+    "campus_start_milp"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/milp/cancel"
+   "path": "/api/campus-electrical/{name}/milp/cancel",
+   "tools": [
+    "campus_cancel_milp"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/run"
+   "path": "/api/campus-electrical/{name}/run",
+   "tools": [
+    "campus_run_study"
+   ],
+   "via": "service_call"
   },
   {
    "class": "tool",
@@ -1069,13 +1120,16 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/gridspine.ts"
    ],
    "method": "POST",
-   "path": "/api/gridspine/{name}/capacity"
+   "path": "/api/gridspine/{name}/capacity",
+   "tools": [
+    "gridspine_compute_capacity"
+   ],
+   "via": "service_call"
   },
   {
    "class": "tool",
@@ -1115,13 +1169,16 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/gridspine.ts"
    ],
    "method": "POST",
-   "path": "/api/gridspine/{name}/connection"
+   "path": "/api/gridspine/{name}/connection",
+   "tools": [
+    "gridspine_assess_connection"
+   ],
+   "via": "service_call"
   },
   {
    "class": "tool",
@@ -1136,13 +1193,16 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/gridspine.ts"
    ],
    "method": "POST",
-   "path": "/api/gridspine/{name}/dispatch-source/external"
+   "path": "/api/gridspine/{name}/dispatch-source/external",
+   "tools": [
+    "gridspine_upload_external_dispatch"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1181,13 +1241,16 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/gridspine.ts"
    ],
    "method": "POST",
-   "path": "/api/gridspine/{name}/readback/{hour}"
+   "path": "/api/gridspine/{name}/readback/{hour}",
+   "tools": [
+    "gridspine_upload_readback"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

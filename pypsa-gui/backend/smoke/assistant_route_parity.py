@@ -206,6 +206,8 @@ def _qualname(fn) -> str:
 
 def service_leaves(fn, depth: int = 3, _seen=None) -> set[str]:
     """Service functions ``fn`` calls directly, following same-module helpers."""
+    from starlette.concurrency import run_in_threadpool
+
     seen = set() if _seen is None else _seen
     fn = inspect.unwrap(fn)
     if not callable(fn) or id(fn) in seen or depth < 0:
@@ -222,6 +224,9 @@ def service_leaves(fn, depth: int = 3, _seen=None) -> set[str]:
         if not isinstance(node, ast.Call):
             continue
         target = _resolve_callee(node.func, glb)
+        if target is run_in_threadpool and node.args:
+            # `await run_in_threadpool(service_fn, ...)`: the call is service_fn's.
+            target = _resolve_callee(node.args[0], glb)
         if target is None or not hasattr(target, '__module__'):
             continue
         mod = target.__module__ or ''

@@ -4633,8 +4633,8 @@
       "backend_routes": 506,
       "gui_routes": 466,
       "limitation": 87,
-      "needs-tool": 31,
-      "tool": 348,
+      "needs-tool": 10,
+      "tool": 369,
       "unclassified": 0
     },
     "limitations_by_reason": {
@@ -4652,34 +4652,13 @@
         "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
         "DELETE /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
         "DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-        "DELETE /api/campus-electrical/{name}/grid-readiness/limits/{item}",
-        "DELETE /api/campus-electrical/{name}/island/cuts",
-        "DELETE /api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}",
         "GET /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
         "GET /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-        "GET /api/campus-electrical/{name}/grid-readiness",
-        "GET /api/campus-electrical/{name}/island/gfm-settings/card",
-        "GET /api/campus-electrical/{name}/island/report",
-        "GET /api/campus-electrical/{name}/milp",
-        "POST /api/campus-electrical/{name}/draft",
         "POST /api/campus-electrical/{name}/grid-codes/documents",
-        "POST /api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract",
         "POST /api/campus-electrical/{name}/grid-codes/drafts",
         "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
         "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
-        "POST /api/campus-electrical/{name}/island/cuts/apply/cancel",
-        "POST /api/campus-electrical/{name}/island/study",
-        "POST /api/campus-electrical/{name}/library/reset",
-        "POST /api/campus-electrical/{name}/milp",
-        "POST /api/campus-electrical/{name}/milp/cancel",
-        "POST /api/campus-electrical/{name}/run",
-        "POST /api/gridspine/{name}/capacity",
-        "POST /api/gridspine/{name}/connection",
-        "POST /api/gridspine/{name}/dispatch-source/external",
-        "POST /api/gridspine/{name}/readback/{hour}",
-        "PUT /api/campus-electrical/{name}/campus",
-        "PUT /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-        "PUT /api/campus-electrical/{name}/grid-readiness/limits/{item}"
+        "PUT /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
       ]
     }
   },
@@ -4793,7 +4772,7 @@
         "id": "route-parity:needs-tool:gridspine-campus",
         "issue": "08",
         "family": "gridspine-campus",
-        "summary": "31 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+        "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       }
     ],
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."

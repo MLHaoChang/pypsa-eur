@@ -61,3 +61,11 @@ flattened app route and writes/checks `.scratch/live-voice/route-parity.json`: 4
 carries a `route_parity` summary and one `route-parity:needs-tool:<family>` blocker per family.
 CI: `.github/workflows/assistant-route-parity.yaml`. Tests: `tests/test_assistant_route_parity.py`.
 Slice B adds typed tools for the needs-tool rows; slice C does the rest and the issue-05 journeys.
+
+2026-10-27: Slice B-campus (in progress). 21 of the 31 gridspine-campus needs-tool routes covered:
+14 new tools calling their route handlers in-process (campus file, MILP status/start/cancel,
+grid-readiness limits, island report/cuts/GFM card, library reset, gridspine external dispatch and
+readback from uploads), and 7 routes matched to existing tools once the parity scan follows
+`run_in_threadpool(service, ...)`. Remaining: the 10 grid-code draft/confirm/publish routes, pending
+the owner's decision on plan C10 (`not_via_chat` `grid_code_publish`). Tests:
+`tests/test_lv08_bcampus_tools.py`, `tests/test_assistant_route_parity.py`.

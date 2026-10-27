@@ -158,6 +158,21 @@ def test_service_call_match_needs_the_allowlist():
     assert problems == [] and row['class'] == 'tool' and row['via'] == 'service_call' and row['tools']
 
 
+async def _shares_campus_state_off_the_loop(name: str):
+    from starlette.concurrency import run_in_threadpool  # noqa: PLC0415
+
+    from services import campus_electrical_service  # noqa: PLC0415
+    return await run_in_threadpool(campus_electrical_service.get_state, name)
+
+
+def test_a_service_handed_to_run_in_threadpool_is_the_routes_call():
+    app = _app(('GET', '/api/test/{name}/state'), endpoint=_shares_campus_state_off_the_loop)
+    allow = [{'service': 'services.campus_electrical_service:get_state'}]
+    rows, problems = _build(app, _decl(service_matches=allow), _scan(('GET', '/api/test/{}/state')))
+    row = rows[('GET', '/api/test/{name}/state')]
+    assert problems == [] and row['class'] == 'tool' and row['via'] == 'service_call' and row['tools']
+
+
 def test_unused_service_match_is_stale():
     _, problems = _build(_app(), _decl(service_matches=[{'service': 'services.nowhere:fn'}]), _scan())
     assert any('stale service_matches entry services.nowhere:fn' in p for p in problems)
