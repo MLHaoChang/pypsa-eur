@@ -84,8 +84,11 @@ export default function ChatAccess({ checked, companion = false }: { checked: bo
               <td className="pr-1">{disposition[row.native]}</td><td>{disposition[row.external]}</td>
             </tr>)}</tbody>
           </table>
-          {current.guided_uncarded.length > 0 && <p>Guided exceptions to the Write row: they only store a record, and the step that applies it carries the approval card.{' '}
-            {current.guided_uncarded.map(row => `${toolLabel(row.tool)}: ${disposition[row.native]}.`).join(' ')}</p>}
+          {current.guided_uncarded.length > 0 && <div>
+            <p>In Guided, these Write tools skip the Write row's card: each only stores a pending change, and the step that applies it shows the card.</p>
+            <ul>{current.guided_uncarded.map(row =>
+              <li key={row.tool}>{toolLabel(row.tool)} · {disposition[row.native]}</li>)}</ul>
+          </div>}
           <p>No approval card does not grant access. Tool availability, locks, checked scope and action-specific validation still apply.
             External non-read calls always need confirmation. Saved context cannot grant permission.</p>
           <p>{current.checking.effective_for_selection
