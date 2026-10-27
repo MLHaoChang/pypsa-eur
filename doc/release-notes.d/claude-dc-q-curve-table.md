@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): the campus study's results show each inverter against the grid code's per-unit reactive capability curve (DC 15), with a unit's shortfall and the reason for any point not checked; a run from before the check says to rerun.

@@ -248,6 +248,27 @@ export interface ReportedRequirement {
   source: GridLimit['source']
 }
 
+/** One IBR unit at one checked active power against the grid code's per-unit reactive capability curve
+ *  (DC 15, gridspine `campus_reactive.IBR_CURVE_COLUMNS`). Generator convention: + the unit delivers.
+ *  `reported` is not checked (no rating, or a point the curve does not state), never a pass. */
+export interface IbrQCurveRow {
+  unit: string
+  kind: string
+  /** Null on a unit's single no-rating row. */
+  p_pu: number | null
+  p_mw: number | null
+  s_mva: number | null
+  q_min_req_mvar: number | null
+  q_max_req_mvar: number | null
+  available_mvar: number | null
+  shortfall_mvar: number | null
+  status: 'pass' | 'fail' | 'reported'
+  detail: string
+  clause: string
+  source: GridLimit['source']
+  basis: string
+}
+
 export interface CampusResults {
   selection: SelectedHour[]
   transformers: TransformerSizing[]
@@ -259,6 +280,10 @@ export interface CampusResults {
   reported_requirements?: ReportedRequirement[]
   /** The harmonic impedance scan from the PCC (DC-SURFACE-1); null for a run from before it was a stage. */
   harmonic_scan?: HarmonicScan | null
+  /** Each IBR unit against the per-unit Q curve (DC 15); null when the grid code has no curve. */
+  ibr_q_curve?: IbrQCurveRow[] | null
+  /** A run from before the table was kept, held to a grid code with the curve: rerun to add it. */
+  ibr_q_curve_not_computed?: boolean
   /** Null throughout when the run did not invest. */
   investment: InvestmentRow[] | null
   cost: CostRow[] | null
