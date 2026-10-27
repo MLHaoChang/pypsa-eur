@@ -701,8 +701,12 @@ component's Edit form with `open_editor` at read tier without saving, and switch
 to every canvas view.
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
-the eligible registry using explicit names, always-available controls, recent
-calls, and query terms, then retains catalogue order for prefix caching. The
+the eligible registry using always-available controls, pending plan tools,
+discovered tools, explicit names, the curated intent map, recent calls, and
+query terms, in that rank order, then retains catalogue order for prefix caching.
+The intent map (`_SELECTION_INTENTS` in `providers/wiring.py`) offers fixed read
+tools for a query word such as "sense" or "plausible", so no description text
+elsewhere in the catalogue can crowd them out. The
 exact selected set supplies the dispatch allowlist; `session_init.tool_count`
 describes the first request. After a toolset switch or intentional project
 rebinding the next request receives the refreshed catalogue and allowlist;
