@@ -307,6 +307,10 @@
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
     },
+    "upload_project_mismatch": {
+      "surface": "inline",
+      "why": "A file-import tool reads the upload from the active project and was asked to write to another project; the model recovers in the same turn by naming the active project or asking the user to switch."
+    },
     "no_chat_session": {
       "surface": "inline",
       "why": "A session-bound control tool (discuss_project_run, use_toolset, start/resume_task) ran without an active ChatSession. The turn framework normally supplies one; when it does not, the model reports the refusal and does not invent session state."

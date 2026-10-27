@@ -515,6 +515,11 @@
    "method": "GET",
    "path": "/api/simulation/queue/{job_id}/log_stream",
    "reason": "live-stream"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/import-folder",
+   "reason": "app-shell"
   }
  ],
  "needs_tool": [
@@ -655,21 +660,6 @@
   },
   {
    "method": "POST",
-   "path": "/api/document_values/commercial/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/document_values/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/equipment_table/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
    "path": "/api/gridspine/{name}/capacity",
    "family": "gridspine-campus"
   },
@@ -687,81 +677,6 @@
    "method": "POST",
    "path": "/api/gridspine/{name}/readback/{hour}",
    "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/library_reference/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/import-folder",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/map_layout/import",
-   "family": "import-export"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/map_layout/osm_suggestions",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/reports",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/capabilities",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/evidence_hash",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/asset/assets",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/curtailment/by_cause",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/eh_readiness",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/energy_flows",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/load_shape",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/loadflow-view",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/run-view",
-   "family": "all-results"
   }
  ],
  "non_mutating_routes": [
@@ -784,6 +699,26 @@
    "method": "POST",
    "path": "/api/results/billing/preview",
    "reason": "bills the last solve under a draft tariff; stores nothing (compute_billing_preview never binds or writes state)"
+  },
+  {
+   "method": "POST",
+   "path": "/api/library_reference/preview",
+   "reason": "plans on an isolated copy; stores no card, undo step or edit"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/preview",
+   "reason": "route docstring: writes nothing (document_values.preview)"
+  },
+  {
+   "method": "POST",
+   "path": "/api/equipment_table/preview",
+   "reason": "route docstring: writes nothing (equipment_table.preview)"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/commercial/preview",
+   "reason": "route docstring: writes nothing (document_values_commercial.preview)"
   }
  ],
  "binding_overrides": [

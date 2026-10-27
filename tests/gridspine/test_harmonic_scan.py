@@ -92,7 +92,8 @@ def test_too_many_combinations_fall_back_with_a_note():
     net, poc = _net(caps=[(10.0, 4), (10.0, 4), (10.0, 4)])         # 125 > MAX_CAP_STATES
     states, notes = hs.cap_states(hs.switched_shunts(net))
     assert len(states) == 2 + 3 * 4
-    assert "MAX_CAP_STATES" in notes[0]
+    assert notes[0] == ("125 capacitor states are more than the 64 the scan steps through in full: scanned all "
+                        "in, all out and each shunt stepped alone with the others in (14 states)")
     assert {i: 4 for i in net.shunt.index} in states and {i: 0 for i in net.shunt.index} in states
     net, _ = _net(caps=[(10.0, 70)])                                # one bank: all-out is scanned once
     states, _ = hs.cap_states(hs.switched_shunts(net))

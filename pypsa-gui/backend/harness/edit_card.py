@@ -60,6 +60,8 @@ SETTINGS_EDITS = frozenset({
     "update_project_settings",
     # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
+    # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
+    "import_map_geometry",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -87,6 +89,8 @@ NOT_EDITS = {
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
     "campus_run_island_study": "a computation on copies of the saved network",
+    # LV08 B2b
+    "create_evidence_report": "a new report record from the current evidence",
     "fetch_site_context": "caches upstream map context for a site; no input changes",
     # live-voice 08 B3
     "solve_queue_clear_finished": "drops finished jobs from the queue listing",

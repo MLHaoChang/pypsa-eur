@@ -183,6 +183,23 @@ def test_an_unknown_profile_is_reported_and_its_rows_unknown(tmp_path):
     assert rows["reactive_range"]["verdict"] == "unknown"
 
 
+def test_a_stored_profile_with_an_angle_limit_of_90_degrees_or_more_is_a_profile_error(tmp_path):
+    """A profile written before the 90 degree bound still loads as an error on the scorecard, not a crash."""
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code(PROFILE, raw=True)
+    p["angle_limit_deg"] = {"value": 120.0, "clause": "Clause X.1", "source": "code"}
+    codes = tmp_path / "codes"
+    codes.mkdir()
+    (codes / "wide_angle.yaml").write_text(json.dumps(p))
+    d, n = _project(tmp_path, "eh_datacenter", dc_load={})
+    out = G.grid_readiness(d, n, "wide_angle", profile_dirs=(codes,))
+    assert "angle_limit_deg value must be an angle below 90 degrees" in out["profile"]["error"]
+    rows = _rows(out)
+    assert rows["rapid_voltage_change"]["verdict"] == "unknown"
+    assert "angle_limit_deg" in rows["rapid_voltage_change"]["source"]
+
+
 def test_a_user_built_project_gets_the_generic_placeholders_marked_assumed(tmp_path):
     d, n = _project(tmp_path, "eh_datacenter", dc_load={})
     meta = json.loads((d / "eh_template.json").read_text())
