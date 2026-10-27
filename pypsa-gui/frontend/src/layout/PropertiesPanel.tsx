@@ -2145,7 +2145,7 @@ export default function PropertiesPanel({ showFootprintEditor = true }: { showFo
         {selectedComponent.type === 'Transformer' && <TransformerPanel key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'Carrier'     && <CarrierPanel     key={selectedComponent.name} name={selectedComponent.name} />}
         {selectedComponent.type === 'ShuntImpedance' && <ShuntPanel key={selectedComponent.name} name={selectedComponent.name} />}
-        {showFootprintEditor && <AssetFootprintEditor key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
+        {showFootprintEditor && <AssetFootprintEditor inPanel key={`footprint:${selectedComponent.type}:${selectedComponent.name}`} componentClass={selectedComponent.type} name={selectedComponent.name} />}
       </div>
     </aside>
   )

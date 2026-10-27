@@ -18,7 +18,8 @@ Until U2 WP10 the same view was also read from three vendored files under
 1-20 are frozen in ``tests/fixtures/legacy_study_library.json`` (gate U2-S1
 C8 a). A ledger a study stored before then still loads, runs and is valued:
 it names :data:`LIBRARY_VERSION` (read-only), and every reader takes the
-pinned pack for what the ledger does not hold. ``study_library/load_profiles/``
+WP0 pack (:data:`WP0_PACK_VERSION`, :func:`library_for_ledger`) for what the
+ledger does not hold. ``study_library/load_profiles/``
 stays: the sector load profiles, which the pack does not carry (Q7).
 
 :func:`seed_ledger` turns the library plus the study's intake into an
@@ -41,12 +42,14 @@ from models.study import (
     LedgerRow,
     Tariff,
 )
+from services.study._pack_rows_not_seeded import PACK_ROWS_NOT_SEEDED_SINCE_2026_10_05
 
 __all__ = [
     "BESS_KEY_DRIVERS", "DEFAULTS_VERSION_PREFIX", "DERIVED", "ENGINE_PATHS",
     "ENGINE_ROWS", "INTAKE_DERIVED_ROWS", "LIBRARY_VERSION", "Library",
     "LibraryError", "RULE_DESCRIPTOR", "TechnologyRow",
-    "horizon_and_replacements", "key_drivers_of", "load_defaults", "seed_ledger",
+    "WP0_PACK_VERSION", "horizon_and_replacements", "key_drivers_of", "library_for_ledger",
+    "load_defaults", "seed_ledger",
 ]
 
 #: READ-ONLY since U2 WP10: the `ledger_version` of a ledger seeded from the
@@ -209,8 +212,10 @@ DEFAULTS_VERSION_PREFIX = "generic-defaults"
 # own parity check; `test_study_ledger_from_pack` fails when a newer vendored
 # pack changes anything the study reads (its mapped and named rows, the pack
 # tariffs, the finance fields), and `unmapped_pack_rows` stays strict on the
-# pinned pack itself.
-PACK_VERSION = "2026-10-05"
+# pinned pack itself. 2026-10-26 (money-year issue 01): the technology-data rows
+# in 2025 EUR (MONEY-YEAR-1) and the seed tariffs converted to 2025 EUR
+# (MONEY-YR-SEED-1), so the study's money is 2025.
+PACK_VERSION = "2026-10-26"
 
 # Pack value key -> the GS identity in `_TECH_KEYS`, in the ledger's row order
 # (the order of the legacy `technology_costs.csv`, so a seeded ledger lists
@@ -237,6 +242,8 @@ _PACK_TECH_ROWS: tuple[tuple[str, tuple[str, str]], ...] = (
 _PACK_ROWS_NOT_SEEDED = {
     # The guided pack books the battery's FOM on the inverter (power) part only.
     "battery.energy.fom_share": "fom_booked_on_power_part",
+    # Rows added after the 2026-10-05 pin, none of a technology the ledger reads.
+    **PACK_ROWS_NOT_SEEDED_SINCE_2026_10_05,
 }
 _PACK_FINANCE_KEYS = {"finance.discount_rate": "discount_rate",
                       "finance.sizing_limit_connection_multiple":
@@ -479,6 +486,42 @@ def load_defaults(version: str | None = None) -> Library:
     ``"generic-defaults <pack version> <pack hash[:12]>"``.
     """
     return _load_defaults(version or PACK_VERSION)
+
+
+#: The pack U2 WP0's parity was frozen on (2020 EUR). A ledger naming
+#: :data:`LIBRARY_VERSION` (seeded before U2 WP8) reads it, as it did while
+#: this was the study's pin (`load_defaults()` before money-year 01): its rows
+#: 1-20 are that pack's (`test_study_ledger_from_pack`), in the same money year.
+WP0_PACK_VERSION = "2026-10-05"
+
+
+def library_for_ledger(ledger) -> Library:
+    """
+    The defaults a STORED ledger was seeded from, so its seed tariff and
+    finance rules are read in its own money year (money-year issue 01): a
+    ledger seeded on 2026-10-05 (2020 EUR) is never priced with the 2025
+    seed tariffs of a later pin. ``"generic-defaults <version> <hash12>"``
+    reads that version, refused when its hash no longer starts with
+    ``hash12``; :data:`LIBRARY_VERSION` reads :data:`WP0_PACK_VERSION`; no
+    ledger reads the pin (it is about to be seeded from it). Anything else
+    is refused, never read against the pin.
+    """
+    if ledger is None:
+        return load_defaults()
+    label = ledger.ledger_version or ""
+    if label == LIBRARY_VERSION:
+        return load_defaults(WP0_PACK_VERSION)
+    parts = label.split(" ")
+    if len(parts) != 3 or parts[0] != DEFAULTS_VERSION_PREFIX:
+        raise LibraryError(f"the ledger names defaults {label!r}, which no pack provides")
+    try:
+        library = load_defaults(parts[1])
+    except LookupError as exc:  # the pack loader's unknown version
+        raise LibraryError(f"the ledger names defaults {label!r}: {exc}") from None
+    if library.version != label:
+        raise LibraryError(f"the ledger was seeded from {label!r}, but pack {parts[1]} "
+                           f"now reads {library.version!r}")
+    return library
 
 
 def _engine_rows(intake: Mapping[str, Any], tariff: Tariff, tariff_provenance: str,

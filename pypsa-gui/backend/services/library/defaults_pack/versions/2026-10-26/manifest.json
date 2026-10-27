@@ -1,0 +1,130 @@
+{
+  "pack_id": "generic_defaults",
+  "version": "2026-10-26",
+  "title": "Generic defaults pack (technology costs, finance defaults, illustrative tariffs, synthetic load profiles)",
+  "seeded_from": {
+    "branch": "claude/edge-tool-ux-research-n0n2l6",
+    "path": "pypsa-gui/backend/study_library/",
+    "files": [
+      "technology_costs.csv",
+      "finance_defaults.yaml",
+      "tariffs.csv",
+      "load_profiles/index.csv",
+      "load_profiles/commercial_office.csv",
+      "load_profiles/industrial_two_shift.csv"
+    ],
+    "library_version": "technology-data v0.14.0",
+    "campus_equipment": {
+      "path": "gridspine/templates/data/campus_assets.yaml",
+      "sha256": "97ce51fbc297140e4a1946b1d56f9e715038652413a117d5f0e51fb623582c97",
+      "entries": 81,
+      "currency": "EUR",
+      "price_year": 2025,
+      "rows": "one `investment` part per entry: overnight (capex_eur, capex_eur_per_km for a cable, per bay for switchgear), lifetime (lifetime_a), fom_share (opex_frac)",
+      "reference": "docs/superpowers/research/2026-10-12-campus-asset-reference-costs.md (cited reference costs: Ei Normvärdeslista elnät 2024-2027, Danish Energy Agency Technology Data for Energy Transport; 2022 SEK to 2025 EUR at the ECB rate and the euro-area C27.1 producer price index); a value without a source stays assumed (illustrative)"
+    },
+    "template_technologies": {
+      "library_version": "technology-data v0.14.0",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+      "rows": "one `investment` part per MW: overnight, fom_share, lifetime and (except onwind) efficiency, in 2025 EUR (technology-data's eur_year); gas-genset ← OCGT, diesel-genset ← oil, onwind ← onwind, fuel-cell ← fuel cell, electrolysis ← electrolysis",
+      "why": "IC S3 seeds (owner 2026-10-13, Q1 a): the Energy Hub templates and redundancy placeholders derive their costs from the pack"
+    },
+    "ammonia_technologies": {
+      "library_version": "technology-data v0.14.0",
+      "url": "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+      "rows": "one `investment` part each: overnight, fom_share, lifetime, in 2025 EUR (technology-data's eur_year); haber-bosch ← Haber-Bosch (per MW of NH3), nh3-tank ← NH3 (l) storage tank incl. liquefaction, h2-tank ← hydrogen storage tank type 1 including compressor",
+      "why": "grid-to-process ticket 05: the ammonia tracer template eh_ammonia_staged prices its tanks from the pack; the Haber-Bosch loop is a sunk, fixed-size unit whose rows serve the investment case. The Haber-Bosch electricity input (0.2473 MWh_el/MWh_NH3) is a template number, ledgered there"
+    },
+    "heat_technologies": {
+      "library_version": "technology-data v0.14.0 (eur_year 2025) and the Danish Energy Agency catalogues it ships",
+      "urls": [
+        "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/outputs/costs_2030.csv",
+        "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/inputs/technology_data_for_industrial_process_heat.xlsx",
+        "https://raw.githubusercontent.com/PyPSA/technology-data/refs/tags/v0.14.0/inputs/technology_data_catalogue_for_energy_storage.xlsx"
+      ],
+      "rows": "one `investment` part each: overnight, fom_share, lifetime, efficiency (a COP for the heat pump) and the operating range the source states (min_load, temperatures); electric-boiler-steam <- electric boiler steam (DEA 310.1), industrial-heat-pump-ht <- industrial heat pump high temperature (DEA 302.b), both from costs_2030.csv in 2025 EUR; electric-process-heater <- DEA 312.c Direct firing, Electricity, 2019 EUR; thermal-storage-molten-salt <- DEA 143b Molten salt Carnot battery (industrial steam), 2020 EUR",
+      "why": "refinery electrification gap 2 (.scratch/grid-to-process/research/se-electrifying-refining-desw024.md section 6a.3): library rows for the electrified heat technologies"
+    }
+  },
+  "files": {
+    "values": "values.csv",
+    "finance": "finance.yaml",
+    "tariffs": "tariffs.json"
+  },
+  "load_profiles": [
+    {
+      "id": "commercial_office",
+      "label": "Commercial office (synthetic shape)",
+      "file": "load_profiles/commercial_office.csv",
+      "sha256": "7b593fc3fa4a6f61a666021ec4a1e4707d17bab94b0ed26d434d670f0ab88c2a",
+      "source": "synthetic: guided investment study S4, a stated shape (weekday 08-18 plateau, night and weekend base, summer cooling uplift), not a measurement",
+      "source_year": 2026,
+      "synthetic": true,
+      "illustrative": true,
+      "unit": "shape, scaled to annual MWh",
+      "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity."
+    },
+    {
+      "id": "industrial_two_shift",
+      "label": "Industrial, two shifts (synthetic shape)",
+      "file": "load_profiles/industrial_two_shift.csv",
+      "sha256": "5fc6e09b43b6133d3645f69866d8f5d639844cac8e84e691526b33901f7f14bf",
+      "source": "synthetic: guided investment study S4, a stated shape (weekday 06-22 two shifts, night and weekend base, August and December shutdown dips), not a measurement",
+      "source_year": 2026,
+      "synthetic": true,
+      "illustrative": true,
+      "unit": "shape, scaled to annual MWh",
+      "note": "Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity."
+    }
+  ],
+  "typed_cost_units": {
+    "from": "2026-10-20",
+    "why": "GS-2b: capacity_basis, includes_grid_connection and money_year on every row; same numbers as 2026-10-20",
+    "includes_grid_connection": "campus equipment false; technology-data v0.14.0 rows \"unknown\" (the v0.14 text does not state it per row)"
+  },
+  "campus_reference_costs": {
+    "from": "2026-10-22",
+    "why": "campus-IC 03A: the 243 campus equipment rows (overnight, lifetime, fom_share of 81 entries) take the cited reference costs in 2025 EUR; every other row, the finance defaults, tariffs and load profiles are 2026-10-22's unchanged"
+  },
+  "heat_technologies": {
+    "from": "2026-10-23",
+    "why": "21 new rows; every 2026-10-23 row, the finance defaults, tariffs and load profiles are unchanged"
+  },
+  "money_year_relabel": {
+    "from": "2026-10-24",
+    "why": "owner decision MONEY-YEAR-1: technology-data v0.14.0 states eur_year 2025 (config.yaml), so its outputs/costs_2030.csv is in 2025 EUR; the CSV's currency_year column is the year each source was inflated from",
+    "relabelled": [
+      "battery.power.overnight",
+      "battery.energy.overnight",
+      "solar-utility.investment.overnight",
+      "solar-rooftop.investment.overnight",
+      "gas-genset.investment.overnight",
+      "diesel-genset.investment.overnight",
+      "onwind.investment.overnight",
+      "fuel-cell.investment.overnight",
+      "electrolysis.investment.overnight",
+      "haber-bosch.investment.overnight",
+      "nh3-tank.investment.overnight",
+      "h2-tank.investment.overnight"
+    ],
+    "change": "money_year 2020 -> 2025 on these rows only; every value, every other row (the DEA-workbook rows keep their sheet's year), the finance defaults, tariffs and load profiles are unchanged"
+  },
+  "money_year_conversion": {
+    "from": "2026-10-25",
+    "why": "owner decision MONEY-YR-SEED-1: the guided study reads the 2025 technology-data rows (pack 2026-10-25) and `currency_year_mixed` refuses a 2020 tariff against them, so the illustrative seed tariffs are converted to 2025 EUR",
+    "index": "Eurostat prc_hicp_aind, HICP all items, annual average rate of change, European Economic Area (EEA), 2021-2025, as vendored by technology-data v0.14.0 at inputs/prc_hicp_aind__custom_20097956_spreadsheet.xlsx",
+    "rates_percent": {
+      "2021": "2.9",
+      "2022": "9.2",
+      "2023": "6.4",
+      "2024": "2.6",
+      "2025": "2.5"
+    },
+    "factor": "1.2573346011408",
+    "converted": {
+      "de_industrial_illustrative": "rates, original_price and export price_per_mwh",
+      "tou_reference_illustrative": "rates, original_price and export price_per_mwh"
+    },
+    "change": "the two tariffs: every money figure x 1.2573346011408 (not rounded), currency_year and valid_from 2020 -> 2025; finance.yaml currency_year 2020 -> 2025; every values.csv row, the finance defaults' values and the load profiles are unchanged"
+  }
+}

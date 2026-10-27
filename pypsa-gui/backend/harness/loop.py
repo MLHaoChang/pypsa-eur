@@ -2944,7 +2944,13 @@ def _dispatch_real_tool_call(
             # Pydantic failures used to surface as opaque "tool_error" with a
             # multi-line body the UI truncated away — keep a short kind.
             error_kind = "validation_error"
-        msg = _redact_for_log(detail or exc)
+        # A refusal's detail is {"error_kind", "message"}: show the human
+        # message, not the dict repr. A lock refusal keeps its whole detail
+        # (the banner reads the holder from it).
+        shown = detail
+        if isinstance(detail, dict) and "lock" not in detail and isinstance(detail.get("message"), str) and detail["message"].strip():
+            shown = detail["message"]
+        msg = _redact_for_log(shown or exc)
         yield "tool_error", {
             "tool_use_id": tool_use_id,
             "tool_name": tool_name,

@@ -112,4 +112,4 @@ def test_the_template_technologies_are_transcribed_from_the_catalogue(new):
 def test_the_guided_study_still_reads_its_pinned_pack():
     from services.study import library as L
 
-    assert L.PACK_VERSION == "2026-10-05"
+    assert L.PACK_VERSION == "2026-10-26"    # money-year 01: the study reads 2025 money

@@ -1,0 +1,37 @@
+{
+  "pack_id": "generic_defaults",
+  "version": "2026-10-26",
+  "region": "ca_federal",
+  "currency": "CAD",
+  "base_version": "2026-10-26",
+  "base_hash": "f4c0c15984ba6087f3460cfa1c46fb9d7e27f473ee88bd3a6c7d866bf9d99997",
+  "title": "Generic defaults pack, regional technology costs: Canada (CER Energy Future 2026, Ontario, scenario CM, 2030)",
+  "sources": [
+    {
+      "source_id": "cost_canada_cer_ef2026",
+      "title": "Canada Energy Future 2026 technology cost/performance parameters",
+      "publisher": "Canada Energy Regulator",
+      "url": "https://open.canada.ca/data/en/dataset/5ab871c2-d811-4b33-93cc-6bb1683c26d2",
+      "file": "ef2026-cost-data-electricity.csv",
+      "sha256": "3e84a4336bb9d6ab64a9621f19d2d0a697f738aacbd98ebe47aff67e9f261927",
+      "size_bytes": 21136884,
+      "also_hashed": {
+        "data-dictionary-ef2026-cost-data-electricity.xlsx": "c24d5b04195783115b6a126ddf6d77125a3ca5f4642937e762b535c2e3d751a0"
+      },
+      "licence": "Open Government Licence - Canada",
+      "terms_url": "https://open.canada.ca/en/open-government-licence-canada",
+      "attribution": "Contains information licensed under the Open Government Licence - Canada.",
+      "redistribution_status": "open_verified",
+      "owner_clearance": "2026-10-21, coordinator-relayed (decision G2)",
+      "selection": "Province/Territory=ON, Scenario=CM, Year=2030; money in CAD, Dollar Year 2025",
+      "file_url": "https://open.canada.ca/data/dataset/5ab871c2-d811-4b33-93cc-6bb1683c26d2/resource/59418abd-6474-454f-87fa-1d5df2794660/download/ef2026-cost-data-electricity.csv"
+    }
+  ],
+  "source_cells": {
+    "file": "source_cells.csv",
+    "sha256": "c8af44a57c9e9dc0e92692e870ac17462de5ebdb0b1b6d9cd7c7de7eac0581e3"
+  },
+  "files": {
+    "values": "values.csv"
+  }
+}

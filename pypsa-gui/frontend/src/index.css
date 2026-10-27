@@ -374,6 +374,14 @@ html {
     outline: 2px solid var(--color-accent);
     outline-offset: 2px;
   }
+  /* A text-link button (a bare <button> styled with `underline`) reads as
+     unavailable when disabled, the same as the filled buttons. Base layer, so
+     a component's own opacity or colour utility still wins. */
+  button.underline:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    text-decoration-style: dotted;
+  }
 }
 
 .leaflet-interactive:focus,

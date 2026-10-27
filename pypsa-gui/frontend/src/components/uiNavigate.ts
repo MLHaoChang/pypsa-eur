@@ -87,6 +87,10 @@ type NavigationRequest = {
   status?: string
   fingerprint?: string
   evidence_available?: boolean
+  loadflow_source?: string | null
+  window_from?: number | null
+  window_to?: number | null
+  highlight?: { component?: string; name?: string } | null
 }
 
 export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
@@ -99,6 +103,8 @@ export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): b
 
 function apply(d: NavigationRequest) {
   const ui = useUIStore.getState()
+  // A highlight lasts until the next navigation.
+  ui.setResultsHighlight(null)
   const closePanelWithReturn = () => withReturnFrom(() => useUIStore.getState().setSlidePanel(null))
   if (d.kind === 'select_component' && d.component_class && d.name) {
     if (ui.activeSlidePanel && ui.activeSlidePanel !== 'issues') closePanelWithReturn()
@@ -185,6 +191,17 @@ function apply(d: NavigationRequest) {
   }
 
   if (d.results_tab) ui.requestResultsTab(d.results_tab)
+  // Live-voice 07: Load flow opens on the source and window the assistant read,
+  // with the named branch highlighted; the ACK checks all three are shown.
+  if (d.results_tab === 'loadflow') {
+    if (d.loadflow_source === 'lopf' || d.loadflow_source === 'ac_pf') ui.setResultSource(d.loadflow_source)
+    if (typeof d.window_from === 'number' && typeof d.window_to === 'number') {
+      ui.requestResultsWindow({ fromIndex: d.window_from, toIndex: d.window_to })
+    }
+    if (d.highlight?.component && d.highlight.name) {
+      ui.setResultsHighlight({ component: d.highlight.component, name: d.highlight.name })
+    }
+  }
   if (d.bottom_tab) ui.requestBottomTab(d.bottom_tab)
   if (typeof d.compare_rail === 'boolean') ui.setCompareRailOpen(d.compare_rail)
   if (d.compare_a || d.compare_b || d.compare_tab) {

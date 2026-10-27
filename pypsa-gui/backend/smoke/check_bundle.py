@@ -210,6 +210,8 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-24/manifest.json",
     # MONEY-YEAR-1: the technology-data rows relabelled to 2025 money.
     "services/library/defaults_pack/versions/2026-10-25/manifest.json",
+    # Money-year 01: the seed tariffs converted to 2025 money.
+    "services/library/defaults_pack/versions/2026-10-26/manifest.json",
     # The shipped common Library items (GS-EU P2d): `common.COMMON_DIR` = the module's
     # sibling `common_items/`; one probe per shipped kind.
     "services/library/common_items/tariff/nl-tennet-2026-hs.json",
@@ -220,6 +222,9 @@ ROOTED = (
     "services/library/defaults_pack/versions/2026-10-22+ca_federal/manifest.json",
     "services/library/defaults_pack/versions/2026-10-22+uk/manifest.json",
     "services/library/defaults_pack/versions/2026-10-22+us_federal/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-26+ca_federal/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-26+uk/manifest.json",
+    "services/library/defaults_pack/versions/2026-10-26+us_federal/manifest.json",
     # The EU cost references (GS-EU): `europe_reference._DATA_FILE` = the module's
     # sibling `reference_data/`; the reader refuses to run without its pinned bytes.
     "services/library/reference_data/eu-dea-2026-08.json",

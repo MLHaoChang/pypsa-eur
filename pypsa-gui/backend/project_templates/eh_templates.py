@@ -99,7 +99,7 @@ def _tag_columns(n) -> None:
 # Owner 2026-10-13: every candidate is priced from the pack through the asset
 # schema (overnight parts; PyPSA or `derive.apply_parts` annuitises them at
 # the pack's discount rate), never from an annualised literal.
-TEMPLATE_PACK_VERSION = "2026-10-22"
+TEMPLATE_PACK_VERSION = "2026-10-26"
 
 
 def _price(n, component: str, name: str, technology: str) -> None:
@@ -449,7 +449,7 @@ def _dc_finance(plan: _DcPlan) -> dict:
     same years)."""
     p = plan.planning
     return {
-        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "currency": "EUR", "currency_year": 2025, "price_basis": "nominal",
         "financial_close": f"{p.start_year - 1}-01-01",
         "cod_by_asset": {a: f"{p.start_year}-01-01" for a in DC_EXISTING},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
@@ -794,7 +794,7 @@ def _mg_finance(planning: Planning | None = None) -> dict:
     before the start, every COD the start, the case to the end year."""
     first, end = _mg_years(planning)
     return {
-        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "currency": "EUR", "currency_year": 2025, "price_basis": "nominal",
         "financial_close": f"{first - 1}-01-01",
         "cod_by_asset": {a: f"{first}-01-01" for a in (*MG_EXISTING, *MG_CANDIDATES)},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
@@ -1109,7 +1109,8 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
              "note": "an illustrative network-use charge on the metered import, on top of the "
                      "wholesale price the grid supply carries; no demand charge (the template "
                      "models one July week, so a monthly item would be billed for one month); "
-                     "replace with the site's tariff"},
+                     "replace with the site's tariff; synthetic, illustrative; no money year of "
+                     "its own; read in the case's money (2025)"},
             {"item": "tariff clock", "value": "UTC",
              "source": "assumed",
              "note": "the representative week's hours are the site clock; stating them as UTC "
@@ -1119,7 +1120,7 @@ def _dc_staged_meta(plan: _DcPlan, load_spec=None) -> dict:
              "source": "assumed",
              "note": "in service at the first period and sunk: no capex in the case; only the "
                      "candidates the plan builds are investments, each a stage at its period"},
-            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+            {"item": "money year", "value": "pack prices (2025 EUR) are read as real base-year EUR",
                "source": "assumed",
                "note": "held flat to the base year, then escalated from it at the case's rates; "
                        "nothing is converted with a price index"
@@ -1249,7 +1250,7 @@ def _mg_single_meta(planning: Planning | None = None) -> dict:
              "note": "in service and sunk: no capex in the case; only the candidates the plan "
                      "builds are investments. The solve is unchanged"},
             {"item": "finance inputs",
-             "value": f"the staged microgrid's: pack prices (2020 price data) taken as real "
+             "value": f"the staged microgrid's: pack prices (2025 EUR) taken as real "
                       f"{first} EUR (the base year), escalation 2 %/yr from "
                       f"{first}, inflation 2 %, all equity at 7 %, pre-tax; PV degrades "
                       "0.5 %/yr, the rest not",
