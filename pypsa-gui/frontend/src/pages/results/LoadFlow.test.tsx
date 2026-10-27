@@ -7,6 +7,7 @@ import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import LoadFlow from './LoadFlow'
 import { findKpiValue } from '../../test/kpi'
+import { navigationEpoch } from '../../utils/navigationEpoch'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -239,7 +240,11 @@ it('Guided keeps Branch loading hidden and gives the assistant branch a route to
   const notice = await screen.findByText(/Load flow for Line 'L 7' \(AC power flow\) is an Expert view\./)
   expect(screen.queryByTestId('branch-loading')).toBeNull()
   expect(resultsEvidenceApi.loadflow).not.toHaveBeenCalled()
+  expect(useUIStore.getState().uiMode).toBe('guided')
+  const epoch = navigationEpoch()
   fireEvent.click(screen.getByRole('button', { name: 'Show in Expert >' }))
+  // A manual navigation: the assistant's pending ACK watcher stops, so the click never ACKs the action.
+  expect(navigationEpoch()).toBeGreaterThan(epoch)
   const ui = useUIStore.getState()
   expect(notice.isConnected).toBe(false)
   expect(ui.uiMode).toBe('expert')
