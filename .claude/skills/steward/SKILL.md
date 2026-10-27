@@ -17,7 +17,7 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    Done when every check run on the head SHA is completed.
 4. **Fix red CI.** See [CI failures](#ci-failures); loop back to step 3 after each push.
    Done when every check run is success or skipped.
-5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`. Premerge's "reviewer verdicts" section shows which GK and UX OKs are current on the head; ask a reviewer again only when its OK is missing or stale. The message holds:
+5. **Report green.** Run `scripts/coord/premerge.sh <pr>` right before reporting, then `send_message` the coordinator, starting with `premerge ok <full sha>`. Premerge's "reviewer verdicts" section shows which GK and UX OKs are current on the head; ask a reviewer again only when its OK is missing or stale. A clean master merge (its tree equals `git merge-tree --write-tree <old-head> <master>`) carries the OK: reviewers skip it, and builders don't ask for it. The message holds:
    - the PR number;
    - the full 40-character head SHA, copied from premerge.sh's `head:` line;
    - the premerge.sh output.

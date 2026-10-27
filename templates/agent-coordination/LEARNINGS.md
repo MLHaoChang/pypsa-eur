@@ -201,3 +201,6 @@ Every tool call and every wake re-reads the whole context. The coordinator was t
 - **2026-10-27: sessions rotated every 20–45 minutes at a 200k limit.** On 1M-context models about 20 builders and reviewers hit the hand-off overnight; each rotation cost a new brief, peer messages and a re-read of the same files.
   - Fix: the context-guard hook and `sessions.py` hand off at 300k for every session (owner decision USE-2); the coordinator stays at 300k.
   - Lives in: `context-guard.sh` and its test, `sessions.py`, steward and coordinator (live and template copies).
+- **2026-10-27: reviewer messages were half the coordinator's wakes.** 18 of ~35 wakes in a day were OK or delta-OK messages, several for clean master merges that already carried the OK.
+  - Fix: the PR comment is the verdict; reviewers message the coordinator only for a blocking NOT OK, a plan review or a ruling to relay. A clean master merge carries the OK, so reviewers skip it and builders don't ask (owner decision RETRO-QUIET-1).
+  - Lives in: review-gk, review-ux (verdict paragraph) and steward "Report green" (live and template copies).
