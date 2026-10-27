@@ -75,6 +75,9 @@ MAX_MULTIMODAL_IMAGE_BYTES = 10 * 1024 * 1024
 # token consumption predictable.
 MAX_MULTIMODAL_BLOCKS = 20
 
+GEOJSON_MIME = "application/geo+json"
+KML_MIME = "application/vnd.google-earth.kml+xml"
+
 # Allowlisted MIME types — sniff result must match one of these. PDFs +
 # common images route to Anthropic multimodal (Phase C); Excel + Word
 # parse server-side (Phase B). CSV is text/plain but worth allowing as a
@@ -94,7 +97,66 @@ ALLOWED_MIME_TYPES = frozenset({
     # CSV / plain text — server-parse to a DataFrame in Phase B.
     "text/csv",
     "text/plain",
+    # Map geometry for `import_map_geometry`. Only ever assigned by
+    # `resolve_geo_mime`, after the bytes parse as GeoJSON / KML.
+    GEOJSON_MIME,
+    KML_MIME,
 })
+
+# What libmagic (or a browser) reports for a real .geojson / .kml: JSON and
+# XML are text, and some browsers send octet-stream for unknown extensions.
+# Only these may be upgraded to a geo MIME; anything else (an EXE, a PDF, a
+# zip renamed .geojson) keeps its real sniff and the allowlist refuses it.
+_GEO_UPGRADABLE = frozenset({
+    "application/json", "text/plain", "text/xml", "application/xml",
+    "application/octet-stream",
+    # The declared type, when libmagic is missing and `_sniff_mime` falls back.
+    GEOJSON_MIME, KML_MIME,
+})
+_GEO_EXTENSIONS = {".geojson": GEOJSON_MIME, ".kml": KML_MIME}
+
+
+def resolve_geo_mime(blob: bytes, filename: str, sniffed: str, declared: str | None) -> str:
+    """
+    The MIME to store: a geo MIME for an upload that IS GeoJSON or KML, else
+    `sniffed` — except that an unverified geo `sniffed` (the declared-type
+    fallback) becomes `application/octet-stream`, which the allowlist refuses.
+
+    A candidate comes from the extension (.geojson / .kml) or the declared
+    type, and only when the sniff is one of `_GEO_UPGRADABLE`. The candidate
+    holds only if `map_geometry_import.parse_features` (the parser the import
+    route runs: size cap, UTF-8, DOCTYPE/entity refusal) reads the bytes as
+    that format, so an accepted upload is one the import can read.
+    """
+    unverified = "application/octet-stream" if sniffed in (GEOJSON_MIME, KML_MIME) else sniffed
+    if sniffed not in _GEO_UPGRADABLE:
+        return unverified
+    ext = os.path.splitext(filename or "")[1].lower()
+    candidate = _GEO_EXTENSIONS.get(ext) or (declared if declared in (GEOJSON_MIME, KML_MIME) else None)
+    if candidate is None:
+        return unverified
+    from services import map_geometry_import as mgi
+    if len(blob) > mgi.MAX_IMPORT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "error_kind": "file_too_large",
+                "message": (
+                    f"This map file is larger than {mgi.MAX_IMPORT_BYTES // (1024 * 1024)} MB, "
+                    "the most the map import reads. Split it or simplify its geometry, then upload it again."
+                ),
+            },
+        )
+    # The parser tells the two formats apart by the first character; pin it
+    # to the candidate so a .geojson holding KML (or the reverse) is refused.
+    is_xml = blob.lstrip(b"\xef\xbb\xbf \t\r\n").startswith(b"<")
+    if is_xml != (candidate == KML_MIME):
+        return unverified
+    try:
+        mgi.parse_features(blob, ".kml" if candidate == KML_MIME else ".geojson")
+    except mgi.GeometryImportInvalid:
+        return unverified
+    return candidate
 
 
 # ── Per-project lock registry ───────────────────────────────────────────────

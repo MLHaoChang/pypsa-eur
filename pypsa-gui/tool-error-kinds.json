@@ -307,6 +307,10 @@
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
     },
+    "upload_project_mismatch": {
+      "surface": "inline",
+      "why": "A file-import tool reads the upload from the active project and was asked to write to another project; the model recovers in the same turn by naming the active project or asking the user to switch."
+    },
     "no_chat_session": {
       "surface": "inline",
       "why": "A session-bound control tool (discuss_project_run, use_toolset, start/resume_task) ran without an active ChatSession. The turn framework normally supplies one; when it does not, the model reports the refusal and does not invent session state."
@@ -422,6 +426,18 @@
     "roundtrip_unreadable": {
       "surface": "inline",
       "why": "POST …/reports/{id}/roundtrip: the uploaded file is not a Word document the reader can open. Inline: the tool result names the file and the remedy (export again, edit in Word, upload the .docx); the assistant relays it."
+    },
+    "rolling_horizon_invalid": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': a Horizon under 1 snapshot. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
+    },
+    "rolling_overlap_invalid": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': a negative Overlap. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
+    },
+    "rolling_overlap_exceeds_horizon": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': an Overlap not shorter than the Horizon. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
     },
     "sdk_not_installed": {
       "surface": "inline",

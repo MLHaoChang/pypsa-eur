@@ -277,10 +277,12 @@ def _typed(card):
 
 
 def test_solver_card_rolling_rows_and_note(grid):
-    frames = _card(grid, "update_solver_config", {"partial": {"solve_strategy": "rolling", "rolling_horizon": 24}})
+    # 48, not 24: a 24-snapshot window over the stored 24-snapshot overlap is
+    # refused (rolling_overlap_exceeds_horizon), see the next test.
+    frames = _card(grid, "update_solver_config", {"partial": {"solve_strategy": "rolling", "rolling_horizon": 48}})
     card = frame(frames, "tool_pending_confirmation")["edit_card"]
     assert card["kind"] == "settings_edit" and card["complete"] is True
-    assert _typed(card) == [("solve_strategy", "full", "rolling", ""), ("rolling_horizon", 168, 24, "snapshots")]
+    assert _typed(card) == [("solve_strategy", "full", "rolling", ""), ("rolling_horizon", 168, 48, "snapshots")]
     strategy, horizon = [r for r in card["rows"] if r["role"] == "typed"]
     assert strategy["label"] == "Solve strategy"
     assert strategy["words"] == {"old": "Full LP", "new": "Rolling horizon"}
@@ -290,9 +292,16 @@ def test_solver_card_rolling_rows_and_note(grid):
     receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
     assert receipt["outcome"] == "verified"
     # The Expert receipt says what the card shows: a horizon that did not apply was "—", not 168.
-    assert "rolling_horizon — → 24 snapshots" in card["says"] and receipt["says"] == card["says"]
+    assert "rolling_horizon — → 48 snapshots" in card["says"] and receipt["says"] == card["says"]
     cfg = sim_router._state["solver_config"]
-    assert (cfg.solve_strategy, cfg.rolling_horizon) == ("rolling", 24)
+    assert (cfg.solve_strategy, cfg.rolling_horizon) == ("rolling", 48)
+
+
+def test_solver_card_refuses_a_window_its_overlap_does_not_fit(grid):
+    frames = _card(grid, "update_solver_config", {"partial": {"solve_strategy": "rolling", "rolling_horizon": 24}})
+    assert not [f for f in frames if f[0] == "tool_pending_confirmation"]
+    assert frame(frames, "tool_error")["error_kind"] == "rolling_overlap_exceeds_horizon"
+    assert sim_router._state["solver_config"].solve_strategy == "full"
 
 
 def test_economics_basis_card_shows_percent(grid):
