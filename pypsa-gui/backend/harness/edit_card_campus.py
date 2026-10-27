@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 from contextlib import contextmanager
 from typing import Any, Callable
 
@@ -29,6 +30,9 @@ from harness.edit_card import (
     _settings_row,
     register,
 )
+from harness.edit_card_site import _fingerprint
+
+_TEXT_CAP = 120  # a free-text string on a card; the rest is "…"
 
 
 def _title(key: str) -> str:
@@ -48,7 +52,9 @@ def _as_card_refusal():
         if isinstance(detail, dict) and detail.get("error_kind"):
             raise
         text = detail if isinstance(detail, str) else json.dumps(detail, default=str)
-        _refuse("invalid_edit_value" if exc.status_code in (413, 422) else "edit_refused", text, exc.status_code)
+        if exc.status_code in (413, 422):
+            _refuse("invalid_edit_value", text, exc.status_code)
+        _refuse("edit_refused", text, exc.status_code)
 
 
 def _project_id(args: dict) -> str:
@@ -88,7 +94,7 @@ def _cell(field: str, value):
         return f"{len(value)} items"
     if isinstance(value, dict):
         return f"{len(value)} fields"
-    return _setting(value)
+    return _setting(_text(value))
 
 
 def _on_off(row: dict) -> dict:
@@ -100,6 +106,31 @@ def _on_off(row: dict) -> dict:
 
 def _differs(old, new) -> bool:
     return not _same(old, new)
+
+
+def _text(value):
+    """A free-text string as the card shows it: at most `_TEXT_CAP` characters, then "…"."""
+    return value[:_TEXT_CAP] + "…" if isinstance(value, str) and len(value) > _TEXT_CAP else value
+
+
+def _hide(row: dict, old, new) -> dict:
+    """A row whose old and new cells read the same although the values differ (a count, a capped
+    string, a folder name) says "(changed)" and carries a fingerprint of the new value; the
+    receipt then compares the stored value's fingerprint (`_stored`)."""
+    if row["old"] == row["new"] and not _same(old, new):
+        row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = _fingerprint(new)
+        if row.get("words"):
+            row["words"] = {**row["words"], "new": f"{row['words']['new']} (changed)"}
+    return row
+
+
+def _stored(row: dict, cell, value):
+    """The stored value's cell, or the row's own "(changed)" cell when the stored value is the one
+    the card fingerprinted. An unwritten store reads as its plain cell, which is not the new one."""
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+        return row["new"]
+    return cell
 
 
 def _capped(rows: list[dict], what: str) -> list[dict]:
@@ -132,15 +163,22 @@ def _source_words(db, project, config: dict) -> str:
         name = gs._project_for_network(db, project, config["from_network"])
         return f"A solved project's network: {name or config['from_network']}"
     if config.get("from_dispatch"):
-        return f"A finished study's directory: {config['from_dispatch']}"
+        # the folder's own name: the card never shows where the server keeps it
+        folder = re.split(r"[\\/]", str(config["from_dispatch"]).rstrip("\\/"))[-1]
+        return f"A finished study's directory: {folder}"
     if config.get("from_external"):
         return f"Your own tables: {pathlib.Path(config['from_external']).name}"
     return "Generate here (unit commitment)"
 
 
+def _source_value(config: dict) -> dict:
+    return {k: config.get(k) for k in _SOURCE_FIELDS}
+
+
 def _source_row(db, project, before: dict, after: dict) -> dict:
-    return _settings_row(_CONFIG_NAME, "dispatch_source", "Dispatch source", _source_words(db, project, before),
-                         _source_words(db, project, after), says_name="Dispatch source")
+    row = _settings_row(_CONFIG_NAME, "dispatch_source", "Dispatch source", _source_words(db, project, before),
+                        _source_words(db, project, after), says_name="Dispatch source")
+    return _hide(row, _source_value(before), _source_value(after))  # two folders can share a name
 
 
 def _source_unchanged(before: dict, after: dict) -> bool:
@@ -179,8 +217,8 @@ def _config_readback(args: dict, rows: list[dict]) -> list[Any]:
 
     def run(project, db, user):
         stored = gs.stored_config(project).to_json()
-        return [_source_words(db, project, stored) if row["field"] == "dispatch_source" else _setting(stored.get(row["field"]))
-                for row in rows]
+        return [_stored(row, _source_words(db, project, stored), _source_value(stored))
+                if row["field"] == "dispatch_source" else _setting(stored.get(row["field"])) for row in rows]
 
     return _with_project(args, run)
 
@@ -226,10 +264,11 @@ def _template_preview(args: dict) -> list[dict]:
         if _same(old_value, entry["value"]) and old_source == entry["source"]:
             _refuse("empty_edit", f"{unit_id} · {param} already has this value and source.")
         label = f"{unit_id} · {param}"
-        return [_settings_row("Unit templates", f"{unit_id}.{param}", label, old_value, entry["value"],
-                              says_name=label),
-                _settings_row("Unit templates", f"{unit_id}.{param}.source", f"{label} source", old_source,
-                              entry["source"], says_name=f"{label} source")]
+        return [_hide(_settings_row("Unit templates", f"{unit_id}.{param}", label, _text(old_value),
+                                    _text(entry["value"]), says_name=label), old_value, entry["value"]),
+                _hide(_settings_row("Unit templates", f"{unit_id}.{param}.source", f"{label} source",
+                                    _text(old_source), _text(entry["source"]), says_name=f"{label} source"),
+                      old_source, entry["source"])]
 
     return _with_project(args, run)
 
@@ -241,7 +280,11 @@ def _template_readback(args: dict, rows: list[dict]) -> list[Any]:
 
     def run(project, db, user):
         stored = gs.template_param(project, unit_id, param) or (None, None)
-        return [stored[1] if row["field"].endswith(".source") else stored[0] for row in rows]
+        out = []
+        for row in rows:
+            value = stored[1] if row["field"].endswith(".source") else stored[0]
+            out.append(_stored(row, _setting(_text(value)), value))
+        return out
 
     return _with_project(args, run)
 
@@ -308,14 +351,12 @@ def _document_rows(name: str, before_doc, after_doc, groups: dict[str, str], lab
         if under_changed(field) or not _differs(b.get(field), a.get(field)):
             continue
         text, unit = label(ap.get(field) or bp[field])
-        old, new = _cell(field, b.get(field)), _cell(field, a.get(field))
-        if old == new:
-            new = f"{new} (changed)"
-        row = _settings_row(name, field, text, old, new, unit, says_name=text)
+        row = _settings_row(name, field, text, _cell(field, b.get(field)), _cell(field, a.get(field)), unit,
+                            says_name=text)
         if isinstance(b.get(field), bool) or isinstance(a.get(field), bool):
             row["words"] = {"old": "not set" if b.get(field) is None else "On" if b.get(field) else "Off",
                             "new": "not set" if a.get(field) is None else "On" if a.get(field) else "Off"}
-        rows.append(row)
+        rows.append(_hide(row, b.get(field), a.get(field)))
     return rows
 
 
@@ -323,7 +364,7 @@ def _document_readback(name: str, doc, groups: dict[str, str], rows: list[dict])
     flat, _, members = _flatten(doc, groups)
     return [None if row["role"] == "note" else
             members.get(row["field"]) if row.get("member") else
-            _cell(row["field"], flat.get(row["field"])) for row in rows]
+            _stored(row, _cell(row["field"], flat.get(row["field"])), flat.get(row["field"])) for row in rows]
 
 
 # campus_set_island_config: the island sidecar (island_config.json).
@@ -509,6 +550,11 @@ def _campus_cells(spec) -> dict[str, Any]:
     return cells
 
 
+def _campus_part(spec, field: str):
+    campus = spec.get("campus") if isinstance(spec, dict) else None
+    return campus.get(field) if isinstance(campus, dict) else None
+
+
 def _stored_campus(project):
     from services import campus_electrical_service as ce
 
@@ -533,9 +579,10 @@ def _draft_preview(args: dict) -> list[dict]:
             sections_same = _same((old_spec or {}).get("campus", {}).get(field), new_spec["campus"].get(field))
             if old_spec is not None and sections_same:
                 continue
-            if field in new or field in old:
-                rows.append(_settings_row(_CAMPUS_NAME, field, label, old.get(field), new.get(field), unit,
-                                          says_name=label))
+            if field in new or field in old:  # a count can hide a changed member: "(changed)" + fingerprint
+                rows.append(_hide(_settings_row(_CAMPUS_NAME, field, label, old.get(field), new.get(field), unit,
+                                                says_name=label),
+                                  _campus_part(old_spec, field), _campus_part(new_spec, field)))
         if not rows:
             _refuse("empty_edit", "The campus file already matches the draft.")
         if old_spec is not None:
@@ -550,8 +597,10 @@ def _draft_preview(args: dict) -> list[dict]:
 
 def _draft_readback(args: dict, rows: list[dict]) -> list[Any]:
     def run(project, db, user):
-        cells = _campus_cells(_stored_campus(project))
-        return [None if row["role"] == "note" else cells.get(row["field"]) for row in rows]
+        spec = _stored_campus(project)
+        cells = _campus_cells(spec)
+        return [None if row["role"] == "note" else _stored(row, cells.get(row["field"]), _campus_part(spec, row["field"]))
+                for row in rows]
 
     return _with_project(args, run)
 
