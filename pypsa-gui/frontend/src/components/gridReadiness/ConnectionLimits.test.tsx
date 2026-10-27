@@ -43,7 +43,7 @@ describe('ConnectionLimits', () => {
       row('ramp_rate', { assumed: true }), row('oscillation', { unit: '% of connection, peak-to-peak', limit: 1 }),
       row('scr') ] } as never)
     mount()
-    expect((await screen.findByTestId('connection-limit-ramp_rate')).textContent).toMatch(/5 MW\/min.*\(assumed\).*the template/)
+    expect((await screen.findByTestId('connection-limit-ramp_rate')).textContent).toMatch(/5\u00A0MW\/min.*\(assumed\).*the template/)
     expect(screen.getByTestId('connection-limit-oscillation').textContent).toMatch(/Oscillation band/)
     expect(screen.getByTestId('connection-limit-energization_peak').textContent).toMatch(/not known/)
     expect(screen.queryByTestId('connection-limit-scr')).toBeNull()
@@ -58,8 +58,8 @@ describe('ConnectionLimits', () => {
       row('energization_peak:2040', { unit: 'MW', limit: 60, target: t })] } as never)
     mount()
     const line = (await screen.findByTestId('connection-limit-energization_peak')).textContent ?? ''
-    expect(line).toMatch(/2030 20 MW · 2035 40 MW · 2040 60 MW/)
-    expect(line).not.toMatch(/Energization: 20 MW\b(?! ·)/)
+    expect(line).toMatch(/2030 20\u00A0MW · 2035 40\u00A0MW · 2040 60\u00A0MW/)
+    expect(line).not.toMatch(/Energization: 20\u00A0MW\b(?! ·)/)
   })
 
   it('Expert offers the route to the schedule; it opens the link', async () => {

@@ -1429,8 +1429,160 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "solve_queue_clear_finished",
-        "Drop FINISHED job listing entries from the in-memory queue. "
-        "Idempotent. No disk/solver impact. Safety: read.",
+        "Drop FINISHED job listing entries from the in-memory queue, for every "
+        "organization (super-admin only; 403 otherwise). Idempotent. No "
+        "disk/solver impact, but it changes what everyone's queue lists. "
+        "Safety: write.",
+    ),
+
+    # ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────
+    # The Solve Queue panel's remaining controls, one tool per route. Pause
+    # and resume stay out of chat (services/not_via_chat.py): instance-wide.
+
+    _t(
+        "solve_queue_job_log",
+        "The log lines one queue job emitted — live while it runs, retained "
+        "once it ends. `job_id` is the UUID from solve_queue_list. Returns "
+        "{status, lines (the last `max_lines`, default 200), total_lines, "
+        "truncated}. Safety: read.",
+        {
+            "job_id": {"type": "string"},
+            "max_lines": {"type": "integer", "minimum": 1, "maximum": 2000},
+        },
+        ["job_id"],
+    ),
+    _empty(
+        "solve_queue_cancel_queued",
+        "Cancel every QUEUED job you could cancel one at a time; running jobs "
+        "are left alone (stop one with solve_queue_abort). Returns "
+        "{cancelled: <count>}. Safety: destructive.",
+    ),
+    _t(
+        "solve_queue_dismiss",
+        "Hide one FINISHED job (done, failed, aborted or interrupted) from "
+        "your own queue listing. Only a job you queued; a queued or running "
+        "job is refused (409). Returns {dismissed: true}. Safety: write.",
+        {"job_id": {"type": "string"}},
+        ["job_id"],
+    ),
+    _t(
+        "solve_queue_requeue",
+        "Run a FINISHED job again as a NEW queued job for the same project "
+        "(the job then solves and saves that project). A queued or running "
+        "job is refused (409); a project another user holds the edit lock on "
+        "is refused. Returns the new job and `already_queued`. "
+        "Safety: execution.",
+        {"job_id": {"type": "string"}},
+        ["job_id"],
+    ),
+
+    # ── FMEA worksheet write (live-voice 08 B3) (1) ─────────────────────────
+
+    _t(
+        "save_fmea_worksheet",
+        "REPLACE the project's FMEA worksheet sidecar: the expert rows and "
+        "the per-mode overlays, as a whole. Anything left out is deleted, so "
+        "read get_fmea_worksheet first and send its `manual_rows` and "
+        "`overlays` back with your change. A row that breaks a rule is "
+        "refused (422, naming the rule). Safety: destructive.",
+        {
+            "name": {"type": "string"},
+            "manual_rows": {"type": "array", "items": {"type": "object"}},
+            "overlays": {"type": "object"},
+        },
+        ["name", "manual_rows", "overlays"],
+    ),
+
+    # ── Time series and weather (live-voice 08 B3) (6) ──────────────────────
+    # The Time Series editors' per-field reads and pending-artifact writes,
+    # and the weather bar. Uploads take a chat upload's `file_id` from THIS
+    # project; nothing here touches the network until apply_generated_profile.
+
+    _t(
+        "get_current_series",
+        "What one component carries now for one time-series attribute: "
+        "nothing, a generated series (its family and provenance) or an "
+        "upload. Example: component_type 'generators', attribute "
+        "'p_max_pu', component 'PV1'. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "component_type", "attribute", "component"],
+    ),
+    _t(
+        "get_weather_choice",
+        "The project's weather source and year (the Time Series weather "
+        "bar): the saved choice, else the snapshots' year (`year_source` "
+        "says which), with its time basis. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "set_weather_choice",
+        "Save the weather source ('synthetic' or 'atlite') and year that "
+        "every profile generate without its own takes. Changes no existing "
+        "series. Returns the choice as get_weather_choice reads it. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "source": {"type": "string", "enum": ["synthetic", "atlite"]},
+            "year": {"type": "integer"},
+        },
+        ["project_id", "source", "year"],
+    ),
+    _t(
+        "pending_profile_from_current",
+        "Turn the series a component carries now into a pending profile, so "
+        "the profile refinement tools act on a measured upload the same way "
+        "as on a generated series. Nothing touches the network; "
+        "apply_generated_profile applies it, and refuses it once the stored "
+        "series changes. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "component_type", "attribute", "component"],
+    ),
+    _t(
+        "upload_load_profiles_file",
+        "Read a measured load export (an uploaded CSV/Excel in this project, "
+        "by `file_id`) into pending profiles, one column per load the network "
+        "has; apply them with apply_generated_profiles. Columns naming no "
+        "load come back as `unmatched`. `unit` is the values' unit (e.g. "
+        "'kW', 'MW'); naive timestamps default to the project's commercial "
+        "timezone unless `timezone` is given; `annual_mwh` rescales to that "
+        "yearly energy. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "unit": {"type": "string"},
+            "timezone": {"type": "string"},
+            "year": {"type": "integer"},
+            "annual_mwh": {"type": "number"},
+        },
+        ["project_id", "file_id"],
+    ),
+    _t(
+        "upload_series_file",
+        "A measured file (an uploaded CSV/Excel in this project, by "
+        "`file_id`) for ONE field as a pending profile: previewed, then "
+        "applied with apply_generated_profile and its old → new receipt. A "
+        "file that does not fit (its column, the model's hours, the field's "
+        "units) is refused as `series_upload`, saying what to change. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "file_id", "component_type", "attribute", "component"],
     ),
 
     # ── Renewable profile generator (6) ────────────────────────────────────
@@ -3753,6 +3905,158 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── LV08 B2a (12) — Library series, meter data, finance, PoC, value-flow
+    # designer, billing preview, investment-case abort, stress profile packs.
+    # Each wraps its route's own router handler in process (live-voice 08 B2).
+    _t(
+        "list_library_series",
+        "List the latest version of every price/meter series in the user's "
+        "organization's Library. Paged: {items: [{id, version, hash, ...}], "
+        "total_count, offset, returned, has_more}; `id` is the series' name. "
+        "Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "get_library_series",
+        "Read one Library series WITHOUT its full values: {ref, timezone, meta, "
+        "points, first, last, min, max, mean, page: {offset, returned, has_more, "
+        "timestamps, values}}. The page holds `limit` points from `offset` "
+        "(default 48, max 500; shortened to fit the chat). `version` defaults to "
+        "the latest. Safety: read.",
+        {"name": {"type": "string"}, "version": {"type": "integer"},
+         "offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        ["name"],
+    ),
+    _t(
+        "import_library_series",
+        "Store a `timestamp,value` CSV or xlsx the user UPLOADED as Library "
+        "series `name` (an existing name gets a new version). `file_id` is the "
+        "upload's id (list_uploads); never paste values into the call. "
+        "`timezone` is the zone of naive timestamps. Size and parse problems "
+        "are refused (413/422). Returns the series ref. Safety: write.",
+        {"file_id": {"type": "string"}, "name": {"type": "string"},
+         "timezone": {"type": "string"}},
+        ["file_id", "name"],
+    ),
+    _t(
+        "import_meter_data",
+        "Store a meter file the user UPLOADED (CSV or xlsx, `file_id` from "
+        "list_uploads) as Library series `name` of average kW per interval, and "
+        "return the monthly history for the tariff's meter_history_peaks_kw / "
+        "meter_history_energy_kwh. `unit` is REQUIRED and must be the file's "
+        "real unit: kW, W or kWh_per_interval (a kWh file read as kW is 4x low "
+        "at 15 min). settlement (15min | 30min | h, default 15min) is the "
+        "tariff's demand interval; label says whether a row's timestamp is the "
+        "interval start or end (default start); timezone is the site clock for "
+        "naive timestamps. Returns {ref, meter_history_peaks_kw, "
+        "meter_history_energy_kwh, settlement, notes, notes_total, help}. "
+        "Safety: write.",
+        {"file_id": {"type": "string"}, "name": {"type": "string"},
+         "unit": {"type": "string", "enum": ["kW", "W", "kWh_per_interval"]},
+         "settlement": {"type": "string", "enum": ["15min", "30min", "h"]},
+         "label": {"type": "string", "enum": ["start", "end"]},
+         "timezone": {"type": "string"}},
+        ["file_id", "name", "unit"],
+    ),
+    _t(
+        "put_library_item",
+        "Save a tariff, contract template or connection agreement as Library "
+        "item `name` in the user's organization (an existing name gets a new "
+        "version; identical content keeps its version). `payload` is the "
+        "item's whole JSON (read an existing one with get_library_item "
+        "detail='full' and send it back changed); `meta` is free provenance "
+        "such as {source, notes}. The shipped common items are read-only "
+        "(library_item_common_readonly). Returns the item ref {kind, id, "
+        "version, hash}. Safety: write.",
+        {"kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+         "name": {"type": "string"}, "payload": {"type": "object"},
+         "meta": {"type": "object"}},
+        ["kind", "name", "payload"],
+    ),
+    _t(
+        "get_finance_inputs",
+        "Read the project's stored finance inputs (FinanceInputs JSON: owner, "
+        "WACC, tax, debt, depreciation, ...) and their `digest`: {finance, "
+        "digest, status (not_set | ok | finance_inputs_invalid)}. Call it before "
+        "set_finance_inputs and pass `digest` as its if_match. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "set_finance_inputs",
+        "Replace the project's finance inputs (the investment case reads them) "
+        "with `finance`, a whole FinanceInputs object: read them with "
+        "get_finance_inputs first, change what the user asked, send the whole "
+        "object back. `if_match` is REQUIRED: the `digest` get_finance_inputs "
+        "returned ('*' is refused); a stale digest is refused "
+        "(finance_changed, 412) — read again. clear=true (with no `finance`) "
+        "REMOVES EVERY finance input, which the investment case then lacks. "
+        "Invalid inputs are refused with their field paths "
+        "(finance_inputs_invalid); refused while a solve runs. Never marks the "
+        "dispatch stale. Returns {finance, digest, status}. Safety: write.",
+        {"finance": {"type": "object"}, "if_match": {"type": "string"},
+         "clear": {"type": "boolean"}},
+        ["if_match"],
+    ),
+    _t(
+        "get_poc_state",
+        "Whether the commercial config's point-of-connection (PoC) link is "
+        "open: {poc_link, open}. open=true means the link carries nothing "
+        "either way (no grid in operation: no connection, tariff or export "
+        "applies); open=null with reason network_busy while a solve holds the "
+        "network. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "get_value_flow_designer",
+        "What the participants designer offers: {site_party, assets (paged: "
+        "component, name, bus, side, ownable — grid-side assets are not "
+        "ownable), assets_total, tariff_items (id, kind, default_payee, "
+        "stream), contract_parties, group_members, default_externals}. "
+        "`offset`/`limit` page the assets. Refused without a valid commercial "
+        "config or while a solve runs. Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "preview_billing",
+        "Bill the last solve's dispatch under a DRAFT import tariff, without "
+        "storing anything: `tariff` is a whole tariff object (the shape "
+        "get_library_item detail='full' returns as payload). Returns {summary "
+        "(per period: total, total_supported, per_item), flags, provenance}; "
+        "the flag preview_dispatch_not_optimised_for_draft is always there — "
+        "the dispatch was optimised for the attached tariff, so say so. No "
+        "contract settlement or gap is computed. no_data before a solve; "
+        "refused during a solve, without a commercial config, or for a draft "
+        "that does not validate (tariff_invalid) or bind on this network "
+        "(tariff_not_bindable). Safety: read.",
+        {"tariff": {"type": "object"}},
+        ["tariff"],
+    ),
+    _t(
+        "abort_investment_case",
+        "Stop a running investment-case run at its next stage; it stores "
+        "nothing. IDEMPOTENT and 200 even when the run has already finished "
+        "({status, aborting: false}); 404 only when no investment-case run was "
+        "recorded in this session. Does NOT stop a foreground solve — that is "
+        "abort_simulation. Safety: destructive.",
+        {},
+        [],
+    ),
+    _t(
+        "list_stress_profile_packs",
+        "List the shipped synthetic profile packs a kind='profiles' stress "
+        "scenario can name as profile_pack (put_stress_scenarios), for project "
+        "`name`. Paged: {items: [{id, ...}], total_count, offset, returned, "
+        "has_more}; a pack that does not parse is listed with its error. "
+        "Safety: read.",
+        {"name": {"type": "string"}, "offset": {"type": "integer"},
+         "limit": {"type": "integer"}},
+        ["name"],
+    ),
+    # ── end LV08 B2a ──────────────────────────────────────────────────────
     # ── Library references (3) — the shipped common cost references ───────
     _t(
         "list_library_references",
@@ -4602,7 +4906,8 @@ TOOL_ROUTES: dict[str, list] = {
     "delete_vintage_bounds": [("DELETE", "/api/network/vintage_bounds/{component_class}/{name}")],
     "cleanup_orphan_vintages": [("POST", "/api/network/vintage_bounds/_cleanup_orphans")],
     # write_timeseries (6)
-    "upload_timeseries": [("PUT", "/api/network/timeseries/{component}/{attribute}")],
+    # The handler calls the multipart upload route, not the JSON PUT (B3).
+    "upload_timeseries": [("POST", "/api/network/timeseries/upload")],
     "generate_exemplary_timeseries": _SERVICE_CALL,
     "delete_timeseries": [("DELETE", "/api/network/timeseries")],
     "upload_load_profile": [("POST", "/api/network/loads/upload_profile")],
@@ -4660,6 +4965,18 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
+    # live-voice 08 B3: queue controls, FMEA worksheet write, time series/weather
+    "solve_queue_job_log": [("GET", "/api/simulation/queue/{job_id}/log_history")],
+    "solve_queue_cancel_queued": [("POST", "/api/simulation/queue/cancel_queued")],
+    "solve_queue_dismiss": [("POST", "/api/simulation/queue/{job_id}/dismiss")],
+    "solve_queue_requeue": [("POST", "/api/simulation/queue/{job_id}/requeue")],
+    "save_fmea_worksheet": [("PUT", "/api/projects/{name}/worksheet")],
+    "get_current_series": [("GET", "/api/projects/{name}/profiles/current")],
+    "get_weather_choice": [("GET", "/api/projects/{name}/profiles/weather")],
+    "set_weather_choice": [("PUT", "/api/projects/{name}/profiles/weather")],
+    "pending_profile_from_current": [("POST", "/api/projects/{name}/profiles/from-current")],
+    "upload_load_profiles_file": [("POST", "/api/projects/{name}/profiles/loads/upload")],
+    "upload_series_file": [("POST", "/api/projects/{name}/profiles/series/upload")],
     # profile generator (11)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
@@ -4861,6 +5178,20 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    # LV08 B2a (12): router handlers called in process (live-voice 08 B2).
+    "list_library_series": [("GET", "/api/library/series")],
+    "get_library_series": [("GET", "/api/library/series/{name}")],
+    "import_library_series": [("POST", "/api/library/series/upload")],
+    "import_meter_data": [("POST", "/api/library/meter_data")],
+    "put_library_item": [("PUT", "/api/library/items/{kind}/{name}")],
+    "get_finance_inputs": [("GET", "/api/simulation/finance")],
+    "set_finance_inputs": [("PUT", "/api/simulation/finance")],
+    "get_poc_state": [("GET", "/api/simulation/commercial/poc")],
+    "get_value_flow_designer": [("GET", "/api/simulation/value_flows/designer")],
+    "preview_billing": [("POST", "/api/results/billing/preview")],
+    "abort_investment_case": [("POST", "/api/results/investment_case/abort")],
+    "list_stress_profile_packs": [("GET", "/api/projects/{name}/stress_profile_packs")],
+    # end LV08 B2a
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),

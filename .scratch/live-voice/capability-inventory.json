@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 300,
+  "tool_count": 323,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -1309,8 +1309,8 @@
       ],
       "route": [
         [
-          "PUT",
-          "/api/network/timeseries/{component}/{attribute}"
+          "POST",
+          "/api/network/timeseries/upload"
         ]
       ],
       "input_keys": [
@@ -2175,8 +2175,264 @@
       ],
       "input_keys": [],
       "required": [],
-      "safety_tier": "read",
+      "safety_tier": "write",
       "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_job_log",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/queue/{job_id}/log_history"
+        ]
+      ],
+      "input_keys": [
+        "job_id",
+        "max_lines"
+      ],
+      "required": [
+        "job_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "568efedc0d91153e7bfdd4c4d54c7defd15e2dde5e0ce164b035ec0aa1691930",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_cancel_queued",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue/cancel_queued"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "destructive",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_dismiss",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue/{job_id}/dismiss"
+        ]
+      ],
+      "input_keys": [
+        "job_id"
+      ],
+      "required": [
+        "job_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "solve_queue_requeue",
+      "toolsets": [
+        "simulation",
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/simulation/queue/{job_id}/requeue"
+        ]
+      ],
+      "input_keys": [
+        "job_id"
+      ],
+      "required": [
+        "job_id"
+      ],
+      "safety_tier": "execution",
+      "schema_sha256": "f5530c9c1ffa2d6e18e530480f1ae9fdbd93fde0302fd760e13dbb29f50813b4",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "save_fmea_worksheet",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/worksheet"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "manual_rows",
+        "overlays"
+      ],
+      "required": [
+        "name",
+        "manual_rows",
+        "overlays"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "59d7918fb77670f873d887e4b864768e70f901381a08631f11c894755e40d0ff",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_current_series",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/current"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "required": [
+        "project_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "5d85f34eb4f58652e7aaeecc3bc47df992e42f6cfc8dc05c7ef3b3ddd7872810",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_weather_choice",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/profiles/weather"
+        ]
+      ],
+      "input_keys": [
+        "project_id"
+      ],
+      "required": [
+        "project_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6332e904f251e5c9a396c95f0c537f1946ccb609d735e8c10353b8d112f2a64e",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_weather_choice",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/profiles/weather"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "source",
+        "year"
+      ],
+      "required": [
+        "project_id",
+        "source",
+        "year"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "9eba6a6e746ea73d4cfb926f8eb9f68ff94bf6c4ba871412bfa6a649d4a8afad",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "pending_profile_from_current",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/from-current"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "required": [
+        "project_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "5d85f34eb4f58652e7aaeecc3bc47df992e42f6cfc8dc05c7ef3b3ddd7872810",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_load_profiles_file",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/loads/upload"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "file_id",
+        "unit",
+        "timezone",
+        "year",
+        "annual_mwh"
+      ],
+      "required": [
+        "project_id",
+        "file_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "e0b6f29b6b0f9267d23aaca838afa2256b8ed82de3d7d900f9957d724f249e6c",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "upload_series_file",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/profiles/series/upload"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "file_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "required": [
+        "project_id",
+        "file_id",
+        "component_type",
+        "attribute",
+        "component"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "38300a0e28beed936c7be447b118edb7a3d0c382e96cfa47e25c096f9dd846ad",
       "behavioral_fixture": "pending"
     },
     {
@@ -5293,6 +5549,244 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/series"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/series/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "version",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6b4bf7be8b84df61224ddf0a029935669cd4ff444d827294601a7b58a6e528a2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/library/series/upload"
+        ]
+      ],
+      "input_keys": [
+        "file_id",
+        "name",
+        "timezone"
+      ],
+      "required": [
+        "file_id",
+        "name"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "5d3a34bb486e364dc2b13b72cce5dd949a77980a882fc8d73af820c41fcacd03",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_meter_data",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/library/meter_data"
+        ]
+      ],
+      "input_keys": [
+        "file_id",
+        "name",
+        "unit",
+        "settlement",
+        "label",
+        "timezone"
+      ],
+      "required": [
+        "file_id",
+        "name",
+        "unit"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "6860be5ca2bc283b79a53d2f2e23f977a27dad232fd06c240bd292a8a68fed5f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "put_library_item",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/library/items/{kind}/{name}"
+        ]
+      ],
+      "input_keys": [
+        "kind",
+        "name",
+        "payload",
+        "meta"
+      ],
+      "required": [
+        "kind",
+        "name",
+        "payload"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "b3871d1937cf40a4f68657eb1bb0ac23463ce4c61d35f644d752235d1389a8c1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_finance_inputs",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/finance"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_finance_inputs",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/simulation/finance"
+        ]
+      ],
+      "input_keys": [
+        "finance",
+        "if_match",
+        "clear"
+      ],
+      "required": [
+        "if_match"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "a930184bda0febe42fb954bbab358a1fc407d97d5b8193d900d576cee08adeba",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_poc_state",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/commercial/poc"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_value_flow_designer",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/value_flows/designer"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_billing",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/results/billing/preview"
+        ]
+      ],
+      "input_keys": [
+        "tariff"
+      ],
+      "required": [
+        "tariff"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "70107a854c9a9daf494301c4a274feb99326338eee34bb8c1a18cf93e0213b40",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_investment_case",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/results/investment_case/abort"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "destructive",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_stress_profile_packs",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/stress_profile_packs"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1f0436a7f7231145ecc41a6dd5700f0b783aeb8910a934ddb93d6f5979b3e269",
       "behavioral_fixture": "pending"
     },
     {

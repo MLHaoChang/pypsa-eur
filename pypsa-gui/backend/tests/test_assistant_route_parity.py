@@ -167,13 +167,15 @@ def test_unused_service_match_is_stale():
 
 
 def test_read_tier_tool_does_not_cover_a_mutating_route_unless_declared_non_mutating():
-    key = ('POST', '/api/simulation/queue/clear_finished')
+    # validate_network is read-tier on the preflight POST (it solves nothing).
+    # solve_queue_clear_finished was the example until B3 made it write-tier.
+    key = ('POST', '/api/simulation/preflight')
     from harness.catalogue import safety_tier_for  # noqa: PLC0415
-    assert safety_tier_for('solve_queue_clear_finished') == 'read'  # see the needs-tool note
+    assert safety_tier_for('validate_network') == 'read'
     rows, _ = _build(_app(key), _decl(), _scan(key))
     assert rows[key]['class'] == 'unclassified'
     rows, problems = _build(_app(key), _decl(non_mutating_routes=[{'method': key[0], 'path': key[1]}]), _scan(key))
-    assert problems == [] and rows[key]['tools'] == ['solve_queue_clear_finished']
+    assert problems == [] and rows[key]['tools'] == ['validate_network']
     _, problems = _build(_app(), _decl(non_mutating_routes=[{'method': key[0], 'path': key[1]}]), _scan())
     assert any('stale non_mutating_routes' in p for p in problems)
 

@@ -736,6 +736,8 @@ def _tdd_row(inp: _Inputs) -> dict:
 #: ``gridspine.static.unbalance``: S_sc2 = S_k'' / c_max (S_k'' = c U^2 / |Z|; the largest c gives the smallest
 #: S_sc2, conservative whichever case S_k'' is) with Z2 = Z1, no transfer from other PoCs and no min/max bands.
 _UNBALANCE_BAND = "PoC S_k''"
+#: Non-breaking spaces: the unit wraps to the next line as a whole, never inside "positive sequence".
+_UNBALANCE_UNIT = "%\u00a0of\u00a0positive\u00a0sequence"
 _UNBALANCE_SCREENING = ("It assumes every unit sits on one phase pair at the PoC, equal negative- and "
                         "positive-sequence impedance, and no background unbalance. The negative-sequence "
                         "short-circuit power is the entered fault level divided by the IEC 60909 voltage factor "
@@ -757,19 +759,19 @@ def _unbalance_row(inp: _Inputs) -> dict:
         from gridspine.static.island_sc_seq import c_factor
     except ImportError as exc:  # pragma: no cover - build-shape branch
         note = f"The unbalance screen needs gridspine ({exc})"
-        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit="% of positive sequence", source=note,
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit=_UNBALANCE_UNIT, source=note,
                     project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
                     target=unit_target)
     limit, cited = ub.limit_from_profile(inp.profile)
     if not cited:
-        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit="% of positive sequence",
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit=_UNBALANCE_UNIT,
                     source=inp.profile_error or ub.NO_LIMIT, project_value=None, verdict="unknown",
                     assumed=True, note=ub.NO_LIMIT, section="assets", target=unit_target)
     source = f"{_profile_title(inp)}: {cited[0]['clause']}"
     lim_assumed = cited[0]["source"] != "code"
     units = harmonic_units(inp.n, "PoC") if inp.n is not None else None
     if units is None or units.empty:
-        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of positive sequence", source=source,
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
                     project_value=None, verdict="unknown", assumed=True,
                     note="No process unit on this project: the screen reads each unit's Single-phase share "
                          "and Rated apparent power",
@@ -782,13 +784,13 @@ def _unbalance_row(inp: _Inputs) -> dict:
         s_unbal, _, missing = ub.unbalanced_mva(loads)
     except ContractError as exc:
         # One unit's malformed stored share reads as unknown here, not a failed scorecard.
-        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of positive sequence", source=source,
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
                     project_value=None, verdict="unknown", assumed=True, note=str(exc), section="assets",
                     target=unit_target)
     missing = missing["PoC"]
     sk = _poc_sk_mva(inp.n)
     if sk is None:
-        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of positive sequence", source=source,
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
                     project_value=None, verdict="unknown", assumed=True,
                     note="No short-circuit level at the point of connection", section="assets",
                     target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
@@ -809,7 +811,7 @@ def _unbalance_row(inp: _Inputs) -> dict:
                  f"negative-sequence short-circuit power = {u2:.2g} %."]
     notes.append(_UNBALANCE_SCREENING)
     verdict = {"pass": "pass", "fail": RULE_UNBALANCE["otherwise"]}.get(verdict, "unknown")
-    row = _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of positive sequence", source=source,
+    row = _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
                project_value=None if missing else round(u2, 4), verdict=verdict,
                assumed=True if missing else lim_assumed or _marking_assumed(inp.marking("fault_level")),
                note=" ".join(notes), section="assets",

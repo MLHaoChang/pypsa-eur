@@ -502,6 +502,16 @@
    "reason": "live-stream"
   },
   {
+   "method": "POST",
+   "path": "/api/simulation/queue/pause",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/resume",
+   "reason": "admin"
+  },
+  {
    "method": "GET",
    "path": "/api/simulation/queue/{job_id}/log_stream",
    "reason": "live-stream"
@@ -684,31 +694,6 @@
    "family": "gridspine-campus"
   },
   {
-   "method": "PUT",
-   "path": "/api/library/items/{kind}/{name}",
-   "family": "economics-investment"
-  },
-  {
-   "method": "POST",
-   "path": "/api/library/meter_data",
-   "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/library/series",
-   "family": "economics-investment"
-  },
-  {
-   "method": "POST",
-   "path": "/api/library/series/upload",
-   "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/library/series/{name}",
-   "family": "economics-investment"
-  },
-  {
    "method": "POST",
    "path": "/api/library_reference/preview",
    "family": "import-export"
@@ -745,11 +730,6 @@
   },
   {
    "method": "POST",
-   "path": "/api/network/timeseries/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
    "path": "/api/projects/import-folder",
    "family": "import-export"
   },
@@ -762,36 +742,6 @@
    "method": "GET",
    "path": "/api/projects/{name}/map_layout/osm_suggestions",
    "family": "import-export"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/profiles/current",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/from-current",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/loads/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/series/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/profiles/weather",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/profiles/weather",
-   "family": "timeseries-horizon"
   },
   {
    "method": "POST",
@@ -835,23 +785,8 @@
   },
   {
    "method": "GET",
-   "path": "/api/projects/{name}/stress_profile_packs",
-   "family": "reliability-adequacy"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/worksheet",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "GET",
    "path": "/api/results/asset/assets",
    "family": "all-results"
-  },
-  {
-   "method": "POST",
-   "path": "/api/results/billing/preview",
-   "family": "economics-investment"
   },
   {
    "method": "GET",
@@ -869,11 +804,6 @@
    "family": "all-results"
   },
   {
-   "method": "POST",
-   "path": "/api/results/investment_case/abort",
-   "family": "economics-investment"
-  },
-  {
    "method": "GET",
    "path": "/api/results/load_shape",
    "family": "all-results"
@@ -887,57 +817,6 @@
    "method": "GET",
    "path": "/api/results/run-view",
    "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/commercial/poc",
-   "family": "economics-investment"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/simulation/finance",
-   "family": "economics-investment"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/cancel_queued",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/clear_finished",
-   "family": "solver-simulation",
-   "note": "solve_queue_clear_finished declares this route but is read-tier; the tier rule (V4) refuses a read tool on a mutating route"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/pause",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/resume",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/dismiss",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/queue/{job_id}/log_history",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/requeue",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/value_flows/designer",
-   "family": "economics-investment"
   }
  ],
  "non_mutating_routes": [
@@ -955,6 +834,11 @@
    "method": "POST",
    "path": "/api/simulation/preflight",
    "reason": "runs the /run validation without solving"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/billing/preview",
+   "reason": "bills the last solve under a draft tariff; stores nothing (compute_billing_preview never binds or writes state)"
   }
  ],
  "binding_overrides": [
@@ -1049,7 +933,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "GET",
@@ -1061,7 +945,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "POST",

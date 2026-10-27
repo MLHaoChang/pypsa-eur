@@ -4632,14 +4632,14 @@
     "counts": {
       "backend_routes": 506,
       "gui_routes": 466,
-      "limitation": 84,
-      "needs-tool": 86,
-      "tool": 296,
+      "limitation": 86,
+      "needs-tool": 60,
+      "tool": 320,
       "unclassified": 0
     },
     "limitations_by_reason": {
       "account-auth": 7,
-      "admin": 13,
+      "admin": 15,
       "app-shell": 7,
       "assistant-self-config": 19,
       "binary-transfer": 7,
@@ -4656,18 +4656,6 @@
         "GET /api/results/load_shape",
         "GET /api/results/loadflow-view",
         "GET /api/results/run-view"
-      ],
-      "economics-investment": [
-        "GET /api/library/series",
-        "GET /api/library/series/{name}",
-        "GET /api/simulation/commercial/poc",
-        "GET /api/simulation/value_flows/designer",
-        "POST /api/library/meter_data",
-        "POST /api/library/series/upload",
-        "POST /api/results/billing/preview",
-        "POST /api/results/investment_case/abort",
-        "PUT /api/library/items/{kind}/{name}",
-        "PUT /api/simulation/finance"
       ],
       "gridspine-campus": [
         "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
@@ -4724,33 +4712,11 @@
         "POST /api/projects/{name}/sites/{site_id}/context",
         "PUT /api/projects/{name}/sites"
       ],
-      "reliability-adequacy": [
-        "GET /api/projects/{name}/stress_profile_packs"
-      ],
       "reports": [
         "GET /api/projects/{name}/reports/capabilities",
         "GET /api/projects/{name}/reports/evidence_hash",
         "GET /api/projects/{name}/reports/{report_id}/versions/{version}",
         "POST /api/projects/{name}/reports"
-      ],
-      "solver-simulation": [
-        "GET /api/simulation/queue/{job_id}/log_history",
-        "POST /api/simulation/queue/cancel_queued",
-        "POST /api/simulation/queue/clear_finished",
-        "POST /api/simulation/queue/pause",
-        "POST /api/simulation/queue/resume",
-        "POST /api/simulation/queue/{job_id}/dismiss",
-        "POST /api/simulation/queue/{job_id}/requeue",
-        "PUT /api/projects/{name}/worksheet"
-      ],
-      "timeseries-horizon": [
-        "GET /api/projects/{name}/profiles/current",
-        "GET /api/projects/{name}/profiles/weather",
-        "POST /api/network/timeseries/upload",
-        "POST /api/projects/{name}/profiles/from-current",
-        "POST /api/projects/{name}/profiles/loads/upload",
-        "POST /api/projects/{name}/profiles/series/upload",
-        "PUT /api/projects/{name}/profiles/weather"
       ]
     }
   },
@@ -4867,12 +4833,6 @@
         "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
-        "id": "route-parity:needs-tool:economics-investment",
-        "issue": "08",
-        "family": "economics-investment",
-        "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:gridspine-campus",
         "issue": "08",
         "family": "gridspine-campus",
@@ -4891,28 +4851,10 @@
         "summary": "11 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
-        "id": "route-parity:needs-tool:reliability-adequacy",
-        "issue": "08",
-        "family": "reliability-adequacy",
-        "summary": "1 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:reports",
         "issue": "08",
         "family": "reports",
         "summary": "4 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:solver-simulation",
-        "issue": "08",
-        "family": "solver-simulation",
-        "summary": "8 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:timeseries-horizon",
-        "issue": "08",
-        "family": "timeseries-horizon",
-        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       }
     ],
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."
