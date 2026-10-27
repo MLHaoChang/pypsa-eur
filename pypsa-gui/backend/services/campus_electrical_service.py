@@ -287,8 +287,6 @@ def _harmonic_scan(run: Path, profile: str, profile_dirs) -> None:
 def _scan_note(note: str) -> str:
     """A scan note as the panel shows it: in words, from a capital. gridspine's
     notes name their input fields (``pcc.sk_normal_mva``); the app names none."""
-    from gridspine.static import harmonic_scan as hs
-
     if note == hs.NO_NORMAL:
         return "The normal case is not scanned: no normal short-circuit level is entered"
     return note[:1].upper() + note[1:]
