@@ -2241,7 +2241,7 @@ def _run_turn_body(
         # to the preview would leave the plan unable to complete.
         routable = [tu for tu in tool_uses
                     if not assistant_tasks.is_next_step(session, tu.get("name"), tu.get("input") or {})]
-        session.turn_redirects = ({} if session.assurance_turn is not None else
+        session.turn_redirects = ({} if session.assurance_turn is not None or not edit_routing.preview_available() else
                                   edit_routing.redirects(routable, session.turn_single_edit_applied))
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.

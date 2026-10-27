@@ -16,6 +16,9 @@ card: the preview has no row for it. An applied single edit counts until a run
 or an applied preview (any execution-tier success), so "edit A, solve, edit B"
 keeps B's single card (GK B C1).
 
+Routing applies only while the preview can run, i.e. with an active project
+(`preview_available`); a network not yet saved as a project keeps the cards.
+
 The refusal is for the model only: the dispatcher sends no frame for it, so the
 user never sees a failed card (UX condition 6). Its `changes` name only calls
 of this response, none applied, so it never re-proposes an applied edit (GK B C2).
@@ -71,6 +74,12 @@ def message(changes: list[dict]) -> str:
     return ("Nothing was changed. An edit of several assets goes through one preview card: call "
             "preview_project_changes with changes=" + json.dumps(changes, separators=(",", ":"))
             + ", then apply_project_changes with its preview_id (one approval, one undo).")
+
+
+def preview_available() -> bool:
+    """The preview needs an active project (`assistant_tools._project`)."""
+    from services.pypsa_service import PyPSAService
+    return bool(PyPSAService.get_active_context().project_uuid)
 
 
 def redirects(tool_uses: list[dict[str, Any]], single_edit_applied: bool) -> dict[str, str]:

@@ -177,7 +177,8 @@ def test_a_refusal_leaves_a_pending_confirmation_alone(grid):
         del grid.pending_confirmations["held"]
 
 
-def test_the_loop_refuses_both_calls_and_sends_one_result_each(grid):
+def test_the_loop_refuses_both_calls_and_sends_one_result_each(mixed):  # noqa: F811 — the fixture
+    session = mixed[1]
     calls = [("update_component", {"component_class": "Line", "name": "L1", "attrs": {"s_nom": 500}}),
              ("update_component", {"component_class": "Line", "name": "L2", "attrs": {"s_nom": 450}})]
     t1 = ([_tool_use_event(f"tu-{i}", n, a) for i, (n, a) in enumerate(calls)],
@@ -185,7 +186,7 @@ def test_the_loop_refuses_both_calls_and_sends_one_result_each(grid):
                             usage=_FakeUsage()))
     t2 = ([_text_event("done")], _FakeFinalMessage(content=[_text_block("done")], usage=_FakeUsage()))
     client = FakeAnthropicClient([t1, t2])
-    events = list(chat_service.run_turn(grid, "set L1 500 and L2 450", client=client))
+    events = list(chat_service.run_turn(session, "set L1 500 and L2 450", client=client))
     assert not [d for e, d in events if isinstance(d, dict) and d.get("tool_use_id") in ("tu-0", "tu-1")]
     results = [b for m in client.calls[1]["messages"] if isinstance(m["content"], list)
                for b in m["content"] if isinstance(b, dict) and b.get("type") == "tool_result"]
@@ -440,3 +441,13 @@ def test_a_cancelled_plan_exempts_nothing(mixed):  # noqa: F811 — the fixture
     assert len(_redirected(results)) == 1, results
     assert not any(e == "tool_pending_confirmation" for e, _ in frames)
     assert _lines() == (300, 300)
+
+
+def test_without_an_active_project_a_bulk_edit_keeps_its_card(grid):
+    # The preview needs an active project; routing to it would leave no way through.
+    assert not PyPSAService.get_active_context().project_uuid
+    frames, results = _loop_turn(grid, ("bulk_update_components", {
+        "component_class": "Line", "names": ["L1", "L2"], "updates": {"s_nom": 500}}))
+    assert any(e == "tool_pending_confirmation" for e, _ in frames), frames
+    assert not _redirected(results), results
+    assert _s_nom() == (500, 500)
