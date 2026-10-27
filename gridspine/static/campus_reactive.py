@@ -144,6 +144,26 @@ IBR_COLUMNS = ("unit", "kind", "p_n_mw", "s_mva", "required_mvar", "available_mv
                "detail", "clause", "source", "basis")
 
 
+def _s_mva(u) -> float:
+    """A unit's inverter S in MVA; NaN when it has none (None, should a rating ever be stored that way, is
+    no rating, as NaN is)."""
+    s = u["s_mva"]
+    return float(s) if s is not None and s == s else math.nan
+
+
+def _circle_q(s: float, p: float) -> float:
+    """The inverter circle: the Q a unit of apparent power ``s`` has left at active power ``p``
+    (0 past P = S; NaN for an unknown ``s``)."""
+    return math.sqrt(max(s ** 2 - p ** 2, 0.0))
+
+
+def _ibr_ratings(campus):
+    """``(uid, kind, P_n, S)`` of every IBR unit, S by ``_s_mva``."""
+    for uid, u in campus.units.iterrows():
+        if u["kind"] in IBR_KINDS:
+            yield uid, u["kind"], float(u["p_mw"]), _s_mva(u)
+
+
 def ibr_q_capability(campus, profile: dict):
     """IEEE 2800's reactive capability of the on-site IBR (``IBR_LABEL``):
     one row per BESS, PV or wind unit, then a plant ``TOTAL`` row whose
@@ -158,11 +178,8 @@ def ibr_q_capability(campus, profile: dict):
     frac = float(ibr["value"])
     oversize = math.sqrt(1.0 + frac ** 2)
     rows = []
-    for uid, u in campus.units.iterrows():
-        if u["kind"] not in IBR_KINDS:
-            continue
-        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] == u["s_mva"] else math.nan
-        base = {"unit": str(uid), "kind": u["kind"], "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
+    for uid, kind, p_n, s in _ibr_ratings(campus):
+        base = {"unit": str(uid), "kind": kind, "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
                 "source": ibr["source"]}
         if not (p_n > 0 and math.isfinite(s) and s > 0):
             rows.append({**base, "required_mvar": frac * p_n if p_n > 0 else math.nan, "available_mvar": math.nan,
@@ -170,7 +187,7 @@ def ibr_q_capability(campus, profile: dict):
                          "detail": f"{uid}: rating not given (P_n and the inverter S are needed)"})
             continue
         req = frac * p_n
-        avail = math.sqrt(max(s ** 2 - p_n ** 2, 0.0))
+        avail = _circle_q(s, p_n)
         short = max(req - avail, 0.0)
         if short <= 1e-9:
             detail = f"{uid} supplies {avail:.2f} Mvar of the {req:.2f} Mvar required at rated P"
@@ -253,12 +270,8 @@ def ibr_q_curve(campus, profile: dict):
     breaks = [p for p, _, _ in lim["points"] if 0.0 <= p <= 1.0]
     p_check = sorted({*breaks, 1.0})
     rows = []
-    for uid, u in campus.units.iterrows():
-        if u["kind"] not in IBR_KINDS:
-            continue
-        # NaN (and None, should a rating ever be stored that way) is no rating
-        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] is not None and u["s_mva"] == u["s_mva"] else math.nan
-        base = {"unit": str(uid), "kind": u["kind"], "s_mva": s, "clause": lim["clause"], "source": lim["source"],
+    for uid, kind, p_n, s in _ibr_ratings(campus):
+        base = {"unit": str(uid), "kind": kind, "s_mva": s, "clause": lim["clause"], "source": lim["source"],
                 "basis": IBR_CURVE_LABEL}
         unknown = {"q_min_req_mvar": math.nan, "q_max_req_mvar": math.nan, "available_mvar": math.nan,
                    "shortfall_mvar": math.nan, "status": "reported"}
@@ -275,7 +288,7 @@ def ibr_q_curve(campus, profile: dict):
                                        "not checked there"})
                 continue
             lo, hi = band[0] * p_n, band[1] * p_n
-            avail = math.sqrt(max(s ** 2 - p ** 2, 0.0))
+            avail = _circle_q(s, p)
             short_out = hi - avail if hi - avail > 1e-9 else 0.0
             short_in = -lo - avail if -lo - avail > 1e-9 else 0.0
             short = max(short_out, short_in)
@@ -333,7 +346,7 @@ def reactive_need(campus, rows: pd.DataFrame, req: ReactiveRequirement, tol: flo
         p = float(net.sgen.at[i, "p_mw"])
         if u["kind"] not in ALWAYS_ON and abs(p) <= 1e-9:
             continue                        # not running / no Q at night
-        head[uid] = math.sqrt(max(float(u["s_mva"]) ** 2 - p ** 2, 0.0))
+        head[uid] = _circle_q(_s_mva(u), p)
     total_head = sum(head.values())
     comp_df = getattr(work, "compensation", None)
     comp_df = comp_df if comp_df is not None else pd.DataFrame(columns=["kind", "steps"])
