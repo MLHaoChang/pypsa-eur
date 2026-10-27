@@ -608,9 +608,10 @@ def _harmonic_row(inp: _Inputs) -> dict:
 #: ``gridspine.static.unbalance``: S_sc2 = S_k'' / c_max (S_k'' = c U^2 / |Z|; the largest c gives the smallest
 #: S_sc2, conservative whichever case S_k'' is) with Z2 = Z1, no transfer from other PoCs and no min/max bands.
 _UNBALANCE_BAND = "PoC S_k''"
-_UNBALANCE_SCREENING = ("a screening upper bound (u2 = S_unbal / S_sc2, every unit lumped at the PoC on one phase "
-                        "pair) with S_sc2 = S_k'' / c_max (c factor and Z2 = Z1 assumed) and no background "
-                        "unbalance; above the limit an unbalanced load-flow study is needed")
+_UNBALANCE_SCREENING = ("It assumes every unit sits on one phase pair at the PoC, equal negative- and "
+                        "positive-sequence impedance, and no background unbalance. The negative-sequence "
+                        "short-circuit power is the entered fault level divided by the IEC 60909 voltage factor "
+                        "(c max). Above the limit, run an unbalanced load-flow study.")
 
 
 def _unbalance_row(inp: _Inputs) -> dict:
@@ -667,18 +668,23 @@ def _unbalance_row(inp: _Inputs) -> dict:
     s_sc2 = sk / c_factor(None, "max")
     u2 = ub.u2_pct(s_unbal["PoC"], s_sc2)
     verdict, margin = ub.judge(u2, limit)
-    notes = [f"u2 ≈ {s_unbal['PoC']:.4g} MVA unbalanced / {s_sc2:.4g} MVA S_sc2 × 100 = {u2:.4g} %"]
     if missing:
         if verdict != "fail":
             verdict = "unknown"
-        notes.append("no input for " + ", ".join(map(str, missing))
-                     + " (Single-phase share or Rated apparent power): a unit without its inputs blocks a pass")
+        # A unit without inputs leaves u2 a floor, so the row shows no number; a floor above 0 is said in words.
+        notes = [f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Single-phase share "
+                 "or Rated apparent power; a unit without them blocks a pass."]
+        if u2 > 0:
+            notes.append(f"At least {u2:.2g} % from the units with inputs.")
+    else:
+        notes = [f"Screening upper bound: {s_unbal['PoC']:.4g} MVA of single-phase load ÷ {s_sc2:.4g} MVA "
+                 f"negative-sequence short-circuit power = {u2:.2g} %."]
     notes.append(_UNBALANCE_SCREENING)
     verdict = {"pass": "pass", "fail": RULE_UNBALANCE["otherwise"]}.get(verdict, "unknown")
     row = _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit="% of positive sequence", source=source,
-               project_value=round(u2, 4), verdict=verdict,
+               project_value=None if missing else round(u2, 4), verdict=verdict,
                assumed=True if missing else lim_assumed or _marking_assumed(inp.marking("fault_level")),
-               note="; ".join(notes), section="assets",
+               note=" ".join(notes), section="assets",
                target=_target("assets", "Link", missing[0], "single_phase_share") if missing else unit_target)
     row["unbalance"] = {"s_unbalanced_mva": s_unbal["PoC"], "s_sc2_mva": s_sc2, "margin_pct": margin,
                         "band": _UNBALANCE_BAND, "no_input_units": missing, "label": ub.LABEL}

@@ -46,7 +46,9 @@ def test_u2_is_the_unbalanced_load_over_s_sc2_with_the_c_factor(tmp_path):
     assert row["project_value"] == pytest.approx(expected, abs=1e-4)
     assert row["limit"] == 1.0 and row["verdict"] == "pass"
     assert row["unit"] == "% of positive sequence"
-    assert "screening" in row["note"] and "Z2 = Z1" in row["note"]
+    assert row["note"].startswith("Screening upper bound: 10 MVA of single-phase load")
+    assert "equal negative- and positive-sequence impedance" in row["note"]
+    assert "IEC 60909 voltage factor" in row["note"]
     assert R.disposition(row) == ("checked", "pass")
     assert row["unbalance"]["margin_pct"] == pytest.approx(1.0 - expected, rel=1e-9)
     assert row["unbalance"]["band"] == "PoC S_k''" and row["unbalance"]["label"].startswith("screening")
@@ -61,8 +63,23 @@ def test_over_the_limit_warns(tmp_path):
 def test_a_unit_without_its_share_is_unknown_and_points_at_it(tmp_path):
     n = _harmonic_site()
     row = _row(tmp_path, n)
-    assert row["verdict"] == "unknown" and "compressor" in row["note"]
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"].startswith("compressor has no Single-phase share or Rated apparent power; "
+                                  "a unit without them blocks a pass.")
+    assert "At least" not in row["note"] and "Screening upper bound" not in row["note"]
     assert row["target"]["entity"] == "compressor" and row["target"]["field"] == "single_phase_share"
+
+
+def test_a_partial_sum_is_said_as_a_floor_without_a_number(tmp_path):
+    n = _site(0.5)
+    n.add("Link", "pump", bus0="mv", bus1="nh3", p_nom=1.0)
+    n.links.loc["pump", ["eh_process", "rated_mva"]] = [True, 5.0]
+    row = _row(tmp_path, n)
+    floor = 100.0 * 0.5 * 20.0 / (1400.0 / 1.1)
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["note"].startswith("pump has no Single-phase share")
+    assert f"At least {floor:.2g} % from the units with inputs." in row["note"]
+    assert row["target"]["entity"] == "pump"
 
 
 def test_a_share_outside_zero_to_one_is_unknown_not_an_error(tmp_path):
