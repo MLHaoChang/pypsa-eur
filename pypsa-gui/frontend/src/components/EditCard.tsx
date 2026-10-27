@@ -224,16 +224,21 @@ function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string,
 
 /** The Guided headline: each typed change in the table's words and display unit
  * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
+export const HEADLINE_CAP = 4
+
 export function editCardWords(card: EditCard): string {
   const members = setMembers(card)
-  return [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
+  const lines = [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
     ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
     const asset = assetWords(r.component_class, r.name)
     if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
     const [old, now] = rowValues(r, true)
     const unit = r.display?.unit || r.unit
     return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
-  })].join('; ')
+  })]
+  // A long card keeps its headline short; the table below lists every row.
+  return lines.length <= HEADLINE_CAP ? lines.join('; ')
+    : `${lines.slice(0, HEADLINE_CAP).join('; ')}; and ${lines.length - HEADLINE_CAP} more changes`
 }
 
 /** Show the field where it lives, without leaving the chat: the component's own
