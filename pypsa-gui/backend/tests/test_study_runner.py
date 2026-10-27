@@ -793,27 +793,52 @@ def test_the_production_run_bills_on_the_engine_and_seeds_from_the_pack(
     rec = wait_run(client, "wp8-run", sid, timeout=1200.0)
     assert rec["status"] == "done", rec
     run = client.get(f"/api/projects/wp8-run/studies/{sid}/run").json()
-    import sys
-    print("DEBUG", json.dumps({o: run["details"][o]["bill"] for o in ("none", "bess_2h")}, default=str), file=sys.stderr)
-    case = client.get(f"/api/projects/wp8-run/studies/{sid}/options/bess_2h/case").json()
-    print("DEBUGCASE", case.get("kpis"), WP0["golden_s5"]["bess_2h"], file=sys.stderr)
+    # Money-year 01: the pin's seed tariff is WP0's with every money figure x
+    # the manifest's exact factor, and the technology rows keep their values,
+    # so the LP dispatches as in WP0 and each bill component is WP0's x factor.
+    from decimal import Decimal
+
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    factor = Decimal(manifest["money_year_conversion"]["factor"])
+
+    def in_pin_money(v):
+        return float(Decimal(repr(v)) * factor)
+
     tol = WP0["tolerances"]
     for option in ("none", "bess_2h"):
         bill = run["details"][option]["bill"]
         assert bill["engine"] == "tariff_engine" and bill["unavailable"] == {}, bill["unavailable"]
+        assert bill["currency_year"] == L.load_defaults().pack.finance.currency_year
         want = WP0["seed_bills"][DE][option]
-        assert close(bill["total"], want["total"], rel=tol["arithmetic_rel"])
+        assert close(bill["total"], in_pin_money(want["total"]), rel=tol["arithmetic_rel"])
         for key, value in want["by_component"].items():
             if key != "unavailable":
-                assert close(bill["by_component"][key], value, rel=tol["arithmetic_rel"],
-                             abs_=tol["arithmetic_abs"]), (option, key)
+                assert close(bill["by_component"][key], in_pin_money(value),
+                             rel=tol["arithmetic_rel"], abs_=tol["arithmetic_abs"]), (option, key)
         cfg = json.loads((project_storage_dir(f"wp8-run-opt-{option}")
                           / "solver_config.json").read_text())
         assert cfg["finance"]["price_basis"] == "real" and cfg["commercial"]["value_flows"]
     case = client.get(f"/api/projects/wp8-run/studies/{sid}/options/bess_2h/case").json()
     assert case["engine"] == "finance_engine" and case["status"] == "ok"
     assert "finance_rules_from_guided_defaults" not in case["honesty_notes"]
-    assert close(case["kpis"]["npv"], WP0["golden_s5"]["bess_2h"]["npv"], rel=1e-9)
+    # WP0's NPV re-priced on the pin: the bill savings x factor, the capex, FOM,
+    # replacements and salvage (technology rows, values kept) as WP0's. The
+    # same cash flows at x1 rebuild WP0's own NPV, which pins the rebuild.
+    g = WP0["golden_s5"]["bess_2h"]
+    rate, years = g["discount_rate"], g["horizon_years"]
+
+    def npv(savings):
+        flows = [-g["capex_total"]] + [savings - g["fom_annual"] - g["vom_annual"]] * years
+        for year, cost in g["replacements"].items():
+            flows[int(year)] -= cost
+        flows[years] += g["salvage_eur"]
+        return sum(v / (1 + rate) ** t for t, v in enumerate(flows))
+
+    assert close(npv(g["savings_annual"]), g["npv"], rel=1e-9)
+    assert close(case["kpis"]["capex_total"], g["capex_total"], rel=1e-9)
+    assert close(case["kpis"]["npv"], npv(in_pin_money(g["savings_annual"])), rel=1e-9)
 
 
 def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(

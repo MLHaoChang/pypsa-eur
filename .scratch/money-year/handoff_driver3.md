@@ -42,3 +42,15 @@ Branch `claude/money-year-01-repin`, WIP commits on master 1d80850. No PR yet. S
    - the table;
    - skipped/risk: issue 02.
 6. Send the PR number to GK B; drive CI; report `premerge ok <sha>` to the coordinator once the owner has approved the table.
+
+## Subagent results
+
+**Group A** (24 ids, all pass; report-routes file 15 passed alone, the other 15 ids passed): tests only, no pack argument changed (no rider 3 lines).
+- test_study_library (6): expectations 2020→2025 (the tech-row test now checks the note says 2020 and the row says 2025 separately); honesty note `_in_2025_eur`.
+- test_study_case_routes: case currency_year 2025.
+- test_study_report_routes (9) + engine_literal_compat, s9, wp8b, wp9 gate (3), wp9 workbooks (2): root cause is `TOU_DC` with currency_year 2020 at ~line 23 of **tests/test_study_tornado_routes.py** (owned by neither group). The agent worked around it with a local `NO_PV_TOU` / `_run` wrapper in report_routes and import swaps in s9/wp8b/wp9 files.
+- **Recommended cleanup (next driver):** set `TOU_DC` currency_year to 2025 in test_study_tornado_routes.py, which also fixes the tornado tests that fail on the branch but aren't in the 47 list. Then revert the `NO_PV_TOU` wrapper and the import swaps (smaller diff, same intent), and rerun those files.
+- `USER_TARIFF` in test_study_library.py stays at 2020 (its tests pass).
+
+**Group B** (20 ids): resumed after a container restart; report still pending at hand-off. Its uncommitted edits are on disk or in WIP commits. If it doesn't report, re-run `scratchpad groupB.txt` ids (copy below) and finish under `brief.md`.
+groupB ids: see `git show 9f7d059 --stat` for files touched; list = test_e1_planning_staged_dc, test_eh_staged_hubs, test_energy_hub_redundancy, test_engine_adapter_demand, test_study_compile_commercial (2), test_study_expert_edits_routes, test_study_finance_staged (3), test_study_intake_routes (2), test_study_ledger_routes (2), test_study_m0, test_study_pack, test_study_runner::production_run, test_u2_wp7_case (3).
