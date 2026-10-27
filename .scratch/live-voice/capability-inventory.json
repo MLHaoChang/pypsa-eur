@@ -3411,13 +3411,17 @@
         "compare_rail",
         "compare_a",
         "compare_b",
-        "compare_tab"
+        "compare_tab",
+        "loadflow_source",
+        "window_from",
+        "window_to",
+        "highlight_branch"
       ],
       "required": [
         "panel_id"
       ],
       "safety_tier": "read",
-      "schema_sha256": "87421d83e3460af3d57df789bde741a01880948d99938662b7eaa4273ebf28eb",
+      "schema_sha256": "9a02006e15a17ce62e468c2322b677fe4b6b3a862c435332c7858b6c4d3c4ba3",
       "behavioral_fixture": "pending"
     },
     {

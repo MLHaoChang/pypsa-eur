@@ -3,7 +3,7 @@
 
 # Immutable run evidence and conversational references
 
-Status: ready-for-agent
+Status: done
 Type: task
 
 This task is independent of a voice provider and can be implemented before the
@@ -109,3 +109,8 @@ rehydration of `discussed_refs` (plus stale-generation refuse after rebind).
 via PR #130. Still open for issue close-out: optional extra retention/unsaved
 foreground edge cases beyond the acceptance suite; keep “never restore
 historical inputs.”
+
+2026-10-26: Closed out by #736. Open follow-ups, not part of 06 acceptance:
+1. `run_evidence.OBJECTIVE_UNIT` is hard-coded `'EUR'`; there is no per-project currency.
+2. A `force_reset` solve makes the monitor record `interrupted`/`outcome_superseded`, not `failed`.
+3. A solver thread that dies without a terminal status keeps the detached monitor polling every 0.5 s.

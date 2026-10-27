@@ -1419,6 +1419,14 @@
       "surface": "inline",
       "why": "The requested shaped artifact has no calibration receipt. Select a calibrated artifact or use pending for an unshaped candidate; no network state changed."
     },
+    "loadflow_view_unavailable": {
+      "surface": "inline",
+      "why": "ui_open_panel was given Load flow arguments (source, window or a branch to highlight) but the Load flow view is unavailable: no network, unsolved, stale, failed, infeasible, or no AC power flow. The detail's unavailable_kind says which; the assistant says so and offers the fix (run or re-run the solve). No navigation happened. There is no conversation-wide recovery action."
+    },
+    "unknown_branch": {
+      "surface": "inline",
+      "why": "ui_open_panel was asked to highlight a Line or Transformer that is not in the open project's network. The detail names it; the assistant checks the name (resolve_reference) instead of guessing. No navigation happened. There is no conversation-wide recovery action."
+    },
     "change_component_missing": {
       "surface": "inline",
       "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A named asset is not in the project; the message lists the existing names so the model can correct the edit (OJ-23)."

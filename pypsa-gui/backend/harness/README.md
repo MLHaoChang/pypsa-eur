@@ -1200,6 +1200,18 @@ stale, running, infeasible, or failed solve returns `status: unavailable`
 with a typed `unavailable_kind`. Branches with a missing or zero rating, or
 with no flow data, appear in `skipped` and stay out of the ranking.
 
+`ui_open_panel(panel_id='results', results_tab='loadflow')` takes optional
+`loadflow_source`, `window_from`/`window_to` (both or neither) and
+`highlight_branch` `{component: Line|Transformer, name}`, normally copied from
+the summary's `ui_reference`. With any of them, `harness/navigation.loadflow_target`
+reads the view once: an unavailable view refuses `loadflow_view_unavailable`
+(with its `unavailable_kind`) and a branch outside the network refuses
+`unknown_branch`, both with no event. The model's result says whether the
+branch is ranked and shown; a skipped branch (no rating, no flow data) is
+neither loaded nor unloaded. `navigation.issue` repeats that read under the
+guard that issues the ACK, binds the view's `binding` verbatim and adds the
+highlight to the ACK `target`. Without these arguments the call is unchanged.
+
 A `run_id` argument reads a stored `loadflow` section when that artifact
 exists. With no such section the result is
 `unavailable_kind=historical_loadflow_unavailable`. Omit `run_id` for the
