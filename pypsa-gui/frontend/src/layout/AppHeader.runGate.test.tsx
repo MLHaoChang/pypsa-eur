@@ -104,4 +104,24 @@ describe('AppHeader — the Run gate', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 20)) })
     expect((screen.getByRole('button', { name: /Run/ }) as HTMLButtonElement).disabled).toBe(false)
   })
+
+  it('counts the requested kinds whose results are stale beside Run', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'stale', freshness_by_kind: { optimisation: 'stale', study: 'stale', loadflow: 'stale' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({
+      sections: [results], run_request: { optimisation: true, study: false, loadflow: true },
+    }))
+    renderHeader()
+    // The study is stale but the Run does not request it.
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(2 stale)')
+  })
+
+  it('shows no count when nothing the Run requests is stale', async () => {
+    const results = { section: 'results', label: 'Results', state: null, required: false, items: [], summary: null,
+      freshness: 'fresh', freshness_by_kind: { optimisation: 'fresh', study: null, loadflow: 'stale' } }
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue(flow({ sections: [results] }))
+    renderHeader()
+    await screen.findByRole('button', { name: /Run/ })
+    expect(screen.queryByTestId('run-stale')).toBeNull()
+  })
 })

@@ -861,21 +861,21 @@ def test_load_flow_off_is_not_requested(client, site):
     assert not any(i["source"] == "loadflow" for i in _every_item(body))
 
 
-def test_a_zero_impedance_line_blocks_each_kind_once(client, site, set_cfg, monkeypatch):
-    """x = 0 is the optimisation's own refusal; r = x = 0 is also Stage 2's.
-    Each kind has its item, each shown once (UX), and /preflight agrees."""
+def test_a_zero_impedance_line_is_one_issue_in_one_place(client, site, set_cfg, monkeypatch):
+    """r = x = 0 is the reactance check's refusal and Stage 2's: one item (the
+    reactance one), which blocks the optimisation and the load flow, and
+    /preflight agrees."""
     name = site(_pf_network(r=0.0, x=0.0), name="lf_zero")
     set_cfg(run_ac_pf_after_lopf=True)
     body = _assert_equivalent(client, monkeypatch, name)
     assert body["run_request"]["loadflow"] is True
     items = _every_item(body)
-    stage2 = [i for i in items if i["code"] == "stage2_zero_impedance"]
-    assert len(stage2) == 1 and stage2[0]["source"] == "loadflow" and stage2[0]["blocking"]
+    assert not [i for i in items if i["code"] == "stage2_zero_impedance"]
     assert [i["source"] for i in items if i["code"] == "line_x_invalid"] == ["validation"]
-    assert body["verdicts"]["optimisation"]["blocker"]["code"] == "line_x_invalid"
-    assert body["verdicts"]["loadflow"]["blocker"]["code"] == "stage2_zero_impedance"
+    assert not any(k.startswith("_") for i in items for k in i)
+    for kind in ("optimisation", "loadflow"):
+        assert body["verdicts"][kind]["blocker"]["code"] == "line_x_invalid"
     assert body["run_ready"] is False
-    # /run's own verdict (the header's Run) is the first of the two in flow order.
     assert body["run_verdict"] == {"ready": False, "blocker": body["run_blocker"]}
 
 

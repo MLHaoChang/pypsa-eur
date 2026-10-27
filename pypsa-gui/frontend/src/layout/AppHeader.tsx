@@ -24,6 +24,7 @@ import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 import { useRunGate } from '../hooks/useRunGate'
+import { useStaleRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
 
@@ -619,6 +620,7 @@ export default function AppHeader() {
   }
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
   const runGate = useRunGate('optimisation')
+  const staleKinds = useStaleRunKinds()
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
@@ -1154,6 +1156,7 @@ export default function AppHeader() {
                 : <>
                     {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
                     {runLabel}
+                    {staleKinds > 0 && <span data-testid="run-stale" className="font-normal opacity-90">({staleKinds} stale)</span>}
                   </>}
           </button>
         </>)
