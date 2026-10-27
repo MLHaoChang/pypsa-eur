@@ -24,7 +24,7 @@ import DecisionRunWatcher from '../pages/decision/DecisionRunWatcher'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
 import { flushPendingMapLayoutToServer } from '../pages/mapLayoutStore'
 import { useRunGate } from '../hooks/useRunGate'
-import { useStaleRunKinds } from '../hooks/useStaleRunKinds'
+import { staleKindsSentence, useStaleRunKinds } from '../hooks/useStaleRunKinds'
 import { openFlowTarget, openSectionInExpert } from './flowNavigation'
 import { componentLabel } from '../utils/componentLabels'
 
@@ -621,6 +621,7 @@ export default function AppHeader() {
   const runLabel = `Run ${MODE_LABEL[mode] ?? mode.toUpperCase()}`
   const runGate = useRunGate('optimisation')
   const staleKinds = useStaleRunKinds()
+  const staleText = staleKinds.length ? staleKindsSentence(staleKinds) : ''
 
   // SSE cleanup ref — close the stream on Abort / unmount so a long-lived
   // EventSource doesn't leak across re-renders.
@@ -1131,7 +1132,7 @@ export default function AppHeader() {
               ? 'Abort the running simulation'
               : jobQueued
                 ? 'Cancel this queued solve'
-                : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free`}
+                : `${runLabel}: ${MODE_DESC[mode] ?? ''} — queues the solve; runs now if the queue is free${staleText ? ` ${staleText}` : ''}`}
             className="flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3.5 h-8 rounded-lg text-[11px] font-semibold text-white transition-all select-none hover:brightness-110 active:translate-y-px disabled:opacity-60 disabled:cursor-wait"
             style={{
               // Design system: 3-stop gradient with layered + inset shadows.
@@ -1156,7 +1157,7 @@ export default function AppHeader() {
                 : <>
                     {mode === 'lopf' ? <Zap size={11} /> : <Play size={11} />}
                     {runLabel}
-                    {staleKinds > 0 && <span data-testid="run-stale" className="font-normal opacity-90">({staleKinds} stale)</span>}
+                    {staleKinds.length > 0 && <span data-testid="run-stale" title={staleText} className="font-normal opacity-90">({staleKinds.length} out of date)</span>}
                   </>}
           </button>
         </>)

@@ -113,7 +113,8 @@ describe('AppHeader — the Run gate', () => {
     }))
     renderHeader()
     // The study is stale but the Run does not request it.
-    expect((await screen.findByTestId('run-stale')).textContent).toBe('(2 stale)')
+    expect((await screen.findByTestId('run-stale')).textContent).toBe('(2 out of date)')
+    expect(screen.getByTestId('run-stale').title).toBe('Optimisation and load flow results are older than the inputs.')
   })
 
   it('shows no count when nothing the Run requests is stale', async () => {
