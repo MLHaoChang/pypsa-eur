@@ -7,6 +7,7 @@
 import { FLOW_STATE_WORDS, type FlowSectionState, type FlowTarget } from '../api/flow'
 import { useUIStore, type SlidePanel } from '../store/uiStore'
 import { componentLabel } from '../utils/componentLabels'
+import { carrierDisplayName } from '../pages/results/carrierAliases'
 
 type Scalar = string | number | boolean | null
 
@@ -21,7 +22,7 @@ export interface EditCardRow {
   unit: string
   role: 'typed' | 'derived' | 'follows' | 'at_solve' | 'note'
   note?: string
-  display?: { old: number | null; new: number; unit: string }
+  display?: { old: number | null; new: number | null; unit: string }
   readback?: Scalar
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
@@ -31,6 +32,24 @@ export interface EditCardRow {
     raw: Scalar; raw_unit: string; formula?: boolean }
   /** A cost's stated money basis. */
   money?: { currency: string; money_year: number }
+}
+
+/** A set the server resolved for one change (LC-16 OJ-22): what it selects, how many, by what factor. */
+export interface EditCardSet {
+  component_class: string
+  attribute: string
+  /** null when the change names its members (a names-form scale). */
+  selector: { carrier?: string; bus?: string; all?: true } | null
+  names: string[]
+  size: number
+  inactive: number
+  /** The inactive members, marked in the table. */
+  inactive_names?: string[]
+  /** The backend's words, in model ids ("all Generator with carrier solar, as of this preview"). */
+  words: string
+  factor: number | null
+  /** "× 1.2 (+20 %)", the same on the card, in its says and on the receipt. */
+  factor_words: string | null
 }
 
 export interface EditCard {
@@ -43,6 +62,8 @@ export interface EditCard {
   digest: string
   /** The flow section the edit lands in ("Connection & grid"). */
   section?: { id: string; label: string }
+  /** One line per selector or scale change, shown above its rows. */
+  sets?: EditCardSet[]
 }
 
 export interface EditReceipt {
@@ -55,6 +76,8 @@ export interface EditReceipt {
   undo: { tool: string; available: boolean }
   /** The section's flow state after the write; `changed` against the card. */
   section?: { id: string; label: string; state: string; changed: boolean }
+  /** The card's set lines, so Guided words the receipt as the card did. */
+  sets?: EditCardSet[]
 }
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -68,10 +91,19 @@ function rowsOk(rows: unknown): rows is EditCardRow[] {
   })
 }
 
+function setsOk(sets: unknown): boolean {
+  return sets === undefined || (Array.isArray(sets) && sets.every(g => {
+    const o = object(g)
+    return !!o && typeof o.component_class === 'string' && typeof o.attribute === 'string'
+      && typeof o.size === 'number' && Array.isArray(o.names) && typeof o.words === 'string'
+  }))
+}
+
 /** A well-formed card or null; a malformed one is never shown as complete. */
 export function editCardOf(value: unknown): EditCard | null {
   const o = object(value)
-  if (!o || o.version !== 1 || typeof o.says !== 'string' || typeof o.digest !== 'string' || !rowsOk(o.rows)) return null
+  if (!o || o.version !== 1 || typeof o.says !== 'string' || typeof o.digest !== 'string' || !rowsOk(o.rows)
+    || !setsOk(o.sets)) return null
   return o as unknown as EditCard
 }
 
@@ -115,19 +147,77 @@ function assetWords(componentClass: string, name: string): string {
   return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
 }
 
+/** The rows a set line stands for, by class, name and field. */
+function setMembers(card: EditCard): Set<string> {
+  return new Set((card.sets ?? []).flatMap(g => g.names.map(n => `${g.component_class}\u0000${n}\u0000${g.attribute}`)))
+}
+
+function inSet(members: Set<string>, r: EditCardRow): boolean {
+  return members.has(`${r.component_class}\u0000${r.name}\u0000${r.field}`)
+}
+
+const MULTI_PORT = new Set(['Line', 'Link', 'Transformer'])
+
+/** What a set selects, in the table's words: "Every Generator with carrier Solar at bus B1".
+ * A names-form scale lists its members. */
+function setPhrase(g: EditCardSet): string {
+  if (!g.selector) return g.names.map(n => assetWords(g.component_class, n)).join(', ')
+  const parts = [`Every ${componentLabel(g.component_class)}`]
+  if (g.selector.carrier !== undefined) parts.push(`with carrier ${carrierDisplayName(g.selector.carrier)}`)
+  // Lines, Transformers and Links have bus0, bus1…: the server matches any of them, as Expert's words say.
+  if (g.selector.bus !== undefined) parts.push(`at bus ${g.selector.bus}${MULTI_PORT.has(g.component_class) ? ' (any port)' : ''}`)
+  return parts.join(' ')
+}
+
+/** "Every Generator with carrier Solar · 3 assets · Capacity × 1.2 (+20 %)"; Expert keeps the backend's
+ * ids. `label` is the field in words, `value` the new value ("→ 0.5") for a set given a value. */
+export function setLine(g: EditCardSet, guided: boolean, label?: string, value = ''): string {
+  const count = `${g.size} asset${g.size === 1 ? '' : 's'}${g.inactive ? `, ${g.inactive} inactive` : ''}`
+  const field = guided && label ? label : g.attribute
+  return `${guided ? setPhrase(g) : g.words} \u00b7 ${count} \u00b7 ${field} ${g.factor_words ?? value}`.trimEnd()
+}
+
+function cardSetLine(card: EditCard, g: EditCardSet, guided: boolean): string {
+  const row = card.rows.find(r => r.role === 'typed' && r.component_class === g.component_class
+    && r.field === g.attribute && g.names.includes(r.name))
+  const unit = row ? row.display?.unit || row.unit : ''
+  const value = row ? `\u2192 ${row.display ? showDisplay(row.display.new) : cellValue(row.new)}${unit ? ` ${unit}` : ''}` : ''
+  return setLine(g, guided, row?.label, value)
+}
+
 /** "Connection & grid › Line 'L2'" (the edit's flow section), or "Line 'L2'" when the
- * project has no flow; a bulk edit lists its names: "Connection & grid › Line 'L1', Line 'L2'". */
+ * project has no flow; a bulk edit lists its names: "Connection & grid › Line 'L1', Line 'L2'";
+ * a set shows its phrase ("Every Generator with carrier Solar"), never its members' names. */
 export function editCardHeader(card: EditCard): string {
   const byKey = new Map<string, string[]>()
+  const members = setMembers(card)
   for (const r of card.rows) {
     if (r.role !== 'typed' || !r.component_class) continue
     const key = card.section && r.target?.section === card.section.id ? card.section.label : ''
     const names = byKey.get(key) ?? []
-    const words = assetWords(r.component_class, r.name)
+    const group = inSet(members, r) ? card.sets!.find(g => g.component_class === r.component_class
+      && g.attribute === r.field && g.names.includes(r.name)) : undefined
+    const words = group ? setPhrase(group) : assetWords(r.component_class, r.name)
     if (!names.includes(words)) names.push(words)
     byKey.set(key, names)
   }
   return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
+}
+
+/** The Guided headline: each typed change in the table's words and display unit
+ * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
+export function editCardWords(card: EditCard): string {
+  const members = setMembers(card)
+  return [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
+    ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
+    const asset = assetWords(r.component_class, r.name)
+    if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
+    const known = r.old_known !== false
+    const old = r.display && known && typeof r.old === 'number' ? showDisplay(r.display.old) : cellValue(r.old, known)
+    const now = r.display ? showDisplay(r.display.new) : cellValue(r.new)
+    const unit = r.display?.unit || r.unit
+    return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
+  })].join('; ')
 }
 
 /** Show the field where it lives, without leaving the chat: the component's own
@@ -145,11 +235,18 @@ function showInProperties(target: FlowTarget) {
 }
 
 export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
-  const asset = (r: EditCardRow) => (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
+  const inactive = new Set((card.sets ?? []).flatMap(g => (g.inactive_names ?? []).map(n => `${g.component_class}\u0000${n}`)))
+  const asset = (r: EditCardRow) => {
+    const words = (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
+    return inactive.has(`${r.component_class}\u0000${r.name}`) ? `${words} (inactive)` : words
+  }
   const header = editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
       {header && <div className="font-medium mb-1" data-testid="chat-edit-header">{header}</div>}
+      {(card.sets ?? []).map((g, i) => (
+        <div key={i} className="mb-1" data-testid="chat-edit-set">{cardSetLine(card, g, guided)}</div>
+      ))}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <caption className="text-left font-semibold mb-1">Changes to apply</caption>
@@ -202,7 +299,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                   {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
-                  {r.display && r.display.unit !== r.unit && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
+                  {r.display && r.display.unit !== r.unit && typeof r.new === 'number' && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     stored as {show(r.new)} {r.unit}
                   </span>}
                 </td>
@@ -218,15 +315,18 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
   )
 }
 
-export function EditReceiptLine({ receipt, disabled, onRequest }: {
+export function EditReceiptLine({ receipt, disabled, onRequest, guided = false }: {
   receipt: EditReceipt; disabled: boolean; onRequest: (text: string) => void
+  /** Guided words the receipt as the card's headline did, never in ids. */
+  guided?: boolean
 }) {
   const verified = receipt.outcome === 'verified'
+  const says = guided ? editCardWords({ rows: receipt.rows, sets: receipt.sets } as EditCard) || receipt.says : receipt.says
   return (
     <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="chat-edit-receipt">
       <div className={verified ? '' : 'text-warn'}>
-        {verified ? `${receipt.says}. Read back from the project.`
-          : `${receipt.says || 'The change'}: the project does not show the expected values. Check them before going on.`}
+        {verified ? `${says}. Read back from the project.`
+          : `${says || 'The change'}: the project does not show the expected values. Check them before going on.`}
       </div>
       {receipt.section?.changed && <div data-testid="chat-edit-section">
         {receipt.section.label}: {FLOW_STATE_WORDS[receipt.section.state as FlowSectionState] ?? receipt.section.state}.
