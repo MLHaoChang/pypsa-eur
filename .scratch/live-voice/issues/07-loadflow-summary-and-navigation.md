@@ -67,8 +67,8 @@ Done (live-voice 07, PR A backend + PR B UI): `ui_open_panel` takes `loadflow_so
 `window_from`, `window_to` and `highlight_branch`; the navigation is checked against the view
 before it is issued, and the ACK binds source, window, data and the highlighted branch. The tab
 applies the source and window, marks the branch row (`aria-current`) and scrolls to it, and
-acknowledges only once that row is shown. Guided keeps Branch loading hidden and offers
-"Show in Expert >" with Back. The typed-chat journey runs on every harness provider; Branch
+acknowledges only once that row is shown. Guided shows Load flow as a temporary advanced tab,
+as master does, so the highlight and ACK work there too. The typed-chat journey runs on every harness provider; Branch
 loading reads the server's shared calculation. Known gaps: a refusal at issue time on a checked
 turn has no typed channel back to the model; a branch outside the shown rows, or one with a
 truncated name, is never acknowledged; multi-period networks whose snapshot labels repeat per

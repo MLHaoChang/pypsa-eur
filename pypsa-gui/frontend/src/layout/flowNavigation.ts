@@ -266,16 +266,6 @@ function openFlowTargetNow(target: FlowTarget): void {
   openSectionInExpert(target.section)
 }
 
-/** Open a Results tab that Guided hides ("Show in Expert >"), through the same
- *  jump as a flow target, so Back returns to the Guided view it left. */
-export function openResultsTabInExpert(tab: string): void {
-  const target: FlowTarget = { section: 'results', panel: 'results', component: null, entity: null, field: null }
-  withReturn(target, () => {
-    openFlowTargetNow(target)
-    useUIStore.getState().requestResultsTab(tab)
-  })
-}
-
 /** Open one flow item's field in place, in Guided: a drawer over the card with
  *  the component's own editor, or the panel it points at. An item with no known
  *  field opens its section in Expert instead (the one way to reach it). */

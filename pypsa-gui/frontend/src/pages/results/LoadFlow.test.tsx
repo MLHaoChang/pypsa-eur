@@ -1,13 +1,12 @@
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup, waitFor, screen, fireEvent } from '@testing-library/react'
+import { render, cleanup, waitFor, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
 import LoadFlow from './LoadFlow'
 import { findKpiValue } from '../../test/kpi'
-import { navigationEpoch } from '../../utils/navigationEpoch'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -233,24 +232,17 @@ it('Run again is the header Run, through the gate; without AC power flow it says
   expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
 })
 
-it('Guided keeps Branch loading hidden and gives the assistant branch a route to Expert', async () => {
-  vi.mocked(resultsEvidenceApi.loadflow).mockClear()
-  useUIStore.setState({ uiMode: 'guided', resultSource: 'ac_pf', resultsHighlight: { component: 'Line', name: 'L 7' }, flowReturn: null })
+it('Guided shows Branch loading with the assistant branch highlighted, as Expert does', async () => {
+  useUIStore.setState({ uiMode: 'guided', resultsHighlight: { component: 'Line', name: 'Line 1' } })
   renderPage()
-  const notice = await screen.findByText(/Load flow for Line 'L 7' \(AC power flow\) is an Expert view\./)
-  expect(screen.queryByTestId('branch-loading')).toBeNull()
-  expect(resultsEvidenceApi.loadflow).not.toHaveBeenCalled()
+  const row = await waitFor(() => {
+    const r = document.querySelector('[data-branch-row][data-branch-name="Line 1"]')
+    expect(r).not.toBeNull()
+    return r as HTMLElement
+  })
+  expect(screen.getByTestId('branch-loading')).toBeTruthy()
+  expect(row.getAttribute('aria-current')).toBe('true')
+  expect(screen.queryByRole('button', { name: 'Show in Expert >' })).toBeNull()
   expect(useUIStore.getState().uiMode).toBe('guided')
-  const epoch = navigationEpoch()
-  fireEvent.click(screen.getByRole('button', { name: 'Show in Expert >' }))
-  // A manual navigation: the assistant's pending ACK watcher stops, so the click never ACKs the action.
-  expect(navigationEpoch()).toBeGreaterThan(epoch)
-  const ui = useUIStore.getState()
-  expect(notice.isConnected).toBe(false)
-  expect(ui.uiMode).toBe('expert')
-  expect(ui.activeSlidePanel).toBe('results')
-  expect(ui.resultsTabRequest).toBe('loadflow')
-  expect(ui.resultsHighlight).toEqual({ component: 'Line', name: 'L 7' })
-  expect(ui.flowReturn?.mode).toBe('guided')
   useUIStore.setState({ uiMode: 'expert', resultsHighlight: null })
 })
