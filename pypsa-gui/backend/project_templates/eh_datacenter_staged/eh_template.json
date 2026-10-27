@@ -52,7 +52,7 @@
     },
     {
       "item": "import tariff",
-      "note": "an illustrative network-use charge on the metered import, on top of the wholesale price the grid supply carries; no demand charge (the template models one July week, so a monthly item would be billed for one month); replace with the site's tariff",
+      "note": "an illustrative network-use charge on the metered import, on top of the wholesale price the grid supply carries; no demand charge (the template models one July week, so a monthly item would be billed for one month); replace with the site's tariff; synthetic, illustrative; no money year of its own; read in the case's money (2025)",
       "source": "synthetic",
       "value": "dc_network_tariff_synthetic: network energy charge 35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise"
     },
@@ -72,7 +72,7 @@
       "item": "money year",
       "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
       "source": "assumed",
-      "value": "pack prices (2020 price data) are read as real base-year EUR"
+      "value": "pack prices (2025 EUR) are read as real base-year EUR"
     },
     {
       "item": "finance inputs",

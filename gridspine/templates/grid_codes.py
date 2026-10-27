@@ -88,6 +88,10 @@ A profile may carry these optional keys:
     which a unit in voltage control does not change its reactive output; a
     positive number. Reported (``reported_requirements``), never checked:
     the static study has no voltage-control loop.
+``current_tdd_standard``
+    The standard whose current-distortion limits the TDD screen applies at
+    the connection point (datacenter readiness 12), one of
+    ``CURRENT_TDD_STANDARDS``. Without it the TDD screen reads unknown.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -137,14 +141,16 @@ _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
                   "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
-                  "q_capability_unit", "voltage_deadband_pct")
+                  "current_tdd_standard", "q_capability_unit", "voltage_deadband_pct")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
                           "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
                           "dynamic_requirements", "notes",
                           "document", "name", "pst_limit", "plt_limit",
-                          "q_capability_unit", "voltage_deadband_pct"})
+                          "current_tdd_standard", "q_capability_unit", "voltage_deadband_pct"})
+#: The standards ``current_tdd_standard`` may name (``static/current_tdd.py``).
+CURRENT_TDD_STANDARDS = ("ieee519-2014",)
 #: Every key a voltage band may carry.
 BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
                        "clause", "source", "page", "quote"})
@@ -264,6 +270,11 @@ def _check_profile(name, p):
             _check_q_capability(p[key], where, key)
     if "harmonic_limits_pct" in p:
         _check_harmonic_orders(p["harmonic_limits_pct"], where)
+    if "current_tdd_standard" in p:
+        _check_limit("current_tdd_standard", p["current_tdd_standard"], where)
+        if p["current_tdd_standard"].get("value") not in CURRENT_TDD_STANDARDS:
+            raise ContractError(f"{where}: current_tdd_standard value must be one of {list(CURRENT_TDD_STANDARDS)}, "
+                                f"got {p['current_tdd_standard'].get('value')!r}")
     bands = p["voltage_bands"]
     if not isinstance(bands, list) or not bands:
         raise ContractError(f"{where}: voltage_bands must be a non-empty list")

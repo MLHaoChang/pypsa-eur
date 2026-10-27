@@ -108,7 +108,7 @@ def test_the_template_prices_its_tanks_from_this_version():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "project_templates"))
     import eh_ammonia as A
 
-    assert A.AMMONIA_PACK_VERSION == "2026-10-22"     # repinned to the typed successor (GS-2b)
+    assert A.AMMONIA_PACK_VERSION == "2026-10-26"     # repinned to the 2025-money pack (money-year 01)
 
 
 def test_moving_latest_changes_no_template_and_no_guided_seed():
@@ -120,5 +120,5 @@ def test_moving_latest_changes_no_template_and_no_guided_seed():
     import eh_templates as T
     from services.study import library as L
 
-    assert T.TEMPLATE_PACK_VERSION == "2026-10-22"    # repinned to the typed successor (GS-2b)
-    assert L.PACK_VERSION == "2026-10-05"
+    assert T.TEMPLATE_PACK_VERSION == "2026-10-26"    # repinned to the 2025-money pack (money-year 01)
+    assert L.PACK_VERSION == "2026-10-26"    # moved with the templates (money-year 01)

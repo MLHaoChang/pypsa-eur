@@ -145,6 +145,9 @@ ALLOWED = (
     # producers/campus.py: a typical LV fault level in MVA
     re.compile(r"^TYPICAL_SK_MVA = \(\(220\.0, 10000\.0, 0\.1\), \(60\.0, 3000\.0, 0\.1\), \(10\.0, 300\.0, 0\.3\), \(0\.0, 50\.0, 0\.5\)\)$"),
     re.compile(r'^"load_step_max_pct": 50\.0, "cos_phi_r"'),      # producers/campus.py: a genset load step in percent
+    # current_tdd.py: IEEE 519's Isc/IL band bounds, not a frequency
+    re.compile(r"^ISC_IL_BOUNDS = \(20\.0, 50\.0, 100\.0, 1000\.0\)$"),
+    re.compile(r"^ISC_IL_BOUNDS_T4 = \(25\.0, 50\.0\)$"),
 )
 #: A default argument in a signature: ``name=50.0`` or ``name: float = 50.0``.
 DEFAULT = re.compile(r"\w+\s*(:\s*\w+\s*)?=\s*50(\.0*)?\s*[,)]")

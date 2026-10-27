@@ -894,10 +894,16 @@ def currency_year_of(ledger: AssumptionsLedger, tariff_meta: Mapping[str, Any],
         years.setdefault(int(study_year), []).append("the study")
     if len(years) > 1:
         detail = "; ".join(f"{y}: {', '.join(sorted(k)[:4])}" for y, k in sorted(years.items()))
+        # Only the study's own year differs (e.g. after a re-seed onto a newer
+        # pack, money-year 01): name the setting that fixes it.
+        others = {y for y, k in years.items() if k != ["the study"]}
+        hint = (f"; or set the study's currency year to {others.pop()} in its settings"
+                if study_year is not None and len(others) == 1
+                and int(study_year) not in others else "")
         raise CompileError(
             "currency_year_mixed",
             f"the case would mix currency years ({detail}); nothing is converted — "
-            "re-enter the values in one currency year")
+            f"re-enter the values in one currency year{hint}")
     if not years:
         raise CompileError("currency_year_unstated",
                            "no money row, tariff or study states a currency year")

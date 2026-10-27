@@ -14,7 +14,7 @@
       "item": "money year",
       "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
       "source": "assumed",
-      "value": "pack prices (2020 price data) are read as real base-year EUR"
+      "value": "pack prices (2025 EUR) are read as real base-year EUR"
     },
     {
       "item": "finance inputs",

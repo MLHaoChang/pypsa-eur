@@ -283,6 +283,7 @@ def test_a_priced_part_without_a_lifetime_is_refused_as_a_single_edit_is(mixed):
                        "attribute": "inv_energy_overnight", "value": 50000.0}])
     assert detail["error_kind"] == "invalid_edit_value"
     assert str(single.value.detail) in detail["message"]
+    assert detail["message"].startswith("Storage 'Battery'") and "StorageUnit" not in detail["message"]
     assert values() == BEFORE
 
 

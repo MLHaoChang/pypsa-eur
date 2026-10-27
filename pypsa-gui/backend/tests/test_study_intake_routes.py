@@ -62,7 +62,9 @@ def test_the_library_lists_tariffs_with_their_honesty_sentences_and_the_profiles
     profiles = {p["profile_id"]: p for p in body["load_profiles"]}
     assert {"commercial_office", "industrial_two_shift"} <= set(profiles)
     assert profiles["commercial_office"]["label"] and profiles["commercial_office"]["synthetic"] is True
-    assert body["currency_year"] == 2020
+    from services.study import library as L
+
+    assert body["currency_year"] == L.load_defaults().pack.finance.currency_year
     assert body["load_units"] == ["kW", "MW"]
 
 
@@ -104,19 +106,33 @@ def test_the_preview_bill_of_the_site_golden_load_equals_wp0(client, api_project
     U2 WP8 (gate C6, WP1's `rate_meter` fact): the preview's engine bill of
     the grid-only baseline equals the WP0 record of GS's bill on the same load
     and tariff (the golden `none`: import = the load), component by component.
+    The preview prices on the pin, whose seed tariff is WP0's with every money
+    figure x the manifest's exact money-year factor (money-year 01), so each
+    WP0 component is scaled by that factor (the bill is linear in them).
     """
+    import json
+    from decimal import Decimal
+
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+    from services.study import library as L
     from tests.golden import site_fixture as SF
     from tests.u2_targets import DE, WP0, close
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    factor = Decimal(manifest["money_year_conversion"]["factor"])
+
+    def in_pin_money(v):
+        return float(Decimal(repr(v)) * factor)
 
     name = api_project("s8-prev-wp0")
     body = client.post(f"/api/projects/{name}/studies/preview",
                        json={"intake": SF.site_intake()}).json()
     assert body["bill"]["status"] == "ok", body["bill"]
     bill, want = body["bill"]["bill"], WP0["seed_bills"][DE]["none"]
-    assert close(bill["annual_bill"], want["annual_bill"])
+    assert close(bill["annual_bill"], in_pin_money(want["annual_bill"]))
     for key, value in want["by_component"].items():
         if key != "unavailable":
-            assert close(bill["by_component"][key], value), key
+            assert close(bill["by_component"][key], in_pin_money(value)), key
 
 
 def test_the_preview_names_why_a_load_cannot_be_read(client, api_project, studies_on):

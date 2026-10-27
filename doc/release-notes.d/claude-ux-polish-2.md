@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): UX polish: disabled text-link buttons look disabled (shared rule); the component drawer's Footprint box is full width with matching padding; "Open here" / "Open … in Expert" end in "›" like "Go to field ›"; the priced-part refusal says "Storage" instead of "StorageUnit"; a refused assistant tool call shows the refusal's message instead of a raw dict.

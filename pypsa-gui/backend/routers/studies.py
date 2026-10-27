@@ -960,6 +960,20 @@ def _library_or_500() -> study_library.Library:
             "code": "study_library_unreadable", "message": str(exc)}) from None
 
 
+def _library_for_or_500(ledger) -> study_library.Library:
+    """
+    The defaults a stored ledger was seeded from (`library.library_for_ledger`,
+    money-year 01), so its rows and seed tariff stay in its own money year;
+    a ledger naming a pack this build does not ship is a 500 that says so,
+    never read against the pin.
+    """
+    try:
+        return study_library.library_for_ledger(ledger)
+    except (study_library.LibraryError, OSError, LookupError, ValueError) as exc:
+        raise HTTPException(500, detail={
+            "code": "study_library_unreadable", "message": str(exc)}) from None
+
+
 def _current_ledger(study: DecisionStudy):
     """
     (ledger, stored): the stored ledger, or a fresh in-memory seed; either
@@ -1070,9 +1084,11 @@ def put_ledger(study_id: str, body: LedgerPut,
                 ledger = study_ledger.reseed_ledger(
                     ledger, _key_drivers(study), study.intake, _library_or_500())
             if body.reset:
+                # The rows come back from the defaults the ledger (after any
+                # re-seed above) was seeded from, never another money year.
                 ledger = study_ledger.reset_rows(
                     ledger, body.reset, _key_drivers(study), study.intake,
-                    _library_or_500())
+                    _library_for_or_500(ledger))
             ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
             now = _now()
             changed_by = str(user.id) if user is not None else None
@@ -1180,7 +1196,6 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         raise HTTPException(409, detail={"error_kind": "intake_changed_since_run", "message": (
             "the study's answers (site, load, tariff or PV) changed after the run; "
             "re-run the study before reading its cases")})
-    library = _library_or_500()
     # Gate S5 BC-S5-1: the fork's file, never its resident context, and only
     # when it is the network the run solved — the run record's bills and
     # asset economics belong to that network, and the case's model hash
@@ -1211,6 +1226,8 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
         raise HTTPException(409, detail={"error_kind": run_hashes.ENGINE_STALE,
                                          "message": run_hashes.edited_since_run([option_id])})
     details = (run.get("details") or {})
+    # The defaults the run's ledger was seeded from (money-year 01).
+    library = _library_for_or_500(ledger)
     try:
         # The config the fork was solved with (the run's export series).
         compiled = packs.option_commercial(study.intake, ledger, library, network.snapshots,

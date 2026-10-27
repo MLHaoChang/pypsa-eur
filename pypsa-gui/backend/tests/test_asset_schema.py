@@ -105,7 +105,7 @@ def test_duration_and_rate_both_move_the_derived_cost():
 def test_a_priced_part_without_a_lifetime_is_refused():
     from services.asset_schema.derive import derive_composite
 
-    with pytest.raises(ValueError, match="lifetime"):
+    with pytest.raises(ValueError, match="^Storage energy part is priced but has no lifetime"):
         derive_composite("StorageUnit", {**PARTS, "inv_energy_lifetime": None},
                          max_hours=HOURS, discount_rate=RATE)
 

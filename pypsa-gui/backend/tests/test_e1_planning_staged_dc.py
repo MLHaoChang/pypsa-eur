@@ -191,7 +191,9 @@ def test_the_held_tariff_is_an_assumed_warning_in_the_flow(client, tmp_projects_
 def test_the_ledger_says_the_pack_money_year_is_not_re_dated():
     meta = T.template_meta(TID, _plan(UNEVEN))
     row = next(r for r in meta["ledger"] if r["item"] == "money year")
-    assert "2020" in row["value"] and "does not re-date" in row["note"]
+    from services.library.defaults_pack.loader import load_defaults_pack
+    pack_year = load_defaults_pack(T.TEMPLATE_PACK_VERSION).finance.currency_year
+    assert f"({pack_year} EUR)" in row["value"] and "does not re-date" in row["note"]
 
 
 # ── 5. growth values the example has no figure for ─────────────────────────
