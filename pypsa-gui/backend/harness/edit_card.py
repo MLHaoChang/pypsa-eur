@@ -53,6 +53,8 @@ SETTINGS_EDITS = frozenset({
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
     "apply_commercial_document_values",
+    # live-voice 08 B3: the weather source/year every profile generate takes
+    "set_weather_choice",
     # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
     "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
     "update_project_settings",
@@ -89,6 +91,12 @@ NOT_EDITS = {
     "campus_run_island_study": "a computation on copies of the saved network",
     # LV08 B2b
     "create_evidence_report": "a new report record from the current evidence",
+    # live-voice 08 B3
+    "solve_queue_clear_finished": "drops finished jobs from the queue listing",
+    "solve_queue_dismiss": "hides a finished job from your own queue listing",
+    "pending_profile_from_current": "a pending profile; apply_generated_profile is the edit",
+    "upload_load_profiles_file": "pending profiles; apply_generated_profiles is the edit",
+    "upload_series_file": "a pending profile; apply_generated_profile is the edit",
 }
 
 

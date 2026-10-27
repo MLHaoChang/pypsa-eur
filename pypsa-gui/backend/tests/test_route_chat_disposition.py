@@ -152,7 +152,6 @@ UI_INTERNAL: dict[str, dict] = {
         "reason": 'Solver log feeds for the log panel; the assistant follows jobs with wait_for_job.',
         "routes": frozenset({
             ('GET', '/api/simulation/log_stream'),
-            ('GET', '/api/simulation/queue/{job_id}/log_history'),
             ('GET', '/api/simulation/queue/{job_id}/log_stream'),
         }),
     },
@@ -170,12 +169,10 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/projects/{name}/uploads'),
         }),
     },
-    'series_file_upload': {
-        "reason": 'Time-series file pickers; chat writes series with upload_timeseries and upload_*_profile tools.',
+    'series_json_put': {
+        "reason": 'JSON series write no screen calls now; chat writes series with upload_timeseries, which posts the file upload.',
         "routes": frozenset({
-            ('POST', '/api/network/timeseries/upload'),
-            ('POST', '/api/projects/{name}/profiles/loads/upload'),
-            ('POST', '/api/projects/{name}/profiles/series/upload'),
+            ('PUT', '/api/network/timeseries/{component}/{attribute}'),
         }),
     },
 }
@@ -193,8 +190,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/network/asset_costs'): 'Expert model editor',
     ('GET', '/api/network/asset_schema/{component}'): 'Expert model editor',
     ('GET', '/api/network/catalog/{component}'): 'Expert model editor',
-    ('GET', '/api/projects/{name}/profiles/current'): 'Time series panel',
-    ('GET', '/api/projects/{name}/profiles/weather'): 'Time series panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/ledger.csv'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/options/{option_id}/case.xlsx'): 'Decision studies panel',
@@ -213,15 +208,9 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('POST', '/api/network/lines/rescale_impedances'): 'Expert model editor',
     ('POST', '/api/network/reset'): 'Expert model editor',
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
-    ('POST', '/api/projects/{name}/profiles/from-current'): 'Time series panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
-    ('POST', '/api/simulation/queue/cancel_queued'): 'Solve queue panel',
-    ('POST', '/api/simulation/queue/{job_id}/dismiss'): 'Solve queue panel',
-    ('POST', '/api/simulation/queue/{job_id}/requeue'): 'Solve queue panel',
     ('PUT', '/api/campus-electrical/{name}/campus'): 'Campus electrical panel',
     ('PUT', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
-    ('PUT', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('PUT', '/api/projects/{name}/worksheet'): 'Projects page / Workspace panel',
 }
 _KNOWN_GAPS_CEILING = 70
 
@@ -300,7 +289,7 @@ def test_served_by_names_real_tools():
 
 
 def test_ui_internal_stays_small():
-    assert len(UI_INTERNAL) <= 11 and 'series_file_upload' in UI_INTERNAL
+    assert len(UI_INTERNAL) <= 11 and 'series_json_put' in UI_INTERNAL
     assert all(20 <= len(entry['reason']) <= 160 for entry in UI_INTERNAL.values())
 
 

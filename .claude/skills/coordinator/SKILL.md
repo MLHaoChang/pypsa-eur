@@ -140,7 +140,7 @@ The owner has three dashboards. Each keeps its data, and any state needed to reb
 |---|---|---|---|
 | Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | With each owner report that changes a PR or a session |
 | Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | After a merge that finishes an issue, and on every sweep |
-| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | Frozen (owner decision USAGE-FREEZE-1) |
+| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | On every sweep (owner decision USAGE-REVIVE-1) |
 
 Every refresh uploads a file (Artifact `publish`, `asset: true`, `url` set to that dashboard) and points the dataset at it: an `ArtifactData` update that sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result (after a rotation, a `get` returns it).
 
@@ -155,11 +155,12 @@ Each refresh is three calls, made at most once per owner report:
 
 **Token usage.** Tokens and API-equivalent cost per Berlin day, over every Claude Code session on the account (Cowork sessions are not listed).
 
-Frozen at 26 Oct 19:30 CET (owner decision USAGE-FREEZE-1): `list_sessions` no longer returns per-session usage totals. Skip this refresh until the totals come back; the steps below apply then.
-1. A Haiku subagent saves each `list_sessions` page (`mine: true`, `limit: 100`, following `after_id`) verbatim to `<scratchpad>/usage/page-N.json`. If a page comes back inline with no saved file, note its cursor in the log and continue; older sessions keep their snapshot totals.
-2. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
-3. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
-4. Upload the three files, then one `ArtifactData batch`: `datasets/daily`, `datasets/sessions`, and `state/usage` with the new `snapshots` url.
+`list_sessions` returns no usage totals, but `get_session <id>` does (`external_metadata.usage`: cache read/write, input and output tokens, `cost_usd`), so each session is read one at a time (owner decision USAGE-REVIVE-1, which replaced USAGE-FREEZE-1).
+1. A Haiku subagent pages `list_sessions` (`mine: true`, `limit: 25`, following `after_id`) for ids and `updated_at` only, and writes the ids of the sessions updated since the last run (`state/usage`'s last run time) into 3 files. Don't keep the `list_sessions` pages in `<scratchpad>/usage/`: they carry no usage field, and `usage.py` would zero those sessions' snapshots.
+2. Three Haiku subagents, one per file, call `get_session` per id and append one compact JSON line each to `<scratchpad>/usage/gs-N.jsonl`: `{id, title, created_at, updated_at, session_context.model, external_metadata.{last_served_model, usage}}`. Combine the lines into `<scratchpad>/usage/page-gs.json` as `{"data": [...]}`.
+3. Unless this session already ran it, restore the history: `ArtifactData get` of `state/usage`, download its `snapshots` asset (Artifact `read`, `path` set to the id) to `<scratchpad>/usage/snapshots.json`, and write `{"first_run": "<its first_run>"}` to `<scratchpad>/usage/meta.json`. Without this, the run starts the history again and credits each session's whole total to its last active day.
+4. `python3 -I scripts/coord/usage.py <scratchpad>/usage` writes `daily.json`, `sessions.json` and the new `snapshots.json`.
+5. Upload the three files, then one `ArtifactData batch`: `datasets/daily`, `datasets/sessions`, and `state/usage` with the new `snapshots` url.
 
 ## Tool hygiene
 

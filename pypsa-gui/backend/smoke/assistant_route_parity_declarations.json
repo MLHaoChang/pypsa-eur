@@ -502,6 +502,16 @@
    "reason": "live-stream"
   },
   {
+   "method": "POST",
+   "path": "/api/simulation/queue/pause",
+   "reason": "admin"
+  },
+  {
+   "method": "POST",
+   "path": "/api/simulation/queue/resume",
+   "reason": "admin"
+  },
+  {
    "method": "GET",
    "path": "/api/simulation/queue/{job_id}/log_stream",
    "reason": "live-stream"
@@ -704,41 +714,6 @@
    "family": "network-topology"
   },
   {
-   "method": "POST",
-   "path": "/api/network/timeseries/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/profiles/current",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/from-current",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/loads/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/profiles/series/upload",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/profiles/weather",
-   "family": "timeseries-horizon"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/profiles/weather",
-   "family": "timeseries-horizon"
-  },
-  {
    "method": "GET",
    "path": "/api/projects/{name}/sites",
    "family": "network-topology"
@@ -757,47 +732,6 @@
    "method": "POST",
    "path": "/api/projects/{name}/sites/{site_id}/context",
    "family": "network-topology"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/worksheet",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/cancel_queued",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/clear_finished",
-   "family": "solver-simulation",
-   "note": "solve_queue_clear_finished declares this route but is read-tier; the tier rule (V4) refuses a read tool on a mutating route"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/pause",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/resume",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/dismiss",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/queue/{job_id}/log_history",
-   "family": "solver-simulation"
-  },
-  {
-   "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/requeue",
-   "family": "solver-simulation"
   }
  ],
  "non_mutating_routes": [
