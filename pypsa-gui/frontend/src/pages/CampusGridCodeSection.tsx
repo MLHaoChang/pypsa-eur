@@ -73,7 +73,7 @@ function limitLabel(path: string): string {
     pf_min_leading: 'Minimum power factor, leading',
     thd_limit_pct: 'Total harmonic distortion at the PCC',
     harmonic_limits_pct: 'Harmonic voltage by order at the PCC',
-    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from characteristic orders',
+    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from characteristic and injected orders',
     pst_limit: 'Flicker severity Pst at the PCC',
     plt_limit: 'Flicker severity Plt at the PCC',
     unbalance_limit_pct: 'Voltage unbalance at the PCC',

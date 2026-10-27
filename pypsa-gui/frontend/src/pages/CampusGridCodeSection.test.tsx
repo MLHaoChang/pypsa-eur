@@ -285,7 +285,7 @@ describe('grid codes: extract', () => {
     // Non-breaking spaces: the unit wraps as a whole.
     expect(ub).toContain('2\u00A0%\u00A0of\u00A0positive\u00A0sequence')
     const rc = screen.getByTestId('limit-harmonic_resonance_clearance_h').textContent
-    expect(rc).toContain('Harmonic resonance clearance')
+    expect(rc).toContain('Harmonic resonance clearance from characteristic and injected orders')
     expect(rc).toContain('±0.5\u00A0h')
     const tdd = screen.getByTestId('limit-current_tdd_standard').textContent
     expect(tdd).toContain('Current distortion (TDD) limits at the PCC')
