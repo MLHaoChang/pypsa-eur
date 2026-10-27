@@ -1,0 +1,88 @@
+{
+ "journey": "LC-16 slice C",
+ "passed": true,
+ "report": {
+  "solver-expert": {
+   "card": "Solver settings\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nSolver settings\tsolve_strategy\tfull\trolling\tNo unit\nSolver settings\trolling_horizon\t—\t48\tsnapshots\n\nRolling dispatch solves the horizon in windows, so it does not prove the investment plan is optimal.",
+   "receipt": "Solver settings solve_strategy full → rolling; Solver settings rolling_horizon — → 48 snapshots. Read back from the project."
+  },
+  "economics-expert": {
+   "card": "Solver settings\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nSolver settings\tdiscount_rate\t7\t5\t%\nstored as 0.05\n\nSolver settings\tdefault_lifetime\t25\t30\tyr",
+   "receipt": "Solver settings discount_rate 7 → 5 % (stored as 0.05 ); Solver settings default_lifetime 25 → 30 yr. Read back from the project."
+  },
+  "name-expert": {
+   "card": "Network\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nNetwork\tname\toj-grid\tHarbour grid\tNo unit",
+   "receipt": "Network name oj-grid → Harbour grid. Read back from the project.\nUndo"
+  },
+  "weightings-expert": {
+   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\tyears.2030\t1\t10\tNo unit\nInvestment periods\tyears.2040\t1\t10\tNo unit\nInvestment periods\tobjective.2040\t1\t0.5\tNo unit",
+   "receipt": "Investment periods years.2030 1 → 10; Investment periods years.2040 1 → 10; Investment periods objective.2040 1 → 0.5. Read back from the project.\nUndo"
+  },
+  "bulk-expert": {
+   "card": "Connection & grid › Line 'L1', Line 'L2'\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nLine 'L1'\ts_nom\nShow in Properties\n\t300\t500\tMVA\nLine 'L2'\ts_nom\nShow in Properties\n\t300\t500\tMVA",
+   "receipt": "L1 s_nom 300 → 500 MVA; L2 s_nom 300 → 500 MVA. Read back from the project.\nUndo"
+  },
+  "solver-guided": {
+   "card": "Solver settings\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nSolver settings\tSolve strategy\tFull LP\tRolling horizon\tNo unit\nSolver settings\tHorizon\t—\t48\tsnapshots\n\nRolling dispatch solves the horizon in windows, so it does not prove the investment plan is optimal.",
+   "receipt": "Solver settings, Solve strategy Full LP → Rolling horizon; Solver settings, Horizon — → 48 snapshots. Read back from the project."
+  },
+  "economics-guided": {
+   "card": "Solver settings\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nSolver settings\tDiscount rate\t7\t5\t%\nstored as 0.05\n\nSolver settings\tDefault lifetime\t25\t30\tyr",
+   "receipt": "Solver settings, Discount rate 7 → 5 %; Solver settings, Default lifetime 25 → 30 yr. Read back from the project."
+  },
+  "name-guided": {
+   "card": "Network\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nNetwork\tNetwork name\toj-grid\tHarbour grid\tNo unit",
+   "receipt": "Network, Network name oj-grid → Harbour grid. Read back from the project.\nUndo"
+  },
+  "weightings-guided": {
+   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\t2030 Years\t1\t10\tNo unit\nInvestment periods\t2040 Years\t1\t10\tNo unit\nInvestment periods\t2040 Objective\t1\t0.5\tNo unit",
+   "receipt": "Investment periods, 2030 Years 1 → 10; Investment periods, 2040 Years 1 → 10; Investment periods, 2040 Objective 1 → 0.5. Read back from the project.\nUndo"
+  },
+  "bulk-guided": {
+   "card": "Connection & grid › Line 'L1', Line 'L2'\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nLine 'L1'\tCapacity\nShow in Properties\n\t300\t500\tMVA\nLine 'L2'\tCapacity\nShow in Properties\n\t300\t500\tMVA",
+   "receipt": "Line 'L1', Capacity 300 → 500 MVA; Line 'L2', Capacity 300 → 500 MVA. Read back from the project.\nUndo"
+  }
+ },
+ "screenshots": [
+  "lc16c-solver-expert-before.png",
+  "lc16c-solver-expert-before-close.png",
+  "lc16c-solver-expert-after.png",
+  "lc16c-solver-expert-after-close.png",
+  "lc16c-economics-expert-before.png",
+  "lc16c-economics-expert-before-close.png",
+  "lc16c-economics-expert-after.png",
+  "lc16c-economics-expert-after-close.png",
+  "lc16c-name-expert-before.png",
+  "lc16c-name-expert-before-close.png",
+  "lc16c-name-expert-after.png",
+  "lc16c-name-expert-after-close.png",
+  "lc16c-weightings-expert-before.png",
+  "lc16c-weightings-expert-before-close.png",
+  "lc16c-weightings-expert-after.png",
+  "lc16c-weightings-expert-after-close.png",
+  "lc16c-bulk-expert-before.png",
+  "lc16c-bulk-expert-before-close.png",
+  "lc16c-bulk-expert-after.png",
+  "lc16c-bulk-expert-after-close.png",
+  "lc16c-solver-guided-before.png",
+  "lc16c-solver-guided-before-close.png",
+  "lc16c-solver-guided-after.png",
+  "lc16c-solver-guided-after-close.png",
+  "lc16c-economics-guided-before.png",
+  "lc16c-economics-guided-before-close.png",
+  "lc16c-economics-guided-after.png",
+  "lc16c-economics-guided-after-close.png",
+  "lc16c-name-guided-before.png",
+  "lc16c-name-guided-before-close.png",
+  "lc16c-name-guided-after.png",
+  "lc16c-name-guided-after-close.png",
+  "lc16c-weightings-guided-before.png",
+  "lc16c-weightings-guided-before-close.png",
+  "lc16c-weightings-guided-after.png",
+  "lc16c-weightings-guided-after-close.png",
+  "lc16c-bulk-guided-before.png",
+  "lc16c-bulk-guided-before-close.png",
+  "lc16c-bulk-guided-after.png",
+  "lc16c-bulk-guided-after-close.png"
+ ]
+}
