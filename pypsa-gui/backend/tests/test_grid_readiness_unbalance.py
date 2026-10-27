@@ -45,6 +45,7 @@ def test_u2_is_the_unbalanced_load_over_s_sc2_with_the_c_factor(tmp_path):
     expected = 100.0 * 0.5 * 20.0 / (1400.0 / 1.1)
     assert row["project_value"] == pytest.approx(expected, abs=1e-4)
     assert row["limit"] == 1.0 and row["verdict"] == "pass"
+    assert row["unit"] == "% of positive sequence"
     assert "screening" in row["note"] and "Z2 = Z1" in row["note"]
     assert R.disposition(row) == ("checked", "pass")
     assert row["unbalance"]["margin_pct"] == pytest.approx(1.0 - expected, rel=1e-9)
