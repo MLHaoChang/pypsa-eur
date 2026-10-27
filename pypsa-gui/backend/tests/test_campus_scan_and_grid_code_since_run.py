@@ -64,6 +64,16 @@ def test_an_extracted_clearance_note_says_it_is_not_yet_confirmed():
         "The clearance is extracted and not yet confirmed on the grid-code page")
 
 
+def test_the_engines_clearance_note_is_the_one_the_service_rewrites():
+    """``_scan_note`` matches gridspine's wording exactly; if the engine changes it, this fails."""
+    import inspect
+
+    from gridspine.drivers import campus_study
+
+    source = inspect.getsource(campus_study)
+    assert 'f"the resonance clearance is {cited[0][\'source\']}, not the grid code\'s"' in source
+
+
 def test_without_a_clearance_in_the_code_the_scan_takes_the_assumed_default(hub):  # noqa: F811
     _publish(hub)
     _run(hub)
