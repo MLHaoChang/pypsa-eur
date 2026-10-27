@@ -872,11 +872,112 @@ def test_angle_limit_pass_and_fail_across_a_branch_and_a_bus_pair():
     res, report = _screen(net, cset, angle_limit=AngleLimit(worst - 1e-6, "assumed",
                                                                 pairs=(AC, ("BUS_B", "BUS_D2"))))
     assert (res["angle_verdict"] == "fail").sum() >= 1
-    assert report["angle_limit"] == {"deg": worst - 1e-6, "basis": "assumed", "reference": ""}
+    assert report["angle_limit"] == {"deg": worst - 1e-6, "basis": "assumed", "reference": "", "from": "argument"}
     with pytest.raises(ContractError, match="not a branch on the net"):
         _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed", pairs=("BUS_X-BUS_Y-1",)))
     with pytest.raises(ContractError, match="not on the net"):
         _screen(net, cset, angle_limit=AngleLimit(30.0, "assumed", pairs=(("BUS_A", "BUS_X"),)))
+
+
+def _angle_profile(value, source="code", **cite):
+    """A validated profile with ``angle_limit_deg`` (placeholder clause, SAGC-1)."""
+    p = _profile((0.0, 1000.0, 0.9, 1.1))
+    p["angle_limit_deg"] = {"value": value, "clause": "Clause X.1", "source": source, **cite}
+    if "page" in cite:
+        p["document"] = {"sha256": "0" * 64, "filename": "placeholder.pdf", "title": "placeholder"}
+    return validate_profile("test_angle", p)
+
+
+def _worst_angle(net, cset):
+    res, _ = _screen(net, cset, angle_limit=AngleLimit(180.0, "assumed"))
+    return float(res.loc[res["stage1_verdict"] != "not_solved", "angle_deg"].max())
+
+
+def test_a_profile_angle_limit_fails_a_row_and_is_reported_as_sagc():
+    net = _net()
+    cset = _set(net)
+    worst = _worst_angle(net, cset)
+    res, report = _screen(net, cset, profile=_angle_profile(worst - 1e-6))
+    assert (res["angle_verdict"] == "fail").sum() >= 1
+    assert report["angle_limit"] == {"deg": worst - 1e-6, "basis": "sagc",
+                                     "reference": "test_angle: Clause X.1", "from": "profile test_angle"}
+    assert not res["note"].str.contains("unconfirmed").any()
+
+
+def test_an_explicit_angle_limit_overrides_the_profile():
+    net = _net()
+    cset = _set(net)
+    worst = _worst_angle(net, cset)
+    res, report = _screen(net, cset, profile=_angle_profile(worst - 1e-6),
+                          angle_limit=AngleLimit(worst + 1.0, "assumed"))
+    solved = res[res["stage1_verdict"] != "not_solved"]
+    assert (solved["angle_verdict"] == "pass").all()
+    assert report["angle_limit"] == {"deg": worst + 1.0, "basis": "assumed", "reference": "", "from": "argument"}
+
+
+def test_a_profile_without_the_key_still_gives_unknown():
+    net = _net()
+    res, report = _screen(net, _set(net), profile=_profile((0.0, 1000.0, 0.9, 1.1)))
+    solved = res["stage1_verdict"] != "not_solved"
+    assert (res.loc[solved, "angle_verdict"] == "unknown").all()
+    assert report["angle_limit"] == "unset"
+
+
+def test_an_extracted_angle_limit_is_assumed_and_named_unconfirmed_on_pass_and_fail_rows():
+    net = _net()
+    cset = _set(net)
+    for value, verdict in ((89.9, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
+        res, report = _screen(net, cset, profile=_angle_profile(value, "extracted", page=12, quote="placeholder"))
+        solved = res[res["stage1_verdict"] != "not_solved"]
+        judged = solved[solved["angle_verdict"] == verdict]
+        assert len(judged)
+        assert judged["note"].str.contains(
+            "angle limit extracted, unconfirmed (test_angle: Clause X.1, p. 12)", regex=False).all()
+        assert report["angle_limit"]["basis"] == "assumed"
+        assert report["angle_limit"]["reference"] == "test_angle: Clause X.1, p. 12, extracted, unconfirmed"
+        assert not res.loc[res["stage1_verdict"] == "not_solved", "note"].str.contains("unconfirmed").any()
+
+
+def test_an_assumed_angle_limit_stays_assumed():
+    net = _net()
+    _, report = _screen(net, _set(net, ("branch",)), profile=_angle_profile(30.0, "assumed"))
+    assert report["angle_limit"]["basis"] == "assumed"
+    assert report["angle_limit"]["reference"] == "test_angle: Clause X.1"
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), 0.0, -5.0, True, "30"])
+def test_a_bad_profile_angle_limit_is_refused(value):
+    with pytest.raises(ContractError, match="angle_limit_deg value must be a positive number"):
+        _angle_profile(value)
+
+
+@pytest.mark.parametrize("value", [90.0, 120.0, 360.0])
+def test_a_profile_angle_limit_at_or_past_90_degrees_is_refused(value):
+    with pytest.raises(ContractError, match="angle_limit_deg value must be an angle below 90 degrees"):
+        _angle_profile(value)
+
+
+@pytest.mark.parametrize("value", [0.5, 30.0, 89.9])
+def test_a_profile_angle_limit_below_90_degrees_is_kept(value):
+    assert _angle_profile(value)["angle_limit_deg"]["value"] == value
+
+
+def test_a_profile_angle_limit_needs_a_clause_and_an_extracted_one_its_page():
+    p = _profile((0.0, 1000.0, 0.9, 1.1))
+    p["angle_limit_deg"] = {"value": 30.0, "source": "code"}
+    with pytest.raises(ContractError, match="angle_limit_deg has no clause"):
+        validate_profile("test_angle", p)
+    with pytest.raises(ContractError, match="angle_limit_deg is extracted but has no page"):
+        _angle_profile(30.0, "extracted", quote="placeholder")
+
+
+def test_confirming_an_extracted_angle_limit_makes_it_sagc():
+    from gridspine.templates.grid_codes import confirm_limit
+    p = confirm_limit(_angle_profile(30.0, "extracted", page=12, quote="placeholder"), "angle_limit_deg")
+    net = _net()
+    _, report = _screen(net, _set(net, ("branch",)), profile=p)
+    assert report["angle_limit"]["basis"] == "sagc"
+    assert report["angle_limit"]["reference"] == "test_angle: Clause X.1"
 
 
 def test_angle_pair_on_a_lost_bus_is_skipped_and_named():

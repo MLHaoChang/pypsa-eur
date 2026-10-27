@@ -18,6 +18,7 @@ The service refuses:
 * a library that does not load (422, naming the entry and field) or is over
   the size cap (413).
 """
+import json
 import uuid
 
 import numpy as np
@@ -197,6 +198,20 @@ def test_bad_settings_are_refused(hub, settings, match):
     with pytest.raises(HTTPException) as exc:
         ce.run(hub, settings)
     assert exc.value.status_code == 422 and match in exc.value.detail
+
+
+def test_a_stored_profile_with_an_angle_limit_of_90_degrees_or_more_refuses_the_run_with_422(hub):
+    """A published profile written before the 90 degree bound: a clean 422 naming the key, never a 500."""
+    from gridspine.templates.grid_codes import load_grid_code
+
+    p = load_grid_code("generic_assumed", raw=True)
+    p["angle_limit_deg"] = {"value": 120.0, "clause": "Clause X.1", "source": "code"}
+    ce.grid_codes_dir(hub).mkdir(parents=True, exist_ok=True)
+    (ce.grid_codes_dir(hub) / "wide_angle.yaml").write_text(json.dumps(p))
+    ce.draft(hub)
+    with pytest.raises(HTTPException) as exc:
+        ce.run(hub, {"k": 1, "profile": "wide_angle"})
+    assert exc.value.status_code == 422 and "angle_limit_deg" in exc.value.detail
 
 
 def test_the_defaults_match_the_engines(hub):

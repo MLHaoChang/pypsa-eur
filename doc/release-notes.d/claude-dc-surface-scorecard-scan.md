@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The campus study runs a harmonic resonance scan after sizing and shows it with the results. The grid-readiness scorecard gains a current-distortion (TDD) row, judged on the standard the grid code names. The scorecard and the campus results now say when the grid code has changed since the last campus study run, or when that run used another grid code.

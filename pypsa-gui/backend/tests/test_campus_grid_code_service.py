@@ -1179,6 +1179,68 @@ def test_a_quoted_ibr_reactive_capability_is_quote_checked_like_the_other_limits
     assert out["review"]["limits"]["q_range_ibr"] == {"quote_found": False, "found_on_page": None}
 
 
+_QUOTE_P2 = "The reactive range shall not exceed 48 percent of the maximum import capacity."
+
+
+@pytest.mark.parametrize("key,limit", [
+    ("pst_limit", {"value": 0.8}),
+    ("plt_limit", {"value": 0.6}),
+    ("current_tdd_standard", {"value": "ieee519-2014"}),
+    ("angle_limit_deg", {"value": 30.0}),
+])
+def test_an_extracted_pq_limit_is_unconfirmed_and_quote_checked(hub, fake_api, key, limit):
+    """The flicker limits and the TDD standard are limits like the others: an
+    extracted one is unconfirmed, and its quote is looked up in the document."""
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited[key] = {**limit, "clause": "Test code §1", "page": 2, "source": "extracted", "quote": _QUOTE_P2}
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert key in out["unconfirmed"]
+    assert out["review"]["limits"][key] == {"quote_found": True, "found_on_page": 2}
+    edited[key]["quote"] = "a sentence the document never says"
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert out["review"]["limits"][key] == {"quote_found": False, "found_on_page": None}
+
+
+def test_an_angle_limit_at_or_past_90_degrees_is_refused_at_save(hub, fake_api):
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited["angle_limit_deg"] = {"value": 120.0, "clause": "Test code §1", "source": "code"}
+    with pytest.raises(HTTPException) as exc:
+        gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert _status(exc) == 422 and "angle_limit_deg" in str(exc.value.detail)
+    edited["angle_limit_deg"]["value"] = 45.0
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert yaml.safe_load(out["yaml"])["angle_limit_deg"]["value"] == 45.0
+
+
+def test_confirming_the_tdd_standard_makes_it_code(hub, fake_api):
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited["current_tdd_standard"] = {"value": "ieee519-2014", "clause": "Test code §1", "page": 2,
+                                      "source": "extracted", "quote": _QUOTE_P2}
+    gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    out = gc.confirm(hub, "tso", "current_tdd_standard")
+    assert out["profile"]["current_tdd_standard"]["source"] == "code"
+    assert "current_tdd_standard" not in out["unconfirmed"]
+
+
+def test_a_tdd_standard_outside_the_known_ones_is_refused_at_save_and_at_publish(hub, fake_api):
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited["current_tdd_standard"] = {"value": "ieee519-1992", "clause": "Test code §1", "source": "code"}
+    text = yaml.safe_dump(edited, sort_keys=False)
+    with pytest.raises(HTTPException) as exc:
+        gc.save_draft(hub, "tso", text)
+    assert _status(exc) == 422 and "current_tdd_standard" in str(exc.value.detail)
+    # A draft file written past the save route is still refused when it is published.
+    (ce.campus_dir(hub) / ce.GRID_CODES_SUBDIR / "drafts" / "tso.yaml").write_text(text)
+    with pytest.raises(HTTPException) as exc:
+        gc.publish(hub, "tso", allow_unconfirmed=True)
+    assert _status(exc) == 422 and "current_tdd_standard" in str(exc.value.detail)
+    assert not (_codes(hub) / "tso.yaml").exists()
+
+
 def test_the_page_range_hint_uses_spaces_and_selects_the_same_pages():
     assert gc.PAGE_RANGES_EXAMPLE == "1-40, 120-180"
     assert gc.parse_page_ranges(gc.PAGE_RANGES_EXAMPLE, 292) == list(range(1, 41)) + list(range(120, 181))

@@ -73,13 +73,26 @@ export function useGridReadiness(enabled = true) {
 
 export function fmt(v: GridReadinessRow['limit'] | GridReadinessRow['project_value'], unit: string | null): string {
   if (v == null) return 'not known'
-  if (typeof v === 'number') return `${Number(v.toPrecision(4))}${unit ? ` ${unit}` : ''}`
+  if (typeof v === 'number') return `${Number(v.toPrecision(4))}${unit ? `\u00A0${unit}` : ''}`
   if (typeof v === 'string') return v
   const lole = v as { lole_h_per_year?: number; horizon_years?: number }
   if (typeof lole.lole_h_per_year === 'number') {
-    return `${Number(lole.lole_h_per_year.toPrecision(3))} h/yr over ${lole.horizon_years ?? '?'} year(s)`
+    return `${Number(lole.lole_h_per_year.toPrecision(3))}\u00A0h/yr over ${lole.horizon_years ?? '?'}\u00A0year(s)`
   }
   return JSON.stringify(v)
+}
+
+/** The run's grid code was published again with other content (SCORECARD-STALE-1); the scorecard header and
+ *  the campus results banner say it in the same words. */
+export const GRID_CODE_CHANGED = 'Grid code changed since the last campus study run. Rerun the study to update.'
+
+/** The notice under "Screening against …" when the profile is not the code the last campus run was held to. */
+function sinceRunText(since: GridReadiness['profile']['since_run']): string | null {
+  if (since?.status === 'changed') return GRID_CODE_CHANGED
+  if (since?.status === 'other_profile') {
+    return `The last campus study run used ${since.run_profile_title ?? since.run_profile}. Rerun the study with this grid code to update.`
+  }
+  return null
 }
 
 export function VerdictChip({ verdict }: { verdict: GridReadinessVerdict }) {
@@ -191,13 +204,13 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
           <div className="font-semibold text-text">{row.requirement}</div>
           {missing && <div data-testid="gr-missing" className="text-muted">{row.note}</div>}
           <div className="text-muted">
-            Limit: <span className="text-text">{fmt(row.limit, row.unit)}</span>
+            Limit:{'\u00A0'}<span className="text-text">{fmt(row.limit, row.unit)}</span>
             {row.assumed && (
               <span data-testid="gr-assumed"
                 className="ml-1 rounded border border-warn/30 bg-warn/5 px-1 text-[10px] text-warn">assumed</span>
             )}
             <span className="mx-1.5">·</span>
-            Project: <span className="text-text">{fmt(row.project_value, row.unit)}</span>
+            Project:{'\u00A0'}<span className="text-text">{fmt(row.project_value, row.unit)}</span>
           </div>
           <AfterLine row={row} />
         </div>
@@ -304,6 +317,9 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
           <div data-testid="gr-summary" className="text-muted">{summaryText(data.summary, mode)}</div>
         )}
         <div className="text-[11px] text-muted">Advisory: nothing here blocks Run.</div>
+        {sinceRunText(data.profile.since_run) && (
+          <div data-testid="gr-since-run" className="text-[11px] text-warn">{sinceRunText(data.profile.since_run)}</div>
+        )}
         {data.profile.error && (
           <div data-testid="gr-profile-error" className="text-[11px] text-warn">{data.profile.error}</div>
         )}

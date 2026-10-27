@@ -277,6 +277,29 @@ component (`frontend/src/components/EditCard.tsx`).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Multi-asset routing (LC-16 slice C, `harness/edit_routing.py`).** Before
+  dispatching a model response, the loop computes `session.turn_redirects`:
+  `bulk_update_components` on two or more names, and `update_component` when
+  the response holds another such single edit or one was already applied this
+  turn, are refused with `use_project_preview` when the preview takes every
+  field (`assistant_tools.preview_kind`, the preview's own test, per class).
+  The refusal is model-only: no frame, one `is_error` tool_result per call,
+  its message carrying the names-form `changes` for `preview_project_changes`
+  (calls of that response only, never an applied edit). A text field, a flag
+  the preview cannot take or a rename keeps its own card. An applied single
+  edit counts until an execution-tier success (a run, an applied preview);
+  assurance turns and external tools are not routed. HTTP routes are unchanged.
+- **Settings cards (LC-16 slice C, OJ-44).** `update_solver_config`,
+  `update_meta` and `set_investment_period_weightings` run their own handler on
+  an isolated copy (`edit_card._sandbox`), so the card refuses what the route
+  refuses (`invalid_edit_value` for a schema error, `edit_refused` for a route
+  refusal). Solver rows carry the Settings panel's `label`, `unit` and, for
+  enumerated values, `words` (Guided shows them); shares carry a `%` `display`;
+  `old_applies: false` marks an old value the old settings did not use (the
+  card shows "—"); a dict setting is one row per key (`load_scalers.<key>`).
+  A move to rolling dispatch adds an asset-less `note`, which the card shows
+  under its table. `finance` and `commercial` refuse with `settings_own_route`.
+  Weightings are one row per period and column (`years.<period>`), by period.
 - **Campus island: `campus_apply_gfm_settings` (W10 R3).** The grid-forming
   recommendation's apply, one card for the Control › Grid-forming tab and the
   copilot. The adapter names its section (`Adapter.section_id="assets"`, rows

@@ -19,7 +19,7 @@ REFUSALS = frozenset({"network_scope_required", "no_saved_project", "unknown_gri
                       "unsupported_snapshot_scope", "limits_changed_during_read"})
 # The warn band is the in-hour uplift; the CI rule; the band of concern (none stored); the per-order limits;
 # Pst and Plt, both judged.
-NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion", "flicker")
+NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion", "flicker", "current_distortion")
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
 CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",

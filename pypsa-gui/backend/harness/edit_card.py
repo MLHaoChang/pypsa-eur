@@ -48,11 +48,20 @@ SETTINGS_EDITS = frozenset({
     "update_solver_config", "set_site_connection", "attach_tariff", "import_urdb_tariff",
     "define_participants", "put_stress_scenarios", "record_asset_health", "set_study_parameter",
     "apply_generated_profile", "apply_generated_profiles", "apply_default_series",
-    "update_project_layout",
+    "update_project_layout", "set_project_sites",
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
     "apply_commercial_document_values",
+    # live-voice 08 B3: the weather source/year every profile generate takes
+    "set_weather_choice",
+    # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
+    "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
+    "update_project_settings",
+    # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
+    "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
+    # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
+    "import_map_geometry",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -75,10 +84,20 @@ NOT_EDITS = {
     "refresh_experiment": "an experiment record", "cancel_experiment": "an experiment record",
     "start_campaign": "a campaign record", "end_campaign": "a campaign record",
     "gridspine_create_study": "a new study record", "start_decision_study": "a new study record",
+    "abort_decision_study": "stops a running study; its inputs are unchanged",
     "gridspine_compute_capacity": "a computation on the saved network",
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
     "campus_run_island_study": "a computation on copies of the saved network",
+    # LV08 B2b
+    "create_evidence_report": "a new report record from the current evidence",
+    "fetch_site_context": "caches upstream map context for a site; no input changes",
+    # live-voice 08 B3
+    "solve_queue_clear_finished": "drops finished jobs from the queue listing",
+    "solve_queue_dismiss": "hides a finished job from your own queue listing",
+    "pending_profile_from_current": "a pending profile; apply_generated_profile is the edit",
+    "upload_load_profiles_file": "pending profiles; apply_generated_profiles is the edit",
+    "upload_series_file": "a pending profile; apply_generated_profile is the edit",
 }
 
 
@@ -160,6 +179,8 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         unit = f" {unit}" if unit else ""
         # The card's own words for an absent value (EditCard.tsx): never "None".
         old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        if row.get("old_applies") is False:
+            old = "\u2014"  # a setting that did not apply, as the card shows it
         new = "not set" if new is None else _number(new)
         stored = (f" (stored as {_number(row['new'])} {row['unit']})"
                   if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
@@ -496,9 +517,30 @@ def _component_attr(component_class: str) -> str:
         "Bus": "buses", "Transformer": "transformers", "GlobalConstraint": "global_constraints"}[component_class]
 
 
+def _sandbox(run: Callable[[], Any]):
+    """Run the native handler on an isolated copy of the project; the copy after it.
+    A route's refusal becomes the card's refusal, so the card refuses what the route does."""
+    from services import change_log_service, workflow_tools
+    from services.pypsa_service import PyPSAService
+
+    active = PyPSAService.get_active_context()
+    candidate = PyPSAService.build_context()
+    candidate.network = workflow_tools._network_copy(active.network)
+    candidate.user_ts = copy.deepcopy(active.user_ts)
+    candidate.solver_state["solver_config"] = copy.deepcopy(active.solver_state["solver_config"])
+    with workflow_tools._isolated(candidate), change_log_service.suppressed():
+        try:
+            run()
+        except HTTPException as exc:
+            if isinstance(exc.detail, dict) and exc.detail.get("error_kind"):
+                raise  # a native refusal keeps its own kind (study_in_flight, …)
+            detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)
+            _refuse("edit_refused", f"The edit would be refused: {detail}", exc.status_code)
+    return candidate
+
+
 def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Callable[[], Any]) -> list[dict]:
     """Run the native handler on an isolated copy and diff each target row."""
-    from services import change_log_service, workflow_tools
     from services.pypsa_service import PyPSAService
 
     fields = _fields(component_class)
@@ -514,18 +556,7 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
         _refuse("component_not_found", f"{component_class} {missing[0]!r} not found.", 404)
     for name, attrs in targets:
         _check_row_rules(component_class, before, name, attrs)
-    candidate = PyPSAService.build_context()
-    candidate.network = workflow_tools._network_copy(active.network)
-    candidate.user_ts = copy.deepcopy(active.user_ts)
-    candidate.solver_state["solver_config"] = copy.deepcopy(active.solver_state["solver_config"])
-    with workflow_tools._isolated(candidate), change_log_service.suppressed():
-        try:
-            run()
-        except HTTPException as exc:
-            if isinstance(exc.detail, dict) and exc.detail.get("error_kind"):
-                raise  # a native refusal keeps its own kind (study_in_flight, …)
-            detail = exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str)
-            _refuse("edit_refused", f"The edit would be refused: {detail}", exc.status_code)
+    candidate = _sandbox(run)
     after = getattr(candidate.network, attr)
     rows = []
     for name, attrs in targets:
@@ -706,6 +737,25 @@ register("update_component", Adapter("parameter_edit", _update_component_preview
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
 
 
+def _rescale_impedances_preview(args: dict) -> list[dict]:
+    """Each named line's old and new r, x and b (LV08 B1, GK B P3)."""
+    from services import chat_tools
+
+    lines = args.get("lines")
+    if not isinstance(lines, list) or not lines or not all(isinstance(e, dict) for e in lines):
+        _refuse("empty_edit", "Name at least one line with its r, x and b.")
+    missing = [e.get("name") for e in lines if any(k not in e for k in ("name", "r", "x", "b"))]
+    if missing:
+        _refuse("invalid_edit_value", f"Line {missing[0]!r} needs name, r, x and b; send the values "
+                "derive_lengths_from_geometry returned.")
+    targets = [(e["name"], {k: e[k] for k in ("r", "x", "b")}) for e in lines]
+    return _sandbox_rows("Line", targets, lambda: chat_tools.rescale_line_impedances(lines))
+
+
+register("rescale_line_impedances", Adapter("parameter_edit", _rescale_impedances_preview,
+                                            _component_readback))
+
+
 # ── Several assets in one reviewed preview: apply_project_changes (LC-16) ──
 #
 # The rows are the stored preview's, rechecked against the live inputs by
@@ -871,7 +921,37 @@ register("apply_commercial_document_values", Adapter("settings_edit", _commercia
                                                      _commercial_document_values_readback))
 
 
-# ── Solver settings: update_solver_config ──────────────────────────────────
+# ── Solver settings and the economics basis: update_solver_config ─────────
+# The handler runs on an isolated copy, so the card refuses what PUT
+# /simulation/solver_config refuses. Labels, units and value words are the
+# Settings panel's (Guided shows `label` and `words`, Expert the field id and
+# value); a field not listed keeps its id. Rates are stored as shares and shown
+# in % (`display`). OJ-44, LC-16 slice C.
+
+_SOLVER_WORDS: dict[str, tuple[str, str, dict | None]] = {
+    "solve_strategy": ("Solve strategy", "", {
+        "full": "Full LP", "rolling": "Rolling horizon", "myopic": "Myopic foresight"}),
+    "rolling_horizon": ("Horizon", "snapshots", None),
+    "rolling_overlap": ("Overlap", "snapshots", None),
+    "discount_rate": ("Discount rate", "", None),
+    "inflation_rate": ("Inflation rate", "", None),
+    "default_lifetime": ("Default lifetime", "yr", None),
+    "auto_discount_periods": ("Discount periods automatically", "", None),
+    "voll": ("Price of undelivered energy", "EUR/MWh", None),
+    "target_lole_h": ("Allowed shortfall", "h/yr", None),
+    "ens_cap_permyriad": ("Energy strictness", "\u2031 of demand", None),
+    "mc_draws": ("Simulation runs per check", "", None),
+    "site_archetype": ("Site type", "", {
+        "strong_grid": "Strong \u2014 import whenever needed", "weak_flexible": "Weak or limited",
+        "off_grid": "None \u2014 the site runs as an island"}),
+}
+_SHARES = frozenset({"discount_rate", "inflation_rate"})
+_ROLLING = frozenset({"rolling_horizon", "rolling_overlap"})
+# Settings with their own route (validation and If-Match): never through this card. The
+# commercial config stays: chat_tools steers the model here for its poc_link and contracts.
+_OWN_ROUTE = {"finance": "PUT /api/simulation/finance"}
+ROLLING_NOTE = ("Rolling dispatch solves the horizon in windows, so it does not prove the investment "
+                "plan is optimal.")
 
 
 def _solver_config() -> dict:
@@ -883,28 +963,157 @@ def _solver_config() -> dict:
     return asdict(config) if not isinstance(config, dict) else dict(config)
 
 
+def _setting(value):
+    """A setting's cell: a scalar as stored, a nested list or dict as compact JSON."""
+    if isinstance(value, (dict, list)):
+        text = json.dumps(value, default=str, separators=(",", ":"))
+        return text if len(text) <= 200 else text[:200] + "\u2026"
+    return _scalar(value)
+
+
+def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
+    base = key.split(".")[0]
+    label, unit, words = _SOLVER_WORDS.get(base, (key, "", None))
+    if base != key:
+        label = f"{label} {key.split('.', 1)[1]}"
+    row = {"component_class": "Settings", "name": "Solver settings", "field": key, "label": label,
+           "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
+    if not applies:
+        row["old_applies"] = False
+    if words:
+        row["words"] = {"old": words.get(old, old), "new": words.get(new, new)}
+    if base in _SHARES and _numeric(new):
+        row["display"] = {"old": old * 100 if _numeric(old) else None, "new": new * 100, "unit": "%"}
+    return row
+
+
 def _solver_preview(args: dict) -> list[dict]:
+    from pydantic import ValidationError
+
+    from services import chat_tools
+
     partial = args.get("partial")
     if not isinstance(partial, dict) or not partial:
         _refuse("empty_edit", "Name at least one setting to change.")
+    for key, owner in _OWN_ROUTE.items():
+        if key in partial:
+            _refuse("settings_own_route", f"The {key} settings change through {owner}, not the solver settings.")
     current = _solver_config()
-    rows = []
     for key, value in partial.items():
         if key not in current:
             _refuse("unknown_field", f"The solver settings have no field {key!r}.")
         if isinstance(value, float) and not math.isfinite(value):
             _refuse("invalid_edit_value", f"Setting {key!r} takes a finite number.")
-        rows.append({"component_class": "Settings", "name": "Solver settings", "field": key, "label": key,
-                     "old": _scalar(current[key]), "new": value, "unit": "", "role": "typed"})
+    try:
+        after = _sandbox(lambda: chat_tools.update_solver_config(dict(partial))).solver_state["solver_config"]
+    except ValidationError as exc:
+        _refuse("invalid_edit_value", "The solver settings refuse this value: "
+                + "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors()[:3]))
+    from dataclasses import asdict
+
+    after = asdict(after) if not isinstance(after, dict) else dict(after)
+    rolling_before = current.get("solve_strategy") == "rolling"
+    rows = []
+    for key in partial:
+        old, new = current.get(key), after.get(key)
+        if isinstance(old, dict) or isinstance(new, dict):
+            old, new = old or {}, new or {}
+            subs = [k for k in dict.fromkeys([*old, *new]) if not _same(old.get(k), new.get(k))]
+            rows += [_solver_row(f"{key}.{k}", old.get(k), new.get(k)) for k in subs]
+            continue
+        rows.append(_solver_row(key, old, new, applies=key not in _ROLLING or rolling_before))
+    if after.get("solve_strategy") == "rolling" and not rolling_before:
+        rows.append(_note("", "", "solve_strategy", ROLLING_NOTE))
+    if not rows:
+        _refuse("empty_edit", "Name at least one setting to change.")
     return rows
 
 
 def _solver_readback(args: dict, rows: list[dict]) -> list[Any]:
     current = _solver_config()
-    return [current.get(row["field"]) for row in rows]
+    out = []
+    for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+            continue
+        key, _, sub = row["field"].partition(".")
+        value = current.get(key)
+        out.append(_setting((value or {}).get(sub) if sub else value))
+    return out
 
 
 register("update_solver_config", Adapter("settings_edit", _solver_preview, _solver_readback))
+
+
+# ── The network's name: update_meta ────────────────────────────────────────
+
+def _meta_preview(args: dict) -> list[dict]:
+    from routers.network import update_meta
+    from models.schemas import NetworkMeta
+    from services.pypsa_service import PyPSAService
+
+    name = args.get("name")
+    if not isinstance(name, str):
+        _refuse("empty_edit", "Name the new network name.")
+    after = _sandbox(lambda: update_meta(NetworkMeta(name=name))).network.name
+    return [{"component_class": "Settings", "name": "Network", "field": "name", "label": "Network name",
+             "old": PyPSAService.get_network().name, "new": after, "unit": "", "role": "typed"}]
+
+
+def _meta_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.pypsa_service import PyPSAService
+
+    return [PyPSAService.get_network().name]
+
+
+register("update_meta", Adapter("settings_edit", _meta_preview, _meta_readback))
+
+
+# ── Investment-period weightings: set_investment_period_weightings ─────────
+# The PATCH handler runs on the copy, so its refusals (unknown period, a bad
+# weight) are the card's; one row per period and column, sorted by period.
+
+_WEIGHT_LABELS = {"years": "Years", "objective": "Objective"}
+_WEIGHT_UNITS = {"years": "yr", "objective": ""}  # Years in "yr", like Default lifetime (UX)
+
+
+def _weightings_preview(args: dict) -> list[dict]:
+    from routers.network_time_axis import update_investment_period_weightings
+    from services.pypsa_service import PyPSAService
+
+    updates = args.get("updates")
+    if not isinstance(updates, dict) or not updates:
+        _refuse("empty_edit", "Name at least one period weighting to change.")
+    before = PyPSAService.get_network().investment_period_weightings
+    after = _sandbox(lambda: update_investment_period_weightings({"updates": updates})).network
+    after = after.investment_period_weightings
+    asked = {(int(p), col) for p, vals in updates.items() if isinstance(vals, dict)
+             for col in _WEIGHT_LABELS if col in vals}
+    rows = []
+    for period in sorted(after.index):
+        for col, label in _WEIGHT_LABELS.items():
+            old, new = _scalar(before.at[period, col]), _scalar(after.at[period, col])
+            if (int(period), col) in asked or not _same(old, new):
+                rows.append({"component_class": "Settings", "name": "Investment periods",
+                             "field": f"{col}.{period}", "label": f"{period} {label}",
+                             "old": old, "new": new, "unit": _WEIGHT_UNITS[col], "role": "typed"})
+    if not rows:
+        _refuse("empty_edit", "Name at least one period weighting to change (years or objective).")
+    return rows
+
+
+def _weightings_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services.pypsa_service import PyPSAService
+
+    df = PyPSAService.get_network().investment_period_weightings
+    out = []
+    for row in rows:
+        col, _, period = row["field"].partition(".")
+        out.append(_scalar(df.at[int(period), col]) if int(period) in df.index else None)
+    return out
+
+
+register("set_investment_period_weightings", Adapter("settings_edit", _weightings_preview, _weightings_readback))
 
 
 # ── Undo: the snapshot it restores, against the project now ────────────────

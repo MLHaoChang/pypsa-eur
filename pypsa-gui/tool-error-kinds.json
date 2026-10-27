@@ -127,6 +127,14 @@
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
     },
+    "finance_if_match_required": {
+      "surface": "inline",
+      "why": "set_finance_inputs was called without the digest get_finance_inputs returned, or with '*'. The model reads the finance inputs first and passes their digest as if_match."
+    },
+    "finance_clear_invalid": {
+      "surface": "inline",
+      "why": "set_finance_inputs got neither a finance object nor clear=true, or both. The model sends the whole finance object, or clear=true alone when the user asked to remove every finance input."
+    },
     "finance_inputs_invalid": {
       "surface": "inline",
       "why": "The stored finance inputs do not validate (the route's 422 lists the errors). The model tells the user which fields; they are corrected in the Investment tab."
@@ -298,6 +306,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "upload_project_mismatch": {
+      "surface": "inline",
+      "why": "A file-import tool reads the upload from the active project and was asked to write to another project; the model recovers in the same turn by naming the active project or asking the user to switch."
     },
     "no_chat_session": {
       "surface": "inline",
@@ -562,6 +574,10 @@
     "study_stage_invalid": {
       "surface": "inline",
       "why": "Decision study chat tool (U3): run_decision_study was asked for a stage other than options or tornado. The model's slip; it reads the message and asks again."
+    },
+    "study_view_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (LV08 B1): get_decision_study was asked for a view other than summary, ledger, option_case or report, or for option_case without option_id. The model's slip; it reads the message and asks again."
     },
     "time_column_parse_error": {
       "surface": "banner",
@@ -1546,6 +1562,58 @@
     "invalid_capability_query": {
       "surface": "inline",
       "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The capability query needs a short goal and a limit of 1–8; the model corrects it."
+    },
+    "cost_set_by_parts": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The capital cost is derived from its overnight parts; the message names the part to edit."
+    },
+    "derived_field": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The field is computed from others; the message names what sets it."
+    },
+    "edit_refused": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The native handler refused the edit on the isolated copy; the message carries the handler's reason."
+    },
+    "empty_edit": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The call named nothing to change; the model asks what to change."
+    },
+    "extendable_capacity": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. An extendable asset's capacity is the solver's; the message says to edit its bounds instead."
+    },
+    "nothing_to_undo": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. undo_last found no step to undo; the model says so."
+    },
+    "overnight_cost_refused_here": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. An overnight cost part goes through its own edit; the message names it."
+    },
+    "read_only_field": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The schema marks the field read-only; the message names it."
+    },
+    "settings_own_route": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. update_solver_config was asked to change finance or commercial settings, which have their own route and If-Match (LC-16 slice C); the message names that route."
+    },
+    "type_owned_field": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A typed line or transformer takes this field from its type; the message says to change the type."
+    },
+    "unknown_component_class": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The class is not one the card reads; the model picks a valid class."
+    },
+    "unknown_field": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The settings have no such field; the model reads the settings and retries."
+    },
+    "use_project_preview": {
+      "surface": "inline",
+      "why": "Model-only (LC-16 slice C, harness/edit_routing.py): a chat edit of several assets is refused toward preview_project_changes before any frame, so the client never receives it; listed so the contract holds every kind the backend authors. The message carries the preview's changes; the model retries through the one preview card."
     }
   }
 }

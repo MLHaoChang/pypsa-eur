@@ -70,6 +70,7 @@ import pandas as pd
 
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, apply_hour
+from gridspine.templates.grid_codes import q_band_at
 
 _SUPPLIERS = frozenset({"bess", "pv", "wind", "fuel_cell", "genset"})
 #: Units that offer reactive power at zero active power. A battery inverter
@@ -143,6 +144,26 @@ IBR_COLUMNS = ("unit", "kind", "p_n_mw", "s_mva", "required_mvar", "available_mv
                "detail", "clause", "source", "basis")
 
 
+def _s_mva(u) -> float:
+    """A unit's inverter S in MVA; NaN when it has none (None, should a rating ever be stored that way, is
+    no rating, as NaN is)."""
+    s = u["s_mva"]
+    return float(s) if s is not None and s == s else math.nan
+
+
+def _circle_q(s: float, p: float) -> float:
+    """The inverter circle: the Q a unit of apparent power ``s`` has left at active power ``p``
+    (0 past P = S; NaN for an unknown ``s``)."""
+    return math.sqrt(max(s ** 2 - p ** 2, 0.0))
+
+
+def _ibr_ratings(campus):
+    """``(uid, kind, P_n, S)`` of every IBR unit, S by ``_s_mva``."""
+    for uid, u in campus.units.iterrows():
+        if u["kind"] in IBR_KINDS:
+            yield uid, u["kind"], float(u["p_mw"]), _s_mva(u)
+
+
 def ibr_q_capability(campus, profile: dict):
     """IEEE 2800's reactive capability of the on-site IBR (``IBR_LABEL``):
     one row per BESS, PV or wind unit, then a plant ``TOTAL`` row whose
@@ -157,11 +178,8 @@ def ibr_q_capability(campus, profile: dict):
     frac = float(ibr["value"])
     oversize = math.sqrt(1.0 + frac ** 2)
     rows = []
-    for uid, u in campus.units.iterrows():
-        if u["kind"] not in IBR_KINDS:
-            continue
-        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] == u["s_mva"] else math.nan
-        base = {"unit": str(uid), "kind": u["kind"], "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
+    for uid, kind, p_n, s in _ibr_ratings(campus):
+        base = {"unit": str(uid), "kind": kind, "p_n_mw": p_n, "s_mva": s, "clause": ibr["clause"],
                 "source": ibr["source"]}
         if not (p_n > 0 and math.isfinite(s) and s > 0):
             rows.append({**base, "required_mvar": frac * p_n if p_n > 0 else math.nan, "available_mvar": math.nan,
@@ -169,7 +187,7 @@ def ibr_q_capability(campus, profile: dict):
                          "detail": f"{uid}: rating not given (P_n and the inverter S are needed)"})
             continue
         req = frac * p_n
-        avail = math.sqrt(max(s ** 2 - p_n ** 2, 0.0))
+        avail = _circle_q(s, p_n)
         short = max(req - avail, 0.0)
         if short <= 1e-9:
             detail = f"{uid} supplies {avail:.2f} Mvar of the {req:.2f} Mvar required at rated P"
@@ -215,6 +233,81 @@ def ibr_q_capability(campus, profile: dict):
     return pd.DataFrame(rows, columns=list(IBR_COLUMNS))
 
 
+#: The basis of every ``ibr_q_curve`` row.
+IBR_CURVE_LABEL = ("screening at unit terminals: sqrt(S^2 - P^2) per inverter against the profile's "
+                   "q_capability_unit x P_n at each checked active power; collector and transformer reactive "
+                   "losses are not counted")
+#: The columns of ``ibr_q_curve``'s table.
+IBR_CURVE_COLUMNS = ("unit", "kind", "p_pu", "p_mw", "s_mva", "q_min_req_mvar", "q_max_req_mvar", "available_mvar",
+                     "shortfall_mvar", "status", "detail", "clause", "source", "basis")
+
+
+def ibr_q_curve(campus, profile: dict):
+    """Each IBR unit's inverter circle against the profile's per-unit
+    reactive capability curve ``q_capability_unit`` (``IBR_CURVE_LABEL``),
+    or None when the profile has no curve or the campus no IBR unit.
+
+    One row per unit and checked active power ``p_pu``: the curve's
+    breakpoints within 0..1 pu, and rated P (1 pu). The required band is
+    ``[q_min_pu, q_max_pu] x P_n`` in the generator convention (+ the unit
+    delivers, over-excited; - it absorbs), unlike ``q_capability_pq``,
+    whose + is the grid supplying the site, per unit of ``p_ref``. The
+    available Q at P = p_pu x P_n is sqrt(S^2 - P^2) either way, so each
+    side is checked on its own. The requirement is linear
+    between breakpoints and the circle concave in P, so their difference is
+    concave on each segment and least at a segment end: the breakpoints and
+    1 pu cover the whole curve. That needs P <= S on the curve: a unit with
+    S < P_n has no Q above P = S (the clamp at 0 bends the circle there), so
+    a shortfall between breakpoints can be missed; rated P then fails anyway
+    whenever the curve asks for Q there. A curve that does not reach 1 pu gives a
+    ``reported`` row at 1 pu, never a silent skip. Points below 0 pu
+    (storage charging) are outside this first cut. A unit without P_n or S
+    is one ``reported`` row, "capability unknown", never ``pass``.
+    ``q_range_ibr`` stays its own table (``ibr_q_capability``)."""
+    lim = profile.get("q_capability_unit")
+    if not lim:
+        return None
+    breaks = [p for p, _, _ in lim["points"] if 0.0 <= p <= 1.0]
+    p_check = sorted({*breaks, 1.0})
+    rows = []
+    for uid, kind, p_n, s in _ibr_ratings(campus):
+        base = {"unit": str(uid), "kind": kind, "s_mva": s, "clause": lim["clause"], "source": lim["source"],
+                "basis": IBR_CURVE_LABEL}
+        unknown = {"q_min_req_mvar": math.nan, "q_max_req_mvar": math.nan, "available_mvar": math.nan,
+                   "shortfall_mvar": math.nan, "status": "reported"}
+        if not (p_n > 0 and math.isfinite(s) and s > 0):
+            rows.append({**base, **unknown, "p_pu": math.nan, "p_mw": math.nan,
+                         "detail": f"capability unknown: {uid} has no rating (P_n and the inverter S are needed)"})
+            continue
+        for p_pu in p_check:
+            p = p_pu * p_n
+            band = q_band_at(lim, p_pu)
+            if band is None:
+                rows.append({**base, **unknown, "p_pu": p_pu, "p_mw": p,
+                             "detail": f"{uid} at P {p_pu:g} pu: the curve does not state rated P, so it is "
+                                       "not checked there"})
+                continue
+            lo, hi = band[0] * p_n, band[1] * p_n
+            avail = _circle_q(s, p)
+            short_out = hi - avail if hi - avail > 1e-9 else 0.0
+            short_in = -lo - avail if -lo - avail > 1e-9 else 0.0
+            short = max(short_out, short_in)
+            if not short:
+                detail = (f"{uid} at P {p_pu:g} pu ({p:.2f} MW) covers {lo:.2f} to {hi:.2f} Mvar "
+                          f"with \u00b1{avail:.2f} Mvar")
+            else:
+                sides = [f"{x:.2f} Mvar short to {what}" for x, what in
+                         ((short_out, "deliver"), (short_in, "absorb")) if x]
+                detail = (f"{uid} at P {p_pu:g} pu ({p:.2f} MW) has \u00b1{avail:.2f} Mvar for {lo:.2f} to "
+                          f"{hi:.2f} Mvar: {' and '.join(sides)}")
+            rows.append({**base, "p_pu": p_pu, "p_mw": p, "q_min_req_mvar": lo, "q_max_req_mvar": hi,
+                         "available_mvar": avail, "shortfall_mvar": short, "status": "fail" if short else "pass",
+                         "detail": detail})
+    if not rows:
+        return None
+    return pd.DataFrame(rows, columns=list(IBR_CURVE_COLUMNS))
+
+
 def compensation_bus(campus) -> str:
     """Where compensation goes: the low-voltage side of the transformers
     connected to the PCC, else the PCC bus itself."""
@@ -253,7 +346,7 @@ def reactive_need(campus, rows: pd.DataFrame, req: ReactiveRequirement, tol: flo
         p = float(net.sgen.at[i, "p_mw"])
         if u["kind"] not in ALWAYS_ON and abs(p) <= 1e-9:
             continue                        # not running / no Q at night
-        head[uid] = math.sqrt(max(float(u["s_mva"]) ** 2 - p ** 2, 0.0))
+        head[uid] = _circle_q(_s_mva(u), p)
     total_head = sum(head.values())
     comp_df = getattr(work, "compensation", None)
     comp_df = comp_df if comp_df is not None else pd.DataFrame(columns=["kind", "steps"])

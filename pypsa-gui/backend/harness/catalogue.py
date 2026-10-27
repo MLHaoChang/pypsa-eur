@@ -517,6 +517,8 @@ TOOLS: list[dict[str, Any]] = [
         "update_global_constraint (dedicated partial-PUT mitigation); other "
         "7 classes → generic _update_component. To rename any class, pass "
         "new_name or attrs.name (bus names starting 'ic:' are reserved). "
+        "Several assets in one request go through preview_project_changes "
+        "(one card): a second numeric edit in a turn is refused toward it. "
         "Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -555,7 +557,9 @@ TOOLS: list[dict[str, Any]] = [
         "Undoable as part of this turn (one undo reverts the turn's network "
         "edits). Backend coerces values against "
         "df[col].dtype; "
-        "all-or-nothing on unknown names. Safety: write.",
+        "all-or-nothing on unknown names. In chat, numeric fields on two or "
+        "more names are refused toward preview_project_changes (one card); "
+        "use this tool for text fields and flags it cannot take. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "names": {"type": "array", "items": {"type": "string"}},
@@ -1429,8 +1433,160 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "solve_queue_clear_finished",
-        "Drop FINISHED job listing entries from the in-memory queue. "
-        "Idempotent. No disk/solver impact. Safety: read.",
+        "Drop FINISHED job listing entries from the in-memory queue, for every "
+        "organization (super-admin only; 403 otherwise). Idempotent. No "
+        "disk/solver impact, but it changes what everyone's queue lists. "
+        "Safety: write.",
+    ),
+
+    # ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────
+    # The Solve Queue panel's remaining controls, one tool per route. Pause
+    # and resume stay out of chat (services/not_via_chat.py): instance-wide.
+
+    _t(
+        "solve_queue_job_log",
+        "The log lines one queue job emitted — live while it runs, retained "
+        "once it ends. `job_id` is the UUID from solve_queue_list. Returns "
+        "{status, lines (the last `max_lines`, default 200), total_lines, "
+        "truncated}. Safety: read.",
+        {
+            "job_id": {"type": "string"},
+            "max_lines": {"type": "integer", "minimum": 1, "maximum": 2000},
+        },
+        ["job_id"],
+    ),
+    _empty(
+        "solve_queue_cancel_queued",
+        "Cancel every QUEUED job you could cancel one at a time; running jobs "
+        "are left alone (stop one with solve_queue_abort). Returns "
+        "{cancelled: <count>}. Safety: destructive.",
+    ),
+    _t(
+        "solve_queue_dismiss",
+        "Hide one FINISHED job (done, failed, aborted or interrupted) from "
+        "your own queue listing. Only a job you queued; a queued or running "
+        "job is refused (409). Returns {dismissed: true}. Safety: write.",
+        {"job_id": {"type": "string"}},
+        ["job_id"],
+    ),
+    _t(
+        "solve_queue_requeue",
+        "Run a FINISHED job again as a NEW queued job for the same project "
+        "(the job then solves and saves that project). A queued or running "
+        "job is refused (409); a project another user holds the edit lock on "
+        "is refused. Returns the new job and `already_queued`. "
+        "Safety: execution.",
+        {"job_id": {"type": "string"}},
+        ["job_id"],
+    ),
+
+    # ── FMEA worksheet write (live-voice 08 B3) (1) ─────────────────────────
+
+    _t(
+        "save_fmea_worksheet",
+        "REPLACE the project's FMEA worksheet sidecar: the expert rows and "
+        "the per-mode overlays, as a whole. Anything left out is deleted, so "
+        "read get_fmea_worksheet first and send its `manual_rows` and "
+        "`overlays` back with your change. A row that breaks a rule is "
+        "refused (422, naming the rule). Safety: destructive.",
+        {
+            "name": {"type": "string"},
+            "manual_rows": {"type": "array", "items": {"type": "object"}},
+            "overlays": {"type": "object"},
+        },
+        ["name", "manual_rows", "overlays"],
+    ),
+
+    # ── Time series and weather (live-voice 08 B3) (6) ──────────────────────
+    # The Time Series editors' per-field reads and pending-artifact writes,
+    # and the weather bar. Uploads take a chat upload's `file_id` from THIS
+    # project; nothing here touches the network until apply_generated_profile.
+
+    _t(
+        "get_current_series",
+        "What one component carries now for one time-series attribute: "
+        "nothing, a generated series (its family and provenance) or an "
+        "upload. Example: component_type 'generators', attribute "
+        "'p_max_pu', component 'PV1'. Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "component_type", "attribute", "component"],
+    ),
+    _t(
+        "get_weather_choice",
+        "The project's weather source and year (the Time Series weather "
+        "bar): the saved choice, else the snapshots' year (`year_source` "
+        "says which), with its time basis. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "set_weather_choice",
+        "Save the weather source ('synthetic' or 'atlite') and year that "
+        "every profile generate without its own takes. Changes no existing "
+        "series. Returns the choice as get_weather_choice reads it. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "source": {"type": "string", "enum": ["synthetic", "atlite"]},
+            "year": {"type": "integer"},
+        },
+        ["project_id", "source", "year"],
+    ),
+    _t(
+        "pending_profile_from_current",
+        "Turn the series a component carries now into a pending profile, so "
+        "the profile refinement tools act on a measured upload the same way "
+        "as on a generated series. Nothing touches the network; "
+        "apply_generated_profile applies it, and refuses it once the stored "
+        "series changes. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "component_type", "attribute", "component"],
+    ),
+    _t(
+        "upload_load_profiles_file",
+        "Read a measured load export (an uploaded CSV/Excel in this project, "
+        "by `file_id`) into pending profiles, one column per load the network "
+        "has; apply them with apply_generated_profiles. Columns naming no "
+        "load come back as `unmatched`. `unit` is the values' unit (e.g. "
+        "'kW', 'MW'); naive timestamps default to the project's commercial "
+        "timezone unless `timezone` is given; `annual_mwh` rescales to that "
+        "yearly energy. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "unit": {"type": "string"},
+            "timezone": {"type": "string"},
+            "year": {"type": "integer"},
+            "annual_mwh": {"type": "number"},
+        },
+        ["project_id", "file_id"],
+    ),
+    _t(
+        "upload_series_file",
+        "A measured file (an uploaded CSV/Excel in this project, by "
+        "`file_id`) for ONE field as a pending profile: previewed, then "
+        "applied with apply_generated_profile and its old → new receipt. A "
+        "file that does not fit (its column, the model's hours, the field's "
+        "units) is refused as `series_upload`, saying what to change. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "component_type": {"type": "string"},
+            "attribute": {"type": "string"},
+            "component": {"type": "string"},
+        },
+        ["project_id", "file_id", "component_type", "attribute", "component"],
     ),
 
     # ── Renewable profile generator (6) ────────────────────────────────────
@@ -3753,6 +3909,158 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── LV08 B2a (12) — Library series, meter data, finance, PoC, value-flow
+    # designer, billing preview, investment-case abort, stress profile packs.
+    # Each wraps its route's own router handler in process (live-voice 08 B2).
+    _t(
+        "list_library_series",
+        "List the latest version of every price/meter series in the user's "
+        "organization's Library. Paged: {items: [{id, version, hash, ...}], "
+        "total_count, offset, returned, has_more}; `id` is the series' name. "
+        "Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "get_library_series",
+        "Read one Library series WITHOUT its full values: {ref, timezone, meta, "
+        "points, first, last, min, max, mean, page: {offset, returned, has_more, "
+        "timestamps, values}}. The page holds `limit` points from `offset` "
+        "(default 48, max 500; shortened to fit the chat). `version` defaults to "
+        "the latest. Safety: read.",
+        {"name": {"type": "string"}, "version": {"type": "integer"},
+         "offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        ["name"],
+    ),
+    _t(
+        "import_library_series",
+        "Store a `timestamp,value` CSV or xlsx the user UPLOADED as Library "
+        "series `name` (an existing name gets a new version). `file_id` is the "
+        "upload's id (list_uploads); never paste values into the call. "
+        "`timezone` is the zone of naive timestamps. Size and parse problems "
+        "are refused (413/422). Returns the series ref. Safety: write.",
+        {"file_id": {"type": "string"}, "name": {"type": "string"},
+         "timezone": {"type": "string"}},
+        ["file_id", "name"],
+    ),
+    _t(
+        "import_meter_data",
+        "Store a meter file the user UPLOADED (CSV or xlsx, `file_id` from "
+        "list_uploads) as Library series `name` of average kW per interval, and "
+        "return the monthly history for the tariff's meter_history_peaks_kw / "
+        "meter_history_energy_kwh. `unit` is REQUIRED and must be the file's "
+        "real unit: kW, W or kWh_per_interval (a kWh file read as kW is 4x low "
+        "at 15 min). settlement (15min | 30min | h, default 15min) is the "
+        "tariff's demand interval; label says whether a row's timestamp is the "
+        "interval start or end (default start); timezone is the site clock for "
+        "naive timestamps. Returns {ref, meter_history_peaks_kw, "
+        "meter_history_energy_kwh, settlement, notes, notes_total, help}. "
+        "Safety: write.",
+        {"file_id": {"type": "string"}, "name": {"type": "string"},
+         "unit": {"type": "string", "enum": ["kW", "W", "kWh_per_interval"]},
+         "settlement": {"type": "string", "enum": ["15min", "30min", "h"]},
+         "label": {"type": "string", "enum": ["start", "end"]},
+         "timezone": {"type": "string"}},
+        ["file_id", "name", "unit"],
+    ),
+    _t(
+        "put_library_item",
+        "Save a tariff, contract template or connection agreement as Library "
+        "item `name` in the user's organization (an existing name gets a new "
+        "version; identical content keeps its version). `payload` is the "
+        "item's whole JSON (read an existing one with get_library_item "
+        "detail='full' and send it back changed); `meta` is free provenance "
+        "such as {source, notes}. The shipped common items are read-only "
+        "(library_item_common_readonly). Returns the item ref {kind, id, "
+        "version, hash}. Safety: write.",
+        {"kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+         "name": {"type": "string"}, "payload": {"type": "object"},
+         "meta": {"type": "object"}},
+        ["kind", "name", "payload"],
+    ),
+    _t(
+        "get_finance_inputs",
+        "Read the project's stored finance inputs (FinanceInputs JSON: owner, "
+        "WACC, tax, debt, depreciation, ...) and their `digest`: {finance, "
+        "digest, status (not_set | ok | finance_inputs_invalid)}. Call it before "
+        "set_finance_inputs and pass `digest` as its if_match. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "set_finance_inputs",
+        "Replace the project's finance inputs (the investment case reads them) "
+        "with `finance`, a whole FinanceInputs object: read them with "
+        "get_finance_inputs first, change what the user asked, send the whole "
+        "object back. `if_match` is REQUIRED: the `digest` get_finance_inputs "
+        "returned ('*' is refused); a stale digest is refused "
+        "(finance_changed, 412) — read again. clear=true (with no `finance`) "
+        "REMOVES EVERY finance input, which the investment case then lacks. "
+        "Invalid inputs are refused with their field paths "
+        "(finance_inputs_invalid); refused while a solve runs. Never marks the "
+        "dispatch stale. Returns {finance, digest, status}. Safety: write.",
+        {"finance": {"type": "object"}, "if_match": {"type": "string"},
+         "clear": {"type": "boolean"}},
+        ["if_match"],
+    ),
+    _t(
+        "get_poc_state",
+        "Whether the commercial config's point-of-connection (PoC) link is "
+        "open: {poc_link, open}. open=true means the link carries nothing "
+        "either way (no grid in operation: no connection, tariff or export "
+        "applies); open=null with reason network_busy while a solve holds the "
+        "network. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "get_value_flow_designer",
+        "What the participants designer offers: {site_party, assets (paged: "
+        "component, name, bus, side, ownable — grid-side assets are not "
+        "ownable), assets_total, tariff_items (id, kind, default_payee, "
+        "stream), contract_parties, group_members, default_externals}. "
+        "`offset`/`limit` page the assets. Refused without a valid commercial "
+        "config or while a solve runs. Safety: read.",
+        {"offset": {"type": "integer"}, "limit": {"type": "integer"}},
+        [],
+    ),
+    _t(
+        "preview_billing",
+        "Bill the last solve's dispatch under a DRAFT import tariff, without "
+        "storing anything: `tariff` is a whole tariff object (the shape "
+        "get_library_item detail='full' returns as payload). Returns {summary "
+        "(per period: total, total_supported, per_item), flags, provenance}; "
+        "the flag preview_dispatch_not_optimised_for_draft is always there — "
+        "the dispatch was optimised for the attached tariff, so say so. No "
+        "contract settlement or gap is computed. no_data before a solve; "
+        "refused during a solve, without a commercial config, or for a draft "
+        "that does not validate (tariff_invalid) or bind on this network "
+        "(tariff_not_bindable). Safety: read.",
+        {"tariff": {"type": "object"}},
+        ["tariff"],
+    ),
+    _t(
+        "abort_investment_case",
+        "Stop a running investment-case run at its next stage; it stores "
+        "nothing. IDEMPOTENT and 200 even when the run has already finished "
+        "({status, aborting: false}); 404 only when no investment-case run was "
+        "recorded in this session. Does NOT stop a foreground solve — that is "
+        "abort_simulation. Safety: destructive.",
+        {},
+        [],
+    ),
+    _t(
+        "list_stress_profile_packs",
+        "List the shipped synthetic profile packs a kind='profiles' stress "
+        "scenario can name as profile_pack (put_stress_scenarios), for project "
+        "`name`. Paged: {items: [{id, ...}], total_count, offset, returned, "
+        "has_more}; a pack that does not parse is listed with its error. "
+        "Safety: read.",
+        {"name": {"type": "string"}, "offset": {"type": "integer"},
+         "limit": {"type": "integer"}},
+        ["name"],
+    ),
+    # ── end LV08 B2a ──────────────────────────────────────────────────────
     # ── Library references (3) — the shipped common cost references ───────
     _t(
         "list_library_references",
@@ -4221,6 +4529,236 @@ TOOLS: list[dict[str, Any]] = [
          "format": {"type": "string", "enum": ["docx", "xlsx", "html"]}},
         ["project", "study_id"],
     ),
+    # ── Decision study records (6) — LV08 B1: the rest of `routers/studies.py` ─
+    _t(
+        "list_decision_studies",
+        "List the decision studies stored in a project (each with its study_id, name, "
+        "question, status and base project). include_library=true also returns the study "
+        "library: the seed tariffs with their honesty notes, the sector load profiles, the "
+        "units an upload may be in and the currency year, which a study's intake chooses "
+        "from. Refusal: decision_studies_unavailable (multi-user mode). Safety: read.",
+        {"project": {"type": "string"},
+         "include_library": {"type": "boolean"}},
+        ["project"],
+    ),
+    _t(
+        "get_decision_study",
+        "Read one decision study. view='summary' (default): the stored record (intake, "
+        "settings, status, options); 'ledger': the assumptions ledger with each row's "
+        "value, unit, provenance and the study's maturity; 'option_case': one option's "
+        "investment case (year-by-year cash flow, KPIs, bill value streams; needs "
+        "option_id; `available` false when not established); 'report': the stored report "
+        "with `stale` recomputed now (404 report_never_assembled before "
+        "generate_study_report). `project` is the study's base project. A figure that "
+        "reads null or 'not established' was not computed: never report it as 0. "
+        "Safety: read.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "view": {"type": "string", "enum": ["summary", "ledger", "option_case", "report"]},
+         "option_id": {"type": "string", "maxLength": 128}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "preview_decision_study_intake",
+        "Preview a decision-study intake before creating or changing a study: the load "
+        "read exactly as the study will read it (an upload's timestamps, unit and "
+        "time-series checks, or a sector profile scaled to its annual MWh) and the "
+        "baseline grid-supply bill on that load. Nothing is written. `intake` has the "
+        "shape start_decision_study takes; it may be partly answered. Safety: read.",
+        {"project": {"type": "string"},
+         "intake": {"type": "object"}},
+        ["project", "intake"],
+    ),
+    _t(
+        "update_decision_study",
+        "Change a stored decision study: rename it (name), merge intake answers key by "
+        "key (intake; with step, only that step's own key may be written), or change its "
+        "settings {perspective, basis: {terms, tax, subsidy}, currency_year}; only the "
+        "site_owner perspective and the default real, pre-tax, no-subsidy basis are "
+        "implemented. Only the fields sent are written. "
+        "A changed intake or setting means the last run no longer matches: run the study "
+        "again. Refusals: 409 another user's edit lock, 422 a load sent as csv_text "
+        "(upload it and set load.upload_id), a setting outside the supported scope. "
+        "Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "name": {"type": "string", "minLength": 1, "maxLength": 120},
+         "step": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,63}$"},
+         "intake": {"type": "object"},
+         "settings": {"type": "object", "additionalProperties": False, "properties": {
+             "perspective": {"type": "string",
+                             "enum": ["site_owner", "developer", "investor", "multi_party"]},
+             "basis": {"type": "object"},
+             "currency_year": {"type": "integer", "minimum": 1900, "maximum": 2200}}}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "abort_decision_study",
+        "Stop a running decision study. stage='options' (default) stops the options run: "
+        "the running option's queue job is aborted, no further option starts, unsolved "
+        "forks are removed and the options never reached are named. stage='tornado' stops "
+        "the tornado before its next solve, keeping the bars computed so far. Idempotent; "
+        "404 when that stage never ran. Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "stage": {"type": "string", "enum": ["options", "tornado"]}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "delete_decision_study",
+        "Delete a decision study permanently. It CASCADES to the option forks the study "
+        "owns (the projects it created for its options, verified server-side) and its "
+        "export series; the base project itself stays. Refused (409, nothing deleted) "
+        "while the study runs or while an owned fork cannot be removed (an active queue "
+        "job, or a project branched from it). Safety: destructive.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"}},
+        ["project", "study_id"],
+    ),
+    # ── Project settings and scope (5) — LV08 B1 ─────────────────────────
+    _t(
+        "get_site_template_form",
+        "Read the generic-site template's form data before a project exists: each site "
+        "type's full preset, the load shapes and the bounds the Guided form shows. Use "
+        "it to offer defaults for create_project_from_template with template 'eh_site'. "
+        "Global, no project needed. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "get_project_flow_scope",
+        "Read a project's flow scope: {scope: {version, groups, options}, cards, "
+        "preset_id, preset, fixed_sizes}: which flow cards and sub-options are on (the "
+        "stored scope, or its template's preset) and the cards the scope draws. The "
+        "project need not be open. Read before update_project_flow_scope. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "update_project_flow_scope",
+        "Replace a project's flow scope with {version, groups, options}: read it with "
+        "get_project_flow_scope first and send it back with the change. Refusals (422, "
+        "typed): flow_scope_invalid (shape), flow_scope_unknown (an id), "
+        "flow_scope_unavailable (a sub-option not yet available), flow_scope_required (a "
+        "locked card or sub-option switched off); 409 another user's edit lock. "
+        "Safety: write.",
+        {"name": {"type": "string"},
+         "scope": {"type": "object"}},
+        ["name", "scope"],
+    ),
+    _t(
+        "update_project_scenario_metadata",
+        "Change a project's scenario category and/or description after creation. Only "
+        "the fields sent are written; description null clears it. scenario_type is one "
+        "of baseline, scenario, stress, sensitivity. Returns the project's info. "
+        "Refusals: 400 an unknown scenario_type or a description starting with a "
+        "'[type]' prefix (send scenario_type instead). Safety: write.",
+        {"name": {"type": "string"},
+         "description": {"type": ["string", "null"], "maxLength": 500},
+         "scenario_type": {"type": "string",
+                           "enum": ["baseline", "scenario", "stress", "sensitivity"]}},
+        ["name"],
+    ),
+    _t(
+        "update_project_settings",
+        "Change a project's settings (metadata.json). Only the keys sent are written. "
+        "derive_lengths_from_geometry: whether line/link lengths follow the map geometry. "
+        "Returns the project's info. 409 when the project has never been saved or "
+        "another user holds its edit lock. Safety: write.",
+        {"name": {"type": "string"},
+         "derive_lengths_from_geometry": {"type": "boolean"}},
+        ["name", "derive_lengths_from_geometry"],
+    ),
+    # ── Network topology and sites (8) — LV08 B1 ─────────────────────────
+    _t(
+        "get_asset_reference",
+        "Read the network's asset reference tables. view='asset_costs': every investable "
+        "asset's upfront parts and annual costs with the global discount rate and each "
+        "asset's provenance (a part priced only through an annual capital_cost is "
+        "back-calculated and flagged); 'asset_schema': the field descriptors an asset card "
+        "shows for component (grouped, in order); 'attribute_catalog': PyPSA's attribute "
+        "metadata for component. asset_schema and attribute_catalog need component. "
+        "Safety: read.",
+        {"view": {"type": "string", "enum": ["asset_costs", "asset_schema", "attribute_catalog"]},
+         "component": {"type": "string", "enum": COMPONENT_CLASS_ENUM}},
+        ["view"],
+    ),
+    _t(
+        "geocode_place",
+        "Look up a place name or address with the configured geocoder (Nominatim-compatible) "
+        "and return its candidate matches with coordinates, to place a site or bus on the "
+        "map. The query is sent to that external service. 503 when no geocoder is "
+        "configured, 502 when it does not answer in time. Safety: read.",
+        {"query": {"type": "string", "minLength": 1, "maxLength": 200}},
+        ["query"],
+    ),
+    _t(
+        "derive_lengths_from_geometry",
+        "Rewrite Line and Link lengths from the project's map geometry: the drawn route "
+        "when a branch has one, else the straight chord. keys: the branches as "
+        "'line:<name>' / 'link:<name>' (omit for every Line and Link). Returns {updated, "
+        "skipped, rescale, sources}; `rescale` lists, per line, the r/x/b values that "
+        "would keep its per-km impedance. Those are NOT applied: show them and call "
+        "rescale_line_impedances only with the values the user accepts. 409 for a project "
+        "never saved (its routes live in the saved map layout). Safety: write.",
+        {"keys": {"type": "array", "maxItems": 500,
+                  "items": {"type": "string", "pattern": "^(line|link):.+$", "maxLength": 200}}},
+        [],
+    ),
+    _t(
+        "rescale_line_impedances",
+        "Write new r, x and b values for named lines, after derive_lengths_from_geometry. "
+        "Use ONLY the values its `rescale` list returned, for the lines the user accepted; "
+        "never compute or default them (by now the old length is gone, so they cannot be "
+        "re-derived). The card shows each line's old and new r, x and b. Returns {updated, "
+        "skipped}. Safety: write.",
+        {"lines": {"type": "array", "minItems": 1, "maxItems": 500, "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["name", "r", "x", "b"],
+            "properties": {"name": {"type": "string", "minLength": 1},
+                           "r": {"type": "number"}, "x": {"type": "number"},
+                           "b": {"type": "number"}}}}},
+        ["lines"],
+    ),
+    _t(
+        "reset_network",
+        "Start a new, empty network (the GUI's New Project): clears the live network, its "
+        "user time series, the undo history and the unsaved-changes flag, and unbinds this "
+        "session from its active project. Unsaved edits are lost; save_project first if "
+        "they matter. The saved project on disk is untouched. Safety: destructive.",
+        {},
+        [],
+    ),
+    _t(
+        "get_project_sites",
+        "Read a project's site document: its sites, boundaries, bus membership and asset "
+        "placements (empty when it has none). With site_id, also the cached site context "
+        "(building footprints and terrain) for that site; 404 when it was never fetched "
+        "(fetch_site_context). Read before set_project_sites. Safety: read.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name"],
+    ),
+    _t(
+        "set_project_sites",
+        "Replace a project's whole site document (read it with get_project_sites first and "
+        "send it back with the change). Validated: a 422 names the field; 413 over the "
+        "size cap; 409 another user's edit lock. A site removed from the document loses "
+        "its cached context. Safety: write.",
+        {"name": {"type": "string"},
+         "sites": {"type": "object"}},
+        ["name", "sites"],
+    ),
+    _t(
+        "fetch_site_context",
+        "Fetch the context of one site's boundary (building footprints from OpenStreetMap "
+        "Overpass and terrain tiles), cache it with the project and return it. Sends the "
+        "boundary's area to those external services. 502 with the upstream's message when "
+        "a source refuses; 409 another user's edit lock. Safety: write.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name", "site_id"],
+    ),
 ]
 
 
@@ -4281,6 +4819,19 @@ TOOLS.extend([
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
     _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     _t("get_reliability_goal", "The project's one reliability goal as the EH study, Monte-Carlo, coupling and margin loops resolve it when a call leaves a field out: {target_lole_h (allowed shortfall, h/yr), ens_cap_permyriad (energy strictness, ‱ of demand), mc_draws, site_archetype}, each {value, source: stored|template|default}. Change it with update_solver_config. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
+    # Each calls its GUI route's own handler in-process (TOOL_ROUTES below);
+    # read outputs are bounded under the result cap.
+    _t("get_osm_suggestions", "OpenStreetMap power lines and substations inside a bounding box, as the map's OSM suggestion layer shows them. bbox is 'min_lng,min_lat,max_lng,max_lat' (WGS84) and must be site-sized; a malformed or district-sized box is 422, an Overpass refusal 429/504/502 naming the setting to change. Returns bbox, attribution, cached, lines_total, areas_total and a page of rows {kind (line|minor_line|cable|substation), osm_id, name, voltage, operator, n_points} in the shared page envelope (offset/limit). Suggestions are never written to the project. Safety: read.", {"name": {"type": "string"}, "bbox": {"type": "string", "maxLength": 128}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, ["name", "bbox"]),
+    _t("preview_library_reference", "Preview applying one shipped cost reference (list_library_references) to ONE asset, exactly as the Library reference dialog previews it: {card, needs, missing, notes, rows, pack, licence, attribution}. While a confirmation is missing there is no card: `needs` says what each confirmation means; ask the user and preview again with confirm=[...] naming only what they confirmed. Plans on a copy and writes nothing; apply_library_reference is the write. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"component_class": {"type": "string", "enum": ["Generator", "Link"]}, "name": {"type": "string"}, "technology": {"type": "string"}, "projection_year": {"type": "integer"}, "confirm": {"type": "array", "items": {"type": "string", "enum": ["dc_ac", "grid_connection", "money_year"]}}}, ["component_class", "name", "technology", "projection_year"]),
+    _t("import_map_geometry", "Match an UPLOADED GeoJSON or KML file (file_id from list_uploads of the open project) against the map: LineStrings become branch routes (by name, else by both ends snapping to placed buses within tolerance_m metres), Polygons become sites. apply=false (default) returns the match report and writes nothing; apply=true writes the routes (source 'import') and appends the sites, and with 'Derive lengths from geometry' on also sets the applied Lines' and Links' lengths (returned under `lengths`). The project must be the open one (409 otherwise); apply under another user's edit lock is 409 project_locked; 413 over the size cap; 422 for malformed GeoJSON/KML or tolerance outside (0, 5000]. Returns counts and per-feature rows without coordinates. Safety: write.", {"name": {"type": "string"}, "file_id": {"type": "string"}, "apply": {"type": "boolean"}, "tolerance_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 5000}}, ["name", "file_id"]),
+    _t("list_result_assets", "Every asset the per-asset view's picker lists for the CURRENT network (transient rows removed): rows {class, name, carrier, bus} in the shared page envelope (offset/limit, total_count, has_more); class and name identify the asset for the per-asset read. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
+    _t("get_curtailment_by_cause", "Read the CURRENT solve's curtailment split by cause per plant, as the curtailment view shows it: export_limit (the export Link at its limit), negative_price (a negative export price), both, other. The causes sum to each plant's total_mwh. Returns status (ok, or not_established with a reason: export_link_missing, export_price_missing, no_commercial_solve_record, export_price_changed_since_solve), export_link, export_capacity_mw, negative_price_hours and a page of plant rows {plant, total_mwh, available_mwh, by_cause_mwh, by_period} (offset/limit). Unsolved or stale dispatch returns status no_data; never report it as zero. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
+    _t("get_eh_readiness", "Energy Hub readiness preflight for an archetype, exactly as the Energy Hub panel's readiness check computes it (on a private copy; nothing is written): which Links the pack treats as imports and by which rule, critical buses, DtC derivability, SCR coverage, Class-B, the MC hub boundary, and a per-stage prediction and solve estimate against budget_solves. stages overrides the pipeline (same rules as run_eh_study); dtc_attribution chooses bus_aggregate_not_per_load or per_load; pack_overrides is the same object run_eh_study takes, validated identically (422 naming the field). 422 for an unknown archetype, a budget out of range or no network. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM}, "budget_solves": {"type": "integer", "minimum": 1, "maximum": _MAX_EH_BUDGET_SOLVES}, "stages": {"type": "array", "items": {"type": "string", "enum": EH_STAGE_ENUM}}, "dtc_attribution": {"type": "string", "enum": ["bus_aggregate_not_per_load", "per_load"]}, "pack_overrides": {"type": "object"}}, ["archetype"]),
+    _t("get_report_capabilities", "What this host can export a study report as beyond .docx: {pdf: bool} (true when LibreOffice is installed, so export_report_pdf can succeed). Safety: read.", {}, []),
+    _t("get_report_evidence_hash", "The hash of the active project's CURRENT report evidence (what create_evidence_report would store as evidence_hash now) and how many evidence sections are established: {evidence_hash, sections_ok, sections_total}. Compare with a report's evidence_hash to say whether the evidence changed since it was written. Safety: read.", {}, []),
+    _t("get_report_version", "Read one stored VERSION of a study report of the active project (report_id from list_reports, version >= 1): the report's meta (report_id, version, title, language, created_at, mode, profile_id, model, evidence_hash) and one row per section {section_id, heading, source, status}. With section_id: that section's prose blocks, tables as {table_id, columns, n_rows}, figures as captions (get_report_table pages a table). 400 invalid_report_id, 404 report_not_found (or version), 404 report_section_not_found. Safety: read.", {"report_id": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "section_id": {"type": "string"}}, ["report_id", "version"]),
+    _t("create_evidence_report", "Build and store a NEW evidence-only study report (version 1) of the active project from the session's current result state, as the Reports panel's 'New evidence report' does: no model writes prose, each section states its evidence or that it is not established. title defaults to the standard title with the project name. Refused under another user's edit lock (409 project_locked). Returns the report meta and its section rows; read it with get_report. Safety: write.", {"title": {"type": "string", "maxLength": 200}}, []),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4355,7 +4906,7 @@ _COMP_DELETE_ROUTES = [
 
 TOOL_ROUTES: dict[str, list] = {
     "list_project_runs": _SERVICE_CALL,
-    "get_run_evidence": _SERVICE_CALL,
+    "get_run_evidence": [("GET", "/api/results/run-view")],
     "compare_project_runs": _SERVICE_CALL,
     "discuss_project_run": _UI_EVENT,
     "export_run_evidence": _SERVICE_CALL,
@@ -4369,9 +4920,9 @@ TOOL_ROUTES: dict[str, list] = {
     "export_experiment_comparison": _SERVICE_CALL,
     "list_experiments": _SERVICE_CALL,
     "get_experiment": _SERVICE_CALL,
-    "get_loadflow_summary": _SERVICE_CALL,
-    "get_energy_flows": _SERVICE_CALL,
-    "get_load_shape": _SERVICE_CALL,
+    "get_loadflow_summary": [("GET", "/api/results/loadflow-view")],
+    "get_energy_flows": [("GET", "/api/results/energy_flows")],
+    "get_load_shape": [("GET", "/api/results/load_shape")],
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
@@ -4448,6 +4999,18 @@ TOOL_ROUTES: dict[str, list] = {
     # write_topology (2)
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
+    # network topology and sites (8) — LV08 B1, in process through `_route`.
+    "get_asset_reference": [("GET", "/api/network/asset_costs"),
+                            ("GET", "/api/network/asset_schema/{component}"),
+                            ("GET", "/api/network/catalog/{component}")],
+    "geocode_place": [("GET", "/api/geocode")],
+    "derive_lengths_from_geometry": [("POST", "/api/network/lengths/from_geometry")],
+    "rescale_line_impedances": [("POST", "/api/network/lines/rescale_impedances")],
+    "reset_network": [("POST", "/api/network/reset")],
+    "get_project_sites": [("GET", "/api/projects/{name}/sites"),
+                          ("GET", "/api/projects/{name}/sites/{site_id}/context")],
+    "set_project_sites": [("PUT", "/api/projects/{name}/sites")],
+    "fetch_site_context": [("POST", "/api/projects/{name}/sites/{site_id}/context")],
     # write_snapshots (4)
     "set_snapshots": [("POST", "/api/network/snapshots")],
     "set_snapshot_weightings": [("PATCH", "/api/network/snapshots/weightings")],
@@ -4462,7 +5025,8 @@ TOOL_ROUTES: dict[str, list] = {
     "delete_vintage_bounds": [("DELETE", "/api/network/vintage_bounds/{component_class}/{name}")],
     "cleanup_orphan_vintages": [("POST", "/api/network/vintage_bounds/_cleanup_orphans")],
     # write_timeseries (6)
-    "upload_timeseries": [("PUT", "/api/network/timeseries/{component}/{attribute}")],
+    # The handler calls the multipart upload route, not the JSON PUT (B3).
+    "upload_timeseries": [("POST", "/api/network/timeseries/upload")],
     "generate_exemplary_timeseries": _SERVICE_CALL,
     "delete_timeseries": [("DELETE", "/api/network/timeseries")],
     "upload_load_profile": [("POST", "/api/network/loads/upload_profile")],
@@ -4520,6 +5084,18 @@ TOOL_ROUTES: dict[str, list] = {
     "solve_queue_list": [("GET", "/api/simulation/queue")],
     "solve_queue_abort": [("POST", "/api/simulation/queue/{job_id}/abort")],
     "solve_queue_clear_finished": [("POST", "/api/simulation/queue/clear_finished")],
+    # live-voice 08 B3: queue controls, FMEA worksheet write, time series/weather
+    "solve_queue_job_log": [("GET", "/api/simulation/queue/{job_id}/log_history")],
+    "solve_queue_cancel_queued": [("POST", "/api/simulation/queue/cancel_queued")],
+    "solve_queue_dismiss": [("POST", "/api/simulation/queue/{job_id}/dismiss")],
+    "solve_queue_requeue": [("POST", "/api/simulation/queue/{job_id}/requeue")],
+    "save_fmea_worksheet": [("PUT", "/api/projects/{name}/worksheet")],
+    "get_current_series": [("GET", "/api/projects/{name}/profiles/current")],
+    "get_weather_choice": [("GET", "/api/projects/{name}/profiles/weather")],
+    "set_weather_choice": [("PUT", "/api/projects/{name}/profiles/weather")],
+    "pending_profile_from_current": [("POST", "/api/projects/{name}/profiles/from-current")],
+    "upload_load_profiles_file": [("POST", "/api/projects/{name}/profiles/loads/upload")],
+    "upload_series_file": [("POST", "/api/projects/{name}/profiles/series/upload")],
     # profile generator (11)
     "list_profile_presets": [("GET", "/api/profiles/presets")],
     "get_profile_parameters": _SERVICE_CALL,
@@ -4606,9 +5182,9 @@ TOOL_ROUTES: dict[str, list] = {
     "list_uploads": [("GET", "/api/projects/{name}/uploads")],
     "read_upload_meta": [("GET", "/api/projects/{name}/uploads/{file_id}/meta")],
     "read_excel_sheet": _SERVICE_CALL,
-    "preview_equipment_mapping": _SERVICE_CALL,
-    "preview_document_values": _SERVICE_CALL,
-    "preview_commercial_document_values": _SERVICE_CALL,
+    "preview_equipment_mapping": [("POST", "/api/equipment_table/preview")],
+    "preview_document_values": [("POST", "/api/document_values/preview")],
+    "preview_commercial_document_values": [("POST", "/api/document_values/commercial/preview")],
     "apply_demand_from_excel": _SERVICE_CALL,
     "delete_upload": [("DELETE", "/api/projects/{name}/uploads/{file_id}")],
     # uploads — vision (Phase C dependency stub)
@@ -4721,6 +5297,20 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    # LV08 B2a (12): router handlers called in process (live-voice 08 B2).
+    "list_library_series": [("GET", "/api/library/series")],
+    "get_library_series": [("GET", "/api/library/series/{name}")],
+    "import_library_series": [("POST", "/api/library/series/upload")],
+    "import_meter_data": [("POST", "/api/library/meter_data")],
+    "put_library_item": [("PUT", "/api/library/items/{kind}/{name}")],
+    "get_finance_inputs": [("GET", "/api/simulation/finance")],
+    "set_finance_inputs": [("PUT", "/api/simulation/finance")],
+    "get_poc_state": [("GET", "/api/simulation/commercial/poc")],
+    "get_value_flow_designer": [("GET", "/api/simulation/value_flows/designer")],
+    "preview_billing": [("POST", "/api/results/billing/preview")],
+    "abort_investment_case": [("POST", "/api/results/investment_case/abort")],
+    "list_stress_profile_packs": [("GET", "/api/projects/{name}/stress_profile_packs")],
+    # end LV08 B2a
     # Library references (3): two reads (the asset's pack from its provenance) and the apply.
     "list_library_references": [("GET", "/api/library/references")],
     "get_library_reference": [("GET", "/api/network/asset_schema/{component}/provenance/{name}"),
@@ -4756,9 +5346,38 @@ TOOL_ROUTES: dict[str, list] = {
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.docx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.xlsx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.html")],
+    # decision study records (6) — LV08 B1, in process through `_route`.
+    "list_decision_studies": [("GET", "/api/projects/{name}/studies/"),
+                              ("GET", "/api/projects/{name}/studies/library")],
+    "get_decision_study": [("GET", "/api/projects/{name}/studies/{study_id}"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/ledger"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/options/{option_id}/case"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/report")],
+    "preview_decision_study_intake": [("POST", "/api/projects/{name}/studies/preview")],
+    "update_decision_study": [("PATCH", "/api/projects/{name}/studies/{study_id}")],
+    "abort_decision_study": [("POST", "/api/projects/{name}/studies/{study_id}/run/abort"),
+                             ("POST", "/api/projects/{name}/studies/{study_id}/findings/tornado/abort")],
+    "delete_decision_study": [("DELETE", "/api/projects/{name}/studies/{study_id}")],
+    # project settings and scope (5) — LV08 B1
+    "get_site_template_form": [("GET", "/api/projects/from_template/eh_site/form")],
+    "get_project_flow_scope": [("GET", "/api/projects/{name}/flow/scope")],
+    "update_project_flow_scope": [("PUT", "/api/projects/{name}/flow/scope")],
+    "update_project_scenario_metadata": [("PATCH", "/api/projects/{name}/scenario")],
+    "update_project_settings": [("PATCH", "/api/projects/{name}/settings")],
     # project flow (B1)
     "get_project_flow": [("GET", "/api/projects/{name}/flow")],
     "get_reliability_goal": [("GET", "/api/projects/{name}/flow/reliability_goal")],
+    # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
+    "get_osm_suggestions": [("GET", "/api/projects/{name}/map_layout/osm_suggestions")],
+    "preview_library_reference": [("POST", "/api/library_reference/preview")],
+    "import_map_geometry": [("POST", "/api/projects/{name}/map_layout/import")],
+    "list_result_assets": [("GET", "/api/results/asset/assets")],
+    "get_curtailment_by_cause": [("GET", "/api/results/curtailment/by_cause")],
+    "get_eh_readiness": [("GET", "/api/results/eh_readiness")],
+    "get_report_capabilities": [("GET", "/api/projects/{name}/reports/capabilities")],
+    "get_report_evidence_hash": [("GET", "/api/projects/{name}/reports/evidence_hash")],
+    "get_report_version": [("GET", "/api/projects/{name}/reports/{report_id}/versions/{version}")],
+    "create_evidence_report": [("POST", "/api/projects/{name}/reports")],
 }
 
 

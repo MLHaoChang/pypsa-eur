@@ -89,7 +89,8 @@ UNAMBIGUOUS_PROJECT_ARGS = frozenset({"project_id", "base", "project_name"})
 _COMPONENT = "a component on the ACTIVE project, whose ACL was established at activate"
 TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
     **{t: _COMPONENT for t in (
-        "apply_library_reference", "attach_tariff", "cascade_delete_bus", "create_carrier",
+        "apply_library_reference", "preview_library_reference",  # LV08 B2b
+        "attach_tariff", "cascade_delete_bus", "create_carrier",
         "create_component", "delete_component", "delete_timeseries",
         "delete_vintage_bounds", "explain_investment",
         "generate_exemplary_timeseries", "get_asset_results", "get_component",
@@ -97,6 +98,11 @@ TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
         "ui_select_component", "update_component", "upload_timeseries",
     )},
     "get_library_item": "an org Library item",
+    # LV08 B2a: org Library series and items, scoped by the Library ACL.
+    "get_library_series": "an org Library series",
+    "import_library_series": "the org Library series to store",
+    "import_meter_data": "the org Library series to store",
+    "put_library_item": "an org Library item",
     "use_skill": "a harness skill name (#86); reads a static catalogue and resolves no project",
     "import_urdb_tariff": "the Library item the import creates",
     "update_meta": "the display name of the ACTIVE network (`NetworkMeta`)",

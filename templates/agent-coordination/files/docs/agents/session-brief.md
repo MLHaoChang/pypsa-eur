@@ -1,28 +1,32 @@
 # Session brief
 
-The coordinator fills in this template when it spawns a session, and sends it as the first message. Replace every `<…>`; write "none" rather than deleting a section.
+The coordinator sends this as a new session's first message. `scripts/coord/brief.py` fills the first block from flags, appends the stream block when `--stream` names one, and writes the brief to a file for `create_session`; edit this file and the script reads the change. Fields the script leaves unset read "none".
 
 ```markdown
 You are a session for {{REPO}}, commissioned by the owner through the coordinator session (the id in `docs/agents/coordinator.md`).
 
 **Task.** <What to build or fix, and the outcome that marks it done.>
 
-**Owner decisions.** <keys only. Look each up with `grep -F '| KEY |' docs/agents/owner-decisions.md`; never read the whole file. A decision not yet logged, in the owner's own words with the option they picked>
-
-**Starts from.** `{{BASE_BRANCH}}` at <full SHA>.
+**Owner decisions.** <keys only, e.g. `USE-1`, `OWN-PR`. Look each up with `grep -F '| KEY |' docs/agents/owner-decisions.md`; never read the whole file.>
 
 **Read first.**
 - <file or doc>: <why>
 
-**Stay out of.** <Files or areas another session owns right now, and which session.>
+**Stay out of.** <Files or areas another session owns right now, and which session. brief.py builds it from the open PRs' changed files and the live sessions.>
 
 **Dependencies.** <PRs that must merge first, or PRs this one must not conflict with; "none".>
 
-**Review.** <"Gatekeeper (see docs/agents/roles.md): send it your plan before building" for {{GATED_AREAS}}; otherwise "premerge only".>
+**Review.** <Who reviews it: the gatekeeper for engine code, else "none required".>
 
-**Process.** Follow `.claude/skills/steward/SKILL.md`:
-- one PR on its own `claude/*` branch;
-- a release-note fragment;
-- drive its CI, then report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green;
-- send questions to the coordinator as 2–4 options.
+**Context budget.** Hand off at 300k context (owner decision USE-2). Keep tool output short: `| tail -8`, `grep -n` then `sed -n` of at most 60 lines, never whole files or whole diffs; background runs under 580 s.
+
+**Process.** Follow `.claude/skills/steward/SKILL.md`: one PR on its own `claude/*` branch, a release-note fragment if the repo's guard requires one for the path, drive its CI, report `premerge ok <full head SHA>` and the `scripts/coord/premerge.sh` output to the coordinator (`docs/agents/coordinator.md`) once green, and send questions to the coordinator as 2–4 options. A clean master merge carries a reviewer's OK, so do not ask for a re-OK (owner decision RETRO-QUIET-1).
+```
+
+## Stream CONFIDENTIAL
+
+Example stream block: appended for `--stream confidential`. Rename the heading and replace the text with the project's own rule, or delete the section.
+
+```markdown
+**CONFIDENTIALITY (owner decision <KEY>).** <What the work derives from, and what may never appear in code, tests, PR text, commits or messages.>
 ```

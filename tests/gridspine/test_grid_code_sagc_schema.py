@@ -109,3 +109,61 @@ def test_an_unknown_dynamic_kind_or_blank_unit_is_refused(bad, match):
     row = {"id": "x", "requirement": "r", "value": "1", "clause": "c", "source": "code", "applies_to": "load", **bad}
     with pytest.raises(ContractError, match=match):
         validate_profile("p", profile(dynamic_requirements=[row]))
+
+
+# DC 15 (G9): a per-unit reactive capability curve and a voltage-control
+# deadband, optional with no default (D3-KEEP).
+CURVE = lim(points=[[0.0, -0.4, 0.4], [0.5, -0.5, 0.5], [1.0, -0.3, 0.3]])
+DEADBAND = lim(value=0.5)
+
+
+def test_a_blank_profile_holds_neither_the_unit_curve_nor_the_deadband_until_set(tmp_path):
+    assert {"q_capability_unit", "voltage_deadband_pct"} <= PROFILE_KEYS
+    assert not {"q_capability_unit", "voltage_deadband_pct"} & set(validate_profile("p", profile()))
+    import yaml
+
+    (tmp_path / "proj.yaml").write_text(yaml.safe_dump(profile(q_capability_unit=CURVE,
+                                                               voltage_deadband_pct=DEADBAND)))
+    out = load_grid_code("proj", extra_dirs=[tmp_path])
+    assert out["q_capability_unit"]["points"] == CURVE["points"]
+    assert out["voltage_deadband_pct"]["value"] == 0.5
+
+
+def test_the_unit_curve_and_the_deadband_can_be_extracted_and_confirmed():
+    doc = {"sha256": "0" * 64, "filename": "code.pdf", "title": "A code"}
+    p = profile(document=doc,
+                q_capability_unit={**CURVE, "source": "extracted", "page": 3, "quote": "reactive capability"},
+                voltage_deadband_pct={**DEADBAND, "source": "extracted", "page": 4, "quote": "deadband"})
+    out = validate_profile("p", p)
+    assert unconfirmed(out) == ["q_capability_unit", "voltage_deadband_pct"]
+    for path in ("q_capability_unit", "voltage_deadband_pct"):
+        out = confirm_limit(out, path)
+        assert out[path]["source"] == "code" and out[path]["page"] in (3, 4)
+    assert unconfirmed(validate_profile("p", out)) == []
+
+
+@pytest.mark.parametrize("extra, match", [
+    ({"q_capability_unit": lim(points=[[0.0, -0.1, 0.1], [0.0, -0.2, 0.2]])}, r"q_capability_unit.*rise strictly"),
+    ({"q_capability_unit": lim(points=[[0.5, -0.1, 0.1], [0.2, -0.2, 0.2]])}, r"q_capability_unit.*rise strictly"),
+    ({"q_capability_unit": lim(points=[[0.0, 0.2, 0.1], [1.0, -0.2, 0.2]])}, r"q_capability_unit.*above q_max_pu"),
+    ({"q_capability_unit": lim(points=[[0.0, -0.1, 0.1]])}, r"q_capability_unit.*at least two"),
+    ({"q_capability_unit": lim(points=[[0.0, -0.1, 0.1], [1.0, -0.2, math.nan]])}, r"q_capability_unit.*finite"),
+    ({"q_capability_unit": {"points": [[0.0, -0.1, 0.1], [1.0, -0.2, 0.2]]}}, "clause"),
+    ({"voltage_deadband_pct": lim(value=0.0)}, "voltage_deadband_pct value must be a positive"),
+    ({"voltage_deadband_pct": lim(value=-0.5)}, "voltage_deadband_pct value must be a positive"),
+    ({"voltage_deadband_pct": lim(value=math.nan)}, "voltage_deadband_pct value must be a positive"),
+    ({"voltage_deadband_pct": lim(value=math.inf)}, "voltage_deadband_pct value must be a positive"),
+    ({"voltage_deadband_pct": {"value": 0.5}}, "clause"),
+])
+def test_a_malformed_unit_curve_or_deadband_is_refused(extra, match):
+    with pytest.raises(ContractError, match=match):
+        validate_profile("p", profile(**extra))
+
+
+def test_the_deadband_is_reported_per_unit_never_judged():
+    out = reported_requirements(validate_profile("p", profile(voltage_deadband_pct=DEADBAND)))
+    row = next(r for r in out if r["id"] == "voltage_deadband_pct")
+    assert row["status"] == "reported" and row["applies_to"] == "unit"
+    assert row["clause"] == "generic test clause" and row["source"] == "code"
+    assert "0.5 %" in row["value"] and "not enforced" in row["detail"]
+    assert not any(r["id"] == "voltage_deadband_pct" for r in reported_requirements(validate_profile("p", profile())))

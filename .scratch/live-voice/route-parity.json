@@ -2,9 +2,9 @@
  "counts": {
   "backend_routes": 506,
   "gui_routes": 466,
-  "limitation": 84,
-  "needs-tool": 102,
-  "tool": 280,
+  "limitation": 87,
+  "needs-tool": 31,
+  "tool": 348,
   "unclassified": 0
  },
  "format_version": 1,
@@ -939,22 +939,28 @@
    "reason": "conversation-transport"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/documentValues.ts"
    ],
    "method": "POST",
-   "path": "/api/document_values/commercial/preview"
+   "path": "/api/document_values/commercial/preview",
+   "tools": [
+    "preview_commercial_document_values"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/documentValues.ts"
    ],
    "method": "POST",
-   "path": "/api/document_values/preview"
+   "path": "/api/document_values/preview",
+   "tools": [
+    "preview_document_values"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -993,22 +999,28 @@
    "reason": "conversation-transport"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/equipmentTable.ts"
    ],
    "method": "POST",
-   "path": "/api/equipment_table/preview"
+   "path": "/api/equipment_table/preview",
+   "tools": [
+    "preview_equipment_mapping"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/geocode.ts"
    ],
    "method": "GET",
-   "path": "/api/geocode"
+   "path": "/api/geocode",
+   "tools": [
+    "geocode_place"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -1384,22 +1396,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "PUT",
-   "path": "/api/library/items/{kind}/{name}"
+   "path": "/api/library/items/{kind}/{name}",
+   "tools": [
+    "put_library_item"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/library/meter_data"
+   "path": "/api/library/meter_data",
+   "tools": [
+    "import_meter_data"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1426,40 +1444,52 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/library/series"
+   "path": "/api/library/series",
+   "tools": [
+    "list_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/library/series/upload"
+   "path": "/api/library/series/upload",
+   "tools": [
+    "import_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/library/series/{name}"
+   "path": "/api/library/series/{name}",
+   "tools": [
+    "get_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/libraryReferences.ts"
    ],
    "method": "POST",
-   "path": "/api/library_reference/preview"
+   "path": "/api/library_reference/preview",
+   "tools": [
+    "preview_library_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -1501,22 +1531,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/assetSchema.ts"
    ],
    "method": "GET",
-   "path": "/api/network/asset_costs"
+   "path": "/api/network/asset_costs",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/assetSchema.ts"
    ],
    "method": "GET",
-   "path": "/api/network/asset_schema/{component}"
+   "path": "/api/network/asset_schema/{component}",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1653,13 +1689,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "GET",
-   "path": "/api/network/catalog/{component}"
+   "path": "/api/network/catalog/{component}",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1867,13 +1906,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/lengths/from_geometry"
+   "path": "/api/network/lengths/from_geometry",
+   "tools": [
+    "derive_lengths_from_geometry"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1924,13 +1966,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/lines/rescale_impedances"
+   "path": "/api/network/lines/rescale_impedances",
+   "tools": [
+    "rescale_line_impedances"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2163,13 +2208,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/reset"
+   "path": "/api/network/reset",
+   "tools": [
+    "reset_network"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2424,13 +2472,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/timeseries/upload"
+   "path": "/api/network/timeseries/upload",
+   "tools": [
+    "upload_timeseries"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2637,13 +2688,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/from_template/eh_site/form"
+   "path": "/api/projects/from_template/eh_site/form",
+   "tools": [
+    "get_site_template_form"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2658,13 +2712,13 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "limitation",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/import-folder"
+   "path": "/api/projects/import-folder",
+   "reason": "app-shell"
   },
   {
    "class": "tool",
@@ -2816,22 +2870,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/flow.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/flow/scope"
+   "path": "/api/projects/{name}/flow/scope",
+   "tools": [
+    "get_project_flow_scope"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/flow.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/flow/scope"
+   "path": "/api/projects/{name}/flow/scope",
+   "tools": [
+    "update_project_flow_scope"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2878,22 +2938,28 @@
    "reason": "ui-local-state"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/mapLayout.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/map_layout/import"
+   "path": "/api/projects/{name}/map_layout/import",
+   "tools": [
+    "import_map_geometry"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/mapLayout.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/map_layout/osm_suggestions"
+   "path": "/api/projects/{name}/map_layout/osm_suggestions",
+   "tools": [
+    "get_osm_suggestions"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -2950,13 +3016,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/profiles/current"
+   "path": "/api/projects/{name}/profiles/current",
+   "tools": [
+    "get_current_series"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2983,13 +3052,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/from-current"
+   "path": "/api/projects/{name}/profiles/from-current",
+   "tools": [
+    "pending_profile_from_current"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3016,13 +3088,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/loads/upload"
+   "path": "/api/projects/{name}/profiles/loads/upload",
+   "tools": [
+    "upload_load_profiles_file"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3073,31 +3148,40 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/series/upload"
+   "path": "/api/projects/{name}/profiles/series/upload",
+   "tools": [
+    "upload_series_file"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/profiles/weather"
+   "path": "/api/projects/{name}/profiles/weather",
+   "tools": [
+    "get_weather_choice"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/profiles/weather"
+   "path": "/api/projects/{name}/profiles/weather",
+   "tools": [
+    "set_weather_choice"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3124,31 +3208,40 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/reports"
+   "path": "/api/projects/{name}/reports",
+   "tools": [
+    "create_evidence_report"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/capabilities"
+   "path": "/api/projects/{name}/reports/capabilities",
+   "tools": [
+    "get_report_capabilities"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/evidence_hash"
+   "path": "/api/projects/{name}/reports/evidence_hash",
+   "tools": [
+    "get_report_evidence_hash"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3318,13 +3411,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}"
+   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
+   "tools": [
+    "get_report_version"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3351,59 +3447,77 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/scenario"
+   "path": "/api/projects/{name}/scenario",
+   "tools": [
+    "update_project_scenario_metadata"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/settings"
+   "path": "/api/projects/{name}/settings",
+   "tools": [
+    "update_project_settings"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/sites"
+   "path": "/api/projects/{name}/sites",
+   "tools": [
+    "get_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts",
     "site3d/sitesStore.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/sites"
+   "path": "/api/projects/{name}/sites",
+   "tools": [
+    "set_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/sites/{site_id}/context"
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "tools": [
+    "get_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/sites/{site_id}/context"
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "tools": [
+    "fetch_site_context"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -3484,13 +3598,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reliability-adequacy",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/stress_profile_packs"
+   "path": "/api/projects/{name}/stress_profile_packs",
+   "tools": [
+    "list_stress_profile_packs"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3517,13 +3634,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/"
+   "path": "/api/projects/{name}/studies/",
+   "tools": [
+    "list_decision_studies"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3538,49 +3658,64 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/library"
+   "path": "/api/projects/{name}/studies/library",
+   "tools": [
+    "list_decision_studies"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/preview"
+   "path": "/api/projects/{name}/studies/preview",
+   "tools": [
+    "preview_decision_study_intake"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "DELETE",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "delete_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "update_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3620,22 +3755,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort"
+   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort",
+   "tools": [
+    "abort_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/ledger"
+   "path": "/api/projects/{name}/studies/{study_id}/ledger",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3659,22 +3800,28 @@
    "reason": "binary-transfer"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case"
+   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/report"
+   "path": "/api/projects/{name}/studies/{study_id}/report",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3749,13 +3896,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/run/abort"
+   "path": "/api/projects/{name}/studies/{study_id}/run/abort",
+   "tools": [
+    "abort_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3829,13 +3979,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/worksheet"
+   "path": "/api/projects/{name}/worksheet",
+   "tools": [
+    "save_fmea_worksheet"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3901,13 +4054,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "pages/results/asset/api.ts"
    ],
    "method": "GET",
-   "path": "/api/results/asset/assets"
+   "path": "/api/results/asset/assets",
+   "tools": [
+    "list_result_assets"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3946,13 +4102,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/results/billing/preview"
+   "path": "/api/results/billing/preview",
+   "tools": [
+    "preview_billing"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4051,13 +4210,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/results/curtailment/by_cause"
+   "path": "/api/results/curtailment/by_cause",
+   "tools": [
+    "get_curtailment_by_cause"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4108,13 +4270,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/results/eh_readiness"
+   "path": "/api/results/eh_readiness",
+   "tools": [
+    "get_eh_readiness"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4201,13 +4366,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/energyFlows.ts"
    ],
    "method": "GET",
-   "path": "/api/results/energy_flows"
+   "path": "/api/results/energy_flows",
+   "tools": [
+    "get_energy_flows"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -4340,13 +4508,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/finance.ts"
    ],
    "method": "POST",
-   "path": "/api/results/investment_case/abort"
+   "path": "/api/results/investment_case/abort",
+   "tools": [
+    "abort_investment_case"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4422,22 +4593,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/loadShape.ts"
    ],
    "method": "GET",
-   "path": "/api/results/load_shape"
+   "path": "/api/results/load_shape",
+   "tools": [
+    "get_load_shape"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/resultsEvidence.ts"
    ],
    "method": "GET",
-   "path": "/api/results/loadflow-view"
+   "path": "/api/results/loadflow-view",
+   "tools": [
+    "get_loadflow_summary"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4596,13 +4773,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/resultsEvidence.ts"
    ],
    "method": "GET",
-   "path": "/api/results/run-view"
+   "path": "/api/results/run-view",
+   "tools": [
+    "get_run_evidence"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4773,13 +4953,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/commercial/poc"
+   "path": "/api/simulation/commercial/poc",
+   "tools": [
+    "get_poc_state"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4825,18 +5008,22 @@
    "method": "GET",
    "path": "/api/simulation/finance",
    "tools": [
+    "get_finance_inputs",
     "solve_ppa_price"
    ],
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/finance.ts"
    ],
    "method": "PUT",
-   "path": "/api/simulation/finance"
+   "path": "/api/simulation/finance",
+   "tools": [
+    "set_finance_inputs"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4920,41 +5107,46 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/cancel_queued"
+   "path": "/api/simulation/queue/cancel_queued",
+   "tools": [
+    "solve_queue_cancel_queued"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "note": "solve_queue_clear_finished declares this route but is read-tier; the tier rule (V4) refuses a read tool on a mutating route",
-   "path": "/api/simulation/queue/clear_finished"
+   "path": "/api/simulation/queue/clear_finished",
+   "tools": [
+    "solve_queue_clear_finished"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "limitation",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/pause"
+   "path": "/api/simulation/queue/pause",
+   "reason": "admin"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "limitation",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/resume"
+   "path": "/api/simulation/queue/resume",
+   "reason": "admin"
   },
   {
    "class": "tool",
@@ -4969,22 +5161,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/dismiss"
+   "path": "/api/simulation/queue/{job_id}/dismiss",
+   "tools": [
+    "solve_queue_dismiss"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/queue/{job_id}/log_history"
+   "path": "/api/simulation/queue/{job_id}/log_history",
+   "tools": [
+    "solve_queue_job_log"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -4996,13 +5194,16 @@
    "reason": "live-stream"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/requeue"
+   "path": "/api/simulation/queue/{job_id}/requeue",
+   "tools": [
+    "solve_queue_requeue"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -5058,13 +5259,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/value_flows/designer"
+   "path": "/api/simulation/value_flows/designer",
+   "tools": [
+    "get_value_flow_designer"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

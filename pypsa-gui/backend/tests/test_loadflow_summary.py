@@ -533,7 +533,8 @@ def test_tool_is_declared_routed_dispatched_and_read_tier():
     declared = {t['name']: t for t in catalogue.TOOLS}
     assert 'get_loadflow_summary' in declared
     assert catalogue.safety_tier_for('get_loadflow_summary') == 'read'
-    assert catalogue.TOOL_ROUTES['get_loadflow_summary'] == catalogue._SERVICE_CALL
+    # LV08 B2b: mapped to the Load flow tab's own route (same _loadflow oracle).
+    assert catalogue.TOOL_ROUTES['get_loadflow_summary'] == [('GET', '/api/results/loadflow-view')]
     assert chat_tools.DISPATCHERS['get_loadflow_summary'] is lf.get_loadflow_summary
     props = declared['get_loadflow_summary']['input_schema']['properties']
     assert set(props) == {'source', 'limit', 'window_from', 'window_to', 'run_id'}

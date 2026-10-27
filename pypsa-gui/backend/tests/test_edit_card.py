@@ -163,7 +163,7 @@ def test_solver_settings_show_old_and_new(grid):
 
 
 def test_an_edit_without_an_adapter_still_shows_a_card(grid):
-    frames, cards, result = _dispatch(grid, "update_meta", {"name": "renamed"})
+    frames, cards, result = _dispatch(grid, "create_carrier", {"name": "renamed"})
     card = cards[0]["edit_card"]
     assert card["kind"] == "arguments" and card["complete"] is False
     assert card["rows"] == [{"component_class": "", "name": "", "field": "name", "label": "name", "old": None,

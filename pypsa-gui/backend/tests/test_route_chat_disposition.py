@@ -28,7 +28,7 @@ _LIBRARY_PREVIEW_PATH = (
 # get_milp versus milp_job_status are NOT the same service; keep that route a gap.
 # Result readers share the native payload builders; tool outputs are bounded.
 # Preview tools use the same plan_active; apply_library_reference's confirmation
-# uses the same edit_card.preview as the HTTP preview (no HTTP preview tool).
+# uses the same edit_card.preview as the HTTP preview (preview_library_reference).
 # Settings selects an existing profile only; secret editing stays NOT_VIA_CHAT.
 # get_file_delivery authorizes the upload and returns its exact native blob link.
 SERVED_BY_TOOL: dict[tuple[str, str], str] = {
@@ -54,8 +54,6 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('GET', '/api/projects/{name}/uploads/{file_id}/blob'): 'get_file_delivery',
     ('GET', '/api/results/asset/{component_class}/{name}'): 'get_asset_results',
     ('GET', '/api/results/asset/{component_class}/{name}/export.xlsx'): 'export_asset_results',
-    ('GET', '/api/results/energy_flows'): 'get_energy_flows',
-    ('GET', '/api/results/load_shape'): 'get_load_shape',
     ('POST', '/api/campus-electrical/{name}/draft'): 'campus_draft_campus',
     ('POST', '/api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract'): 'campus_extract_grid_code',
     ('POST', '/api/campus-electrical/{name}/island/cuts/apply'): 'campus_apply_island_cuts',
@@ -64,15 +62,11 @@ SERVED_BY_TOOL: dict[tuple[str, str], str] = {
     ('POST', '/api/campus-electrical/{name}/island/study'): 'campus_run_island_study',
     ('POST', '/api/campus-electrical/{name}/run'): 'campus_run_study',
     ('POST', '/api/chat/settings/llm/active'): 'set_active_profile',
-    ('POST', '/api/document_values/commercial/preview'): 'preview_commercial_document_values',
-    ('POST', '/api/document_values/preview'): 'preview_document_values',
-    ('POST', '/api/equipment_table/preview'): 'preview_equipment_mapping',
     ('POST', '/api/gridspine/projects'): 'gridspine_create_study',
     ('POST', '/api/gridspine/{name}/capacity'): 'gridspine_compute_capacity',
     ('POST', '/api/gridspine/{name}/connection'): 'gridspine_assess_connection',
     ('POST', '/api/gridspine/{name}/dispatch-source'): 'gridspine_set_dispatch_source',
     ('POST', '/api/gridspine/{name}/run'): 'gridspine_run_pipeline',
-    ('POST', _LIBRARY_PREVIEW_PATH): 'apply_library_reference',
     ('PUT', '/api/campus-electrical/{name}/island'): 'campus_set_island_config',
     ('PUT', '/api/campus-electrical/{name}/library'): 'campus_set_library',
     ('PUT', '/api/gridspine/{name}/config'): 'gridspine_update_config',
@@ -158,7 +152,6 @@ UI_INTERNAL: dict[str, dict] = {
         "reason": 'Solver log feeds for the log panel; the assistant follows jobs with wait_for_job.',
         "routes": frozenset({
             ('GET', '/api/simulation/log_stream'),
-            ('GET', '/api/simulation/queue/{job_id}/log_history'),
             ('GET', '/api/simulation/queue/{job_id}/log_stream'),
         }),
     },
@@ -176,18 +169,10 @@ UI_INTERNAL: dict[str, dict] = {
             ('POST', '/api/projects/{name}/uploads'),
         }),
     },
-    'series_file_upload': {
-        "reason": 'Time-series file pickers; chat writes series with upload_timeseries and upload_*_profile tools.',
+    'series_json_put': {
+        "reason": 'JSON series write no screen calls now; chat writes series with upload_timeseries, which posts the file upload.',
         "routes": frozenset({
-            ('POST', '/api/network/timeseries/upload'),
-            ('POST', '/api/projects/{name}/profiles/loads/upload'),
-            ('POST', '/api/projects/{name}/profiles/series/upload'),
-        }),
-    },
-    'template_form': {
-        "reason": 'Schema for the generic-site form; chat creates templates using explicit tool arguments.',
-        "routes": frozenset({
-            ('GET', '/api/projects/from_template/eh_site/form'),
+            ('PUT', '/api/network/timeseries/{component}/{attribute}'),
         }),
     },
 }
@@ -198,44 +183,17 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('DELETE', '/api/campus-electrical/{name}/island/cuts'): 'Campus electrical panel',
     ('DELETE', '/api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}'): 'Campus electrical panel',
     ('DELETE', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('DELETE', '/api/projects/{name}/studies/{study_id}'): 'Decision studies panel',
     ('GET', '/api/campus-electrical/{name}/island/report'): 'Campus electrical panel',
     ('GET', '/api/campus-electrical/{name}/milp'): 'Campus electrical panel',
     ('GET', '/api/campus-electrical/{name}/owner-assets'): 'Campus electrical panel',
     ('GET', '/api/guides'): 'Help, guides panel',
-    ('GET', '/api/network/asset_costs'): 'Expert model editor',
-    ('GET', '/api/network/asset_schema/{component}'): 'Expert model editor',
-    ('GET', '/api/network/catalog/{component}'): 'Expert model editor',
-    ('GET', '/api/projects/{name}/flow/scope'): 'Projects page / Workspace panel',
-    ('GET', '/api/projects/{name}/profiles/current'): 'Time series panel',
-    ('GET', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('GET', '/api/projects/{name}/reports/capabilities'): 'Reports panel',
-    ('GET', '/api/projects/{name}/reports/evidence_hash'): 'Reports panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
-    ('GET', '/api/projects/{name}/reports/{report_id}/versions/{version}'): 'Reports panel',
-    ('GET', '/api/projects/{name}/stress_profile_packs'): 'Projects page / Workspace panel',
-    ('GET', '/api/projects/{name}/studies/'): 'Decision studies panel',
-    ('GET', '/api/projects/{name}/studies/library'): 'Decision studies panel',
-    ('GET', '/api/projects/{name}/studies/{study_id}'): 'Decision studies panel',
-    ('GET', '/api/projects/{name}/studies/{study_id}/ledger'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/ledger.csv'): 'Decision studies panel',
-    ('GET', '/api/projects/{name}/studies/{study_id}/options/{option_id}/case'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/options/{option_id}/case.xlsx'): 'Decision studies panel',
-    ('GET', '/api/projects/{name}/studies/{study_id}/report'): 'Decision studies panel',
-    ('GET', '/api/results/asset/assets'): 'Results panel',
-    ('GET', '/api/results/curtailment/by_cause'): 'Results panel',
-    ('GET', '/api/results/eh_readiness'): 'Results panel',
     ('GET', '/api/results/energy_flows.csv'): 'Results panel',
     ('GET', '/api/results/investment_case/export.xlsx'): 'Results panel',
-    ('GET', '/api/results/loadflow-view'): 'Results panel',
     ('GET', '/api/results/process_uc_check'): 'Results panel',
     ('GET', '/api/results/process_view'): 'Results panel',
-    ('GET', '/api/results/run-view'): 'Results panel',
-    ('GET', '/api/simulation/commercial/poc'): 'Simulation and commercial configuration panels',
-    ('GET', '/api/simulation/value_flows/designer'): 'Simulation and commercial configuration panels',
-    ('PATCH', '/api/projects/{name}/scenario'): 'Projects page / Workspace panel',
-    ('PATCH', '/api/projects/{name}/settings'): 'Projects page / Workspace panel',
-    ('PATCH', '/api/projects/{name}/studies/{study_id}'): 'Decision studies panel',
     ('POST', '/api/campus-electrical/{name}/island/cuts/apply/cancel'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/island/preset'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/library/reset'): 'Campus electrical panel',
@@ -243,27 +201,10 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('POST', '/api/campus-electrical/{name}/milp/cancel'): 'Campus electrical panel',
     ('POST', '/api/gridspine/{name}/dispatch-source/external'): 'Control strategy, planning-to-dynamics study',
     ('POST', '/api/gridspine/{name}/readback/{hour}'): 'Control strategy, planning-to-dynamics study',
-    ('POST', '/api/network/lengths/from_geometry'): 'Expert model editor',
-    ('POST', '/api/network/lines/rescale_impedances'): 'Expert model editor',
-    ('POST', '/api/network/reset'): 'Expert model editor',
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
-    ('POST', '/api/projects/{name}/profiles/from-current'): 'Time series panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
-    ('POST', '/api/projects/{name}/reports'): 'Reports panel',
-    ('POST', '/api/projects/{name}/studies/preview'): 'Decision studies panel',
-    ('POST', '/api/projects/{name}/studies/{study_id}/findings/tornado/abort'): 'Decision studies panel',
-    ('POST', '/api/projects/{name}/studies/{study_id}/run/abort'): 'Decision studies panel',
-    ('POST', '/api/results/billing/preview'): 'Results panel',
-    ('POST', '/api/results/investment_case/abort'): 'Results panel',
-    ('POST', '/api/simulation/queue/cancel_queued'): 'Solve queue panel',
-    ('POST', '/api/simulation/queue/{job_id}/dismiss'): 'Solve queue panel',
-    ('POST', '/api/simulation/queue/{job_id}/requeue'): 'Solve queue panel',
     ('PUT', '/api/campus-electrical/{name}/campus'): 'Campus electrical panel',
     ('PUT', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
-    ('PUT', '/api/projects/{name}/flow/scope'): 'Projects page / Workspace panel',
-    ('PUT', '/api/projects/{name}/profiles/weather'): 'Time series panel',
-    ('PUT', '/api/projects/{name}/worksheet'): 'Projects page / Workspace panel',
-    ('PUT', '/api/simulation/finance'): 'Simulation and commercial configuration panels',
 }
 _KNOWN_GAPS_CEILING = 70
 
@@ -342,7 +283,7 @@ def test_served_by_names_real_tools():
 
 
 def test_ui_internal_stays_small():
-    assert len(UI_INTERNAL) <= 11 and 'series_file_upload' in UI_INTERNAL
+    assert len(UI_INTERNAL) <= 11 and 'series_json_put' in UI_INTERNAL
     assert all(20 <= len(entry['reason']) <= 160 for entry in UI_INTERNAL.values())
 
 
