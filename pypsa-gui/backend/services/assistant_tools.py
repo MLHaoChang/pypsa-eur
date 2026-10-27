@@ -648,6 +648,7 @@ def _preview_candidate(ctx, parsed):
     class runs through the native bulk handler on an isolated copy, so derived
     columns recompute and show as derived rows."""
     from services import change_log_service, chat_tools, network_crud
+    from services.asset_schema.derive import class_label
     from harness import edit_card
 
     targets = {}
@@ -666,7 +667,7 @@ def _preview_candidate(ctx, parsed):
             try:
                 network_crud._check_investment_parts(klass, {**current, **submitted}, row=merged)
             except HTTPException as exc:
-                workflow._refuse("invalid_edit_value", f"{'Storage' if klass == 'StorageUnit' else klass} {name!r}: {exc.detail}")
+                workflow._refuse("invalid_edit_value", f"{class_label(klass)} {name!r}: {exc.detail}")
 
     def run(klass):
         groups = {}
