@@ -298,7 +298,15 @@ component (`frontend/src/components/EditCard.tsx`).
   "not set" when absent); a whole-document payload (scope, study intake) shows
   only what differs. Study intake shows at most `STUDY_LEAF_CAP` rows plus a
   note, summarises lists and objects, and shows a secret-like key only as "set".
-  `tests/test_edit_card.py` pins the tools still without an adapter.
+  `tests/test_edit_card.py` pins the tools still without an adapter (none today; a new
+  settings edit tool needs its adapter in the same change).
+  The rest live one module per area: `edit_card_site` (connection, sites, finance, tariffs,
+  participants), `edit_card_library` (Library items, series, meter data, weather choice, map
+  geometry), `edit_card_reports`, `edit_card_campus` (gridspine and campus) and
+  `edit_card_records` (stress scenarios, asset health, study ledger, layout). Where a handler had
+  no pure validator the card needs, the handler's check was extracted (`_patched_study`,
+  `planned_config_update`, `prepare_item`, …) so the write and the card call one function.
+  `_edit_receipt` is the first key of the result, so a spilled or truncated result keeps it.
 - **Settings cards (LC-16 slice C, OJ-44).** `update_solver_config`,
   `update_meta` and `set_investment_period_weightings` run their own handler on
   an isolated copy (`edit_card._sandbox`), so the card refuses what the route

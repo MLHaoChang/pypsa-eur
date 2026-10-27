@@ -30,11 +30,8 @@ def test_every_write_tool_is_an_edit_or_a_named_non_edit():
     assert set(edit_card.SETTINGS_EDITS) <= writes, set(edit_card.SETTINGS_EDITS) - writes
 
 
-# Q3-CARDS-1: every settings edit has its own old → new adapter. Slice 2 moves the rest here.
-_NO_ADAPTER_YET = frozenset({
-    "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
-    "campus_set_island_config", "campus_set_library", "campus_draft_campus",
-})
+# Q3-CARDS-1: every settings edit has its own old → new adapter; a new edit tool without one is listed here.
+_NO_ADAPTER_YET = frozenset()
 
 
 def test_every_settings_edit_has_an_adapter():
