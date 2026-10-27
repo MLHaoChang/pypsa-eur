@@ -328,6 +328,28 @@ def test_the_milp_start_is_carded_and_its_card_starts_nothing(hub, monkeypatch):
     assert shown["k"] == 4 and shown["invest"] is True and shown["n_minus_1"] is True
 
 
+@pytest.mark.parametrize("decision, started", [("deny", 0), ("approve", 1)])
+def test_the_turn_loop_starts_no_milp_job_before_the_card_is_approved(hub, monkeypatch, decision, started):
+    from services import chat_service
+
+    calls = []
+    _spy(monkeypatch, ce, "start_milp_job", calls)
+    session = chat_service.ChatSession()
+    chat_tools.set_chat_session(session)
+    try:
+        collector, cards = [], []
+        tu = {"id": "tu-milp", "name": "campus_start_milp", "input": {**P, "k": 4}}
+        for event, data in chat_service._dispatch_real_tool_call(session, tu, collector):
+            if event == "tool_pending_confirmation":
+                assert calls == []  # the card is up; no job yet
+                cards.append(data["edit_card"])
+                session.record_decision(data["confirmation_token"], decision)
+    finally:
+        chat_tools.set_chat_session(None)
+    assert len(cards) == 1 and len(calls) == started
+    assert len(collector) == 1 and bool(collector[0].get("is_error")) is (decision == "deny")
+
+
 def test_a_second_milp_start_gets_the_handlers_own_409(hub, monkeypatch):
     monkeypatch.setitem(ce._MILP_SLOT, "active", {"state": "running", "project": "Other", "thread": None})
     monkeypatch.setattr(ce, "profiles", lambda project: {"eu_rfg_dcc_ce": "EU"}, raising=False)
