@@ -2814,7 +2814,8 @@ def _dispatch_real_tool_call(
                         with edit_cards.approved(edit_card["digest"]):
                             out = invoke(session, tool_name, args or {}, handler)
                         if isinstance(out, dict):
-                            out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
+                            # First, so a result the chat spills or truncates keeps its receipt.
+                            out = {"_edit_receipt": edit_cards.receipt(edit_card, args or {}), **out}
                         return out
                     return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.

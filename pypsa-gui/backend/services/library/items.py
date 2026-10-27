@@ -35,7 +35,7 @@ import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, ValidationError
@@ -201,11 +201,17 @@ def _write(target: Path, data: bytes, digest: str) -> None:
             os.unlink(tmp)
 
 
-def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
-             meta: dict | None = None, *, created_by: UUID | None = None,
-             root: Path | None = None) -> M.LibraryItemRef:
-    """Store `payload` as item `name` of `kind`; idempotent on content (the
-    series store's race rule: the unique key arbitrates, the loser re-reads)."""
+class PreparedItem(NamedTuple):
+    """What `put_item` would store: the validated name, meta and canonical bytes."""
+    name: str
+    meta: ItemMeta
+    data: bytes
+    digest: str
+
+
+def prepare_item(kind: str, name: str, payload: dict, meta: dict | None = None) -> PreparedItem:
+    """Every check `put_item` makes before it touches storage, and the canonical bytes it
+    would store. Pure: the edit card calls it, so it shows exactly what the write stores."""
     name = (name or "").strip()
     if not name or len(name) > _NAME_MAX:
         raise ValueError(f"item name must be 1..{_NAME_MAX} characters")
@@ -223,7 +229,15 @@ def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
     if meta_ok.scope != "org":
         raise ValueError("only shipped items are common; an organization's item has scope 'org'")
     data = _canonical_bytes(kind, model, payload)
-    digest = hashlib.sha256(data).hexdigest()
+    return PreparedItem(name, meta_ok, data, hashlib.sha256(data).hexdigest())
+
+
+def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
+             meta: dict | None = None, *, created_by: UUID | None = None,
+             root: Path | None = None) -> M.LibraryItemRef:
+    """Store `payload` as item `name` of `kind`; idempotent on content (the
+    series store's race rule: the unique key arbitrates, the loser re-reads)."""
+    name, meta_ok, data, digest = prepare_item(kind, name, payload, meta)
     rel = Path("items") / kind / f"{_slug(name)}-{digest[:16]}.json"
     _write(library_file(root or _default_root(), org_id, rel), data, digest)
     meta_json = json.dumps(meta_ok.model_dump(), sort_keys=True)

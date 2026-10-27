@@ -420,13 +420,9 @@ def get_study(study_id: str,
     return _out(_load(project, study_id))
 
 
-@router.patch("/{study_id}")
-def patch_study(study_id: str, body: StudyPatch,
-                project: AuthorizedProject = ProjectAccessDep,
-                db: DBSession = Depends(get_db),
-                user: User | None = Depends(optional_user)) -> dict:
-    _refuse_unless_enabled()
-    _check_lock(db, project, user)
+def _refuse_bad_patch(body: StudyPatch) -> None:
+    """The refusals that need no stored study: an unimplemented basis or perspective, the
+    `csv_text` rule and the `step` rule."""
     _refuse_outside_mvp1(body.settings)
     load = (body.intake or {}).get("load")
     if isinstance(load, dict) and "csv_text" in load:
@@ -441,42 +437,58 @@ def patch_study(study_id: str, body: StudyPatch,
             raise HTTPException(422, (
                 f"a PATCH for step {body.step!r} may only carry "
                 f"intake[{body.step!r}]"))
+
+
+def _patched_study(study: DecisionStudy, body: StudyPatch) -> DecisionStudy:
+    """The study a PATCH would store, validated and re-seeded as the route does. Pure: no
+    `updated_at`, no save. `patch_study` and the chat edit card both call it, so the card
+    refuses what the route refuses."""
+    data = study.model_dump(mode="json", by_alias=True)
+    if body.name is not None:
+        data["name"] = body.name
+    if body.intake is not None:
+        data["intake"] = {**data["intake"], **body.intake}
+    if body.settings is not None:
+        data.update(body.settings.model_dump(mode="json", exclude_unset=True))
+    try:
+        updated = DecisionStudy.model_validate(data)
+    except ValidationError as exc:
+        raise HTTPException(422, exc.errors(include_url=False,
+                                            include_context=False)) from None
+    if body.intake is not None and "tariff" in body.intake:
+        _refuse_bad_tariff(updated.intake)
+        if updated.ledger is not None:
+            # Gate S2 [S9]: a tariff change re-seeds the stored ledger, so
+            # its tariff rows (the demand-charge price, the energy level)
+            # follow the new tariff; a user value that no longer applies
+            # is flagged `needs_attention`, and the run refuses it.
+            try:
+                updated = updated.model_copy(update={
+                    "ledger": study_ledger.reseed_ledger(
+                        updated.ledger, _key_drivers(updated), updated.intake,
+                        _library_or_500())})
+            except study_library.LibraryError as exc:
+                raise HTTPException(422, str(exc)) from None
+    if updated.ledger is not None:
+        # S2: the badge reads the intake's load too, so an intake step
+        # (e.g. a meter upload) moves it without waiting for a ledger PUT.
+        updated = updated.model_copy(update={
+            "maturity": study_ledger.maturity_from_ledger(
+                updated.ledger, study_ledger.load_provenance(updated.intake))})
+    return updated
+
+
+@router.patch("/{study_id}")
+def patch_study(study_id: str, body: StudyPatch,
+                project: AuthorizedProject = ProjectAccessDep,
+                db: DBSession = Depends(get_db),
+                user: User | None = Depends(optional_user)) -> dict:
+    _refuse_unless_enabled()
+    _check_lock(db, project, user)
+    _refuse_bad_patch(body)
     with _WRITE_LOCK:
         study = _load(project, study_id)
-        data = study.model_dump(mode="json", by_alias=True)
-        if body.name is not None:
-            data["name"] = body.name
-        if body.intake is not None:
-            data["intake"] = {**data["intake"], **body.intake}
-        if body.settings is not None:
-            data.update(body.settings.model_dump(mode="json",
-                                                 exclude_unset=True))
-        data["updated_at"] = _now().isoformat()
-        try:
-            updated = DecisionStudy.model_validate(data)
-        except ValidationError as exc:
-            raise HTTPException(422, exc.errors(include_url=False,
-                                                include_context=False)) from None
-        if body.intake is not None and "tariff" in body.intake:
-            _refuse_bad_tariff(updated.intake)
-            if updated.ledger is not None:
-                # Gate S2 [S9]: a tariff change re-seeds the stored ledger, so
-                # its tariff rows (the demand-charge price, the energy level)
-                # follow the new tariff; a user value that no longer applies
-                # is flagged `needs_attention`, and the run refuses it.
-                try:
-                    updated = updated.model_copy(update={
-                        "ledger": study_ledger.reseed_ledger(
-                            updated.ledger, _key_drivers(updated), updated.intake,
-                            _library_or_500())})
-                except study_library.LibraryError as exc:
-                    raise HTTPException(422, str(exc)) from None
-        if updated.ledger is not None:
-            # S2: the badge reads the intake's load too, so an intake step
-            # (e.g. a meter upload) moves it without waiting for a ledger PUT.
-            updated = updated.model_copy(update={
-                "maturity": study_ledger.maturity_from_ledger(
-                    updated.ledger, study_ledger.load_provenance(updated.intake))})
+        updated = _patched_study(study, body).model_copy(update={"updated_at": _now()})
         return _save(project, updated)
 
 
@@ -1069,6 +1081,32 @@ def get_ledger(study_id: str,
                        maturity)
 
 
+def _ledger_after(study: DecisionStudy, ledger, body: "LedgerPut", changed_by: str | None, now):
+    """
+    The ledger a ``PUT .../ledger`` would store, from the stored (or seeded) ``ledger``;
+    nothing is saved. Raises ``LedgerEditError`` / ``LibraryError`` for a refused edit.
+    The route and the chat edit card both call this.
+    """
+    if body.reseed:
+        ledger = study_ledger.reseed_ledger(
+            ledger, _key_drivers(study), study.intake, _library_or_500())
+    if body.reset:
+        # The rows come back from the defaults the ledger (after any
+        # re-seed above) was seeded from, never another money year.
+        ledger = study_ledger.reset_rows(
+            ledger, body.reset, _key_drivers(study), study.intake,
+            _library_for_or_500(ledger))
+    ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
+    for edit in body.rows:
+        ledger = study_ledger.apply_user_row(
+            ledger, edit.key, edit.value, unit=edit.unit,
+            changed_by=changed_by, changed_at=now,
+            provenance=edit.provenance, source=edit.source,
+            source_year=edit.source_year, source_url=edit.source_url,
+            currency_year=edit.currency_year)
+    return ledger
+
+
 @router.put("/{study_id}/ledger")
 def put_ledger(study_id: str, body: LedgerPut,
                project: AuthorizedProject = ProjectAccessDep,
@@ -1080,25 +1118,7 @@ def put_ledger(study_id: str, body: LedgerPut,
         study = _load(project, study_id)
         ledger, _stored = _current_ledger(study)
         try:
-            if body.reseed:
-                ledger = study_ledger.reseed_ledger(
-                    ledger, _key_drivers(study), study.intake, _library_or_500())
-            if body.reset:
-                # The rows come back from the defaults the ledger (after any
-                # re-seed above) was seeded from, never another money year.
-                ledger = study_ledger.reset_rows(
-                    ledger, body.reset, _key_drivers(study), study.intake,
-                    _library_for_or_500(ledger))
-            ledger = study_ledger.with_study_currency_year(ledger, study.currency_year)
-            now = _now()
-            changed_by = str(user.id) if user is not None else None
-            for edit in body.rows:
-                ledger = study_ledger.apply_user_row(
-                    ledger, edit.key, edit.value, unit=edit.unit,
-                    changed_by=changed_by, changed_at=now,
-                    provenance=edit.provenance, source=edit.source,
-                    source_year=edit.source_year, source_url=edit.source_url,
-                    currency_year=edit.currency_year)
+            ledger = _ledger_after(study, ledger, body, str(user.id) if user is not None else None, _now())
         except (study_ledger.LedgerEditError, study_library.LibraryError) as exc:
             raise HTTPException(422, str(exc)) from None
         maturity = study_ledger.maturity_from_ledger(

@@ -9,6 +9,7 @@ tests/test_oj05_selected_line_edit_journey.py.
 """
 import json
 
+from fastapi import HTTPException
 import pypsa
 import pytest
 
@@ -27,6 +28,15 @@ def test_every_write_tool_is_an_edit_or_a_named_non_edit():
     assert writes - edits - named == set(), "classify each new write tool in harness/edit_card.py"
     assert named <= writes, named - writes
     assert set(edit_card.SETTINGS_EDITS) <= writes, set(edit_card.SETTINGS_EDITS) - writes
+
+
+# Q3-CARDS-1: every settings edit has its own old → new adapter; a new edit tool without one is listed here.
+_NO_ADAPTER_YET = frozenset()
+
+
+def test_every_settings_edit_has_an_adapter():
+    missing = set(edit_card.SETTINGS_EDITS) - set(edit_card.ADAPTERS)
+    assert missing == _NO_ADAPTER_YET, missing ^ _NO_ADAPTER_YET
 
 
 @pytest.fixture
@@ -287,3 +297,21 @@ def test_the_section_state_does_not_bind_the_card(grid, monkeypatch):
     first["section_state"] = edit_card._section_state("connection")  # the state moved on
     edit_card.require_current("update_component", {"component_class": "Line", "name": "L1",
                                                    "attrs": {"s_nom": 9.0}}, first)
+
+
+@pytest.mark.parametrize("partial,kind", [
+    ({"solve_strategy": "rolling", "rolling_horizon": 24, "rolling_overlap": 24}, "rolling_overlap_exceeds_horizon"),
+    ({"solve_strategy": "rolling", "rolling_horizon": 0}, "rolling_horizon_invalid"),
+    ({"solve_strategy": "rolling", "rolling_horizon": 48, "rolling_overlap": -1}, "rolling_overlap_invalid"),
+])
+def test_solver_card_refuses_an_unusable_rolling_window(grid, partial, kind):
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("update_solver_config", {"partial": partial})
+    assert exc.value.detail["error_kind"] == kind
+
+
+def test_solver_card_allows_turning_rolling_off_with_a_stale_window(grid):
+    cfg = PyPSAService.get_active_context().solver_state["solver_config"]
+    cfg.solve_strategy, cfg.rolling_horizon, cfg.rolling_overlap = "rolling", 24, 24  # legacy pair
+    card = edit_card.preview("update_solver_config", {"partial": {"solve_strategy": "full"}})
+    assert [r["field"] for r in card["rows"]] == ["solve_strategy"]
