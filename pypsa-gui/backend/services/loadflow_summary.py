@@ -25,7 +25,7 @@ silently ranked as zero.
 Historical runs are not recomputed here: ``run_id`` is resolved through the
 run evidence store. The newest completed run whose inputs are still current
 answers with the current summary; any other run answers from the ``loadflow``
-section captured when it finished (``run_evidence._loadflow_section``), and a
+section captured when it finished (``retained_results``), and a
 run without that section answers a typed unavailable.
 """
 from __future__ import annotations
@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 
-from services import run_evidence
+from services import retained_results, run_evidence
 from services.pypsa_service import PyPSAService
 
 SOURCES = ("lopf", "ac_pf")
@@ -119,19 +119,9 @@ _RETAINED_KEYS = ("project_id", "source", "window", "solve", "claims", "bases_pr
 def _historical(run_id: str, source: str | None = None, limit: int | None = None,
                 window_from: int | None = None, window_to: int | None = None) -> dict:
     """A past run's load flow from the section captured when it finished."""
-    try:
-        record = run_evidence.get_run_evidence(run_id, HISTORICAL_SECTION)
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, dict) else {}
-        if detail.get("error_kind") in ("run_not_found", "evidence_unavailable"):
-            return _unavailable(
-                "historical_loadflow_unavailable",
-                "No load flow was kept for this run: it was solved before load flow was "
-                "captured, ran outside a chat-started solve, or its section is missing, "
-                "corrupt or not finished. The current results are not this run.",
-                run_id=run_id, reason=detail.get("reason") or detail.get("error_kind"),
-                scope="historical")
-        raise
+    record, refused = retained_results.historical(HISTORICAL_SECTION, run_id)
+    if refused is not None:
+        return refused
     stored = record.get("data") or {}
     data = {k: stored[k] for k in _RETAINED_KEYS if k in stored}
     window = data.get("window") or {}
@@ -151,7 +141,7 @@ def _historical(run_id: str, source: str | None = None, limit: int | None = None
         data["top_truncated"] = len(top) > limit or bool(stored.get("top_truncated"))
     return {**data, "status": "ok", "scope": "historical", "run_id": run_id,
             "section": HISTORICAL_SECTION,
-            "run": {"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": False},
+            "run": retained_results.run_ref(run_id, record, current=False),
             "scope_note": "This run's load flow as captured when it finished; the Load flow tab "
                           "shows the current results, not this run."}
 
@@ -415,40 +405,13 @@ def get_loadflow_view(source: str = "lopf", window_from: int | None = None,
         return _loadflow(source, MAX_LIMIT, window_from, window_to, None, view=True)
 
 
-def _run_binding(run_id: str) -> tuple[dict | None, dict]:
-    """Is `run_id` the solve the current results came from?
-
-    Only when it is the project's newest completed run, its recorded inputs are
-    the ones the current results were solved from, and nothing changed since.
-    Otherwise the current results are not that run and are never reported as it.
-    """
-    from services import workflow_tools
-
-    try:
-        record = run_evidence.get_run_evidence(run_id)
-    except HTTPException:
-        return None, {"run_is_current": False, "inputs_changed_since_run": None}
-    latest = run_evidence.list_project_runs(limit=1, status="completed")["items"]
-    recorded = record.get("fingerprint")
-    n = PyPSAService.get_network()
-    # None = unknown: a run without a recorded fingerprint cannot be compared.
-    changed = None if not isinstance(recorded, str) else (
-        recorded != workflow_tools._network_input_fingerprint(PyPSAService.get_active_context()))
-    if (record.get("status") == "completed" and changed is False
-            and latest and latest[0]["run_id"] == run_id
-            and getattr(n, "meta", {}).get("assistant_solve_input_fingerprint") == recorded):
-        return ({"run_id": run_id, "finished_at": record.get("finished_at"), "is_current": True},
-                {"run_is_current": True, "inputs_changed_since_run": False})
-    return None, {"run_is_current": False, "inputs_changed_since_run": changed}
-
-
 def _loadflow(source: str, limit: int, window_from: int | None,
               window_to: int | None, run_id: str | None, *, view: bool = False,
               run: dict | None = None) -> dict:
     _check_args(source, limit, window_from, window_to, run_id)
     _root, project_id, _owner = run_evidence._authority()
     if run_id is not None:
-        run, facts = _run_binding(run_id)
+        run, facts = retained_results.run_binding(run_id)
         if run is not None:
             return {**_loadflow(source, limit, window_from, window_to, None, run=run),
                     "run_id": run_id, **facts}

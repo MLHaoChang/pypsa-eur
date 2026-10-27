@@ -1,7 +1,7 @@
 # LC-03 — generic native evidence and navigation adapters
 
 Status: ready-for-agent
-Progress: Result-view registry #407, walk #410, retained load flow #416 merged; only load-flow family retained, LC-14 reach fixes open.
+Progress: Result-view registry #407, walk #410, retained load flow #416 merged; common retained adapter + Summary family (PR-D, below) open; LC-14 reach fixes outsourced.
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01/02 and current native evidence stores
@@ -145,3 +145,40 @@ Kept, with reasons:
   finishing after a solve makes that solve's run historical, which is honest.
 - The capture reuses the read path (and its network guard) on the monitor
   thread; a busy guard skips the section with the warning above.
+
+### PR-D, common retained adapter + Summary family (2026-10-27)
+
+Rebaselined on master `926b07d6d`. Branch `claude/lc03-retained-summary`.
+
+- `services/retained_results.py`: the typed common adapter. One `Retained`
+  row per family (section, view, capture, refusal kind); `capture` binds the
+  run's context and actor once, runs each family, and drops a section that
+  fails, refuses or exceeds `MAX_SECTION_BYTES` (an oversized section used to
+  refuse the whole manifest) with `<section>_not_captured`. `historical` and
+  `run_binding` are the load-flow code moved, now shared.
+- Load flow ported onto it unchanged (its tests pass untouched, bar the
+  registry pin).
+- Summary family: section `results_summary` keeps `get_results`
+  `statistics` and `cost_breakdown` exactly as they answered at completion,
+  minus today's freshness keys, and only while `results_current` is true.
+  `get_results(result_kind, run_id)` answers the run: current read for the
+  current run, the kept section for an older one, typed refusal otherwise;
+  other kinds refuse `historical_scope_mismatch` with `kept_kinds`.
+- RED: `tests/test_retained_summary.py` (oj-grid solved at Gas 50 then 60;
+  hand oracle opex = 50 or 60 x sum(90 - 80 pu_t)). On master `get_results`
+  has no `run_id`.
+- Commands: `pytest tests/test_retained_summary.py tests/test_retained_loadflow.py
+  tests/test_result_views.py tests/test_run_evidence_*.py
+  tests/test_vs2_results_walk_journey.py tests/test_oj01_latest_loadflow_journey.py`
+  pass; `smoke/assistant_inventory.py --write` regenerated.
+
+Kept, with reasons:
+- No UI change: the Results tabs still show the current results; a past
+  run's answer says so in `scope_note`. Queue, study and report runs still
+  refuse until each gets its own capture.
+- A network whose summary exceeds 16 KB keeps no summary section (warned),
+  rather than a trimmed one that would not match the read.
+
+Remaining gates: the other families (capacity, dispatch, prices, emissions)
+one adapter per PR, which LC-21's chapters read; UI/export parity for past
+runs; LC-T09/T10 browser cases for historical views.

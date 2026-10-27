@@ -694,13 +694,14 @@
         "source",
         "detail",
         "offset",
-        "limit"
+        "limit",
+        "run_id"
       ],
       "required": [
         "result_kind"
       ],
       "safety_tier": "read",
-      "schema_sha256": "93630057d488ce9c3daaddedf55ff1892830d78f8753bba9f3cc9b5a78f0d6ad",
+      "schema_sha256": "13a80248409e52dd59502b7a8f6acde6e33edb47c0c24000da6309aba58ad232",
       "behavioral_fixture": "pending"
     },
     {

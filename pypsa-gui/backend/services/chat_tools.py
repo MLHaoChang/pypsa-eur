@@ -678,14 +678,17 @@ _RESULTS_NO_DATA_MESSAGE = (
 
 
 def get_results(result_kind: str, source: str = "lopf", detail: str | None = None,
-                offset: int = 0, limit: int | None = None) -> Any:
+                offset: int = 0, limit: int | None = None, run_id: str | None = None) -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
     handler, with ac_pf_status mapped to a distinct path via the lookup dict.
     `source` ('lopf' | 'ac_pf') is forwarded where the handler supports it.
     `detail` ('summary' | 'lines') with `offset` / `limit` shapes the kinds
     that have a summary (value_flows, IC P3 WP3.4) and is ignored elsewhere.
+    `run_id` (LC-03) answers for one run: see `_results_for_run`.
     """
+    if run_id is not None:
+        return _results_for_run(result_kind, run_id)
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
@@ -698,6 +701,41 @@ def get_results(result_kind: str, source: str = "lopf", detail: str | None = Non
         result = (_value_flow_lines_page(result, offset, limit) if detail == "lines"
                   else _value_flows_summary(result))
     return _with_freshness(result)
+
+
+def _results_for_run(result_kind: str, run_id: Any) -> dict:
+    """LC-03: one run's results, never another run's.
+
+    The run the current results came from answers with the current read; any
+    other run answers from the section kept when it finished
+    (`retained_results`), or a typed unavailable naming the run. Only the
+    kinds a family keeps take a run_id.
+    """
+    from services import retained_results, run_evidence
+
+    if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
+        raise HTTPException(422, {"error_kind": "invalid_results_argument",
+                                  "message": "run_id must be a run id from list_project_runs."})
+    if result_kind not in retained_results.SUMMARY_KINDS:
+        return retained_results.unavailable(
+            "historical_scope_mismatch",
+            f"result_kind {result_kind!r} is not kept per run; run_id reads only these kinds.",
+            run_id=run_id, scope="historical", kept_kinds=list(retained_results.SUMMARY_KINDS))
+    run_evidence._authority()
+    run, facts = retained_results.run_binding(run_id)
+    if run is not None:
+        return {"status": "ok", "scope": "current", "result_kind": result_kind,
+                "data": get_results(result_kind), "run_id": run_id, "run": run, **facts}
+    record, refused = retained_results.historical("results_summary", run_id)
+    if refused is not None:
+        return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
+                "next_step": "Say this run is not the current result and offer to re-run."}
+    return {"status": "ok", "scope": "historical", "result_kind": result_kind,
+            "data": (record.get("data") or {}).get(result_kind),
+            "section": "results_summary", "run_id": run_id,
+            "run": retained_results.run_ref(run_id, record, current=False), **facts,
+            "scope_note": "This run's results as kept when it finished; the Results tabs "
+                          "show the current results, not this run."}
 
 
 def _with_freshness(result: Any) -> Any:
