@@ -428,11 +428,14 @@ def test_abort_endpoint_sets_abort_event(client, seeded_identity):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_concurrent_confirm_one_succeeds_one_404(client, seeded_identity):
+def test_concurrent_confirm_one_succeeds_one_404(client, seeded_identity, monkeypatch):
     """
     Two concurrent /confirm POSTs against the SAME token. _lock serialises:
     one succeeds (200), the other observes a missing token (404).
     """
+    # The autouse 0.3s TTL made this race expiry on a loaded runner (the loser
+    # saw 409 `confirmation_expired`, not 404); same fix as the "within ttl" test.
+    monkeypatch.setattr(harness_session, "CONFIRMATION_TTL_SECONDS", 60.0)
     sess = chat_service.get_or_create_session("sess-race", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "X"},
