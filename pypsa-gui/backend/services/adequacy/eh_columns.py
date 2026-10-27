@@ -71,6 +71,16 @@ def coerce_eh_value(component_class: str, col: str, value):
         if not math.isfinite(v) or v < 0:
             raise ValueError(f"{col}: must be a finite number >= 0, got {v!r}")
         return v
+    if kind == "fraction":
+        if value is None or value == "":
+            return float("nan")
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{col}: expected a number, got {value!r}") from None
+        if not math.isfinite(v) or not 0 <= v <= 1:
+            raise ValueError(f"{col}: must be within 0..1, got {v!r}")
+        return v
     if kind == "role":
         v = "" if value is None else str(value).strip()
         if v in EH_INTERNAL_ROLES:
@@ -118,8 +128,8 @@ def coerce_eh_value(component_class: str, col: str, value):
 
 
 def _default(kind: str):
-    return {"bool": False, "float_nonneg": float("nan"), "role": "", "tier": "", "process_role": "",
-            "text": "", "harmonic_source": "", "harmonic_spectrum": ""}[kind]
+    return {"bool": False, "float_nonneg": float("nan"), "fraction": float("nan"), "role": "", "tier": "",
+            "process_role": "", "text": "", "harmonic_source": "", "harmonic_spectrum": ""}[kind]
 
 
 def ensure_eh_column(n, component_class: str, col: str) -> None:
@@ -131,7 +141,7 @@ def ensure_eh_column(n, component_class: str, col: str) -> None:
     kind = eh_columns_for(component_class)[col]
     df[col] = pd.Series(_default(kind), index=df.index,
                         dtype=bool if kind == "bool" else
-                        float if kind == "float_nonneg" else object)
+                        float if kind in ("float_nonneg", "fraction") else object)
 
 
 def normalise_eh_columns(n) -> None:
@@ -155,7 +165,7 @@ def normalise_eh_columns(n) -> None:
                         except ValueError:
                             return False
                     df[col] = df[col].map(_b).astype(bool)
-                elif kind == "float_nonneg":
+                elif kind in ("float_nonneg", "fraction"):
                     df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
                 else:
                     df[col] = df[col].map(

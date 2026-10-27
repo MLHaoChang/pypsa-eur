@@ -783,7 +783,7 @@
         "attrs"
       ],
       "safety_tier": "write",
-      "schema_sha256": "a3ebf70f98f365c1f6deadf6c1855bd6b2ae003275fecad753db55969e1c8c4c",
+      "schema_sha256": "c5d844aeba6c3495bfc3d4a6ab3474ecdf7634c45f6bde3fa9007ea8dfc67989",
       "behavioral_fixture": "pending"
     },
     {

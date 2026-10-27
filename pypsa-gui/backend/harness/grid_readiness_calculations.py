@@ -53,7 +53,8 @@ def _registered():
     from services.adequacy import grid_readiness as G
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
-            "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE}
+            "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE,
+            "voltage_unbalance": G.RULE_UNBALANCE}
 
 
 def _named(row_id, prefixes):
