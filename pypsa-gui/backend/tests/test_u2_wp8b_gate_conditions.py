@@ -121,7 +121,8 @@ def test_a_centre_refusal_the_run_did_not_record_is_a_422_on_the_tornado_post(
     findings, with the code and the message, and starts nothing.
     """
     from services.study import engine_adapter as A
-    from tests.test_study_tornado_routes import _run
+    # Money-year 01: the report tests' `_run` states the custom tariff in 2025 EUR.
+    from tests.test_study_report_routes import _run
 
     name = "z3-centre"
     sid = _run(client, api_project, name)

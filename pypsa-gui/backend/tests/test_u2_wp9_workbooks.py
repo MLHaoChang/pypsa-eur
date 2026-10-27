@@ -65,7 +65,8 @@ def _npv_cell(ws):
 def test_the_case_route_serves_the_engines_workbook_with_the_guided_sheets(
         client, api_project, studies_on, fake):
     from services.http_filenames import content_disposition
-    from tests.test_study_tornado_routes import _run
+    # Money-year 01: the report tests' `_run` states the custom tariff in 2025 EUR.
+    from tests.test_study_report_routes import _run
 
     name = "wp9-case"
     sid = _run(client, api_project, name)

@@ -19,7 +19,9 @@ import threading
 
 import pytest
 
-from tests.test_study_tornado_routes import _run, wait_tornado
+# Money-year 01: the report tests' `_run` states the custom tariff in 2025 EUR.
+from tests.test_study_report_routes import _run
+from tests.test_study_tornado_routes import wait_tornado
 
 
 @pytest.fixture

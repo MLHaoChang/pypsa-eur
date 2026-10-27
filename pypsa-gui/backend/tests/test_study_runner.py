@@ -793,6 +793,10 @@ def test_the_production_run_bills_on_the_engine_and_seeds_from_the_pack(
     rec = wait_run(client, "wp8-run", sid, timeout=1200.0)
     assert rec["status"] == "done", rec
     run = client.get(f"/api/projects/wp8-run/studies/{sid}/run").json()
+    import sys
+    print("DEBUG", json.dumps({o: run["details"][o]["bill"] for o in ("none", "bess_2h")}, default=str), file=sys.stderr)
+    case = client.get(f"/api/projects/wp8-run/studies/{sid}/options/bess_2h/case").json()
+    print("DEBUGCASE", case.get("kpis"), WP0["golden_s5"]["bess_2h"], file=sys.stderr)
     tol = WP0["tolerances"]
     for option in ("none", "bess_2h"):
         bill = run["details"][option]["bill"]

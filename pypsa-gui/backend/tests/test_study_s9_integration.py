@@ -370,7 +370,9 @@ def test_a_tornado_stops_at_the_first_solve_past_the_deadline(
     the record carries the typed error.
     """
     from services import solver_service
-    from tests.test_study_tornado_routes import _run, _variant_rows, wait_tornado
+    # Money-year 01: the report tests' `_run` states the custom tariff in 2025 EUR.
+    from tests.test_study_report_routes import _run
+    from tests.test_study_tornado_routes import _variant_rows, wait_tornado
 
     solver = _HangsOnFirstVariant()
     monkeypatch.setattr(solver_service, "run_simulation", solver)

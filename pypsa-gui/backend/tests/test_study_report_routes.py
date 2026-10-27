@@ -15,7 +15,18 @@ import pytest
 
 from tests.study_s4_support import create_pack_study, enable_studies, wait_run
 from tests.test_study_runner import FakeSolver
-from tests.test_study_tornado_routes import NO_PV_TOU, _run, wait_tornado
+from tests.test_study_tornado_routes import NO_PV_TOU as _TORNADO_INTAKE
+from tests.test_study_tornado_routes import TOU_DC, wait_tornado
+from tests.test_study_tornado_routes import _run as _tornado_run
+
+# Money-year 01 (MONEY-YR-SEED-1): the study's money is 2025 EUR, and
+# `currency_year_mixed` refuses a 2020 tariff against the 2025 rows, so the
+# report's custom tariff states 2025.
+NO_PV_TOU = {**_TORNADO_INTAKE, "tariff": {"custom": {**TOU_DC, "currency_year": 2025}}}
+
+
+def _run(client, api_project, name, intake=NO_PV_TOU):
+    return _tornado_run(client, api_project, name, intake=intake)
 
 XSS = "<script>alert(1)</script>"
 

@@ -15,7 +15,17 @@ import pytest
 
 from tests.golden import site_fixture as sf
 
-META = {"currency": "EUR", "currency_year": 2020, "tariff_id": "t"}
+
+
+def _study_money_year() -> int:
+    """The study's money: the pinned pack's currency year (a tariff in another
+    year would be refused `currency_year_mixed` against the seeded rows)."""
+    from services.study import library as L
+
+    return L.load_defaults().pack.finance.currency_year
+
+
+META = {"currency": "EUR", "currency_year": _study_money_year(), "tariff_id": "t"}
 
 
 def _C():
