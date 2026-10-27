@@ -69,6 +69,9 @@ inventory_overlap_re='^pypsa-gui/backend/harness/catalogue\.py$'
 # overlap; a PR touching the manifest or a fragment also runs these.
 kinds_re='^pypsa-gui/tool-error-kinds(\.json$|\.d/)'
 kinds_tests=(tests/test_tool_error_kind_manifest.py tests/test_json_fragments.py)
+# Route-parity declarations arrive as fragments too; a PR touching them runs these.
+decl_re='^pypsa-gui/backend/smoke/assistant_route_parity_declarations(\.json$|\.d/)'
+decl_tests=(tests/test_assistant_route_parity.py tests/test_route_chat_disposition.py tests/test_json_fragments.py)
 # Frontend tests that read the tool list or the kind manifest (#766 turned
 # master red through ChatPanel.sendRequest); run when either changes.
 tool_list_re='(^|/)harness/(catalogue|toolsets)|(^|/)services/chat_tools|(^|/)chat_tools'
@@ -153,6 +156,7 @@ tests_to_run=("${semantic_tests[@]}")
 need_sem=0 need_vt=0
 grep -Eq "$tool_list_re" <<<"$changed" && need_vt=1
 grep -Eq "$kinds_re" <<<"$changed" && { tests_to_run+=("${kinds_tests[@]}"); need_vt=1; }
+grep -Eq "$decl_re" <<<"$changed" && { tests_to_run+=("${decl_tests[@]}"); need_sem=1; }
 { grep -Eq "$semantic_re" <<<"$changed" || ((need_vt || ${#inv_overlap[@]})); } && need_sem=1
 unmapped=() pytest_files=() vitest_files=() tested=()
 if ((!need_sem && ${#code_files[@]} == 0)); then

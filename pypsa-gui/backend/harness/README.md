@@ -704,8 +704,7 @@ declarations in `smoke/assistant_route_parity_declarations.d/`
 (`smoke/json_fragments.py` merges them and fails on a duplicate). A declaration or
 `KNOWN_GAPS` row whose route a tool now serves stays in place and passes as stale;
 the coordinator's sweep deletes it (`smoke/prune_stale_declarations.py`). New tool
-blocks still go at the end of `TOOLS`, because catalogue order breaks selection
-ties.
+blocks go at the end of TOOLS (and of the matching chat_tools section). Existing tools then keep their selection tie-breaks, which `wiring._bounded_tools` resolves toward the earlier index. Two PRs that append at the same anchor conflict as text: resolve it by keeping both blocks, the earlier-merged PR's first, then run `assistant_inventory.py --check` and the tool-selection tests at the merge.
 The assistant can navigate all current Results tabs and panel targets, including
 adequacy/FMEA, workspace/settings/GridSpine/reports/campus electrical. Invalid
 navigation IDs/types are refused by the shared handler before a UI event emits.

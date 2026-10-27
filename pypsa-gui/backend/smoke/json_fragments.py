@@ -24,7 +24,12 @@ def fragment_dir(base: Path) -> Path:
 
 def fragment_files(base: Path) -> list[Path]:
     folder = fragment_dir(base)
-    return sorted(folder.glob('*.json')) if folder.is_dir() else []
+    if not folder.is_dir():
+        return []
+    stray = sorted(p.name for p in folder.iterdir() if p.suffix != '.json' and p.name != 'README.md')
+    if stray:
+        raise ValueError(f'{folder}: only *.json fragments and README.md belong here, not {stray}')
+    return sorted(folder.glob('*.json'))
 
 
 def _read_object(path: Path) -> dict:
@@ -35,6 +40,13 @@ def _read_object(path: Path) -> dict:
     if not isinstance(data, dict):
         raise ValueError(f'{path}: top level must be a JSON object')
     return data
+
+
+def _shared_keys(items: list) -> set:
+    """The keys every object item in the base list has; empty when the items are not objects."""
+    if not items or not all(isinstance(item, dict) for item in items):
+        return set()
+    return set.intersection(*(set(item) for item in items))
 
 
 def load_merged(base: Path) -> dict:
@@ -59,7 +71,10 @@ def load_merged(base: Path) -> dict:
                 continue
             if not isinstance(value, list):
                 raise ValueError(f'{path}: {key!r} must be a list')
+            required = _shared_keys(merged[key])
             for item in value:
+                if required and not (isinstance(item, dict) and required <= item.keys()):
+                    raise ValueError(f'{path}: each {key} item needs the keys {sorted(required)}; got {item!r}')
                 text = json.dumps(item, sort_keys=True)
                 if text in seen[key]:
                     raise ValueError(f'{path}: duplicate {key} item {text}')

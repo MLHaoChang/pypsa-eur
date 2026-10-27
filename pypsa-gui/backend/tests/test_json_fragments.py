@@ -33,7 +33,7 @@ def test_without_fragments_the_base_is_returned_unchanged(base):
 def test_fragments_merge_in_file_name_order(base):
     _fragment(base, 'claude-b.json', {'rows': [{'path': '/b'}], 'kinds': {'b': {}}})
     _fragment(base, 'claude-a.json', {'$comment': 'ignored', 'rows': [{'path': '/z'}], 'kinds': {'z': {}}})
-    _fragment(base, 'notes.txt', 'not json and not read')
+    _fragment(base, 'README.md', 'not json and not read')
     merged = load_merged(base)
     assert [r['path'] for r in merged['rows']] == ['/a', '/z', '/b']
     assert list(merged['kinds']) == ['a', 'z', 'b']
@@ -48,12 +48,21 @@ def test_fragments_merge_in_file_name_order(base):
     ('x.json', {'rows': {}}, "'rows' must be a list"),
     ('x.json', {'kinds': {'a': {'surface': 'banner'}}}, "kinds already defines ['a']"),
     ('x.json', {'rows': [{'path': '/a'}]}, 'duplicate rows item'),
+    ('x.json', {'rows': [{'method': 'GET'}]}, "each rows item needs the keys ['path']"),
+    ('x.json', {'rows': ['/b']}, "each rows item needs the keys ['path']"),
 ])
 def test_a_bad_fragment_fails_and_names_its_file(base, name, data, expected):
     path = _fragment(base, name, data)
     with pytest.raises(ValueError) as err:
         load_merged(base)
     assert str(path) in str(err.value) and expected in str(err.value)
+
+
+@pytest.mark.parametrize('name', ['typo.JSON', 'x.json5', 'notes.txt'])
+def test_a_file_that_is_not_a_fragment_fails_instead_of_being_skipped(base, name):
+    _fragment(base, name, '{}')
+    with pytest.raises(ValueError, match=name.replace('.', r'\.')):
+        load_merged(base)
 
 
 def test_two_fragments_may_not_define_the_same_kind(base):

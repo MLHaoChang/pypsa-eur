@@ -50,7 +50,12 @@ const fragments = existsSync(FRAGMENT_DIR)
   : []
 const kinds: Record<string, Entry> = { ...read(MANIFEST_PATH).kinds }
 for (const path of fragments) {
-  for (const [kind, entry] of Object.entries(read(path).kinds ?? {})) {
+  const fragment = read(path) as Record<string, unknown>
+  const unknown = Object.keys(fragment).filter((k) => k !== '$comment' && k !== 'kinds')
+  if (unknown.length) throw new Error(`${path}: unknown keys ${unknown.join(', ')}`)
+  const fragmentKinds = fragment.kinds ?? {}
+  if (typeof fragmentKinds !== 'object' || Array.isArray(fragmentKinds)) throw new Error(`${path}: kinds must be an object`)
+  for (const [kind, entry] of Object.entries(fragmentKinds as Record<string, Entry>)) {
     if (kind in kinds) throw new Error(`${path}: kind ${kind} is already defined`)
     kinds[kind] = entry
   }
