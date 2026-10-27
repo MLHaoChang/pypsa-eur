@@ -76,7 +76,8 @@ def derive_composite(component_class: str, parts: Mapping[str, Any], *, discount
             continue
         life = number(parts.get(spec.column("lifetime")) if spec.own_lifetime else asset_lifetime)
         if life is None or not math.isfinite(life) or life <= 0:
-            raise ValueError(f"{component_class} {spec.name} part is priced but has no lifetime")
+            label = "Storage" if component_class == "StorageUnit" else component_class
+            raise ValueError(f"{label} {spec.name} part is priced but has no lifetime")
         share = number(parts.get(spec.column("fom_share"))) or 0.0
         per_unit = overnight * (scales.get(spec.scale_by, 1.0) if spec.scale_by else 1.0)
         capital += per_unit * _annuity(float(discount_rate), life)

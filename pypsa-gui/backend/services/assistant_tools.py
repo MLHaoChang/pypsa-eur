@@ -666,7 +666,7 @@ def _preview_candidate(ctx, parsed):
             try:
                 network_crud._check_investment_parts(klass, {**current, **submitted}, row=merged)
             except HTTPException as exc:
-                workflow._refuse("invalid_edit_value", f"{klass} {name!r}: {exc.detail}")
+                workflow._refuse("invalid_edit_value", f"{'Storage' if klass == 'StorageUnit' else klass} {name!r}: {exc.detail}")
 
     def run(klass):
         groups = {}

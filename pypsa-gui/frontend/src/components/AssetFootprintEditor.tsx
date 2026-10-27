@@ -12,7 +12,7 @@ export default function AssetFootprintEditor({ componentClass, name }: Props) {
   const [open, setOpen] = useState(false)
   const project = useUIStore(s => s.currentProject)
   if (!FOOTPRINT_CLASSES.has(componentClass)) return null
-  return <details className="rounded border border-border bg-bg p-2 text-[11px] max-w-72" onToggle={e => setOpen(e.currentTarget.open)}>
+  return <details className="rounded border border-border bg-bg p-2.5 text-[11px] block w-full" onToggle={e => setOpen(e.currentTarget.open)}>
     <summary className="cursor-pointer font-semibold text-text">Footprint (optional)</summary>
     {open && <FootprintFields key={`${project}:${componentClass}:${name}`} componentClass={componentClass} name={name} />}
   </details>
