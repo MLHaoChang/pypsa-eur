@@ -1418,6 +1418,126 @@
     "not_a_shaped_profile": {
       "surface": "inline",
       "why": "The requested shaped artifact has no calibration receipt. Select a calibrated artifact or use pending for an unshaped candidate; no network state changed."
+    },
+    "change_component_missing": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A named asset is not in the project; the message lists the existing names so the model can correct the edit (OJ-23)."
+    },
+    "change_preflight_failed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The candidate network fails validation; the project was not modified and the model says so."
+    },
+    "change_selection_empty": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A select names no asset (LC-16 OJ-22); the message lists the carriers or buses present so the model can ask or correct."
+    },
+    "change_series_shadowed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A member's field has a time series that overrides the static value at solve time (LC-16 OJ-22); the model points to the time series instead."
+    },
+    "duplicate_change": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The same asset and field appear twice in one preview; the model merges them and previews again."
+    },
+    "invalid_change_attribute": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The field is not an editable numeric or true/false parameter; the model reads get_component_schema and retries."
+    },
+    "invalid_change_selector": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The class has no carrier or bus to select by (LC-16 OJ-22); the message names the keys it does have."
+    },
+    "invalid_change_value": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A value or scale result is out of range, not whole for an integer field, or a per-unit share above 1; the message names the members."
+    },
+    "invalid_changes": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The changes argument has the wrong shape; the message states the shape."
+    },
+    "invalid_edit_value": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A value has the wrong type for its field (e.g. a number for a flag); the model corrects it."
+    },
+    "invalid_preview": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The preview is too large or no longer matches its reviewed record; the model splits it or makes a new preview."
+    },
+    "preview_apply_uncertain": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. An earlier apply was interrupted; the model inspects inputs and makes a new preview."
+    },
+    "preview_not_found": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The preview_id does not exist for this owner and project; the model makes a new preview."
+    },
+    "preview_stale": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. Project inputs changed since the preview; the model makes a new preview."
+    },
+    "project_busy": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. A solve is running; the model says to wait for it before previewing or applying."
+    },
+    "project_changed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The active project changed while a chart or delivery was built; the model retries in the intended project."
+    },
+    "chart_data_missing": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. No series exists for these assets and attribute; the model says so."
+    },
+    "chart_invalid_data": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The chart data holds non-finite values; the model says so."
+    },
+    "chart_results_unavailable": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. Results do not match the current inputs; the model suggests solving first."
+    },
+    "chart_source_changed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. Chart inputs or data changed while rendering; the model retries."
+    },
+    "chart_too_many_rows": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The series exceeds 5000 rows; the model picks a shorter one."
+    },
+    "invalid_chart": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The chart request lacks a component, source or 1–8 unique names; the message states the shape."
+    },
+    "invalid_chart_attribute": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The attribute does not match the chosen input/result source; the model corrects it."
+    },
+    "delivery_file_changed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. An artifact changed since it was made; the model regenerates it before delivery."
+    },
+    "delivery_too_large": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The delivery exceeds 25 MB; the model narrows it."
+    },
+    "invalid_delivery": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The delivery needs 1–20 unique file ids and a short .zip name; the model corrects it."
+    },
+    "import_expansion_too_large": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The workbook or import expands beyond 50 MB; the model says so."
+    },
+    "import_file_changed": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The uploaded bytes no longer match their hash; the model asks for the file again."
+    },
+    "invalid_import_format": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The format is not netcdf, csv_bundle, excel or matpower; the model names those."
+    },
+    "invalid_capability_query": {
+      "surface": "inline",
+      "why": "A preview, apply, chart, delivery or import tool's own refusal (workflow._refuse in services/assistant_tools.py); the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The capability query needs a short goal and a limit of 1–8; the model corrects it."
     }
   }
 }
