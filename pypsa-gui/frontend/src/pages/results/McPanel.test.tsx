@@ -433,7 +433,7 @@ describe('McPanel', () => {
   it('shows the goal\'s draws read-only and sends none: the backend fills them', async () => {
     const user = await openPanel()
     expect(screen.queryByLabelText(/draws/i)).toBeNull()
-    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe('250 MC draws'))
+    await waitFor(() => expect(screen.getByTestId('mc-goal-values').textContent).toBe('MC draws 250'))
     expect(screen.getByTestId('mc-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run study/i }))
     await waitFor(() => expect(resultsApi.startMc).toHaveBeenCalledWith({}))

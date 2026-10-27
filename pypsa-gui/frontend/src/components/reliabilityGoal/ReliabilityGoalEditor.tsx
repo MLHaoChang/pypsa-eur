@@ -7,7 +7,7 @@
 import type { ReactNode } from 'react'
 import type { ReliabilityGoal } from '../../api/flow'
 import {
-  goalPatchFromEdits, goalText, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
+  goalPatchFromEdits, goalText, goalWords, GOAL_UNSET, MAX_GOAL_DRAWS, type GoalEdits, type GoalNumberField,
 } from '../../hooks/useReliabilityGoal'
 import { Term } from '../../pages/hubDesign/shared/Term'
 import { useGuide } from '../GuidedTour'
@@ -20,7 +20,7 @@ export const ENS_UNIT = '‱ of demand'
 const ALL_FIELDS: GoalNumberField[] = ['target_lole_h', 'ens_cap_permyriad', 'mc_draws']
 
 export function ReliabilityGoalEditor({
-  mode, goal, edits, onChange, fields = ALL_FIELDS, defaults, disabled = false,
+  mode, goal, edits, onChange, fields = ALL_FIELDS, disabled = false,
 }: {
   /** Its two homes: Guided's Goal card (`hub-goal-*` test ids) and Expert's
    *  Solver settings (`solver-goal-*`). */
@@ -30,8 +30,6 @@ export function ReliabilityGoalEditor({
   onChange: (edits: GoalEdits) => void
   /** The fields shown (Guided keeps ENS and draws under "More settings"). */
   fields?: GoalNumberField[]
-  /** The site type's own values, named in the placeholder of a default field. */
-  defaults?: { target_lole_h?: number | null; ens_cap_permyriad?: number | null }
   disabled?: boolean
 }) {
   const guided = mode === 'guided'
@@ -50,13 +48,10 @@ export function ReliabilityGoalEditor({
     ens_cap_permyriad: <InfoTip text={fieldTip('ens_cap_permyriad')}>{`ENS target (${ENS_UNIT})`}</InfoTip>,
     mc_draws: <InfoTip text={fieldTip('mc_draws')}>MC draws</InfoTip>,
   }
-  const placeholder = (k: GoalNumberField): string => {
-    if (k === 'mc_draws') return `${goal?.mc_draws.value ?? 500} (default)`
-    const d = defaults?.[k]
-    if (d != null) return `${d} (default)`
-    if (k === 'target_lole_h') return guided ? 'e.g. 3' : 'not set'
-    return guided ? 'default' : 'off'
-  }
+  // An empty field reads what the goal says, the same in both modes and in
+  // the Results summary: `not set`, `off`, or the default draws.
+  const placeholder = (k: GoalNumberField): string =>
+    (k === 'mc_draws' ? goalWords(goal, k) || 'default' : GOAL_UNSET[k])
   const common = (k: GoalNumberField) => ({
     k, mode, label: label[k], placeholder: placeholder(k), disabled,
     value: edits[k] ?? goalText(goal, k),
@@ -104,8 +99,8 @@ function GoalInput({ k, mode, testId, label, placeholder, value, disabled, fromT
   return (
     <label className={guided ? 'flex flex-col gap-1 text-[12px]' : 'flex flex-col gap-1'}>
       <span className={guided ? 'font-semibold text-text' : 'text-[10px] text-muted'} title={hint}>
+        {/* One ⓘ: the label's catalogue hover (its InfoTip); the hint is the title. */}
         {label}
-        {hint && !guided && <span className="ml-1 text-[9px] text-muted/60 cursor-help">ⓘ</span>}
       </span>
       <input type="number" data-testid={testId}
         step={k === 'mc_draws' ? 1 : 'any'} min={k === 'mc_draws' ? 1 : 0}

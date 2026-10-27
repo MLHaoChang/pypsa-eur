@@ -53,12 +53,42 @@ describe('ReliabilityGoalEditor', () => {
     expect(label.closest('label')!.querySelector('input')).toBe(input('solver-goal-ens'))
   })
 
-  it('Guided names the site type\'s default in the placeholder and shows only the asked fields', () => {
+  it('Guided and Expert show the same thing on the same empty goal (condition f)', () => {
+    const empty = goal()
+    render(<>
+      <ReliabilityGoalEditor mode="guided" goal={empty} edits={{}} onChange={vi.fn()} />
+      <ReliabilityGoalEditor mode="expert" goal={empty} edits={{}} onChange={vi.fn()} />
+    </>)
+    for (const f of ['lole', 'ens', 'draws']) {
+      const g = input(`hub-goal-${f}`)
+      const e = input(`solver-goal-${f}`)
+      expect([g.value, g.placeholder]).toEqual([e.value, e.placeholder])
+    }
+    expect(input('hub-goal-lole').placeholder).toBe('not set')
+    expect(input('hub-goal-ens').placeholder).toBe('off')
+    expect(input('hub-goal-draws').placeholder).toBe('500 (default)')
+  })
+
+  it('shows only the asked fields', () => {
     render(<ReliabilityGoalEditor mode="guided" goal={goal()} edits={{}} onChange={vi.fn()}
-      fields={['target_lole_h']} defaults={{ target_lole_h: 3 }} />)
-    expect(input('hub-goal-lole').placeholder).toBe('3 (default)')
+      fields={['target_lole_h']} />)
     expect(screen.queryByTestId('hub-goal-ens')).toBeNull()
     expect(screen.queryByTestId('hub-goal-draws')).toBeNull()
+  })
+
+  it('Expert has one help icon per label (the catalogue hover), never a second hint icon', async () => {
+    const { guidesApi } = await import('../GuidedTour')
+    vi.spyOn(guidesApi, 'getGuide').mockResolvedValue({
+      version: 1, tours: {},
+      fields: { target_lole_h: 'a', ens_cap_permyriad: 'b', mc_draws: 'c' },
+    } as never)
+    render(<ReliabilityGoalEditor mode="expert" goal={G} edits={{}} onChange={vi.fn()} />)
+    for (const f of ['lole', 'ens', 'draws']) {
+      const label = input(`solver-goal-${f}`).closest('label')!
+      await waitFor(() => expect(label.querySelectorAll('[tabindex="0"]').length).toBe(1))
+      expect(label.querySelectorAll('.cursor-help').length).toBe(1)
+      expect(label.textContent).not.toMatch(/ⓘ/)
+    }
   })
 
   it('Expert shows the catalogue\'s hover help on the goal fields, as the EH panel did', async () => {

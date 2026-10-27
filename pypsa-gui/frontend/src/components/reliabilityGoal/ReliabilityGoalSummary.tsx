@@ -4,7 +4,7 @@
 // type. The study sends none of these: the backend fills them from the goal.
 import type { GoalValue } from '../../api/flow'
 import { openReliabilityGoal, openSiteType } from '../../layout/flowNavigation'
-import { useReliabilityGoal } from '../../hooks/useReliabilityGoal'
+import { goalWords, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { siteTypeLabel } from './SiteTypeSelect'
 
 export const NO_GOAL = 'No reliability goal set.'
@@ -37,36 +37,31 @@ export function ReliabilityGoalSummary({ items, testId, requireTarget = false }:
       </div>
     )
   }
+  // The same words the editor shows in both modes (`goalWords`).
   const parts: string[] = []
   if (goal) {
     for (const it of items) {
-      if (it === 'target') {
-        const f = goal.target_lole_h
-        parts.push(f.value == null ? 'allowed shortfall: the site type\'s own'
-          : `allowed shortfall ${f.value} h/yr${sourceNote(f)}`)
-      } else if (it === 'ens') {
-        const f = goal.ens_cap_permyriad
-        parts.push(f.value == null ? 'ENS target: the site type\'s own'
-          : `ENS target ${f.value}‱${sourceNote(f)}`)
-      } else if (it === 'draws') {
-        parts.push(`${goal.mc_draws.value} MC draws${sourceNote(goal.mc_draws)}`)
-      } else {
-        parts.push(`site type: ${siteTypeLabel(goal.site_archetype.value)}${sourceNote(goal.site_archetype)}`)
-      }
+      if (it === 'target') parts.push(`allowed shortfall ${goalWords(goal, 'target_lole_h')}`)
+      else if (it === 'ens') parts.push(`ENS target ${goalWords(goal, 'ens_cap_permyriad')}`)
+      else if (it === 'draws') parts.push(`MC draws ${goalWords(goal, 'mc_draws')}`)
+      else parts.push(`site type: ${siteTypeLabel(goal.site_archetype.value)}${sourceNote(goal.site_archetype)}`)
     }
   }
+  // Inline text, not a wrapping flex row: a long row wraps inside its words
+  // and each link follows the values on the same line, as its own element.
+  const inlineLink = `${link} ml-2 whitespace-nowrap`
   return (
-    <div data-testid={testId} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-muted">
-      <span className="font-semibold">Reliability goal:</span>
+    <p data-testid={testId} className="text-[10px] text-muted">
+      <span className="font-semibold">Reliability goal:</span>{' '}
       <span data-testid={`${testId}-values`} className="font-mono">
         {goal ? parts.join(' · ') : isError ? 'could not be read' : '…'}
       </span>
-      <button type="button" data-testid={`${testId}-change`} className={link}
+      <button type="button" data-testid={`${testId}-change`} className={inlineLink}
         onClick={openReliabilityGoal}>Change in Scenarios &amp; optimisation ›</button>
       {items.includes('site') && (
-        <button type="button" data-testid={`${testId}-site`} className={link}
+        <button type="button" data-testid={`${testId}-site`} className={inlineLink}
           onClick={openSiteType}>Site type in Connection &amp; grid ›</button>
       )}
-    </div>
+    </p>
   )
 }

@@ -27,6 +27,7 @@ import {
 import { useUIStore } from '../../store/uiStore'
 import { goalText, useReliabilityGoal } from '../../hooks/useReliabilityGoal'
 import { ReliabilityGoalSummary } from '../../components/reliabilityGoal/ReliabilityGoalSummary'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { ehStudyRefetchInterval } from './ehStudyPoll'
 import { useChatStore } from '../../store/chatStore'
@@ -274,8 +275,10 @@ export function normalisedVerdict(verdict: unknown): string | null {
 /** What to do after each verdict (spec §2.9); null when nothing is owed. */
 export const CERTIFICATION_NEXT = {
   fail: 'Next: tighten the energy target or add firm capacity — press Ask the assistant for a reviewed recommendation.',
-  inconclusive: 'Next: raise MC draws (Pack settings → Draws) or tighten the plan; an inconclusive verdict is not a failure.',
-  noTarget: 'Next: set a shortfall target (Pack settings → LOLE target) to certify.',
+  // The draws and the target are the reliability goal's (W3b-R); the line
+  // links there ("Change in Scenarios & optimisation ›").
+  inconclusive: 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.',
+  noTarget: 'Next: set an allowed shortfall in the reliability goal to certify.',
 } as const
 
 /** MC certification headline from the `certification` section, if it ran. */
@@ -1552,6 +1555,12 @@ export function EhReferenceDesignPanel() {
               {cert?.next && (
                 <p className="text-[10px] text-muted" data-testid="eh-certification-next">
                   {cert.next}
+                  {(cert.next === CERTIFICATION_NEXT.inconclusive
+                    || cert.next === CERTIFICATION_NEXT.noTarget) && (
+                    <button type="button" data-testid="eh-certification-next-goal"
+                      className="text-accent hover:underline ml-2 whitespace-nowrap"
+                      onClick={openReliabilityGoal}>Change in Scenarios &amp; optimisation ›</button>
+                  )}
                 </p>
               )}
 

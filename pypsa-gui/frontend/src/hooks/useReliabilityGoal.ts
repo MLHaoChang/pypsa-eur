@@ -62,6 +62,23 @@ export function goalText(goal: ReliabilityGoal | null, k: GoalNumberField): stri
   return String(f.value)
 }
 
+/** What an unset field reads, in both modes and in the Results summary. */
+export const GOAL_UNSET: Record<'target_lole_h' | 'ens_cap_permyriad', string> = {
+  target_lole_h: 'not set', ens_cap_permyriad: 'off',
+}
+
+/** A goal field in words, exactly as `GET …/reliability_goal` returns it:
+ *  `3 h/yr`, `0.5‱`, `500`, or `not set` / `off`; a value that is not the
+ *  user's own says where it came from (`(template)`, `(default)`). The one
+ *  formatter the editor's placeholders (both modes) and the summary use. */
+export function goalWords(goal: ReliabilityGoal | null, k: GoalNumberField): string {
+  const f = goal?.[k]
+  if (!f || f.value == null) return k === 'mc_draws' ? '' : GOAL_UNSET[k]
+  const unit = k === 'target_lole_h' ? ' h/yr' : k === 'ens_cap_permyriad' ? '‱' : ''
+  const note = f.source === 'template' ? ' (template)' : f.source === 'default' ? ' (default)' : ''
+  return `${f.value}${unit}${note}`
+}
+
 export function useReliabilityGoal() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()

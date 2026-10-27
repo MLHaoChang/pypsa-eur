@@ -429,6 +429,20 @@ describe('the rail is the ten flow sections', () => {
     expect(ids).toHaveLength(10)
   })
 
+  it('scrolls the current step into view when a link jumps to it (a "… ›" goal link)', async () => {
+    const scrolled: string[] = []
+    const spy = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(
+      function (this: Element) { scrolled.push(this.getAttribute('data-testid') ?? '') })
+    try {
+      mount()
+      await screen.findByTestId('hub-card-site')
+      scrolled.length = 0
+      act(() => { useUIStore.setState({ activeSection: 'scenarios' }) })
+      await screen.findByTestId('hub-card-goal')
+      await waitFor(() => expect(scrolled).toContain('hub-rail-step-goal'))
+    } finally { spy.mockRestore() }
+  })
+
   it('a section without a bespoke card shows the generic card and its open items, with a way to Expert', async () => {
     const payload = flowPayload()
     const loads = payload.sections.find(x => x.section === 'loads')!

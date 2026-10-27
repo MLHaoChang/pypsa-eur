@@ -21,7 +21,7 @@ import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 export function GoalCard() {
-  const { project, running, readiness, voll, vollMissing } = useGoalStudy()
+  const { project, running, voll, vollMissing } = useGoalStudy()
   const liveStudy = useLiveStudyRunning()
   const { goal, save } = useReliabilityGoal()
   const [edits, setEdits] = useState<GoalEdits>({})
@@ -46,7 +46,6 @@ export function GoalCard() {
   // hides and the study is not run. VOLL stays: the optimisation prices lost
   // load with it (modular-cards §2).
   const reliabilityOn = useInScope('reliability', 'goal_study')
-  const packDefaults = readiness?.pack_defaults
   const loleText = edits.target_lole_h ?? (goal?.target_lole_h.source !== 'default'
     ? String(goal?.target_lole_h.value ?? '') : '')
 
@@ -59,10 +58,10 @@ export function GoalCard() {
       {reliabilityOn && <>
       <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
         onChange={setEdits} disabled={running || !goal}
-        fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']}
-        defaults={{ target_lole_h: packDefaults?.target_lole_h,
-          ens_cap_permyriad: packDefaults?.ens_cap_permyriad }} />
-      {loleText.trim() === '' && packDefaults?.target_lole_h == null && (
+        fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />
+      {/* The field shows the goal as stored ("not set"), as Expert does; a
+          typical value is only suggested here, never shown as a default. */}
+      {loleText.trim() === '' && (
         <span className="text-[12px] text-muted" data-testid="hub-goal-empty-hint">
           No goal yet. Type how many hours per year without power you can accept (for example 3)
           to get a pass or fail answer.

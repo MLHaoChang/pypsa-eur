@@ -406,7 +406,7 @@ describe('LoopPanel target entry', () => {
     await waitFor(() => expect(screen.getByTestId('loop-target-echo').textContent)
       .toBe('3 h/yr = 0.058 h / 168 h horizon'))
     expect(screen.getByTestId('loop-goal-values').textContent)
-      .toBe('allowed shortfall 3 h/yr · 500 MC draws (default)')
+      .toBe('allowed shortfall 3 h/yr · MC draws 500 (default)')
     expect(screen.getByTestId('loop-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
     await user.click(screen.getByRole('button', { name: /run loop/i }))
     await waitFor(() => expect(resultsApi.startCouplingLoop).toHaveBeenCalled())
