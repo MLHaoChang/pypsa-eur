@@ -3647,6 +3647,15 @@ def put_stress_scenarios(name: str, scenarios: list) -> dict:
                   project=_authorized_project(name))
 
 
+def save_fmea_worksheet(name: str, manual_rows: list, overlays: dict) -> dict:
+    """Replace the FMEA sidecar wholesale (B3), through `_route` so the
+    route's foreign-lock check and its 422 on a broken row apply."""
+    from routers.adequacy_worksheet import WorksheetPut
+    from routers.adequacy_worksheet import put_worksheet as _h
+    return _route(_h, body=WorksheetPut(manual_rows=manual_rows, overlays=overlays),
+                  project=_authorized_project(name))
+
+
 def get_eh_template(name: str) -> dict:
     """The Energy Hub template a project was created from (P19): recommended
     archetype, pack overrides, stages, DtC attribution and study notes."""
@@ -3968,12 +3977,46 @@ def solve_queue_abort(job_id: str) -> dict:
 
 
 def solve_queue_clear_finished() -> dict:
-    """N1: read-tier — drops listing entries only, idempotent."""
+    """Write tier (B3; it was read): the POST drops every org's finished
+    listing entries. Idempotent, no disk or solver effect."""
     # P-1: super-admin only, so this 403s for an ordinary chat caller. That is
     # the intended outcome — the queue is process-global and the clear crosses
     # every org.
     from routers.solve_queue import clear_finished as _h
     return _route(_h)
+
+
+# ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────────
+#
+# One wrapper per Solve Queue panel route, through `_route`: the routes own
+# the visibility and per-user checks and requeue's holder check.
+
+_JOB_LOG_DEFAULT_LINES = 200
+_JOB_LOG_MAX_LINES = 2000  # the catalogue schema's `maximum`
+
+
+def solve_queue_job_log(job_id: str, max_lines: int | None = None) -> dict:
+    from routers.solve_queue import job_log_history as _h
+    out = _route(_h, job_id)
+    lines = list(out.get("lines") or [])
+    keep = max(1, min(int(max_lines or _JOB_LOG_DEFAULT_LINES), _JOB_LOG_MAX_LINES))
+    return {"status": out.get("status"), "lines": lines[-keep:],
+            "total_lines": len(lines), "truncated": len(lines) > keep}
+
+
+def solve_queue_cancel_queued() -> dict:
+    from routers.solve_queue import cancel_queued as _h
+    return _route(_h)
+
+
+def solve_queue_dismiss(job_id: str) -> dict:
+    from routers.solve_queue import dismiss_job as _h
+    return _route(_h, job_id)
+
+
+def solve_queue_requeue(job_id: str) -> dict:
+    from routers.solve_queue import requeue_job as _h
+    return _route(_h, job_id)
 
 
 # ── Renewable profile generator (6) — profile_gen Tasks 6–8 ─────────────────
@@ -4066,6 +4109,83 @@ def compare_profiles(project_id: str, a: str, b: str, component: str | None = No
     from routers.profiles import compare_profiles as _h
     return _profile_route(_h, a=a, b=b, component=component,
                           proj=_authorized_project(project_id))
+
+
+# ── Time series and weather (live-voice 08 B3) (6) ──────────────────────────
+
+
+def get_current_series(project_id: str, component_type: str, attribute: str,
+                       component: str) -> dict:
+    from routers.profiles import get_current_series as _h
+    return _profile_route(_h, component_type=component_type, attribute=attribute,
+                          component=component, proj=_authorized_project(project_id))
+
+
+def get_weather_choice(project_id: str) -> dict:
+    from routers.profiles import get_weather_choice as _h
+    return _profile_route(_h, proj=_authorized_project(project_id))
+
+
+def set_weather_choice(project_id: str, source: str, year: int) -> dict:
+    from routers.profiles import WeatherChoice, put_weather_choice as _h
+    return _profile_route(_h, body=WeatherChoice(source=source, year=year),
+                          proj=_authorized_project(project_id))
+
+
+def pending_profile_from_current(project_id: str, component_type: str,
+                                 attribute: str, component: str) -> dict:
+    from routers.profiles import CurrentSeriesRequest, pending_from_current as _h
+    body = CurrentSeriesRequest(component_type=component_type, attribute=attribute,
+                                component=component)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def _profile_upload(handler, project_id: str, file_id: str, **form) -> dict:
+    """Run an async multipart profile route on a chat upload of THIS project.
+
+    The blob is resolved only under the authorized project's own upload store,
+    so another project's `file_id` is `upload_not_found`. It reaches the route
+    as an `UploadFile` over the open blob with its stored filename and content
+    type, so the route's own chunked size cap (`read_capped`) and parsing run
+    unchanged and nothing is buffered before that cap. Async, so `_route` cannot
+    drive it (its `with _acting()` would close `db` before the coroutine ran):
+    the dependencies are injected inside the block, as `_import_raw` does.
+    """
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from services import upload_service
+    from services.profile_gen.refusals import public_message
+
+    proj = _authorized_project(project_id)
+    meta = upload_service.get_upload_meta(proj.name, file_id, project_dir=proj.directory)
+    blob = upload_service.get_upload_path(proj.name, file_id, project_dir=proj.directory)
+    try:
+        with blob.open("rb") as fh, _acting() as (db, user):
+            upload = UploadFile(file=fh, filename=meta.filename,
+                                headers=Headers({"content-type": meta.mime}))
+            return _sync(handler(file=upload, proj=proj, db=db, user=user, **form))
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — as `_profile_route`: the type, never the text
+        raise HTTPException(
+            status_code=500, detail=public_message(exc, route=handler.__name__),
+        ) from exc
+
+
+def upload_load_profiles_file(project_id: str, file_id: str, unit: str | None = None,
+                              timezone: str | None = None, year: int | None = None,
+                              annual_mwh: float | None = None) -> dict:
+    from routers.profiles import upload_load_profiles as _h
+    return _profile_upload(_h, project_id, file_id, unit=unit, timezone=timezone,
+                           year=year, annual_mwh=annual_mwh)
+
+
+def upload_series_file(project_id: str, file_id: str, component_type: str,
+                       attribute: str, component: str) -> dict:
+    from routers.profiles import upload_series as _h
+    return _profile_upload(_h, project_id, file_id, component_type=component_type,
+                           attribute=attribute, component=component)
 
 
 def generate_renewable_profile(project_id: str, points: list | None = None,
@@ -8411,6 +8531,18 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
+    # live-voice 08 B3
+    "solve_queue_job_log": solve_queue_job_log,
+    "solve_queue_cancel_queued": solve_queue_cancel_queued,
+    "solve_queue_dismiss": solve_queue_dismiss,
+    "solve_queue_requeue": solve_queue_requeue,
+    "save_fmea_worksheet": save_fmea_worksheet,
+    "get_current_series": get_current_series,
+    "get_weather_choice": get_weather_choice,
+    "set_weather_choice": set_weather_choice,
+    "pending_profile_from_current": pending_profile_from_current,
+    "upload_load_profiles_file": upload_load_profiles_file,
+    "upload_series_file": upload_series_file,
     # Renewable profile generator (6)
     "list_profile_presets": list_profile_presets,
     "get_profile_parameters": get_profile_parameters,
@@ -8682,6 +8814,13 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
     "/api/simulation/queue/{job_id}/abort",
+    # B3, mirroring main's exempt set for the queue controls the new tools
+    # reach. `requeue` is exempt there BECAUSE `requeue_job` runs its own
+    # holder check on the project it resolves from the job (main.py's "pair"),
+    # so a foreign lock still refuses it, in the handler.
+    "/api/simulation/queue/cancel_queued",
+    "/api/simulation/queue/{job_id}/dismiss",
+    "/api/simulation/queue/{job_id}/requeue",
     # The study ABORTS, mirroring `main._FOREIGN_LOCK_GATE_EXEMPT_EXACT`. This
     # set had only the three queue paths, so `abort_adequacy_study` — which
     # routes to these — was refused under a foreign lock in chat while the
