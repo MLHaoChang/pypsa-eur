@@ -15,6 +15,9 @@ from fastapi import HTTPException
 
 from harness.edit_card import (STUDY_LEAF_CAP, _SECRET_KEY, Adapter, _note, _refuse, _same, _setting,
                                _settings_row, register)
+from harness.edit_card_site import _fingerprint
+
+_TEXT_CAP = 120  # a free-text string on a card; the rest is "…"
 
 _SECTION = "results"  # "Results -> reports": where the report viewer lives
 
@@ -63,6 +66,31 @@ def _row(field: str, label: str, old, new, *, words: dict | None = None) -> dict
     return row
 
 
+def _text(value):
+    """A free-text string as the card shows it: at most `_TEXT_CAP` characters, then "…"."""
+    return value[:_TEXT_CAP] + "\u2026" if isinstance(value, str) and len(value) > _TEXT_CAP else value
+
+
+def _hide(row: dict, old, new) -> dict:
+    """A row whose old and new cells read the same although the values differ (a count, a capped
+    text, a name two files share, "set") says "(changed)" and carries a fingerprint of the new
+    value; the receipt then compares the stored value's fingerprint (`_stored`)."""
+    if row["old"] == row["new"] and not _same(old, new):
+        row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = _fingerprint(new)
+        if isinstance(row.get("words", {}).get("new"), str):
+            row["words"] = {**row["words"], "new": f"{row['words']['new']} (changed)"}
+    return row
+
+
+def _stored(row: dict, cell, value):
+    """The stored value's cell, or the row's own "(changed)" cell when the stored value is the one
+    the card fingerprinted. An unwritten store reads as its plain cell, which is not the new one."""
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+        return row["new"]
+    return cell
+
+
 def _capped(typed: list[dict], notes: list[dict], what: str) -> list[dict]:
     """The notes first (they are the warnings), then at most STUDY_LEAF_CAP rows and one
     summary note for the rest."""
@@ -91,6 +119,12 @@ def _template_state(project, doc, meta) -> dict[str, Any]:
             "mapping_plan": _plan_size(meta.mapping_plan)}
 
 
+def _template_raw(doc, meta) -> dict[str, Any]:
+    """The stored values behind `_template_state`'s cells (what a fingerprint covers)."""
+    return {"template_file_id": doc.template_file_id, "template_mode": meta.template_mode,
+            "template_language": meta.template_language, "mapping_plan": meta.mapping_plan}
+
+
 def _template_preview(args: dict) -> list[dict]:
     from pydantic import ValidationError
 
@@ -109,12 +143,16 @@ def _template_preview(args: dict) -> list[dict]:
         _data, outline = reports._resolve_template(project, body.file_id)  # the route's own checks
         new_name = _upload_name(project, body.file_id)
     changed = doc.template_file_id != body.file_id
+    old_raw = _template_raw(doc, meta)
+    new_raw = {"template_file_id": body.file_id, "template_mode": outline.mode if outline else None,
+               "template_language": outline.language if outline else None,
+               "mapping_plan": None if changed else meta.mapping_plan}
     new = {"template_file_id": new_name,
            "template_mode": outline.mode if outline else None,
            "template_language": outline.language if outline else None,
            # a different template clears the stored plan, whose heading indices belong to the old outline
            "mapping_plan": None if changed else old["mapping_plan"]}
-    differing = [key for key in new if not _same(old[key], new[key])]
+    differing = [key for key in new if not _same(old_raw[key], new_raw[key])]  # a file id, not only its name
     if not differing:
         _refuse("empty_edit", "The report already uses " + ("this template." if body.file_id else
                                                               "the built-in document layout."))
@@ -129,14 +167,15 @@ def _template_preview(args: dict) -> list[dict]:
             words = {"old": old[key] or "Built-in default", "new": new[key] or "Built-in default"}
         elif key == "mapping_plan" and new[key] is None:
             words = {"old": old[key] or "not set", "new": "cleared"}
-        rows.append(_row(key, labels[key], old[key], new[key], words=words))
+        rows.append(_hide(_row(key, labels[key], old[key], new[key], words=words), old_raw[key], new_raw[key]))
     return rows
 
 
 def _template_readback(args: dict, rows: list[dict]) -> list[Any]:
     project, _report_id, doc, meta = _report_state(args)
-    stored = _template_state(project, doc, meta)
-    return [None if row["role"] == "note" else _setting(stored[row["field"]]) for row in rows]
+    stored, raw = _template_state(project, doc, meta), _template_raw(doc, meta)
+    return [None if row["role"] == "note" else _stored(row, _setting(stored[row["field"]]), raw[row["field"]])
+            for row in rows]
 
 
 register("set_report_template", Adapter("settings_edit", _template_preview, _template_readback,
@@ -166,27 +205,33 @@ def _short(text: str, width: int = 40) -> str:
     return text if len(text) <= width else text[: width - 1] + "…"
 
 
-def _plan_raw(plan, outline, titles: dict) -> dict[str, Any]:
+def _plan_raw(plan, outline, titles: dict, *, full: bool = False) -> dict[str, Any]:
     """Every value of a plan by field, defaults filled in as the panel shows them (an absent
-    entry is `keep`, no new text, no sections)."""
+    entry is `keep`, no new text, no sections). `full`: the whole values, not the panel's
+    shortened cells (names cut to a count, headings cut to a width); what a fingerprint covers."""
     plan = plan if isinstance(plan, dict) else {}
+    names = (lambda ids, _t: list(ids or []) or None) if full else _names
+    short = (lambda text: text) if full else _short
     entries = {e.get("heading_index"): e for e in plan.get("entries") or [] if isinstance(e, dict)}
     out: dict[str, Any] = {}
     for index in dict.fromkeys([*(h.index for h in outline.headings), *entries]):
         entry = entries.get(index) or {}
         out[f"entries.{index}.action"] = entry.get("action") or "keep"
         out[f"entries.{index}.new_text"] = entry.get("new_text")
-        out[f"entries.{index}.section_ids"] = _names(entry.get("section_ids"), titles)
+        out[f"entries.{index}.section_ids"] = names(entry.get("section_ids"), titles)
     for ins in plan.get("inserted") or []:
         if isinstance(ins, dict):
             key = f"inserted.{ins.get('section_id')}"
-            cell = f"after heading {ins.get('after_heading_index')} as “{_short(ins.get('heading') or '')}”"
+            if full:
+                out.setdefault(key, []).append([ins.get("after_heading_index"), ins.get("heading")])
+                continue
+            cell = f"after heading {ins.get('after_heading_index')} as “{short(ins.get('heading') or '')}”"
             out[key] = f"{out[key]}; {cell}" if key in out else cell
     for key, value in (plan.get("placeholders") or {}).items():
         out[f"placeholders.{key}"] = value
-    out["unmapped_sections"] = _names(plan.get("unmapped_sections"), titles)
+    out["unmapped_sections"] = names(plan.get("unmapped_sections"), titles)
     notes = plan.get("notes") or []
-    out["notes"] = _plural(len(notes), "note") if notes else None
+    out["notes"] = (list(notes) or None) if full else (_plural(len(notes), "note") if notes else None)
     return out
 
 
@@ -194,7 +239,7 @@ def _plan_cell(field: str, value):
     """A plan value in the panel's words; a secret-like placeholder only says it is set."""
     if field.startswith("placeholders.") and any(word in field.lower() for word in _SECRET_KEY):
         return None if value is None else "set"
-    return _setting(value)
+    return _setting(_text(value))
 
 
 def _plan_label(field: str, headings: dict, titles: dict) -> str:
@@ -232,15 +277,16 @@ def _mapping_preview(args: dict) -> list[dict]:
     titles = {s.section_id: s.heading for s in doc.sections}
     headings = {h.index: h.text for h in outline.headings}
     before, after = _plan_raw(meta.mapping_plan, outline, titles), _plan_raw(plan, outline, titles)
+    before_full = _plan_raw(meta.mapping_plan, outline, titles, full=True)
+    after_full = _plan_raw(plan, outline, titles, full=True)
     typed = []
     for field in dict.fromkeys([*before, *after]):
-        if _same(before.get(field), after.get(field)):
+        if _same(before_full.get(field), after_full.get(field)):
             continue
         old, new = _plan_cell(field, before.get(field)), _plan_cell(field, after.get(field))
-        if old == "set" and new == "set":
-            new = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
         label = _plan_label(field, headings, titles)
-        typed.append(_row(field, label, old, new))
+        # a secret never shows, a long list is a count: a change the cells cannot show says "(changed)"
+        typed.append(_hide(_row(field, label, old, new), before_full.get(field), after_full.get(field)))
     if not typed:
         _refuse("empty_edit", "The report already has this mapping plan.")
     raw_notes = body.get("notes")
@@ -255,13 +301,13 @@ def _mapping_readback(args: dict, rows: list[dict]) -> list[Any]:
     project, _report_id, doc, meta = _report_state(args)
     outline, titles = _plan_context(project, doc)
     stored = _plan_raw(meta.mapping_plan, outline, titles)
+    stored_full = _plan_raw(meta.mapping_plan, outline, titles, full=True)
     out = []
     for row in rows:
         if row["role"] == "note":
             out.append(None)
             continue
-        cell = _plan_cell(row["field"], stored.get(row["field"]))
-        out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
+        out.append(_stored(row, _plan_cell(row["field"], stored.get(row["field"])), stored_full.get(row["field"])))
     return out
 
 
@@ -293,7 +339,11 @@ def _blocks_json(section) -> list:
 
 
 def _instruction_cell(section):
-    return _setting(section.pending_instruction)
+    return _setting(_text(section.pending_instruction))
+
+
+def _instruction_raw(section) -> list:
+    return [section.pending_instruction, list(section.comments or [])]
 
 
 def _merge_state(project, report_id: str, args: dict):
@@ -334,20 +384,23 @@ def _roundtrip_preview(args: dict) -> list[dict]:
         if old is None:
             continue
         if _blocks_json(old) != _blocks_json(section):
-            typed.append(_row(f"sections.{section.section_id}", f"Section · {section.heading}",
-                              _section_cell(old), _section_cell(section)))
+            typed.append(_hide(_row(f"sections.{section.section_id}", f"Section · {section.heading}",
+                                    _section_cell(old), _section_cell(section)),
+                               _blocks_json(old), _blocks_json(section)))
         if not _same(old.pending_instruction, section.pending_instruction) or old.comments != section.comments:
-            typed.append(_row(f"instructions.{section.section_id}", f"Pending instruction · {section.heading}",
-                              _instruction_cell(old), _instruction_cell(section)))
+            typed.append(_hide(_row(f"instructions.{section.section_id}", f"Pending instruction · {section.heading}",
+                                    _instruction_cell(old), _instruction_cell(section)),
+                               _instruction_raw(old), _instruction_raw(section)))
         if section.section_id not in in_copy and old.note != section.note:
             absent.append(section.heading)
     template_changed = False
     if body.bind_as_template and base.template_file_id != body.file_id:
         template_changed = True
-        typed.append(_row("template_file_id", "Template", _upload_name(project, base.template_file_id),
-                          _upload_name(project, body.file_id),
-                          words={"old": _upload_name(project, base.template_file_id) or "Built-in default",
-                                 "new": _upload_name(project, body.file_id)}))
+        typed.append(_hide(_row("template_file_id", "Template", _upload_name(project, base.template_file_id),
+                                _upload_name(project, body.file_id),
+                                words={"old": _upload_name(project, base.template_file_id) or "Built-in default",
+                                       "new": _upload_name(project, body.file_id)}),
+                           base.template_file_id, body.file_id))
         if meta.mapping_plan:
             typed.append(_row("mapping_plan", "Mapping plan", _plan_size(meta.mapping_plan), None,
                               words={"old": _plan_size(meta.mapping_plan), "new": "cleared"}))
@@ -387,13 +440,14 @@ def _roundtrip_readback(args: dict, rows: list[dict]) -> list[Any]:
         elif field == "version":
             out.append(latest.version)
         elif field == "template_file_id":
-            out.append(_upload_name(project, latest.template_file_id))
+            out.append(_stored(row, _upload_name(project, latest.template_file_id), latest.template_file_id))
         elif field == "mapping_plan":
             out.append(_plan_size(meta.mapping_plan))
         elif kind == "sections":
-            out.append(_section_cell(by_id[rest]) if rest in by_id else None)
+            out.append(_stored(row, _section_cell(by_id[rest]), _blocks_json(by_id[rest])) if rest in by_id else None)
         else:
-            out.append(_instruction_cell(by_id[rest]) if rest in by_id else None)
+            out.append(_stored(row, _instruction_cell(by_id[rest]), _instruction_raw(by_id[rest]))
+                       if rest in by_id else None)
     return out
 
 

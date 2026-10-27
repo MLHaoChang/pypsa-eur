@@ -261,3 +261,62 @@ def test_a_running_report_job_refuses_like_the_route(project, fixtures, fake_unt
         with pytest.raises(HTTPException) as real:  # the handler says the same
             getattr(T, tool)(**args)
         assert real.value.detail["error_kind"] == "report_job_in_flight", tool
+
+
+# ── a cell that hides a difference: "(changed)" + fingerprint, and a receipt that can fail ──
+
+def _renamed(plan, text):
+    plan = {**plan, "entries": [dict(e) for e in plan["entries"]]}
+    next(e for e in plan["entries"] if e["action"] == "rename")["new_text"] = text
+    return plan
+
+
+def test_mapping_text_changed_past_the_cap_is_changed_and_an_unwritten_store_is_uncertain(
+        project, fixtures, fake_untagged):
+    rid, outline = _untagged_report(project, fixtures)
+    first = _renamed(_plan_for(outline), "t" * 130 + "a")
+    T.set_report_mapping(rid, first)
+    args = {"report_id": rid, "plan": _renamed(first, "t" * 130 + "b")}
+    card = edit_card.preview("set_report_mapping", args)
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    assert row["old"] == "t" * 120 + "…" and row["new"] == row["old"] + " (changed)" and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"  # the store still holds the first text
+    T.set_report_mapping(rid, args["plan"])
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
+def test_two_templates_of_one_file_name_are_told_apart_by_the_receipt(project, fixtures):
+    rid = _evidence_report()
+    data = fixtures["corporate_untagged.docx"]
+    first = _upload_template(project, "same.docx", data)
+    other = Document(io.BytesIO(data))
+    other.core_properties.title = "A second file with the same name"
+    buffer = io.BytesIO()
+    other.save(buffer)
+    second = _upload_template(project, "same.docx", buffer.getvalue())  # file ids are content hashes
+    assert second != first
+    T.set_report_template(rid, first)
+    args = {"report_id": rid, "file_id": second}
+    card = edit_card.preview("set_report_template", args)
+    row = next(r for r in card["rows"] if r["field"] == "template_file_id")
+    assert (row["old"], row["new"]) == ("same.docx", "same.docx (changed)") and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"
+    T.set_report_template(rid, second)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
+def test_a_long_pending_instruction_is_capped_and_a_difference_past_the_cap_is_marked():
+    from types import SimpleNamespace
+
+    from harness import edit_card_reports as er
+
+    def section(tail):
+        return SimpleNamespace(pending_instruction="w" * 130 + tail, comments=[])
+
+    old, new = section("a"), section("b")
+    assert er._instruction_cell(old) == "w" * 120 + "…"
+    row = er._hide(er._row("instructions.s", "Pending instruction", er._instruction_cell(old),
+                           er._instruction_cell(new)), er._instruction_raw(old), er._instruction_raw(new))
+    assert row["new"].endswith("… (changed)")
+    assert er._stored(row, er._instruction_cell(old), er._instruction_raw(old)) == "w" * 120 + "…"  # unwritten
+    assert er._stored(row, er._instruction_cell(new), er._instruction_raw(new)) == row["new"]  # written

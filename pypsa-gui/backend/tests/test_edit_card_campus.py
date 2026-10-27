@@ -115,7 +115,26 @@ def test_update_config_dispatch_directory_is_a_dispatch_source_row(study, hub):
     card = edit_card.preview("gridspine_update_config", {"project_id": "Card Study", "from_dispatch": str(run)})
     (row,) = card["rows"]
     assert (row["label"], row["old"]) == ("Dispatch source", "Generate here (unit commitment)")
-    assert row["new"].startswith("A finished study's directory: ") and str(run) in row["new"]
+    assert row["new"] == "A finished study's directory: run"  # the folder's name, never the server path
+    assert str(run.parent) not in json.dumps(card, default=str)
+
+
+def test_two_dispatch_folders_of_one_name_read_back_by_fingerprint(study, user_and_db):
+    db, user = user_and_db
+    other = db.get(Project, uuid.UUID(gs.create_study(db, user, "Other Study", config=CONFIG)["id"]))
+    first, second = _storage(study) / "gridspine" / "run", _storage(other) / "gridspine" / "run"
+    for run in (first, second):
+        run.mkdir(parents=True)
+        (run / "dispatch.csv").write_text("x\n")
+        (run / "loads.csv").write_text("x\n")
+    chat_tools.gridspine_update_config("Card Study", from_dispatch=str(first))
+    args = {"project_id": "Card Study", "from_dispatch": str(second)}
+    card = edit_card.preview("gridspine_update_config", args)
+    (row,) = card["rows"]
+    assert row["new"] == "A finished study's directory: run (changed)" and row.get("fingerprint")
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"  # the store still holds the first folder
+    chat_tools.gridspine_update_config("Card Study", from_dispatch=str(second))
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
 
 
 # ── gridspine_set_dispatch_source ───────────────────────────────────────────
@@ -425,3 +444,55 @@ def test_island_words_mirror_the_island_form():
     cuts = (pages / "CampusIslandCutsSection.tsx").read_text(encoding="utf-8")
     scen = cuts[cuts.index("const SCENARIO_WORDS"):cuts.index("\n", cuts.index("const SCENARIO_WORDS"))]
     assert ec._SCENARIO_WORDS == dict(re.findall(r"(\w+): '([^']*)'", scen))
+
+
+# ── a summary that hides a difference: "(changed)" + fingerprint, and a receipt that can fail ──
+
+def _blocks(last):
+    config = _config()
+    config["requirements"]["pickup_blocks"]["value"] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, last]
+    return config
+
+
+def test_island_list_with_the_same_summary_is_changed_then_verified(grid, island_hub):
+    chat_tools.campus_set_island_config("Island Hub", _blocks(7.0))
+    args = {"project_id": "Island Hub", "config": _blocks(8.0)}
+    card = edit_card.preview("campus_set_island_config", args)
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    assert (row["old"], row["new"]) == ("7 items", "7 items (changed)") and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"  # nothing written yet
+    frames, cards, result = _dispatch(grid, "campus_set_island_config", args)
+    _verified(result, grid)
+
+
+def test_library_text_changed_past_the_cap_is_changed_then_verified(island_hub):
+    def library(last):
+        lib = _shipped_library()
+        lib["transformers"][0]["note"] = "n" * 130 + last
+        return yaml.safe_dump(lib, sort_keys=False)
+
+    chat_tools.campus_set_library("Island Hub", library("a"))
+    args = {"project_id": "Island Hub", "yaml": library("b")}
+    card = edit_card.preview("campus_set_library", args)
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    assert row["new"] == "n" * 120 + "\u2026 (changed)" and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"
+    chat_tools.campus_set_library(**args)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
+def test_draft_with_the_same_counts_but_a_changed_member_is_fingerprinted(hub):
+    chat_tools.campus_draft_campus("Campus Hub")
+    path = _storage(hub) / ce.SUBDIR / ce.CAMPUS_FILE
+    spec = yaml.safe_load(path.read_text())
+    units = spec["campus"]["units"]
+    first = next(iter(units))
+    units["renamed"] = units.pop(first)  # one unit swapped for another: the count is the same
+    path.write_text(yaml.safe_dump(spec, sort_keys=False))
+    args = {"project_id": "Campus Hub", "overwrite": True}
+    card = edit_card.preview("campus_draft_campus", args)
+    row = _rows(card)["units"]
+    assert str(row["new"]).endswith(" (changed)") and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain"
+    chat_tools.campus_draft_campus("Campus Hub", True)
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
