@@ -23,11 +23,12 @@ Many sessions work on this repo in parallel. One **coordinator** session relays 
    - the premerge.sh output.
 
    Done when the message is sent and premerge.sh exited 0, or the message names what blocks it.
-6. **Hold.** The coordinator merges, and runs premerge once more at merge, so leave the merge button alone. Act again only on a new CI or review event, a conflict, or a coordinator request.
+6. **Hand off early when only CI is left.** When everything left on your PR is CI and premerge (every reviewer OK current, no open threads) and your context is above 150k, send the coordinator `ci-only <pr> <full head sha>` with your hand-off note and stop. Do not idle near 300k re-reading context on each CI event.
+7. **Hold.** The coordinator merges, and runs premerge once more at merge, so leave the merge button alone. Act again only on a new CI or review event, a conflict, or a coordinator request.
 
 ## Messages to the coordinator
 
-Send the coordinator only: `premerge ok <full sha>`, a review request, a question, a hand-off note. No "ready", FYI or resend. A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
+Send the coordinator only: `premerge ok <full sha>`, a review request, a question, a hand-off note, `ci-only`. No "ready", FYI, resend or status update such as "PR open, CI pending". A new session reports ready by doing its first piece of work. Reviewers' verdicts are PR comments, not messages; you see them through your PR subscription.
 
 ## Merge gate
 
@@ -50,7 +51,7 @@ The gatekeeper (`docs/agents/roles.md`) advises at two points before review, as 
 
 Before you ask the gatekeeper for an OK on a gated PR, run the `mp-code-review` skill against the issue or spec file. Fix what it finds, or say in the PR body why a finding stays. Ungated PRs skip this.
 
-The gatekeeper advises; it does not write the code. Plan verdicts come back through the coordinator, since there is no PR yet. A PR whose plan went to review opens after the plan verdicts arrive. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
+The gatekeeper advises; it does not write the code. Plan verdicts go from the gatekeeper straight to you (your session id is in your plan message), since there is no PR yet; the coordinator hears only of a NO-GO you dispute or a standing ruling. A PR whose plan went to review opens after the plan verdicts arrive. The gatekeeper's standing rules are in `docs/agents/review-gk.md`.
 
 ## Merging {{BASE_BRANCH}} into a PR
 

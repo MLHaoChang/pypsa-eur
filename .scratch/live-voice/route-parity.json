@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 86,
-  "needs-tool": 60,
-  "tool": 320,
+  "needs-tool": 49,
+  "tool": 331,
   "unclassified": 0
  },
  "format_version": 1,
@@ -1002,13 +1002,16 @@
    "path": "/api/equipment_table/preview"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/geocode.ts"
    ],
    "method": "GET",
-   "path": "/api/geocode"
+   "path": "/api/geocode",
+   "tools": [
+    "geocode_place"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -1516,22 +1519,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/assetSchema.ts"
    ],
    "method": "GET",
-   "path": "/api/network/asset_costs"
+   "path": "/api/network/asset_costs",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/assetSchema.ts"
    ],
    "method": "GET",
-   "path": "/api/network/asset_schema/{component}"
+   "path": "/api/network/asset_schema/{component}",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1668,13 +1677,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "GET",
-   "path": "/api/network/catalog/{component}"
+   "path": "/api/network/catalog/{component}",
+   "tools": [
+    "get_asset_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1882,13 +1894,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/lengths/from_geometry"
+   "path": "/api/network/lengths/from_geometry",
+   "tools": [
+    "derive_lengths_from_geometry"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1939,13 +1954,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/lines/rescale_impedances"
+   "path": "/api/network/lines/rescale_impedances",
+   "tools": [
+    "rescale_line_impedances"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2178,13 +2196,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/reset"
+   "path": "/api/network/reset",
+   "tools": [
+    "reset_network"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3420,41 +3441,53 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/sites"
+   "path": "/api/projects/{name}/sites",
+   "tools": [
+    "get_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts",
     "site3d/sitesStore.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/sites"
+   "path": "/api/projects/{name}/sites",
+   "tools": [
+    "set_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/sites/{site_id}/context"
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "tools": [
+    "get_project_sites"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "network-topology",
+   "class": "tool",
    "gui_files": [
     "api/sites.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/sites/{site_id}/context"
+   "path": "/api/projects/{name}/sites/{site_id}/context",
+   "tools": [
+    "fetch_site_context"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
