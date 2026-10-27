@@ -1079,7 +1079,22 @@ the live network stay out of it.
 
 Retention keeps section artifacts for the 20 newest manifests and manifest
 records for 200 runs. Older section directories are removed; a later read of
-a pruned section is `evidence_unavailable`.
+a pruned section is `evidence_unavailable`. Orphaned running markers (below)
+count toward the 200 and are removed with the rest. Runs are ordered by
+`started_at`, or by the file's mtime when that is missing or unparsable.
+
+A running marker is live only while the process that wrote it still owes the
+manifest. The app runs one worker, so after a restart or crash every leftover
+marker is read as `interrupted` with the warning `process_exited`. It has no
+`finished_at` and no evidence. That reading is derived when the marker is read.
+Nothing is written, so reads stay read-only. A queued job restored at boot
+claims its run id again and is live once more.
+
+A session abort ends the foreground solver monitor's log bridge, but not the
+solve. The monitor keeps waiting for that solve, identified by the log queue
+and thread the solver state held when the monitor started, and publishes it
+once. If another solve replaces it first, the run is published `interrupted`
+with `outcome_superseded`; the other solve's outcome is never attached to it.
 
 Publishers are best-effort. An unsaved scratch network produces no record, and
 a recording failure does not fail the solve.

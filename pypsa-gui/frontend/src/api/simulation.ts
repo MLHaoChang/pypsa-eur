@@ -17,11 +17,6 @@ export const simulationApi = {
   // that have overnight_cost set but capital_cost=0.
   getAssetCosts: () => client.get<AssetCostMap>('/simulation/asset_costs').then(r => r.data),
   run: () => client.post('/simulation/run'),
-  // Stage 2 standalone trigger. Requires that a LOPF (or SCLOPF) run has
-  // already populated n.generators_t.p. Returns immediately ({status:
-  // 'started'}); progress streams via the existing /log_stream SSE, and
-  // the new convergence info appears in /results/ac_pf/status.
-  runAcPf: () => client.post('/simulation/run_ac_pf'),
   abort: () => client.post('/simulation/abort'),
   // Disown a stuck "running" state when the worker thread is still alive but
   // we want to give up on it (e.g. the user lost the SSE log and decides the

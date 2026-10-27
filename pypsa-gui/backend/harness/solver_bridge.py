@@ -24,6 +24,18 @@ from services.project_context import ProjectContext
 
 logger = logging.getLogger(__name__)
 
+_TERMINAL_POLL_S = 0.5
+_TERMINAL = ("completed", "failed", "aborted", "idle")
+
+
+def _call(hook: Callable[[], None] | None, name: str) -> None:
+    if hook is None:
+        return
+    try:
+        hook()
+    except Exception:  # noqa: BLE001 — a completion hook must not break the monitor
+        logger.exception("detached solver %s hook failed", name)
+
 
 def _classify_solver_line(line: str) -> str:
     """
@@ -53,23 +65,53 @@ def start_detached_solver_monitor(
     tool_name: str,
     poll_interval: float = 0.1,
     on_terminal: Callable[[], None] | None = None,
+    on_superseded: Callable[[], None] | None = None,
+    is_pending: Callable[[], bool] | None = None,
 ) -> None:
     """Run ``solver_log_bridge`` on a daemon thread after turn handoff (issue 11).
 
     Progress is buffered on the session (same payload keys as ``tool_progress``)
     so the turn can return immediately. Callers drain via
-    ``session.drain_detached_progress()``. ``on_terminal`` runs on the monitor
-    thread once the solver state is terminal (not when only the session aborted).
+    ``session.drain_detached_progress()``.
+
+    ``on_terminal`` runs once on the monitor thread when THIS solve is terminal,
+    also when a session abort ended the bridge first. The solve is the one whose
+    log queue and thread the solver state held at monitor start; when another
+    solve has replaced them before this one was seen terminal, ``on_superseded``
+    runs instead, since the state then holds the other solve's outcome. Waiting
+    after the bridge stops once ``is_pending`` returns False.
     """
     import threading
 
-    def _done() -> bool:
+    def _identity(state: dict) -> tuple:
+        return (state.get("log_queue"), state.get("thread"))
+
+    with ctx.solver_state_lock:
+        solve = _identity(ctx.solver_state)
+
+    def _state() -> tuple[str | None, bool]:
+        """(status, still this solve's state)."""
         with ctx.solver_state_lock:
-            status = ctx.solver_state.get("status")
-        return status in ("completed", "failed", "aborted", "idle")
+            return ctx.solver_state.get("status"), _identity(ctx.solver_state) == solve
+
+    def _done() -> bool:
+        status, same = _state()
+        return status in _TERMINAL or not same
+
+    def _settle() -> bool:
+        """Publish once this solve's outcome is known; True when settled."""
+        status, same = _state()
+        if not same:
+            _call(on_superseded, "on_superseded")
+            return True
+        if status in _TERMINAL:
+            _call(on_terminal, "on_terminal")
+            return True
+        return False
 
     def _run() -> None:
         session.mark_detached_monitor(tool_use_id, tool_name, active=True)
+        settled = on_terminal is None
         try:
             for prog in solver_log_bridge(
                 session, ctx,
@@ -82,12 +124,17 @@ def start_detached_solver_monitor(
                     **prog,
                 })
         finally:
-            if on_terminal is not None and _done():
-                try:
-                    on_terminal()
-                except Exception:  # noqa: BLE001 — a completion hook must not break the monitor
-                    logger.exception("detached solver on_terminal hook failed")
+            if not settled:
+                settled = _settle()
             session.mark_detached_monitor(tool_use_id, tool_name, active=False)
+        # A session abort ends the bridge, not the solve: wait it out so the
+        # run is still published once (a process exit is read as interrupted).
+        while not settled:
+            if is_pending is not None and not is_pending():
+                logger.debug("detached solver %s: run no longer pending", tool_use_id)
+                return
+            time.sleep(_TERMINAL_POLL_S)
+            settled = _settle()
 
     threading.Thread(
         target=_run,
