@@ -45,7 +45,7 @@ def test_u2_is_the_unbalanced_load_over_s_sc2_with_the_c_factor(tmp_path):
     expected = 100.0 * 0.5 * 20.0 / (1400.0 / 1.1)
     assert row["project_value"] == pytest.approx(expected, abs=1e-4)
     assert row["limit"] == 1.0 and row["verdict"] == "pass"
-    assert row["unit"] == "% of positive sequence"
+    assert row["unit"] == "%\u00a0of\u00a0positive\u00a0sequence"   # wraps as one unit
     assert row["note"].startswith("Screening upper bound: 10 MVA of single-phase load")
     assert "equal negative- and positive-sequence impedance" in row["note"]
     assert "IEC 60909 voltage factor" in row["note"]
@@ -78,6 +78,20 @@ def test_a_partial_sum_is_said_as_a_floor_without_a_number(tmp_path):
     floor = 100.0 * 0.5 * 20.0 / (1400.0 / 1.1)
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"].startswith("pump has no Single-phase share")
+    assert f"At least {floor:.2g} % from the units with inputs." in row["note"]
+    assert row["target"]["entity"] == "pump"
+
+
+def test_a_floor_already_over_the_limit_warns_without_a_number(tmp_path):
+    """A unit without inputs only adds to u2, so a floor already over the limit is the rule's otherwise
+    verdict, still with no project value and the floor said in words."""
+    n = _site(1.0, rated=20.0, sk=1000.0)
+    n.add("Link", "pump", bus0="mv", bus1="nh3", p_nom=1.0)
+    n.links.loc["pump", ["eh_process", "rated_mva"]] = [True, 5.0]
+    row = _row(tmp_path, n)
+    floor = 100.0 * 1.0 * 20.0 / (1000.0 / 1.1)
+    assert floor > LIMIT["value"]
+    assert row["verdict"] == G.RULE_UNBALANCE["otherwise"] == "warn" and row["project_value"] is None
     assert f"At least {floor:.2g} % from the units with inputs." in row["note"]
     assert row["target"]["entity"] == "pump"
 

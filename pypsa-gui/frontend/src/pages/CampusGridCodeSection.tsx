@@ -48,8 +48,8 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   paths.push('q_range_demand', 'rvc_limit_pct')
   if (profile.campus_voltage) paths.push('campus_voltage')
   for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-    'thd_limit_pct', 'harmonic_limits_pct', 'pst_limit', 'plt_limit',
-    'q_capability_unit', 'voltage_deadband_pct'] as const) {
+    'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
+    'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct'] as const) {
     if (profile[key]) paths.push(key)
   }
   return paths
@@ -73,12 +73,18 @@ function limitLabel(path: string): string {
     pf_min_leading: 'Minimum power factor, leading',
     thd_limit_pct: 'Total harmonic distortion at the PCC',
     harmonic_limits_pct: 'Harmonic voltage by order at the PCC',
+    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from the orders that count',
     pst_limit: 'Flicker severity Pst at the PCC',
     plt_limit: 'Flicker severity Plt at the PCC',
+    unbalance_limit_pct: 'Voltage unbalance at the PCC',
+    current_tdd_standard: 'Current distortion (TDD) limits at the PCC',
     q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; + = unit delivers)',
     voltage_deadband_pct: 'Voltage-control deadband per unit (reported, not checked)',
   }[path] ?? path
 }
+
+/** The current-distortion standards the engine knows (`CURRENT_TDD_STANDARDS`), by their published name. */
+const TDD_STANDARD_LABEL: Record<string, string> = { 'ieee519-2014': 'IEEE 519-2014' }
 
 function limitValue(path: string, lim: GridLimit): string {
   if (path.startsWith('voltage_bands')) return `${lim.kv_min}–${lim.kv_max} kV: ${lim.v_min}–${lim.v_max} pu`
@@ -93,6 +99,12 @@ function limitValue(path: string, lim: GridLimit): string {
     return `${lim.value}`
   }
   if (path === 'voltage_deadband_pct') return `±${lim.value}\u00A0%`
+  if (path === 'harmonic_resonance_clearance_h') return `±${lim.value}\u00A0h`
+  if (path === 'unbalance_limit_pct') return `${lim.value}\u00A0%\u00A0of\u00A0positive\u00A0sequence`
+  if (path === 'current_tdd_standard') {
+    const value = String((lim as { value?: unknown }).value ?? '')
+    return TDD_STANDARD_LABEL[value] ?? value
+  }
   if (path === 'q_capability_pq' || path === 'q_capability_unit') {
     const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
     const pu = (v: number) => `${v}`.replace('-', '−')
