@@ -1052,6 +1052,7 @@ export const CHART_TOOLTIP = {
     fontFamily: 'var(--font-family-mono)',
     padding: '6px 9px',
   } as CSSProperties,
+  separator: ': ',
   labelStyle: { color: 'var(--color-muted)', fontSize: 10, marginBottom: 3 } as CSSProperties,
   itemStyle: { color: 'var(--color-text)', padding: '1px 0' } as CSSProperties,
 }

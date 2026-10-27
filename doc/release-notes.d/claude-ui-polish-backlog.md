@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): UI text polish: sentence-case grid-code refusals, a plain harmonic-scan clearance note, matching precision in the grid-readiness notes, no stray unit after a missing figure, a space after the colon in chart tooltips, and scorecard text that wraps instead of running under "Ask the assistant".

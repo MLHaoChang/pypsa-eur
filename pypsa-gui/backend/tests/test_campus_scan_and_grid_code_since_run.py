@@ -59,6 +59,11 @@ def test_the_run_scans_after_sizing_and_the_state_reads_the_scan_back(hub):  # n
     assert not (run / ce.HARMONIC_SCAN_ERROR).exists()
 
 
+def test_an_extracted_clearance_note_says_it_is_not_yet_confirmed():
+    assert ce._scan_note("the resonance clearance is extracted, not the grid code's") == (
+        "The clearance is extracted and not yet confirmed on the grid-code page")
+
+
 def test_without_a_clearance_in_the_code_the_scan_takes_the_assumed_default(hub):  # noqa: F811
     _publish(hub)
     _run(hub)
