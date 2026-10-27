@@ -341,8 +341,11 @@ def test_the_milp_start_is_carded_and_its_card_starts_nothing(hub, monkeypatch):
         assert confirm.confirmation_policy("execution_long_running", guided=guided) == "user"
     card = edit_card.preview("campus_start_milp", {"project_id": "Chat Hub", "k": 4})
     assert calls == []  # the card is built; no job started
-    shown = {r["field"]: r["new"] for r in card["rows"] if r["role"] == "typed"}
-    assert shown["k"] == 4 and shown["invest"] is True and shown["n_minus_1"] is True
+    (job,) = [r for r in card["rows"] if r["role"] == "typed"]  # one change: the job; its settings are a note
+    assert (job["old"], job["new"]) == ("not started", "running")
+    assert job["settings"]["k"] == 4 and job["settings"]["invest"] is True and job["settings"]["n_minus_1"] is True
+    notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
+    assert "Hours per criterion: 4" in notes and "Transformer N-1: yes" in notes
 
 
 @pytest.mark.parametrize("decision, started", [("deny", 0), ("approve", 1)])
@@ -392,9 +395,9 @@ def test_save_campus_refuses_a_stale_base_and_its_card_shows_the_change(hub, mon
     base = campus_cards.sha256_text("a: 1\nb: 2\n")
     card = edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 1\nb: 3\n",
                                                     "base_sha256": base})
-    row, sha = [r for r in card["rows"] if r["role"] == "typed"]
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]  # no hash row: the user decides on values
     assert (row["field"], row["old"], row["new"]) == ("b", 2, 3)
-    assert (sha["old"], sha["new"]) == (base, campus_cards.sha256_text("a: 1\nb: 3\n"))
+    assert row["stored_sha256"] == campus_cards.sha256_text("a: 1\nb: 3\n")
     assert card["binding"] == {"sha256": base}
     with pytest.raises(HTTPException):
         edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 2\n"})  # no base
@@ -429,8 +432,9 @@ def test_the_confirm_card_shows_the_limit_and_its_quote(hub, monkeypatch):
     card = edit_card.preview("campus_confirm_grid_code_limit",
                              {"project_id": "Chat Hub", "profile_id": "tso", "limit": "q_range_demand"})
     typed = {r["field"]: (r["old"], r["new"]) for r in card["rows"] if r["role"] == "typed"}
-    assert typed["source"] == ("extracted", "code") and typed["q_min"] == (-0.48, -0.48)
+    assert typed == {"source": ("extracted", "code")}  # the one change; the values are a note
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
+    assert "The limit stays as extracted: q_min -0.48, q_max 0.48." in notes
     assert "between 0.48 leading and lagging" in notes and "page 12" in notes and "clause 4.2" in notes
     assert "Quote not found on its page (it is on page 13)" in notes
 
@@ -456,14 +460,15 @@ def test_the_publish_card_names_what_it_replaces_and_each_unconfirmed_limit(hub,
                                                                    "profile": {"title": "Old code"}})
     card = edit_card.preview("campus_publish_grid_code", {"project_id": "Chat Hub", "profile_id": "tso",
                                                            "allow_unconfirmed": True})
-    row, sha = [r for r in card["rows"] if r["role"] == "typed"]
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]  # the hash stays off the rows the user reads
     assert (row["old"], row["new"]) == ("Old code", "TSO code")
     from harness.campus_cards import sha256_text
 
-    assert (sha["old"], sha["new"]) == (sha256_text("old: 1\n"), sha256_text(_shaped()["yaml"]))
-    assert card["says"] == "Publishes draft tso as grid code tso, replacing the published “Old code”."
+    assert row["draft_sha256"] == sha256_text(_shaped()["yaml"])
+    assert card["says"] == "Publishes the draft “TSO code” as a grid code, replacing the published “Old code”."
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
-    assert "Replaces the published profile" in notes and "q_range_demand is unconfirmed: it stays extracted" in notes
+    assert "Replaces the published profile" in notes and "Reactive range at the PCC is unconfirmed: it stays extracted" in notes
+    assert "(409)" not in notes
     assert set(card["binding"]) == {"draft_sha256", "published_sha256"}
 
 
@@ -634,14 +639,40 @@ def test_the_receipts_say_the_effect_in_words(codes):
 
     calls = _grid_code_calls(codes)
     says = {tool: edit_card.preview(tool, {**P, **calls[tool]}, with_state=False)["says"] for tool in GRID_CODE_TOOLS}
-    assert says["campus_delete_grid_code_draft"] == ("Deletes the draft grid-code profile tso (“TSO code”); "
-                                                     "this cannot be undone.")
-    assert says["campus_delete_published_grid_code"].startswith("Deletes the published grid-code profile tso")
+    assert says["campus_delete_grid_code_draft"] == "Deletes the draft grid-code profile “TSO code”; this cannot be undone."
+    assert says["campus_delete_published_grid_code"] == ("Deletes the published grid-code profile “TSO code”; "
+                                                         "this cannot be undone.")
     assert says["campus_delete_grid_code_document"] == "Deletes the grid-code document code.pdf; this cannot be undone."
-    assert says["campus_publish_grid_code"] == "Publishes draft tso as grid code tso, replacing the published “TSO code”."
-    assert says["campus_confirm_grid_code_limit"] == ("Marks limit voltage_bands[0] of draft tso as confirmed against "
+    assert says["campus_publish_grid_code"] == ("Publishes the draft “TSO code” as a grid code, replacing the "
+                                                "published “TSO code”.")
+    assert says["campus_confirm_grid_code_limit"] == ("Marks Voltage band 1 in draft “TSO code” as confirmed against "
                                                       "its quoted page (source extracted → code).")
-    assert "None" not in " ".join(says.values())
+    text = " ".join(says.values())
+    assert "None" not in text and "'tso'" not in text and "voltage_bands" not in text
+    assert says["campus_new_grid_code_draft"] == "Creates a blank draft “Fresh code”, every limit assumed until filled in by hand."
+
+
+def test_the_cards_name_limits_as_the_grid_codes_panel_does():
+    import pathlib
+    import re
+
+    from harness.campus_cards import LIMIT_LABELS, limit_label
+
+    tsx = (pathlib.Path(__file__).resolve().parents[2] / "frontend/src/pages/CampusGridCodeSection.tsx").read_text()
+    body = tsx[tsx.index("function limitLabel"):]
+    body = body[:body.index("}[path]")]
+    panel = {k: v.replace("\\'", "'") for k, v in re.findall(r"^\s+(\w+): '((?:[^'\\]|\\.)*)',?$", body, re.M)}
+    assert panel == LIMIT_LABELS
+    assert limit_label("voltage_bands[1]") == "Voltage band 2"
+
+
+def test_a_refusal_names_the_limit_in_words_without_python_quotes(codes):
+    from harness import edit_card
+
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("campus_confirm_grid_code_limit", {**P, "profile_id": "tso", "limit": "rvc_limit_pct"})
+    message = exc.value.detail["message"]
+    assert message.startswith("Rapid voltage change is tagged assumed, not extracted") and "'" not in message
 
 
 def _touch(path):
@@ -715,6 +746,7 @@ def test_the_extract_card_says_the_document_goes_to_the_extraction_provider(code
     card = edit_card.preview("campus_extract_grid_code", {**P, "document_id": codes["document_id"]})
     notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
     assert "Sends the document to the configured extraction provider" in notes and "one API call" in notes
+    assert card["says"] == "Drafts a grid-code profile from code.pdf with the extraction provider."
     (row,) = [r for r in card["rows"] if r["role"] == "typed"]
     assert (row["field"], row["new"]) == ("document", codes["document_id"])
 
@@ -737,7 +769,9 @@ def test_the_milp_receipt_reads_the_new_job_and_its_recorded_settings(hub, monke
     assert kind is None and receipt["outcome"] == "verified", [r for r in receipt["rows"] if r["role"] != "note"]
     job = next(r for r in receipt["rows"] if r["field"] == "job")
     assert job["readback"] == "running"
-    assert receipt["says"].startswith("Starts the campus joint optimisation in the background (k 4")
+    assert receipt["says"].startswith("Starts the campus joint optimisation in the background (Hours per criterion: 4; "
+                                      "Connection-agreement power factor: the grid code's widest range;")
+    assert "Design margin: 20%" in receipt["says"] and "Transformer N-1: yes" in receipt["says"]
 
 
 @pytest.mark.parametrize("fake", ["other_settings", "no_new_job"])

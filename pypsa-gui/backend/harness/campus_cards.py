@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 import yaml
 from fastapi import HTTPException
@@ -25,6 +26,38 @@ from fastapi import HTTPException
 from harness import edit_card as ec
 
 CLASS = "Settings"
+
+# The Grid codes panel's words for a limit (`limitLabel` in
+# frontend/src/pages/CampusGridCodeSection.tsx; tests/test_lv08_bcampus_tools.py keeps them equal).
+LIMIT_LABELS = {
+    "q_range_demand": "Reactive range at the PCC",
+    "rvc_limit_pct": "Rapid voltage change",
+    "campus_voltage": "Voltage inside the campus",
+    "rvc_limit_infrequent_pct": "Rapid voltage change, infrequent",
+    "q_capability_pq": "Reactive power band against active power at the PCC",
+    "pf_min_lagging": "Minimum power factor, lagging",
+    "pf_min_leading": "Minimum power factor, leading",
+    "thd_limit_pct": "Total harmonic distortion at the PCC",
+    "harmonic_limits_pct": "Harmonic voltage by order at the PCC",
+    "harmonic_resonance_clearance_h": "Harmonic resonance clearance from characteristic and injected orders",
+    "pst_limit": "Flicker severity Pst at the PCC",
+    "plt_limit": "Flicker severity Plt at the PCC",
+    "unbalance_limit_pct": "Voltage unbalance at the PCC",
+    "current_tdd_standard": "Current distortion (TDD) limits at the PCC",
+    "q_capability_unit": "Reactive capability per generating unit (pu of the unit's rated P; positive = the unit "
+                         "exports reactive power)",
+    "voltage_deadband_pct": "Voltage-control deadband per unit (reported, not checked)",
+    "angle_limit_deg": "Voltage-angle difference across a branch",
+}
+
+
+def limit_label(path: str) -> str:
+    m = re.fullmatch(r"voltage_bands\[(\d+)\]", path)
+    return f"Voltage band {int(m.group(1)) + 1}" if m else LIMIT_LABELS.get(path, path)
+
+
+def _title(shaped: dict | None, pid: str) -> str:
+    return str(((shaped or {}).get("profile") or {}).get("title") or pid)
 
 
 def sha256_text(text: str | None) -> str | None:
@@ -70,16 +103,28 @@ def _yaml_rows(name: str, old_text: str | None, new: dict, new_text: str, what: 
     """One old → new row per top-level key the write changes, then the stored
     text's sha256: the receipt reads the file back against both."""
     old = _load(old_text)
-    rows = [_row(name, key, key, old.get(key), new.get(key), old_known=old_text is not None)
+    sha = sha256_text(new_text)  # kept on each row for the receipt, never shown
+    rows = [{**_row(name, key, key, old.get(key), new.get(key), old_known=old_text is not None), "stored_sha256": sha}
             for key in sorted(set(old) | set(new), key=str) if old.get(key) != new.get(key)]
-    rows = rows or [_note(name, 0, f"The {what} is unchanged.")]
-    sha = _row(name, "sha256", "file sha256", sha256_text(old_text), sha256_text(new_text))
-    return rows + [{**sha, "says_name": f"the {what}'s sha256"}]
+    return rows or [_note(name, 0, f"The {what} is unchanged.")]
+
+
+_OTHER_FILE = "a different file"
+_EXISTS, _DELETED = "exists", "deleted"  # a delete card's one row, and what its receipt reads
+
+
+def _yaml_says(what: str):
+    def says(args: dict, rows: list[dict]) -> str:
+        keys = [r["field"] for r in rows if r["role"] == "typed"]
+        name = rows[0]["name"] if rows else what
+        return f"Saves {name}: " + (f"changes {', '.join(keys)}." if keys else "nothing changes.")
+    return says
 
 
 def _yaml_back(text: str | None, rows: list[dict]) -> list:
-    stored = _load(text)
-    return [None if row["role"] == "note" else sha256_text(text) if row["field"] == "sha256"
+    """Each row's stored value, read only from the very text the card bound."""
+    stored, sha = _load(text), sha256_text(text)
+    return [None if row["role"] == "note" else _OTHER_FILE if row.get("stored_sha256") != sha
             else _short(stored.get(row["field"])) for row in rows]
 
 
@@ -101,7 +146,7 @@ def _save_campus_preview(args: dict) -> list[dict]:
         require_base(current, args.get("base_sha256"), "campus file")
         text = str(args.get("yaml", ""))
         spec = ce.check_campus_text(text)  # save_campus's own refusal, before any card
-        return _yaml_rows("Campus file", current, spec if isinstance(spec, dict) else {}, text, "campus file")
+        return _yaml_rows("the campus file", current, spec if isinstance(spec, dict) else {}, text, "campus file")
 
     return ec._campus(args, run)
 
@@ -117,7 +162,36 @@ def _save_campus_binding(args: dict) -> dict:
 # ── the joint optimisation ──────────────────────────────────────────────────
 
 
+# The run panel's words for each setting (CampusElectricalPanel.tsx).
+MILP_LABELS = {
+    "k": "Hours per criterion", "pf": "Connection-agreement power factor", "profile": "Grid code",
+    "margin": "Design margin", "n_minus_1": "Transformer N-1",
+    "invest": "Buy assets from the library (least cost, AC-checked)",
+    "pcc_switchgear_by_operator": "PCC switchgear owned by the grid operator (not costed)",
+    "pcc_tap_control": "PCC transformer taps held by",
+}
+
+
+def _milp_words(key: str, value) -> str:
+    """A setting's value as the run panel shows it."""
+    if key == "margin" and isinstance(value, (int, float)):
+        return f"{round(value * 100, 6):g}%"
+    if key == "pf" and value is None:
+        return "the grid code's widest range"
+    if key == "pcc_tap_control":
+        return {"campus": "the campus", "grid_operator": "the grid operator"}.get(value, str(value))
+    return ("yes" if value else "no") if isinstance(value, bool) else str(value)
+
+
+def _milp_settings_text(settings: dict) -> str:
+    return "; ".join(f"{MILP_LABELS.get(k, k)}: {_milp_words(k, v)}" for k, v in settings.items())
+
+
+_NOT_STARTED = "not started"
+
+
 def _milp_preview(args: dict) -> list[dict]:
+    """One change, the job: its settings ride on the row for the receipt and show as a note."""
     from routers.campus_electrical import RunSettings
 
     given = {k: v for k, v in (args or {}).items() if k != "project_id" and v is not None}
@@ -125,8 +199,6 @@ def _milp_preview(args: dict) -> list[dict]:
         settings = RunSettings(**given).model_dump()
     except ValueError as exc:
         ec._refuse("invalid_edit_value", str(exc))
-    rows = [_row("Joint optimisation", key, key, None, value, old_known=False)
-            for key, value in settings.items()]
 
     def prior(project):
         from services import campus_electrical_service as ce
@@ -134,44 +206,43 @@ def _milp_preview(args: dict) -> list[dict]:
         return ce.milp_job_status(project)
 
     before = ec._campus(args, prior) or {}
-    job = _row("Joint optimisation", "job", "job", before.get("state"), "running", old_known=True)
+    name = "Joint optimisation"
+    job = _row(name, "job", "job", before.get("state") or _NOT_STARTED, "running")
     # Which record is the earlier job's: the receipt needs a NEW record, not the old one still running.
-    rows.append({**job, "says_name": "the joint optimisation job", "prior_started_at": before.get("started_at")})
-    rows.append(_note("Joint optimisation", 0, "Runs for minutes in the background from the last campus run; "
-                                               "cancelling keeps the best choice found so far."))
-    return rows
+    return [{**job, "says_name": "the joint optimisation job", "prior_started_at": before.get("started_at"),
+             "settings": settings},
+            _note(name, 0, f"Settings: {_milp_settings_text(settings)}."),
+            _note(name, 1, "Runs for minutes in the background from the last campus run; cancelling keeps the "
+                           "best choice found so far.")]
 
 
 def _milp_back(args: dict, rows: list[dict]) -> list:
-    """The job record the start made (its state) and the settings its run
-    directory's basis file records."""
+    """The job record the start made (its state), read only when the run
+    directory's basis file records the settings the card showed."""
     def run(project):
         from services import campus_electrical_service as ce
 
         record = ce.milp_job_status(project) or {}
         basis = ce.campus_dir(project) / ce.MILP_SUBDIR / ce.MILP_BASIS_FILE
         try:
-            settings = json.loads(basis.read_text()).get("settings") or {}
+            recorded = json.loads(basis.read_text()).get("settings") or {}
         except (OSError, ValueError):
-            settings = {}
+            recorded = {}
         out = []
         for row in rows:
             if row["role"] == "note":
                 out.append(None)
-            elif row["field"] == "job":
-                new = record.get("started_at") is not None and record.get("started_at") != row["prior_started_at"]
-                out.append(record.get("state") if new else None)
-            else:
-                out.append(settings[row["field"]] if row["field"] in settings else "not recorded")
+                continue
+            new = record.get("started_at") is not None and record.get("started_at") != row["prior_started_at"]
+            same = all(ec._same(recorded.get(k, _NOT_STARTED), v) for k, v in row["settings"].items())
+            out.append(record.get("state") if new and same else None)
         return out
 
     return ec._campus(args, run)
 
 
 def _milp_says(args: dict, rows: list[dict]) -> str:
-    shown = ", ".join(f"{r['field']} {'default' if r['new'] is None else r['new']}"
-                      for r in rows if r["role"] == "typed" and r["field"] != "job")
-    return f"Starts the campus joint optimisation in the background ({shown})."
+    return f"Starts the campus joint optimisation in the background ({_milp_settings_text(rows[0]['settings'])})."
 
 
 # ── grid codes ──────────────────────────────────────────────────────────────
@@ -213,13 +284,13 @@ def _save_draft_preview(args: dict) -> list[dict]:
     def run(project):
         pid = str(args.get("profile_id", ""))
         current = _draft_or_none(project, pid)
-        require_base(current and current["yaml"], args.get("base_sha256"), f"draft {pid!r}")
+        require_base(current and current["yaml"], args.get("base_sha256"), f"draft “{pid}”")
         if current is None:
-            ec._refuse("component_not_found", f"no draft grid-code profile {pid!r}", 404)
+            ec._refuse("component_not_found", f"There is no draft grid-code profile “{pid}”.", 404)
         from services import campus_grid_code_service as gc
 
         stored = gc._dump(gc.check_draft_text(pid, str(args.get("yaml", ""))))  # save_draft's own refusal
-        return _yaml_rows(f"Draft {pid}", current["yaml"], _load(stored), stored, "draft")
+        return _yaml_rows(f"the draft “{_title(current, pid)}”", current["yaml"], _load(stored), stored, "draft")
 
     return _gc(args, run)
 
@@ -257,23 +328,25 @@ def _new_draft_preview(args: dict) -> list[dict]:
         from services import campus_grid_code_service as gc
 
         pid, extract = _new_pid(args), "document_id" in args
-        name = f"Draft {pid}"
         existing = _draft_or_none(project, pid)
         if extract:
+            doc = gc._doc_meta(project, gc._doc_id(str(args["document_id"])))
+            name = f"Draft from {doc.get('filename') or 'the document'}"
             old = ((existing or {}).get("profile") or {}).get("document") or {}
             rows = [{**_row(name, "document", "document", old.get("sha256"), gc._doc_id(str(args["document_id"]))),
-                     "says_name": f"draft {pid} source document"}]
+                     "says_name": f"{name}: source document"}]
             rows.append(_note(name, 9, f"Sends the document to the configured extraction provider (Anthropic, "
                                        f"model {gc._extraction_model()}): one API call, and a second only if "
                                        "the API refuses the first."))
         else:
             old_title = ((existing or {}).get("profile") or {}).get("title")
             title = (args.get("title") or "").strip()[:200] or "Project grid code (to be filled in by hand)"
-            rows = [{**_row(name, "title", "title", old_title, title), "says_name": f"draft {pid} title"}]
+            name = f"Draft “{title}”"
+            rows = [{**_row(name, "title", "title", old_title, title), "says_name": "the draft's title"}]
         if existing is None:
             return rows
         if not args.get("overwrite"):
-            return rows + [_note(name, 0, "A draft of this id exists; without overwrite the call is refused (409).")]
+            return rows + [_note(name, 0, "A draft of this id exists; without overwrite nothing is replaced and the call is refused.")]
         return rows + [_profile_note(name, 1, existing),
                        _note(name, 2, "overwrite replaces this draft and its review.")]
 
@@ -289,6 +362,14 @@ def _new_draft_back(args: dict, rows: list[dict]) -> list:
     return _gc(args, run)
 
 
+def _new_draft_says(args: dict, rows: list[dict]) -> str:
+    first = rows[0]
+    if first["field"] == "document":
+        return f"Drafts a grid-code profile from {first['name'].removeprefix('Draft from ')} with the extraction provider."
+    replaced = f"Replaces the draft “{first['old']}” with" if first["old"] is not None and args.get("overwrite") else "Creates"
+    return f"{replaced} a blank draft “{first['new']}”, every limit assumed until filled in by hand."
+
+
 def _new_draft_binding(args: dict) -> dict:
     return _gc(args, lambda project: {"draft_sha256": sha256_text(_draft_text(project, _new_pid(args)))})
 
@@ -300,15 +381,17 @@ def _confirm_preview(args: dict) -> list[dict]:
         pid, path = str(args.get("profile_id", "")), str(args.get("limit", ""))
         draft = gc.get_draft(project, pid)
         limit = dict(gc._limits(draft["profile"])).get(path)
+        label, title = limit_label(path), _title(draft, pid)
         if not isinstance(limit, dict):
-            ec._refuse("component_not_found", f"draft {pid!r} has no limit {path!r}", 404)
+            ec._refuse("component_not_found", f"Draft “{title}” has no limit “{label}”.", 404)
         if limit.get("source") != "extracted":
-            ec._refuse("edit_refused", f"{path} is {limit.get('source')!r}, not extracted; only an extracted "
-                                       "limit is confirmed")
-        name = f"Draft {pid} {path}"
+            ec._refuse("edit_refused", f"{label} is tagged {limit.get('source') or 'with no source'}, not "
+                                       "extracted; only an extracted limit is confirmed.")
+        name = f"Draft “{title}”: {label}"
         rows = [_row(name, "source", "source", "extracted", "code")]
-        rows += [_row(name, key, key, value, value) for key, value in limit.items()
-                 if key not in ("source", "quote", "page", "clause")]
+        values = ", ".join(f"{key} {value}" for key, value in limit.items()
+                           if key not in ("source", "quote", "page", "clause"))
+        rows.append(_note(name, 3, f"The limit stays as extracted: {values}."))
         check = ((draft.get("review") or {}).get("limits") or {}).get(path) or {}
         found = check.get("quote_found")
         rows += [
@@ -340,7 +423,9 @@ def _confirm_back(args: dict, rows: list[dict]) -> list:
 
 
 def _confirm_says(args: dict, rows: list[dict]) -> str:
-    return (f"Marks limit {args.get('limit')} of draft {args.get('profile_id')} as confirmed against its quoted "
+    title = _gc(args, lambda project: _title(_draft_or_none(project, str(args.get("profile_id", ""))),
+                                             str(args.get("profile_id", ""))))
+    return (f"Marks {limit_label(str(args.get('limit', '')))} in draft “{title}” as confirmed against its quoted "
             "page (source extracted → code).")
 
 
@@ -351,20 +436,18 @@ def _publish_preview(args: dict) -> list[dict]:
         pid = str(args.get("profile_id", ""))
         draft = gc.get_draft(project, pid)
         old = _published_or_none(project, pid)
-        name = f"Grid code {pid}"
-        rows = [_row(name, "published", "published",
-                     None if old is None else (old["profile"] or {}).get("title", pid),
-                     (draft["profile"] or {}).get("title", pid)),
-                # The published file is the draft's validated text: the receipt reads its sha.
-                _row(name, "sha256", "published sha256", sha256_text(old and old["yaml"]), sha256_text(draft["yaml"]))]
+        name = f"Grid code “{_title(draft, pid)}”"
+        # The published file is the draft's validated text: the receipt compares its sha (never shown).
+        rows = [{**_row(name, "published", "published", None if old is None else _title(old, pid), _title(draft, pid)),
+                 "draft_sha256": sha256_text(draft["yaml"])}]
         rows.append(_note(name, 0, "Replaces the published profile of this id." if old is not None
                                    else "A new published profile; studies can then use it."))
         open_limits = draft.get("unconfirmed") or []
         for i, path in enumerate(open_limits, start=1):
-            rows.append(_note(name, i, f"{path} is unconfirmed: "
+            rows.append(_note(name, i, f"{limit_label(path)} is unconfirmed: "
                                        + ("it stays extracted; every report row on it says so."
                                           if args.get("allow_unconfirmed")
-                                          else "publishing is refused (409) until it is confirmed.")))
+                                          else "publishing is refused until it is confirmed.")))
         return rows
 
     return _gc(args, run)
@@ -373,15 +456,16 @@ def _publish_preview(args: dict) -> list[dict]:
 def _publish_back(args: dict, rows: list[dict]) -> list:
     def run(project):
         p = _published_or_none(project, str(args.get("profile_id", "")))
-        return [None if row["role"] == "note" or p is None else sha256_text(p["yaml"]) if row["field"] == "sha256"
-                else (p["profile"] or {}).get("title", p["id"]) for row in rows]
+        return [None if row["role"] == "note" or p is None
+                else _OTHER_FILE if sha256_text(p["yaml"]) != row["draft_sha256"]
+                else _title(p, p["id"]) for row in rows]
 
     return _gc(args, run)
 
 
 def _publish_says(args: dict, rows: list[dict]) -> str:
-    pid, old = args.get("profile_id"), rows[0]["old"]
-    return (f"Publishes draft {pid} as grid code {pid}"
+    old, new = rows[0]["old"], rows[0]["new"]
+    return (f"Publishes the draft “{new}” as a grid code"
             + (f", replacing the published “{old}”." if old is not None else "; studies can then use it."))
 
 
@@ -401,8 +485,8 @@ def _delete_profile(kind: str):
 
             pid = str(args.get("profile_id", ""))
             shaped = (gc.get_draft if kind == "draft" else gc.get_published)(project, pid)
-            name = f"{kind.capitalize()} {pid}"
-            return [_row(name, kind, kind, (shaped["profile"] or {}).get("title", pid), None),
+            name = f"{kind.capitalize()} “{_title(shaped, pid)}”"
+            return [_row(name, kind, kind, _EXISTS, _DELETED),
                     _profile_note(name, 0, shaped),
                     _note(name, 1, f"The {kind} profile is deleted; this cannot be undone.")]
 
@@ -420,14 +504,12 @@ def _delete_profile(kind: str):
         """The profile's title while it is still there; None (the card's new) once it is gone."""
         def run(project):
             shaped = (_draft_or_none if kind == "draft" else _published_or_none)(project, str(args.get("profile_id", "")))
-            title = None if shaped is None else (shaped["profile"] or {}).get("title", shaped["id"])
-            return [None if row["role"] == "note" else title for row in rows]
+            return [None if row["role"] == "note" else _DELETED if shaped is None else _EXISTS for row in rows]
 
         return _gc(args, run)
 
     def says(args: dict, rows: list[dict]) -> str:
-        return (f"Deletes the {kind} grid-code profile {args.get('profile_id')} (“{rows[0]['old']}”); "
-                "this cannot be undone.")
+        return f"Deletes the {kind} grid-code profile {rows[0]['name'].split(' ', 1)[1]}; this cannot be undone."
 
     return preview, binding, back, says
 
@@ -440,11 +522,12 @@ def _delete_document_preview(args: dict) -> list[dict]:
         listing = gc.list_grid_codes(project)
         doc = next((d for d in listing.get("documents") or [] if d.get("id") == did), None)
         if doc is None:
-            ec._refuse("component_not_found", f"no grid-code document {did!r}", 404)
+            ec._refuse("component_not_found", f"There is no grid-code document “{did}”.", 404)
         name = f"Document {doc.get('filename') or did}"
-        citing = [d["id"] for d in listing.get("drafts") or [] if d.get("document") == did]
-        rows = [_row(name, "document", "document", f"{doc.get('filename')} ({doc.get('size')} bytes, "
-                                                    f"{doc.get('pages')} pages)", None)]
+        citing = [f"“{d.get('title') or d['id']}”" for d in listing.get("drafts") or [] if d.get("document") == did]
+        rows = [_row(name, "document", "document", _EXISTS, _DELETED),
+                _note(name, 1, f"{doc.get('filename')}: {doc.get('size')} bytes, {doc.get('pages')} "
+                                  f"page{'' if doc.get('pages') == 1 else 's'}.")]
         rows.append(_note(name, 0, ("Drafts that cite it: " + ", ".join(citing) + "; their quotes can no longer "
                                     "be checked.") if citing else "No draft cites it."))
         return rows
@@ -458,7 +541,7 @@ def _delete_document_back(args: dict, rows: list[dict]) -> list:
 
         did = str(args.get("document_id", ""))
         doc = next((d for d in gc.list_grid_codes(project).get("documents") or [] if d.get("id") == did), None)
-        return [None if row["role"] == "note" or doc is None else row["old"] for row in rows]
+        return [None if row["role"] == "note" else _DELETED if doc is None else _EXISTS for row in rows]
 
     return _gc(args, run)
 
@@ -470,14 +553,14 @@ def _delete_document_says(args: dict, rows: list[dict]) -> str:
 def _register() -> None:
     reg, A = ec.register, ec.Adapter
     reg("campus_save_campus", A("settings_edit", _save_campus_preview, _save_campus_back,
-                                binding=_save_campus_binding))
+                                binding=_save_campus_binding, says=_yaml_says("the campus file")))
     reg("campus_start_milp", A("settings_edit", _milp_preview, _milp_back, says=_milp_says))
     reg("campus_save_grid_code_draft", A("settings_edit", _save_draft_preview, _save_draft_back,
-                                         binding=_draft_binding))
+                                         binding=_draft_binding, says=_yaml_says("the draft")))
     reg("campus_new_grid_code_draft", A("settings_edit", _new_draft_preview, _new_draft_back,
-                                        binding=_new_draft_binding))
+                                        binding=_new_draft_binding, says=_new_draft_says))
     reg("campus_extract_grid_code", A("settings_edit", _new_draft_preview, _new_draft_back,
-                                      binding=_new_draft_binding))
+                                      binding=_new_draft_binding, says=_new_draft_says))
     reg("campus_confirm_grid_code_limit", A("settings_edit", _confirm_preview, _confirm_back,
                                             binding=_draft_binding, says=_confirm_says))
     reg("campus_publish_grid_code", A("settings_edit", _publish_preview, _publish_back,
