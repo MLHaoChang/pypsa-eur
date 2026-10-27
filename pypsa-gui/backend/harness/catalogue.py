@@ -1535,7 +1535,7 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "pending_profile_from_current",
-        "Make the series a component carries now into a pending profile, so "
+        "Turn the series a component carries now into a pending profile, so "
         "the profile refinement tools act on a measured upload the same way "
         "as on a generated series. Nothing touches the network; "
         "apply_generated_profile applies it, and refuses it once the stored "
