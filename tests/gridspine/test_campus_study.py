@@ -607,3 +607,34 @@ def test_sizing_writes_the_ibr_capability_and_the_reported_requirements_beside_c
     assert {"frt", "vrt", "rocof", "large_load_ride_through"} <= ids
     size_campus(run)                                                     # back to EU: the table goes
     assert not (run / IBR_CAPABILITY_CSV).is_file()
+
+
+def test_sizing_writes_the_unit_q_curve_only_for_a_profile_that_sets_one(tmp_path, project):
+    """DC 15: a profile with ``q_capability_unit`` adds its own table beside
+    the IBR capability; without one there is no table and ``ibr_q_curve`` is
+    None. The deadband is a reported row. Generic test values."""
+    import pandas as pd
+
+    from gridspine.drivers.campus_study import IBR_Q_CURVE_CSV, REPORTED_REQUIREMENTS_JSON
+    from gridspine.templates.grid_codes import load_grid_code
+
+    run = tmp_path / "run"
+    prepare_campus(run, draft_from_project(project).spec, project)
+    rank_campus(run, k=1)
+    plain = size_campus(run)
+    assert plain["ibr_q_curve"] is None and not (run / IBR_Q_CURVE_CSV).is_file()
+    dirs = tmp_path / "codes"
+    dirs.mkdir()
+    lim = {"clause": "generic test clause", "source": "code"}
+    (dirs / "proj.yaml").write_text(yaml.safe_dump({
+        **load_grid_code("generic_assumed", raw=True),
+        "q_capability_unit": {**lim, "points": [[0.0, -0.3, 0.3], [1.0, -0.3, 0.3]]},
+        "voltage_deadband_pct": {**lim, "value": 0.5}}))
+    got = size_campus(run, profile="proj", profile_dirs=[dirs])
+    table = pd.read_csv(run / IBR_Q_CURVE_CSV)
+    assert len(table) == len(got["ibr_q_curve"]) > 0
+    assert set(table["status"]) <= {"pass", "fail", "reported"}
+    assert "voltage_deadband_pct" in {r["id"] for r in json.loads((run / REPORTED_REQUIREMENTS_JSON).read_text())}
+    assert list(got["compliance"]["check"]) == list(plain["compliance"]["check"])    # no new compliance row
+    size_campus(run)                                                     # back to a profile without one
+    assert not (run / IBR_Q_CURVE_CSV).is_file()

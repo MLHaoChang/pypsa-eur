@@ -1,12 +1,13 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-26",
+  "generated_at": "2026-10-27",
   "status": "control/parameter matrix for Network/topology; behavioral journeys remain pending on issue 05",
   "sources": [
     "pypsa-gui/frontend/src/layout/CreationForm.tsx",
     "pypsa-gui/frontend/src/utils/attributeCatalog.ts",
     ".scratch/live-voice/capability-inventory.json",
-    ".scratch/live-voice/application-coverage.md"
+    ".scratch/live-voice/application-coverage.md",
+    ".scratch/live-voice/route-parity.json"
   ],
   "controls": [
     {
@@ -4626,6 +4627,133 @@
       "status": "assigned"
     }
   ],
+  "route_parity": {
+    "source": ".scratch/live-voice/route-parity.json",
+    "counts": {
+      "backend_routes": 506,
+      "gui_routes": 466,
+      "limitation": 84,
+      "needs-tool": 86,
+      "tool": 296,
+      "unclassified": 0
+    },
+    "limitations_by_reason": {
+      "account-auth": 7,
+      "admin": 13,
+      "app-shell": 7,
+      "assistant-self-config": 19,
+      "binary-transfer": 7,
+      "conversation-transport": 26,
+      "live-stream": 2,
+      "ui-local-state": 3
+    },
+    "needs_tool_by_family": {
+      "all-results": [
+        "GET /api/results/asset/assets",
+        "GET /api/results/curtailment/by_cause",
+        "GET /api/results/eh_readiness",
+        "GET /api/results/energy_flows",
+        "GET /api/results/load_shape",
+        "GET /api/results/loadflow-view",
+        "GET /api/results/run-view"
+      ],
+      "economics-investment": [
+        "GET /api/library/series",
+        "GET /api/library/series/{name}",
+        "GET /api/simulation/commercial/poc",
+        "GET /api/simulation/value_flows/designer",
+        "POST /api/library/meter_data",
+        "POST /api/library/series/upload",
+        "POST /api/results/billing/preview",
+        "POST /api/results/investment_case/abort",
+        "PUT /api/library/items/{kind}/{name}",
+        "PUT /api/simulation/finance"
+      ],
+      "gridspine-campus": [
+        "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
+        "DELETE /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+        "DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+        "DELETE /api/campus-electrical/{name}/grid-readiness/limits/{item}",
+        "DELETE /api/campus-electrical/{name}/island/cuts",
+        "DELETE /api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}",
+        "GET /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+        "GET /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+        "GET /api/campus-electrical/{name}/grid-readiness",
+        "GET /api/campus-electrical/{name}/island/gfm-settings/card",
+        "GET /api/campus-electrical/{name}/island/report",
+        "GET /api/campus-electrical/{name}/milp",
+        "POST /api/campus-electrical/{name}/draft",
+        "POST /api/campus-electrical/{name}/grid-codes/documents",
+        "POST /api/campus-electrical/{name}/grid-codes/documents/{document_id}/extract",
+        "POST /api/campus-electrical/{name}/grid-codes/drafts",
+        "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
+        "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
+        "POST /api/campus-electrical/{name}/island/cuts/apply/cancel",
+        "POST /api/campus-electrical/{name}/island/study",
+        "POST /api/campus-electrical/{name}/library/reset",
+        "POST /api/campus-electrical/{name}/milp",
+        "POST /api/campus-electrical/{name}/milp/cancel",
+        "POST /api/campus-electrical/{name}/run",
+        "POST /api/gridspine/{name}/capacity",
+        "POST /api/gridspine/{name}/connection",
+        "POST /api/gridspine/{name}/dispatch-source/external",
+        "POST /api/gridspine/{name}/readback/{hour}",
+        "PUT /api/campus-electrical/{name}/campus",
+        "PUT /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+        "PUT /api/campus-electrical/{name}/grid-readiness/limits/{item}"
+      ],
+      "import-export": [
+        "GET /api/projects/{name}/map_layout/osm_suggestions",
+        "POST /api/document_values/commercial/preview",
+        "POST /api/document_values/preview",
+        "POST /api/equipment_table/preview",
+        "POST /api/library_reference/preview",
+        "POST /api/projects/import-folder",
+        "POST /api/projects/{name}/map_layout/import"
+      ],
+      "network-topology": [
+        "GET /api/geocode",
+        "GET /api/network/asset_costs",
+        "GET /api/network/asset_schema/{component}",
+        "GET /api/network/catalog/{component}",
+        "GET /api/projects/{name}/sites",
+        "GET /api/projects/{name}/sites/{site_id}/context",
+        "POST /api/network/lengths/from_geometry",
+        "POST /api/network/lines/rescale_impedances",
+        "POST /api/network/reset",
+        "POST /api/projects/{name}/sites/{site_id}/context",
+        "PUT /api/projects/{name}/sites"
+      ],
+      "reliability-adequacy": [
+        "GET /api/projects/{name}/stress_profile_packs"
+      ],
+      "reports": [
+        "GET /api/projects/{name}/reports/capabilities",
+        "GET /api/projects/{name}/reports/evidence_hash",
+        "GET /api/projects/{name}/reports/{report_id}/versions/{version}",
+        "POST /api/projects/{name}/reports"
+      ],
+      "solver-simulation": [
+        "GET /api/simulation/queue/{job_id}/log_history",
+        "POST /api/simulation/queue/cancel_queued",
+        "POST /api/simulation/queue/clear_finished",
+        "POST /api/simulation/queue/pause",
+        "POST /api/simulation/queue/resume",
+        "POST /api/simulation/queue/{job_id}/dismiss",
+        "POST /api/simulation/queue/{job_id}/requeue",
+        "PUT /api/projects/{name}/worksheet"
+      ],
+      "timeseries-horizon": [
+        "GET /api/projects/{name}/profiles/current",
+        "GET /api/projects/{name}/profiles/weather",
+        "POST /api/network/timeseries/upload",
+        "POST /api/projects/{name}/profiles/from-current",
+        "POST /api/projects/{name}/profiles/loads/upload",
+        "POST /api/projects/{name}/profiles/series/upload",
+        "PUT /api/projects/{name}/profiles/weather"
+      ]
+    }
+  },
   "full_coverage": {
     "claimed": false,
     "status": "not_established",
@@ -4723,14 +4851,68 @@
         "summary": "Every matrix row still carries a pending:issue-05-* behavioral fixture; no per-family real journey has passed."
       },
       {
-        "id": "ui-control-tool-parity-unaudited",
+        "id": "ui-local-control-parity-unaudited",
         "issue": "08",
-        "summary": "Panel/subview/filter/editor controls beyond creation-form fields and catalogue closed sets are not mapped to a typed tool or a declared gap."
+        "summary": "Client-only panel/subview/filter controls (no backend call) are not mapped to a navigation tool or a declared gap; controls that call the backend are audited in route_parity."
       },
       {
         "id": "hosted-gates-pending",
         "issue": "05",
         "summary": "Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior."
+      },
+      {
+        "id": "route-parity:needs-tool:all-results",
+        "issue": "08",
+        "family": "all-results",
+        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:economics-investment",
+        "issue": "08",
+        "family": "economics-investment",
+        "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:gridspine-campus",
+        "issue": "08",
+        "family": "gridspine-campus",
+        "summary": "31 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:import-export",
+        "issue": "08",
+        "family": "import-export",
+        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:network-topology",
+        "issue": "08",
+        "family": "network-topology",
+        "summary": "11 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:reliability-adequacy",
+        "issue": "08",
+        "family": "reliability-adequacy",
+        "summary": "1 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:reports",
+        "issue": "08",
+        "family": "reports",
+        "summary": "4 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:solver-simulation",
+        "issue": "08",
+        "family": "solver-simulation",
+        "summary": "8 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
+      },
+      {
+        "id": "route-parity:needs-tool:timeseries-horizon",
+        "issue": "08",
+        "family": "timeseries-horizon",
+        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       }
     ],
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."

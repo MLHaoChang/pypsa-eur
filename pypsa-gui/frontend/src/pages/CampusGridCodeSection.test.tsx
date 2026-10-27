@@ -249,7 +249,7 @@ describe('grid codes: extract', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
     await screen.findByTestId('limit-rvc_limit_pct')
     for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-      'thd_limit_pct', 'harmonic_limits_pct', 'pst_limit', 'plt_limit']) {
+      'thd_limit_pct', 'harmonic_limits_pct', 'pst_limit', 'plt_limit', 'q_capability_unit', 'voltage_deadband_pct']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
     }
   })
@@ -268,6 +268,48 @@ describe('grid codes: extract', () => {
     const plt = screen.getByTestId('limit-plt_limit').textContent
     expect(plt).toContain('Flicker severity Plt at the PCC')
     expect(plt).toContain('0.6')
+  })
+
+  it('shows the per-unit capability curve apart from the PCC band, and the deadband', async () => {
+    const base = draft()
+    const points: [number, number, number][] = [[0, -0.1, 0.1], [1, -0.3, 0.3]]
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      q_capability_pq: { clause: 'generic clause', source: 'code', points },
+      q_capability_unit: { clause: 'generic clause', source: 'code', points },
+      voltage_deadband_pct: { value: 0.5, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const unit = (await screen.findByTestId('limit-q_capability_unit')).textContent
+    expect(unit).toContain('Reactive capability per generating unit')
+    expect(unit).toContain("pu of the unit's rated P")
+    expect(unit).toContain('+ = unit delivers')
+    expect(unit).not.toContain('PCC')
+    // The same text as the PCC band: one formatter for both.
+    expect(unit).toContain('P 0 pu: Q −0.1 to 0.1 pu · P 1 pu: Q −0.3 to 0.3 pu')
+    expect(screen.getByTestId('limit-q_capability_pq').textContent).toContain('at the PCC')
+    const db = screen.getByTestId('limit-voltage_deadband_pct').textContent
+    expect(db).toContain('Voltage-control deadband')
+    expect(db).toContain('not checked')
+    expect(db).toContain('±0.5\u00A0%')
+  })
+
+  it('confirms the per-unit curve and the deadband by their own paths', async () => {
+    const d = draft({ unconfirmed: ['q_capability_unit', 'voltage_deadband_pct'] })
+    const doc = { source: 'extracted' as const, page: 31, quote: 'generic quote' }
+    d.profile.q_capability_unit = { clause: 'generic clause', ...doc, points: [[0, -0.1, 0.1], [1, -0.3, 0.3]] }
+    d.profile.voltage_deadband_pct = { value: 0.5, clause: 'generic clause', ...doc }
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110', d.unconfirmed)] }))
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    api.confirmGridCodeLimit.mockResolvedValue(d)
+    for (const path of ['q_capability_unit', 'voltage_deadband_pct']) {
+      const limit = await screen.findByTestId(`limit-${path}`)
+      expect(limit.textContent).toContain('generic quote')
+      await userEvent.click(within(limit).getByRole('button', { name: /^Confirm/ }))
+      await waitFor(() => expect(api.confirmGridCodeLimit).toHaveBeenCalledWith('Hub A', 'vde_4110', path))
+    }
   })
 
   it('leaves the profile id out when none is typed, so the backend derives one', async () => {
