@@ -1,7 +1,7 @@
 # E1. Examples for any planning years
 
-Status: ready-for-agent
-Progress: E1a #540 and E1b #574 and #580 merged; E1c ammonia on branch `claude/e1c-planning-years-ammonia`; E1d single-year and IPP templates lack planning_spec.
+Status: done
+Progress: E1a #540, E1b #574 and #580, E1c #718, E1d #730 and the placeholder follow-up #733 merged; the report ledger follow-up is done (#704). The Builder's period preview is W2's.
 Type: task
 Gated: yes, the engine gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC). Each slice needs its own OK on its head.
 Model tier: opus

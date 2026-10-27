@@ -66,6 +66,10 @@ TERMINAL_STATUSES = frozenset({'completed', 'failed', 'interrupted'})
 STATUSES = TERMINAL_STATUSES | {'running'}
 
 _LOCK = threading.RLock()
+# Runs this process started and has not yet published; changed only under
+# _LOCK. A running marker outside it was left by a process that exited
+# (restart, crash): it reads as interrupted.
+_LIVE: set[tuple[str, str]] = set()
 _RUN_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$')
 _SECTION = re.compile(r'^[a-z][a-z0-9_]{0,31}$')
 _METRIC = re.compile(r'^[A-Za-z][A-Za-z0-9_.-]{0,63}$')
@@ -126,6 +130,10 @@ def _evidence_path(root: Path, *parts: str) -> Path:
         raise HTTPException(422, {'error_kind': 'invalid_run_evidence',
                                  'message': 'Evidence path leaves the owned project.'})
     return Path(path)
+
+
+def _live_key(root: Path, run_id: str) -> tuple[str, str]:
+    return (str(Path(root).resolve()), run_id)
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -193,7 +201,13 @@ def start_run(root: Path, project_id: str, *, run_id: str, kind: str,
         if _evidence_path(root, run_id, 'manifest.json').exists():
             _refuse('run_already_finalized', 'This run already has a terminal manifest.',
                     run_id=run_id)
-        _atomic_write(_evidence_path(root, run_id, 'running.json'), _json_bytes(marker))
+        # Live before the marker exists, so no read sees this run as orphaned.
+        _LIVE.add(_live_key(root, run_id))
+        try:
+            _atomic_write(_evidence_path(root, run_id, 'running.json'), _json_bytes(marker))
+        except BaseException:
+            _LIVE.discard(_live_key(root, run_id))
+            raise
     return copy.deepcopy(marker)
 
 
@@ -254,6 +268,7 @@ def publish_run(root: Path, project_id: str, *, run_id: str, kind: str, status: 
             _atomic_write(section_paths[name], blob)
         _atomic_write(manifest_path, _json_bytes(manifest))
         marker_path.unlink(missing_ok=True)
+        _LIVE.discard(_live_key(root, run_id))
         _enforce_retention(root)
     return copy.deepcopy(manifest)
 
@@ -293,6 +308,17 @@ def _load_run(root: Path, project_id: str, run_id: str) -> dict | None:
     record = _read_manifest_file(manifest) or _read_json(marker)
     if record is None or record.get('project_id') != project_id or record.get('run_id') != run_id:
         return None
+    if record.get('status') == 'running' and _live_key(root, run_id) not in _LIVE:
+        return _orphaned(record)
+    return record
+
+
+def _orphaned(marker: dict) -> dict:
+    """A marker no live process will publish: interrupted, with no evidence. Read-only."""
+    record = copy.deepcopy(marker)
+    record['status'] = 'interrupted'
+    record['finished_at'] = None
+    record['warnings'] = [*(record.get('warnings') or []), 'process_exited']
     return record
 
 
@@ -341,14 +367,32 @@ def _enforce_retention(root: Path) -> None:
     base = root / 'run_evidence'
     entries = []
     for child in base.iterdir():
-        record = _read_manifest_file(child / 'manifest.json') if child.is_dir() else None
+        if not child.is_dir():
+            continue
+        path = child / 'manifest.json'
+        record = _read_manifest_file(path)
+        if record is None and _live_key(root, child.name) not in _LIVE:
+            path = child / 'running.json'  # orphaned marker
+            record = _read_json(path)
         if record is not None:
-            entries.append((record.get('started_at') or '', child.name, child))
+            entries.append((_started_key(record, path), child.name, child))
     entries.sort(reverse=True)
     for _, _, child in entries[MAX_MANIFESTS:]:
         shutil.rmtree(child, ignore_errors=True)
     for _, _, child in entries[MAX_RUNS_WITH_ARTIFACTS:MAX_MANIFESTS]:
         shutil.rmtree(child / 'sections', ignore_errors=True)
+
+
+def _started_key(record: dict, path: Path) -> datetime:
+    """started_at for retention order; the file's mtime when it is missing or unparsable."""
+    try:
+        started = datetime.fromisoformat(record['started_at'])
+        return started if started.tzinfo else started.replace(tzinfo=timezone.utc)
+    except (KeyError, TypeError, ValueError):
+        try:
+            return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc)
+        except OSError:
+            return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _summary(root: Path, record: dict) -> dict:
@@ -567,9 +611,10 @@ def start_foreground_run(ctx: Any, *, job_id: str, tool_name: str,
             'kind': _FOREGROUND_KINDS.get(kind or '', 'simulation'),
             'solver_kind': kind, 'tool_name': tool_name,
             'started_at': _now(), 'unsaved_inputs': dirty_state.is_dirty(ctx),
+            'mode': _solver_mode(ctx, kind),
         }
         start_run(root, project_id, run_id=token['run_id'], kind=token['kind'],
-                  started_at=token['started_at'], mode=_solver_mode(ctx, kind),
+                  started_at=token['started_at'], mode=token['mode'],
                   job_id=job_id, unsaved_inputs=token['unsaved_inputs'], actor_id=owner)
         return token
     except HTTPException:
@@ -677,6 +722,25 @@ def publish_foreground_run(token: dict | None, ctx: Any) -> dict | None:
             job_id=token['job_id'], unsaved_inputs=token['unsaved_inputs'],
             actor_id=token['actor_id'], metrics=metrics, error=error,
             sections=sections)
+    except HTTPException:
+        return None
+
+
+def foreground_run_pending(token: dict | None) -> bool:
+    """Whether this process still owes the run its terminal manifest."""
+    return bool(token) and _live_key(token['root'], token['run_id']) in _LIVE
+
+
+def publish_foreground_superseded(token: dict | None) -> dict | None:
+    """The solve's own outcome is gone (another solve replaced it): record interrupted."""
+    if not token:
+        return None
+    try:
+        return publish_run(
+            token['root'], token['project_id'], run_id=token['run_id'], kind=token['kind'],
+            status='interrupted', started_at=token['started_at'], mode=token.get('mode'),
+            warnings=['outcome_superseded'], job_id=token['job_id'],
+            unsaved_inputs=token['unsaved_inputs'], actor_id=token['actor_id'])
     except HTTPException:
         return None
 

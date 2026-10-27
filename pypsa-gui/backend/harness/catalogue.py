@@ -4210,7 +4210,24 @@ TOOLS: list[dict[str, Any]] = [
 # v4-NIT-1 / v6-F4: derive the count from the registry length at module
 # import. NEVER pre-state the count anywhere in code or docs.
 # Provider-neutral assistant operations. Every action uses normal dispatch.
-_ENGINEERING_CHANGES = next(t for t in TOOLS if t["name"] == "run_sensitivity_sweep")["input_schema"]["properties"]["cases"]["items"]["properties"]["changes"]
+# LC-16: the preview takes any editable numeric field of these classes
+# (checked against get_component_schema by the server); the sweep keeps its own.
+_PREVIEW_CHANGES = {"type": "array", "minItems": 1, "maxItems": 20, "items": {
+    "type": "object", "additionalProperties": False,
+    "properties": {
+        "component_class": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]},
+        "names": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}},
+        "attribute": {"type": "string", "maxLength": 64},
+        "select": {"type": "object", "additionalProperties": False, "properties": {
+            "carrier": {"type": "string", "minLength": 1, "maxLength": 64},
+            "bus": {"type": "string", "minLength": 1, "maxLength": 64},
+            "all": {"type": "boolean", "enum": [True]}}},
+        "value": {"type": ["number", "boolean"]},
+        "operation": {"type": "object", "additionalProperties": False,
+                      "properties": {"scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 1000}},
+                      "required": ["scale"]},
+    },
+    "required": ["component_class", "attribute"]}}
 TOOLS.extend([
     _t("advance_experiment", "Arm or resume one or two prepared NETWORK cases in this chat, in declared order with shared caps and stop/continue policy. Returns one exact next_call for ordinary run_sensitivity_sweep or bounded wait_for_job; does not execute it or approve it. Actual case creation/queue submission still requires the ordinary execution confirmation. Frozen owner/project/input identities, durable attempt/time caps and no-replay receipts apply. Other domains and plans larger than two cases are not admitted. Uncertain/partial effects block both failure policies until explicitly reconciled. Strict checked tool policy is unchanged. Safety: write.", {"experiment_id": {"type": "string", "maxLength": 36}}, ["experiment_id"]),
     _t("refresh_experiment", "Refresh one or two armed network case receipts against the authorized queue job, exact saved/solved input identity and intact immutable run evidence. Submitted/running/failed/uncertain are never completed. Returns recorded objective only for matching completed sources; unavailable evidence has no value. No job is started, retried or aborted. Safety: write.", {"experiment_id": {"type": "string", "maxLength": 36}}, ["experiment_id"]),
@@ -4240,12 +4257,13 @@ TOOLS.extend([
     _t("get_file_delivery", "Get a file's authenticated browser download link, content hash, size and project provenance by upload ID. Never returns binary bytes or server paths. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("inspect_import", "Inspect uploaded CSV/Excel metadata: up to five sheets, 200 sampled rows and 20 columns. Returns missing-value/time-axis diagnostics, explicit sample limits and native import format. Units and column mappings require user confirmation; never guessed. Other native formats receive format guidance. Safety: read.", {"file_id": {"type": "string"}}, ["file_id"]),
     _t("import_uploaded_network", "Replace the current network using an authorized upload ID and the existing native import handler. Binary bytes stay server-side. Rebinds to an unsaved draft; save under a chosen project afterward. Normal destructive confirmation and locks apply. Safety: destructive.", {"file_id": {"type": "string"}, "format": {"type": "string", "enum": ["netcdf", "csv_bundle", "excel", "matpower"]}}, ["file_id", "format"]),
-    _t("preview_project_changes", "Preview 1–20 typed engineering parameter changes on an isolated network. Returns immutable preview_id, old/new values with units, validation and fingerprint; stores a preview but does not modify network inputs. Existing time-series overrides remain. Topology edits use existing CRUD tools. Safety: write.", {"changes": _ENGINEERING_CHANGES}, ["changes"]),
+    _t("preview_project_changes", "Preview several parameter edits as ONE card: up to 20 asset × field rows across Generator, Load, Line, Link, StorageUnit, Store, Bus and Transformer, each with its own value (L1 s_nom 500 and L2 s_nom 450 are two changes). Each change takes exactly one of names or select, and exactly one of value or operation. select names a set the server resolves at preview time: carrier, bus (a Link matches on any bus port) and/or all: true; inactive members are included. operation {scale: f} (0 < f <= 1000) multiplies each member's current value on the server: '+20 %' is 1.2, 'halve' is 0.5; never compute the new values yourself. An empty set, a member whose field has a time series, a non-whole result for an integer field or a per-unit share scaled above 1 refuses the whole preview. attribute: any numeric or true/false field get_component_schema marks editable, in its STORED unit (unit_storage); derived, read-only and output fields refuse. One missing name refuses the whole preview, naming it and the existing names; nothing is stored. Returns immutable preview_id, old/new values with units, validation and fingerprint; does not modify network inputs. Apply with apply_project_changes: one approval, one atomic apply, one undo. Existing time-series overrides remain. Topology edits use existing CRUD tools. Safety: write.", {"changes": _PREVIEW_CHANGES}, ["changes"]),
     _t("apply_project_changes", "Apply a reviewed typed preview atomically to unchanged active-project inputs. Refuses stale, foreign, busy or interrupted previews. Normal execution confirmation, lock/study guards and undo capture apply. Repeated successful application returns reused. Leaves changes unsaved. Safety: execution.", {"preview_id": {"type": "string"}}, ["preview_id"]),
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
     _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_reliability_goal", "The project's one reliability goal as the EH study, Monte-Carlo, coupling and margin loops resolve it when a call leaves a field out: {target_lole_h (allowed shortfall, h/yr), ens_cap_permyriad (energy strictness, ‱ of demand), mc_draws, site_archetype}, each {value, source: stored|template|default}. Change it with update_solver_config. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4723,6 +4741,7 @@ TOOL_ROUTES: dict[str, list] = {
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.html")],
     # project flow (B1)
     "get_project_flow": [("GET", "/api/projects/{name}/flow")],
+    "get_reliability_goal": [("GET", "/api/projects/{name}/flow/reliability_goal")],
 }
 
 

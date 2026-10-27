@@ -29,6 +29,9 @@ POST    /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm    
 POST    /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish       -> publish_grid_code_api_campus_electrical__name__grid_codes_drafts__profile_id__publish_post
 DELETE  /api/campus-electrical/{name}/grid-codes/published/{profile_id}            -> delete_published_grid_code_api_campus_electrical__name__grid_codes_published__profile_id__delete
 GET     /api/campus-electrical/{name}/grid-codes/published/{profile_id}            -> get_published_grid_code_api_campus_electrical__name__grid_codes_published__profile_id__get
+GET     /api/campus-electrical/{name}/grid-readiness                               -> get_grid_readiness_api_campus_electrical__name__grid_readiness_get
+DELETE  /api/campus-electrical/{name}/grid-readiness/limits/{item}                 -> delete_grid_readiness_limit_api_campus_electrical__name__grid_readiness_limits__item__delete
+PUT     /api/campus-electrical/{name}/grid-readiness/limits/{item}                 -> put_grid_readiness_limit_api_campus_electrical__name__grid_readiness_limits__item__put
 GET     /api/campus-electrical/{name}/island                                       -> get_island_api_campus_electrical__name__island_get
 PUT     /api/campus-electrical/{name}/island                                       -> save_island_api_campus_electrical__name__island_put
 DELETE  /api/campus-electrical/{name}/island/cuts                                  -> clear_island_cuts_api_campus_electrical__name__island_cuts_delete
@@ -40,6 +43,8 @@ DELETE  /api/campus-electrical/{name}/island/cuts/{period}/{hour}/{kind}        
 GET     /api/campus-electrical/{name}/island/gfm-settings                          -> get_gfm_settings_api_campus_electrical__name__island_gfm_settings_get
 POST    /api/campus-electrical/{name}/island/gfm-settings                          -> recommend_gfm_settings_api_campus_electrical__name__island_gfm_settings_post
 POST    /api/campus-electrical/{name}/island/gfm-settings/apply                    -> apply_gfm_settings_api_campus_electrical__name__island_gfm_settings_apply_post
+GET     /api/campus-electrical/{name}/island/gfm-settings/card                     -> gfm_settings_card_api_campus_electrical__name__island_gfm_settings_card_get
+POST    /api/campus-electrical/{name}/island/preset                                -> select_island_preset_api_campus_electrical__name__island_preset_post
 GET     /api/campus-electrical/{name}/island/report                                -> island_report_api_campus_electrical__name__island_report_get
 POST    /api/campus-electrical/{name}/island/study                                 -> run_island_study_api_campus_electrical__name__island_study_post
 GET     /api/campus-electrical/{name}/library                                      -> get_library_api_campus_electrical__name__library_get
@@ -89,6 +94,8 @@ POST    /api/chat/ui-ack                                                        
 GET     /api/chat/workflows                                                        -> get_chat_workflows_api_chat_workflows_get
 POST    /api/chat/{session_id}/abort                                               -> chat_abort_api_chat__session_id__abort_post
 POST    /api/chat/{session_id}/confirm                                             -> chat_confirm_api_chat__session_id__confirm_post
+GET     /api/chat/{session_id}/continuations                                       -> chat_continuations_api_chat__session_id__continuations_get
+POST    /api/chat/{session_id}/continuations/{job_id}/dismiss                      -> chat_dismiss_continuation_api_chat__session_id__continuations__job_id__dismiss_post
 POST    /api/chat/{session_id}/goal                                                -> chat_goal_api_chat__session_id__goal_post
 GET     /api/chat/{session_id}/progress                                            -> chat_progress_api_chat__session_id__progress_get
 POST    /api/chat/{session_id}/rewind                                              -> chat_rewind_api_chat__session_id__rewind_post
@@ -144,7 +151,7 @@ GET     /api/library/series                                                     
 POST    /api/library/series                                                        -> put_series_api_library_series_post
 POST    /api/library/series/upload                                                 -> upload_series_api_library_series_upload_post
 GET     /api/library/series/{name}                                                 -> get_series_api_library_series__name__get
-POST    /api/library_reference/preview                                            -> preview_library_reference_api_library_reference_preview_post
+POST    /api/library_reference/preview                                             -> preview_library_reference_api_library_reference_preview_post
 GET     /api/local-settings                                                        -> get_local_settings_api_local_settings_get
 PUT     /api/local-settings/anthropic-key                                          -> put_anthropic_key_api_local_settings_anthropic_key_put
 POST    /api/local-settings/reveal-log                                             -> reveal_log_api_local_settings_reveal_log_post
@@ -248,6 +255,7 @@ GET     /api/network/vintage_results                                            
 POST    /api/profiles/estimate                                                     -> estimate_profile_api_profiles_estimate_post
 GET     /api/profiles/load-archetypes                                              -> list_load_archetypes_api_profiles_load_archetypes_get
 GET     /api/profiles/presets                                                      -> list_profile_presets_api_profiles_presets_get
+GET     /api/profiles/schema                                                       -> profile_tuning_schema_api_profiles_schema_get
 GET     /api/projects/                                                             -> list_projects_api_projects__get
 GET     /api/projects/from_template/eh_site/form                                   -> get_site_template_form_api_projects_from_template_eh_site_form_get
 POST    /api/projects/from_template/{template_id}                                  -> create_from_template_api_projects_from_template__template_id__post
@@ -266,6 +274,9 @@ GET     /api/projects/{name}/compare-state                                      
 GET     /api/projects/{name}/eh_template                                           -> get_eh_template_api_projects__name__eh_template_get
 GET     /api/projects/{name}/flow                                                  -> get_project_flow_api_projects__name__flow_get
 POST    /api/projects/{name}/flow/ack                                              -> ack_flow_item_api_projects__name__flow_ack_post
+GET     /api/projects/{name}/flow/reliability_goal                                 -> get_reliability_goal_api_projects__name__flow_reliability_goal_get
+GET     /api/projects/{name}/flow/scope                                            -> get_flow_scope_api_projects__name__flow_scope_get
+PUT     /api/projects/{name}/flow/scope                                            -> put_flow_scope_api_projects__name__flow_scope_put
 GET     /api/projects/{name}/layout                                                -> get_layout_api_projects__name__layout_get
 PUT     /api/projects/{name}/layout                                                -> put_layout_api_projects__name__layout_put
 GET     /api/projects/{name}/map_layout                                            -> get_map_layout_api_projects__name__map_layout_get
@@ -290,6 +301,10 @@ GET     /api/projects/{name}/profiles/readiness                                 
 POST    /api/projects/{name}/profiles/refine                                       -> refine_profile_api_projects__name__profiles_refine_post
 POST    /api/projects/{name}/profiles/series/generate                              -> generate_series_profiles_api_projects__name__profiles_series_generate_post
 POST    /api/projects/{name}/profiles/series/upload                                -> upload_series_api_projects__name__profiles_series_upload_post
+POST    /api/projects/{name}/profiles/shape                                        -> shape_profile_api_projects__name__profiles_shape_post
+DELETE  /api/projects/{name}/profiles/weather                                      -> clear_weather_choice_api_projects__name__profiles_weather_delete
+GET     /api/projects/{name}/profiles/weather                                      -> get_weather_choice_api_projects__name__profiles_weather_get
+PUT     /api/projects/{name}/profiles/weather                                      -> put_weather_choice_api_projects__name__profiles_weather_put
 POST    /api/projects/{name}/rename                                                -> rename_project_api_projects__name__rename_post
 GET     /api/projects/{name}/reports                                               -> list_reports_api_projects__name__reports_get
 POST    /api/projects/{name}/reports                                               -> create_report_api_projects__name__reports_post
@@ -383,6 +398,7 @@ GET     /api/results/coupling_loop                                              
 POST    /api/results/coupling_loop                                                 -> post_coupling_loop_api_results_coupling_loop_post
 POST    /api/results/coupling_loop/abort                                           -> post_coupling_loop_abort_api_results_coupling_loop_abort_post
 GET     /api/results/curtailment                                                   -> get_curtailment_api_results_curtailment_get
+GET     /api/results/curtailment/by_cause                                          -> get_curtailment_by_cause_api_results_curtailment_by_cause_get
 GET     /api/results/economics_by_carrier                                          -> get_economics_by_carrier_api_results_economics_by_carrier_get
 GET     /api/results/eh_dtc                                                        -> get_eh_dtc_api_results_eh_dtc_get
 GET     /api/results/eh_dtc_planning                                               -> get_eh_dtc_planning_api_results_eh_dtc_planning_get
@@ -395,6 +411,8 @@ GET     /api/results/eh_study                                                   
 POST    /api/results/eh_study                                                      -> post_eh_study_api_results_eh_study_post
 POST    /api/results/eh_study/abort                                                -> post_eh_study_abort_api_results_eh_study_abort_post
 GET     /api/results/emissions                                                     -> get_emissions_api_results_emissions_get
+GET     /api/results/energy_flows                                                  -> get_energy_flows_api_results_energy_flows_get
+GET     /api/results/energy_flows.csv                                              -> get_energy_flows_csv_api_results_energy_flows_csv_get
 GET     /api/results/fmea_modes                                                    -> get_fmea_modes_api_results_fmea_modes_get
 GET     /api/results/fmea_sweep                                                    -> get_fmea_sweep_api_results_fmea_sweep_get
 POST    /api/results/fmea_sweep                                                    -> post_fmea_sweep_api_results_fmea_sweep_post
@@ -413,6 +431,7 @@ GET     /api/results/line_duals                                                 
 GET     /api/results/line_reactive                                                 -> get_line_reactive_api_results_line_reactive_get
 GET     /api/results/lines                                                         -> get_line_results_api_results_lines_get
 GET     /api/results/links                                                         -> get_link_results_api_results_links_get
+GET     /api/results/load_shape                                                    -> get_load_shape_api_results_load_shape_get
 GET     /api/results/loadflow-view                                                 -> get_loadflow_view_api_results_loadflow_view_get
 GET     /api/results/loads                                                         -> get_load_results_api_results_loads_get
 GET     /api/results/losses                                                        -> get_losses_summary_api_results_losses_get
@@ -427,6 +446,8 @@ GET     /api/results/mc/elcc_candidates                                         
 GET     /api/results/objective_decomposition                                       -> get_objective_decomposition_api_results_objective_decomposition_get
 GET     /api/results/price_drivers                                                 -> get_price_drivers_api_results_price_drivers_get
 GET     /api/results/prices                                                        -> get_prices_api_results_prices_get
+GET     /api/results/process_uc_check                                              -> get_process_uc_check_api_results_process_uc_check_get
+GET     /api/results/process_view                                                  -> get_process_view_api_results_process_view_get
 GET     /api/results/reserve_margin                                                -> get_reserve_margin_api_results_reserve_margin_get
 GET     /api/results/run-view                                                      -> get_run_view_api_results_run_view_get
 GET     /api/results/statistics                                                    -> get_statistics_api_results_statistics_get

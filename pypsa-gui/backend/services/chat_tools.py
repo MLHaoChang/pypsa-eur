@@ -3277,6 +3277,17 @@ def get_project_flow(name: str) -> dict:
     return _route(_h, project=_authorized_project(name))
 
 
+def get_reliability_goal(name: str) -> dict:
+    """The project's reliability goal (W3b-R) as every study resolves it,
+    through the same handler as ``GET /api/projects/{name}/flow/reliability_goal``.
+    Reads the open project only (409 otherwise), as ``get_project_flow`` does."""
+    from routers.flow import _require_open, get_reliability_goal as _h
+
+    project = _authorized_project(name)
+    _require_open(project)
+    return _route(_h, project=project)
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -6011,6 +6022,8 @@ def apply_demand_from_excel(
         except ImportError:  # pragma: no cover — only fails if routers/network refactor breaks paths
             _user_ts = None
             _user_ts_lock = None
+        from services import growth_placeholders
+        prior = growth_placeholders.before(n, "loads", "p_set", [load_name])
         # Direct dataframe write so the LP sees the new demand on next solve.
         if value_col in n.loads_t.p_set.columns or load_name in n.loads_t.p_set.columns:
             n.loads_t.p_set[load_name] = aligned
@@ -6021,6 +6034,8 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+        # A user's load profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
     from services import change_log_service
     tile_note = (
@@ -7926,6 +7941,7 @@ DISPATCHERS: dict[str, Any] = {
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
     "get_project_flow": get_project_flow,
+    "get_reliability_goal": get_reliability_goal,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,

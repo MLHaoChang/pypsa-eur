@@ -1367,9 +1367,7 @@ async def import_bundle(
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
         _state["solver_config"] = _solver_config_from_dict(cfg_data)
-        from services.reliability_goal import invalid_goal_fields
-        dropped_goal = [{"field": k, "value": v if _json_finite(v) else str(v)}
-                        for k, v in invalid_goal_fields(cfg_data).items()]
+        dropped_goal = _dropped_goal(cfg_data)
     else:
         # Defaults, not the previously open project's config (WP1.1c review #2).
         from services.solver_service import SolverConfig
@@ -1608,13 +1606,20 @@ def _solver_config_from_dict(data: dict):
     if clean.get("mode") == "lpf":
         clean["mode"] = "lopf"
     # The reliability goal (W3b-R) is validated as PUT validates it; a value
-    # PUT would refuse loads as "not set" (logged; bundle import also names
-    # it in its response), never as a bad goal.
+    # PUT would refuse loads as "not set" (logged; load_project and bundle
+    # import also name it in their responses), never as a bad goal.
     from services.reliability_goal import invalid_goal_fields
     for key, value in invalid_goal_fields(clean).items():
         logger.warning("solver_config: ignoring invalid %s=%r", key, value)
         clean[key] = None
     return SolverConfig(**clean)
+
+
+def _dropped_goal(cfg_data: dict) -> list[dict]:
+    """The stored goal values a load ignores, as ``[{field, value}]``."""
+    from services.reliability_goal import invalid_goal_fields
+    return [{"field": k, "value": v if _json_finite(v) else str(v)}
+            for k, v in invalid_goal_fields(cfg_data).items()]
 
 
 def _json_finite(v) -> bool:
@@ -3423,6 +3428,7 @@ def load_project(
 
     cfg_path = src / "solver_config.json"
     from routers.simulation import _state
+    dropped_goal: list[dict] = []
     if cfg_path.exists():
         data = json.loads(cfg_path.read_text())
         # Shared legacy-tolerant loader: filter to the live dataclass field set
@@ -3430,6 +3436,7 @@ def load_project(
         # otherwise raise TypeError) and coerce removed enum values. Same path
         # import_bundle uses, so both routes accept old files identically.
         _state["solver_config"] = _solver_config_from_dict(data)
+        dropped_goal = _dropped_goal(data)
     else:
         # No file → defaults, not the PREVIOUS project's config (which
         # `reset_network` carries forward): a later save would otherwise write
@@ -3576,7 +3583,8 @@ def load_project(
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
-    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues}
+    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:

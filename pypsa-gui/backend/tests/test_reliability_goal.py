@@ -270,6 +270,35 @@ def test_the_goal_route_resolves_stored_over_template(client, tmp_projects_dir):
     assert goal["mc_draws"] == {"value": 40, "source": "stored"}
 
 
+def test_the_assistant_reads_the_goal_through_the_route(client, tmp_projects_dir, bound_ctx):
+    from services import chat_tools
+    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+    from tests.test_project_flow import _create
+
+    name = _create(client, "eh_microgrid", "goal_tool")
+    url = f"/api/projects/{name}/flow/reliability_goal"
+    assert TOOL_ROUTES["get_reliability_goal"] == [("GET", "/api/projects/{name}/flow/reliability_goal")]
+    assert safety_tier_for("get_reliability_goal") == "read"
+    with bound_ctx(client):
+        out = chat_tools.DISPATCHERS["get_reliability_goal"](name=name)
+    assert out == client.get(url).json()
+    assert out["site_archetype"]["source"] == "template"
+
+    _put(client, mc_draws=40)
+    with bound_ctx(client):
+        out = chat_tools.DISPATCHERS["get_reliability_goal"](name=name)
+    assert out == client.get(url).json()
+    assert out["mc_draws"] == {"value": 40, "source": "stored"}
+
+    # Another (accessible) project that is not the open one is refused.
+    other = _create(client, "eh_microgrid", "goal_tool_other")
+    _create(client, "eh_microgrid", "goal_tool_third")
+    from fastapi import HTTPException
+    with bound_ctx(client), pytest.raises(HTTPException) as exc:
+        chat_tools.DISPATCHERS["get_reliability_goal"](name=other)
+    assert exc.value.status_code == 409
+
+
 def test_a_bundle_with_an_invalid_goal_imports_and_names_the_drop(
         client, api_project, project_storage_dir):
     import io
@@ -291,6 +320,26 @@ def test_a_bundle_with_an_invalid_goal_imports_and_names_the_drop(
     assert (live["target_lole_h"], live["mc_draws"], live["site_archetype"]) == (None, 300, None)
     # PUT refuses the same value.
     assert client.put(CONFIG_URL, json={"target_lole_h": -1}).status_code == 422
+
+
+def test_loading_a_project_with_an_invalid_goal_names_the_drop(
+        client, api_project, project_storage_dir):
+    name = api_project("goal-load")
+    cfg = project_storage_dir(name) / "solver_config.json"
+    cfg.write_text(json.dumps({"target_lole_h": -1, "mc_draws": 300,
+                               "site_archetype": "mega_hub"}))
+    r = client.get(f"/api/projects/{name}")
+    assert r.status_code == 200, r.text[:300]
+    assert r.json()["dropped_goal"] == [{"field": "target_lole_h", "value": -1},
+                                        {"field": "site_archetype", "value": "mega_hub"}]
+    live = client.get(CONFIG_URL).json()
+    assert (live["target_lole_h"], live["mc_draws"], live["site_archetype"]) == (None, 300, None)
+
+    # A clean goal loads without the key.
+    cfg.write_text(json.dumps({"target_lole_h": 2.0}))
+    r = client.get(f"/api/projects/{name}")
+    assert r.status_code == 200, r.text[:300]
+    assert "dropped_goal" not in r.json()
 
 
 @pytest.mark.parametrize("module", ["test_adequacy_coupling_endpoint", "test_adequacy_margin_loop"])
