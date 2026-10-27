@@ -55,6 +55,31 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('GridReadinessScorecard', () => {
+  describe('the grid code since the last campus run (SCORECARD-STALE-1)', () => {
+    const since = (status: 'same' | 'changed' | 'other_profile') => ({
+      ...DATA, profile: { ...DATA.profile, since_run: { run_profile: 'pq_x', run_profile_title: 'Project code', status } },
+    })
+    for (const mode of ['guided', 'expert'] as const) {
+      it(`says the code changed since the run, once, in ${mode}`, () => {
+        render(<GridReadinessScorecard data={since('changed')} mode={mode} />)
+        expect(screen.getAllByTestId('gr-since-run').map(e => e.textContent)).toEqual([
+          'Grid code changed since the last campus study run. Rerun the study to update.'])
+      })
+    }
+    it('names the run\'s grid code when the scorecard screens against another one', () => {
+      render(<GridReadinessScorecard data={since('other_profile')} mode="expert" />)
+      expect(screen.getByTestId('gr-since-run').textContent).toBe(
+        'The last campus study run used Project code. Rerun the study with this grid code to update.')
+    })
+    it('says nothing when the code is the run\'s, or no run kept it', () => {
+      render(<GridReadinessScorecard data={since('same')} mode="expert" />)
+      expect(screen.queryByTestId('gr-since-run')).toBeNull()
+      cleanup()
+      render(<GridReadinessScorecard data={{ ...DATA, profile: { ...DATA.profile, since_run: null } }} mode="guided" />)
+      expect(screen.queryByTestId('gr-since-run')).toBeNull()
+    })
+  })
+
   it('shows each verdict as a word, the assumed badge and the profile by name', () => {
     render(<GridReadinessScorecard data={DATA} mode="expert" />)
     expect(screen.getByTestId('gr-profile').textContent).toBe('EU RfG and DCC')

@@ -4669,6 +4669,96 @@ TOOLS: list[dict[str, Any]] = [
          "derive_lengths_from_geometry": {"type": "boolean"}},
         ["name", "derive_lengths_from_geometry"],
     ),
+    # ── Network topology and sites (8) — LV08 B1 ─────────────────────────
+    _t(
+        "get_asset_reference",
+        "Read the network's asset reference tables. view='asset_costs': every investable "
+        "asset's upfront parts and annual costs with the global discount rate and each "
+        "asset's provenance (a part priced only through an annual capital_cost is "
+        "back-calculated and flagged); 'asset_schema': the field descriptors an asset card "
+        "shows for component (grouped, in order); 'attribute_catalog': PyPSA's attribute "
+        "metadata for component. asset_schema and attribute_catalog need component. "
+        "Safety: read.",
+        {"view": {"type": "string", "enum": ["asset_costs", "asset_schema", "attribute_catalog"]},
+         "component": {"type": "string", "enum": COMPONENT_CLASS_ENUM}},
+        ["view"],
+    ),
+    _t(
+        "geocode_place",
+        "Look up a place name or address with the configured geocoder (Nominatim-compatible) "
+        "and return its candidate matches with coordinates, to place a site or bus on the "
+        "map. The query is sent to that external service. 503 when no geocoder is "
+        "configured, 502 when it does not answer in time. Safety: read.",
+        {"query": {"type": "string", "minLength": 1, "maxLength": 200}},
+        ["query"],
+    ),
+    _t(
+        "derive_lengths_from_geometry",
+        "Rewrite Line and Link lengths from the project's map geometry: the drawn route "
+        "when a branch has one, else the straight chord. keys: the branches as "
+        "'line:<name>' / 'link:<name>' (omit for every Line and Link). Returns {updated, "
+        "skipped, rescale, sources}; `rescale` lists, per line, the r/x/b values that "
+        "would keep its per-km impedance. Those are NOT applied: show them and call "
+        "rescale_line_impedances only with the values the user accepts. 409 for a project "
+        "never saved (its routes live in the saved map layout). Safety: write.",
+        {"keys": {"type": "array", "maxItems": 500,
+                  "items": {"type": "string", "pattern": "^(line|link):.+$", "maxLength": 200}}},
+        [],
+    ),
+    _t(
+        "rescale_line_impedances",
+        "Write new r, x and b values for named lines, after derive_lengths_from_geometry. "
+        "Use ONLY the values its `rescale` list returned, for the lines the user accepted; "
+        "never compute or default them (by now the old length is gone, so they cannot be "
+        "re-derived). The card shows each line's old and new r, x and b. Returns {updated, "
+        "skipped}. Safety: write.",
+        {"lines": {"type": "array", "minItems": 1, "maxItems": 500, "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["name", "r", "x", "b"],
+            "properties": {"name": {"type": "string", "minLength": 1},
+                           "r": {"type": "number"}, "x": {"type": "number"},
+                           "b": {"type": "number"}}}}},
+        ["lines"],
+    ),
+    _t(
+        "reset_network",
+        "Start a new, empty network (the GUI's New Project): clears the live network, its "
+        "user time series, the undo history and the unsaved-changes flag, and unbinds this "
+        "session from its active project. Unsaved edits are lost; save_project first if "
+        "they matter. The saved project on disk is untouched. Safety: destructive.",
+        {},
+        [],
+    ),
+    _t(
+        "get_project_sites",
+        "Read a project's site document: its sites, boundaries, bus membership and asset "
+        "placements (empty when it has none). With site_id, also the cached site context "
+        "(building footprints and terrain) for that site; 404 when it was never fetched "
+        "(fetch_site_context). Read before set_project_sites. Safety: read.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name"],
+    ),
+    _t(
+        "set_project_sites",
+        "Replace a project's whole site document (read it with get_project_sites first and "
+        "send it back with the change). Validated: a 422 names the field; 413 over the "
+        "size cap; 409 another user's edit lock. A site removed from the document loses "
+        "its cached context. Safety: write.",
+        {"name": {"type": "string"},
+         "sites": {"type": "object"}},
+        ["name", "sites"],
+    ),
+    _t(
+        "fetch_site_context",
+        "Fetch the context of one site's boundary (building footprints from OpenStreetMap "
+        "Overpass and terrain tiles), cache it with the project and return it. Sends the "
+        "boundary's area to those external services. 502 with the upstream's message when "
+        "a source refuses; 409 another user's edit lock. Safety: write.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name", "site_id"],
+    ),
 ]
 
 
@@ -4896,6 +4986,18 @@ TOOL_ROUTES: dict[str, list] = {
     # write_topology (2)
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
+    # network topology and sites (8) — LV08 B1, in process through `_route`.
+    "get_asset_reference": [("GET", "/api/network/asset_costs"),
+                            ("GET", "/api/network/asset_schema/{component}"),
+                            ("GET", "/api/network/catalog/{component}")],
+    "geocode_place": [("GET", "/api/geocode")],
+    "derive_lengths_from_geometry": [("POST", "/api/network/lengths/from_geometry")],
+    "rescale_line_impedances": [("POST", "/api/network/lines/rescale_impedances")],
+    "reset_network": [("POST", "/api/network/reset")],
+    "get_project_sites": [("GET", "/api/projects/{name}/sites"),
+                          ("GET", "/api/projects/{name}/sites/{site_id}/context")],
+    "set_project_sites": [("PUT", "/api/projects/{name}/sites")],
+    "fetch_site_context": [("POST", "/api/projects/{name}/sites/{site_id}/context")],
     # write_snapshots (4)
     "set_snapshots": [("POST", "/api/network/snapshots")],
     "set_snapshot_weightings": [("PATCH", "/api/network/snapshots/weightings")],

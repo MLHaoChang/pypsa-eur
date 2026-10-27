@@ -82,6 +82,19 @@ export function fmt(v: GridReadinessRow['limit'] | GridReadinessRow['project_val
   return JSON.stringify(v)
 }
 
+/** The run's grid code was published again with other content (SCORECARD-STALE-1); the scorecard header and
+ *  the campus results banner say it in the same words. */
+export const GRID_CODE_CHANGED = 'Grid code changed since the last campus study run. Rerun the study to update.'
+
+/** The notice under "Screening against …" when the profile is not the code the last campus run was held to. */
+function sinceRunText(since: GridReadiness['profile']['since_run']): string | null {
+  if (since?.status === 'changed') return GRID_CODE_CHANGED
+  if (since?.status === 'other_profile') {
+    return `The last campus study run used ${since.run_profile_title ?? since.run_profile}. Rerun the study with this grid code to update.`
+  }
+  return null
+}
+
 export function VerdictChip({ verdict }: { verdict: GridReadinessVerdict }) {
   const { word, Icon, cls } = VERDICT[verdict]
   return (
@@ -304,6 +317,9 @@ export function GridReadinessScorecard({ data, mode, onJump = () => {}, fieldLab
           <div data-testid="gr-summary" className="text-muted">{summaryText(data.summary, mode)}</div>
         )}
         <div className="text-[11px] text-muted">Advisory: nothing here blocks Run.</div>
+        {sinceRunText(data.profile.since_run) && (
+          <div data-testid="gr-since-run" className="text-[11px] text-warn">{sinceRunText(data.profile.since_run)}</div>
+        )}
         {data.profile.error && (
           <div data-testid="gr-profile-error" className="text-[11px] text-warn">{data.profile.error}</div>
         )}
