@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 311,
+  "tool_count": 323,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5549,6 +5549,244 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "743228dbe166990a2f0fad7a884cde9ec2e264b826a0ce7f163b03a5006611ac",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/series"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/library/series/{name}"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "version",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6b4bf7be8b84df61224ddf0a029935669cd4ff444d827294601a7b58a6e528a2",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_library_series",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/library/series/upload"
+        ]
+      ],
+      "input_keys": [
+        "file_id",
+        "name",
+        "timezone"
+      ],
+      "required": [
+        "file_id",
+        "name"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "5d3a34bb486e364dc2b13b72cce5dd949a77980a882fc8d73af820c41fcacd03",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_meter_data",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/library/meter_data"
+        ]
+      ],
+      "input_keys": [
+        "file_id",
+        "name",
+        "unit",
+        "settlement",
+        "label",
+        "timezone"
+      ],
+      "required": [
+        "file_id",
+        "name",
+        "unit"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "6860be5ca2bc283b79a53d2f2e23f977a27dad232fd06c240bd292a8a68fed5f",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "put_library_item",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/library/items/{kind}/{name}"
+        ]
+      ],
+      "input_keys": [
+        "kind",
+        "name",
+        "payload",
+        "meta"
+      ],
+      "required": [
+        "kind",
+        "name",
+        "payload"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "b3871d1937cf40a4f68657eb1bb0ac23463ce4c61d35f644d752235d1389a8c1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_finance_inputs",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/finance"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "set_finance_inputs",
+      "toolsets": [],
+      "route": [
+        [
+          "PUT",
+          "/api/simulation/finance"
+        ]
+      ],
+      "input_keys": [
+        "finance",
+        "if_match",
+        "clear"
+      ],
+      "required": [
+        "if_match"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "a930184bda0febe42fb954bbab358a1fc407d97d5b8193d900d576cee08adeba",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_poc_state",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/commercial/poc"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_value_flow_designer",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/simulation/value_flows/designer"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "dcaafa29211617afc9399243ad3712bb418e13ffacf92bd13be99085790db371",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_billing",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/results/billing/preview"
+        ]
+      ],
+      "input_keys": [
+        "tariff"
+      ],
+      "required": [
+        "tariff"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "70107a854c9a9daf494301c4a274feb99326338eee34bb8c1a18cf93e0213b40",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_investment_case",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/results/investment_case/abort"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "destructive",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_stress_profile_packs",
+      "toolsets": [
+        "network"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/stress_profile_packs"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1f0436a7f7231145ecc41a6dd5700f0b783aeb8910a934ddb93d6f5979b3e269",
       "behavioral_fixture": "pending"
     },
     {

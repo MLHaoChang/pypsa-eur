@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 86,
-  "needs-tool": 71,
-  "tool": 309,
+  "needs-tool": 60,
+  "tool": 320,
   "unclassified": 0
  },
  "format_version": 1,
@@ -1384,22 +1384,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "PUT",
-   "path": "/api/library/items/{kind}/{name}"
+   "path": "/api/library/items/{kind}/{name}",
+   "tools": [
+    "put_library_item"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/library/meter_data"
+   "path": "/api/library/meter_data",
+   "tools": [
+    "import_meter_data"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -1426,31 +1432,40 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/library/series"
+   "path": "/api/library/series",
+   "tools": [
+    "list_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/library/series/upload"
+   "path": "/api/library/series/upload",
+   "tools": [
+    "import_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/library/series/{name}"
+   "path": "/api/library/series/{name}",
+   "tools": [
+    "get_library_series"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "needs-tool",
@@ -3520,13 +3535,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reliability-adequacy",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/stress_profile_packs"
+   "path": "/api/projects/{name}/stress_profile_packs",
+   "tools": [
+    "list_stress_profile_packs"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4018,13 +4036,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "POST",
-   "path": "/api/results/billing/preview"
+   "path": "/api/results/billing/preview",
+   "tools": [
+    "preview_billing"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4412,13 +4433,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/finance.ts"
    ],
    "method": "POST",
-   "path": "/api/results/investment_case/abort"
+   "path": "/api/results/investment_case/abort",
+   "tools": [
+    "abort_investment_case"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4845,13 +4869,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/commercial/poc"
+   "path": "/api/simulation/commercial/poc",
+   "tools": [
+    "get_poc_state"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4897,18 +4924,22 @@
    "method": "GET",
    "path": "/api/simulation/finance",
    "tools": [
+    "get_finance_inputs",
     "solve_ppa_price"
    ],
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/finance.ts"
    ],
    "method": "PUT",
-   "path": "/api/simulation/finance"
+   "path": "/api/simulation/finance",
+   "tools": [
+    "set_finance_inputs"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -5144,13 +5175,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "economics-investment",
+   "class": "tool",
    "gui_files": [
     "api/commercial.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/value_flows/designer"
+   "path": "/api/simulation/value_flows/designer",
+   "tools": [
+    "get_value_flow_designer"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

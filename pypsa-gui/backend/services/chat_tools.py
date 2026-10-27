@@ -1939,6 +1939,261 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
             "replaced": replaced}
 
 
+# ── LV08 B2a (12) — live-voice 08 slice B2 ──────────────────────────────────
+# Library series and meter data, Library item edits, finance inputs, the PoC
+# state, the value-flow designer, the billing preview, the investment-case
+# abort and the stress profile packs. Each calls its route's own router handler
+# in process (`_route` / `_library_call`), so ACL, validation and refusals are
+# the route's; the tools only bound what reaches the model.
+
+# Tool-side refusals of set_finance_inputs' arguments (gatekeeper F1), as
+# literals for the manifest guard.
+_FINANCE_TOOL_ERROR_KINDS = (
+    {"error_kind": "finance_if_match_required"},
+    {"error_kind": "finance_clear_invalid"},
+)
+# get_library_series' page of points: default, cap, and the JSON budget the
+# page is trimmed to (under the chat's per-result cap with the envelope).
+_SERIES_PAGE_DEFAULT = 48
+_SERIES_PAGE_MAX = 500
+_SERIES_PAGE_CHARS = 2400
+
+
+def _awaited(handler):
+    """An async router handler as a sync callable `_route` can inject into: the
+    coroutine is driven inside `_route`'s `_acting()` block, while its db
+    session is open. `functools.wraps` keeps the signature `_route` reads."""
+    import functools
+
+    @functools.wraps(handler)
+    def run(*args, **kwargs):
+        return _sync(handler(*args, **kwargs))
+
+    return run
+
+
+def _active_upload(file_id: str):
+    """`(filename, UploadFile)` for an upload of the ACTIVE project; another
+    project's id is the upload service's 404. The bytes go to the route as
+    they are: its size cap (413) and parsers (422) decide."""
+    import io
+
+    from fastapi import UploadFile
+
+    from services import upload_service
+
+    with _acting():   # identity before the file is read (as import_urdb_tariff)
+        pass
+    project = _require_active_project()
+    data = upload_service.get_upload_bytes(project, file_id)
+    filename = upload_service.get_upload_meta(project, file_id).filename
+    return UploadFile(filename=filename, file=io.BytesIO(data))
+
+
+def list_library_series(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library import list_series as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, org_id=None)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_series(name: str, version: int | None = None, offset: int = 0,
+                       limit: int | None = None) -> dict:
+    """One series' ref, meta and statistics, and a bounded page of its points —
+    never the whole series (a year at 15 min is 35 040 points)."""
+    import math
+
+    from routers.library import get_series as _h
+
+    if offset < 0:
+        raise HTTPException(400, f"offset must be >= 0, got {offset}")
+    if limit is not None and limit < 1:
+        raise HTTPException(400, f"limit must be >= 1, got {limit}")
+    out = _library_call(_h, name, version=version, org_id=None)
+    ts, vals = out.timestamps, out.values
+    finite = [v for v in vals if math.isfinite(v)]
+    size = min(_SERIES_PAGE_DEFAULT if limit is None else limit, _SERIES_PAGE_MAX)
+    page_ts, page_vals = ts[offset:offset + size], vals[offset:offset + size]
+    # Trim to the JSON budget: always keep one point, so `offset` can advance.
+    while len(page_ts) > 1 and len(json.dumps([page_ts, page_vals])) > _SERIES_PAGE_CHARS:
+        keep = max(1, len(page_ts) * 3 // 4)
+        page_ts, page_vals = page_ts[:keep], page_vals[:keep]
+    meta = out.meta or {}
+    if len(json.dumps(meta, default=str)) > 600:
+        notes = meta.get("notes") if isinstance(meta.get("notes"), list) else None
+        meta = {k: v for k, v in meta.items() if k != "notes"}
+        if notes is not None:
+            meta["notes"] = _fit([str(n) for n in notes], 300)
+            meta["notes_total"] = len(notes)
+        if len(json.dumps(meta, default=str)) > 600:
+            meta = {"keys": sorted(meta)[:30], "truncated": True}
+    return {"ref": out.ref.model_dump(mode="json"), "timezone": out.timezone, "meta": meta,
+            "points": len(vals), "first": ts[0] if ts else None, "last": ts[-1] if ts else None,
+            "min": min(finite) if finite else None, "max": max(finite) if finite else None,
+            "mean": (sum(finite) / len(finite)) if finite else None,
+            "page": {"offset": offset, "returned": len(page_ts),
+                     "has_more": offset + len(page_ts) < len(vals),
+                     "timestamps": page_ts, "values": page_vals}}
+
+
+def import_library_series(file_id: str, name: str, timezone: str | None = None) -> dict:
+    """An UPLOADED CSV/xlsx (never an LLM-emitted blob) → a Library series,
+    through `POST /api/library/series/upload` (its cap, parser and store)."""
+    from routers.library import upload_series as _h
+
+    upload = _active_upload(file_id)
+    ref = _library_call(_awaited(_h), file=upload, name=name, timezone=timezone,
+                        source="upload", org_id=None)
+    return {"ref": ref.model_dump(mode="json")}
+
+
+def import_meter_data(file_id: str, name: str, unit: str, settlement: str = "15min",
+                      label: str = "start", timezone: str | None = None) -> dict:
+    """An UPLOADED meter file → a Library kW series and the monthly history,
+    through `POST /api/library/meter_data`."""
+    from routers.library import upload_meter_data as _h
+
+    upload = _active_upload(file_id)
+    out = _library_call(_awaited(_h), file=upload, name=name, unit=unit,
+                        settlement=settlement, label=label, timezone=timezone,
+                        org_id=None).model_dump(mode="json")
+    notes = out.get("notes") or []
+    out["notes_total"] = len(notes)
+    out["notes"] = _fit([_safe_text(n, 120) for n in notes])
+    return out
+
+
+def put_library_item(kind: str, name: str, payload: dict, meta: dict | None = None) -> dict:
+    """Save a Library item through `PUT /api/library/items/{kind}/{name}`, in the
+    acting user's own org (the route's `_target_org`, write)."""
+    from routers.library import ItemIn, put_item as _h
+
+    try:
+        body = ItemIn(payload=payload, meta=meta or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=_safe_text(exc, 300)) from exc
+    return _library_call(_h, _library_kind(kind), name, body, org_id=None).model_dump(mode="json")
+
+
+def get_finance_inputs() -> dict:
+    from routers.simulation import get_finance as _h
+    return _h()
+
+
+def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
+    """Replace (or, with clear=true, remove) the finance inputs through
+    `PUT /api/simulation/finance`, always with the digest the model read
+    (gatekeeper F1: no '*', no implicit clear)."""
+    from routers.simulation import FinanceIn, put_finance as _h
+
+    tag = (if_match or "").strip()
+    if tag.strip('"').strip() in ("", "*"):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_if_match_required",
+            "message": "pass the `digest` get_finance_inputs returned as if_match; "
+                       "'*' is refused"})
+    if clear and finance is not None:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_clear_invalid",
+            "message": "clear=true removes every finance input: pass no `finance` with it"})
+    if not clear and finance is None:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_clear_invalid",
+            "message": "pass the whole `finance` object, or clear=true to remove every "
+                       "finance input"})
+    return _h(FinanceIn(finance=None if clear else finance), if_match=tag)
+
+
+def get_poc_state() -> dict:
+    from routers.simulation import get_poc_state as _h
+    return _h()
+
+
+def _fit_rows(rows: list, budget: int) -> tuple[list, int]:
+    """As many leading `rows` as fit `budget` JSON chars (at least one)."""
+    out, used = [], 0
+    for r in rows:
+        cost = len(json.dumps(r, default=str)) + 2
+        if out and used + cost > budget:
+            break
+        out.append(r)
+        used += cost
+    return out, len(rows)
+
+
+def get_value_flow_designer(offset: int = 0, limit: int | None = None) -> dict:
+    """The designer context with its asset list paged and the other lists cut
+    to fit (each with its total), so a large site stays under the cap."""
+    from routers.simulation import get_value_flow_designer as _h
+
+    out = dict(_h())
+    assets = _paginate(list(out.pop("assets", None) or []), offset, limit)
+    page = {k: assets[k] for k in ("offset", "returned", "has_more")}
+    # The asset page takes most of the budget; the other lists share ~900 chars.
+    assets_items, _ = _fit_rows(assets["items"], 1900)
+    page["returned"] = len(assets_items)
+    page["has_more"] = assets["offset"] + len(assets_items) < assets["total_count"]
+    for key in ("tariff_items", "contract_parties", "group_members", "default_externals"):
+        rows = out.get(key)
+        if isinstance(rows, list):
+            out[key], total = _fit_rows(rows, 220)
+            if len(out[key]) < total:
+                out[f"{key}_total"] = total
+    out["assets"] = assets_items
+    out["assets_total"] = assets["total_count"]
+    out["assets_page"] = page
+    return out
+
+
+def preview_billing(tariff: dict) -> dict:
+    """The last solve's dispatch billed under a DRAFT tariff through
+    `POST /api/results/billing/preview` — which stores nothing. The per-period
+    line detail is left out (the summary carries each period's per-item
+    totals); a summary too large for the chat is cut to its totals."""
+    from routers.results import BillingPreviewIn, preview_billing as _h
+
+    try:
+        body = BillingPreviewIn(tariff=tariff)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=_safe_text(exc, 300)) from exc
+    out = _payload_or_no_data("billing_preview", _h(body), _RESULTS_NO_DATA_MESSAGE)
+    if out.get("status") == "no_data":
+        return out
+    result = {"summary": out.get("summary"), "flags": out.get("flags"),
+              "provenance": out.get("provenance"), "gap": out.get("gap")}
+    if len(json.dumps(result, default=str)) > MAX_PAGE_CHARS:
+        result["summary"] = {k: (None if v is None else {"total": v.get("total"),
+                                                         "total_supported": v.get(
+                                                             "total_supported")})
+                             for k, v in (out.get("summary") or {}).items()}
+        result["summary_per_item"] = "omitted to fit the chat"
+    if len(json.dumps(result, default=str)) > MAX_PAGE_CHARS:
+        periods = list(result["summary"].items())
+        kept, _ = _fit_rows(periods, 1500)
+        result["summary"] = dict(kept)
+        result["summary_periods_total"] = len(periods)
+        result["provenance"] = {"preview": True}
+    return result
+
+
+def abort_investment_case() -> dict:
+    """
+    Ask a running investment-case run to stop at its next stage; it stores
+    nothing. IDEMPOTENT, and 200 even when the run has already finished; 404
+    only when no run was recorded in this session (as abort_adequacy_study).
+    """
+    from routers.results import post_investment_case_abort as _h
+    return _h()
+
+
+def list_stress_profile_packs(name: str, offset: int = 0, limit: int | None = None) -> dict:
+    """The shipped profile packs, under the project's own authorization."""
+    from routers.adequacy_worksheet import get_stress_profile_packs as _h
+    packs = _route(_h, project=_authorized_project(name)).get("packs") or []
+    return _paginate(list(packs), offset, limit)
+
+# ── end LV08 B2a ────────────────────────────────────────────────────────────
+
+
 # ── Site connection (IC U1 follow-up, item b) ──────────────────────────────
 # The commercial root: the meter Links and the site clock. Written through the
 # solver-config route (which binds the whole config); refusals as literals for
@@ -8490,6 +8745,25 @@ DISPATCHERS: dict[str, Any] = {
 }
 
 
+# LV08 B2a (12) — live-voice 08 slice B2: registered before the lock and
+# study gates below wrap DISPATCHERS, so they apply to these as to the rest.
+DISPATCHERS.update({
+    "list_library_series": list_library_series,
+    "get_library_series": get_library_series,
+    "import_library_series": import_library_series,
+    "import_meter_data": import_meter_data,
+    "put_library_item": put_library_item,
+    "get_finance_inputs": get_finance_inputs,
+    "set_finance_inputs": set_finance_inputs,
+    "get_poc_state": get_poc_state,
+    "get_value_flow_designer": get_value_flow_designer,
+    "preview_billing": preview_billing,
+    "abort_investment_case": abort_investment_case,
+    "list_stress_profile_packs": list_stress_profile_packs,
+})
+# end LV08 B2a
+
+
 # ── Foreign-lock gate at the dispatch seam (fix-wave F1) ────────────────────
 #
 # The write middleware in `main.py` refuses a non-holder's write to
@@ -8560,6 +8834,7 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/results/margin_loop/abort",
     "/api/results/coupling_loop/abort",
     "/api/results/eh_study/abort",
+    "/api/results/investment_case/abort",  # as main.py (LV08 B2a)
     # Latent today — `validate_network` is tiered `read`, so the tier filter
     # skips it before this set is consulted — but HTTP exempts preflight on
     # purpose, and the per-route parity test found the two sets disagreeing

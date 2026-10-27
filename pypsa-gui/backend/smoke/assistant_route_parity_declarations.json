@@ -694,31 +694,6 @@
    "family": "gridspine-campus"
   },
   {
-   "method": "PUT",
-   "path": "/api/library/items/{kind}/{name}",
-   "family": "economics-investment"
-  },
-  {
-   "method": "POST",
-   "path": "/api/library/meter_data",
-   "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/library/series",
-   "family": "economics-investment"
-  },
-  {
-   "method": "POST",
-   "path": "/api/library/series/upload",
-   "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/library/series/{name}",
-   "family": "economics-investment"
-  },
-  {
    "method": "POST",
    "path": "/api/library_reference/preview",
    "family": "import-export"
@@ -810,18 +785,8 @@
   },
   {
    "method": "GET",
-   "path": "/api/projects/{name}/stress_profile_packs",
-   "family": "reliability-adequacy"
-  },
-  {
-   "method": "GET",
    "path": "/api/results/asset/assets",
    "family": "all-results"
-  },
-  {
-   "method": "POST",
-   "path": "/api/results/billing/preview",
-   "family": "economics-investment"
   },
   {
    "method": "GET",
@@ -839,11 +804,6 @@
    "family": "all-results"
   },
   {
-   "method": "POST",
-   "path": "/api/results/investment_case/abort",
-   "family": "economics-investment"
-  },
-  {
    "method": "GET",
    "path": "/api/results/load_shape",
    "family": "all-results"
@@ -857,21 +817,6 @@
    "method": "GET",
    "path": "/api/results/run-view",
    "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/commercial/poc",
-   "family": "economics-investment"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/simulation/finance",
-   "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/simulation/value_flows/designer",
-   "family": "economics-investment"
   }
  ],
  "non_mutating_routes": [
@@ -889,6 +834,11 @@
    "method": "POST",
    "path": "/api/simulation/preflight",
    "reason": "runs the /run validation without solving"
+  },
+  {
+   "method": "POST",
+   "path": "/api/results/billing/preview",
+   "reason": "bills the last solve under a draft tariff; stores nothing (compute_billing_preview never binds or writes state)"
   }
  ],
  "binding_overrides": [
@@ -983,7 +933,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "GET",
@@ -995,7 +945,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "POST",
