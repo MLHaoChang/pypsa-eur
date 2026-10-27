@@ -11,6 +11,7 @@ import { resultsApi, simulationApi } from '../../api/simulation'
 import * as flowApi from '../../api/flow'
 import { guidesApi } from '../../components/GuidedTour'
 import { useUIStore } from '../../store/uiStore'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { nk } from '../../utils/queryKeys'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from './hubDesignStore'
 import { BLOCKED_NO_PROJECT, BLOCKED_NO_STUDY } from './flow'
@@ -427,6 +428,29 @@ describe('the rail is the ten flow sections', () => {
       'Time series & profiles', 'Commercial & parties', 'Scenarios & optimisation', 'Readiness and run',
       'Results & reports'])
     expect(ids).toHaveLength(10)
+  })
+
+  it('a goal link that lands while the flow read is deferred re-reads it: section 8 shows the payload\'s state', async () => {
+    const deferred = flowPayload()
+    deferred.deferred = true
+    deferred.deferred_reason = 'The network is busy (a solve or an edit holds its lock)'
+    for (const sec of deferred.sections) {
+      if (sec.state != null) sec.state = 'unknown' as never
+      sec.items = []
+    }
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'hubDesign' })
+    mount()
+    await screen.findByTestId('hub-card-site')
+    // The jump starts the Goal card's readiness, which holds the network: the
+    // flow read beside it comes back deferred once, then normal.
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValueOnce(deferred)
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: nk('Demo', 'flow') })
+      openReliabilityGoal()
+    })
+    await screen.findByTestId('hub-card-goal')
+    await waitFor(() => expect(rail('goal').getAttribute('title')).toBe('Scenarios & optimisation: to do'),
+      { timeout: 4000 })
   })
 
   it('scrolls the current step into view when a link jumps to it (a "… ›" goal link)', async () => {
