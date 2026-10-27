@@ -134,7 +134,7 @@ def _rows(network, change: dict) -> list[dict]:
     rows = []
     for name in change["names"]:
         if name not in frame.index:
-            _refuse("unknown_component", f"{cls} {name!r} is not in the saved baseline.", 422)
+            _refuse("unknown_component", f"{cls} “{name}” is not in the saved baseline.", 422)
         base = _value(frame.at[name, attr]) if attr in frame.columns else None
         row = {"component_class": cls, "name": name, "field": attr, "label": field.get("label") or attr,
                "base": base, "case": change["value"],
@@ -168,12 +168,12 @@ def preview(args: dict) -> dict:
         if resident is None and str(PyPSAService.get_active_context().project_uuid) == str(base.id):
             resident = PyPSAService.get_active_context()
         if resident is not None and dirty_state.is_dirty(resident):
-            _refuse("baseline_not_saved", f"The baseline {base.name!r} has unsaved changes and a sweep branches the saved "
+            _refuse("baseline_not_saved", f"The baseline “{base.name}” has unsaved changes and a sweep branches the saved "
                     "file. Save it first (save_project shows its own card); nothing was saved or created.")
         try:
             network = wt._load_context(base).network
         except Exception:  # noqa: BLE001 — an unreadable saved baseline shows no card
-            _refuse("sweep_preview_unavailable", f"The saved baseline {base.name!r} could not be read; "
+            _refuse("sweep_preview_unavailable", f"The saved baseline “{base.name}” could not be read; "
                     "open and save it, then try again.")
         out, solves, total = [], 0, 0
         for case in named(cases, network):
@@ -188,8 +188,8 @@ def preview(args: dict) -> dict:
                 existing = project_registry.resolve_project(db, user, str(existing.id))
                 old = wt._read_json(project_registry.project_dir(existing) / wt.SENSITIVITY_CASE_FILE)
                 if existing.parent_project_id != base.id or old.get("case") != {"new_name": case["new_name"], "changes": case["changes"]}:
-                    _refuse("sensitivity_name_conflict", f"A project named {case['new_name']!r} already exists with other "
-                            f"inputs. The case needs another name (for example {case['new_name'] + '-2'!r}).")
+                    _refuse("sensitivity_name_conflict", f"A project named “{case['new_name']}” already exists with other "
+                            f"inputs. The case needs another name (for example “{case['new_name']}-2”).")
                 entry["existing"] = True
                 saved = wt._load_context(existing).network
                 queues = not (dispatch_status(saved) == "fresh" and getattr(saved, "objective", None) is not None
