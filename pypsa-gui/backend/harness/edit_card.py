@@ -53,6 +53,9 @@ SETTINGS_EDITS = frozenset({
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
     "apply_commercial_document_values",
+    # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
+    "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
+    "update_project_settings",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
 })
@@ -77,6 +80,7 @@ NOT_EDITS = {
     "refresh_experiment": "an experiment record", "cancel_experiment": "an experiment record",
     "start_campaign": "a campaign record", "end_campaign": "a campaign record",
     "gridspine_create_study": "a new study record", "start_decision_study": "a new study record",
+    "abort_decision_study": "stops a running study; its inputs are unchanged",
     "gridspine_compute_capacity": "a computation on the saved network",
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
