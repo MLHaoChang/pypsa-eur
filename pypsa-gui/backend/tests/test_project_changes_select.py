@@ -221,12 +221,13 @@ def test_resolved_rows_count_against_the_cap(grid):
     detail = refused([{"component_class": "Generator", "select": {"all": True}, "attribute": f,
                        "operation": {"scale": 1.1}} for f in ("p_nom", "marginal_cost", "p_nom_max",
                                                               "p_nom_min", "capital_cost", "lifetime")], grid[2])
-    assert detail["error_kind"] in ("invalid_preview", "derived_field")
+    assert detail["error_kind"] == "invalid_preview"
+    assert "resolves to 24" in detail["message"]
     detail = refused([{"component_class": "Generator", "select": {"all": True}, "attribute": f, "value": 1.0}
                       for f in ("p_nom", "marginal_cost", "p_nom_max", "p_nom_min", "lifetime", "ramp_limit_up")],
                      grid[2])
     assert detail["error_kind"] == "invalid_preview"
-    assert "4 Generator" in detail["message"] or "24" in detail["message"]
+    assert "resolves to 24" in detail["message"]
 
 
 def test_the_set_is_frozen_at_preview_time(grid):
