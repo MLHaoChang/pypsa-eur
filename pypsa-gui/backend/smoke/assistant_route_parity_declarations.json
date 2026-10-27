@@ -749,24 +749,9 @@
    "family": "timeseries-horizon"
   },
   {
-   "method": "GET",
-   "path": "/api/projects/from_template/eh_site/form",
-   "family": "projects"
-  },
-  {
    "method": "POST",
    "path": "/api/projects/import-folder",
    "family": "import-export"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/flow/scope",
-   "family": "projects"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/flow/scope",
-   "family": "projects"
   },
   {
    "method": "POST",
@@ -829,16 +814,6 @@
    "family": "reports"
   },
   {
-   "method": "PATCH",
-   "path": "/api/projects/{name}/scenario",
-   "family": "projects"
-  },
-  {
-   "method": "PATCH",
-   "path": "/api/projects/{name}/settings",
-   "family": "projects"
-  },
-  {
    "method": "GET",
    "path": "/api/projects/{name}/sites",
    "family": "network-topology"
@@ -862,61 +837,6 @@
    "method": "GET",
    "path": "/api/projects/{name}/stress_profile_packs",
    "family": "reliability-adequacy"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/",
-   "family": "experiments"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/library",
-   "family": "experiments"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/studies/preview",
-   "family": "experiments"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/projects/{name}/studies/{study_id}",
-   "family": "experiments"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}",
-   "family": "experiments"
-  },
-  {
-   "method": "PATCH",
-   "path": "/api/projects/{name}/studies/{study_id}",
-   "family": "experiments"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort",
-   "family": "experiments"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/ledger",
-   "family": "experiments"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case",
-   "family": "experiments"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/report",
-   "family": "experiments"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/run/abort",
-   "family": "experiments"
   },
   {
    "method": "PUT",
@@ -1025,6 +945,11 @@
    "method": "POST",
    "path": "/api/profiles/estimate",
    "reason": "synthetic preview, writes nothing"
+  },
+  {
+   "method": "POST",
+   "path": "/api/projects/{name}/studies/preview",
+   "reason": "intake preview: reads the load and prices the baseline bill, writes nothing"
   },
   {
    "method": "POST",
