@@ -219,7 +219,7 @@ def test_island_config_first_save_then_changes_show_old_to_new(grid, island_hub)
     assert (rows["requirements.sustained_h.source"]["label"], rows["requirements.sustained_h.source"]["old"],
             rows["requirements.sustained_h.source"]["new"]) == ("Sustained ride-through source", "assumed", "datasheet")
     assert (rows["requirements.scenarios"]["old"], rows["requirements.scenarios"]["new"]) == (
-        "ups_bridged, seamless", "seamless")
+        "UPS-bridged, Seamless", "Seamless")
     assert (rows["units.bess.droop_pct.value"]["label"], rows["units.bess.droop_pct.value"]["old"],
             rows["units.bess.droop_pct.value"]["new"]) == ("bess \u00b7 Droop pct", 4.0, 5.0)
     assert harness.edit_card_campus._island_label(["units", "bess", "control"]) == ("Control mode of bess", "")
@@ -401,3 +401,27 @@ def test_readback_after_the_real_call_equals_new(study, island_hub, hub):
         stored = edit_card.ADAPTERS[tool].readback(args, card["rows"])
         expected = [None if r["role"] == "note" else r["new"] for r in card["rows"]]
         assert stored == pytest.approx(expected) if tool == "gridspine_edit_template_param" else stored == expected, tool
+
+
+def test_island_words_mirror_the_island_form():
+    """`_ISLAND_WORDS` and `_SCENARIO_WORDS` are CampusIslandSection's FIELD_WORDS and the Cuts
+    section's scenarioWords, so a card names a field the way the form does."""
+    import pathlib
+    import re
+
+    from harness import edit_card_campus as ec
+
+    pages = pathlib.Path(__file__).resolve().parents[2] / "frontend" / "src" / "pages"
+    form = (pages / "CampusIslandSection.tsx").read_text(encoding="utf-8")
+    block = form[form.index("const FIELD_WORDS"):]
+    block = block[:block.index("\n}\n")]
+    words = {}
+    for key, text in re.findall(r"(\w+): '([^']*)'", block):
+        label, unit = re.fullmatch(r"(.*?)(?: \(([^)]*)\))?", text).groups()
+        words[key] = (label, unit or "")
+    # "Genset redundancy (N+k)" keeps its parenthesis: it is a name, not a unit.
+    words["genset_redundancy_n"] = ("Genset redundancy (N+k)", "")
+    assert ec._ISLAND_WORDS == words
+    cuts = (pages / "CampusIslandCutsSection.tsx").read_text(encoding="utf-8")
+    scen = cuts[cuts.index("const SCENARIO_WORDS"):cuts.index("\n", cuts.index("const SCENARIO_WORDS"))]
+    assert ec._SCENARIO_WORDS == dict(re.findall(r"(\w+): '([^']*)'", scen))

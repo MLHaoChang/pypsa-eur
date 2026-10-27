@@ -80,6 +80,8 @@ def _cell(field: str, value):
     list of scalars reads as its members, any other list or object is summarised."""
     if any(word in field.lower() for word in _SECRET_KEY):
         return None if value is None else "set"
+    if field.endswith("requirements.scenarios") and isinstance(value, list):
+        return ", ".join(_SCENARIO_WORDS.get(v, str(v).replace("_", " ")[:1].upper() + str(v).replace("_", " ")[1:]) for v in value) or "none"
     if isinstance(value, list):
         if len(value) <= 6 and all(not isinstance(v, (list, dict)) for v in value):
             return ", ".join(str(v) for v in value) if value else "none"
@@ -334,9 +336,22 @@ _ISLAND_WORDS = {
     "bridge_s": ("UPS bridge", "s"),
     "fuel_autonomy_h": ("Fuel autonomy", "h"),
     "genset_redundancy_n": ("Genset redundancy (N+k)", ""),
+    "gfm_margin": ("Grid-forming margin", ""),
+    "i_max_sensitivity_pu": ("Current limits tried", "pu"),
+    "relay_sensitivity": ("Relay sensitivity", ""),
+    "rocof_window_ms": ("Rate-of-change window", "ms"),
     "scenarios": ("Scenarios", ""),
-    "linearised_uc": ("Linearised unit commitment for the fixed-size gensets", ""),
+    "linearised_uc": ("Linearised unit commitment", ""),
+    "ride_through_storage": ("Ride-through storage", ""),
+    "pickup_blocks": ("Pickup blocks", ""),
+    "f_max_hz": ("Highest frequency", "Hz"),
+    "f_min_hz": ("Lowest frequency", "Hz"),
+    "qss_band_hz": ("Settled band", "Hz"),
+    "rocof_hz_per_s": ("Rate of change", "Hz/s"),
+    "rocof_hz_per_s_max": ("Rate of change", "Hz/s"),
 }
+# CampusIslandCutsSection.tsx `scenarioWords`: the Scenarios checkboxes' words.
+_SCENARIO_WORDS = {"ups_bridged": "UPS-bridged", "seamless": "Seamless", "planned": "Planned"}
 _SUFFIX = {"source": " source", "note": " note"}
 
 
@@ -349,6 +364,9 @@ def _island_label(path: list[str]) -> tuple[str, str]:
     if core[0] == "requirements" and len(core) == 2:
         text, unit = _ISLAND_WORDS.get(core[1], (_title(core[1]), ""))
         return text + suffix, "" if suffix else unit
+    if core[0] == "requirements" and len(core) == 3:  # a frequency limit of a named mode
+        text, unit = _ISLAND_WORDS.get(core[2], (core[2].replace("_", " "), ""))
+        return f"{_title(core[1])}: {text[:1].lower() + text[1:]}" + suffix, "" if suffix else unit
     if core[0] == "units" and len(core) == 3 and core[2] == "control":
         return f"Control mode of {core[1]}" + suffix, ""
     if core[0] == "units":
