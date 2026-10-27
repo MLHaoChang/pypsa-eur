@@ -47,9 +47,42 @@ def _plain(value):
     return _setting(value)
 
 
-def _fingerprint(value) -> str:
+def _fingerprint(value, size: int = 6) -> str:
     """Short content hash, so a series whose length did not change still reads as changed."""
-    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:6]
+    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:size]
+
+
+def _value_row(section: str, field: str, label: str, old, new, cell=None, unit: str = "") -> dict:
+    """One changed (or named) value. When a summary cell ("1 items", a capped text) hides the
+    difference the new cell says "(changed)" and the row carries a fingerprint of the NEW value;
+    the receipt then compares a fingerprint of what is stored."""
+    cell = cell or _plain
+    old_cell, new_cell = cell(old), cell(new)
+    row = _settings_row(section, field, label, old_cell, new_cell, unit, says_name=label)
+    if old_cell == new_cell and not _same_json(old, new):
+        row["new"] = f"{new_cell} (changed)"
+        row["fingerprint"] = _fingerprint(new, 12)
+    return row
+
+
+def _read_value(row: dict, stored, cell=None):
+    """The stored value for a `_value_row`, as the card writes it."""
+    cell = cell or _plain
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(stored, 12):
+        return row["new"]
+    return cell(stored)
+
+
+def _refuse_foreign_lock(project) -> None:
+    """The route's check-only look at another user's project lock (never acquires it)."""
+    from routers import projects
+    from routers.adequacy_worksheet import _lock_target
+    from services import chat_tools
+
+    target = _lock_target(project)
+    if target is not None:
+        with chat_tools._acting() as (db, user):
+            projects._check_project_lock(db, target, user)
 
 
 def _bulk(value):
@@ -124,6 +157,7 @@ def _stress_preview(args: dict) -> list[dict]:
     from services.adequacy import stress
 
     project = _stress_project(args)  # access first
+    _refuse_foreign_lock(project)
     new = _stress_new(args)
     old, error = stress.load_scenarios_checked(project.directory)
     if _same_json(old, new) and error is None:
@@ -133,7 +167,7 @@ def _stress_preview(args: dict) -> list[dict]:
     rows: list[dict] = []
     for sid in dict.fromkeys([*after, *before]):
         a, b = before.get(sid), after.get(sid)
-        label = f"Stress scenario · {_scenario_name(b or a)}"
+        label = f"Stress scenario · {_plain(_scenario_name(b or a))}"
         if a is None or b is None:
             row = _settings_row("Stress scenarios", f"scenario.{sid}", label, _scenario_summary(a),
                                 _scenario_summary(b), says_name=label)
@@ -144,15 +178,13 @@ def _stress_preview(args: dict) -> list[dict]:
             if _same_json(a.get(key), b.get(key)):
                 continue
             field_label = f"{label} · {_STRESS_LABELS.get(key, _title(key))}"
-            rows.append(_settings_row("Stress scenarios", f"scenario.{sid}.{key}", field_label,
-                                      _stress_cell(key, a.get(key)), _stress_cell(key, b.get(key)),
-                                      says_name=field_label))
+            rows.append(_value_row("Stress scenarios", f"scenario.{sid}.{key}", field_label,
+                                   a.get(key), b.get(key), lambda v, key=key: _stress_cell(key, v)))
     common_old = [s for s in before if s in after]
     common_new = [s for s in after if s in before]
     if common_old != common_new:
-        rows.append(_settings_row("Stress scenarios", "order", "Stress scenarios · Order",
-                                  ", ".join(common_old), ", ".join(common_new),
-                                  says_name="Stress scenarios · Order"))
+        rows.append(_value_row("Stress scenarios", "order", "Stress scenarios · Order",
+                               ", ".join(common_old), ", ".join(common_new)))
     if error is not None:
         rows.append(_note("", "", "unreadable", f"The stored list could not be read ({error}); this replaces it."))
     if not any(r["role"] != "note" for r in rows):
@@ -171,15 +203,16 @@ def _stress_readback(args: dict, rows: list[dict]) -> list[Any]:
         if row["role"] == "note":
             out.append(None)
         elif field == "order":
-            out.append(_stored_order(rows, stored))
+            out.append(_read_value(row, _stored_order(rows, stored)))
         else:
             _, sid, *key = field.split(".", 2)
             scenario = stored.get(sid)
             if not key:
                 out.append(_scenario_summary(scenario))
             else:
+                stored_value = None if scenario is None else scenario.get(key[0])
                 out.append(None if scenario is None or key[0] not in scenario
-                           else _stress_cell(key[0], scenario[key[0]]))
+                           else _read_value(row, stored_value, lambda v, k=key[0]: _stress_cell(k, v)))
     return out
 
 
@@ -225,7 +258,7 @@ def _health_summary(entry: dict | None):
     if entry.get("mttr_hours") is not None:
         parts.append(f"MTTR {_plain(entry['mttr_hours'])} h")
     parts += [f"{entry['method']}", f"measured {entry['measured_at']}"]
-    return " · ".join(parts)
+    return _plain(" · ".join(parts))
 
 
 def _health_preview(args: dict) -> list[dict]:
@@ -233,6 +266,7 @@ def _health_preview(args: dict) -> list[dict]:
     from services.adequacy import asset_health
 
     project = chat_tools._authorized_project(args.get("name"))  # access first
+    _refuse_foreign_lock(project)
     new = _health_new(args)
     old = asset_health.load_asset_health(project.directory)["entries"]
     if _same_json(sorted(old, key=lambda e: (e["component"], e["name"])),
@@ -255,8 +289,8 @@ def _health_preview(args: dict) -> list[dict]:
             if _same_json(a.get(attr), b.get(attr)):
                 continue
             label = f"{asset} · {word}"
-            rows.append(_settings_row("Asset health", f"{field}:{attr}", label, _plain(a.get(attr)),
-                                      _plain(b.get(attr)), unit, says_name=label))
+            rows.append(_value_row("Asset health", f"{field}:{attr}", label, a.get(attr), b.get(attr),
+                                   unit=unit))
     return _capped(rows, "entries")
 
 
@@ -278,7 +312,7 @@ def _health_readback(args: dict, rows: list[dict]) -> list[Any]:
         if not attr:
             out.append(_health_summary(entry))
         else:
-            out.append(None if entry is None else _plain(entry.get(attr)))
+            out.append(None if entry is None else _read_value(row, entry.get(attr)))
     return out
 
 
@@ -296,8 +330,13 @@ def _ledger_edit(args: dict):
 
     from harness.edit_card import _study
 
-    study = _study(args)  # access first
-    studies._refuse_unless_enabled()
+    from services import chat_tools
+
+    studies._refuse_unless_enabled()  # the handler's own first refusal, before any lookup
+    project = chat_tools._authorized_project(args.get("project"))  # access
+    with chat_tools._acting() as (db, user):
+        studies._check_lock(db, project, user)  # check only, as `put_ledger` does
+    study = _study(args)
     fields = {k: args[k] for k in ("key", "value", "unit") if k in args}
     if args.get("source"):
         fields["source"] = args["source"]
@@ -340,8 +379,8 @@ def _ledger_preview(args: dict) -> list[dict]:
         if not named and _same_json(a, b):
             continue
         label = new.label if word is None else f"{new.label} · {word}"
-        rows.append(_settings_row("Assumption", f"ledger.{new.key}.{attr}", label, _plain(a), _plain(b),
-                                  new.unit if attr == "value" else "", says_name=label))
+        rows.append(_value_row("Assumption", f"ledger.{new.key}.{attr}", label, a, b,
+                               unit=new.unit if attr == "value" else ""))
     if all(_same_json(getattr(old, a), getattr(new, a)) for a, _ in _LEDGER_ATTRS):
         _refuse("empty_edit", f"{new.label} already has this value, source and status.")
     return rows
@@ -350,7 +389,7 @@ def _ledger_preview(args: dict) -> list[dict]:
 def _ledger_readback(args: dict, rows: list[dict]) -> list[Any]:
     stored = _stored_ledger_row(args)
     return [None if row["role"] == "note" or stored is None
-            else _plain(getattr(stored, row["field"].rsplit(".", 1)[1])) for row in rows]
+            else _read_value(row, getattr(stored, row["field"].rsplit(".", 1)[1])) for row in rows]
 
 
 register("set_study_parameter", Adapter("settings_edit", _ledger_preview, _ledger_readback, section_id="project"))
@@ -364,8 +403,9 @@ _LAYOUT_LABELS = {"nodes": "Nodes", "edges": "Edges", "version": "Format version
 
 def _layout_dir(args: dict):
     """The project's storage directory, by the route's own access check; nothing is read yet."""
+    from routers import projects
     from routers.projects import _resolve_project_src
-    from services import chat_tools
+    from services import chat_tools, project_registry
 
     name = args.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -374,6 +414,8 @@ def _layout_dir(args: dict):
         src, canonical = _resolve_project_src(name, db, user)
     if not src.exists():
         raise HTTPException(404, f"Project '{canonical}' not found")
+    with chat_tools._acting() as (db, user):  # check only, as `put_layout` does
+        projects._check_project_lock(db, project_registry.find_project(db, user, canonical), user)
     return src
 
 
@@ -383,10 +425,6 @@ def _stored_layout(src) -> dict:
     except (OSError, ValueError):
         return {}  # the route's own reading of a missing or unusable file
     return data if isinstance(data, dict) else {}
-
-
-def _layout_cell(value):
-    return _plain(value)
 
 
 def _layout_change(key: str, old, new) -> str | None:
@@ -419,8 +457,7 @@ def _layout_preview(args: dict) -> list[dict]:
         if _same_json(old.get(key), layout.get(key)):
             continue
         label = f"Diagram layout · {_LAYOUT_LABELS.get(key, _title(key))}"
-        rows.append(_settings_row("Layout", f"layout.{key}", label, _layout_cell(old.get(key)),
-                                  _layout_cell(layout.get(key)), says_name=label))
+        rows.append(_value_row("Layout", f"layout.{key}", label, old.get(key), layout.get(key)))
         change = _layout_change(key, old.get(key), layout.get(key))
         if change:
             rows.append(_note("", "", f"layout.{key}.change", change))
@@ -429,7 +466,7 @@ def _layout_preview(args: dict) -> list[dict]:
 
 def _layout_readback(args: dict, rows: list[dict]) -> list[Any]:
     stored = _stored_layout(_layout_dir(args))
-    return [None if row["role"] == "note" else _layout_cell(stored.get(row["field"].split(".", 1)[1]))
+    return [None if row["role"] == "note" else _read_value(row, stored.get(row["field"].split(".", 1)[1]))
             for row in rows]
 
 
