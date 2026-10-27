@@ -3,8 +3,8 @@
 
 # LC-13 — owner-journey acceptance suite (Tier A in CI, Tier B capped)
 
-Status: ready-for-agent. Owner decision Q2: Tier B is a manual-trigger run with a
-Progress: oj_grid fixture, backend OJ modules, local browser runner, CI browser job `GUI owner journeys (browser)` (OJ-01, OJ-05) and Tier B `run_owner_journeys.py` (manual workflow, OJ-01 live) exist; PR open. Done once merged.
+Status: done (#717, b763622d). Owner decision Q2: Tier B is a manual-trigger run with a
+Progress: oj_grid fixture, backend OJ modules, local browser runner, CI browser job `GUI owner journeys (browser)` (OJ-01, OJ-05) and Tier B `run_owner_journeys.py` (manual workflow, OJ-01 live) exist; merged in #717.
 hard cost cap, reported per journey, never a merge gate. The Tier A harness
 lands with the first layer that closes a journey (OJ-09 in LC-01 or OJ-01 in LC-03).
 Type: task
