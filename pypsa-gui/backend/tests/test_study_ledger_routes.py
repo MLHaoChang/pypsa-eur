@@ -239,6 +239,10 @@ def test_an_illustrative_tariff_keeps_the_route_badge_at_screening(client, api_p
         "tariff: de_industrial_illustrative (illustrative, library)"]
 
 
+#: The money year a new study's ledger is seeded in: the pinned pack's.
+PIN_YEAR = str(lib.load_defaults().pack.finance.currency_year)
+
+
 @pytest.mark.parametrize("edit,needles", [
     # BC-S2-2: a row MVP-1 does not use.
     ({"key": "battery_storage_degradation_calendar_pct_per_year", "value": 2.0,
@@ -249,7 +253,7 @@ def test_an_illustrative_tariff_keeps_the_route_badge_at_screening(client, api_p
      ["battery_inverter_efficiency", "(0, 1]"]),
     # BC-S2-4: another currency year.
     ({"key": "battery_storage_eur_per_kwh", "value": 150.0, "unit": "EUR/kWh",
-      "currency_year": 2026}, ["battery_storage_eur_per_kwh", "2026", "2020"]),
+      "currency_year": 2026}, ["battery_storage_eur_per_kwh", "2026", PIN_YEAR]),
 ])
 def test_put_refuses_and_names_the_row_and_the_reason(client, api_project, studies_on,
                                                       project_storage_dir, edit, needles):
@@ -301,4 +305,4 @@ def test_a_study_currency_year_other_than_the_ledgers_is_named(client, api_proje
     assert client.patch(f"/api/projects/{name}/studies/{sid}",
                         json={"settings": {"currency_year": 2026}}).status_code == 200
     notes = client.get(_url(name, sid)).json()["ledger"]["honesty_notes"]
-    assert [n for n in notes if "2026" in n and "2020" in n], notes
+    assert [n for n in notes if "2026" in n and PIN_YEAR in n], notes

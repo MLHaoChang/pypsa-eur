@@ -61,9 +61,10 @@ DE, TOU = "de_industrial_illustrative", "tou_reference_illustrative"
 
 def _pack():
     from services.library.defaults_pack.loader import load_defaults_pack
-    from services.study.library import PACK_VERSION
+    from services.study.library import WP0_PACK_VERSION
 
-    return load_defaults_pack(PACK_VERSION)  # the study's pin, never the newest
+    # The WP0 pack the spike's goldens were recorded on (money-year 01 rider 3), never the newest.
+    return load_defaults_pack(WP0_PACK_VERSION)
 
 
 def pack_tariff(tariff_id: str, *, settlement: str | None = "h", valid_from: str | None = None

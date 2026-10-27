@@ -141,7 +141,11 @@ def test_the_technology_rows_are_the_v0_14_0_transcription(library):
         src = note[(r.technology, r.parameter)]
         assert r.value == float(src["value"]), (r.technology, r.parameter)
         assert r.unit == src["unit"]
-        assert r.currency_year == int(float(src["currency_year"])) == 2020
+        # MONEY-YEAR-1: technology-data v0.14.0 states 2025 EUR; the pack
+        # relabels its rows to 2025 (values unchanged). The transcription
+        # note predates the relabel and still says 2020.
+        assert int(float(src["currency_year"])) == 2020
+        assert r.currency_year == 2025
         assert r.source == src["source"]
         assert r.source_year == 2026
         assert r.source_url == TD_URL
@@ -185,7 +189,7 @@ def test_the_seed_tariffs_load_as_tariff_models(library):
     assert library.default_tariff_id == "de_industrial_illustrative"
     for t in library.tariffs.values():
         assert t.source == "illustrative"
-        assert t.currency == "EUR" and t.currency_year == 2020
+        assert t.currency == "EUR" and t.currency_year == 2025
         assert t.export.price_per_mwh is not None and t.export.series_ref is None
         assert t.honesty_notes
     de = library.tariffs["de_industrial_illustrative"]
@@ -230,7 +234,7 @@ def test_finance_defaults_state_their_basis_and_rules(library):
     assert f["discount_rate"]["source"] and f["discount_rate"]["source_year"]
     assert f["basis"] == {"terms": "real", "tax": "pre", "subsidy": "excl"}
     assert f["perspective"] == "site_owner"
-    assert f["currency_year"] == 2020
+    assert f["currency_year"] == 2025
     assert f["horizon_rule"]["horizon_years"] == "battery_storage_lifetime_years"
 
 
@@ -656,17 +660,17 @@ def test_a_value_in_another_currency_year_is_refused_naming_both(seeded):
         L.apply_user_row(seeded, "battery_storage_eur_per_kwh", 150.0, unit="EUR/kWh",
                          changed_by="u1", changed_at=NOW, currency_year=2026)
     text = str(exc.value)
-    assert "battery_storage_eur_per_kwh" in text and "2026" in text and "2020" in text
+    assert "battery_storage_eur_per_kwh" in text and "2026" in text and "2025" in text
     same = L.apply_user_row(seeded, "battery_storage_eur_per_kwh", 150.0, unit="EUR/kWh",
-                            changed_by="u1", changed_at=NOW, currency_year=2020)
-    assert _row(same, "battery_storage_eur_per_kwh").currency_year == 2020
+                            changed_by="u1", changed_at=NOW, currency_year=2025)
+    assert _row(same, "battery_storage_eur_per_kwh").currency_year == 2025
 
 
 def test_a_study_currency_year_other_than_the_ledgers_is_named(seeded):
     noted = L.with_study_currency_year(seeded, 2026)
     [note] = [n for n in noted.honesty_notes if "currency_year" in n and "2026" in n]
-    assert "2020" in note
-    assert L.with_study_currency_year(seeded, 2020).honesty_notes == seeded.honesty_notes
+    assert "2025" in note
+    assert L.with_study_currency_year(seeded, 2025).honesty_notes == seeded.honesty_notes
     assert L.with_study_currency_year(seeded, None).honesty_notes == seeded.honesty_notes
     # Idempotent: applying it twice names the mismatch once.
     assert L.with_study_currency_year(noted, 2026).honesty_notes == noted.honesty_notes
@@ -677,7 +681,7 @@ def test_a_study_currency_year_other_than_the_ledgers_is_named(seeded):
 def test_the_cost_rows_are_labelled_2030_projections(library, seeded):
     sourced = [r for r in library.technology if r.value is not None]
     assert {r.projection_year for r in sourced} == {2030}
-    assert "technology_costs_are_2030_projections_in_2020_eur" in seeded.honesty_notes
+    assert "technology_costs_are_2030_projections_in_2025_eur" in seeded.honesty_notes
     for r in sourced:
         assert "(2030 projection)" in _row(seeded, r.key).label, r.key
 

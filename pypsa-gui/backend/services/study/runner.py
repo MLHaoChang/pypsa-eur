@@ -392,9 +392,10 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
     except store.StudyNotFound:
         raise RunRefused(404, "study_not_found", "Study not found") from None
     question = _runnable(study, base_uuid)
-    library = study_library.load_defaults()
-    ledger = study.ledger or study_library.seed_ledger(question, study.intake, library)
     try:
+        # A stored ledger is priced on the defaults it was seeded from (money-year 01).
+        library = packs.library_for(study.ledger)
+        ledger = study.ledger or study_library.seed_ledger(question, study.intake, library)
         packs.refuse_unrunnable_ledger(ledger)
         missing = packs.missing_inputs(study.intake)
         if missing:
@@ -403,7 +404,8 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         packs.effective_tariff(study.intake, ledger, library)  # stale tariff → refused
         packs.option_commercial(study.intake, ledger, library)  # the engine's tariff (WP6)
     except packs.PackError as exc:
-        status = 409 if exc.code in ("ledger_needs_attention", "ledger_tariff_stale") else 422
+        status = 409 if exc.code in ("ledger_needs_attention", "ledger_tariff_stale",
+                                     "ledger_defaults_unknown") else 422
         raise RunRefused(status, exc.code, exc.message) from None
     options = Q.options_for(question, study.intake)
     solves = campaign.estimate_solves(None, STUDY_KEY, options=[o.option_id for o in options])
@@ -626,7 +628,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         base_row = db.get(Project, _uuid(base_row_id))
         study = store.load_study(base_dir, study_id)
         question = Q.get_question(study.question_id)
-        library = study_library.load_defaults()
+        library = packs.library_for(ledger)
         # The ledger and intake captured when the run started (BC-S4-2), not
         # whatever the sidecar holds by now.
         tariff = packs.effective_tariff(intake, ledger, library)

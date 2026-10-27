@@ -36,7 +36,7 @@
       "item": "money year",
       "note": "held flat to the base year, then escalated from it at the case's rates; nothing is converted with a price index",
       "source": "assumed",
-      "value": "pack prices (2020 price data) are read as real base-year EUR"
+      "value": "pack prices (2025 EUR) are read as real base-year EUR"
     },
     {
       "item": "finance inputs",
@@ -58,7 +58,7 @@
     },
     {
       "item": "import tariff",
-      "note": "an illustrative network-use charge on top of the wholesale price",
+      "note": "an illustrative network-use charge on top of the wholesale price; synthetic, illustrative; no money year of its own; read in the case's money (2025)",
       "source": "synthetic",
       "value": "h2_hub_network_tariff_synthetic: 25 EUR/MWh 08-20 h, 15 EUR/MWh otherwise"
     },

@@ -18,7 +18,18 @@ from services.pypsa_service import PyPSAService
 from services.study import packs, store
 from tests.study_s4_support import create_pack_study, enable_studies, wait_run
 from tests.test_study_runner import FakeSolver
-from tests.test_study_tornado_routes import NO_PV_TOU
+from tests.test_study_tornado_routes import NO_PV_TOU, TOU_DC
+
+
+def _study_money_year() -> int:
+    from services.study import library as L
+
+    return L.load_defaults().pack.finance.currency_year
+
+
+# The user's tariff, stated in the study's money (the pinned pack's year), so
+# the case does not mix it with the seeded rows (`currency_year_mixed`).
+INTAKE = {**NO_PV_TOU, "tariff": {"custom": {**TOU_DC, "currency_year": _study_money_year()}}}
 
 
 @pytest.fixture
@@ -37,7 +48,7 @@ def fake(monkeypatch):
 
 def _run(client, api_project, name):
     api_project(f"{name}-src")
-    r = create_pack_study(client, f"{name}-src", name, intake=NO_PV_TOU)
+    r = create_pack_study(client, f"{name}-src", name, intake=INTAKE)
     assert r.status_code == 201, r.text
     sid = r.json()["study_id"]
     assert client.post(f"/api/projects/{name}/studies/{sid}/run", json={}).status_code == 202

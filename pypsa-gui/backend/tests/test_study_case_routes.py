@@ -69,7 +69,7 @@ def test_the_case_and_its_workbook_after_a_run(client, api_project, studies_on, 
     assert case["option_id"] == "bess_2h" and case["study_id"] == sid
     # U2 WP8: the fake's fork carries the engine's solve record, so the case
     # is the finance engine's (the pro forma is never a stored study's).
-    assert case["currency_year"] == 2020 and case["engine"] == "finance_engine"
+    assert case["currency_year"] == 2025 and case["engine"] == "finance_engine"
     assert case["horizon_years"] == 25 and len(case["years"]) == 26
     assert case["sources"]["asset_economics_ref"] == "run_record"
     assert case["provenance"]["model_hash"]

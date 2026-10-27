@@ -291,6 +291,7 @@ def test_pricing_stamps_the_regional_source_and_never_the_eu_one(with_region):
 
 REGIONS = {"ca_federal": "CAD", "uk": "GBP", "us_federal": "USD"}
 SHIPPED = "2026-10-22"
+LATEST = "2026-10-26"      # money-year 01: the regional packs re-based on the 2025-money EU pack
 CLEARANCE = "2026-10-21, coordinator-relayed (decision G2)"
 SOURCE_IDS = {"ca_federal": "cost_canada_cer_ef2026", "uk": "cost_uk_desnz_2025",
               "us_federal": "cost_eia_reference_plants"}
@@ -307,12 +308,12 @@ def shipped_caches():
 
 def test_the_three_regions_ship_with_their_currency_and_are_not_versions(shipped_caches):
     assert D.available_regions() == tuple(sorted(REGIONS))
-    # The regional packs sit on BASE; a later EU version (2026-10-23, campus-IC 03A) leaves them as they are.
+    # The newest regional packs sit on LATEST (money-year 01); the ones on BASE stay shipped beside them.
     assert BASE in D.available_versions() and not any("+" in v for v in D.available_versions())
     for region, currency in REGIONS.items():
         pack = D.load_defaults_pack(region=region)
-        assert pack.version == f"{SHIPPED}+{region}"
-        assert pack.region_info.currency == currency and pack.region_info.base_version == BASE
+        assert pack.version == f"{LATEST}+{region}"
+        assert pack.region_info.currency == currency and pack.region_info.base_version == LATEST
         for v in pack.cost_values:
             if v.currency is not None:
                 assert v.currency == currency and v.unit.startswith(currency + "/")
@@ -325,9 +326,9 @@ def test_regional_hashes_are_pinned_and_the_eu_pins_are_unchanged(shipped_caches
     regional = json.loads((FIXTURES / "regional_pack_hashes.json").read_text())[
         "generic_defaults_regional"]
     # the 2026-10-21 versions are legacy (untyped, GS-2b) and stay pinned beside the typed ones
-    assert set(regional) == {f"{d}+{r}" for r in REGIONS for d in ("2026-10-21", SHIPPED)}
+    assert set(regional) == {f"{d}+{r}" for r in REGIONS for d in ("2026-10-21", SHIPPED, LATEST)}
     for region in REGIONS:
-        for date in ("2026-10-21", SHIPPED):
+        for date in ("2026-10-21", SHIPPED, LATEST):
             pack = D.load_defaults_pack(date, region=region)
             assert pack.hash == regional[pack.version]
             assert pack.region_info.base_hash == \
@@ -436,7 +437,7 @@ def test_a_ca_project_prices_solar_in_cad_from_its_region_and_an_eu_one_is_uncha
 
     ca = price_from_pack(net(), "generators", "pv", "solar-utility", version=SHIPPED,
                          region="ca_federal")
-    pack = D.load_defaults_pack(region="ca_federal")
+    pack = D.load_defaults_pack(SHIPPED, region="ca_federal")
     rate = float(pack.finance.discount_rate.value)
     over = 2_078_400.0
     assert ca["pack_version"] == f"{SHIPPED}+ca_federal" and ca["pack_hash"] == pack.hash
@@ -491,7 +492,7 @@ def test_an_eu_fallback_field_and_the_eu_discount_rate_are_recorded_as_such(ship
     prov = provenance._root(n)["Generator"]["pv"]
     assert prov["lifetime"]["fallback"] == "eu_fallback"          # the study states no lifetime
     assert "fallback" not in prov["overnight_cost"]
-    pack = D.load_defaults_pack(region="us_federal")
+    pack = D.load_defaults_pack(SHIPPED, region="us_federal")
     eu = D.load_defaults_pack(BASE)
     assert prov["overnight_cost"]["source"].startswith(f"generic_defaults@{pack.version}#")
     assert prov["discount_rate"]["source"] == f"generic_defaults@{BASE}#{eu.hash[:16]}"

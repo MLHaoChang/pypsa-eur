@@ -366,9 +366,8 @@ def test_an_item_the_engine_cannot_rate_makes_its_component_not_established():
 # ── WP0 parity: both seeds, every component, 1e-9 ────────────────────────
 
 def _defaults():
-    from services.study import library as L
-
-    return L.load_defaults()
+    # The WP0 pack the parity was recorded on (`SF.site_library`, money-year 01 rider 3).
+    return SF.site_library()
 
 
 def _compiled_seed(tid, snapshots):

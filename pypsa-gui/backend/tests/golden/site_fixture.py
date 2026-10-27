@@ -38,6 +38,9 @@ from __future__ import annotations
 
 import pandas as pd
 
+# The defaults pack the frozen WP0 numbers were recorded and re-derived on.
+from services.study.library import WP0_PACK_VERSION
+
 SITE_YEAR = 2025
 CONNECTION_MW = 2.0
 BASE_MW = 0.6
@@ -63,10 +66,13 @@ def site_intake() -> dict:
     }
 
 
+
 def site_library():
     from services.study import library as study_library
 
-    return study_library.load_defaults()
+    # The frozen WP0 parity (u2_pre_numbers.json) was recorded on this pack: pinned, so the
+    # comparison keeps its inputs when the study's PACK_VERSION moves.
+    return study_library.load_defaults(WP0_PACK_VERSION)
 
 
 def site_ledger():

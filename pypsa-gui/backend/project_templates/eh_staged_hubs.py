@@ -198,7 +198,7 @@ def _h2_finance(planning=None) -> dict:
     years, end = (YEARS, HORIZON_END) if planning is None else (planning.years, planning.end_year)
     cand = [f"{k}_new_{y}" for y in years for k in ("wind", "solar", "bess")]
     return {
-        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "currency": "EUR", "currency_year": 2025, "price_basis": "nominal",
         "financial_close": f"{years[0] - 1}-01-01",
         "cod_by_asset": {a: f"{years[0]}-01-01" for a in H2_EXISTING},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
@@ -319,7 +319,7 @@ def _mg_finance(planning=None) -> dict:
     cand = [f"{k}_new_{y}" for y in years for k in ("diesel", "bess", "pv", "wind")]
     owned_gen = [a for a in MG_EXISTING if a != "hospital_feeder"]
     return {
-        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "currency": "EUR", "currency_year": 2025, "price_basis": "nominal",
         "financial_close": f"{years[0] - 1}-01-01",
         "cod_by_asset": {a: f"{years[0]}-01-01" for a in MG_EXISTING},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
@@ -437,7 +437,7 @@ def _common_ledger(plan: _HubPlan | None = None) -> list[dict]:
     return [
         {"item": "discount rate", "value": "7 % nominal", "source": "assumed",
          "note": "the solve discounts each period's costs at it"},
-        {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+        {"item": "money year", "value": "pack prices (2025 EUR) are read as real base-year EUR",
              "source": "assumed",
              "note": "held flat to the base year, then escalated from it at the case's rates; "
                      "nothing is converted with a price index"
@@ -557,7 +557,8 @@ def _h2_meta(T, planning=None) -> dict:
              "note": "not modelled, so the counterfactual bill is the served load at the meter"},
             {"item": "import tariff", "value": f"{SYNTHETIC_TARIFF['id']}: 25 EUR/MWh 08-20 h, "
                                                "15 EUR/MWh otherwise", "source": "synthetic",
-             "note": "an illustrative network-use charge on top of the wholesale price"},
+             "note": "an illustrative network-use charge on top of the wholesale price; "
+                     "synthetic, illustrative; no money year of its own; read in the case's money (2025)"},
             {"item": "existing electrolyser", "value": "30 MW (the single-year template has 60)",
              "source": "assumed",
              "note": "the 2027 offtake (10 MW of H2) needs about 15 MW; the plan adds the rest by "

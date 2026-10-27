@@ -136,6 +136,20 @@ class PackError(ValueError):
 
 # ── ledger reads ──────────────────────────────────────────────────────────
 
+def library_for(ledger: AssumptionsLedger | None):
+    """
+    `library.library_for_ledger`: the defaults the stored ledger was seeded
+    from (the pin when there is none), refused 409-style as
+    ``ledger_defaults_unknown`` when no shipped pack is that one.
+    """
+    from services.study import library as study_library
+
+    try:
+        return study_library.library_for_ledger(ledger)
+    except study_library.LibraryError as exc:
+        raise PackError("ledger_defaults_unknown", str(exc)) from None
+
+
 def needs_attention_rows(ledger: AssumptionsLedger) -> list[str]:
     """Every row a re-seed flagged (status or honesty-note protocol)."""
     keys = {r.key for r in ledger.rows if r.status == "needs_attention"}
@@ -620,7 +634,7 @@ def build_site_network(intake: Mapping[str, Any] | None,
     which survives the netCDF round trip.
     """
     intake = intake or {}
-    library = library or study_library.load_defaults()
+    library = library or library_for(ledger)
     refuse_unrunnable_ledger(ledger)
     missing = missing_inputs(intake)
     if missing:

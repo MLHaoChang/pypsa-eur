@@ -8,9 +8,11 @@ literal in the pack (or a cost read from anywhere but the ledger) goes red.
 """
 from __future__ import annotations
 
+import json
 import math
 import queue
 import threading
+from decimal import Decimal
 
 import numpy as np
 import pandas as pd
@@ -37,6 +39,14 @@ def _intake(**over):
     }
     base.update(over)
     return base
+
+
+def _money_year_factor() -> Decimal:
+    """The pinned pack's exact money-year factor (2020 -> its currency year)."""
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    manifest = json.loads((VERSIONS_DIR / lib.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    return Decimal(manifest["money_year_conversion"]["factor"])
 
 
 @pytest.fixture(scope="module")
@@ -267,7 +277,8 @@ def test_energy_price_level_is_not_applicable_on_a_flat_tariff(ledger):
                          changed_by="u", changed_at=NOW)
     assert "single energy band" in str(exc.value)
     imp, _e = _prices(_intake(), ledger)
-    assert np.allclose(imp.to_numpy(), 110.0 + 20.0)
+    # The seed tariff's 110 + 20 EUR/MWh (2020) in the pin's money: x the manifest factor.
+    assert np.allclose(imp.to_numpy(), float((Decimal(110) + Decimal(20)) * _money_year_factor()))
 
 
 # ── refusals ─────────────────────────────────────────────────────────────
