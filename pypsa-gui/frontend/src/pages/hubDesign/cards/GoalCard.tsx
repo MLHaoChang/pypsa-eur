@@ -81,6 +81,11 @@ export function GoalCard() {
           className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {save.isPending ? 'Saving…' : 'Save goal'}
         </button>
+        {!edited && !save.isSuccess && (
+          <span data-testid="hub-goal-no-changes" className="text-[12px] text-muted">
+            No changes to save.
+          </span>
+        )}
         {save.isSuccess && !edited && (
           <span data-testid="hub-goal-saved" role="status" className="text-[12px] text-muted">
             Saved.

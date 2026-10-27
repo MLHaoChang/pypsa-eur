@@ -129,14 +129,17 @@ describe('GoalCard goal (W3b-R: the one stored goal)', () => {
     const user = mount()
     expect(screen.queryByTestId('hub-goal-ens')).toBeNull()
     expect(screen.queryByTestId('hub-goal-draws')).toBeNull()
+    // UX: a disabled Save says why.
+    expect(screen.getByTestId('hub-goal-no-changes').textContent).toBe('No changes to save.')
     await user.click(screen.getByTestId('hub-goal-advanced'))
     await waitFor(() => expect(input('hub-goal-ens').disabled).toBe(false))
     expect(input('hub-goal-draws').placeholder).toBe('500 (default)')
     await user.type(input('hub-goal-ens'), '2')
     await user.click(screen.getByTestId('hub-goal-save'))
     await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledWith({ ens_cap_permyriad: 2 }))
-    // A save says it landed; the next edit clears the note.
+    // A save says it landed (and not "no changes"); the next edit clears it.
     expect((await screen.findByTestId('hub-goal-saved')).textContent).toBe('Saved.')
+    expect(screen.queryByTestId('hub-goal-no-changes')).toBeNull()
     await user.type(input('hub-goal-ens'), '3')
     expect(screen.queryByTestId('hub-goal-saved')).toBeNull()
   })
