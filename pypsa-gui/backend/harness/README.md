@@ -239,9 +239,12 @@ component (`frontend/src/components/EditCard.tsx`).
   (`catalogue.tool_edits_network`) or a project setting (`SETTINGS_EDITS`).
   Every other write-tier tool is in `NOT_EDITS` with its reason;
   `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
-  is gated as Guided gates a write, so Expert shows the card too.
+  is gated as Guided gates a write, so Expert shows the card too. The reverse
+  holds for `confirm.GUIDED_UNCARDED` (`preview_project_changes`): it stores a
+  record and changes nothing, so Guided gates it as Expert does and the apply
+  card is the one approval (OJ-21).
 - **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
-  says, complete, digest}`, or refuses before any card (`unknown_field`,
+  says, complete, binding, digest}`, or refuses before any card (`unknown_field`,
   `derived_field`, `read_only_field`, `invalid_edit_value`,
   `component_not_found`, `edit_refused`). Component rows come from running the
   NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
@@ -261,6 +264,8 @@ component (`frontend/src/components/EditCard.tsx`).
   `edit_card.register(tool, Adapter(kind, preview, readback))`, where
   `preview(args)` returns rows `{component_class, name, field, label, old,
   new, unit, role}` and `readback(args, rows)` the stored values in row order.
+  An optional `Adapter.binding(args)` returns a dict the card carries as
+  `binding` and its digest covers (a stored record the edit applies).
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
@@ -833,6 +838,17 @@ copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
 and the existing foreign-lock/study/undo gates. It commits a validated private
 candidate, retains unsaved work, and refuses interrupted application replay.
+LC-16: one preview spans several assets of the eight component classes, each
+change an `attribute` that `get_component_schema` types as a number or
+boolean in its stored unit; derived, read-only, negative and non-finite values
+refuse, and one missing name refuses everything (`change_component_missing`,
+naming it and up to five existing names). The rows come from the native bulk
+handler on a copy (`edit_card._sandbox_rows`), and a number column the asset
+never set is created there, as a single edit does. `apply_project_changes` is
+an edit card (`parameter_edit`) whose `binding` is `{preview_id,
+review_sha256}`; the loop refuses `invalid_preview` when the approved card's
+binding is not the record the handler applies. Records are version 2 (with
+`rows`); older records fail closed. One apply is one `undo_last` step.
 Previews are limited to a complete review of at most 20 values fitting a
 3800-character card; larger changes must be split. Legacy/clipped records need
 a new preview. The card renders an old/new/unit table on both surfaces and
@@ -869,7 +885,8 @@ review. Verified failed/uncertain steps may be explicitly reconciled through
 the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
-still receives only its catalogue arguments; chat renders the preview table.
+still receives only its catalogue arguments; chat renders the preview table,
+or, when the confirmation carries a complete edit card, the card alone.
 
 ### Plan jobs and continuation (LC-05, LC-12)
 
@@ -1047,7 +1064,22 @@ the live network stay out of it.
 
 Retention keeps section artifacts for the 20 newest manifests and manifest
 records for 200 runs. Older section directories are removed; a later read of
-a pruned section is `evidence_unavailable`.
+a pruned section is `evidence_unavailable`. Orphaned running markers (below)
+count toward the 200 and are removed with the rest. Runs are ordered by
+`started_at`, or by the file's mtime when that is missing or unparsable.
+
+A running marker is live only while the process that wrote it still owes the
+manifest. The app runs one worker, so after a restart or crash every leftover
+marker is read as `interrupted` with the warning `process_exited`. It has no
+`finished_at` and no evidence. That reading is derived when the marker is read.
+Nothing is written, so reads stay read-only. A queued job restored at boot
+claims its run id again and is live once more.
+
+A session abort ends the foreground solver monitor's log bridge, but not the
+solve. The monitor keeps waiting for that solve, identified by the log queue
+and thread the solver state held when the monitor started, and publishes it
+once. If another solve replaces it first, the run is published `interrupted`
+with `outcome_superseded`; the other solve's outcome is never attached to it.
 
 Publishers are best-effort. An unsaved scratch network produces no record, and
 a recording failure does not fail the solve.

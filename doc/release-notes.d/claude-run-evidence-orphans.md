@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Run history no longer shows a run as running forever after a restart or crash. Such a run reads as interrupted (`process_exited`) with no evidence. A solve whose chat session was aborted is still recorded when it ends, and retention now also prunes these left-over run markers.

@@ -279,17 +279,18 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-def draft_from_project(network_path, island=None) -> CampusDraft:
+def draft_from_project(network_path, island=None, f_hz=None) -> CampusDraft:
     """A campus draft from the saved, solved project at ``network_path``.
     An unsolved project is refused here. The draft itself needs no dispatch,
     but the study does, and the user should hear it now rather than at run
     time. ``island``, the project's validated island sidecar, is passed to
     ``draft_campus`` (campus island plan I1, I9b): the campus then carries
-    its island data. Without it the draft is unchanged."""
+    its island data. Without it the draft is unchanged. ``f_hz`` is
+    ``draft_campus``'s own parameter, passed through."""
     n = load_solved_network(network_path)
     if not is_solved(n):
         raise ContractError("the project is not solved; solve it and save, then draft the campus")
-    return draft_campus(n, island=island)
+    return draft_campus(n, island=island, f_hz=f_hz)
 
 
 def check_campus(spec: dict) -> None:
@@ -861,6 +862,16 @@ def _sk_source(campus: dict, n) -> tuple[str, bool]:
     return SK_CAMPUS, False
 
 
+def _unchanged_project(run_dir: Path):
+    """The project network a run was prepared from, refused when it changed
+    since (its sha256 is in the manifest)."""
+    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
+    network_path = Path(manifest["network_path"])
+    if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
+        raise ContractError("the project changed since this campus run was prepared; prepare the run again")
+    return load_solved_network(network_path)
+
+
 def harmonic_units(n, poc: str) -> pd.DataFrame:
     """The harmonic sources of a project network, all lumped at ``poc``: every
     Link that is a process unit (``eh_process``) or names a
@@ -895,12 +906,8 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     from gridspine.static import harmonics as hm
 
     run_dir = Path(run_dir)
-    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
-    network_path = Path(manifest["network_path"])
-    if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
-        raise ContractError("the project changed since this campus run was prepared; prepare the run again")
+    n = _unchanged_project(run_dir)
     campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
-    n = load_solved_network(network_path)
     code = load_grid_code(profile, extra_dirs=profile_dirs)
     limits, cited = hm.limits_from_profile(code)
 
@@ -928,3 +935,44 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     out = pd.concat(frames, ignore_index=True).reindex(columns=columns)
     _write_text_atomic(run_dir / HARMONICS_CSV, out.to_csv(index=False))
     return out
+
+
+# --- the harmonic impedance scan (datacenter grid readiness issue 12) -------
+
+HARMONIC_SCAN_CSV = "campus_harmonic_scan.csv"
+HARMONIC_ENVELOPE_CSV = "campus_harmonic_envelope.csv"
+HARMONIC_RESONANCE_CSV = "campus_harmonic_resonance.csv"
+
+
+def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()):
+    """The harmonic impedance scan of a prepared run from its PCC
+    (``static/harmonic_scan.py``), written to ``campus_harmonic_scan.csv``
+    (R(h), X(h) per short-circuit case and capacitor state),
+    ``campus_harmonic_envelope.csv`` and ``campus_harmonic_resonance.csv``.
+
+    The orders that count are 6k +- 1 and every order a harmonic source's
+    spectrum injects (vendor or demo default, as the harmonic screen takes
+    them), read from the project network, which must be unchanged since the
+    run was prepared. Returns the ``ScanStudy``."""
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import harmonics as hm
+
+    run_dir = Path(run_dir)
+    n = _unchanged_project(run_dir)
+    campus = load_run_campus(run_dir)
+    bus, cases, notes = hs.campus_cases(campus)
+    spectrum_orders, demo = set(), False
+    for _, u in harmonic_units(n, str(campus.net.bus.at[bus, "name"])).iterrows():
+        spectrum, source = hm.unit_spectrum(u["harmonic_source"], u["harmonic_spectrum"])
+        spectrum_orders.update(h for h, pct in (spectrum or {}).items() if pct > 0)
+        demo |= bool(spectrum) and source.startswith("demo")
+    limit, cited = hs.clearance_from_profile(load_grid_code(profile, extra_dirs=profile_dirs))
+    not_code = bool(cited) and cited[0]["source"] != "code"
+    if not_code:
+        notes.append(f"the resonance clearance is {cited[0]['source']}, not the grid code's")
+    study = hs.impedance_scan(campus.net, bus, cases, spectrum_orders=sorted(spectrum_orders), spectrum_demo=demo,
+                              limit_h=limit, limit_assumed=not_code, notes=notes)
+    for name, df in ((HARMONIC_SCAN_CSV, study.scan), (HARMONIC_ENVELOPE_CSV, study.envelope),
+                     (HARMONIC_RESONANCE_CSV, study.resonance)):
+        _write_text_atomic(run_dir / name, df.to_csv(index=False))
+    return study

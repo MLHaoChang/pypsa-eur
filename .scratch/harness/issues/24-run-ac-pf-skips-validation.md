@@ -3,7 +3,7 @@
 
 # 24 — The assistant's AC power-flow stage skips the run validation
 
-Status: ready-for-agent
+Status: done (#722)
 Type: task
 Gated: yes (GK B reviews the PR)
 Reported by: engine gatekeeper, 26 Oct 2026
