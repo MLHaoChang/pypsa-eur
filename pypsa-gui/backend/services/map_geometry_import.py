@@ -13,11 +13,11 @@ The result is a MATCH REPORT the user confirms before anything is written;
 Pure over dicts: the parsers take text, the matcher takes the branch and bus
 tables the route reads from the live network, and `apply_report` takes the
 project directory. No FastAPI, no PyPSA, no network I/O. The KML parser is
-stdlib `xml.etree` only — no new dependency — and reads the subset a
+dependency-free beyond a hardened XML parser, and reads the subset a
 surveyor's export carries: Placemark name, LineString, Polygon outer ring,
-MultiGeometry. A document that declares a DOCTYPE or an entity is refused
-before parsing (no entity expansion, no external entities), whether or not
-defusedxml is installed.
+MultiGeometry. A document that is not UTF-8, or declares a DOCTYPE or an
+entity, is refused before parsing, and the parse itself uses a hardened
+parser only (defusedxml, else lxml with entities off).
 
 Coordinates are GeoJSON `[lng, lat]` throughout, the order `map_layout.json`
 stores. A route's stored `points` are its INTERIOR vertices: an end vertex
@@ -195,10 +195,24 @@ def _kml_coords(text: str | None, where: str) -> list[list[float]]:
 _DTD = re.compile(r"<!(DOCTYPE|ENTITY)", re.IGNORECASE)
 _DECLARED_ENCODING = re.compile(r"""^\s*<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
 
-try:  # Hardened when defusedxml is importable (the frozen app pins it); the DOCTYPE refusal holds either way.
-    from defusedxml.ElementTree import fromstring as _xml_fromstring
-except ImportError:
-    _xml_fromstring = ET.fromstring
+
+def _xml_fromstring(text: str):
+    """Parse with a hardened parser only: defusedxml (the frozen app pins it),
+    else lxml with entities, DTDs and the network off (the dev environments
+    carry it). Neither importable refuses the KML instead of falling back."""
+    try:
+        from defusedxml.ElementTree import fromstring
+    except ImportError:
+        pass
+    else:
+        return fromstring(text)
+    try:
+        from lxml import etree
+    except ImportError:
+        raise GeometryImportInvalid("KML can't be read here: neither defusedxml nor lxml is installed.") from None
+    parser = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True, huge_tree=False,
+                             remove_comments=True, remove_pis=True)
+    return etree.fromstring(text.encode("utf-8"), parser)
 
 
 def parse_kml(text: str) -> list[Feature]:
@@ -215,7 +229,7 @@ def parse_kml(text: str) -> list[Feature]:
         raise GeometryImportInvalid("KML declares a DOCTYPE or entity; remove it and upload the file again.")
     try:
         root = _xml_fromstring(text)
-    except (ET.ParseError, ValueError) as exc:
+    except (ET.ParseError, ValueError, SyntaxError) as exc:  # lxml's XMLSyntaxError is a SyntaxError
         raise GeometryImportInvalid(f"KML is not well-formed XML: {exc}") from exc
     out: list[Feature] = []
     index = 0

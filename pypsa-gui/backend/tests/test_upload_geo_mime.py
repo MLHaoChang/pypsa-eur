@@ -127,3 +127,19 @@ def test_the_size_cap_is_checked_before_any_parse(client, route_project, monkeyp
     monkeypatch.setattr(mgi, "parse_features", lambda *a, **k: pytest.fail("parsed over the cap"))
     r = _post(client, route_project, "routes.kml", KML, "application/vnd.google-earth.kml+xml")
     assert r.status_code == 413, r.text
+
+
+def test_kml_is_refused_without_a_hardened_parser(monkeypatch):
+    """No fallback to the stdlib parser: with neither defusedxml nor lxml the KML is refused."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def hardened_missing(name, *args, **kwargs):
+        if name.split(".")[0] in ("defusedxml", "lxml"):
+            raise ImportError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", hardened_missing)
+    with pytest.raises(mgi.GeometryImportInvalid, match="neither defusedxml nor lxml"):
+        mgi.parse_features(KML, "routes.kml")
