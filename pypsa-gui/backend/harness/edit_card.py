@@ -968,12 +968,17 @@ def _solver_config() -> dict:
     return asdict(config) if not isinstance(config, dict) else dict(config)
 
 
+TEXT_CAP = 120  # characters of a free-text cell a card shows
+
+
 def _setting(value):
-    """A setting's cell: a scalar as stored, a nested list or dict as compact JSON."""
+    """A setting's cell: a scalar as stored (a long text cut at TEXT_CAP), a nested list or dict as
+    compact JSON."""
     if isinstance(value, (dict, list)):
         text = json.dumps(value, default=str, separators=(",", ":"))
         return text if len(text) <= 200 else text[:200] + "\u2026"
-    return _scalar(value)
+    value = _scalar(value)
+    return value if not isinstance(value, str) or len(value) <= TEXT_CAP else value[:TEXT_CAP] + "\u2026"
 
 
 def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
