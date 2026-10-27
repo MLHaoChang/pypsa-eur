@@ -88,9 +88,11 @@ def test_points_below_zero_pu_are_outside_the_first_cut():
     assert sorted(got) == [0.0, 1.0]
 
 
-def test_a_unit_without_a_rating_is_unknown_never_passed():
+@pytest.mark.parametrize("missing", [float("nan"), None])
+def test_a_unit_without_a_rating_is_unknown_never_passed(missing):
     c = campus()
-    c.units.loc["PV1", "s_mva"] = float("nan")
+    c.units["s_mva"] = c.units["s_mva"].astype(object)      # so a None stays None
+    c.units.loc["PV1", "s_mva"] = missing
     df = ibr_q_curve(c, with_curve(PART_LOAD))
     pv = [r for r in df.to_dict("records") if r["unit"] == "PV1"]
     assert len(pv) == 1 and pv[0]["status"] == "reported" and "unknown" in pv[0]["detail"]

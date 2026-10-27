@@ -239,7 +239,10 @@ def ibr_q_curve(campus, profile: dict):
     side is checked on its own. The requirement is linear
     between breakpoints and the circle concave in P, so their difference is
     concave on each segment and least at a segment end: the breakpoints and
-    1 pu cover the whole curve. A curve that does not reach 1 pu gives a
+    1 pu cover the whole curve. That needs P <= S on the curve: a unit with
+    S < P_n has no Q above P = S (the clamp at 0 bends the circle there), so
+    a shortfall between breakpoints can be missed; rated P then fails anyway
+    whenever the curve asks for Q there. A curve that does not reach 1 pu gives a
     ``reported`` row at 1 pu, never a silent skip. Points below 0 pu
     (storage charging) are outside this first cut. A unit without P_n or S
     is one ``reported`` row, "capability unknown", never ``pass``.
@@ -253,11 +256,12 @@ def ibr_q_curve(campus, profile: dict):
     for uid, u in campus.units.iterrows():
         if u["kind"] not in IBR_KINDS:
             continue
-        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] == u["s_mva"] else math.nan
+        # NaN (and None, should a rating ever be stored that way) is no rating
+        p_n, s = float(u["p_mw"]), float(u["s_mva"]) if u["s_mva"] is not None and u["s_mva"] == u["s_mva"] else math.nan
         base = {"unit": str(uid), "kind": u["kind"], "s_mva": s, "clause": lim["clause"], "source": lim["source"],
                 "basis": IBR_CURVE_LABEL}
         unknown = {"q_min_req_mvar": math.nan, "q_max_req_mvar": math.nan, "available_mvar": math.nan,
-               "shortfall_mvar": math.nan, "status": "reported"}
+                   "shortfall_mvar": math.nan, "status": "reported"}
         if not (p_n > 0 and math.isfinite(s) and s > 0):
             rows.append({**base, **unknown, "p_pu": math.nan, "p_mw": math.nan,
                          "detail": f"capability unknown: {uid} has no rating (P_n and the inverter S are needed)"})
