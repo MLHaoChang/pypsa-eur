@@ -62,9 +62,19 @@ SETTINGS_EDITS = frozenset({
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
-    # LV08 B-campus: the campus file, the readiness limits, an applied island cut, the study's dispatch
-    "campus_save_campus", "campus_set_grid_limit", "campus_reset_grid_limit", "campus_remove_island_cut",
-    "gridspine_upload_external_dispatch",
+    # LV08 B-campus: the campus file, the readiness limits, the study's dispatch, grid-code drafts
+    # (GRIDCODE-CHAT-1: an extract or blank draft with overwrite replaces one, so both are carded)
+    "campus_save_campus", "campus_set_grid_limit", "campus_reset_grid_limit",
+    "gridspine_upload_external_dispatch", "campus_extract_grid_code", "campus_new_grid_code_draft",
+    "campus_save_grid_code_draft",
+})
+
+# Destructive- and execution-tier tools that show a content card too (owner decision
+# GRIDCODE-CHAT-1: panel-only actions get chat tools behind a confirmation card). Their
+# adapters are in `harness/campus_cards.py`; tests/test_edit_card.py pins the tiers.
+CARDED_ACTIONS = frozenset({
+    "campus_start_milp", "campus_confirm_grid_code_limit", "campus_publish_grid_code",
+    "campus_delete_grid_code_draft", "campus_delete_published_grid_code", "campus_delete_grid_code_document",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -90,7 +100,6 @@ NOT_EDITS = {
     "abort_decision_study": "stops a running study; its inputs are unchanged",
     "gridspine_compute_capacity": "a computation on the saved network",
     "gridspine_assess_connection": "a computation on the saved network",
-    "campus_extract_grid_code": "reads a document into a study file",
     "campus_run_island_study": "a computation on copies of the saved network",
     # LV08 B2b
     "create_evidence_report": "a new report record from the current evidence",
@@ -99,6 +108,7 @@ NOT_EDITS = {
     "campus_cancel_milp": "stops a running job; it keeps its best point",
     "campus_cancel_island_cuts": "stops a running job after the trial in hand",
     "gridspine_upload_readback": "compares an uploaded export with a bundle; no input changes",
+    "campus_upload_grid_code_document": "stores a source document; a draft is the edit",
     # live-voice 08 B3
     "solve_queue_clear_finished": "drops finished jobs from the queue listing",
     "solve_queue_dismiss": "hides a finished job from your own queue listing",
@@ -112,7 +122,7 @@ def is_edit(tool_name: str) -> bool:
     """True when a chat call of `tool_name` changes project inputs or settings."""
     from harness.catalogue import tool_edits_network
 
-    return tool_name in SETTINGS_EDITS or tool_edits_network(tool_name)
+    return tool_name in SETTINGS_EDITS or tool_name in CARDED_ACTIONS or tool_edits_network(tool_name)
 
 
 @dataclass(frozen=True)
@@ -1349,3 +1359,7 @@ def _gfm_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 # Section 5: the Controls block of each converter-coupled asset (card-workspaces.md §3.3).
 register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets"))
+
+
+# The campus and grid-code cards register themselves on this module.
+from harness import campus_cards  # noqa: E402,F401

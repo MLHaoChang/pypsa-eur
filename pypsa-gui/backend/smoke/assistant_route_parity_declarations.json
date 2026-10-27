@@ -543,58 +543,7 @@
    "reason": "app-shell"
   }
  ],
- "needs_tool": [
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-   "family": "gridspine-campus"
-  },
-  {
-   "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-   "family": "gridspine-campus"
-  }
- ],
+ "needs_tool": [],
  "non_mutating_routes": [
   {
    "method": "POST",

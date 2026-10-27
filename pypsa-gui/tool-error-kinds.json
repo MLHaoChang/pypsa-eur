@@ -307,6 +307,10 @@
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
     },
+    "file_changed_since_read": {
+      "surface": "inline",
+      "why": "A whole-file write (campus file, grid-code draft) names the digest of the text the model read, and the file changed since; the model recovers in the same turn by reading the file again and redoing the change on the current text."
+    },
     "upload_project_mismatch": {
       "surface": "inline",
       "why": "A file-import tool reads the upload from the active project and was asked to write to another project; the model recovers in the same turn by naming the active project or asking the user to switch."

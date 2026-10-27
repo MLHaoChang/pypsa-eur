@@ -4603,9 +4603,12 @@ def gridspine_get_connection_assessments(project_id: str, assessment_id: str | N
 
 
 def campus_get_study(project_id: str) -> dict:
+    from harness.campus_cards import sha256_text
     from services.campus_electrical_service import get_state as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id))
+        state = _h(_gridspine_project(db, user, project_id))
+    # The digest campus_save_campus's base_sha256 names (LV08 B-campus).
+    return {**state, "campus_sha256": sha256_text(state.get("campus_yaml"))}
 
 
 def campus_draft_campus(project_id: str, overwrite: bool = False) -> dict:
@@ -8666,11 +8669,17 @@ def _campus_route(handler, project_id: str, /, *args, **kwargs):
         return _sync(handler(*args, **injected, **kwargs))
 
 
-def campus_save_campus(project_id: str, yaml: str) -> dict:
-    """`PUT …/campus`: the user's campus file, validated by building it."""
+def campus_save_campus(project_id: str, yaml: str, base_sha256: str | None = None) -> dict:
+    """`PUT …/campus`: the user's campus file, validated by building it. Refused
+    when the file changed since the model read it (`base_sha256`)."""
+    from harness import campus_cards
     from routers.campus_electrical import CampusText, save_campus as _h
 
-    return _b2b_fit(_campus_route(_h, project_id, CampusText(yaml=yaml)))
+    with _acting() as (db, user):
+        campus_cards.require_base(campus_cards.campus_text(_gridspine_project(db, user, project_id)),
+                                  base_sha256, "campus file")
+    out = _campus_route(_h, project_id, CampusText(yaml=yaml))
+    return _b2b_fit({"campus_sha256": campus_cards.sha256_text(out.get("campus_yaml")), **out})
 
 
 def campus_milp_status(project_id: str) -> dict:
@@ -8763,19 +8772,26 @@ def campus_reset_library(project_id: str) -> dict:
 def _gridspine_upload(project_id: str, file_id: str):
     """An UploadFile of the active project's upload `file_id`, for a gridspine
     upload route on the project `project_id` names. The upload belongs to the
-    active project, so naming another one is 409 (as import_map_geometry). The
-    gridspine upload routes check no edit lock; the tool does, before it
-    writes (`_gridspine_project_for_write`)."""
+    active project, so naming another one is 409 (as import_map_geometry). No
+    edit lock, as the route: a gridspine study is not lock-coordinated
+    (`STUDY_NOT_LOCK_COORDINATED` in tests/test_write_surface_lock_policy.py)."""
     with _acting() as (db, user):
-        project = _gridspine_project_for_write(db, user, project_id)
-        target = project.name
+        target = _gridspine_project(db, user, project_id).name
     active = _require_active_project()
     if target != active:
         raise HTTPException(status_code=409, detail={
             "error_kind": "upload_project_mismatch",
             "message": f"the file is an upload of the active project {active!r}; "
                        f"use that project, or switch to {target!r} and upload there"})
-    return _active_upload(file_id)
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from services import upload_service
+
+    upload = _active_upload(file_id)
+    # The stored upload's own media type, as a browser would send it (the PDF route checks it).
+    mime = upload_service.get_upload_meta(active, file_id).mime
+    return UploadFile(file=upload.file, filename=upload.filename, headers=Headers({"content-type": mime}))
 
 
 def gridspine_upload_external_dispatch(project_id: str, dispatch_file_id: str,
@@ -8796,6 +8812,86 @@ def gridspine_upload_readback(project_id: str, hour: int, bus_file_id: str,
     bus = _gridspine_upload(project_id, bus_file_id)
     branches = _gridspine_upload(project_id, branches_file_id) if branches_file_id else None
     return _b2b_fit(_campus_route(_h, project_id, int(hour), bus=bus, branches=branches))
+
+
+# Grid codes (owner decision GRIDCODE-CHAT-1): confirm, publish and the deletes
+# are destructive and show a card (harness/campus_cards.py) before they run.
+
+
+def _with_sha(shaped: dict) -> dict:
+    from harness.campus_cards import sha256_text
+
+    return _b2b_fit({"sha256": sha256_text(shaped.get("yaml")), **shaped})
+
+
+def campus_upload_grid_code_document(project_id: str, file_id: str, page_ranges: str | None = None) -> dict:
+    """`POST …/grid-codes/documents` with the active project's UPLOADED PDF; the route's size cap runs."""
+    from routers.campus_electrical import upload_grid_code_document as _h
+
+    pdf = _gridspine_upload(project_id, file_id)
+    return _b2b_fit(_campus_route(_h, project_id, file=pdf, page_ranges=page_ranges))
+
+
+def campus_delete_grid_code_document(project_id: str, document_id: str) -> dict:
+    from routers.campus_electrical import delete_grid_code_document as _h
+
+    return _campus_route(_h, project_id, document_id)
+
+
+def campus_new_grid_code_draft(project_id: str, profile_id: str, title: str | None = None,
+                               overwrite: bool = False) -> dict:
+    from routers.campus_electrical import NewDraft, new_grid_code_draft as _h
+
+    return _with_sha(_campus_route(_h, project_id, NewDraft(profile_id=profile_id, title=title,
+                                                            overwrite=bool(overwrite))))
+
+
+def campus_get_grid_code_draft(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import get_grid_code_draft as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id))
+
+
+def campus_save_grid_code_draft(project_id: str, profile_id: str, yaml: str,
+                                base_sha256: str | None = None) -> dict:
+    """`PUT …/grid-codes/drafts/{id}`; refused when the draft changed since it was read."""
+    from harness import campus_cards
+    from routers.campus_electrical import ProfileText, save_grid_code_draft as _h
+
+    with _acting() as (db, user):
+        current = campus_cards._draft_or_none(_gridspine_project(db, user, project_id), profile_id)
+    campus_cards.require_base(current and current["yaml"], base_sha256, f"draft {profile_id!r}")
+    return _with_sha(_campus_route(_h, project_id, profile_id, ProfileText(yaml=yaml)))
+
+
+def campus_delete_grid_code_draft(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import delete_grid_code_draft as _h
+
+    return _campus_route(_h, project_id, profile_id)
+
+
+def campus_confirm_grid_code_limit(project_id: str, profile_id: str, limit: str) -> dict:
+    from routers.campus_electrical import ConfirmLimit, confirm_grid_code_limit as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id, ConfirmLimit(limit=limit)))
+
+
+def campus_publish_grid_code(project_id: str, profile_id: str, allow_unconfirmed: bool = False) -> dict:
+    from routers.campus_electrical import Publish, publish_grid_code as _h
+
+    return _b2b_fit(_campus_route(_h, project_id, profile_id, Publish(allow_unconfirmed=bool(allow_unconfirmed))))
+
+
+def campus_get_published_grid_code(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import get_published_grid_code as _h
+
+    return _with_sha(_campus_route(_h, project_id, profile_id))
+
+
+def campus_delete_published_grid_code(project_id: str, profile_id: str) -> dict:
+    from routers.campus_electrical import delete_published_grid_code as _h
+
+    return _campus_route(_h, project_id, profile_id)
 
 
 # ── Registry entry-point ────────────────────────────────────────────────────
@@ -9268,6 +9364,16 @@ DISPATCHERS.update({
     "campus_reset_library": campus_reset_library,
     "gridspine_upload_external_dispatch": gridspine_upload_external_dispatch,
     "gridspine_upload_readback": gridspine_upload_readback,
+    "campus_upload_grid_code_document": campus_upload_grid_code_document,
+    "campus_delete_grid_code_document": campus_delete_grid_code_document,
+    "campus_new_grid_code_draft": campus_new_grid_code_draft,
+    "campus_get_grid_code_draft": campus_get_grid_code_draft,
+    "campus_save_grid_code_draft": campus_save_grid_code_draft,
+    "campus_delete_grid_code_draft": campus_delete_grid_code_draft,
+    "campus_confirm_grid_code_limit": campus_confirm_grid_code_limit,
+    "campus_publish_grid_code": campus_publish_grid_code,
+    "campus_get_published_grid_code": campus_get_published_grid_code,
+    "campus_delete_published_grid_code": campus_delete_published_grid_code,
 })
 
 

@@ -62,10 +62,14 @@ carries a `route_parity` summary and one `route-parity:needs-tool:<family>` bloc
 CI: `.github/workflows/assistant-route-parity.yaml`. Tests: `tests/test_assistant_route_parity.py`.
 Slice B adds typed tools for the needs-tool rows; slice C does the rest and the issue-05 journeys.
 
-2026-10-27: Slice B-campus (in progress). 21 of the 31 gridspine-campus needs-tool routes covered:
-14 new tools calling their route handlers in-process (campus file, MILP status/start/cancel,
+2026-10-27: Slice B-campus landed. The last 31 needs-tool rows (gridspine-campus) are covered:
+24 new tools calling their route handlers in-process (campus file, MILP status/start/cancel,
 grid-readiness limits, island report/cuts/GFM card, library reset, gridspine external dispatch and
-readback from uploads), and 7 routes matched to existing tools once the parity scan follows
-`run_in_threadpool(service, ...)`. Remaining: the 10 grid-code draft/confirm/publish routes, pending
-the owner's decision on plan C10 (`not_via_chat` `grid_code_publish`). Tests:
-`tests/test_lv08_bcampus_tools.py`, `tests/test_assistant_route_parity.py`.
+readback from uploads, and the 10 grid-code document/draft/confirm/publish/delete tools), and 7
+routes matched to existing tools once the parity scan follows `run_in_threadpool(service, ...)`.
+Owner decision GRIDCODE-CHAT-1 supersedes plans C10 and C12: confirm, publish, the deletes and the
+MILP start show a content card first (`harness/campus_cards.py`, `edit_card.CARDED_ACTIONS`); the
+campus file and grid-code drafts are whole-file writes that refuse a stale read
+(`file_changed_since_read`). route-parity.json: 0 needs-tool of 466 GUI routes. Tests:
+`tests/test_lv08_bcampus_tools.py`, `tests/test_assistant_route_parity.py`. Slice C (behavioral
+journeys on issue 05) remains; the full-coverage claim stays `not_established`.

@@ -4633,8 +4633,8 @@
       "backend_routes": 506,
       "gui_routes": 466,
       "limitation": 87,
-      "needs-tool": 10,
-      "tool": 369,
+      "needs-tool": 0,
+      "tool": 379,
       "unclassified": 0
     },
     "limitations_by_reason": {
@@ -4647,20 +4647,7 @@
       "live-stream": 2,
       "ui-local-state": 3
     },
-    "needs_tool_by_family": {
-      "gridspine-campus": [
-        "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
-        "DELETE /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-        "DELETE /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-        "GET /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
-        "GET /api/campus-electrical/{name}/grid-codes/published/{profile_id}",
-        "POST /api/campus-electrical/{name}/grid-codes/documents",
-        "POST /api/campus-electrical/{name}/grid-codes/drafts",
-        "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
-        "POST /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
-        "PUT /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
-      ]
-    }
+    "needs_tool_by_family": {}
   },
   "full_coverage": {
     "claimed": false,
@@ -4767,12 +4754,6 @@
         "id": "hosted-gates-pending",
         "issue": "05",
         "summary": "Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior."
-      },
-      {
-        "id": "route-parity:needs-tool:gridspine-campus",
-        "issue": "08",
-        "family": "gridspine-campus",
-        "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       }
     ],
     "permitted_statement": "Tested subsets only, labelled accordingly; no whole-application coverage claim."

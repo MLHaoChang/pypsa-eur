@@ -216,30 +216,6 @@ NOT_VIA_CHAT: tuple[dict, ...] = (
             ('POST', '/api/library/series'),
         }),
     },
-    {
-        'id': 'grid_code_publish',
-        'title': 'Grid-code review and publishing',
-        'disposition': 'manual',
-        'reason': 'Confirm limits and publish grid-code profiles in Campus electrical, Grid codes. Chat can list profiles and extract a draft from a document, but cannot publish it.',
-        'page': 'Campus electrical, Grid codes',
-        'panel': 'campusElectrical',
-        'keywords': frozenset({
-            'publish',
-            'published',
-        }),
-        'routes': frozenset({
-            ('DELETE', '/api/campus-electrical/{name}/grid-codes/documents/{document_id}'),
-            ('DELETE', '/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}'),
-            ('DELETE', '/api/campus-electrical/{name}/grid-codes/published/{profile_id}'),
-            ('GET', '/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}'),
-            ('GET', '/api/campus-electrical/{name}/grid-codes/published/{profile_id}'),
-            ('POST', '/api/campus-electrical/{name}/grid-codes/documents'),
-            ('POST', '/api/campus-electrical/{name}/grid-codes/drafts'),
-            ('POST', '/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm'),
-            ('POST', '/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish'),
-            ('PUT', '/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}'),
-        }),
-    },
 )
 
 NOTE = ("not_via_chat lists features you cannot do from chat. Tell the user the reason and the page; "

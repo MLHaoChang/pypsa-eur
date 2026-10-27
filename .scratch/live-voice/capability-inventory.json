@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 355,
+  "tool_count": 365,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -7792,14 +7792,15 @@
       ],
       "input_keys": [
         "project_id",
-        "yaml"
+        "yaml",
+        "base_sha256"
       ],
       "required": [
         "project_id",
         "yaml"
       ],
       "safety_tier": "write",
-      "schema_sha256": "fe9d2ba36d0bf4c21379a9ea4e5bf91d6545fa39905e997494f46a0ecede8ef0",
+      "schema_sha256": "f07062290ecabbcaef301fdc34905f650a7608bf3e6097f2df5b74253174d228",
       "behavioral_fixture": "pending"
     },
     {
@@ -7989,7 +7990,7 @@
         "hour",
         "kind"
       ],
-      "safety_tier": "write",
+      "safety_tier": "destructive",
       "schema_sha256": "7f56b9953cc4814e036d733a143117e4f6d16b78d7d3fec152db38e726c206c4",
       "behavioral_fixture": "pending"
     },
@@ -8104,6 +8105,246 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "b75bcf22a0ee8f6a1352650051669cffe9135567ca18931e18a4852ffd8209ad",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_upload_grid_code_document",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/grid-codes/documents"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "file_id",
+        "page_ranges"
+      ],
+      "required": [
+        "project_id",
+        "file_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "74ea33c32766708da7d51dac8ef9e04e0f9654d9412664ee4027990a6267bdea",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_delete_grid_code_document",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/grid-codes/documents/{document_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "document_id"
+      ],
+      "required": [
+        "project_id",
+        "document_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "c48b6138d378f30a360404e46c541a4b8fb739291856736d9bdfaeec64587b86",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_new_grid_code_draft",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/grid-codes/drafts"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id",
+        "title",
+        "overwrite"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "bf416312ff2f71725acca6629832fcf8dbc2d411ca91a7a16258dc5ebce3a389",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_grid_code_draft",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "a913030cffd5f56ed820e8d6cd8c1d9f74ad7dedeebc3e76f5c9958cdcad0325",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_save_grid_code_draft",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id",
+        "yaml",
+        "base_sha256"
+      ],
+      "required": [
+        "project_id",
+        "profile_id",
+        "yaml",
+        "base_sha256"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "3041574979928f9cea2324ff2b474ade9422ce0e00572158fdcb2c43c14110da",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_delete_grid_code_draft",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "a913030cffd5f56ed820e8d6cd8c1d9f74ad7dedeebc3e76f5c9958cdcad0325",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_confirm_grid_code_limit",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id",
+        "limit"
+      ],
+      "required": [
+        "project_id",
+        "profile_id",
+        "limit"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "75e6a5ffd9ba371b5d82a891ff3743131dc4f6bd0d44ea06f282ea7dce1b1391",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_publish_grid_code",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id",
+        "allow_unconfirmed"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "d2c5b63e17e7f23602b7f7ec85b4f32eec8f2fea4ad760bf58f761a9db50e230",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_get_published_grid_code",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/campus-electrical/{name}/grid-codes/published/{profile_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "a913030cffd5f56ed820e8d6cd8c1d9f74ad7dedeebc3e76f5c9958cdcad0325",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "campus_delete_published_grid_code",
+      "toolsets": [
+        "gridspine"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/campus-electrical/{name}/grid-codes/published/{profile_id}"
+        ]
+      ],
+      "input_keys": [
+        "project_id",
+        "profile_id"
+      ],
+      "required": [
+        "project_id",
+        "profile_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "a913030cffd5f56ed820e8d6cd8c1d9f74ad7dedeebc3e76f5c9958cdcad0325",
       "behavioral_fixture": "pending"
     }
   ],

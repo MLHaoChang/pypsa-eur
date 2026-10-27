@@ -30,12 +30,23 @@ TOOLS = {
     "campus_reset_grid_limit": "write",
     "campus_island_report": "read",
     "campus_cancel_island_cuts": "write",
-    "campus_remove_island_cut": "write",
+    "campus_remove_island_cut": "destructive",
     "campus_clear_island_cuts": "destructive",
     "campus_gfm_settings_card": "read",
     "campus_reset_library": "destructive",
     "gridspine_upload_external_dispatch": "write",
     "gridspine_upload_readback": "write",
+    # GRIDCODE-CHAT-1
+    "campus_upload_grid_code_document": "write",
+    "campus_delete_grid_code_document": "destructive",
+    "campus_new_grid_code_draft": "write",
+    "campus_get_grid_code_draft": "read",
+    "campus_save_grid_code_draft": "write",
+    "campus_delete_grid_code_draft": "destructive",
+    "campus_confirm_grid_code_limit": "destructive",
+    "campus_publish_grid_code": "destructive",
+    "campus_get_published_grid_code": "read",
+    "campus_delete_published_grid_code": "destructive",
 }
 P = {"project_id": "Chat Hub"}
 
@@ -209,7 +220,14 @@ def test_a_large_island_report_is_trimmed_under_the_result_cap(hub, monkeypatch)
 @pytest.fixture
 def uploads(hub, monkeypatch):
     files = {"d1": ("dispatch.csv", b"t,g\n0,1\n"), "l1": ("loads.csv", b"t,l\n0,1\n"),
-             "b1": ("bus.csv", b"bus,v\nB1,1.0\n")}
+             "b1": ("bus.csv", b"bus,v\nB1,1.0\n"), "p1": ("code.pdf", b"%PDF-1.7 grid code")}
+    from types import SimpleNamespace
+
+    from services import upload_service
+
+    monkeypatch.setattr(upload_service, "get_upload_meta",
+                        lambda project, file_id: SimpleNamespace(mime="application/pdf" if file_id == "p1"
+                                                                 else "text/csv"))
     monkeypatch.setattr(chat_tools, "_require_active_project", lambda: "Chat Hub")
     monkeypatch.setattr(chat_tools, "_active_upload",
                         lambda file_id: UploadFile(filename=files[file_id][0],
@@ -243,17 +261,30 @@ def test_the_upload_tools_refuse_a_project_other_than_the_active_one(uploads, mo
     assert exc.value.detail["error_kind"] == "upload_project_mismatch"
 
 
-def test_the_upload_tools_check_the_named_projects_lock(uploads, monkeypatch):
+def test_the_gridspine_upload_tools_keep_the_routes_declared_lock_exemption(uploads, monkeypatch):
+    """GK B condition 2: the routes are STUDY_NOT_LOCK_COORDINATED; the tools add no lock."""
     from routers import projects
+    from tests import test_write_surface_lock_policy as policy
 
-    def refuse(db, target, user):
-        raise HTTPException(status_code=409, detail="locked by someone else")
+    for tool in ("gridspine_upload_external_dispatch", "gridspine_upload_readback"):
+        ((method, path),) = catalogue.TOOL_ROUTES[tool]
+        assert policy.ROUTE_POLICY[(method, path)][0] == policy.STUDY_NOT_LOCK_COORDINATED, tool
+    monkeypatch.setattr(projects, "_check_project_lock", lambda *a: pytest.fail("no lock check"))
+    calls = []
+    _spy(monkeypatch, gs, "upload_external_dispatch", calls)
+    chat_tools.gridspine_upload_external_dispatch("Chat Hub", "d1")
+    assert len(calls) == 1
 
-    monkeypatch.setattr(projects, "_check_project_lock", refuse)
-    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a: pytest.fail("never reached"))
+
+def test_an_oversized_stored_upload_gets_the_routes_refusal(uploads, monkeypatch):
+    """GK B condition 5: the bytes go through the route's own UploadBudget."""
+    from services import campus_grid_code_service as gc
+
+    monkeypatch.setattr(gc, "MAX_PDF_BYTES", 4)
+    monkeypatch.setattr(gc, "upload_document", lambda *a: pytest.fail("never reached"))
     with pytest.raises(HTTPException) as exc:
-        chat_tools.gridspine_upload_external_dispatch("Chat Hub", "d1")
-    assert exc.value.status_code == 409
+        chat_tools.campus_upload_grid_code_document("Chat Hub", "p1")
+    assert exc.value.status_code == 413
 
 
 # ── the existing tools now matched to their routes ──────────────────────────
@@ -267,3 +298,172 @@ def test_extract_passes_the_routes_profile_id_and_overwrite(hub, monkeypatch):
     chat_tools.campus_extract_grid_code("Chat Hub", "doc1", profile_id="tso", overwrite=True)
     ((_, a, _k),) = calls
     assert a[1:] == ("doc1", "tso", True)
+
+
+# ── async handlers, the joint optimisation's card (GK B conditions 1, 6') ───
+
+
+def test_an_async_route_tool_returns_the_payload_not_a_coroutine(hub, monkeypatch):
+    import inspect
+
+    from routers import campus_electrical
+
+    assert inspect.iscoroutinefunction(campus_electrical.start_milp)
+    _services(monkeypatch)
+    out = chat_tools.campus_start_milp("Chat Hub")
+    assert out == {"ok": True} and not inspect.iscoroutine(out)
+
+
+def test_the_milp_start_is_carded_and_its_card_starts_nothing(hub, monkeypatch):
+    from harness import confirm, edit_card
+
+    calls = []
+    _spy(monkeypatch, ce, "start_milp_job", calls)
+    assert edit_card.is_edit("campus_start_milp")
+    for guided in (False, True):
+        assert confirm.confirmation_policy("execution_long_running", guided=guided) == "user"
+    card = edit_card.preview("campus_start_milp", {"project_id": "Chat Hub", "k": 4})
+    assert calls == []  # the card is built; no job started
+    shown = {r["field"]: r["new"] for r in card["rows"] if r["role"] == "typed"}
+    assert shown["k"] == 4 and shown["invest"] is True and shown["n_minus_1"] is True
+
+
+def test_a_second_milp_start_gets_the_handlers_own_409(hub, monkeypatch):
+    monkeypatch.setitem(ce._MILP_SLOT, "active", {"state": "running", "project": "Other", "thread": None})
+    monkeypatch.setattr(ce, "profiles", lambda project: {"eu_rfg_dcc_ce": "EU"}, raising=False)
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.campus_start_milp("Chat Hub")
+    assert exc.value.status_code == 409 and "already running" in str(exc.value.detail)
+
+
+# ── whole-file writes refuse a stale read (GK B condition 3) ────────────────
+
+
+def test_save_campus_refuses_a_stale_base_and_its_card_shows_the_change(hub, monkeypatch):
+    from harness import campus_cards, edit_card
+
+    f = ce.campus_dir(hub) / ce.CAMPUS_FILE
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("a: 1\nb: 2\n")
+    monkeypatch.setattr(ce, "save_campus", lambda *a: pytest.fail("a stale write never reaches the service"))
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.campus_save_campus("Chat Hub", "a: 1\nb: 3\n", base_sha256="0" * 64)
+    assert exc.value.status_code == 409 and exc.value.detail["error_kind"] == "file_changed_since_read"
+    base = campus_cards.sha256_text("a: 1\nb: 2\n")
+    card = edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 1\nb: 3\n",
+                                                    "base_sha256": base})
+    ((row,),) = [[r for r in card["rows"] if r["role"] == "typed"]]
+    assert (row["field"], row["old"], row["new"]) == ("b", 2, 3)
+    assert card["binding"] == {"sha256": base}
+    with pytest.raises(HTTPException):
+        edit_card.preview("campus_save_campus", {"project_id": "Chat Hub", "yaml": "a: 2\n"})  # no base
+
+
+def test_get_study_carries_the_digest_save_campus_names(hub, monkeypatch):
+    monkeypatch.setattr(ce, "get_state", lambda project: {"campus_yaml": "a: 1\n"})
+    from harness.campus_cards import sha256_text
+
+    assert chat_tools.campus_get_study("Chat Hub")["campus_sha256"] == sha256_text("a: 1\n")
+
+
+# ── grid codes (GRIDCODE-CHAT-1) ────────────────────────────────────────────
+
+EXTRACTED = {"q_range_demand": {"q_min": -0.48, "q_max": 0.48, "source": "extracted", "page": 12,
+                                "clause": "4.2", "quote": "between 0.48 leading and lagging"}}
+
+
+def _shaped(pid="tso", profile=None, review=None, unconfirmed=("q_range_demand",)):
+    profile = {"title": "TSO code", **(EXTRACTED if profile is None else profile)}
+    return {"id": pid, "yaml": f"title: TSO code # {pid}\n", "profile": profile, "review": review,
+            "unconfirmed": list(unconfirmed), "document": None}
+
+
+def test_the_confirm_card_shows_the_limit_and_its_quote(hub, monkeypatch):
+    from harness import edit_card
+    from services import campus_grid_code_service as gc
+
+    review = {"limits": {"q_range_demand": {"quote_found": False, "found_on_page": 13}}}
+    monkeypatch.setattr(gc, "get_draft", lambda project, pid: _shaped(pid, review=review))
+    monkeypatch.setattr(gc, "confirm", lambda *a: pytest.fail("the card confirms nothing"))
+    card = edit_card.preview("campus_confirm_grid_code_limit",
+                             {"project_id": "Chat Hub", "profile_id": "tso", "limit": "q_range_demand"})
+    typed = {r["field"]: (r["old"], r["new"]) for r in card["rows"] if r["role"] == "typed"}
+    assert typed["source"] == ("extracted", "code") and typed["q_min"] == (-0.48, -0.48)
+    notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
+    assert "between 0.48 leading and lagging" in notes and "page 12" in notes and "clause 4.2" in notes
+    assert "Quote not found on its page (it is on page 13)" in notes
+
+
+def test_the_confirm_card_refuses_a_limit_that_is_not_extracted(hub, monkeypatch):
+    from harness import edit_card
+    from services import campus_grid_code_service as gc
+
+    monkeypatch.setattr(gc, "get_draft", lambda project, pid: _shaped(
+        pid, profile={"q_range_demand": {**EXTRACTED["q_range_demand"], "source": "code"}}))
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("campus_confirm_grid_code_limit",
+                          {"project_id": "Chat Hub", "profile_id": "tso", "limit": "q_range_demand"})
+    assert exc.value.status_code == 422
+
+
+def test_the_publish_card_names_what_it_replaces_and_each_unconfirmed_limit(hub, monkeypatch):
+    from harness import edit_card
+    from services import campus_grid_code_service as gc
+
+    monkeypatch.setattr(gc, "get_draft", lambda project, pid: _shaped(pid))
+    monkeypatch.setattr(gc, "get_published", lambda project, pid: {**_shaped(pid), "yaml": "old: 1\n",
+                                                                   "profile": {"title": "Old code"}})
+    card = edit_card.preview("campus_publish_grid_code", {"project_id": "Chat Hub", "profile_id": "tso",
+                                                           "allow_unconfirmed": True})
+    (row,) = [r for r in card["rows"] if r["role"] == "typed"]
+    assert (row["old"], row["new"]) == ("Old code", "TSO code")
+    notes = " ".join(r["note"] for r in card["rows"] if r["role"] == "note")
+    assert "Replaces the published profile" in notes and "q_range_demand is unconfirmed: it stays extracted" in notes
+    assert set(card["binding"]) == {"draft_sha256", "published_sha256"}
+
+
+def test_the_grid_code_actions_are_carded_destructive_and_reach_their_service(hub, monkeypatch):
+    from harness import edit_card
+    from services import campus_grid_code_service as gc
+
+    calls = []
+    for fn in ("delete_document", "new_draft", "get_draft", "delete_draft", "confirm", "publish",
+               "get_published", "delete_published"):
+        _spy(monkeypatch, gc, fn, calls, result=_shaped())
+    for tool in ("campus_confirm_grid_code_limit", "campus_publish_grid_code", "campus_delete_grid_code_draft",
+                 "campus_delete_published_grid_code", "campus_delete_grid_code_document"):
+        assert tool in edit_card.CARDED_ACTIONS and catalogue.safety_tier_for(tool) == "destructive", tool
+    chat_tools.campus_new_grid_code_draft("Chat Hub", "tso", title="T", overwrite=True)
+    chat_tools.campus_confirm_grid_code_limit("Chat Hub", "tso", "q_range_demand")
+    chat_tools.campus_publish_grid_code("Chat Hub", "tso", allow_unconfirmed=True)
+    chat_tools.campus_delete_grid_code_draft("Chat Hub", "tso")
+    chat_tools.campus_delete_published_grid_code("Chat Hub", "tso")
+    chat_tools.campus_delete_grid_code_document("Chat Hub", "d" * 64)
+    out = chat_tools.campus_get_grid_code_draft("Chat Hub", "tso")
+    from harness.campus_cards import sha256_text
+
+    assert out["sha256"] == sha256_text(_shaped()["yaml"])
+    got = [(n, a[1:]) for n, a, _k in calls]
+    assert got == [("new_draft", ("tso", "T", True)), ("confirm", ("tso", "q_range_demand")),
+                   ("publish", ("tso", True)), ("delete_draft", ("tso",)), ("delete_published", ("tso",)),
+                   ("delete_document", ("d" * 64,)), ("get_draft", ("tso",))]
+
+
+def test_save_draft_refuses_a_stale_base(hub, monkeypatch):
+    from services import campus_grid_code_service as gc
+
+    monkeypatch.setattr(gc, "get_draft", lambda project, pid: _shaped(pid))
+    monkeypatch.setattr(gc, "save_draft", lambda *a: pytest.fail("a stale write never reaches the service"))
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.campus_save_grid_code_draft("Chat Hub", "tso", "title: x\n", base_sha256="0" * 64)
+    assert exc.value.detail["error_kind"] == "file_changed_since_read"
+
+
+def test_the_pdf_upload_reaches_the_service_with_its_media_type(uploads, monkeypatch):
+    from services import campus_grid_code_service as gc
+
+    calls = []
+    _spy(monkeypatch, gc, "upload_document", calls)
+    chat_tools.campus_upload_grid_code_document("Chat Hub", "p1", page_ranges="1-3")
+    ((_, a, _k),) = calls
+    assert a[1:] == (b"%PDF-1.7 grid code", "code.pdf", "application/pdf", "1-3")

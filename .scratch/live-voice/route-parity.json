@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 87,
-  "needs-tool": 10,
-  "tool": 369,
+  "needs-tool": 0,
+  "tool": 379,
   "unclassified": 0
  },
  "format_version": 1,
@@ -203,22 +203,28 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents"
+   "path": "/api/campus-electrical/{name}/grid-codes/documents",
+   "tools": [
+    "campus_upload_grid_code_document"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/documents/{document_id}",
+   "tools": [
+    "campus_delete_grid_code_document"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -233,76 +239,100 @@
    "via": "service_call"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts",
+   "tools": [
+    "campus_new_grid_code_draft"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "tools": [
+    "campus_delete_grid_code_draft"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "tools": [
+    "campus_get_grid_code_draft"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "PUT",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
+   "tools": [
+    "campus_save_grid_code_draft"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/confirm",
+   "tools": [
+    "campus_confirm_grid_code_limit"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "POST",
-   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish"
+   "path": "/api/campus-electrical/{name}/grid-codes/drafts/{profile_id}/publish",
+   "tools": [
+    "campus_publish_grid_code"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "DELETE",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+   "tools": [
+    "campus_delete_published_grid_code"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "gridspine-campus",
+   "class": "tool",
    "gui_files": [
     "api/campusElectrical.ts"
    ],
    "method": "GET",
-   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}"
+   "path": "/api/campus-electrical/{name}/grid-codes/published/{profile_id}",
+   "tools": [
+    "campus_get_published_grid_code"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

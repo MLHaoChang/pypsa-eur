@@ -29,6 +29,16 @@ def test_every_write_tool_is_an_edit_or_a_named_non_edit():
     assert set(edit_card.SETTINGS_EDITS) <= writes, set(edit_card.SETTINGS_EDITS) - writes
 
 
+def test_carded_actions_are_confirmed_tiers_with_their_own_card():
+    """GRIDCODE-CHAT-1: a destructive or execution tool that shows a content card, never the
+    bare arguments card, and is gated as an edit."""
+    from harness.confirm import DESTRUCTIVE_TIERS
+
+    for name in edit_card.CARDED_ACTIONS:
+        assert _safety_tier_for(name) in DESTRUCTIVE_TIERS, name
+        assert edit_card.is_edit(name) and name in edit_card.ADAPTERS, name
+
+
 @pytest.fixture
 def grid(install_network, monkeypatch):
     n = pypsa.Network()
