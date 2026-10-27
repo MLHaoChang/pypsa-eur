@@ -96,23 +96,9 @@ def _solver_settings(project: AuthorizedProject) -> dict | None:
     """The project's solver config, for the sub-options it decides (load flow,
     N-1 security): the loaded one when the project is open, else its saved
     ``solver_config.json``. None when neither can be read."""
-    import json
-    from dataclasses import asdict
+    from services.reliability_goal import stored_config
 
-    from services import network_lengths
-    from services.pypsa_service import PyPSAService
-
-    active = network_lengths.active_project_dir()
-    if active is not None and os.path.realpath(active) == os.path.realpath(project.directory):
-        try:
-            return asdict(PyPSAService.get_solver_state()["solver_config"])
-        except Exception:                                # noqa: BLE001 — read the file
-            pass
-    try:
-        raw = json.loads((project.directory / "solver_config.json").read_text("utf-8"))
-    except (OSError, ValueError):
-        return None
-    return raw if isinstance(raw, dict) else None
+    return stored_config(project.directory)
 
 
 def _no_load(project: AuthorizedProject, template: dict | None) -> bool:
@@ -265,6 +251,20 @@ def get_flow_scope(project: AuthorizedProject = ProjectAccessDep) -> dict:
             # The size source Asset sizing off dispatches on (read-only here).
             "fixed_sizes": (settings or {}).get("fixed_sizes", "off"),
             **flow_scope.registry(template, settings, no_load=no_load)}
+
+
+@router.get("/{name}/flow/reliability_goal")
+def get_reliability_goal(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """The project's one reliability goal as every study resolves it (W3b-R):
+    ``{field: {value, source}}`` for ``target_lole_h`` (h/yr),
+    ``ens_cap_permyriad``, ``mc_draws`` and ``site_archetype``, with
+    ``source`` one of stored / template / default. Written through
+    ``PUT /api/simulation/solver_config``. Reads only the project's sidecars,
+    so the project need not be open."""
+    from services.reliability_goal import effective_goal
+
+    return effective_goal(_solver_settings(project) or {},
+                          flow_service.read_template(project.directory))
 
 
 @router.put("/{name}/flow/scope")

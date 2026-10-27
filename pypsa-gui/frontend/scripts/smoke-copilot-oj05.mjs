@@ -132,7 +132,9 @@ try {
     await receipt.waitFor({ timeout: 60000 })
     assert.equal(await sNom(), 400, 'native read-back')
     const words = await receipt.innerText()
-    assert.match(words, /L2 s_nom 300 → 400 MVA\. Read back from the project\./)
+    // Guided words the receipt as the card's headline does; Expert keeps the ids.
+    assert.match(words, mode === 'guided' ? /Line 'L2', Capacity 300 → 400 MVA\. Read back from the project\./
+      : /L2 s_nom 300 → 400 MVA\. Read back from the project\./)
     assert.match(words, /Results are now stale/)
     shots[`receipt_${mode}`] = `oj05-receipt-${mode}.png`
     await page.screenshot({ path: path.join(artifacts, shots[`receipt_${mode}`]) })

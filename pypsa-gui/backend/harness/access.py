@@ -6,7 +6,7 @@ import time
 from fastapi import HTTPException
 
 from db.models import ProjectLock
-from harness import budget, confirm, restrictions, session as sessions
+from harness import budget, catalogue, confirm, restrictions, session as sessions
 from services import project_registry
 from services.pypsa_service import PyPSAService
 
@@ -75,6 +75,13 @@ def snapshot(*, db, user, session, project_id, ui_mode, checked):
                                                      restriction_mode=rule['mode'] if rule else 'standard')}
             for tier in ('read', 'write', 'destructive', 'execution', 'execution_long_running')
         ],
+        # LC-16 B9: Guided's named exceptions to the write row; each gates as in Expert.
+        'guided_uncarded': [
+            {'tool': name,
+             'native': confirm.confirmation_policy(catalogue.safety_tier_for(name),
+                                                   restriction_mode=rule['mode'] if rule else 'standard')}
+            for name in sorted(confirm.GUIDED_UNCARDED)
+        ] if ui_mode == 'guided' else [],
         'project_lock': lock_state, 'blockers': blockers, 'session': session_view,
         'checking': {'server_mode': mode, 'effective_for_selection': checks,
                      'scope': 'bounded_profiles'},

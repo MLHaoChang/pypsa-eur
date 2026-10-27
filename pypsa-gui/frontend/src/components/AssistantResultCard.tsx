@@ -1,5 +1,6 @@
-import { EditReceiptLine, editReceiptOf } from './EditCard'
+import { EditReceiptLine, editReceiptOf, setLine, type EditCardSet } from './EditCard'
 import { formatElapsed, useElapsed } from '../hooks/useElapsed'
+import { useUIStore } from '../store/uiStore'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -39,13 +40,15 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
   /** LC-12: set while this card's plan waits on its job. */
   continuation?: ContinuationLine
 }) {
+  // Guided names a parameter in words (the edit card's label), Expert by its field.
+  const guided = useUIStore((s) => s.uiMode) === 'guided'
   const data = object(result)
   if (!data) return null
   // Raw checked-mode cards cannot bypass answer/artifact admission. The current
   // pilot has no approved artifact/task-card contract.
   if (object(data._assurance)) return null
   const receipt = editReceiptOf(data._edit_receipt)
-  if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} />
+  if (receipt) return <EditReceiptLine receipt={receipt} disabled={disabled} onRequest={onRequest} guided={guided} />
   const task = object(data._task) ?? (typeof data.task_id === 'string' ? data : null)
   const taskId = typeof task?.task_id === 'string' && /^[0-9a-f-]{36}$/.test(task.task_id) ? task.task_id : null
   const status = typeof task?.status === 'string' ? task.status : ''
@@ -78,14 +81,22 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
     </div>}
     {preview && <div data-testid="assistant-change-preview">
       <div className="font-medium">Project change preview · {Number(preview.changes_total ?? 0)} values</div>
+      {Array.isArray(preview.sets) && (preview.sets as EditCardSet[])
+        .filter(g => object(g) && Array.isArray(g.names) && typeof g.words === 'string').map((g, i) => {
+        const diff = (preview.diff as unknown[]).map(object).find(d => d && d.component_class === g.component_class
+          && d.attribute === g.attribute && g.names.includes(String(d.name)))
+        const value = diff ? `\u2192 ${String(diff.after ?? '')}${diff.unit ? ` ${String(diff.unit)}` : ''}` : ''
+        return <div key={i} data-testid="assistant-change-set">
+          {setLine(g, guided, diff && typeof diff.label === 'string' ? diff.label : undefined, value)}</div>
+      })}
       <div className="overflow-x-auto">
         <table aria-label="Project change preview" className="w-full text-left">
           <thead><tr><th>Asset</th><th>Parameter</th><th>Before</th><th>After</th><th>Unit</th></tr></thead>
           <tbody>{(preview.diff as unknown[]).map((row, index) => {
             const diff = object(row)
             return diff ? <tr key={index}>
-              <td>{String(diff.name ?? '')}</td><td>{String(diff.attribute ?? '')}</td>
-              <td>{String(diff.before ?? '')}</td><td>{String(diff.after ?? '')}</td><td>{String(diff.unit ?? '')}</td>
+              <td>{String(diff.name ?? '')}</td><td>{String((guided && diff.label) || diff.attribute || '')}</td>
+              <td>{String(diff.before ?? 'not set')}</td><td>{String(diff.after ?? '')}</td><td>{String(diff.unit ?? '')}</td>
             </tr> : null
           })}</tbody>
         </table>

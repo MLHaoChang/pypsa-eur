@@ -41,6 +41,7 @@ from models.adequacy import (
     VollBlock,
     ZoneTarget,
 )
+from services.reliability_goal import goal_free_config
 from services.adequacy.metrics import (
     electrical_columns,
     horizon_years,
@@ -55,6 +56,9 @@ BINDING_TOLERANCE = 1e-3
 def _config_hash(cfg) -> str:
     try:
         payload = asdict(cfg) if is_dataclass(cfg) else dict(vars(cfg))
+        # A report is about the plan; the goal fields the LP never reads
+        # (W3b-R) leave its hash as it was.
+        payload = goal_free_config(payload)
         commercial = payload.get("commercial")
         if isinstance(commercial, dict):
             # Participant splits never change a design (IC P3 WP3.0, decision

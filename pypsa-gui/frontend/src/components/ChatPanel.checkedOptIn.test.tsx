@@ -119,7 +119,7 @@ it.each(['pilot', 'strict'])('shows the same %s checked selection in in-page cha
   capabilities.mode = mode
   const access = (checked: boolean): ChatAccessSnapshot => ({ version: 1, read_only: true, observed_at: 100,
     scope: { project_id: 'project-a', project_name: 'Demo' }, selection: { ui_mode: 'expert', checked_requested: checked },
-    restrictions: { mode: 'read_only', revision: 'rule-a' }, confirmation_rules: [], blockers: [],
+    restrictions: { mode: 'read_only', revision: 'rule-a' }, confirmation_rules: [], guided_uncarded: [], blockers: [],
     project_lock: 'unlocked', session: { id: 'pilot-session', output_tokens_used: 0, turn_in_flight: false },
     checking: { server_mode: mode, effective_for_selection: checked, scope: 'bounded_profiles' },
     limits: { output_tokens_per_turn: 8192, tool_calls_per_turn: 25, output_tokens_per_session: 200000,

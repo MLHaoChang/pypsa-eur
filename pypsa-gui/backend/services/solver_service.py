@@ -184,6 +184,13 @@ class SolverConfig:
     # Per-zone ceiling as a multiple of the system target, applied to each
     # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
     ens_zone_cap_multiple: float | None = None
+    # ── The reliability goal (W3b-R; services/reliability_goal.py) ───────
+    # Read by the reliability studies, never by the LP: left out of every
+    # input fingerprint (`reliability_goal.GOAL_FIELDS`). None = the
+    # template's value, else the study's own default.
+    target_lole_h: float | None = None  # allowed shortfall, h/yr
+    mc_draws: int | None = None         # MC draws per evaluation
+    site_archetype: str | None = None   # section 3's site type (EH archetype)
     # ── Energy import cap (EH spec §6 P17 amendment) ─────────────────────
     # PACK-ONLY: set by `archetypes.solver_config_patch_with_preflight` from a
     # weak_flexible pack, never a user global — absent from

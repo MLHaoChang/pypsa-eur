@@ -3277,6 +3277,17 @@ def get_project_flow(name: str) -> dict:
     return _route(_h, project=_authorized_project(name))
 
 
+def get_reliability_goal(name: str) -> dict:
+    """The project's reliability goal (W3b-R) as every study resolves it,
+    through the same handler as ``GET /api/projects/{name}/flow/reliability_goal``.
+    Reads the open project only (409 otherwise), as ``get_project_flow`` does."""
+    from routers.flow import _require_open, get_reliability_goal as _h
+
+    project = _authorized_project(name)
+    _require_open(project)
+    return _route(_h, project=project)
+
+
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
     """The in-app guide (P21) the GUI's tours and hover tips show — the same
     wording, so explanations match the screen. ``tour`` returns one tour's
@@ -3430,7 +3441,7 @@ def run_mc_study(
 
 
 def run_coupling_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     eps0: float | None = None,
@@ -3443,6 +3454,8 @@ def run_coupling_loop(
 
     `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
     on a multi-year horizon, and say which basis you used when reporting.
+    Omitted, it and `draws` are the project's reliability goal (W3b-R); the
+    result's `goal_sources` names where each came from.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
     return _campaign_gated(
@@ -3459,7 +3472,7 @@ def run_coupling_loop(
 
 
 def run_margin_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     max_solves: int | None = None,
@@ -3473,6 +3486,8 @@ def run_margin_loop(
     There is deliberately no starting-margin parameter: the start is a
     MEASUREMENT taken by a probing solve, and a user-supplied one is the
     single number here that can silently make the study worthless.
+    An omitted `target_lole_h` or `draws` is the project's reliability goal
+    (W3b-R), named in the result's `goal_sources`.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
     return _campaign_gated(
@@ -3488,7 +3503,7 @@ def run_margin_loop(
 
 
 def run_eh_study(
-    archetype: str,
+    archetype: str | None = None,
     stages: list | None = None,
     budget_solves: int | None = None,
     pack_overrides: dict | None = None,
@@ -3503,6 +3518,9 @@ def run_eh_study(
     Applies the pack, runs the EH pipeline, and persists a
     ``ReferenceDesignReport`` for ``get_adequacy_results('eh_reference_design')``.
     Poll ``get_adequacy_results('eh_study')`` while it runs.
+    An omitted ``archetype``, ``pack_overrides`` LOLE / ENS target or
+    ``mc.draws`` is the project's reliability goal (W3b-R); a value passed
+    here wins for this run, and ``goal_sources`` names each one's source.
     """
     from routers.results import EhStudyRequest, post_eh_study as _h
     return _campaign_gated(
@@ -4987,11 +5005,19 @@ def ui_open_panel(
     compare_b: str | None = None,
     compare_tab: str | None = None,
     canvas_view: str | None = None,
+    loadflow_source: str | None = None,
+    window_from: int | None = None,
+    window_to: int | None = None,
+    highlight_branch: dict | None = None,
 ) -> dict:
     """
     Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
     ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
     asset tabs, and the A|B compare rail.
+
+    Load flow arguments (live-voice 07) need panel results and results_tab
+    loadflow. With any of them the view is read first: an unavailable view or
+    an unknown branch refuses with no event. Without them the call is unchanged.
     """
     from harness.catalogue import (
         BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
@@ -5025,6 +5051,14 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    loadflow = _loadflow_navigation_args(panel_id, results_tab, loadflow_source,
+                                         window_from, window_to, highlight_branch)
+    facts = None
+    if loadflow:
+        from harness.navigation import loadflow_target
+
+        _view, facts = loadflow_target(loadflow.get("loadflow_source"), loadflow.get("window_from"),
+                                       loadflow.get("window_to"), loadflow.get("highlight"))
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
@@ -5032,6 +5066,9 @@ def ui_open_panel(
     }
     if results_tab:
         event["results_tab"] = results_tab
+    event.update(loadflow)
+    if facts is not None:
+        event["highlight_facts"] = facts
     if bottom_tab:
         event["bottom_tab"] = bottom_tab
     if compare_rail is not None:
@@ -5045,6 +5082,45 @@ def ui_open_panel(
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
     return event
+
+
+def _loadflow_navigation_args(panel_id, results_tab, source, window_from, window_to,
+                              highlight) -> dict:
+    """Validate the optional Load flow navigation arguments (shape only)."""
+    def refuse(field: str, message: str) -> None:
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": field, "message": message})
+
+    given = {k: v for k, v in (("loadflow_source", source), ("window_from", window_from),
+                               ("window_to", window_to), ("highlight", highlight))
+             if v is not None}
+    if not given:
+        return {}
+    if panel_id != "results" or results_tab != "loadflow":
+        refuse(next(iter(given)), "Load flow arguments need panel_id results and results_tab loadflow.")
+    if source is not None and source not in ("lopf", "ac_pf"):
+        refuse("loadflow_source", "Choose lopf or ac_pf.")
+    if (window_from is None) != (window_to is None):
+        refuse("window_from", "Give window_from and window_to together, or neither.")
+    if window_from is not None:
+        if type(window_from) is not int or type(window_to) is not int:
+            refuse("window_from", "Window positions are integer snapshot indexes.")
+        if window_from < 0 or window_to < window_from:
+            refuse("window_from", "Use 0 <= window_from <= window_to.")
+        network = PyPSAService.get_active_context().network
+        n_snapshots = len(network.snapshots) if network is not None else 0
+        # No network: the view read below refuses with no_network instead.
+        if network is not None and not 0 <= window_from <= window_to < n_snapshots:
+            refuse("window_from", f"Use 0 <= window_from <= window_to < {n_snapshots}.")
+    if highlight is not None:
+        if (not isinstance(highlight, dict) or set(highlight) != {"component", "name"}
+                or highlight["component"] not in ("Line", "Transformer")
+                or not isinstance(highlight["name"], str)
+                or not 1 <= len(highlight["name"]) <= 128):
+            refuse("highlight_branch",
+                   "highlight_branch is {component: Line or Transformer, name: 1-128 characters}.")
+        given["highlight"] = {"component": highlight["component"], "name": highlight["name"]}
+    return given
 
 
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
@@ -6004,6 +6080,8 @@ def apply_demand_from_excel(
         except ImportError:  # pragma: no cover — only fails if routers/network refactor breaks paths
             _user_ts = None
             _user_ts_lock = None
+        from services import growth_placeholders
+        prior = growth_placeholders.before(n, "loads", "p_set", [load_name])
         # Direct dataframe write so the LP sees the new demand on next solve.
         if value_col in n.loads_t.p_set.columns or load_name in n.loads_t.p_set.columns:
             n.loads_t.p_set[load_name] = aligned
@@ -6014,6 +6092,8 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+        # A user's load profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
     from services import change_log_service
     tile_note = (
@@ -7919,6 +7999,7 @@ DISPATCHERS: dict[str, Any] = {
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
     "get_project_flow": get_project_flow,
+    "get_reliability_goal": get_reliability_goal,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,

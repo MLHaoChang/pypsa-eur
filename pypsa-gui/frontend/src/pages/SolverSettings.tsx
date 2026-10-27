@@ -10,6 +10,11 @@ import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
+import type { ReliabilityGoal } from '../api/flow'
+import {
+  goalPatchFromEdits, invalidateReliabilityGoal, useReliabilityGoal, type GoalEdits,
+} from '../hooks/useReliabilityGoal'
+import { ReliabilityGoalEditor } from '../components/reliabilityGoal/ReliabilityGoalEditor'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
 import { ConfirmDialog } from '../components/ConfirmDialog'
@@ -148,6 +153,11 @@ export default function SolverSettings() {
   const { data: cfg } = useQuery({ queryKey: nk(currentProject, 'solverConfig'), queryFn: simulationApi.getSolverConfig })
   const { data: solvers } = useQuery({ queryKey: ['checkSolvers'], queryFn: simulationApi.checkSolvers })
   const [draft, setDraft] = useState<SolverConfig | null>(null)
+  // The reliability goal's editor (W3b-R): what was typed, per field. Valid
+  // edits go into the draft at once; Save sends only what changed.
+  const { goal } = useReliabilityGoal()
+  const [goalEdits, setGoalEdits] = useState<GoalEdits>({})
+  const goalError = goalPatchFromEdits(goalEdits).error
   // Snapshot of `cfg` at the moment `draft` was hydrated. Used at Save
   // time to compute a DIFF — we send only the fields the user actually
   // changed in this form, never the unchanged ones. Without this, Save
@@ -202,6 +212,9 @@ export default function SolverSettings() {
       // what we just persisted (or, on no-op, the same snapshot).
       baselineRef.current = JSON.parse(JSON.stringify(savedNext))
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') })
+      // Guided's Goal card and every Results study read the goal (W3b-R).
+      invalidateReliabilityGoal(qc, useUIStore.getState().currentProject)
+      setGoalEdits({})
       if (noOp) {
         toast('No changes to save', { icon: 'ℹ️' })
       } else {
@@ -253,7 +266,9 @@ export default function SolverSettings() {
     if (!blockRequest || !draft) return
     const [want, target] = blockRequest === 'sclopf'
       ? ['network', 'solver-sclopf-panel'] as const
-      : ['dispatch', 'solver-economic-assumptions'] as const
+      : blockRequest === 'goal'
+        ? ['network', 'solver-reliability-goal'] as const
+        : ['dispatch', 'solver-economic-assumptions'] as const
     if (tab !== want) { setTab(want); return }
     document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
@@ -908,7 +923,12 @@ export default function SolverSettings() {
       </section>
 
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
-      <ReliabilityAssumptions draft={draft} patch={patch} />
+      <ReliabilityAssumptions draft={draft} patch={patch} goal={goal} goalEdits={goalEdits}
+        onGoalEdits={e => {
+          setGoalEdits(e)
+          const { patch: p, error } = goalPatchFromEdits(e)
+          if (!error) patch(p)
+        }} />
 
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
       <StressConditionsSection project={currentProject} />
@@ -929,7 +949,8 @@ export default function SolverSettings() {
       <div className="flex gap-2 p-3 border-t border-border bg-bg">
         <button
           onClick={() => draft && save.mutate(draft)}
-          disabled={save.isPending}
+          disabled={save.isPending || goalError !== null}
+          title={goalError ?? undefined}
           className="flex-1 px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
         >{save.isPending ? 'Saving…' : 'Save settings'}</button>
         <button
@@ -944,6 +965,7 @@ export default function SolverSettings() {
             // mutation flow was rewritten to avoid.
             setDraft(cfg)
             baselineRef.current = JSON.parse(JSON.stringify(cfg))
+            setGoalEdits({})
           }}
           className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text"
         >Revert</button>
@@ -1489,6 +1511,19 @@ function Co2PricePerPeriod({
   )
 }
 
+/** The goal as the draft holds it, for a mount without the goal query: a set
+ *  value is stored, an unset one the default. */
+function goalFromDraft(d: SolverConfig): ReliabilityGoal {
+  const pick = <T,>(v: T | null | undefined, dflt: T) =>
+    (v != null ? { value: v, source: 'stored' as const } : { value: dflt, source: 'default' as const })
+  return {
+    target_lole_h: pick<number | null>(d.target_lole_h, null),
+    ens_cap_permyriad: pick<number | null>(d.ens_cap_permyriad, null),
+    mc_draws: pick(d.mc_draws, 500),
+    site_archetype: pick(d.site_archetype, 'strong_grid' as const),
+  }
+}
+
 // ReliabilityAssumptions lives under the Network tab. Single field (VOLL) —
 // when > 0 the backend injects a slack 'load_shedding' generator on every bus,
 // so the LP can drop demand instead of failing when supply is tight.
@@ -1496,11 +1531,26 @@ function Co2PricePerPeriod({
 // tested) without mounting the whole settings page: this component is pure
 // `(draft, patch)` with no hooks of its own.
 export function ReliabilityAssumptions({
-  draft, patch,
+  draft, patch, goal = null, goalEdits = {}, onGoalEdits,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  /** The stored goal with its fallbacks; without it, the draft's values. */
+  goal?: ReliabilityGoal | null
+  goalEdits?: GoalEdits
+  /** Without it, a valid edit patches the draft directly. */
+  onGoalEdits?: (e: GoalEdits) => void
 }) {
+  const [ownEdits, setOwnEdits] = useState<GoalEdits>({})
+  const edits = onGoalEdits ? goalEdits : ownEdits
+  // The ENS the run uses: the draft's, else the template's (an ENS of 0 or
+  // none lets the template's stand; W3b-R PR1).
+  const ensShown = draft.ens_cap_permyriad || goal?.ens_cap_permyriad.value
+  const onEdits = onGoalEdits ?? ((e: GoalEdits) => {
+    setOwnEdits(e)
+    const { patch: p, error } = goalPatchFromEdits(e)
+    if (!error) patch(p)
+  })
   return (
     <section className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -1523,20 +1573,19 @@ export function ReliabilityAssumptions({
           this is set and the LP actually sheds.
         </p>
 
-        {/* ── Reliability target (adequacy spec §5.1) ─────────────── */}
+        {/* ── Reliability goal (W3b-R; adequacy spec §5.1) ───────── */}
         <div className="mt-3 pt-3 border-t border-border">
-          <NumberField
-            label="ENS target"
-            unit="‱ of demand"
-            value={draft.ens_cap_permyriad ?? 0}
-            step={0.1}
-            min={0}
-            onChange={v => patch({ ens_cap_permyriad: v > 0 ? v : null })}
-            hint="Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
-          />
-          {ensTargetWarning(draft.ens_cap_permyriad) && (
+          <div id="solver-reliability-goal" data-testid="solver-reliability-goal"
+            className="flex flex-col gap-2 mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Reliability goal
+            </span>
+            <ReliabilityGoalEditor mode="expert"
+              goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits} />
+          </div>
+          {ensTargetWarning(ensShown) && (
             <p className="text-[10px] text-danger mt-1">
-              {ensTargetWarning(draft.ens_cap_permyriad)}
+              {ensTargetWarning(ensShown)}
             </p>
           )}
           <NumberField

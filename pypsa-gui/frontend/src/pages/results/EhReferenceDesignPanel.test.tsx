@@ -40,6 +40,15 @@ import {
   verdictTone,
 } from './EhReferenceDesignPanel'
 import { downloadCSV, downloadJSON } from './shared'
+import { goal } from '../../test/fixtures/reliabilityGoal'
+
+// The site type, targets and draws are the project's one stored goal (W3b-R):
+// the panel shows them read-only and sends none of them.
+const getReliabilityGoal = vi.fn()
+vi.mock('../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../api/flow')>()
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
+})
 
 vi.mock('./shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./shared')>()
@@ -128,6 +137,7 @@ async function openPanel() {
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo' })
+  getReliabilityGoal.mockReset().mockResolvedValue(goal())
   vi.mocked(resultsApi.getEhStudy).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.startEhStudy).mockReset()
     .mockResolvedValue({ status: 'running', study: 'eh_study', archetype: 'strong_grid' })
@@ -321,35 +331,56 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-reference-design-panel')).toBeTruthy()
     expect(await screen.findByTestId('eh-not-run')).toBeTruthy()
     expect(screen.queryByTestId('eh-abort')).toBeNull()
-    expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
-      .toBe('strong_grid')
-    await user.selectOptions(screen.getByTestId('eh-archetype'), 'off_grid')
-    expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
-      .toBe('off_grid')
+    // The goal, read-only, with "›" links to its editors (W3b-R).
+    await waitFor(() => expect(screen.getByTestId('eh-goal-values').textContent)
+      .toBe('grid connection: strong — import whenever needed (default) · allowed shortfall not set · '
+        + 'ENS target off · MC draws 500 (default)'))
+    expect(screen.getByTestId('eh-archetype').textContent).toMatch(/^Strong grid: /)
+    expect(screen.queryByRole('combobox', { name: /archetype/i })).toBeNull()
+    expect(screen.getByTestId('eh-goal-change').textContent).toBe('Change in Scenarios & optimisation ›')
+    expect(screen.getByTestId('eh-goal-site').textContent).toBe('Site type in Connection & grid ›')
+    void user
+  })
+
+  it('the goal links open its editors in place, with a way back (W3b-R)', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results', flowReturn: null,
+      solverBlockRequest: null })
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-goal-change'))
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'expert', activeSlidePanel: 'simparams',
+      solverBlockRequest: 'goal' })
+    expect(useUIStore.getState().flowReturn?.panel).toBe('results')
+    useUIStore.setState({ activeSlidePanel: 'results', flowReturn: null })
+    await user.click(screen.getByTestId('eh-goal-site'))
+    expect(useUIStore.getState()).toMatchObject({ uiMode: 'expert', activeSlidePanel: 'campusElectrical' })
+    expect(useUIStore.getState().flowReturn?.panel).toBe('results')
   })
 
   it('sends pack settings and blocks Run on an invalid value', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'stored'],
+      target_lole_h: [3, 'stored'], ens_cap_permyriad: [5, 'stored'], mc_draws: [800, 'stored'] }))
     const user = await openPanel()
-    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
     await user.click(screen.getByTestId('eh-pack-settings-toggle'))
-    await user.type(screen.getByTestId('eh-pack-ens-cap'), '0')
+    // The goal fields are not pack settings any more (W3b-R).
+    expect(screen.queryByTestId('eh-pack-ens-cap')).toBeNull()
+    expect(screen.queryByTestId('eh-pack-lole-target')).toBeNull()
+    expect(screen.queryByTestId('eh-pack-draws')).toBeNull()
+    await user.type(await screen.findByTestId('eh-pack-import-mw'), '0')
     const run = screen.getByTestId('eh-run') as HTMLButtonElement
     expect(run.disabled).toBe(true)
-    expect(run.getAttribute('title')).toMatch(/ENS target/)
-    await user.clear(screen.getByTestId('eh-pack-ens-cap'))
-    await user.type(screen.getByTestId('eh-pack-ens-cap'), '5000')
-    expect(screen.getByTestId('eh-pack-lole-target').closest('label')?.textContent)
-      .toMatch(/h\/yr/)
+    expect(run.getAttribute('title')).toMatch(/import cap/)
+    await user.clear(screen.getByTestId('eh-pack-import-mw'))
+    await user.type(screen.getByTestId('eh-pack-import-mw'), '80')
+    await waitFor(() => expect(run.disabled).toBe(false))
     await user.click(run)
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
-      archetype: 'weak_flexible',
-      pack_overrides: { ens_cap_permyriad: 5000 },
+      pack_overrides: { import_p_nom_mw: 80 },
     }))
   })
 
-  it('shows readiness for the selected archetype before Run', async () => {
-    const user = await openPanel()
-    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+  it('shows readiness for the stored site type before Run', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'stored'] }))
+    await openPanel()
     const box = await screen.findByTestId('eh-readiness')
     expect(box.textContent).toMatch(/import/)
     expect(screen.getByTestId('eh-readiness-solves').textContent).toMatch(/14 \/ 30/)
@@ -400,14 +431,20 @@ describe('EhReferenceDesignPanel', () => {
       'strong_grid', 2, undefined, {})
   })
 
-  it('starts a study with the selected archetype', async () => {
+  it('starts a study without the goal fields: the backend fills the stored site type', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'stored'] }))
     const user = await openPanel()
-    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+    await waitFor(() => expect((screen.getByTestId('eh-run') as HTMLButtonElement).disabled).toBe(false))
     await user.click(screen.getByTestId('eh-run'))
-    await waitFor(() =>
-      expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
-        archetype: 'weak_flexible',
-      }))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]).toEqual({})
+  })
+
+  it('waits for the goal before it can run', async () => {
+    getReliabilityGoal.mockReturnValue(new Promise(() => {}))
+    await openPanel()
+    await new Promise(r => setTimeout(r, 20))
+    expect((screen.getByTestId('eh-run') as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('offers Abort only while running and calls the abort route', async () => {
@@ -1167,7 +1204,7 @@ describe('P18 — DtC attribution choice', () => {
       .toHaveBeenCalledWith('strong_grid', undefined, 'per_load', {}))
     await user.click(screen.getByTestId('eh-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
-      archetype: 'strong_grid', dtc_attribution: 'per_load' }))
+      dtc_attribution: 'per_load' }))
   })
 })
 
@@ -1191,17 +1228,17 @@ describe('P19 — EH template banner', () => {
 
   it('offers and applies the recommended settings', async () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(META as never)
+    // The template's site type reaches the panel as the goal's fallback.
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
     const user = await openPanel()
     const banner = await screen.findByTestId('eh-template-banner')
     expect(banner.textContent).toMatch(/Data Center Energy Hub template/)
     expect(banner.textContent).toMatch(/IT load is critical/)
     await user.click(screen.getByTestId('eh-template-apply'))
-    expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
-      .toBe('weak_flexible')
+    await waitFor(() => expect(screen.getByTestId('eh-archetype').textContent).toMatch(/^Weak \/ flexible: /))
     await user.click(screen.getByTestId('eh-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
-      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
-      dtc_attribution: 'per_load' }))
+      pack_overrides: { import_p_nom_mw: 40 }, dtc_attribution: 'per_load' }))
   })
 
   it('shows no banner for a project not made from an EH template', async () => {
@@ -1230,10 +1267,9 @@ describe('E2E review — panel fixes', () => {
     expect(leverKeysFor('off_grid')).not.toContain('import_cap')
   })
 
-  it('previews the stages and overrides that will run', async () => {
-    const user = await openPanel()
-    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
-    await user.type(screen.getByTestId('eh-pack-lole-target'), '3')
+  it('previews the stages and overrides that will run, the goal\'s target included', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [3, 'stored'] }))
+    await openPanel()
     await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
       'strong_grid', undefined, undefined,
       { pack_overrides: { target_lole_h: 3, certification_metric: 'mc_lole' } }),
@@ -1269,18 +1305,18 @@ describe('P19–P22 gate — panel', () => {
     const { guidesApi } = await import('../../components/GuidedTour')
     vi.spyOn(guidesApi, 'getGuide').mockResolvedValue({
       version: 1, tours: {},
-      fields: { ens_cap_permyriad: 'ENS target — the share of energy demand allowed unserved.' },
+      fields: { budget_solves: 'Budget — the most LP solves the study may spend.' },
     } as never)
     const user = await openPanel()
     await user.click(screen.getByTestId('eh-pack-settings-toggle'))
-    const label = screen.getByTestId('eh-pack-ens-cap-label')
+    const label = screen.getByTestId('eh-pack-budget-label')
     const trigger = await waitFor(() => {
       const t = label.querySelector('[tabindex="0"]')
       if (!t) throw new Error('help icon not rendered yet')
       return t
     })
     await user.hover(trigger)
-    expect(await screen.findByText(/share of energy demand allowed unserved/)).toBeTruthy()
+    expect(await screen.findByText(/most LP solves the study may spend/)).toBeTruthy()
   })
 
   it('preselects the template recommendation so Run runs the right pack', async () => {
@@ -1290,13 +1326,13 @@ describe('P19–P22 gate — panel', () => {
       pack_overrides: { import_p_nom_mw: 40 }, stages: null,
       dtc_attribution: 'per_load',
     } as never)
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
     const user = await openPanel()
-    await waitFor(() => expect(
-      (screen.getByTestId('eh-archetype') as HTMLSelectElement).value).toBe('weak_flexible'))
+    await waitFor(() => expect(screen.getByTestId('eh-archetype').textContent).toMatch(/^Weak \/ flexible: /))
+    await waitFor(() => expect(screen.getByTestId('eh-pack-settings-toggle')).toBeTruthy())
     await user.click(screen.getByTestId('eh-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
-      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
-      dtc_attribution: 'per_load' }))
+      pack_overrides: { import_p_nom_mw: 40 }, dtc_attribution: 'per_load' }))
   })
 })
 

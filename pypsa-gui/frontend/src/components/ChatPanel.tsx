@@ -35,6 +35,7 @@ import { CheckedAnswerControl } from './CheckedAnswerControl'
 import ChatAccess from './ChatAccess'
 import { SourceGapFollowupCard } from './SourceGapFollowupCard'
 import type { SourceGapDraft } from '../store/chatStore'
+import { shortMcpToolName } from '../api/mcpSettings'
 import { CHECKED_ANSWERS_QUERY_KEY, getCheckedAnswerCapabilities } from '../api/reliability'
 import toast from 'react-hot-toast'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -169,6 +170,7 @@ interface ToolPendingFrame {
   confirmation_token: string
   ttl_seconds: number
   edit_card?: unknown
+  external?: { server: string }
 }
 
 // P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
@@ -237,7 +239,7 @@ const GUIDED_TOOL_PHRASE: Record<string, string> = {
 export function guidedToolPhrase(tool: string): string {
   return Object.prototype.hasOwnProperty.call(GUIDED_TOOL_PHRASE, tool)
     ? GUIDED_TOOL_PHRASE[tool]
-    : `use ${tool.replace(/_/g, ' ')}`
+    : `use ${shortMcpToolName(tool).replace(/_/g, ' ')}`
 }
 const PREPARING_LINE = /^… preparing \S+$/
 const REQUEST_LINE = /^→ (\S+)$/
@@ -2227,6 +2229,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
           ttl_seconds: d.ttl_seconds,
           expires_at_epoch_ms: Date.now() + d.ttl_seconds * 1000,
           edit_card: d.edit_card,
+          external: d.external,
         })
         break
       }

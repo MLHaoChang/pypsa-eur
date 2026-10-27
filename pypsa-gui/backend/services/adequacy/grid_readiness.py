@@ -322,8 +322,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                              note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the "
                                    "period takes the example's same-stage value, a placeholder "
                                    "that is not a value to check against, so the period stays unknown "
-                                   "(setting a placeholder is follow-up "
-                                   "E1-set-growth-placeholders)"),
+                                   "until it is set; editing the period's series sets it"),
                              section="connection", target=target))
             continue
         uplift = _in_hour_uplift_mw(inp, r["period"])

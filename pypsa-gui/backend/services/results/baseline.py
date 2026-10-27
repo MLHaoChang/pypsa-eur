@@ -39,6 +39,7 @@ import threading
 from dataclasses import dataclass, field
 
 from services.finance.baseline_text import flag_text  # noqa: F401  (the flags' wording)
+from services.reliability_goal import goal_free_config
 
 _EPS_MW = 1e-6
 #: A removed row's upper bound in the baseline (MW): see `baseline_network`.
@@ -266,6 +267,7 @@ def _key(n, cfg, plan: BaselinePlan, island=None, supplies=()) -> str:
     except TypeError:
         conf = dict(vars(cfg))
     conf.pop("finance", None)
+    conf = goal_free_config(conf)       # the LP never reads the goal (W3b-R)
     blob = {"dispatch": dispatch_digest(n), "config": conf,
             "removed": plan.removed, "fixed": plan.fixed, "island": island}
     if supplies:
