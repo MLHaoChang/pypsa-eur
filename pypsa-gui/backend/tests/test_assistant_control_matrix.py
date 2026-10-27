@@ -158,8 +158,12 @@ def test_full_coverage_is_explicitly_not_claimed_while_journeys_are_pending(matr
     blocker_ids = {b['id'] for b in block['blockers']}
     for row in pending:
         assert f'family-journey:{row["journey_id"]}' in blocker_ids
-    assert {'behavioral-fixtures-pending', 'ui-control-tool-parity-unaudited',
+    assert {'behavioral-fixtures-pending', 'ui-local-control-parity-unaudited',
             'hosted-gates-pending'} <= blocker_ids
+    parity = matrix['route_parity']
+    assert parity['counts']['unclassified'] == 0
+    for family, routes in parity['needs_tool_by_family'].items():
+        assert routes and f'route-parity:needs-tool:{family}' in blocker_ids
     for blocker in block['blockers']:
         assert blocker['issue'] in {'05', '08'} and blocker['summary']
 
@@ -174,6 +178,9 @@ def test_matrix_never_asserts_whole_application_coverage_elsewhere(matrix):
     assert 'Whole-application coverage is NOT claimed.' in doc
     assert (f'Pending family journeys: {matrix["full_coverage"]["journeys_pending"]} of '
             f'{matrix["full_coverage"]["journeys_total"]}') in doc
+    counts = matrix['route_parity']['counts']
+    assert f'{counts["needs-tool"]} of {counts["gui_routes"]} GUI-reached routes need a typed tool' in doc
+    assert f'{counts["limitation"]} routes are declared' in doc
 
 
 @pytest.mark.parametrize('mutate, expected', [

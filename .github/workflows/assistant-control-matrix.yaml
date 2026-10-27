@@ -6,6 +6,7 @@ on:
     paths:
       - '.scratch/live-voice/capability-matrix.json'
       - '.scratch/live-voice/capability-inventory.json'
+      - '.scratch/live-voice/route-parity.json'
       - 'pypsa-gui/backend/smoke/assistant_control_matrix.py'
       - 'pypsa-gui/backend/tests/test_assistant_control_matrix.py'
       - 'pypsa-gui/frontend/src/layout/CreationForm.tsx'
@@ -16,6 +17,7 @@ on:
     paths:
       - '.scratch/live-voice/capability-matrix.json'
       - '.scratch/live-voice/capability-inventory.json'
+      - '.scratch/live-voice/route-parity.json'
       - 'pypsa-gui/backend/smoke/assistant_control_matrix.py'
       - 'pypsa-gui/backend/tests/test_assistant_control_matrix.py'
       - 'pypsa-gui/frontend/src/layout/CreationForm.tsx'
