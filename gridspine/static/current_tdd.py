@@ -28,7 +28,7 @@ ratio is lower and the band stricter than the standard's. It passes the
 rated campus load as I_L, not IEEE 519's average of monthly maximum demands.
 Both are said in every judged row.
 
-The table values are IEEE Std 519-2014, 5.2, Tables 2-4. They were checked
+The table values are IEEE Std 519-2014, 5.2, Tables 2–4. They were checked
 against published reproductions of those tables, not the licensed text, so
 every row stays assumed.
 
@@ -86,7 +86,7 @@ def _table(name: str, kv_max: float | None, bounds: tuple, rows: tuple) -> Table
 
 #: IEEE 519-2014 current-distortion limits, % of I_L, by table: its name, the
 #: highest PCC voltage it covers (kV, inclusive; None for no ceiling), its
-#: Isc/IL bounds and, per row, (label, odd limits by group, TDD). IEEE Std 519-2014, 5.2, Tables 2-4
+#: Isc/IL bounds and, per row, (label, odd limits by group, TDD). IEEE Std 519-2014, 5.2, Tables 2–4
 #: (120 V-69 kV, 69-161 kV, above 161 kV); checked against published reproductions, not the licensed text.
 TABLES = (
     _table("Table 2", 69.0, ISC_IL_BOUNDS, (
