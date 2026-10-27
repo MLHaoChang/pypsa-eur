@@ -1,10 +1,10 @@
 # Templates: move the case currency year and the pack pins to 2025 together
 
-Status: ready-for-agent
+Status: done (#747, 56c42b45)
 Gated: **yes** (study compile, finance and adequacy pins; an owner check of result deltas before merge)
 Model tier: opus
 Size: M
-Progress: the relabelled pack 2026-10-25 merged (#688, 719f8b01); the repin and the case-year move are not done.
+Progress: the relabelled pack 2026-10-25 merged (#688, 719f8b01); the repin and the case-year move merged in #747 (56c42b45).
 
 Follow-up to the MONEY-YEAR-1 relabel (pack 2026-10-25, branch `claude/pack-money-year-relabel`).
 The gatekeeper's plan review decided that the case year and the pins are one decision and move together.
