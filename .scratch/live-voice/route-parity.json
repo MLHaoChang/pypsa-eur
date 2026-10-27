@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 84,
-  "needs-tool": 102,
-  "tool": 280,
+  "needs-tool": 87,
+  "tool": 295,
   "unclassified": 0
  },
  "format_version": 1,
@@ -2424,13 +2424,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/network.ts"
    ],
    "method": "POST",
-   "path": "/api/network/timeseries/upload"
+   "path": "/api/network/timeseries/upload",
+   "tools": [
+    "upload_timeseries"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2950,13 +2953,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/profiles/current"
+   "path": "/api/projects/{name}/profiles/current",
+   "tools": [
+    "get_current_series"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2983,13 +2989,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/from-current"
+   "path": "/api/projects/{name}/profiles/from-current",
+   "tools": [
+    "pending_profile_from_current"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3016,13 +3025,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/loads/upload"
+   "path": "/api/projects/{name}/profiles/loads/upload",
+   "tools": [
+    "upload_load_profiles_file"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3073,31 +3085,40 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/profiles/series/upload"
+   "path": "/api/projects/{name}/profiles/series/upload",
+   "tools": [
+    "upload_series_file"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/profiles/weather"
+   "path": "/api/projects/{name}/profiles/weather",
+   "tools": [
+    "get_weather_choice"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "timeseries-horizon",
+   "class": "tool",
    "gui_files": [
     "api/profiles.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/profiles/weather"
+   "path": "/api/projects/{name}/profiles/weather",
+   "tools": [
+    "set_weather_choice"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3829,13 +3850,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/worksheet"
+   "path": "/api/projects/{name}/worksheet",
+   "tools": [
+    "save_fmea_worksheet"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4920,41 +4944,52 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/cancel_queued"
+   "path": "/api/simulation/queue/cancel_queued",
+   "tools": [
+    "solve_queue_cancel_queued"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "note": "solve_queue_clear_finished declares this route but is read-tier; the tier rule (V4) refuses a read tool on a mutating route",
-   "path": "/api/simulation/queue/clear_finished"
+   "path": "/api/simulation/queue/clear_finished",
+   "tools": [
+    "solve_queue_clear_finished"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/pause"
+   "path": "/api/simulation/queue/pause",
+   "tools": [
+    "solve_queue_pause"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/resume"
+   "path": "/api/simulation/queue/resume",
+   "tools": [
+    "solve_queue_resume"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4969,22 +5004,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/dismiss"
+   "path": "/api/simulation/queue/{job_id}/dismiss",
+   "tools": [
+    "solve_queue_dismiss"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "GET",
-   "path": "/api/simulation/queue/{job_id}/log_history"
+   "path": "/api/simulation/queue/{job_id}/log_history",
+   "tools": [
+    "solve_queue_job_log"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -4996,13 +5037,16 @@
    "reason": "live-stream"
   },
   {
-   "class": "needs-tool",
-   "family": "solver-simulation",
+   "class": "tool",
    "gui_files": [
     "api/solveQueue.ts"
    ],
    "method": "POST",
-   "path": "/api/simulation/queue/{job_id}/requeue"
+   "path": "/api/simulation/queue/{job_id}/requeue",
+   "tools": [
+    "solve_queue_requeue"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
