@@ -37,6 +37,7 @@ _NO_ADAPTER_YET = frozenset({
     "campus_set_island_config", "campus_set_library", "campus_draft_campus", "set_report_mapping",
     "set_report_template", "import_edited_report", "set_weather_choice", "import_library_series",
     "import_meter_data", "put_library_item", "set_finance_inputs", "set_project_sites",
+    "import_map_geometry",
 })
 
 
