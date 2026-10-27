@@ -1,7 +1,7 @@
 # LC-02 — usable generic companion interaction
 
-Status: ready-for-agent
-Progress: Composer pointer (#369) and narrow layout (#370) merged; generic scope/plan/source UX still not delivered.
+Status: done (#369, #370, plan card PR below)
+Progress: Composer pointer (#369), narrow layout and in-surface Choice/Confirmation (#370) merged; the plan card lists steps, states and applied changes (LC-02C).
 Type: task
 Baseline: master `c75ca5584b873418f10f1bca42f868255d445b7b`
 Dependencies: LC-01 for resolved scope; browser layout repairs may land first
@@ -92,3 +92,27 @@ fc28935e2dc8d215c65cf1cdf3570125dff606b0, browser harness sourcefc6940d0;
 retained source hashes verified. See QA and `../evidence/narrow-layout*.json`.
 Both source review axes zero findings. PR/remote CI/fresh-master premerge remain
 pending; this does not complete generic-context UX or engineering validation.
+
+## LC-02C plan card — 2026-10-27
+
+Rebaselined on master `926b07d6d`. Already on master: understood scope and
+sources for checked answers (`CheckedEvidenceCard`: run, entity, profile,
+window, cost basis; `ProvenanceChip`), Choice/Confirmation in both surfaces
+(#370), goal strip and rounds (`GoalStrip`), detached job progress. Missing:
+the plan card (`AssistantResultCard`) showed only `status · n / m steps` and
+the next tool, although each step's `_task` view carries the step list, the
+brief phase, the waiting job ID and the applied edit receipts (`changes`).
+
+RED: `AssistantResultCard.test.tsx` LC-02 cases (2 failed). GREEN: the card
+lists each step with its state in words (to do, running, waiting for job
+<job ID>, done, failed, needs review), marks the next step `aria-current`,
+shows the brief's objective and phase, says when steps are left out, and lists
+what was applied. Guided names steps with `guidedToolPhrase`; Expert by tool.
+Both surfaces mount the same `ChatPanel`, so dock and companion agree.
+Checks: AssistantResultCard, ChatPanel, continuation, sendRequest and
+usePlanContinuation suites 215/215; `tsc -b` clean. No backend change.
+
+Left for other packages: a generic "what I understood" line for unchecked
+turns has no backend frame to show (LC-C7 residual); navigation/rebind races
+(LC-T10) belong to LC-03/LC-10.
+

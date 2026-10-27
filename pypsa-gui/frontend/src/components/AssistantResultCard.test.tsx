@@ -71,3 +71,28 @@ it('LC-12: a held continuation offers Continue now; other states are plain lines
     continuation={{ state: 'continued' }} />)
   expect(screen.queryByTestId('task-continuation-line')).toBeNull()
 })
+it('LC-02: lists the plan steps with their states, the applied changes, and the waiting job ID', () => {
+  const plan = { ...task, status: 'waiting_job', completed_steps: 1, total_steps: 3,
+    steps: [{ id: 'cap', tool: 'set_component_attribute', status: 'completed' },
+      { id: 'solve', tool: 'solve_network', status: 'waiting' }, { id: 'chart', tool: 'create_chart', status: 'pending' }],
+    next_step: { id: 'solve', tool: 'solve_network', status: 'waiting', job_id: 'job-42' },
+    changes: ['Set G1 marginal cost 10 → 20 currency/MWh'] }
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
+  const steps = screen.getAllByTestId('assistant-task-step')
+  expect(steps.map(s => [s.dataset.status, s.textContent])).toEqual([
+    ['completed', 'set_component_attribute · done'], ['waiting', 'solve_network · waiting for job job-42'],
+    ['pending', 'create_chart · to do']])
+  expect(steps[1].getAttribute('aria-current')).toBe('step')
+  expect(screen.getByTestId('assistant-task-applied').textContent).toBe('Applied: Set G1 marginal cost 10 → 20 currency/MWh')
+})
+it('LC-02: names steps in words when given, shows the brief phase and says when steps are left out', () => {
+  const plan = { ...task, steps: [{ id: 'a', tool: 'generate_report', status: 'failed' }], step_details_truncated: true,
+    next_step: { id: 'a', tool: 'generate_report', status: 'failed' },
+    brief: { objective: 'Size the battery', phase: { card: 'capacity', index: 1, of: 2 } } }
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()}
+    toolWords={(t) => t === 'generate_report' ? 'start writing the project report' : t} />)
+  expect(screen.getByTestId('assistant-task-step').textContent).toBe('start writing the project report · failed')
+  expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 1 of 2: capacity')
+  expect(screen.getByText('Some steps are not listed.')).toBeTruthy()
+  expect(screen.queryByTestId('assistant-task-applied')).toBeNull()
+})
