@@ -1,0 +1,83 @@
+{
+  "zero": {
+    "run_ready": false,
+    "run_request": {
+      "optimisation": true,
+      "study": false
+    },
+    "verdicts": {
+      "optimisation": {
+        "ready": false,
+        "blocker": {
+          "section": "connection",
+          "message": "Connection & grid: reactance x must be > 0 (got 0). Required for power-flow solves.",
+          "detail": "reactance x must be > 0 (got 0). Required for power-flow solves.",
+          "code": "line_x_invalid",
+          "target": {
+            "section": "connection",
+            "panel": null,
+            "component": "Line",
+            "entity": "Line 0-1",
+            "field": null
+          }
+        }
+      },
+      "study": null
+    },
+    "run_blocker": "Connection & grid: reactance x must be > 0 (got 0). Required for power-flow solves.",
+    "header_blocker": "Connection & grid: reactance x must be > 0 (got 0). Required for power-flow solves.",
+    "run_disabled": true,
+    "issue_titles": [
+      "Time-step weights do not add up to a year",
+      "Line x invalid",
+      "Line with zero impedance",
+      "No slack chosen for AC power flow",
+      "Bus has no location",
+      "Length disagrees with the map"
+    ],
+    "items": [
+      "connection:line_x_invalid:validation",
+      "scenarios:stage2_zero_impedance:validation"
+    ]
+  },
+  "rolling": {
+    "run_ready": false,
+    "run_request": {
+      "optimisation": true,
+      "study": false
+    },
+    "verdicts": {
+      "optimisation": {
+        "ready": false,
+        "blocker": {
+          "section": "scenarios",
+          "message": "Scenarios & optimisation: AC power flow is not available with a rolling horizon",
+          "detail": "Load flow (AC power flow after the solve) can't run with the rolling-horizon strategy yet: the dispatch fix needs a per-window slack story. Switch off What the Run computes › Load flow, or use the full solve.",
+          "code": "rolling_with_ac_pf",
+          "target": {
+            "section": "scenarios",
+            "panel": "simparams",
+            "component": null,
+            "entity": null,
+            "field": null
+          }
+        }
+      },
+      "study": null
+    },
+    "run_blocker": "Scenarios & optimisation: AC power flow is not available with a rolling horizon",
+    "header_blocker": "Scenarios & optimisation: AC power flow is not available with a rolling horizon",
+    "run_disabled": true,
+    "issue_titles": [
+      "Time-step weights do not add up to a year",
+      "AC power flow is not available with a rolling horizon",
+      "No slack chosen for AC power flow",
+      "Rolling-horizon window is longer than the model",
+      "Bus has no location",
+      "Length disagrees with the map"
+    ],
+    "items": [
+      "scenarios:rolling_with_ac_pf:validation"
+    ]
+  }
+}
