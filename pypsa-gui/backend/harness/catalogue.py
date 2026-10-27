@@ -4373,6 +4373,146 @@ TOOLS: list[dict[str, Any]] = [
          "format": {"type": "string", "enum": ["docx", "xlsx", "html"]}},
         ["project", "study_id"],
     ),
+    # ── Decision study records (6) — LV08 B1: the rest of `routers/studies.py` ─
+    _t(
+        "list_decision_studies",
+        "List the decision studies stored in a project (each with its study_id, name, "
+        "question, status and base project). include_library=true also returns the study "
+        "library: the seed tariffs with their honesty notes, the sector load profiles, the "
+        "units an upload may be in and the currency year, which a study's intake chooses "
+        "from. Refusal: decision_studies_unavailable (multi-user mode). Safety: read.",
+        {"project": {"type": "string"},
+         "include_library": {"type": "boolean"}},
+        ["project"],
+    ),
+    _t(
+        "get_decision_study",
+        "Read one decision study. view='summary' (default): the stored record (intake, "
+        "settings, status, options); 'ledger': the assumptions ledger with each row's "
+        "value, unit, provenance and the study's maturity; 'option_case': one option's "
+        "investment case (year-by-year cash flow, KPIs, bill value streams; needs "
+        "option_id; `available` false when not established); 'report': the stored report "
+        "with `stale` recomputed now (404 report_never_assembled before "
+        "generate_study_report). `project` is the study's base project. A figure that "
+        "reads null or 'not established' was not computed: never report it as 0. "
+        "Safety: read.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "view": {"type": "string", "enum": ["summary", "ledger", "option_case", "report"]},
+         "option_id": {"type": "string", "maxLength": 128}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "preview_decision_study_intake",
+        "Preview a decision-study intake before creating or changing a study: the load "
+        "read exactly as the study will read it (an upload's timestamps, unit and "
+        "time-series checks, or a sector profile scaled to its annual MWh) and the "
+        "baseline grid-supply bill on that load. Nothing is written. `intake` has the "
+        "shape start_decision_study takes; it may be partly answered. Safety: read.",
+        {"project": {"type": "string"},
+         "intake": {"type": "object"}},
+        ["project", "intake"],
+    ),
+    _t(
+        "update_decision_study",
+        "Change a stored decision study: rename it (name), merge intake answers key by "
+        "key (intake; with step, only that step's own key may be written), or change its "
+        "settings {perspective, basis: {terms, tax, subsidy}, currency_year}; only the "
+        "site_owner perspective and the default real, pre-tax, no-subsidy basis are "
+        "implemented. Only the fields sent are written. "
+        "A changed intake or setting means the last run no longer matches: run the study "
+        "again. Refusals: 409 another user's edit lock, 422 a load sent as csv_text "
+        "(upload it and set load.upload_id), a setting outside the supported scope. "
+        "Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "name": {"type": "string", "minLength": 1, "maxLength": 120},
+         "step": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_]{0,63}$"},
+         "intake": {"type": "object"},
+         "settings": {"type": "object", "additionalProperties": False, "properties": {
+             "perspective": {"type": "string",
+                             "enum": ["site_owner", "developer", "investor", "multi_party"]},
+             "basis": {"type": "object"},
+             "currency_year": {"type": "integer", "minimum": 1900, "maximum": 2200}}}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "abort_decision_study",
+        "Stop a running decision study. stage='options' (default) stops the options run: "
+        "the running option's queue job is aborted, no further option starts, unsolved "
+        "forks are removed and the options never reached are named. stage='tornado' stops "
+        "the tornado before its next solve, keeping the bars computed so far. Idempotent; "
+        "404 when that stage never ran. Safety: write.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"},
+         "stage": {"type": "string", "enum": ["options", "tornado"]}},
+        ["project", "study_id"],
+    ),
+    _t(
+        "delete_decision_study",
+        "Delete a decision study permanently. It CASCADES to the option forks the study "
+        "owns (the projects it created for its options, verified server-side) and its "
+        "export series; the base project itself stays. Refused (409, nothing deleted) "
+        "while the study runs or while an owned fork cannot be removed (an active queue "
+        "job, or a project branched from it). Safety: destructive.",
+        {"project": {"type": "string"},
+         "study_id": {"type": "string"}},
+        ["project", "study_id"],
+    ),
+    # ── Project settings and scope (5) — LV08 B1 ─────────────────────────
+    _t(
+        "get_site_template_form",
+        "Read the generic-site template's form data before a project exists: each site "
+        "type's full preset, the load shapes and the bounds the Guided form shows. Use "
+        "it to offer defaults for create_project_from_template with template 'eh_site'. "
+        "Global, no project needed. Safety: read.",
+        {},
+        [],
+    ),
+    _t(
+        "get_project_flow_scope",
+        "Read a project's flow scope: {scope: {version, groups, options}, cards, "
+        "preset_id, preset, fixed_sizes}: which flow cards and sub-options are on (the "
+        "stored scope, or its template's preset) and the cards the scope draws. The "
+        "project need not be open. Read before update_project_flow_scope. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "update_project_flow_scope",
+        "Replace a project's flow scope with {version, groups, options}: read it with "
+        "get_project_flow_scope first and send it back with the change. Refusals (422, "
+        "typed): flow_scope_invalid (shape), flow_scope_unknown (an id), "
+        "flow_scope_unavailable (a sub-option not yet available), flow_scope_required (a "
+        "locked card or sub-option switched off); 409 another user's edit lock. "
+        "Safety: write.",
+        {"name": {"type": "string"},
+         "scope": {"type": "object"}},
+        ["name", "scope"],
+    ),
+    _t(
+        "update_project_scenario_metadata",
+        "Change a project's scenario category and/or description after creation. Only "
+        "the fields sent are written; description null clears it. scenario_type is one "
+        "of baseline, scenario, stress, sensitivity. Returns the project's info. "
+        "Refusals: 400 an unknown scenario_type or a description starting with a "
+        "'[type]' prefix (send scenario_type instead). Safety: write.",
+        {"name": {"type": "string"},
+         "description": {"type": ["string", "null"], "maxLength": 500},
+         "scenario_type": {"type": "string",
+                           "enum": ["baseline", "scenario", "stress", "sensitivity"]}},
+        ["name"],
+    ),
+    _t(
+        "update_project_settings",
+        "Change a project's settings (metadata.json). Only the keys sent are written. "
+        "derive_lengths_from_geometry: whether line/link lengths follow the map geometry. "
+        "Returns the project's info. 409 when the project has never been saved or "
+        "another user holds its edit lock. Safety: write.",
+        {"name": {"type": "string"},
+         "derive_lengths_from_geometry": {"type": "boolean"}},
+        ["name", "derive_lengths_from_geometry"],
+    ),
 ]
 
 
@@ -4921,6 +5061,24 @@ TOOL_ROUTES: dict[str, list] = {
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.docx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.xlsx"),
                               ("GET", "/api/projects/{name}/studies/{study_id}/report.html")],
+    # decision study records (6) — LV08 B1, in process through `_route`.
+    "list_decision_studies": [("GET", "/api/projects/{name}/studies/"),
+                              ("GET", "/api/projects/{name}/studies/library")],
+    "get_decision_study": [("GET", "/api/projects/{name}/studies/{study_id}"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/ledger"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/options/{option_id}/case"),
+                           ("GET", "/api/projects/{name}/studies/{study_id}/report")],
+    "preview_decision_study_intake": [("POST", "/api/projects/{name}/studies/preview")],
+    "update_decision_study": [("PATCH", "/api/projects/{name}/studies/{study_id}")],
+    "abort_decision_study": [("POST", "/api/projects/{name}/studies/{study_id}/run/abort"),
+                             ("POST", "/api/projects/{name}/studies/{study_id}/findings/tornado/abort")],
+    "delete_decision_study": [("DELETE", "/api/projects/{name}/studies/{study_id}")],
+    # project settings and scope (5) — LV08 B1
+    "get_site_template_form": [("GET", "/api/projects/from_template/eh_site/form")],
+    "get_project_flow_scope": [("GET", "/api/projects/{name}/flow/scope")],
+    "update_project_flow_scope": [("PUT", "/api/projects/{name}/flow/scope")],
+    "update_project_scenario_metadata": [("PATCH", "/api/projects/{name}/scenario")],
+    "update_project_settings": [("PATCH", "/api/projects/{name}/settings")],
     # project flow (B1)
     "get_project_flow": [("GET", "/api/projects/{name}/flow")],
     "get_reliability_goal": [("GET", "/api/projects/{name}/flow/reliability_goal")],

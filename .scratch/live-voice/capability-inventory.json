@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 300,
+  "tool_count": 311,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -6099,6 +6099,275 @@
       ],
       "safety_tier": "write",
       "schema_sha256": "4c371de156bae5ed913134eef2ce1138a2c2e8b7c4eb57ac6fd8a3d50063f2a6",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_decision_studies",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/studies/"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/library"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "include_library"
+      ],
+      "required": [
+        "project"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "4356651fc0b454d48227bdea046bd03dd52573433b7bdc7858ae0298e67aaa8d",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/ledger"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/options/{option_id}/case"
+        ],
+        [
+          "GET",
+          "/api/projects/{name}/studies/{study_id}/report"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "view",
+        "option_id"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d8223b2425e34a80a2614374916f4408ccc1fb5418cdb9fadc07bc9eee8dba18",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_decision_study_intake",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/studies/preview"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "intake"
+      ],
+      "required": [
+        "project",
+        "intake"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "6c03bf643886345c1ac2634b0b5dfc71ddc137533d8436b55d3d79c84bf11414",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/projects/{name}/studies/{study_id}"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "name",
+        "step",
+        "intake",
+        "settings"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "acb1cb7f5c5af8a2f32d17da24b89441d080b4250fa424e38921c2c40c3f2800",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "abort_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/studies/{study_id}/run/abort"
+        ],
+        [
+          "POST",
+          "/api/projects/{name}/studies/{study_id}/findings/tornado/abort"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id",
+        "stage"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "61a813fba64c0ae52f128219a46da95c7d86bdc86aca0b55d81dc2fb5cff3c3a",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "delete_decision_study",
+      "toolsets": [
+        "simulation"
+      ],
+      "route": [
+        [
+          "DELETE",
+          "/api/projects/{name}/studies/{study_id}"
+        ]
+      ],
+      "input_keys": [
+        "project",
+        "study_id"
+      ],
+      "required": [
+        "project",
+        "study_id"
+      ],
+      "safety_tier": "destructive",
+      "schema_sha256": "693fcb5125fb5bf97c9fc829772647e27ac2bad2af76cad37ba2d6997240e138",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_site_template_form",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/from_template/eh_site/form"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_project_flow_scope",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow/scope"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_project_flow_scope",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PUT",
+          "/api/projects/{name}/flow/scope"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "scope"
+      ],
+      "required": [
+        "name",
+        "scope"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "ab30dd86fdb5a1a09338d3fb4fe481fa98f10b04a7abb786d948e37f7c6589a1",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_project_scenario_metadata",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/projects/{name}/scenario"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "description",
+        "scenario_type"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "f28d465994ca558a4d8efd7b42e5bfd542dbea8a109ca9d0de70fd66a5e5c727",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "update_project_settings",
+      "toolsets": [
+        "project"
+      ],
+      "route": [
+        [
+          "PATCH",
+          "/api/projects/{name}/settings"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "derive_lengths_from_geometry"
+      ],
+      "required": [
+        "name",
+        "derive_lengths_from_geometry"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "18c934a5887147f5321d1c4372785c5dd659273ed260c1cd2ba4850c9542766a",
       "behavioral_fixture": "pending"
     },
     {

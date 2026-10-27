@@ -4633,8 +4633,8 @@
       "backend_routes": 506,
       "gui_routes": 466,
       "limitation": 86,
-      "needs-tool": 87,
-      "tool": 293,
+      "needs-tool": 71,
+      "tool": 309,
       "unclassified": 0
     },
     "limitations_by_reason": {
@@ -4668,19 +4668,6 @@
         "POST /api/results/investment_case/abort",
         "PUT /api/library/items/{kind}/{name}",
         "PUT /api/simulation/finance"
-      ],
-      "experiments": [
-        "DELETE /api/projects/{name}/studies/{study_id}",
-        "GET /api/projects/{name}/studies/",
-        "GET /api/projects/{name}/studies/library",
-        "GET /api/projects/{name}/studies/{study_id}",
-        "GET /api/projects/{name}/studies/{study_id}/ledger",
-        "GET /api/projects/{name}/studies/{study_id}/options/{option_id}/case",
-        "GET /api/projects/{name}/studies/{study_id}/report",
-        "PATCH /api/projects/{name}/studies/{study_id}",
-        "POST /api/projects/{name}/studies/preview",
-        "POST /api/projects/{name}/studies/{study_id}/findings/tornado/abort",
-        "POST /api/projects/{name}/studies/{study_id}/run/abort"
       ],
       "gridspine-campus": [
         "DELETE /api/campus-electrical/{name}/grid-codes/documents/{document_id}",
@@ -4736,13 +4723,6 @@
         "POST /api/network/reset",
         "POST /api/projects/{name}/sites/{site_id}/context",
         "PUT /api/projects/{name}/sites"
-      ],
-      "projects": [
-        "GET /api/projects/from_template/eh_site/form",
-        "GET /api/projects/{name}/flow/scope",
-        "PATCH /api/projects/{name}/scenario",
-        "PATCH /api/projects/{name}/settings",
-        "PUT /api/projects/{name}/flow/scope"
       ],
       "reliability-adequacy": [
         "GET /api/projects/{name}/stress_profile_packs"
@@ -4874,12 +4854,6 @@
         "summary": "10 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
-        "id": "route-parity:needs-tool:experiments",
-        "issue": "08",
-        "family": "experiments",
-        "summary": "11 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:gridspine-campus",
         "issue": "08",
         "family": "gridspine-campus",
@@ -4896,12 +4870,6 @@
         "issue": "08",
         "family": "network-topology",
         "summary": "11 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:projects",
-        "issue": "08",
-        "family": "projects",
-        "summary": "5 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
         "id": "route-parity:needs-tool:reliability-adequacy",

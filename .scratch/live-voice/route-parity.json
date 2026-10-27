@@ -3,8 +3,8 @@
   "backend_routes": 506,
   "gui_routes": 466,
   "limitation": 86,
-  "needs-tool": 87,
-  "tool": 293,
+  "needs-tool": 71,
+  "tool": 309,
   "unclassified": 0
  },
  "format_version": 1,
@@ -2640,13 +2640,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/from_template/eh_site/form"
+   "path": "/api/projects/from_template/eh_site/form",
+   "tools": [
+    "get_site_template_form"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -2819,22 +2822,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/flow.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/flow/scope"
+   "path": "/api/projects/{name}/flow/scope",
+   "tools": [
+    "get_project_flow_scope"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/flow.ts"
    ],
    "method": "PUT",
-   "path": "/api/projects/{name}/flow/scope"
+   "path": "/api/projects/{name}/flow/scope",
+   "tools": [
+    "update_project_flow_scope"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3372,22 +3381,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/scenario"
+   "path": "/api/projects/{name}/scenario",
+   "tools": [
+    "update_project_scenario_metadata"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "projects",
+   "class": "tool",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/settings"
+   "path": "/api/projects/{name}/settings",
+   "tools": [
+    "update_project_settings"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "needs-tool",
@@ -3538,13 +3553,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/"
+   "path": "/api/projects/{name}/studies/",
+   "tools": [
+    "list_decision_studies"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3559,49 +3577,64 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/library"
+   "path": "/api/projects/{name}/studies/library",
+   "tools": [
+    "list_decision_studies"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/preview"
+   "path": "/api/projects/{name}/studies/preview",
+   "tools": [
+    "preview_decision_study_intake"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "DELETE",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "delete_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "PATCH",
-   "path": "/api/projects/{name}/studies/{study_id}"
+   "path": "/api/projects/{name}/studies/{study_id}",
+   "tools": [
+    "update_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3641,22 +3674,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort"
+   "path": "/api/projects/{name}/studies/{study_id}/findings/tornado/abort",
+   "tools": [
+    "abort_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/ledger"
+   "path": "/api/projects/{name}/studies/{study_id}/ledger",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3680,22 +3719,28 @@
    "reason": "binary-transfer"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case"
+   "path": "/api/projects/{name}/studies/{study_id}/options/{option_id}/case",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/studies/{study_id}/report"
+   "path": "/api/projects/{name}/studies/{study_id}/report",
+   "tools": [
+    "get_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3770,13 +3815,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "experiments",
+   "class": "tool",
    "gui_files": [
     "api/decisionStudies.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/studies/{study_id}/run/abort"
+   "path": "/api/projects/{name}/studies/{study_id}/run/abort",
+   "tools": [
+    "abort_decision_study"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

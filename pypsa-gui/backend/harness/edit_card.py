@@ -55,6 +55,9 @@ SETTINGS_EDITS = frozenset({
     "apply_commercial_document_values",
     # live-voice 08 B3: the weather source/year every profile generate takes
     "set_weather_choice",
+    # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
+    "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
+    "update_project_settings",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -77,6 +80,7 @@ NOT_EDITS = {
     "refresh_experiment": "an experiment record", "cancel_experiment": "an experiment record",
     "start_campaign": "a campaign record", "end_campaign": "a campaign record",
     "gridspine_create_study": "a new study record", "start_decision_study": "a new study record",
+    "abort_decision_study": "stops a running study; its inputs are unchanged",
     "gridspine_compute_capacity": "a computation on the saved network",
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
