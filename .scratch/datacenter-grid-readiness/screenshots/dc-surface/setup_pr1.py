@@ -22,4 +22,6 @@ prof["q_capability_unit"] = ext(points=[[0.0, -0.4, 0.4], [0.5, -0.5, 0.5], [1.0
                                quote="each generating unit shall provide reactive power within the capability chart")
 prof["voltage_deadband_pct"] = ext(value=0.5, clause="generic test clause (voltage control)", page=32,
                                    quote="a deadband of 0.5 % of nominal voltage")
+prof["angle_limit_deg"] = ext(value=30.0, clause="generic test clause (voltage angle)", page=33,
+                              quote="the voltage angle difference across a branch shall not exceed 30 degrees")
 r = s.put(f"{P}/drafts/pq_demo", json={"yaml": yaml.safe_dump(prof, sort_keys=False)}); print("save", r.status_code, r.text[:300])

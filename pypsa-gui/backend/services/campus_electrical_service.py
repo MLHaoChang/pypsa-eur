@@ -223,9 +223,14 @@ def profile_fingerprint(project, profile_id: str) -> str | None:
 
 def _profile_used(run: Path) -> dict | None:
     """``{profile, sha256}`` the run in ``run`` was held to; None for a run
-    from before it was kept."""
-    used = run / PROFILE_USED_FILE
-    return json.loads(used.read_text()) if used.is_file() else None
+    from before it was kept, or when the file is unreadable or has no
+    fingerprint (the notice is then left out, never the scorecard)."""
+    try:
+        used = json.loads((run / PROFILE_USED_FILE).read_text())
+    except (OSError, ValueError):
+        return None
+    ok = isinstance(used, dict) and isinstance(used.get("profile"), str) and isinstance(used.get("sha256"), str)
+    return used if ok else None
 
 
 def grid_code_since_run(project, profile_id: str) -> dict | None:

@@ -176,6 +176,16 @@ def test_a_run_from_before_the_profile_was_kept_gives_no_notice(hub):  # noqa: F
     assert G.grid_readiness_for(hub)["profile"]["since_run"] is None
 
 
+@pytest.mark.parametrize("content", ["{not json", '{"profile": "pq_test", "sha256": null}', "[]"])
+def test_an_unreadable_record_of_the_runs_profile_gives_no_notice_and_keeps_the_scorecard(hub, content):  # noqa: F811
+    _publish(hub)
+    _run(hub)
+    (ce.campus_dir(hub) / "run" / ce.PROFILE_USED_FILE).write_text(content)
+    assert ce.get_state(hub)["grid_code_changed"] is False
+    gr = G.grid_readiness_for(hub)
+    assert gr["profile"]["since_run"] is None and gr["rows"]
+
+
 def test_a_project_without_a_campus_run_gives_no_notice_and_makes_no_campus_directory(hub):  # noqa: F811
     from services import project_registry
 

@@ -45,6 +45,16 @@ def test_tdd_is_the_rss_of_the_unit_currents_over_the_rated_import_by_hand(tmp_p
     assert R.disposition(row) == ("not_scalar", None)
 
 
+def test_a_demo_spectrum_points_go_to_field_at_that_unit_as_the_harmonic_row_does(tmp_path):
+    rows = _rows(G.grid_readiness(tmp_path, _harmonic_site(), PROFILE))
+    row = rows["current_distortion"]
+    assert row["target"]["entity"] == "compressor" and row["target"]["field"] == "harmonic_spectrum"
+    assert row["target"] == rows["harmonic_distortion"]["target"]
+    assert "Demo default spectrum for compressor (no vendor spectrum entered)." in row["note"]
+    vendor = _row(tmp_path, _harmonic_site(spectrum=SPECTRUM))
+    assert vendor["target"]["entity"] is None and "Demo default" not in vendor["note"]
+
+
 def test_over_the_limit_warns_and_names_the_failing_orders(tmp_path):
     row = _row(tmp_path, _harmonic_site(spectrum="5:30, 7:20"))
     assert row["project_value"] == pytest.approx(math.hypot(30.0, 20.0) / 3.0, abs=1e-4)
@@ -65,6 +75,10 @@ def test_without_a_connection_rating_i_l_is_the_process_units_rated_load(tmp_pat
     row = _row(tmp_path, n)
     assert row["tdd"]["i_l_mva"] == 20.0 and row["project_value"] == pytest.approx(math.hypot(3.0, 2.0), abs=1e-4)
     assert "I_L: the process units' rated load only" in row["note"]
+    # The I_L source moves the band: 1400 / 20 = 70 is 50-100 (limit 12.0), where the import's 23.3 was 20-50.
+    with_import = _row(tmp_path, _harmonic_site(spectrum=SPECTRUM))
+    assert (with_import["tdd"]["band"], with_import["limit"]) == ("20-50", 4.0)
+    assert row["tdd"]["band"] == "50-100" and row["limit"] != with_import["limit"]
 
 
 def test_no_standard_in_the_grid_code_is_unknown(tmp_path):

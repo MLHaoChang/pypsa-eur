@@ -667,15 +667,18 @@ def _tdd_row(inp: _Inputs) -> dict:
                     section="assets",
                     target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
                                    "eh_sk_mva"))
+    demo = []
     for rec in units.to_dict("records"):
         try:
-            hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
+            _, spectrum_source = hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
         except ContractError as exc:
             # One unit's malformed stored input reads as unknown here, not a failed scorecard.
             field = "harmonic_spectrum" if str(exc).startswith("Harmonic spectrum") else "harmonic_source"
             return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
                         verdict="unknown", assumed=True, note=f"{rec['unit']}: {exc}", section="assets",
                         target=_target("assets", "Link", rec["unit"], field))
+        if spectrum_source.startswith("demo"):
+            demo.append(rec["unit"])
     if inp.connection_mw:
         i_l, i_l_note = inp.connection_mw, _TDD_IL_IMPORT
     else:
@@ -695,6 +698,9 @@ def _tdd_row(inp: _Inputs) -> dict:
         first = missing[0]
         rated = pd.to_numeric(units.set_index("unit")["rated_mva"], errors="coerce").get(first)
         target = _target("assets", "Link", first, "rated_mva" if pd.isna(rated) else "harmonic_source")
+    elif demo:
+        # As the harmonic row: Go to field opens the first unit whose spectrum is a topology's demo default.
+        target = _target("assets", "Link", demo[0], "harmonic_spectrum")
     else:
         target = unit_target
     notes = []
@@ -710,6 +716,8 @@ def _tdd_row(inp: _Inputs) -> dict:
                      + (f" (limit {worst_lim:g} %)." if worst_lim is not None else "."))
     if poc["failing_orders"]:
         notes.append("Orders over their limit: " + ", ".join(map(str, poc["failing_orders"])) + ".")
+    if demo and not missing:
+        notes.append("Demo default spectrum for " + ", ".join(map(str, demo)) + " (no vendor spectrum entered).")
     notes.append(f"{_TDD_SK_NOTE}. {i_l_note}. Screening: above the limit, run a harmonic load-flow study.")
     verdict = {"pass": "pass", "fail": RULE_TDD["otherwise"]}.get(poc["verdict"], "unknown")
     row = _row(rid, req, rule=RULE_TDD, limit=limit, unit=_TDD_UNIT, source=source,
@@ -1258,7 +1266,7 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _flicker_row(inp), _tdd_row(inp),
+            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
             _unbalance_row(inp),
             _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)

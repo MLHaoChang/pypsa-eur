@@ -1010,9 +1010,11 @@ def _profile_without(tmp_path, *keys):
     return name, (codes,)
 
 
-def test_the_flicker_row_follows_the_harmonic_row(tmp_path):
+def test_current_distortion_then_flicker_follow_the_harmonic_row(tmp_path):
+    """Current distortion sits with voltage distortion (UX placement), flicker after both."""
     ids = [r["id"] for r in G.grid_readiness(tmp_path, _flicker_site(), PROFILE)["rows"]]
-    assert ids.index("flicker") == ids.index("harmonic_distortion") + 1
+    h = ids.index("harmonic_distortion")
+    assert ids[h + 1:h + 3] == ["current_distortion", "flicker"]
 
 
 def test_without_a_flicker_limit_the_row_is_unknown(tmp_path):

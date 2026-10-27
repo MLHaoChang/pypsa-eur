@@ -36,6 +36,13 @@ describe('CampusHarmonicScanSection', () => {
     expect(screen.getByTestId('scan-chart')).toBeTruthy()
   })
 
+  it('shows a missing figure as a dash alone, never a dash with its unit', () => {
+    render(<CampusHarmonicScanSection scan={scan({ resonance: [resonance({ f_hz: null as never, z_peak_ohm: NaN })] })} />)
+    const text = screen.getByTestId('scan-resonance').textContent ?? ''
+    expect(text).toContain('h 7.3 · — · |Z| —')
+    expect(text).not.toMatch(/—\s*(Hz|Ω)/)
+  })
+
   it('says when no resonance is found', () => {
     render(<CampusHarmonicScanSection scan={scan({ resonance: [] })} />)
     expect(screen.getByTestId('scan-none').textContent).toBe('No parallel resonance up to h 50 in any case.')

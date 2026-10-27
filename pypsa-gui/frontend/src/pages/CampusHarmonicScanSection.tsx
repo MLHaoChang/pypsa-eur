@@ -19,6 +19,12 @@ function fig(v: number | null | undefined, digits = 3): string {
   return v == null || !isFinite(v) ? '—' : `${Number(v.toPrecision(digits))}`
 }
 
+/** A figure and its unit, kept together; a missing figure is "—" alone, with no unit after it. */
+function figUnit(v: number | null | undefined, unit: string, digits = 3): string {
+  const f = fig(v, digits)
+  return f === '—' ? f : `${f}\u00A0${unit}`
+}
+
 /** 6k±1 up to `hMax`: 5, 7, 11, 13 … */
 export function characteristicOrders(hMax: number): number[] {
   const out: number[] = []
@@ -37,13 +43,13 @@ function ResonanceRow({ r }: { r: HarmonicResonance }) {
         {r.cap_state && <span className="block text-muted">{r.cap_state}</span>}
       </td>
       <td className="pr-3 align-top whitespace-nowrap tabular-nums">
-        h {fig(r.h_r)} · {fig(r.f_hz, 4)}&nbsp;Hz · |Z| {fig(r.z_peak_ohm)}&nbsp;Ω
+        h {fig(r.h_r)} · {figUnit(r.f_hz, 'Hz', 4)} · |Z| {figUnit(r.z_peak_ohm, 'Ω')}
       </td>
       <td className="pr-3 align-top whitespace-nowrap tabular-nums">
         h {r.nearest_order} <span className="text-muted">({r.order_set})</span>
       </td>
       <td data-testid="scan-clearance" className="pr-3 align-top whitespace-nowrap tabular-nums">
-        {fig(r.margin_h, 2)}&nbsp;h · limit ±{fig(r.limit_h)}&nbsp;h
+        {figUnit(r.margin_h, 'h', 2)} · limit ±{figUnit(r.limit_h, 'h')}
       </td>
       <td className="align-top">
         <span className="inline-flex items-center gap-1.5">
