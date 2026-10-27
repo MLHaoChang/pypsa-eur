@@ -575,6 +575,20 @@ def _shadowing_series(klass, names, attribute, network, user_ts):
     return [n for n in names if n in columns or (component_attr, attribute, n) in (user_ts or {})]
 
 
+PREVIEW_CLASSES = frozenset(_PreviewChange.model_fields["component_class"].annotation.__args__)
+
+
+def preview_kind(component_class, attribute):
+    """'number' or 'boolean' when `preview_project_changes` takes this field of
+    this class, else None: the one eligibility test, which chat routing
+    (`harness/edit_routing.py`) reuses."""
+    from harness import edit_card
+
+    if component_class not in PREVIEW_CLASSES:
+        return None
+    return _parameter_kind(edit_card._fields(component_class).get(attribute))
+
+
 def _preview_changes(changes, network, user_ts=None):
     """Parse and check a preview before any sandbox work: every member exists,
     every field is an editable number or flag, at most 20 entity × field rows."""
@@ -613,7 +627,7 @@ def _preview_changes(changes, network, user_ts=None):
     seen = set()
     for change in parsed:
         field = edit_card._fields(change.component_class).get(change.attribute)
-        kind = _parameter_kind(field)
+        kind = preview_kind(change.component_class, change.attribute)
         if kind is None:
             workflow._refuse("invalid_change_attribute", f"{change.component_class}.{change.attribute} is not a numeric "
                              "or true/false parameter of that class. Read get_component_schema.")
@@ -720,6 +734,21 @@ def _idle(ctx, project):
         workflow._refuse("project_busy", "Wait for the current solve before previewing or applying changes.", 409)
 
 
+def _preview_fingerprint(ctx):
+    """Input fingerprint as the apply will see it.
+
+    The undo snapshot taken before an apply copies profiles held only in the
+    network's _t tables into the user time series; take the fingerprint over
+    that copy so a preview on such a project is not stale at its own apply.
+    """
+    from types import SimpleNamespace
+    from services.user_timeseries import _backup_network_ts_to_user_ts
+    store = dict(ctx.user_ts)
+    _backup_network_ts_to_user_ts(ctx.network, store)
+    return workflow._network_input_fingerprint(
+        SimpleNamespace(network=ctx.network, solver_state=ctx.solver_state, user_ts=store))
+
+
 def preview_project_changes(changes: list[dict]) -> dict:
     project, root, owner = _project()
     with PyPSAService.get_lock():
@@ -727,7 +756,7 @@ def preview_project_changes(changes: list[dict]) -> dict:
         _idle(ctx, project)
         absolute, sets = _resolve_changes(changes, ctx.network)
         parsed = _preview_changes(absolute, ctx.network, ctx.user_ts)
-        fingerprint = workflow._network_input_fingerprint(ctx)
+        fingerprint = _preview_fingerprint(ctx)
         _, diffs, rows, validation = _preview_candidate(ctx, parsed)
         preview_id = str(uuid.uuid4())
         record = {"version": 2, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
@@ -771,7 +800,7 @@ def apply_project_changes(preview_id: str) -> dict:
         _idle(ctx, project)
         if record.get("applied"):
             return {"preview_id": preview_id, "project_id": str(project.id), "applied": True, "reused": True}
-        if workflow._network_input_fingerprint(ctx) != record["fingerprint"]:
+        if _preview_fingerprint(ctx) != record["fingerprint"]:
             workflow._refuse("preview_stale", "Project inputs changed; create and review a new preview.", 409)
         candidate, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record["changes"], ctx.network, ctx.user_ts))
         if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):
@@ -961,7 +990,7 @@ def preview_confirmation(preview_id):
         if record.get('applied') or record.get('applying'):
             workflow._refuse('invalid_preview', 'Preview was already applied or interrupted; inspect inputs and create a new preview.', 409)
         ctx = PyPSAService.get_active_context()
-        if workflow._network_input_fingerprint(ctx) != record['fingerprint']:
+        if _preview_fingerprint(ctx) != record['fingerprint']:
             workflow._refuse('preview_stale', 'Project inputs changed; create and review a new preview.', 409)
         _, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record['changes'], ctx.network))
         if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):

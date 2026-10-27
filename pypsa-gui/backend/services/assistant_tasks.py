@@ -699,6 +699,23 @@ def claim_continuation(session, job_id):
     _refuse("continuation_unavailable", "No finished job of this conversation is waiting to continue.")
 
 
+def is_next_step(session, tool, args) -> bool:
+    """True for the bound plan's next step: it runs as that step, with its own
+    card, so chat edit routing leaves it alone (harness/edit_routing.py)."""
+    task_id = getattr(session, "task_id", None)
+    if not task_id or tool in _CONTROLS:
+        return False
+    with _LOCK:
+        try:
+            _, task = _read(task_id)
+            step = _next(task)
+            if task["status"] in ("cancelled", "completed") or step is None or step["tool"] != tool:
+                return False
+            return _same_args(tool, _resolve(step["args"], task["steps"]), args)
+        except HTTPException:
+            return False
+
+
 def begin_step(session, tool, args):
     """Called only after the ordinary offered-tool and confirmation gates."""
     task_id = getattr(session, "task_id", None)

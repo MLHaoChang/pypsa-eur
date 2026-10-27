@@ -3,8 +3,8 @@
 
 # LC-16 — parametrising several assets in one request
 
-Status: ready-for-agent inside LC-04, after the storage/line slice (OJ-05/06)
-Progress: Edit cards for bulk_update_components (one class) and solver config exist; no mixed-class card, relative/set changes, or other settings cards.
+Status: done (slices A #738, B #744, B9(a) #749, C: chat routing and settings cards)
+Progress: Mixed-class preview card (A), selector and scale edits (B), chat multi-asset routing through the preview and old→new cards for solver/economics settings, network name and period weightings (C, `tests/test_project_changes_routing.py`). Left out: the OJ-21 €/kW basis Choice and the #567 equipment-table cases.
 Type: task
 Baseline: master `ae95a94a866730c0fe67fad37e238dc281786bd6`
 Dependencies: LC-04 storage/line slice; LC-10 resolution ladder

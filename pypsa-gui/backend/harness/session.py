@@ -241,6 +241,11 @@ class ChatSession:
     # W10 H2a — the task cap of the turn in flight (budget.task_cap), decided
     # once at its start; None outside a bounded task.
     turn_task_cap: Any = None
+    # LC-16 slice C (harness/edit_routing.py): a single edit the preview could
+    # take was applied this turn, since the last run; and the calls of the
+    # response in flight refused toward the preview.
+    turn_single_edit_applied: bool = False
+    turn_redirects: dict[str, str] = field(default_factory=dict)
     # LC-10 — components that successful tool calls named, newest last, as
     # (project key, class, name): the "discussed last" rung. Keyed by project
     # so a switch, by a tool or another tab, never carries a name across.
