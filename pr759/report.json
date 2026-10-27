@@ -15,8 +15,8 @@
    "receipt": "Network name oj-grid → Harbour grid. Read back from the project.\nUndo"
   },
   "weightings-expert": {
-   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\tyears.2030\t1\t10\tNo unit\nInvestment periods\tyears.2040\t1\t10\tNo unit\nInvestment periods\tobjective.2040\t1\t0.5\tNo unit",
-   "receipt": "Investment periods years.2030 1 → 10; Investment periods years.2040 1 → 10; Investment periods objective.2040 1 → 0.5. Read back from the project.\nUndo"
+   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\tyears.2030\t1\t10\tyr\nInvestment periods\tyears.2040\t1\t10\tyr\nInvestment periods\tobjective.2040\t1\t0.5\tNo unit",
+   "receipt": "Investment periods years.2030 1 → 10 yr; Investment periods years.2040 1 → 10 yr; Investment periods objective.2040 1 → 0.5. Read back from the project.\nUndo"
   },
   "bulk-expert": {
    "card": "Connection & grid › Line 'L1', Line 'L2'\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nLine 'L1'\ts_nom\nShow in Properties\n\t300\t500\tMVA\nLine 'L2'\ts_nom\nShow in Properties\n\t300\t500\tMVA",
@@ -35,8 +35,8 @@
    "receipt": "Network, Network name oj-grid → Harbour grid. Read back from the project.\nUndo"
   },
   "weightings-guided": {
-   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\t2030 Years\t1\t10\tNo unit\nInvestment periods\t2040 Years\t1\t10\tNo unit\nInvestment periods\t2040 Objective\t1\t0.5\tNo unit",
-   "receipt": "Investment periods, 2030 Years 1 → 10; Investment periods, 2040 Years 1 → 10; Investment periods, 2040 Objective 1 → 0.5. Read back from the project.\nUndo"
+   "card": "Investment periods\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nInvestment periods\t2030 Years\t1\t10\tyr\nInvestment periods\t2040 Years\t1\t10\tyr\nInvestment periods\t2040 Objective\t1\t0.5\tNo unit",
+   "receipt": "Investment periods, 2030 Years 1 → 10 yr; Investment periods, 2040 Years 1 → 10 yr; Investment periods, 2040 Objective 1 → 0.5. Read back from the project.\nUndo"
   },
   "bulk-guided": {
    "card": "Connection & grid › Line 'L1', Line 'L2'\nChanges to apply\nAsset\tField\tOld\tNew\tUnit\nLine 'L1'\tCapacity\nShow in Properties\n\t300\t500\tMVA\nLine 'L2'\tCapacity\nShow in Properties\n\t300\t500\tMVA",
