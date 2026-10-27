@@ -85,16 +85,17 @@ export function SweepCardTable({ card, guided }: { card: SweepCard; guided: bool
       {shown.map(({ c, rows }) => (
         <div key={c.name} data-testid="chat-sweep-case">
           <EditCardTable card={caseCard(card, c, rows)} guided={guided} labels={{
-            header: c.existing ? `${c.name} \u00b7 existing case` : c.name,
-            caption: c.name, old: 'Base', new: 'Case', noUnit: '',
+            // The caption names the case once; no asset header above it.
+            header: '', caption: c.existing ? `${c.name} \u00b7 existing case` : c.name,
+            old: 'Base', new: 'Case', noUnit: '',
           }} />
           {rows.length < c.rows.length && <p className="mb-2 text-muted" data-testid="chat-sweep-more-rows">
-            {c.rows.length - rows.length} more asset{c.rows.length - rows.length === 1 ? '' : 's'} change in this case.
+            {c.rows.length - rows.length} more {c.rows.length - rows.length === 1 ? 'asset changes' : 'assets change'} in this case.
           </p>}
         </div>
       ))}
       {hiddenCases > 0 && <p className="mb-1 text-muted" data-testid="chat-sweep-more-cases">
-        {hiddenCases} more case{hiddenCases === 1 ? '' : 's'} change.
+        {hiddenCases} more {hiddenCases === 1 ? 'case changes' : 'cases change'}.
       </p>}
       <p className="text-muted" data-testid="chat-sweep-solves">
         {card.solves === 0 ? 'Queues no solve: every case is already solved.'
