@@ -257,6 +257,8 @@ export interface CampusResults {
   requirement: Requirement
   /** Needs an RMS study; empty for a run from before it was kept. */
   reported_requirements?: ReportedRequirement[]
+  /** The harmonic impedance scan from the PCC (DC-SURFACE-1); null for a run from before it was a stage. */
+  harmonic_scan?: HarmonicScan | null
   /** Null throughout when the run did not invest. */
   investment: InvestmentRow[] | null
   cost: CostRow[] | null
@@ -345,6 +347,37 @@ export interface MilpResults {
   stop: MilpStop
 }
 
+/** One parallel resonance of the scan (`gridspine.static.harmonic_scan.RESONANCE_COLUMNS`). */
+export interface HarmonicResonance {
+  case: string
+  cap_state: string
+  h_r: number
+  f_hz: number
+  z_peak_ohm: number
+  prominence: number
+  nearest_order: number
+  /** Which orders `nearest_order` is from: "6k±1", "unit spectrum" or "demo unit spectrum". */
+  order_set: string
+  margin_h: number
+  limit_h: number
+  verdict: 'pass' | 'fail'
+  assumed: boolean
+  note: string | null
+}
+
+export interface HarmonicEnvelopePoint {
+  h: number
+  z_max_ohm: number
+  x_min_ohm: number
+  x_max_ohm: number
+}
+
+/** The scan's result, or `{error}` when it could not run (the run itself still stands). */
+export type HarmonicScan =
+  | { error: string }
+  | { error?: undefined; limit_h: number; limit_source: LimitSource | null; clause: string | null; notes: string[]
+      basis: string[]; label: string; resonance: HarmonicResonance[]; envelope: HarmonicEnvelopePoint[] }
+
 export interface CampusMilp {
   status: MilpJobRecord | null
   results: MilpResults | null
@@ -359,6 +392,8 @@ export interface CampusState {
   settings: CampusSettings | null
   results: CampusResults | null
   stale: boolean
+  /** The run's grid-code profile was published again with other content since (SCORECARD-STALE-1). */
+  grid_code_changed?: boolean
   /** Null, with `hub_cost_reason`, when the hub's cost cannot be computed. */
   hub_cost: HubCost | null
   hub_cost_reason: string | null
@@ -383,7 +418,8 @@ export interface CampusState {
 }
 
 /** The run's stages, as the backend names them (`RUN_STAGES`), then `done`. */
-export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'invest' | 'gfm_settings' | 'done'
+export type CampusRunStage = 'prepare' | 'rank' | 'island_checks' | 'cuts' | 'size' | 'harmonic_scan' | 'invest'
+  | 'gfm_settings' | 'done'
 
 /** The campus run's solve-queue job, with the stage it reached. */
 export interface CampusRunJob {
@@ -772,9 +808,16 @@ export interface GridReadinessAfterUnit {
   target: GridReadinessTarget
 }
 
+/** This profile against the last campus run's (SCORECARD-STALE-1); null without a run that kept it. */
+export interface GridCodeSinceRun {
+  run_profile: string
+  run_profile_title: string | null
+  status: 'same' | 'changed' | 'other_profile'
+}
+
 export interface GridReadiness {
   schema: number
-  profile: { id: string; title: string | null; error: string | null }
+  profile: { id: string; title: string | null; error: string | null; since_run?: GridCodeSinceRun | null }
   template_id: string | null
   envelope: boolean
   rows: GridReadinessRow[]

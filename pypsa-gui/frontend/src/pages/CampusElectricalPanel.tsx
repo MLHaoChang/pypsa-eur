@@ -46,6 +46,8 @@ import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
+import CampusHarmonicScanSection from './CampusHarmonicScanSection'
+import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
@@ -643,9 +645,11 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           run. They are replaced when it ends.
         </p>
       )}
-      {state.stale && (
-        <p className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
-          The campus file or the project has changed since this run. Run the study again before using these numbers.
+      {(state.stale || state.grid_code_changed) && (
+        <p data-testid="campus-results-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
+          {state.stale && 'The campus file or the project has changed since this run. Run the study again before using these numbers.'}
+          {state.stale && state.grid_code_changed && ' '}
+          {state.grid_code_changed && GRID_CODE_CHANGED}
         </p>
       )}
       {design && <CampusInvestmentSection state={state} />}
@@ -716,6 +720,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </p>
         )}
       </PageSection>}
+
+      {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
 
       {design && <>
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">

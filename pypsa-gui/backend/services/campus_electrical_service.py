@@ -127,6 +127,13 @@ GRID_CODES_SUBDIR = "grid_codes"
 LIBRARY_FILE = "campus_assets.yaml"
 USED_LIBRARY_FILE = "campus_assets_used.yaml"
 COST_BASIS_FILE = "campus_cost_basis.json"
+#: The grid-code profile a run was held to and its fingerprint (``profile_fingerprint``), kept with the run, so
+#: the scorecard and the results can say when the code changed since (owner decision SCORECARD-STALE-1).
+PROFILE_USED_FILE = "campus_profile_used.json"
+#: The harmonic impedance scan beside its CSVs (DC-SURFACE-1): the clearance it judged on, its notes and basis;
+#: or, when the scan could not run, why.
+HARMONIC_SCAN_META = "campus_harmonic_scan.json"
+HARMONIC_SCAN_ERROR = "harmonic_scan_error.json"
 SOLVER_CONFIG_FILE = "solver_config.json"
 MAX_CAMPUS_BYTES = 1_000_000
 MAX_LIBRARY_BYTES = 1_000_000
@@ -184,6 +191,109 @@ def profiles(project) -> dict:
         return cs.grid_code_profiles(extra_dirs=(grid_codes_dir(project),))
     except ContractError as exc:
         raise _unprocessable(exc)
+
+
+#: What says where a profile's limits were read, not what they are: a change to these alone is not a changed
+#: grid code. Confirming an extracted limit changes its ``source`` and so does count (conservative).
+_INERT_PROFILE_KEYS = frozenset({"title", "name", "notes", "document"})
+_INERT_LIMIT_KEYS = frozenset({"page", "quote"})
+
+
+def _fingerprint(profile: dict) -> str:
+    def strip(v):
+        if isinstance(v, dict):
+            return {k: strip(x) for k, x in v.items() if k not in _INERT_LIMIT_KEYS}
+        if isinstance(v, list):
+            return [strip(x) for x in v]
+        return v
+    core = {k: strip(v) for k, v in profile.items() if k not in _INERT_PROFILE_KEYS}
+    return hashlib.sha256(json.dumps(core, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def profile_fingerprint(project, profile_id: str) -> str | None:
+    """sha256 of grid-code profile ``profile_id`` as the engine loads and
+    validates it, without its inert keys (``_INERT_PROFILE_KEYS``, and each
+    limit's ``_INERT_LIMIT_KEYS``); None when it no longer loads."""
+    try:
+        return _fingerprint(cs.load_grid_code(profile_id, extra_dirs=(grid_codes_dir(project),)))
+    except ContractError:
+        return None
+
+
+def _profile_used(run: Path) -> dict | None:
+    """``{profile, sha256}`` the run in ``run`` was held to; None for a run
+    from before it was kept."""
+    used = run / PROFILE_USED_FILE
+    return json.loads(used.read_text()) if used.is_file() else None
+
+
+def grid_code_since_run(project, profile_id: str) -> dict | None:
+    """How grid-code profile ``profile_id`` stands against the last campus
+    run's (SCORECARD-STALE-1): ``{run_profile, run_profile_title, status}``,
+    ``status`` ``same``, ``changed`` (the run's profile was published again
+    with other content, or no longer loads) or ``other_profile`` (it is not
+    the profile the run used). None when there is no run, or the run is from
+    before the profile was kept."""
+    # Read only: the scorecard asks this of any project, so no campus directory is made for it.
+    used = _profile_used(project_registry.project_dir(project) / SUBDIR / "run")
+    if used is None:
+        return None
+    if used["profile"] != profile_id:
+        status = "other_profile"
+    else:
+        status = "same" if profile_fingerprint(project, profile_id) == used["sha256"] else "changed"
+    try:
+        title = profiles(project).get(used["profile"])
+    except HTTPException:
+        title = None
+    return {"run_profile": used["profile"], "run_profile_title": title, "status": status}
+
+
+def _harmonic_scan(run: Path, profile: str, profile_dirs) -> None:
+    """The harmonic impedance scan of the prepared run in ``run`` (DC-SURFACE-1,
+    ``campus_study.harmonic_scan_campus``), its meta in ``HARMONIC_SCAN_META``.
+    The scan is screening beside the sizing, so its failure never fails the
+    run: the reason goes to ``HARMONIC_SCAN_ERROR`` and no scan file stays."""
+    from gridspine.static import harmonic_scan as hs
+
+    files = (cs.HARMONIC_SCAN_CSV, cs.HARMONIC_ENVELOPE_CSV, cs.HARMONIC_RESONANCE_CSV, HARMONIC_SCAN_META,
+             HARMONIC_SCAN_ERROR)
+
+    def clear():
+        for name in files:
+            (run / name).unlink(missing_ok=True)
+
+    clear()
+    try:
+        study = cs.harmonic_scan_campus(run, profile, profile_dirs)
+        limit, cited = hs.clearance_from_profile(cs.load_grid_code(profile, extra_dirs=profile_dirs))
+    except Exception as exc:  # noqa: BLE001 - a scan failure is shown with the results, never a failed run
+        if not isinstance(exc, ContractError):
+            logger.exception("campus run: the harmonic scan failed in %s", run)
+        clear()
+        (run / HARMONIC_SCAN_ERROR).write_text(json.dumps({"error": str(exc) or type(exc).__name__}))
+        return
+    meta = {"limit_h": hs.DEFAULT_CLEARANCE_H if limit is None else limit,
+            "limit_source": cited[0]["source"] if cited else None,
+            "clause": cited[0]["clause"] if cited else None,
+            "notes": list(study.notes), "basis": list(hs.LEDGER), "label": hs.LABEL}
+    (run / HARMONIC_SCAN_META).write_text(json.dumps(meta))
+
+
+def _harmonic_scan_results(run: Path) -> dict | None:
+    """The scan for ``get_state``: ``{error}`` when it could not run, else its
+    meta with the resonance rows and the envelope (h, |Z| max, X min and max);
+    None for a run from before the scan was a stage."""
+    error = run / HARMONIC_SCAN_ERROR
+    if error.is_file():
+        return json.loads(error.read_text())
+    meta = run / HARMONIC_SCAN_META
+    if not meta.is_file():
+        return None
+    env = pd.read_csv(run / cs.HARMONIC_ENVELOPE_CSV)
+    return {**json.loads(meta.read_text()),
+            "resonance": _read_csv(run / cs.HARMONIC_RESONANCE_CSV) or [],
+            "envelope": _records(env[["h", "z_max_ohm", "x_min_ohm", "x_max_ohm"]])}
 
 
 def _network(project) -> Path:
@@ -267,6 +377,8 @@ def _results(run: Path):
         # each came from. None when the run did not invest.
         "cost_basis": (json.loads((run / COST_BASIS_FILE).read_text())
                        if investment is not None and (run / COST_BASIS_FILE).is_file() else None),
+        # DC-SURFACE-1: the harmonic impedance scan from the PCC (``_harmonic_scan_results``).
+        "harmonic_scan": _harmonic_scan_results(run),
     }
 
 
@@ -427,6 +539,11 @@ def _library_stale(project, d: Path) -> bool:
         return True
 
 
+def _grid_code_changed(project, d: Path) -> bool:
+    used = _profile_used(d / "run")
+    return used is not None and profile_fingerprint(project, used["profile"]) != used["sha256"]
+
+
 def _stale(project, d: Path) -> bool:
     manifest = d / "run" / cs.CAMPUS_MANIFEST
     campus = d / CAMPUS_FILE
@@ -534,6 +651,8 @@ def get_state(project) -> dict:
         "settings": json.loads(settings.read_text()) if settings.is_file() else None,
         "results": results,
         "stale": bool(results) and _stale(project, d),
+        # SCORECARD-STALE-1: the run's grid-code profile was published again with other content since.
+        "grid_code_changed": bool(results) and _grid_code_changed(project, d),
         "hub_cost": cost,
         "hub_cost_reason": reason,
         "milp": _milp_state(project, d),
@@ -1283,7 +1402,7 @@ def _aborted_on_stop(stage):
 
 #: The run's stages, in order, as its progress names them (the queue log's
 #: ``campus <stage> <done>/<total>`` lines and ``get_state``'s ``run_job``).
-RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "invest")
+RUN_STAGES = ("prepare", "rank", "island_checks", "cuts", "size", "harmonic_scan", "invest")
 
 
 class CampusRunAborted(Exception):
@@ -1388,6 +1507,10 @@ def run(project, settings: dict, *, progress=None, should_stop=None) -> dict:
                     _run_cuts(work, should_stop)
                 stage("size")
                 cs.size_campus(work, criteria, profile=s["profile"], pf=s["pf"], profile_dirs=profile_dirs)
+                (work / PROFILE_USED_FILE).write_text(json.dumps(
+                    {"profile": s["profile"], "sha256": profile_fingerprint(project, s["profile"])}))
+                stage("harmonic_scan")
+                _harmonic_scan(work, s["profile"], profile_dirs)
             except ContractError as exc:
                 raise _unprocessable(exc)
             _publish_run(work, published)
