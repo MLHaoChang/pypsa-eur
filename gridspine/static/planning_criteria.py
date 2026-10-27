@@ -158,6 +158,11 @@ PLANNING_LEDGER = (
     "raw, since it may span several transformers; a pair with a bus out of "
     "service is skipped and named in the note; no limit set gives unknown, "
     "never pass",
+    "the angle limit is the angle_limit argument, else the grid-code profile's "
+    "angle_limit_deg (a code figure as basis sagc, an assumed one as assumed, an "
+    "extracted one as assumed and named unconfirmed on each judged row), with the "
+    "profile named in the reference; the report says which was used; pairs are "
+    "only ever an argument",
 )
 
 ANGLE_BASES = frozenset({"assumed", "sagc"})
@@ -186,7 +191,8 @@ def _finite_number(v) -> bool:
 class AngleLimit:
     """The voltage-angle limit across a branch or bus pair, in degrees.
     ``basis`` is ``"assumed"`` or ``"sagc"``; ``"sagc"`` names the public
-    SAGC clause in ``reference``. ``pairs`` holds branch ids and (bus, bus)
+    SAGC clause in ``reference`` (one built from a profile reads
+    ``"<profile>: <clause>"``). ``pairs`` holds branch ids and (bus, bus)
     name pairs; empty means every in-service branch on the net. A branch
     pair is measured net of a transformer's phase shift; a (bus, bus) pair
     is measured raw, since it may span several transformers, so name a
@@ -762,7 +768,24 @@ def _angle(work, pairs, live: set):
     return worst, label, skipped
 
 
-def _angle_fields(work, pairs, live, angle_limit: AngleLimit | None, notes: list) -> dict:
+def _angle_limit_from(profile: dict) -> tuple:
+    """``(AngleLimit or None, caveat)`` from the profile's ``angle_limit_deg``;
+    the caveat names an extracted, unconfirmed figure ("" otherwise). The
+    reference names the profile, so another code's clause never reads as SAGC."""
+    lim = profile.get("angle_limit_deg")
+    if lim is None:
+        return None, ""
+    ref = f"{profile['name']}: {lim['clause']}"
+    if lim["source"] == "code":
+        return AngleLimit(lim["value"], "sagc", ref), ""
+    if lim["source"] == "extracted":
+        ref = f"{ref}, p. {lim['page']}"
+        return (AngleLimit(lim["value"], "assumed", f"{ref}, extracted, unconfirmed"),
+                f"angle limit extracted, unconfirmed ({ref})")
+    return AngleLimit(lim["value"], "assumed", ref), ""
+
+
+def _angle_fields(work, pairs, live, angle_limit: AngleLimit | None, notes: list, caveat: str = "") -> dict:
     deg, pair, skipped = _angle(work, pairs, live)
     if skipped:
         notes.append(f"angle pairs skipped, a bus out of service: {', '.join(skipped)}")
@@ -773,6 +796,8 @@ def _angle_fields(work, pairs, live, angle_limit: AngleLimit | None, notes: list
         notes.append("no angle pair measurable")
     else:
         verdict = "pass" if deg <= float(angle_limit.deg) else "fail"
+        if caveat:
+            notes.append(caveat)
     return {"angle_deg": deg, "angle_pair": pair, "angle_verdict": verdict}
 
 
@@ -821,10 +846,12 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
     """``(results, report)``: one ``validate_planning_results`` row per
     contingency judged, in the set's order, and ``{"counts": {kind: n judged},
     "skipped": {compound kind: n}, "summary": {kind: {...}}, "angle_limit":
-    {...} or "unset", "voltage_band": {"profile": name or "assumed", "buses":
+    {deg, basis, reference, from: "argument" or "profile <name>"} or
+    "unset", "voltage_band": {"profile": name or "assumed", "buses":
     {"profile": n, "assumed": n}} (the base case's live buses), "seconds"}``. Kinds judged: branch (any
     order), unit, bus_section, n_m_1, n_1_1. ``profile`` is a grid-code profile
-    (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``)."""
+    (``load_grid_code``); stage 2 takes each bus's band from it (``_bands``),
+    and its ``angle_limit_deg`` is the angle limit when ``angle_limit`` is None."""
     cset = validate_contingency_set(contingencies)
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
@@ -836,6 +863,10 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         if not isinstance(profile, dict) or not profile.get("name"):
             raise ContractError("profile must be a grid-code profile (load_grid_code) with its name, or None")
         profile = validate_profile(profile["name"], profile)
+    angle_from, caveat = "argument", ""
+    if angle_limit is None and profile is not None:
+        angle_limit, caveat = _angle_limit_from(profile)
+        angle_from = f"profile {profile['name']}"
     check_net_carries_hour(net, dispatch, loads, hour, registry)
     validate_emergency_ratings(net)
     kinds = set(cset["kind"])
@@ -914,7 +945,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
             continue
         s1_pct, s1_branch = _worst(s1.emergency, ids)
         stage1 = {"stage1_loading_pct": s1_pct, "stage1_branch": s1_branch, "stage1_verdict": _verdict(s1_pct)}
-        angle = _angle_fields(work, pairs, set(judged), angle_limit, notes)
+        angle = _angle_fields(work, pairs, set(judged), angle_limit, notes, caveat)
         notes.append(_rating_note(work))
         notes.append(_band_note(used, profile))
         notes.append(_controls_note(work, knobs, units, set(judged)))
@@ -950,7 +981,7 @@ def screen_planning(net, contingencies, dispatch, loads, hour, registry, *, cont
         "counts": {k: int(n) for k, n in cset["kind"].value_counts().sort_index().items()},
         "skipped": skipped,
         "summary": _summary(results, kinds, skipped),
-        "angle_limit": angle_limit.ledger() if angle_limit is not None else "unset",
+        "angle_limit": {**angle_limit.ledger(), "from": angle_from} if angle_limit is not None else "unset",
         "voltage_band": {"profile": profile["name"] if profile is not None else "assumed",
                          "buses": {"profile": sum(band is not None for _, band in base_used),
                                    "assumed": sum(band is None for _, band in base_used)}},
