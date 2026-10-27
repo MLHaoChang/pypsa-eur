@@ -631,6 +631,9 @@ _WRITE_ARGS = {
     "undo_last": lambda n: ((), {}),
     "update_meta": lambda n: (("renamed",), {}),
     "recalculate_line_lengths": lambda n: ((), {}),
+    "derive_lengths_from_geometry": lambda n: ((), {}),
+    "rescale_line_impedances": lambda n: (([{"name": n.lines.index[0], "r": 0.2, "x": 0.4, "b": 0.0}],), {}),
+    "reset_network": lambda n: ((), {}),
     "set_snapshots": lambda n: (("2025-01-01", "2025-01-02"), {}),
     "set_snapshot_weightings": lambda n: (({n.snapshots[0].isoformat(): {"objective": 2.0}},), {}),
     "upload_snapshot_weightings_csv": lambda n: ((_b64(

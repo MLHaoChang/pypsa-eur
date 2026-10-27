@@ -1301,6 +1301,7 @@ def get_project_sites(name: str, site_id: str | None = None) -> dict:
     """The site document, plus one site's cached context when `site_id` is given."""
     from routers import projects as R
 
+    _authorized_project(name)  # the per-project ACL, as every project read runs it
     out = {"sites": _route(R.get_sites, name)}
     if site_id:
         out["context"] = _route(R.get_site_context, name, site_id)
