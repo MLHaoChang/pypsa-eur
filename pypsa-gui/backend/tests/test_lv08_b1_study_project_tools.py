@@ -91,6 +91,16 @@ def test_the_view_and_stage_enums_list_exactly_the_routed_views():
     assert len(catalogue.TOOL_ROUTES["abort_decision_study"]) == len(chat_tools._STUDY_STAGES)
 
 
+def test_the_study_abort_is_not_refused_under_a_foreign_lock_in_chat_as_over_http():
+    """GK B P1: the middleware does not foreign-lock-gate the abort routes, so
+    the chat seam must not either (the handler's own lock check still runs)."""
+    import main
+
+    for _method, path in catalogue.TOOL_ROUTES["abort_decision_study"]:
+        assert not path.startswith(main._FOREIGN_LOCK_GATE_PREFIXES), path
+    assert "abort_decision_study" not in chat_tools._lock_gated_tool_names()
+
+
 def test_the_delete_description_names_the_cascade():
     desc = next(t["description"] for t in catalogue.TOOLS if t["name"] == "delete_decision_study")
     assert "CASCADES to the option forks the study owns" in desc
@@ -222,6 +232,9 @@ def test_scenario_metadata_and_settings_write_only_what_is_sent(client, api_proj
     with pytest.raises(HTTPException) as exc:
         chat_tools.update_project_scenario_metadata(name, scenario_type="nonsense")
     assert exc.value.status_code == 400
+    with pytest.raises(HTTPException) as exc:  # the request model's own bound, as a 422
+        chat_tools.update_project_scenario_metadata(name, description="x" * 501)
+    assert exc.value.status_code == 422
 
     import json
 

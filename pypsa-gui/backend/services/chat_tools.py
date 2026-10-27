@@ -3128,9 +3128,14 @@ def update_project_scenario_metadata(name: str, description: str | None | _Unset
     from models.schemas import UpdateScenarioRequest
     from routers.projects import update_scenario_metadata as _h
 
-    body = UpdateScenarioRequest(**{k: v for k, v in (("description", description),
-                                                      ("scenario_type", scenario_type))
-                                    if v is not _UNSET})
+    from pydantic import ValidationError
+
+    try:
+        body = UpdateScenarioRequest(**{k: v for k, v in (("description", description),
+                                                          ("scenario_type", scenario_type))
+                                        if v is not _UNSET})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
     return _route(_h, name, body)
 
 
