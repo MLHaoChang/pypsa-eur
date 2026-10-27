@@ -1,6 +1,6 @@
 """
 GeoJSON / KML through `POST /api/projects/{name}/uploads`: accepted only when
-the bytes parse as the map import reads them (`upload_service.geo_mime_for`),
+the bytes parse as the map import reads them (`upload_service.resolve_geo_mime`),
 refused when the name or declared type says geo and the bytes do not.
 """
 from __future__ import annotations

@@ -886,7 +886,7 @@ def _check_loss_magnitude(n, cfg) -> list[Issue]:
     return out
 
 
-def rolling_window_problems(horizon: int, overlap: int, strategy: str = "rolling") -> list[tuple[str, str]]:
+def rolling_window_problems(horizon: int, overlap: int, strategy: str) -> list[tuple[str, str]]:
     """
     `(kind, message)` for each way a rolling window is unusable: horizon <= 0,
     overlap < 0, overlap >= horizon (PyPSA rejects it). Empty when usable, and
@@ -934,7 +934,7 @@ def _check_rolling_horizon(n, cfg) -> list[Issue]:
     out: list[Issue] = []
     H = int(getattr(cfg, "rolling_horizon", 168) or 0)
     O = int(getattr(cfg, "rolling_overlap", 24) or 0)
-    out += [_err(kind, "", "", msg) for kind, msg in rolling_window_problems(H, O)]
+    out += [_err(kind, "", "", msg) for kind, msg in rolling_window_problems(H, O, "rolling")]
     if getattr(cfg, "sclopf", False):
         out.append(_err("rolling_with_sclopf", "", "",
             "N-1 security can't run with the rolling-horizon "

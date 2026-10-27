@@ -65,6 +65,23 @@ def test_unrelated_put_is_not_blocked_by_a_stored_bad_pair(client):
     assert r.status_code == 200, r.text
 
 
+def test_the_settings_form_echo_of_a_stored_bad_pair_is_not_refused(client):
+    """A full-form PUT re-sends the rolling values unchanged: only the edit it carries is judged."""
+    sim_router._state["solver_config"].solve_strategy = "rolling"
+    sim_router._state["solver_config"].rolling_overlap = 500
+    r = client.put(URL, json={**client.get(URL).json(), "voll": 9000})
+    assert r.status_code == 200, r.text
+    assert client.get(URL).json()["voll"] == 9000
+
+
+def test_changing_the_window_over_a_stored_bad_pair_is_judged(client):
+    sim_router._state["solver_config"].solve_strategy = "rolling"
+    sim_router._state["solver_config"].rolling_overlap = 500
+    r = client.put(URL, json={**client.get(URL).json(), "rolling_horizon": 200})
+    assert r.status_code == 422, r.text
+    assert client.put(URL, json={"rolling_overlap": 24}).status_code == 200
+
+
 def test_switching_to_rolling_over_a_stored_bad_pair_is_refused(client):
     sim_router._state["solver_config"].rolling_overlap = 500
     r = client.put(URL, json=ROLLING)
@@ -98,7 +115,7 @@ def test_the_chat_tool_gets_the_refusal_under_its_kind(client):
 
 
 def test_the_preflight_check_and_the_route_share_one_rule():
-    assert [k for k, _ in rolling_window_problems(168, 24)] == []
-    assert [k for k, _ in rolling_window_problems(24, 24)] == ["rolling_overlap_exceeds_horizon"]
-    assert [k for k, _ in rolling_window_problems(0, -1)] == ["rolling_horizon_invalid", "rolling_overlap_invalid"]
+    assert [k for k, _ in rolling_window_problems(168, 24, "rolling")] == []
+    assert [k for k, _ in rolling_window_problems(24, 24, "rolling")] == ["rolling_overlap_exceeds_horizon"]
+    assert [k for k, _ in rolling_window_problems(0, -1, "rolling")] == ["rolling_horizon_invalid", "rolling_overlap_invalid"]
     assert rolling_window_problems(24, 500, "full") == []

@@ -623,6 +623,7 @@ def update_solver_config(
         rebound = submitted["commercial"] is not None
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
+        stored = dict(merged)
         if rebound:
             # The value-flow config is owned by its own route: keep what is
             # stored NOW (read under the lock, so a concurrent value-flows edit
@@ -632,9 +633,10 @@ def update_solver_config(
                 current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
         # Checked on the MERGED values (a partial PUT may set one of them), and
-        # only when this PUT sets one: a stored legacy pair must not block
-        # unrelated edits (the pre-flight check still refuses it at solve).
-        if _ROLLING_KEYS & submitted.keys():
+        # only when this PUT changes one: a stored legacy pair, or the settings
+        # form echoing it unchanged, must not block unrelated edits (the
+        # pre-flight check still refuses it at solve).
+        if any(submitted[k] != stored.get(k) for k in _ROLLING_KEYS & submitted.keys()):
             problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]),
                                                merged.get("solve_strategy", "full"))
             if problems:
