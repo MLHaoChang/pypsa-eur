@@ -679,21 +679,28 @@ def _tdd_row(inp: _Inputs) -> dict:
                         target=_target("assets", "Link", rec["unit"], field))
         if spectrum_source.startswith("demo"):
             demo.append(rec["unit"])
+    rated = pd.to_numeric(units["rated_mva"], errors="coerce")
     if inp.connection_mw:
         i_l, i_l_note = inp.connection_mw, _TDD_IL_IMPORT
     else:
-        rated = pd.to_numeric(units["rated_mva"], errors="coerce")
         i_l, i_l_note = (float(rated.sum()) if rated.notna().any() else None), _TDD_IL_PROCESS
-    poc = td.tdd_table(units, {"PoC": sk}, {"PoC": i_l}, {"PoC": _poc_vn_kv(inp.n)}, standard,
+    vn_kv = _poc_vn_kv(inp.n)
+    poc = td.tdd_table(units, {"PoC": sk}, {"PoC": i_l}, {"PoC": vn_kv}, standard,
                        basis=(_TDD_SK_NOTE, i_l_note)).iloc[0]
     tdd, limit = _num(poc["tdd_pct"]), _num(poc["tdd_limit_pct"])
     missing = list(poc["no_input_units"] or [])
     if poc["verdict"] == "unknown" and poc["band"] is None:
-        # tdd_table's own guards: no voltage, or no load current at the PoC.
+        # tdd_table's own guards: no voltage, or no load current at the PoC. Without a connection rating I_L
+        # is the process units' rated load, so Go to field opens the first unit without a rating.
+        unrated = units.loc[rated.isna(), "unit"]
+        if vn_kv is None:
+            target = _target("connection", "Bus", None, "v_nom")
+        elif i_l_note == _TDD_IL_PROCESS and len(unrated):
+            target = _target("assets", "Link", unrated.iloc[0], "rated_mva")
+        else:
+            target = _target("connection", "Link", inp.link, "p_nom")
         return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
-                    verdict="unknown", assumed=True, note=str(poc["note"]), section="assets",
-                    target=_target("connection", "Bus", None, "v_nom") if _poc_vn_kv(inp.n) is None
-                    else _target("connection", "Link", inp.link, "p_nom"))
+                    verdict="unknown", assumed=True, note=str(poc["note"]), section="assets", target=target)
     if missing:
         first = missing[0]
         rated = pd.to_numeric(units.set_index("unit")["rated_mva"], errors="coerce").get(first)
@@ -708,7 +715,7 @@ def _tdd_row(inp: _Inputs) -> dict:
         notes.append(f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Harmonic source "
                      "or Rated apparent power; a unit without them blocks a pass.")
     else:
-        notes.append(f"Current distortion {tdd:.3g} % of the load current against {limit:g} %.")
+        notes.append(f"Current distortion {tdd:.4g} % of the load current against {limit:g} %.")
     notes.append(f"IEEE 519-2014 {poc['table']}: short-circuit ratio {poc['isc_il']:.3g}, "
                  f"band {str(poc['band']).replace('<=', '≤')}.")
     worst, worst_lim = _num(poc["worst_i_h_pct"]), _num(poc["worst_limit_pct"])
@@ -805,7 +812,7 @@ def _unbalance_row(inp: _Inputs) -> dict:
         notes = [f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Single-phase share "
                  "or Rated apparent power; a unit without them blocks a pass."]
         if u2 > 0:
-            notes.append(f"At least {u2:.2g} % from the units with inputs.")
+            notes.append(f"At least {u2:.4g} % from the units with inputs.")
     else:
         notes = [f"Screening upper bound: {s_unbal['PoC']:.4g} MVA of single-phase load ÷ {s_sc2:.4g} MVA "
                  f"negative-sequence short-circuit power = {u2:.2g} %."]

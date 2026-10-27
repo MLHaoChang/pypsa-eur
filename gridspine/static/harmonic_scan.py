@@ -191,8 +191,8 @@ def cap_states(shunts: pd.DataFrame) -> tuple[list, list]:
         for s in range(int(shunts.at[i, "max_step"])):
             if {**full, i: s} not in states:
                 states.append({**full, i: s})
-    note = (f"{count} capacitor states exceed MAX_CAP_STATES ({MAX_CAP_STATES}): scanned all in, all out and "
-            f"each shunt stepped alone with the others in ({len(states)} states)")
+    note = (f"{count} capacitor states are more than the {MAX_CAP_STATES} the scan steps through in full: scanned "
+            f"all in, all out and each shunt stepped alone with the others in ({len(states)} states)")
     return states, [note]
 
 

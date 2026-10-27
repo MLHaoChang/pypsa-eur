@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileText, Save, Sparkles, Trash2, Upload } from 'lucide-react'
 import {
-  campusApi, errorText,
+  campusApi, errorText as apiErrorText,
   type GridCodeDocument, type GridCodeDraft, type GridCodeSummary, type GridLimit,
 } from '../api/campusElectrical'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
@@ -31,6 +31,13 @@ const UNCONFIRMED_CHECK = 'Publish with unconfirmed limits (they will show as ex
 
 const SOURCE_TONE: Record<GridLimit['source'], 'ok' | 'warn' | 'accent'> = {
   code: 'accent', assumed: 'warn', extracted: 'warn',
+}
+
+/** The backend's refusal from a capital: its grid-code messages open in lower case.
+ *  A field path (`voltage_bands[0]: …`) opens the message as written. */
+const errorText = (e: unknown): string => {
+  const text = apiErrorText(e)
+  return /^[a-z]+(?![\w[.])/.test(text) ? text.charAt(0).toUpperCase() + text.slice(1) : text
 }
 
 /** A stored selection (`1-40,120-180`) as shown: en dashes, a space after each comma. */

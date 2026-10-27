@@ -4669,6 +4669,96 @@ TOOLS: list[dict[str, Any]] = [
          "derive_lengths_from_geometry": {"type": "boolean"}},
         ["name", "derive_lengths_from_geometry"],
     ),
+    # ── Network topology and sites (8) — LV08 B1 ─────────────────────────
+    _t(
+        "get_asset_reference",
+        "Read the network's asset reference tables. view='asset_costs': every investable "
+        "asset's upfront parts and annual costs with the global discount rate and each "
+        "asset's provenance (a part priced only through an annual capital_cost is "
+        "back-calculated and flagged); 'asset_schema': the field descriptors an asset card "
+        "shows for component (grouped, in order); 'attribute_catalog': PyPSA's attribute "
+        "metadata for component. asset_schema and attribute_catalog need component. "
+        "Safety: read.",
+        {"view": {"type": "string", "enum": ["asset_costs", "asset_schema", "attribute_catalog"]},
+         "component": {"type": "string", "enum": COMPONENT_CLASS_ENUM}},
+        ["view"],
+    ),
+    _t(
+        "geocode_place",
+        "Look up a place name or address with the configured geocoder (Nominatim-compatible) "
+        "and return its candidate matches with coordinates, to place a site or bus on the "
+        "map. The query is sent to that external service. 503 when no geocoder is "
+        "configured, 502 when it does not answer in time. Safety: read.",
+        {"query": {"type": "string", "minLength": 1, "maxLength": 200}},
+        ["query"],
+    ),
+    _t(
+        "derive_lengths_from_geometry",
+        "Rewrite Line and Link lengths from the project's map geometry: the drawn route "
+        "when a branch has one, else the straight chord. keys: the branches as "
+        "'line:<name>' / 'link:<name>' (omit for every Line and Link). Returns {updated, "
+        "skipped, rescale, sources}; `rescale` lists, per line, the r/x/b values that "
+        "would keep its per-km impedance. Those are NOT applied: show them and call "
+        "rescale_line_impedances only with the values the user accepts. 409 for a project "
+        "never saved (its routes live in the saved map layout). Safety: write.",
+        {"keys": {"type": "array", "maxItems": 500,
+                  "items": {"type": "string", "pattern": "^(line|link):.+$", "maxLength": 200}}},
+        [],
+    ),
+    _t(
+        "rescale_line_impedances",
+        "Write new r, x and b values for named lines, after derive_lengths_from_geometry. "
+        "Use ONLY the values its `rescale` list returned, for the lines the user accepted; "
+        "never compute or default them (by now the old length is gone, so they cannot be "
+        "re-derived). The card shows each line's old and new r, x and b. Returns {updated, "
+        "skipped}. Safety: write.",
+        {"lines": {"type": "array", "minItems": 1, "maxItems": 500, "items": {
+            "type": "object", "additionalProperties": False,
+            "required": ["name", "r", "x", "b"],
+            "properties": {"name": {"type": "string", "minLength": 1},
+                           "r": {"type": "number"}, "x": {"type": "number"},
+                           "b": {"type": "number"}}}}},
+        ["lines"],
+    ),
+    _t(
+        "reset_network",
+        "Start a new, empty network (the GUI's New Project): clears the live network, its "
+        "user time series, the undo history and the unsaved-changes flag, and unbinds this "
+        "session from its active project. Unsaved edits are lost; save_project first if "
+        "they matter. The saved project on disk is untouched. Safety: destructive.",
+        {},
+        [],
+    ),
+    _t(
+        "get_project_sites",
+        "Read a project's site document: its sites, boundaries, bus membership and asset "
+        "placements (empty when it has none). With site_id, also the cached site context "
+        "(building footprints and terrain) for that site; 404 when it was never fetched "
+        "(fetch_site_context). Read before set_project_sites. Safety: read.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name"],
+    ),
+    _t(
+        "set_project_sites",
+        "Replace a project's whole site document (read it with get_project_sites first and "
+        "send it back with the change). Validated: a 422 names the field; 413 over the "
+        "size cap; 409 another user's edit lock. A site removed from the document loses "
+        "its cached context. Safety: write.",
+        {"name": {"type": "string"},
+         "sites": {"type": "object"}},
+        ["name", "sites"],
+    ),
+    _t(
+        "fetch_site_context",
+        "Fetch the context of one site's boundary (building footprints from OpenStreetMap "
+        "Overpass and terrain tiles), cache it with the project and return it. Sends the "
+        "boundary's area to those external services. 502 with the upstream's message when "
+        "a source refuses; 409 another user's edit lock. Safety: write.",
+        {"name": {"type": "string"},
+         "site_id": {"type": "string", "maxLength": 128}},
+        ["name", "site_id"],
+    ),
 ]
 
 
@@ -4729,6 +4819,19 @@ TOOLS.extend([
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
     _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     _t("get_reliability_goal", "The project's one reliability goal as the EH study, Monte-Carlo, coupling and margin loops resolve it when a call leaves a field out: {target_lole_h (allowed shortfall, h/yr), ens_cap_permyriad (energy strictness, ‱ of demand), mc_draws, site_archetype}, each {value, source: stored|template|default}. Change it with update_solver_config. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
+    # Each calls its GUI route's own handler in-process (TOOL_ROUTES below);
+    # read outputs are bounded under the result cap.
+    _t("get_osm_suggestions", "OpenStreetMap power lines and substations inside a bounding box, as the map's OSM suggestion layer shows them. bbox is 'min_lng,min_lat,max_lng,max_lat' (WGS84) and must be site-sized; a malformed or district-sized box is 422, an Overpass refusal 429/504/502 naming the setting to change. Returns bbox, attribution, cached, lines_total, areas_total and a page of rows {kind (line|minor_line|cable|substation), osm_id, name, voltage, operator, n_points} in the shared page envelope (offset/limit). Suggestions are never written to the project. Safety: read.", {"name": {"type": "string"}, "bbox": {"type": "string", "maxLength": 128}, "offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, ["name", "bbox"]),
+    _t("preview_library_reference", "Preview applying one shipped cost reference (list_library_references) to ONE asset, exactly as the Library reference dialog previews it: {card, needs, missing, notes, rows, pack, licence, attribution}. While a confirmation is missing there is no card: `needs` says what each confirmation means; ask the user and preview again with confirm=[...] naming only what they confirmed. Plans on a copy and writes nothing; apply_library_reference is the write. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"component_class": {"type": "string", "enum": ["Generator", "Link"]}, "name": {"type": "string"}, "technology": {"type": "string"}, "projection_year": {"type": "integer"}, "confirm": {"type": "array", "items": {"type": "string", "enum": ["dc_ac", "grid_connection", "money_year"]}}}, ["component_class", "name", "technology", "projection_year"]),
+    _t("import_map_geometry", "Match an UPLOADED GeoJSON or KML file (file_id from list_uploads of the open project) against the map: LineStrings become branch routes (by name, else by both ends snapping to placed buses within tolerance_m metres), Polygons become sites. apply=false (default) returns the match report and writes nothing; apply=true writes the routes (source 'import') and appends the sites, and with 'Derive lengths from geometry' on also sets the applied Lines' and Links' lengths (returned under `lengths`). The project must be the open one (409 otherwise); apply under another user's edit lock is 409 project_locked; 413 over the size cap; 422 for malformed GeoJSON/KML or tolerance outside (0, 5000]. Returns counts and per-feature rows without coordinates. Safety: write.", {"name": {"type": "string"}, "file_id": {"type": "string"}, "apply": {"type": "boolean"}, "tolerance_m": {"type": "number", "exclusiveMinimum": 0, "maximum": 5000}}, ["name", "file_id"]),
+    _t("list_result_assets", "Every asset the per-asset view's picker lists for the CURRENT network (transient rows removed): rows {class, name, carrier, bus} in the shared page envelope (offset/limit, total_count, has_more); class and name identify the asset for the per-asset read. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
+    _t("get_curtailment_by_cause", "Read the CURRENT solve's curtailment split by cause per plant, as the curtailment view shows it: export_limit (the export Link at its limit), negative_price (a negative export price), both, other. The causes sum to each plant's total_mwh. Returns status (ok, or not_established with a reason: export_link_missing, export_price_missing, no_commercial_solve_record, export_price_changed_since_solve), export_link, export_capacity_mw, negative_price_hours and a page of plant rows {plant, total_mwh, available_mwh, by_cause_mwh, by_period} (offset/limit). Unsolved or stale dispatch returns status no_data; never report it as zero. Safety: read.", {"offset": {"type": "integer", "minimum": 0}, "limit": {"type": "integer", "minimum": 1}}, []),
+    _t("get_eh_readiness", "Energy Hub readiness preflight for an archetype, exactly as the Energy Hub panel's readiness check computes it (on a private copy; nothing is written): which Links the pack treats as imports and by which rule, critical buses, DtC derivability, SCR coverage, Class-B, the MC hub boundary, and a per-stage prediction and solve estimate against budget_solves. stages overrides the pipeline (same rules as run_eh_study); dtc_attribution chooses bus_aggregate_not_per_load or per_load; pack_overrides is the same object run_eh_study takes, validated identically (422 naming the field). 422 for an unknown archetype, a budget out of range or no network. Long lists are trimmed and `truncated` names each one's total. Safety: read.", {"archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM}, "budget_solves": {"type": "integer", "minimum": 1, "maximum": _MAX_EH_BUDGET_SOLVES}, "stages": {"type": "array", "items": {"type": "string", "enum": EH_STAGE_ENUM}}, "dtc_attribution": {"type": "string", "enum": ["bus_aggregate_not_per_load", "per_load"]}, "pack_overrides": {"type": "object"}}, ["archetype"]),
+    _t("get_report_capabilities", "What this host can export a study report as beyond .docx: {pdf: bool} (true when LibreOffice is installed, so export_report_pdf can succeed). Safety: read.", {}, []),
+    _t("get_report_evidence_hash", "The hash of the active project's CURRENT report evidence (what create_evidence_report would store as evidence_hash now) and how many evidence sections are established: {evidence_hash, sections_ok, sections_total}. Compare with a report's evidence_hash to say whether the evidence changed since it was written. Safety: read.", {}, []),
+    _t("get_report_version", "Read one stored VERSION of a study report of the active project (report_id from list_reports, version >= 1): the report's meta (report_id, version, title, language, created_at, mode, profile_id, model, evidence_hash) and one row per section {section_id, heading, source, status}. With section_id: that section's prose blocks, tables as {table_id, columns, n_rows}, figures as captions (get_report_table pages a table). 400 invalid_report_id, 404 report_not_found (or version), 404 report_section_not_found. Safety: read.", {"report_id": {"type": "string"}, "version": {"type": "integer", "minimum": 1}, "section_id": {"type": "string"}}, ["report_id", "version"]),
+    _t("create_evidence_report", "Build and store a NEW evidence-only study report (version 1) of the active project from the session's current result state, as the Reports panel's 'New evidence report' does: no model writes prose, each section states its evidence or that it is not established. title defaults to the standard title with the project name. Refused under another user's edit lock (409 project_locked). Returns the report meta and its section rows; read it with get_report. Safety: write.", {"title": {"type": "string", "maxLength": 200}}, []),
 ])
 
 TOOL_COUNT: int = len(TOOLS)
@@ -4803,7 +4906,7 @@ _COMP_DELETE_ROUTES = [
 
 TOOL_ROUTES: dict[str, list] = {
     "list_project_runs": _SERVICE_CALL,
-    "get_run_evidence": _SERVICE_CALL,
+    "get_run_evidence": [("GET", "/api/results/run-view")],
     "compare_project_runs": _SERVICE_CALL,
     "discuss_project_run": _UI_EVENT,
     "export_run_evidence": _SERVICE_CALL,
@@ -4817,9 +4920,9 @@ TOOL_ROUTES: dict[str, list] = {
     "export_experiment_comparison": _SERVICE_CALL,
     "list_experiments": _SERVICE_CALL,
     "get_experiment": _SERVICE_CALL,
-    "get_loadflow_summary": _SERVICE_CALL,
-    "get_energy_flows": _SERVICE_CALL,
-    "get_load_shape": _SERVICE_CALL,
+    "get_loadflow_summary": [("GET", "/api/results/loadflow-view")],
+    "get_energy_flows": [("GET", "/api/results/energy_flows")],
+    "get_load_shape": [("GET", "/api/results/load_shape")],
     "list_tasks": _SERVICE_CALL,
     "find_capabilities": _SERVICE_CALL,
     "get_component_schema": _SERVICE_CALL,
@@ -4896,6 +4999,18 @@ TOOL_ROUTES: dict[str, list] = {
     # write_topology (2)
     "cluster_network": [("POST", "/api/network/cluster")],
     "recalculate_line_lengths": [("POST", "/api/network/lines/recalculate_lengths")],
+    # network topology and sites (8) — LV08 B1, in process through `_route`.
+    "get_asset_reference": [("GET", "/api/network/asset_costs"),
+                            ("GET", "/api/network/asset_schema/{component}"),
+                            ("GET", "/api/network/catalog/{component}")],
+    "geocode_place": [("GET", "/api/geocode")],
+    "derive_lengths_from_geometry": [("POST", "/api/network/lengths/from_geometry")],
+    "rescale_line_impedances": [("POST", "/api/network/lines/rescale_impedances")],
+    "reset_network": [("POST", "/api/network/reset")],
+    "get_project_sites": [("GET", "/api/projects/{name}/sites"),
+                          ("GET", "/api/projects/{name}/sites/{site_id}/context")],
+    "set_project_sites": [("PUT", "/api/projects/{name}/sites")],
+    "fetch_site_context": [("POST", "/api/projects/{name}/sites/{site_id}/context")],
     # write_snapshots (4)
     "set_snapshots": [("POST", "/api/network/snapshots")],
     "set_snapshot_weightings": [("PATCH", "/api/network/snapshots/weightings")],
@@ -5067,9 +5182,9 @@ TOOL_ROUTES: dict[str, list] = {
     "list_uploads": [("GET", "/api/projects/{name}/uploads")],
     "read_upload_meta": [("GET", "/api/projects/{name}/uploads/{file_id}/meta")],
     "read_excel_sheet": _SERVICE_CALL,
-    "preview_equipment_mapping": _SERVICE_CALL,
-    "preview_document_values": _SERVICE_CALL,
-    "preview_commercial_document_values": _SERVICE_CALL,
+    "preview_equipment_mapping": [("POST", "/api/equipment_table/preview")],
+    "preview_document_values": [("POST", "/api/document_values/preview")],
+    "preview_commercial_document_values": [("POST", "/api/document_values/commercial/preview")],
     "apply_demand_from_excel": _SERVICE_CALL,
     "delete_upload": [("DELETE", "/api/projects/{name}/uploads/{file_id}")],
     # uploads — vision (Phase C dependency stub)
@@ -5252,6 +5367,17 @@ TOOL_ROUTES: dict[str, list] = {
     # project flow (B1)
     "get_project_flow": [("GET", "/api/projects/{name}/flow")],
     "get_reliability_goal": [("GET", "/api/projects/{name}/flow/reliability_goal")],
+    # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
+    "get_osm_suggestions": [("GET", "/api/projects/{name}/map_layout/osm_suggestions")],
+    "preview_library_reference": [("POST", "/api/library_reference/preview")],
+    "import_map_geometry": [("POST", "/api/projects/{name}/map_layout/import")],
+    "list_result_assets": [("GET", "/api/results/asset/assets")],
+    "get_curtailment_by_cause": [("GET", "/api/results/curtailment/by_cause")],
+    "get_eh_readiness": [("GET", "/api/results/eh_readiness")],
+    "get_report_capabilities": [("GET", "/api/projects/{name}/reports/capabilities")],
+    "get_report_evidence_hash": [("GET", "/api/projects/{name}/reports/evidence_hash")],
+    "get_report_version": [("GET", "/api/projects/{name}/reports/{report_id}/versions/{version}")],
+    "create_evidence_report": [("POST", "/api/projects/{name}/reports")],
 }
 
 

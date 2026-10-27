@@ -48,7 +48,7 @@ SETTINGS_EDITS = frozenset({
     "update_solver_config", "set_site_connection", "attach_tariff", "import_urdb_tariff",
     "define_participants", "put_stress_scenarios", "record_asset_health", "set_study_parameter",
     "apply_generated_profile", "apply_generated_profiles", "apply_default_series",
-    "update_project_layout",
+    "update_project_layout", "set_project_sites",
     "gridspine_update_config", "gridspine_edit_template_param", "gridspine_set_dispatch_source",
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
@@ -60,6 +60,8 @@ SETTINGS_EDITS = frozenset({
     "update_project_settings",
     # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
     "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
+    # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
+    "import_map_geometry",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -87,6 +89,9 @@ NOT_EDITS = {
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
     "campus_run_island_study": "a computation on copies of the saved network",
+    # LV08 B2b
+    "create_evidence_report": "a new report record from the current evidence",
+    "fetch_site_context": "caches upstream map context for a site; no input changes",
     # live-voice 08 B3
     "solve_queue_clear_finished": "drops finished jobs from the queue listing",
     "solve_queue_dismiss": "hides a finished job from your own queue listing",
@@ -730,6 +735,25 @@ def _bulk_preview(args: dict) -> list[dict]:
 
 register("update_component", Adapter("parameter_edit", _update_component_preview, _component_readback))
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
+
+
+def _rescale_impedances_preview(args: dict) -> list[dict]:
+    """Each named line's old and new r, x and b (LV08 B1, GK B P3)."""
+    from services import chat_tools
+
+    lines = args.get("lines")
+    if not isinstance(lines, list) or not lines or not all(isinstance(e, dict) for e in lines):
+        _refuse("empty_edit", "Name at least one line with its r, x and b.")
+    missing = [e.get("name") for e in lines if any(k not in e for k in ("name", "r", "x", "b"))]
+    if missing:
+        _refuse("invalid_edit_value", f"Line {missing[0]!r} needs name, r, x and b; send the values "
+                "derive_lengths_from_geometry returned.")
+    targets = [(e["name"], {k: e[k] for k in ("r", "x", "b")}) for e in lines]
+    return _sandbox_rows("Line", targets, lambda: chat_tools.rescale_line_impedances(lines))
+
+
+register("rescale_line_impedances", Adapter("parameter_edit", _rescale_impedances_preview,
+                                            _component_readback))
 
 
 # ── Several assets in one reviewed preview: apply_project_changes (LC-16) ──

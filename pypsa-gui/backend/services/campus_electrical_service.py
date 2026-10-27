@@ -289,6 +289,8 @@ def _scan_note(note: str) -> str:
     notes name their input fields (``pcc.sk_normal_mva``); the app names none."""
     if note == hs.NO_NORMAL:
         return "The normal case is not scanned: no normal short-circuit level is entered"
+    if note == "the resonance clearance is extracted, not the grid code's":
+        return "The clearance is extracted and not yet confirmed on the grid-code page"
     return note[:1].upper() + note[1:]
 
 

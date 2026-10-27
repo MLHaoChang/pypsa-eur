@@ -926,7 +926,7 @@ def test_a_profile_without_the_key_still_gives_unknown():
 def test_an_extracted_angle_limit_is_assumed_and_named_unconfirmed_on_pass_and_fail_rows():
     net = _net()
     cset = _set(net)
-    for value, verdict in ((180.0, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
+    for value, verdict in ((89.9, "pass"), (_worst_angle(net, cset) - 1e-6, "fail")):
         res, report = _screen(net, cset, profile=_angle_profile(value, "extracted", page=12, quote="placeholder"))
         solved = res[res["stage1_verdict"] != "not_solved"]
         judged = solved[solved["angle_verdict"] == verdict]
@@ -949,6 +949,17 @@ def test_an_assumed_angle_limit_stays_assumed():
 def test_a_bad_profile_angle_limit_is_refused(value):
     with pytest.raises(ContractError, match="angle_limit_deg value must be a positive number"):
         _angle_profile(value)
+
+
+@pytest.mark.parametrize("value", [90.0, 120.0, 360.0])
+def test_a_profile_angle_limit_at_or_past_90_degrees_is_refused(value):
+    with pytest.raises(ContractError, match="angle_limit_deg value must be an angle below 90 degrees"):
+        _angle_profile(value)
+
+
+@pytest.mark.parametrize("value", [0.5, 30.0, 89.9])
+def test_a_profile_angle_limit_below_90_degrees_is_kept(value):
+    assert _angle_profile(value)["angle_limit_deg"]["value"] == value
 
 
 def test_a_profile_angle_limit_needs_a_clause_and_an_extracted_one_its_page():

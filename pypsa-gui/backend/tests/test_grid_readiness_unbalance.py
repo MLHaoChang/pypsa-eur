@@ -78,7 +78,7 @@ def test_a_partial_sum_is_said_as_a_floor_without_a_number(tmp_path):
     floor = 100.0 * 0.5 * 20.0 / (1400.0 / 1.1)
     assert row["verdict"] == "unknown" and row["project_value"] is None
     assert row["note"].startswith("pump has no Single-phase share")
-    assert f"At least {floor:.2g} % from the units with inputs." in row["note"]
+    assert f"At least {floor:.4g} % from the units with inputs." in row["note"]
     assert row["target"]["entity"] == "pump"
 
 
@@ -92,7 +92,7 @@ def test_a_floor_already_over_the_limit_warns_without_a_number(tmp_path):
     floor = 100.0 * 1.0 * 20.0 / (1000.0 / 1.1)
     assert floor > LIMIT["value"]
     assert row["verdict"] == G.RULE_UNBALANCE["otherwise"] == "warn" and row["project_value"] is None
-    assert f"At least {floor:.2g} % from the units with inputs." in row["note"]
+    assert f"At least {floor:.4g} % from the units with inputs." in row["note"]
     assert row["target"]["entity"] == "pump"
 
 

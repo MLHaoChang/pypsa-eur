@@ -34,7 +34,7 @@ const setting = (item: string, over: Record<string, unknown> = {}) => ({
 describe('ConnectionLimits', () => {
   it('names the starting template when its label is unavailable', () => {
     expect(resetTarget({ item: 'fault_level', user: null,
-      default: { value: 25, source: 'assumed', origin: 'template' } }, '')).toBe("the starting template's 25, assumed")
+      default: { value: 25, source: 'assumed', origin: 'template' } }, 'MVA')).toBe("the starting template's 25 MVA, assumed")
   })
 
   it('lists energization, ramp, oscillation and fault level with their source and assumed tag', async () => {

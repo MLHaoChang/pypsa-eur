@@ -171,7 +171,7 @@ from services.solver_service import (
 )
 from services import study_state as _study_state
 from services.ac_pf_service import run_ac_pf_stage
-from services.validation_service import has_errors, validate_for_run
+from services.validation_service import has_errors, rolling_window_problems, validate_for_run
 from starlette.responses import StreamingResponse
 
 
@@ -536,6 +536,16 @@ def _gate_user_code(submitted: dict, db, actor) -> None:
         )
 
 
+_ROLLING_KEYS = frozenset({"solve_strategy", "rolling_horizon", "rolling_overlap"})
+# `error_kind` literals (the tool-error manifest derives kinds from them): the
+# chat forwards the kind, and the EditCard preview re-raises it before a card.
+_ROLLING_REFUSALS = {d["error_kind"]: d for d in (
+    {"error_kind": "rolling_horizon_invalid"},
+    {"error_kind": "rolling_overlap_invalid"},
+    {"error_kind": "rolling_overlap_exceeds_horizon"},
+)}
+
+
 @router.put("/solver_config")
 def update_solver_config(
     cfg: SolverConfigSchema,
@@ -613,6 +623,7 @@ def update_solver_config(
         rebound = submitted["commercial"] is not None
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
+        stored = dict(merged)
         if rebound:
             # The value-flow config is owned by its own route: keep what is
             # stored NOW (read under the lock, so a concurrent value-flows edit
@@ -621,6 +632,16 @@ def update_solver_config(
             submitted["commercial"]["value_flows"] = (
                 current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
+        # Checked on the MERGED values (a partial PUT may set one of them), and
+        # only when this PUT changes one: a stored legacy pair, or the settings
+        # form echoing it unchanged, must not block unrelated edits (the
+        # pre-flight check still refuses it at solve).
+        if any(submitted[k] != stored.get(k) for k in _ROLLING_KEYS & submitted.keys()):
+            problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]),
+                                               merged.get("solve_strategy", "full"))
+            if problems:
+                kind, message = problems[0]
+                raise HTTPException(422, {**_ROLLING_REFUSALS[kind], "message": message})
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
 
