@@ -3526,7 +3526,7 @@ def dispatch_status() -> dict:
 
 
 def run_simulation(rerun_current: bool = False) -> dict:
-    # `rerun_current` is read before the card (harness/rerun.py), never here.
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # The route handler is `run`, NOT `run_simulation` — the latter is
     # `services.solver_service.run_simulation` re-exported via the router
     # module's `from services.solver_service import run_simulation` import.

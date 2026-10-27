@@ -690,7 +690,7 @@ describe('P26 gate B2: Guided cards name what they touch', () => {
       'Run the power-flow check again; its results already match the network, so it gives the same answer'],
     ['solve_queue_requeue', { job_id: 'j1' }, 'Run the finished calculation j1 again as a new job'],
     ['solve_queue_requeue', { job_id: 'j1', rerun_current: true },
-      'Run the finished calculation j1 again as a new job; its results already match the inputs'],
+      'Run the finished calculation j1 again as a new job; its results already match the inputs, so it gives the same answer'],
     ['solve_queue_cancel_queued', {},
       'Cancel every calculation you queued that has not started; running ones go on'],
     ['set_active_profile', { profile_id: 'local' }, 'Switch the assistant to the model profile local'],

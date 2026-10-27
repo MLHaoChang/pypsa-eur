@@ -2502,10 +2502,13 @@ def _dispatch_real_tool_call(
                                        "content": _error_result_content(detail, None, detail["error_kind"])})
         return
     # LC-19: a re-solve of current results is asked about first, also for the
-    # model only (harness/run_lifecycle.py); the user's yes comes back with the flag.
+    # model only (harness/run_lifecycle.py); the user's yes comes back with the flag,
+    # which the card keeps only while the results really are current.
     from harness import run_lifecycle
     try:
-        current = None if external else run_lifecycle.check_rerun(tool_name, args)
+        current = None
+        if not external:
+            current, args = run_lifecycle.gate(tool_name, args)
     except Exception:  # noqa: BLE001 — the run card still asks; never make a tool uncallable
         logger.exception("chat: re-run check for %r failed; the card decides", tool_name)
         current = None

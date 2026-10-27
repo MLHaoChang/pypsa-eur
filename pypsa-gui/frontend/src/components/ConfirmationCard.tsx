@@ -164,7 +164,7 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
   solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
   // LC-19: a retry runs the finished job again as a new one; cancel touches only your queued jobs.
   solve_queue_requeue: (a) => `Run the finished calculation${_str(a.job_id) ? ` ${a.job_id}` : ''} again as a new job`
-    + (a.rerun_current === true ? '; its results already match the inputs' : ''),
+    + (a.rerun_current === true ? '; its results already match the inputs, so it gives the same answer' : ''),
   solve_queue_cancel_queued: () => 'Cancel every calculation you queued that has not started; running ones go on',
   save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
   save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,

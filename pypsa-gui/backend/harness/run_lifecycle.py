@@ -119,6 +119,18 @@ def _check_loadflow_rerun() -> dict | None:
     }
 
 
+def gate(tool_name: str, args: dict[str, Any]) -> tuple[dict | None, dict[str, Any]]:
+    """The refusal for a re-solve of current results, and the args the card shows.
+    The flag stays only while the results really are current: the card words it
+    as "the results already match", so a flag on changed inputs is dropped."""
+    if args.get(FLAG) is not True:
+        return check_rerun(tool_name, args), args
+    plain = {k: v for k, v in args.items() if k != FLAG}
+    if tool_name != LOADFLOW_TOOL and tool_name not in RERUN_TOOLS:
+        return None, args
+    return None, (args if check_rerun(tool_name, plain) else plain)
+
+
 # A status that ends a solve without results and was not the user's own stop.
 FAILED = frozenset(["failed", "interrupted"])
 

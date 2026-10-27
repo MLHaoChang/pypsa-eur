@@ -146,6 +146,26 @@ def test_oj32_changed_inputs_need_no_flag(oj_grid):
     assert [c['tool_name'] for c in cards] == ['run_simulation'] and len(oj_grid.starts) == 1
 
 
+def test_oj32_a_flag_on_changed_inputs_shows_the_plain_card(oj_grid):
+    # The flag acknowledges current results; on changed inputs it is dropped, so
+    # the card does not say "the results already match".
+    chat_tools.update_component('Line', 'L1', {'s_nom': 500})
+    cards = []
+    calls, results, frames, _ = run_journey(
+        *PROVIDERS[1], [lambda r: ('run_simulation', {'rerun_current': True}), lambda r: (None, {})], 'Re-run it.',
+        on_frame=_deny(cards))
+    assert [c['tool_name'] for c in cards] == ['run_simulation'] and cards[0]['args'] == {}
+    assert oj_grid.starts == []
+
+
+def test_the_rerun_flag_is_not_an_input_to_a_plan_step():
+    from services.assistant_tasks import _same_args
+
+    assert _same_args('run_simulation', {}, {'rerun_current': True})
+    assert _same_args('solve_queue_requeue', {'job_id': 'a'}, {'job_id': 'a', 'rerun_current': True})
+    assert not _same_args('solve_queue_requeue', {'job_id': 'a'}, {'job_id': 'b', 'rerun_current': True})
+
+
 def test_oj32_queueing_the_open_saved_project_is_asked_too(oj_grid):
     from services.solve_queue import solve_queue
 
