@@ -123,6 +123,8 @@ jobs:
         filters: |
           gui:
             - 'pypsa-gui/backend/**'
+            - 'pypsa-gui/tool-error-kinds.json'
+            - 'pypsa-gui/tool-error-kinds.d/**'
             - 'pixi.toml'
             - 'pixi.lock'
             - '.github/workflows/test.yaml'
@@ -257,6 +259,8 @@ jobs:
         filters: |
           gui:
             - 'pypsa-gui/frontend/**'
+            - 'pypsa-gui/tool-error-kinds.json'
+            - 'pypsa-gui/tool-error-kinds.d/**'
             - '.github/workflows/test.yaml'
 
     - name: Skip - no frontend changes

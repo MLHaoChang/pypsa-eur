@@ -10,10 +10,10 @@
 #
 # This is the whole merge gate: one command, nothing checked by hand. It exits
 # non-zero on a conflict, a code-file overlap with master, a failing semantic
-# test or catalogue inventory check on the trial merge, or any check run on the
-# head that is not success or skipped (or that it could not read), a GK/UX
-# "NOT OK" PR comment newer than that reviewer's last OK, or a live
-# coordination-file change with no matching template change. Docs-only
+# test, frontend tool-list test or catalogue inventory check on the trial merge,
+# or any check run on the head that is not success or skipped (or that it could
+# not read), a GK/UX "NOT OK" PR comment newer than that reviewer's last OK, or a
+# live coordination-file change with no matching template change. Docs-only
 # overlap and files identical on both sides are reported, not fatal. A code
 # overlap is waived when the trial merge is clean, the semantic tests pass and
 # the tests that exercise each overlapping file pass (see "code overlap tests").
@@ -59,15 +59,25 @@ semantic_tests=(
   tests/test_project_route_acl_policy.py
   tests/test_harness_mcp_server.py
 )
-# A PR touching these must also keep the assistant inventory current.
+# A PR touching these must also pass the assistant inventory check, which builds
+# the inventory in memory (nothing generated is committed; RETRO-COST-1).
 catalogue_re='(^|/)harness/catalogue'
-# Overlap only in these files does not block when the trial merge is clean and
+# Overlap only in this file does not block when the trial merge is clean and
 # the semantic tests and the assistant inventory check pass on it.
-inventory_overlap_re='^(pypsa-gui/backend/harness/catalogue\.py|\.scratch/live-voice/capability-inventory\.json)$'
-# Overlap only in this manifest does not block when both sides only add lines
-# to it, the trial merge is clean and the manifest test passes on it.
-kinds_overlap_re='^pypsa-gui/tool-error-kinds\.json$'
-kinds_test=tests/test_tool_error_kind_manifest.py
+inventory_overlap_re='^pypsa-gui/backend/harness/catalogue\.py$'
+# New error kinds arrive as fragments in tool-error-kinds.d/, which never
+# overlap; a PR touching the manifest or a fragment also runs these.
+kinds_re='^pypsa-gui/tool-error-kinds(\.json$|\.d/)'
+kinds_tests=(tests/test_tool_error_kind_manifest.py tests/test_json_fragments.py)
+# Frontend tests that read the tool list or the kind manifest (#766 turned
+# master red through ChatPanel.sendRequest); run when either changes.
+tool_list_re='(^|/)harness/(catalogue|toolsets)|(^|/)services/chat_tools|(^|/)chat_tools'
+tool_list_vitests=(
+  src/components/ChatPanel.test.tsx
+  src/components/ChatPanel.sendRequest.test.tsx
+  src/components/ChatPanel.rebound.test.tsx
+  src/components/ChatPanel.manifest.test.tsx
+)
 # A PR touching these live coordination files must also update
 # templates/agent-coordination/ (or run with PREMERGE_TEMPLATE_SYNC=skip).
 template_live_re='^(\.claude/skills/(steward|coordinator|retro)/|scripts/coord/|docs/agents/session-brief\.md$)'
@@ -111,7 +121,6 @@ echo
 echo "== files changed on both sides since merge-base"
 code_files=()  # code overlap, waived if its tests pass on the trial merge (below)
 inv_overlap=()  # overlap files that pass if the trial merge, tests and inventory do
-kinds_overlap=()  # tool-error-kinds.json overlap, waived if append-only (below)
 overlap=$(comm -12 \
   <(git diff --name-only "$mbase" "$master" | sort) \
   <(git diff --name-only "$mbase" "$head" | sort))
@@ -129,9 +138,6 @@ else
     elif [[ $f =~ $inventory_overlap_re ]]; then
       echo "  inventory  $f (decided on the trial merge, below)"
       inv_overlap+=("$f")
-    elif [[ $f =~ $kinds_overlap_re ]]; then
-      echo "  kinds      $f (decided on the trial merge, below)"
-      kinds_overlap+=("$f")
     else
       echo "  code       $f"
       code_files+=("$f")
@@ -144,9 +150,10 @@ echo "== semantic tests"
 changed=$(git diff --name-only "$mbase" "$head")
 sem_ok=0 inv_ok=0
 tests_to_run=("${semantic_tests[@]}")
-((${#kinds_overlap[@]})) && tests_to_run+=("$kinds_test")
-need_sem=0
-{ grep -Eq "$semantic_re" <<<"$changed" || ((${#inv_overlap[@]} || ${#kinds_overlap[@]})); } && need_sem=1
+need_sem=0 need_vt=0
+grep -Eq "$tool_list_re" <<<"$changed" && need_vt=1
+grep -Eq "$kinds_re" <<<"$changed" && { tests_to_run+=("${kinds_tests[@]}"); need_vt=1; }
+{ grep -Eq "$semantic_re" <<<"$changed" || ((need_vt || ${#inv_overlap[@]})); } && need_sem=1
 unmapped=() pytest_files=() vitest_files=() tested=()
 if ((!need_sem && ${#code_files[@]} == 0)); then
   echo "not needed (no route, chat-tool, project-ACL or MCP-server change)"
@@ -195,6 +202,22 @@ else
     echo "semantic tests: FAIL"
     fail=1
     reasons+=("semantic tests failed")
+  fi
+
+  if ((need_vt)); then
+    echo
+    echo "== frontend tool-list tests"
+    [[ -e $wt/pypsa-gui/frontend/node_modules ]] \
+      || ln -s "$root/pypsa-gui/frontend/node_modules" "$wt/pypsa-gui/frontend/node_modules" 2>/dev/null || true
+    read -r -a vt_cmd <<<"${PREMERGE_VITEST:-npx vitest run}"
+    if (cd "$wt/pypsa-gui/frontend" && "${vt_cmd[@]}" "${tool_list_vitests[@]}"); then
+      echo "frontend tool-list tests: pass"
+    else
+      echo "frontend tool-list tests: FAIL"
+      sem_ok=0
+      fail=1
+      reasons+=("frontend tool-list tests failed")
+    fi
   fi
 
   if grep -Eq "$catalogue_re" <<<"$changed" || ((${#inv_overlap[@]})); then
@@ -256,21 +279,6 @@ if ((${#inv_overlap[@]})); then
     printf '  code        %s\n' "${inv_overlap[@]}"
     fail=1
     reasons+=("overlap: ${#inv_overlap[@]} code file$([[ ${#inv_overlap[@]} -eq 1 ]] || echo s)")
-  fi
-fi
-
-if ((${#kinds_overlap[@]})); then
-  echo
-  echo "== tool-error-kinds overlap"
-  kinds_file=${kinds_overlap[0]}
-  removed=$(( $(git diff -U0 "$mbase" "$master" -- "$kinds_file" | grep -c '^-[^-]' || true) \
-    + $(git diff -U0 "$mbase" "$head" -- "$kinds_file" | grep -c '^-[^-]' || true) ))
-  if ((!conflict && sem_ok && removed == 0)); then
-    echo "  waived      tool-error-kinds overlap: append-only, clean trial merge, manifest test pass"
-  else
-    echo "  code        $kinds_file (removed lines: $removed)"
-    fail=1
-    reasons+=("overlap: tool-error-kinds.json not append-only or not verified")
   fi
 fi
 

@@ -259,13 +259,40 @@ def test_acl_and_mcp_changes_run_all_six_semantic_tests(repos, tmp_path, path):
     assert "assistant inventory" not in res.stdout
 
 
-def test_catalogue_change_checks_the_inventory(repos, tmp_path):
+def fake_vitest(tmp_path, code):
+    vitest = tmp_path / "fakevitest"
+    vitest.write_text(f'#!/bin/sh\necho vitest "$@"\nexit {code}\n')
+    vitest.chmod(0o755)
+    return str(vitest)
+
+
+def test_catalogue_change_checks_the_inventory_and_the_tool_list_vitests(repos, tmp_path):
     remote, clone = repos
-    publish_pr(remote, {"pypsa-gui/backend/harness/catalogue.py": "x\n"})
-    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0))
+    publish_pr(remote, {"pypsa-gui/backend/harness/catalogue.py": "x\n", "pypsa-gui/frontend/keep": ""})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0), PREMERGE_VITEST=fake_vitest(tmp_path, 0))
     assert res.returncode == 0, res.stdout + res.stderr
     assert "smoke/assistant_inventory.py --check" in res.stdout
     assert "inventory: pass" in res.stdout
+    assert "vitest src/components/ChatPanel.test.tsx src/components/ChatPanel.sendRequest.test.tsx" in res.stdout
+    assert "frontend tool-list tests: pass" in res.stdout
+
+
+def test_a_failing_tool_list_vitest_blocks(repos, tmp_path):
+    remote, clone = repos
+    publish_pr(remote, {"pypsa-gui/backend/services/chat_tools.py": "x\n", "pypsa-gui/frontend/keep": ""})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0), PREMERGE_VITEST=fake_vitest(tmp_path, 1))
+    assert res.returncode == 1
+    assert "frontend tool-list tests failed" in res.stdout
+
+
+def test_a_kind_fragment_runs_the_manifest_tests(repos, tmp_path):
+    remote, clone = repos
+    publish_pr(remote, {"pypsa-gui/tool-error-kinds.d/claude-x.json": "{}\n", "pypsa-gui/frontend/keep": "",
+                        "pypsa-gui/backend/keep": ""})
+    res = run(clone, PREMERGE_PYTHON=fake_python(tmp_path, 0), PREMERGE_VITEST=fake_vitest(tmp_path, 0))
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "test_tool_error_kind_manifest.py" in res.stdout and "test_json_fragments.py" in res.stdout
+    assert "ChatPanel.manifest.test.tsx" in res.stdout
 
 
 def test_green_checks_are_counted(repos):
