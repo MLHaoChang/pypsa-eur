@@ -6496,7 +6496,7 @@
         "changes"
       ],
       "safety_tier": "write",
-      "schema_sha256": "731c50cedf7e04663a8aebb987527dba54481727489042a1ff071b4e90e37fbb",
+      "schema_sha256": "98f428bb66bcc43adf5d17cfc1bf5219e60220a90e8bf6b7279e92ea12e5a46c",
       "behavioral_fixture": "pending"
     },
     {

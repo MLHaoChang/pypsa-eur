@@ -201,8 +201,7 @@ def loadflow_verdict() -> dict:
     read inside the preflight's lock span, so a busy network is ``deferred``."""
     from routers.simulation import ac_pf_refusal, preflight_validate
 
-    deferred, _issues, refusal = preflight_validate(lambda n, _cfg: ac_pf_refusal(n),
-                                                    validate=False)
+    deferred, _issues, refusal = preflight_validate(ac_pf_refusal, validate=False)
     if deferred is not None:
         return {"ready": False, "deferred": True,
                 "blocker": {"code": "deferred",
