@@ -16,10 +16,12 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+from dataclasses import replace
 
 import pytest
 
 from routers import simulation as sim_router
+from services.pypsa_service import PyPSAService
 
 GOLDEN = pathlib.Path(__file__).resolve().parent / "fixtures" / "preflight_pin.json"
 TEMPLATES = ["eh_datacenter", "eh_datacenter_staged", "eh_h2_hub", "eh_h2_hub_staged",
@@ -34,7 +36,7 @@ def _shape(r) -> dict:
             "codes": sorted(i["code"] for i in body.get("issues", []))}
 
 
-def _case(client, case, monkeypatch) -> dict:
+def _case(client, case, monkeypatch, bound_ctx) -> dict:
     if case in TEMPLATES:
         kw = {"json": {"site_type": "industrial"}} if case == "eh_site" else {}
         r = client.post(f"/api/projects/from_template/{case}", params={"name": "pin"}, **kw)
@@ -42,10 +44,11 @@ def _case(client, case, monkeypatch) -> dict:
     elif case == "broken":
         r = client.post("/api/projects/from_template/eh_h2_hub", params={"name": "pin"})
         assert r.status_code == 200, r.text
-        r = client.put("/api/simulation/solver_config",
-                       json={**client.get("/api/simulation/solver_config").json(),
-                             "solve_strategy": "rolling", "rolling_horizon": 0})
-        assert r.status_code == 200, r.text
+        # Stored directly: PUT /solver_config now refuses this window (422
+        # rolling_horizon_invalid), and the pin is about pre-flight seeing one.
+        with bound_ctx(client):
+            state = PyPSAService.get_solver_state()
+            state["solver_config"] = replace(state["solver_config"], solve_strategy="rolling", rolling_horizon=0)
     elif case == "in_flight":
         r = client.post("/api/projects/from_template/eh_h2_hub", params={"name": "pin"})
         assert r.status_code == 200, r.text
@@ -54,8 +57,8 @@ def _case(client, case, monkeypatch) -> dict:
 
 
 @pytest.mark.parametrize("case", [*TEMPLATES, "broken", "in_flight"])
-def test_preflight_response_is_pinned(client, tmp_projects_dir, monkeypatch, case):
-    got = _case(client, case, monkeypatch)
+def test_preflight_response_is_pinned(client, tmp_projects_dir, monkeypatch, bound_ctx, case):
+    got = _case(client, case, monkeypatch, bound_ctx)
     if os.environ.get("PREFLIGHT_PIN_WRITE"):
         data = json.loads(GOLDEN.read_text()) if GOLDEN.exists() else {}
         data[case] = got

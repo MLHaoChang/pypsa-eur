@@ -66,9 +66,21 @@ def _validator_codes() -> tuple[set[str], set[str]]:
                 for s in ([suffix.replace("{prefix}", p) for p in ("p_nom", "e_nom", "s_nom")]
                           if "{prefix}" in suffix else [suffix]):
                     expanded.add(f"{comp.lower()}_{s}")
+        elif t == "kind":                            # rolling_window_problems' codes
+            expanded |= _rolling_window_codes()
         else:
             raise AssertionError(f"unexpanded code template {t}: teach this test it")
     return literal, expanded
+
+
+def _rolling_window_codes() -> set[str]:
+    """The literal codes `rolling_window_problems` returns (`_err(kind, …)`)."""
+    tree = ast.parse(VALIDATOR.read_text("utf-8"))
+    fn = next(n for n in ast.walk(tree)
+              if isinstance(n, ast.FunctionDef) and n.name == "rolling_window_problems")
+    return {e.elts[0].value for e in ast.walk(fn)
+            if isinstance(e, ast.Tuple) and e.elts and isinstance(e.elts[0], ast.Constant)
+            and isinstance(e.elts[0].value, str)}
 
 
 def _delegated_codes() -> set[str]:
