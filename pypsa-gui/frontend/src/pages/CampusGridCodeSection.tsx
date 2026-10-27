@@ -49,7 +49,8 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   if (profile.campus_voltage) paths.push('campus_voltage')
   for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
     'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
-    'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct'] as const) {
+    'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
+    'angle_limit_deg'] as const) {
     if (profile[key]) paths.push(key)
   }
   return paths
@@ -80,6 +81,7 @@ function limitLabel(path: string): string {
     current_tdd_standard: 'Current distortion (TDD) limits at the PCC',
     q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; positive = the unit exports reactive power)',
     voltage_deadband_pct: 'Voltage-control deadband per unit (reported, not checked)',
+    angle_limit_deg: 'Voltage-angle difference across a branch',
   }[path] ?? path
 }
 
@@ -99,6 +101,7 @@ function limitValue(path: string, lim: GridLimit): string {
     return `${lim.value}`
   }
   if (path === 'voltage_deadband_pct') return `±${lim.value}\u00A0%`
+  if (path === 'angle_limit_deg') return `${lim.value}°`
   if (path === 'harmonic_resonance_clearance_h') return `±${lim.value}\u00A0h`
   if (path === 'unbalance_limit_pct') return `${lim.value}\u00A0%\u00A0of\u00A0positive\u00A0sequence`
   if (path === 'current_tdd_standard') {

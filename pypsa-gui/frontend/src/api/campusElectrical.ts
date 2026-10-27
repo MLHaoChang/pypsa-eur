@@ -460,6 +460,7 @@ export interface GridCodeProfile {
   q_capability_unit?: GridLimit & { points: [number, number, number][] }
   /** Voltage-control deadband, % of nominal voltage either side. Reported, never checked. */
   voltage_deadband_pct?: GridLimit
+  angle_limit_deg?: GridLimit
   document?: { sha256: string; filename: string; title: string }
 }
 

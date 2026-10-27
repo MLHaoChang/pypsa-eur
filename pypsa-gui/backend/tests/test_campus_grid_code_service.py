@@ -1186,6 +1186,7 @@ _QUOTE_P2 = "The reactive range shall not exceed 48 percent of the maximum impor
     ("pst_limit", {"value": 0.8}),
     ("plt_limit", {"value": 0.6}),
     ("current_tdd_standard", {"value": "ieee519-2014"}),
+    ("angle_limit_deg", {"value": 30.0}),
 ])
 def test_an_extracted_pq_limit_is_unconfirmed_and_quote_checked(hub, fake_api, key, limit):
     """The flicker limits and the TDD standard are limits like the others: an

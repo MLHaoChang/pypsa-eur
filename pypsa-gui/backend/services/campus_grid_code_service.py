@@ -503,7 +503,7 @@ def _limits(profile: dict):
                 "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
                 "unbalance_limit_pct", "harmonic_resonance_clearance_h",
                 "q_capability_unit", "voltage_deadband_pct",
-                "pst_limit", "plt_limit", "current_tdd_standard"):
+                "pst_limit", "plt_limit", "current_tdd_standard", "angle_limit_deg"):
         if isinstance(profile.get(key), dict):
             yield key, profile[key]
 

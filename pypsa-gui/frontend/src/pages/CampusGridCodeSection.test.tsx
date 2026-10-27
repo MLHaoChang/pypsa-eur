@@ -250,7 +250,8 @@ describe('grid codes: extract', () => {
     await screen.findByTestId('limit-rvc_limit_pct')
     for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
       'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
-      'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct']) {
+      'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
+      'angle_limit_deg']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
     }
   })
@@ -319,6 +320,18 @@ describe('grid codes: extract', () => {
     expect(db).toContain('Voltage-control deadband')
     expect(db).toContain('not checked')
     expect(db).toContain('±0.5\u00A0%')
+  })
+
+  it('shows the voltage-angle limit (DC 18) in degrees', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      angle_limit_deg: { value: 30, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const angle = (await screen.findByTestId('limit-angle_limit_deg')).textContent
+    expect(angle).toContain('Voltage-angle difference across a branch')
+    expect(angle).toContain('30°')
   })
 
   it('confirms the per-unit curve and the deadband by their own paths', async () => {
