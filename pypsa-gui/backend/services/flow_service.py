@@ -655,14 +655,22 @@ def _shown(value) -> str:
     return str(int(value)) if float(value).is_integer() else repr(float(value))
 
 
-def _assumed_items(template: dict) -> list[dict]:
+def _assumed_items(template: dict, cfg: dict | None = None) -> list[dict]:
     """The template's `assumed` ledger rows and energization: a default the user
     has not confirmed is a warning (design §3.2). A row may name its own
     ``section`` (and ``component`` / ``entity`` / ``field`` / ``panel``); one
-    that does not is filed by ``ledger_section(item)``."""
+    that does not is filed by ``ledger_section(item)``. A row on a reliability
+    goal field the project stores (``cfg``, W3b-R) is not raised: the stored
+    value, not the template's, is the one the run uses."""
+    from services.reliability_goal import STORED, effective_goal
+
+    goal = effective_goal(cfg or {}, template)
+    stored = {k for k, v in goal.items() if v["source"] == STORED}
     out: list[dict] = []
     for row in template.get("ledger") or []:
         if not isinstance(row, dict) or row.get("source") != "assumed":
+            continue
+        if row.get("field") in stored:
             continue
         item = str(row.get("item") or "")
         value = row.get("value")
@@ -995,7 +1003,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             r = _readiness(facts, template, cache_key)
             items += _readiness_items(r, voll_noted=any(
                 i["code"] == "presence_voll" for i in presence))
-        items += _assumed_items(template)
+        items += _assumed_items(template, facts.cfg_dict)
     items += _bind_items(facts, db, org_id, project_dir, n)
     # Load flow and N-1 security are on exactly when their solver settings are.
     scope = S.apply_settings(scope, facts.cfg_dict)

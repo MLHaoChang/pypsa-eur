@@ -176,7 +176,10 @@ query selections describe a next turn, not a running turn. The read-only view is
 not an action capability, remaining-budget estimate, complete readiness check or
 permission to incur charges. Unknown usage is unavailable rather than zero.
 Locks are inspected without pruning expired rows; busy chat state returns 409
-without waiting behind a turn's session lock. The response is `no-store`;
+without waiting behind a turn's session lock. In Guided, `guided_uncarded`
+lists each `confirm.GUIDED_UNCARDED` tool with its native disposition (computed
+as Expert gates it, under the saved restriction), so the view names the
+exceptions to Guided's write row; Expert returns `[]` (LC-16 B9). The response is `no-store`;
 dispatch and effect commit keep their own current checks. The dock's **Access
 and approvals** disclosure hides stale/failed or mismatched-scope reads. Existing
 Confirmation/Choice cards and Activity remain the decision paths. See

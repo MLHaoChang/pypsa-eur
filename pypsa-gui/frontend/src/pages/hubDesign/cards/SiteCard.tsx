@@ -13,6 +13,8 @@ import Kpi from '../../../components/Kpi'
 import Explain from '../../../components/Explain'
 import { kpiFigure } from '../../../utils/format'
 import { useHubDesignStore } from '../hubDesignStore'
+import { useReliabilityGoal } from '../../../hooks/useReliabilityGoal'
+import { SiteTypeSelect } from '../../../components/reliabilityGoal/SiteTypeSelect'
 import { siteFixText, type SiteFix } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
@@ -22,11 +24,9 @@ import { displayName } from '../../../utils/displayName'
 import { GridReadinessScorecard, summaryText, useGridReadiness, useScorecardOpen }
   from '../../../components/gridReadiness/GridReadinessScorecard'
 
-export const SITE_TYPES: { id: EhArchetype; label: string }[] = [
-  { id: 'strong_grid', label: 'Strong — import whenever needed' },
-  { id: 'weak_flexible', label: 'Weak or limited' },
-  { id: 'off_grid', label: 'None — the site runs as an island' },
-]
+// The site type is the stored reliability goal's (W3b-R): one select, also at
+// the top of Expert's Connection & grid panel.
+export { SITE_TYPES } from '../../../components/reliabilityGoal/SiteTypeSelect'
 
 const mw = (v: number) => `${Number(v.toPrecision(6))} MW`
 
@@ -165,8 +165,7 @@ function SiteSchedule({ template }: { template: EhTemplateMeta }) {
 export function SiteCard() {
   const { running, isPending: studyPending } = useHubStudy()
   const { template, isPending: templatePending } = useHubTemplate()
-  const archetype = useHubDesignStore(s => s.archetype)
-  const setArchetype = useHubDesignStore(s => s.setArchetype)
+  const { archetype } = useReliabilityGoal()
   const { readiness, isError } = useHubReadiness(template, running,
     !studyPending && !templatePending)
   const rows = readiness ? siteRows(readiness, archetype) : null
@@ -177,15 +176,8 @@ export function SiteCard() {
 
   return (
     <CardShell step="site" testId="hub-card-site" title="Site" next="goal">
-      <label className="flex flex-col gap-1 text-[12px]">
-        <span className="font-semibold text-text"><Term k="site_type">Grid connection</Term></span>
-        <select data-testid="hub-site-type" value={archetype}
-          disabled={running}
-          onChange={e => setArchetype(e.target.value as EhArchetype)}
-          className="max-w-sm rounded border border-border bg-bg px-2 py-1 text-[12px] text-text">
-          {SITE_TYPES.map(t => <option key={t.id} value={t.id}>{t.label}</option>)}
-        </select>
-      </label>
+      <SiteTypeSelect mode="guided" testId="hub-site-type" disabled={running}
+        label={<Term k="site_type">Grid connection</Term>} />
 
       {template?.site_type && <SiteSchedule template={template} />}
 

@@ -11,6 +11,7 @@ export interface ChatAccessSnapshot {
   selection: { ui_mode: 'expert' | 'guided'; checked_requested: boolean }
   restrictions: ChatRestriction | null
   confirmation_rules: Array<{ tier: string; native: 'none' | 'policy' | 'user' | 'blocked'; external: 'none' | 'policy' | 'user' | 'blocked' }>
+  guided_uncarded: Array<{ tool: string; native: 'none' | 'policy' | 'user' | 'blocked' }>
   project_lock: 'unlocked' | 'yours' | 'other' | 'not_applicable'
   blockers: string[]
   session: { id: string; output_tokens_used: number | null; turn_in_flight: boolean } | null

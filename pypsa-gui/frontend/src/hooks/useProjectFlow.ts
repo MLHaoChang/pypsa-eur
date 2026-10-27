@@ -16,6 +16,12 @@ export function useProjectFlow() {
     enabled: !!project,
     staleTime: 5_000,
     retry: false,
+    // A deferred answer ("the network is busy … Refresh once it finishes") is
+    // read while something holds the network lock — e.g. the Goal card's EH
+    // readiness, which a jump to the card starts beside this read. Nothing
+    // else re-reads the flow, so without this the rail and the cards stay at
+    // "not known yet" with no items until the next edit.
+    refetchInterval: (q) => (q.state.data?.deferred ? 2_000 : false),
   })
   const flow = q.data ?? null
   const section = (id: FlowSectionId): FlowSection | null =>

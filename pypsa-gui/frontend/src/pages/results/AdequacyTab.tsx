@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { FileText } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
+import { openReliabilityGoal } from '../../layout/flowNavigation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
@@ -100,11 +101,13 @@ export default function AdequacyTab() {
         // next action differs by why. Everything below still runs.
         <p className="text-[11px] text-muted" data-testid="adequacy-no-target">
           No reliability target was applied to the last solve, so there is no
-          achieved-vs-target readout yet. Set{' '}
-          <span className="font-medium text-text">ENS target</span> in Solver
-          Settings and re-solve to get one — or run the screening, the frontier
-          or the loop below, none of which needs a target to say something
-          useful about this network.
+          achieved-vs-target readout yet. Set the ENS target in the{' '}
+          <button type="button" data-testid="adequacy-no-target-goal"
+            className="font-medium text-accent hover:underline"
+            onClick={openReliabilityGoal}>reliability goal ›</button>{' '}
+          and re-solve to get one — or run the screening or the frontier below,
+          neither of which needs a target to say something useful about this
+          network.
         </p>
       )}
 

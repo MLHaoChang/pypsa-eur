@@ -893,6 +893,34 @@ def harmonic_units(n, poc: str) -> pd.DataFrame:
     return out
 
 
+def _screen_inputs(run_dir, profile, profile_dirs):
+    """A prepared run's campus description, its project network (refused when
+    it changed since the run was prepared) and the grid-code profile."""
+    n = _unchanged_project(run_dir)
+    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    return campus, n, load_grid_code(profile, extra_dirs=profile_dirs)
+
+
+def _screen_frame(pocs, units, unit_assumed, sk_source, typical, profile, limit_assumed, poc_columns,
+                  unit_columns) -> pd.DataFrame:
+    """One ``level`` ``poc`` row per PoC and one ``unit`` row per unit, with
+    the S_k source, the profile and the ``assumed`` flag."""
+    frames = []
+    for level, df, extra in (("poc", pocs, bool(unit_assumed.any())), ("unit", units, unit_assumed)):
+        df = df.copy()
+        df.insert(0, "level", level)
+        df["sk_mva_source"] = sk_source
+        df["profile"] = profile
+        df["assumed"] = limit_assumed | typical | extra
+        if typical:
+            df["note"] = df["note"].map(lambda s: f"S_k is {SK_TYPICAL}, so no verdict here is a pass to "
+                                                  f"rely on; {s}")
+        frames.append(df)
+    columns = ["level", *dict.fromkeys((*unit_columns[:2], *poc_columns, *unit_columns)),
+               "sk_mva_source", "profile", "assumed"]
+    return pd.concat(frames, ignore_index=True).reindex(columns=columns)
+
+
 def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
     """The harmonic screen of a prepared run (``static/harmonics.py``),
     written to ``campus_harmonics.csv``: one ``level`` ``poc`` row and one
@@ -906,9 +934,7 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     from gridspine.static import harmonics as hm
 
     run_dir = Path(run_dir)
-    n = _unchanged_project(run_dir)
-    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
-    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
     limits, cited = hm.limits_from_profile(code)
 
     pcc = campus["campus"]["pcc"]
@@ -919,21 +945,53 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
 
     limit_assumed = not cited or any(c["source"] != "code" for c in cited)
     unit_demo = study.units["spectrum_source"].astype(str).str.startswith("demo")
-    frames = []
-    for level, df, demo in (("poc", study.pocs, bool(unit_demo.any())), ("unit", study.units, unit_demo)):
-        df = df.copy()
-        df.insert(0, "level", level)
-        df["sk_mva_source"] = sk_source
-        df["profile"] = profile
-        df["assumed"] = limit_assumed | typical | demo
-        if typical:
-            df["note"] = df["note"].map(lambda s: f"S_k is {SK_TYPICAL}, so no verdict here is a pass to "
-                                                  f"rely on; {s}")
-        frames.append(df)
-    columns = ["level", *dict.fromkeys((*hm.UNIT_COLUMNS[:2], *hm.POC_COLUMNS, *hm.UNIT_COLUMNS)),
-               "sk_mva_source", "profile", "assumed"]
-    out = pd.concat(frames, ignore_index=True).reindex(columns=columns)
+    out = _screen_frame(study.pocs, study.units, unit_demo, sk_source, typical, profile, limit_assumed,
+                        hm.POC_COLUMNS, hm.UNIT_COLUMNS)
     _write_text_atomic(run_dir / HARMONICS_CSV, out.to_csv(index=False))
+    return out
+
+
+# --- the flicker screen (grid-to-process issue 17) ---------------------------
+
+FLICKER_CSV = "campus_flicker.csv"
+
+
+def flicker_units(n, poc: str) -> pd.DataFrame:
+    """The fluctuating loads of a project network, all lumped at ``poc``:
+    every Link that is a process unit (``eh_process``) or names a flicker
+    step. A unit with an input missing is kept (the screen says "no input")."""
+    links = n.links
+
+    def col(name, default):
+        return links[name] if name in links.columns else pd.Series(default, index=links.index, dtype=object)
+
+    process = col("eh_process", False).map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
+    chosen = links.index[process | col("flicker_step_mva", None).notna()]
+    return pd.DataFrame({"unit": list(chosen), "poc": poc,
+                         "step_mva": list(col("flicker_step_mva", None).reindex(chosen)),
+                         "changes_per_min": list(col("flicker_changes_per_min", None).reindex(chosen))},
+                        columns=["unit", "poc", "step_mva", "changes_per_min"])
+
+
+def flicker_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> pd.DataFrame:
+    """The flicker screen of a prepared run (``static/flicker.py``), written
+    to ``campus_flicker.csv``: one ``level`` ``poc`` row and one ``unit`` row
+    per process unit, with S_k and its source as in ``harmonics_campus``."""
+    from gridspine.static import flicker as fl
+
+    run_dir = Path(run_dir)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
+    limits, cited = fl.limits_from_profile(code)
+
+    pcc = campus["campus"]["pcc"]
+    poc = str(pcc["bus"])
+    sk_source, typical = _sk_source(campus, n)
+    study = fl.flicker_table(flicker_units(n, poc), {poc: _pcc_sk_min(pcc)}, limits)
+
+    limit_assumed = not cited or any(c["source"] != "code" for c in cited)
+    out = _screen_frame(study.pocs, study.units, pd.Series(False, index=study.units.index), sk_source, typical,
+                        profile, limit_assumed, fl.POC_COLUMNS, fl.UNIT_COLUMNS)
+    _write_text_atomic(run_dir / FLICKER_CSV, out.to_csv(index=False))
     return out
 
 

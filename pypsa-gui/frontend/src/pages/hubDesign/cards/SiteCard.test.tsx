@@ -7,12 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { resultsApi } from '../../../api/simulation'
+import { resultsApi, simulationApi } from '../../../api/simulation'
 import { useChatStore } from '../../../store/chatStore'
 import { useUIStore } from '../../../store/uiStore'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { siteFixText } from '../delegate'
 import { DC_TEMPLATE, MG_TEMPLATE, SITE_TEMPLATE, readiness } from '../testFixtures'
+import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { SiteCard } from './SiteCard'
 import { nk } from '../../../utils/queryKeys'
 import { campusApi, type GridReadiness } from '../../../api/campusElectrical'
@@ -27,7 +28,15 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
       getEhStudy: vi.fn(), getEhReadiness: vi.fn(), getEhTemplate: vi.fn(),
       getFmeaModes: vi.fn(),
     },
+    simulationApi: { ...actual.simulationApi, updateSolverConfig: vi.fn() },
   }
+})
+
+// The site type is the stored reliability goal's (W3b-R).
+const getReliabilityGoal = vi.fn()
+vi.mock('../../../api/flow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/flow')>()
+  return { ...actual, getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 vi.mock('../../../api/campusElectrical', async (importOriginal) => {
@@ -41,8 +50,9 @@ beforeEach(() => {
   useScorecardOpen.setState({ open: {} })
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
   useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
-  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
-    step: 'site', archetype: 'weak_flexible' })
+  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'site' })
+  getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
+  vi.mocked(simulationApi.updateSolverConfig).mockResolvedValue({} as never)
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
   vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
@@ -116,7 +126,7 @@ describe('SiteCard rows', () => {
   })
 
   it('a strong-grid site does not need grid-strength data', async () => {
-    useHubDesignStore.setState({ archetype: 'strong_grid' })
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['strong_grid', 'stored'] }))
     vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
       archetype: 'strong_grid', scr: { status: 'not_required', note: null, min_scr: null } }))
     mount()
@@ -126,7 +136,7 @@ describe('SiteCard rows', () => {
   })
 
   it('off-grid: the open tie is not a grid connection and not missing outage data (N4)', async () => {
-    useHubDesignStore.setState({ archetype: 'off_grid' })
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['off_grid', 'template'] }))
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(MG_TEMPLATE)
     vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
       archetype: 'off_grid',
@@ -147,11 +157,14 @@ describe('SiteCard rows', () => {
     expect(screen.queryByTestId('hub-site-fix-outage')).toBeNull()
   })
 
-  it('site type select updates the store and refetches readiness for the new type', async () => {
+  it('site type select saves only the site type and refetches readiness for the new type', async () => {
     const user = mount()
     await screen.findByTestId('hub-site-grid')
+    expect(screen.getByTestId('hub-site-type-source').textContent).toMatch(/template's choice/)
+    getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['strong_grid', 'stored'] }))
     await user.selectOptions(screen.getByTestId('hub-site-type'), 'strong_grid')
-    expect(useHubDesignStore.getState().archetype).toBe('strong_grid')
+    await waitFor(() => expect(simulationApi.updateSolverConfig).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(simulationApi.updateSolverConfig).mock.calls[0][0]).toEqual({ site_archetype: 'strong_grid' })
     await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
       'strong_grid', undefined, undefined, { stages: undefined, pack_overrides: undefined }))
   })

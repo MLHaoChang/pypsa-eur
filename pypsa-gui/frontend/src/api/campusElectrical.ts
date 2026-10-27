@@ -446,6 +446,9 @@ export interface GridCodeProfile {
   thd_limit_pct?: GridLimit
   /** Harmonic voltage limits per order at the PCC: `orders` {h: % of the fundamental}. */
   harmonic_limits_pct?: GridLimit & { orders: Record<string, number> }
+  /** Short-term and long-term flicker severity limits at the PCC. */
+  pst_limit?: GridLimit
+  plt_limit?: GridLimit
   document?: { sha256: string; filename: string; title: string }
 }
 
@@ -710,6 +713,18 @@ export interface GridReadinessRow {
   setting?: GridLimitSetting
   /** The harmonic row only (grid-to-process issue 17): the screen's figures at the PoC. */
   harmonics?: GridReadinessHarmonics
+  /** The flicker row only (grid-to-process issue 17): the screen's figures at the PoC. */
+  flicker?: GridReadinessFlicker
+}
+
+export interface GridReadinessFlicker {
+  sk_mva: number
+  pst: number | null
+  plt: number | null
+  pst_limit: number | null
+  plt_limit: number | null
+  no_input_units: string[]
+  outside_range_units: string[]
 }
 
 export interface GridReadinessHarmonics {

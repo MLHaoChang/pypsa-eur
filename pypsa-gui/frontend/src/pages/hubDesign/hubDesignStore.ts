@@ -1,9 +1,9 @@
-// Hub-design step cards (guided-mode spec §5.2): which card is showing and the
-// three choices the cards own. Not persisted — a reload re-derives the step
+// Hub-design step cards (guided-mode spec §5.2): which card is showing. The
+// goal and the site type are the project's stored reliability goal
+// (`hooks/useReliabilityGoal`, W3b-R), not card state. Not persisted — a reload re-derives the step
 // from the study record (§5.4). `guided_step` in the chat context reads
 // `step` (P25).
 import { create } from 'zustand'
-import type { EhArchetype } from '../../api/simulation'
 import type { FlowSectionId } from '../../api/flow'
 import { useUIStore } from '../../store/uiStore'
 import type { SiteParams } from './genericSite'
@@ -22,16 +22,8 @@ export const SECTION_STEP: Partial<Record<FlowSectionId, HubStep>> = {
   project: 'start', connection: 'site', scenarios: 'goal', results: 'results',
 }
 
-/** Where the Goal card's shortfall target came from: the template's own
- *  override, the pack default readiness reports, or the user's typing. Only
- *  a pack-seeded value follows the pack when the site type changes. */
-export type LoleSource = 'template' | 'pack' | 'user' | null
-
 export interface HubDesignDefaults {
   step: HubStep
-  archetype: EhArchetype
-  loleTarget: string
-  ensCap: string
 }
 
 interface HubDesignState {
@@ -39,12 +31,6 @@ interface HubDesignState {
   project: string | null
   ready: boolean
   step: HubStep
-  archetype: EhArchetype
-  /** Allowed shortfall, h/yr — a string like `PackForm` (half-typed input). */
-  loleTarget: string
-  loleSource: LoleSource
-  /** Energy strictness (ENS cap); '' = the pack's own value. */
-  ensCap: string
   goalAdvancedRequested: boolean
   /** A manual rail click suppresses the next auto-advance (§5.6). */
   userMovedRail: boolean
@@ -61,10 +47,6 @@ interface HubDesignState {
   resetFor: (project: string | null, d: HubDesignDefaults) => void
   setStep: (step: HubStep, opts?: { user?: boolean }) => void
   clearUserMoved: () => void
-  setArchetype: (a: EhArchetype) => void
-  setLoleTarget: (v: string) => void
-  seedLoleFromPack: (v: string) => void
-  setEnsCap: (v: string) => void
   /** One-shot: the Goal card opens its "More settings" (a link to the stress editor). */
   setGoalAdvancedRequested: (v: boolean) => void
   setSiteSeed: (seed: { params: SiteParams; entered: string[] } | null) => void
@@ -76,10 +58,6 @@ export const HUB_DESIGN_INITIAL = {
   project: null as string | null,
   ready: false,
   step: 'start' as HubStep,
-  archetype: 'strong_grid' as EhArchetype,
-  loleTarget: '',
-  loleSource: null as LoleSource,
-  ensCap: '',
   goalAdvancedRequested: false,
   userMovedRail: false,
   siteSeed: null as { params: SiteParams; entered: string[] } | null,
@@ -90,9 +68,7 @@ export const HUB_DESIGN_INITIAL = {
 export const useHubDesignStore = create<HubDesignState>()((set) => ({
   ...HUB_DESIGN_INITIAL,
   resetFor: (project, d) => set({
-    project, ready: true, step: d.step, archetype: d.archetype,
-    loleTarget: d.loleTarget, loleSource: d.loleTarget !== '' ? 'template' : null,
-    ensCap: d.ensCap, userMovedRail: false, siteSeed: null,
+    project, ready: true, step: d.step, userMovedRail: false, siteSeed: null,
   }),
   // The card and the section are one position: moving the step moves the
   // section both modes share (`activeSection`, §7).
@@ -101,10 +77,6 @@ export const useHubDesignStore = create<HubDesignState>()((set) => ({
     set(opts?.user ? { step, userMovedRail: true } : { step })
   },
   clearUserMoved: () => set({ userMovedRail: false }),
-  setArchetype: (archetype) => set({ archetype }),
-  setLoleTarget: (loleTarget) => set({ loleTarget, loleSource: 'user' }),
-  seedLoleFromPack: (loleTarget) => set({ loleTarget, loleSource: 'pack' }),
-  setEnsCap: (ensCap) => set({ ensCap }),
   setGoalAdvancedRequested: (goalAdvancedRequested) => set({ goalAdvancedRequested }),
   setSiteSeed: (siteSeed) => set({ siteSeed }),
   setSiteFormRequested: (siteFormRequested) => set({ siteFormRequested }),

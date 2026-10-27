@@ -236,6 +236,10 @@ describe('grid codes: extract', () => {
     const orders = screen.getByTestId('limit-harmonic_limits_pct').textContent
     expect(orders).toContain('Harmonic voltage by order at the PCC')
     expect(orders).toContain('h5\u00A02\u00A0% · h7\u00A02\u00A0% · h11\u00A01.5\u00A0%')
+    // The by-order list wraps rather than widening the whole table; a single value stays on one line.
+    const cells = screen.getByTestId('limit-harmonic_limits_pct').querySelectorAll('td')
+    expect(cells[1].className).not.toContain('whitespace-nowrap')
+    expect(screen.getByTestId('limit-thd_limit_pct').querySelectorAll('td')[1].className).toContain('whitespace-nowrap')
   })
 
   it('shows no SAGC-type row for a profile without those limits', async () => {
@@ -245,9 +249,25 @@ describe('grid codes: extract', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
     await screen.findByTestId('limit-rvc_limit_pct')
     for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-      'thd_limit_pct', 'harmonic_limits_pct']) {
+      'thd_limit_pct', 'harmonic_limits_pct', 'pst_limit', 'plt_limit']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
     }
+  })
+
+  it('shows the flicker limits a profile sets', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      pst_limit: { value: 0.8, clause: 'generic clause', source: 'code' as const },
+      plt_limit: { value: 0.6, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const pst = (await screen.findByTestId('limit-pst_limit')).textContent
+    expect(pst).toContain('Flicker severity Pst at the PCC')
+    expect(pst).toContain('0.8')
+    const plt = screen.getByTestId('limit-plt_limit').textContent
+    expect(plt).toContain('Flicker severity Plt at the PCC')
+    expect(plt).toContain('0.6')
   })
 
   it('leaves the profile id out when none is typed, so the backend derives one', async () => {

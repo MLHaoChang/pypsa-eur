@@ -32,7 +32,8 @@ PROCESS_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
     "Link": {"eh_process": "bool", "criticality_tier": "tier", "throughput_unit": "text",
              "specific_energy_kwh_per_t": "float_nonneg", "rated_mva": "float_nonneg",
              "harmonic_source": "harmonic_source", "harmonic_spectrum": "harmonic_spectrum",
-             "spectrum_post_filter": "bool"},
+             "spectrum_post_filter": "bool", "flicker_step_mva": "float_nonneg",
+             "flicker_changes_per_min": "float_nonneg"},
 }
 
 

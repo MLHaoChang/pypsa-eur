@@ -15,6 +15,7 @@ function snapshot(project = 'Project A'): ChatAccessSnapshot {
     scope: { project_id: 'p1', project_name: project }, selection: { ui_mode: 'expert', checked_requested: false },
     restrictions: { mode: 'standard', revision: 'revision-1' },
     confirmation_rules: [{ tier: 'write', native: 'none', external: 'user' }],
+    guided_uncarded: [],
     project_lock: 'other', blockers: ['project_writes_locked'], session: null,
     checking: { server_mode: 'disabled', effective_for_selection: false, scope: 'bounded_profiles' },
     limits: { output_tokens_per_turn: 8192, tool_calls_per_turn: 25, output_tokens_per_session: 200000,
@@ -255,4 +256,18 @@ it.each(['wrong-project', 'old-revision'])('does not claim a %s acknowledgement 
   fireEvent.click(screen.getByRole('button', { name: 'Save restriction' }))
   expect(await screen.findByText('Save could not be confirmed. Refresh access and choose again.')).toBeTruthy()
   expect(screen.queryByText('Restriction saved.')).toBeNull()
+})
+it('names the Guided tools that skip the write card with their actual rule', async () => {
+  get.mockResolvedValue({ ...snapshot(), guided_uncarded: [{ tool: 'preview_project_changes', native: 'none' }] })
+  mount()
+  fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
+  expect(await screen.findByText(/In Guided, these Write tools have their own rule/)).toBeTruthy()
+  expect(screen.getByRole('listitem').textContent).toBe('Preview project changes · No approval card')
+})
+it('adds no Guided exception line when there are none', async () => {
+  get.mockResolvedValue(snapshot())
+  mount()
+  fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
+  expect(await screen.findByText('Confirmation rules')).toBeTruthy()
+  expect(screen.queryByText(/these Write tools/)).toBeNull()
 })

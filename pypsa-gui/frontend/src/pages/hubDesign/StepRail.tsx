@@ -5,6 +5,7 @@
 // source for literal `data-testid=` / `testId=` strings, and neither a
 // template string nor a lookup table would be found. The other five sections
 // carry `hub-rail-section-*` ids.
+import { useEffect, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { FlowStateDot } from '../../components/FlowStateDot'
 import { ScopeChips, useScopeChips } from '../../components/flowScope/ScopeChips'
@@ -112,8 +113,19 @@ function ImproveButton(props: RailProps) {
 }
 
 export function StepRail(props: RailProps) {
+  // The current step stays in view: a jump from elsewhere (a "… ›" link to the
+  // Goal card) can land on a step scrolled off the rail's narrow strip.
+  const navRef = useRef<HTMLElement | null>(null)
+  const shown = useRef<string | null>(null)
+  useEffect(() => {
+    const cur = navRef.current?.querySelector<HTMLElement>('[aria-current="step"]')
+    const id = cur?.dataset.testid ?? null
+    if (!cur || id === shown.current) return
+    shown.current = id
+    cur.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  })
   return (
-    <nav data-testid="hub-rail" aria-label="Project flow sections"
+    <nav ref={navRef} data-testid="hub-rail" aria-label="Project flow sections"
       className="flex items-center gap-1 overflow-x-auto pb-1">
       <RailButton {...props} id="project" testId="hub-rail-step-start" />
       <RailButton {...props} id="carriers" testId="hub-rail-section-carriers" />

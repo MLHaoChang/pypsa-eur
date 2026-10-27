@@ -26,8 +26,10 @@ vi.mock('../../api/simulation', async (importOriginal) => {
 })
 
 const FAIL_NEXT = 'Next: tighten the energy target or add firm capacity — press Ask the assistant for a reviewed recommendation.'
-const INCONCLUSIVE_NEXT = 'Next: raise MC draws (Pack settings → Draws) or tighten the plan; an inconclusive verdict is not a failure.'
-const NO_TARGET_NEXT = 'Next: set a shortfall target (Pack settings → LOLE target) to certify.'
+// W3b-R: the draws and the target are the reliability goal's, linked by the line.
+const INCONCLUSIVE_NEXT = 'Next: raise the MC draws in the reliability goal or tighten the plan; an inconclusive verdict is not a failure.'
+const NO_TARGET_NEXT = 'Next: set an allowed shortfall in the reliability goal to certify.'
+const GOAL_LINK = 'Change in Scenarios & optimisation ›'
 
 function report(payload: Record<string, unknown>) {
   return {
@@ -80,10 +82,11 @@ describe('rendered next step', () => {
 
   it('renders for inconclusive and for no target, not for pass', async () => {
     await renderWith({ verdict: 'inconclusive', target_lole_h: 3 })
-    expect(screen.getByTestId('eh-certification-next').textContent).toBe(INCONCLUSIVE_NEXT)
+    expect(screen.getByTestId('eh-certification-next').textContent).toBe(INCONCLUSIVE_NEXT + GOAL_LINK)
+    expect(screen.getByTestId('eh-certification-next-goal').textContent).toBe(GOAL_LINK)
     cleanup()
     await renderWith({ verdict: null, target_lole_h: null })
-    expect(screen.getByTestId('eh-certification-next').textContent).toBe(NO_TARGET_NEXT)
+    expect(screen.getByTestId('eh-certification-next').textContent).toBe(NO_TARGET_NEXT + GOAL_LINK)
     cleanup()
     await renderWith({ verdict: 'pass', target_lole_h: 30 })
     expect(screen.queryByTestId('eh-certification-next')).toBeNull()

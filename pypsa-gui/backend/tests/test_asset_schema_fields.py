@@ -36,6 +36,7 @@ CUSTOM_BY_CLASS = {"Bus": {"country", "mwh_per_t", "product_value"}, "Carrier": 
                    "Link": {"eh_process", "criticality_tier", "throughput_unit", "specific_energy_kwh_per_t",
                             # Grid-to-process issue 17: the harmonic-screen columns (models/process_unit.py).
                             "rated_mva", "harmonic_source", "harmonic_spectrum", "spectrum_post_filter",
+                            "flicker_step_mva", "flicker_changes_per_min",
                             # PyPSA registers extra ports on first use (`pypsa.constants.RE_PORTS_GE_2`).
                             "bus2", "bus3", "bus4", "efficiency2", "efficiency3", "efficiency4"}}
 
