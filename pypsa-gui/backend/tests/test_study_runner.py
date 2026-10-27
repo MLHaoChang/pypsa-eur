@@ -1021,3 +1021,29 @@ def test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year(
     detail = case.json()["detail"]
     assert detail["error_kind"] == "currency_year_mixed"
     assert "set the study's currency year to 2025 in its settings" in detail["message"]
+
+
+def test_a_ledger_naming_an_unshipped_pack_is_refused_never_read_on_the_pin(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 01 (GK B plan A C2): a stored ledger whose defaults
+    this build does not ship is refused by name (run 409, ledger read 500),
+    never priced on the pin.
+    """
+    from services.study import store
+
+    sid = _setup(client, api_project, "unknown-pack")
+    base = project_storage_dir("unknown-pack")
+    study = store.load_study(base, sid)
+    label = "generic-defaults 2099-01-01 000000000000"
+    ledger = study.ledger.model_copy(update={"ledger_version": label})
+    store.save_study(base, study.model_copy(update={"ledger": ledger, "ledger_version": label}))
+    r = client.post(f"/api/projects/unknown-pack/studies/{sid}/run", json={})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "ledger_defaults_unknown"
+    assert label in r.json()["detail"]["message"]
+    r = client.put(f"/api/projects/unknown-pack/studies/{sid}/ledger",
+                   json={"reset": ["battery_storage_eur_per_kwh"]})
+    assert r.status_code == 500, r.text
+    assert r.json()["detail"]["code"] == "study_library_unreadable"
+    assert label in r.json()["detail"]["message"]
