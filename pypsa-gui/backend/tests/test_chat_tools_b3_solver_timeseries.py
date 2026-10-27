@@ -257,6 +257,25 @@ def test_requeue_is_refused_under_a_foreign_lock(
     assert len(solve_queue._jobs) == 1
 
 
+def test_requeue_checks_the_jobs_project_not_the_active_one(
+        client, api_project, registry_key_for, project_storage_dir, project_row,
+        bound_ctx, clean_queue, colleague, acting):
+    """The holder check reads the project the JOB names: a job for a locked
+    project is refused while the chat turn is bound to a different, unlocked
+    project."""
+    locked = api_project("b3-requeue-locked")
+    assert client.post(f"/api/projects/{locked}/lock").status_code == 200
+    jid = _seed_job("completed", locked, registry_key_for(locked),
+                    str(project_storage_dir(locked)), by=colleague)
+    other = api_project("b3-requeue-other")  # the session's active project now
+    acting(colleague)
+    with bound_ctx(client) as ctx, pytest.raises(HTTPException) as err:
+        assert ctx.project_uuid == str(project_row(other).id)
+        chat_tools.DISPATCHERS["solve_queue_requeue"](job_id=str(jid))
+    assert _is_lock_refusal(err.value), err.value.detail
+    assert len(solve_queue._jobs) == 1
+
+
 def test_requeue_runs_a_finished_job_again(
         client, api_project, registry_key_for, project_storage_dir, clean_queue,
         seeded_identity, acting):
