@@ -3,7 +3,7 @@
 
 # Per-unit reactive capability curve and voltage-control deadband (G9)
 
-Status: ready-for-agent
+Status: done
 Type: task
 Blocked by: none (10a merged in #691, 60934d14)
 Gated: **yes** (gridspine; UX reviewer for the profile UI)

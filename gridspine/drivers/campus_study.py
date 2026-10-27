@@ -176,7 +176,7 @@ from gridspine.ranking.campus import campus_metrics, island_metrics, select_camp
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, held_transformers, size_transformers, solve_cases
-from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_reactive import ibr_q_capability, ibr_q_curve, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
@@ -212,6 +212,7 @@ SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
 #: IEEE 2800's IBR reactive capability, when the profile states it.
 IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
+IBR_Q_CURVE_CSV = "campus_ibr_q_curve.csv"
 #: What the profile requires that a steady-state study cannot show.
 REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
 INVESTMENT_CSV = "campus_investment.csv"
@@ -755,11 +756,16 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         _write_text_atomic(run_dir / IBR_CAPABILITY_CSV, ibr.to_csv(index=False))
     else:
         (run_dir / IBR_CAPABILITY_CSV).unlink(missing_ok=True)       # an earlier profile's table
+    curve = ibr_q_curve(campus, code)
+    if curve is not None:
+        _write_text_atomic(run_dir / IBR_Q_CURVE_CSV, curve.to_csv(index=False))
+    else:
+        (run_dir / IBR_Q_CURVE_CSV).unlink(missing_ok=True)
     reported = reported_requirements(code)
     _write_text_atomic(run_dir / REPORTED_REQUIREMENTS_JSON, json.dumps(reported, indent=2))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
             "short_circuit": short_circuit, "compliance": compliance, "ibr_capability": ibr,
-            "reported_requirements": reported}
+            "ibr_q_curve": curve, "reported_requirements": reported}
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,

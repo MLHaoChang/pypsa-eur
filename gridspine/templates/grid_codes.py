@@ -73,6 +73,20 @@ A profile may carry these optional keys:
     The short-term and long-term flicker severity limits at the connection
     point (grid-to-process issue 17), positive numbers. The flicker screen
     judges on whichever of the two is set.
+``q_capability_unit``
+    A reactive capability required of EACH generating or storage unit
+    against its active power (datacenter grid readiness issue 15): the
+    same ``points`` shape and checks as ``q_capability_pq``, but per unit
+    of the unit's own rated active power (``p_mw``), and in the generator
+    convention: a ``q`` is positive when the unit delivers reactive power
+    (over-excited) and negative when it absorbs. ``q_capability_pq`` is
+    the site's band at the connection point, in the site's convention.
+    ``campus_reactive.ibr_q_curve`` checks it.
+``voltage_deadband_pct``
+    The voltage-control deadband, % of nominal voltage either side, inside
+    which a unit in voltage control does not change its reactive output; a
+    positive number. Reported (``reported_requirements``), never checked:
+    the static study has no voltage-control loop.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -121,13 +135,15 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
-                  "harmonic_resonance_clearance_h", "pst_limit", "plt_limit")
+                  "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
+                  "q_capability_unit", "voltage_deadband_pct")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
                           "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
                           "dynamic_requirements", "notes",
-                          "document", "name", "pst_limit", "plt_limit"})
+                          "document", "name", "pst_limit", "plt_limit",
+                          "q_capability_unit", "voltage_deadband_pct"})
 #: Every key a voltage band may carry.
 BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
                        "clause", "source", "page", "quote"})
@@ -225,7 +241,7 @@ def _check_profile(name, p):
     if missing:
         raise ContractError(f"{where} is missing {missing}")
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
-                "harmonic_resonance_clearance_h", "pst_limit", "plt_limit"):
+                "harmonic_resonance_clearance_h", "pst_limit", "plt_limit", "voltage_deadband_pct"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)
@@ -242,8 +258,9 @@ def _check_profile(name, p):
             v = p[key].get("value")
             if not _is_number(v) or not 0 < v <= 1:
                 raise ContractError(f"{where}: {key} value must be a power factor in (0, 1], got {v!r}")
-    if "q_capability_pq" in p:
-        _check_q_capability(p["q_capability_pq"], where)
+    for key in ("q_capability_pq", "q_capability_unit"):
+        if key in p:
+            _check_q_capability(p[key], where, key)
     if "harmonic_limits_pct" in p:
         _check_harmonic_orders(p["harmonic_limits_pct"], where)
     bands = p["voltage_bands"]
@@ -295,20 +312,20 @@ def _check_campus_voltage(cv, where):
         )
 
 
-def _check_q_capability(lim, where):
-    _check_limit("q_capability_pq", lim, where)
+def _check_q_capability(lim, where, key="q_capability_pq"):
+    _check_limit(key, lim, where)
     points = lim.get("points")
     if not isinstance(points, list) or len(points) < 2:
-        raise ContractError(f"{where}: q_capability_pq.points must be a list of at least two "
+        raise ContractError(f"{where}: {key}.points must be a list of at least two "
                             "[p_pu, q_min_pu, q_max_pu] points")
     for i, pt in enumerate(points):
         if not isinstance(pt, (list, tuple)) or len(pt) != 3 or not all(_is_number(x) for x in pt):
-            raise ContractError(f"{where}: q_capability_pq.points[{i}] must be three finite numbers "
+            raise ContractError(f"{where}: {key}.points[{i}] must be three finite numbers "
                                 f"[p_pu, q_min_pu, q_max_pu], got {pt!r}")
         if pt[1] > pt[2]:
-            raise ContractError(f"{where}: q_capability_pq.points[{i}] has q_min_pu {pt[1]:g} above q_max_pu {pt[2]:g}")
+            raise ContractError(f"{where}: {key}.points[{i}] has q_min_pu {pt[1]:g} above q_max_pu {pt[2]:g}")
         if i and not pt[0] > points[i - 1][0]:
-            raise ContractError(f"{where}: q_capability_pq.points[{i}] p_pu {pt[0]:g} does not follow "
+            raise ContractError(f"{where}: {key}.points[{i}] p_pu {pt[0]:g} does not follow "
                                 f"{points[i - 1][0]:g}; p_pu must rise strictly, each value once")
 
 
@@ -369,7 +386,8 @@ def reported_requirements(profile: dict) -> list:
     """What the profile requires that a steady-state study cannot show, one
     row each with status ``reported`` (never ``pass``): its
     ``dynamic_requirements`` ("needs an RMS study"), then every band's
-    time-limited ``v_max_30min`` ("dynamic study needed"). No verdict counts
+    time-limited ``v_max_30min`` ("dynamic study needed"), then the
+    ``voltage_deadband_pct`` (applies to each unit). No verdict counts
     them, and nothing here reads the value, so no value can pass or fail."""
     out = [{**r, "status": "reported",
             "detail": f"{r['requirement']}: {r['value']}{' ' + r['unit'] if r.get('unit') else ''} (needs an RMS study)"}
@@ -381,6 +399,14 @@ def reported_requirements(profile: dict) -> list:
                         "value": value, "clause": b["clause"], "source": b["source"], "applies_to": "facility",
                         "status": "reported",
                         "detail": f"time-limited voltage {value}: reported, not enforced (dynamic study needed)"})
+    db = profile.get("voltage_deadband_pct")
+    if db:
+        value = f"±{db['value']:g} % of nominal voltage"
+        out.append({"id": "voltage_deadband_pct", "requirement": "Voltage-control deadband",
+                    "value": value, "clause": db["clause"], "source": db["source"], "applies_to": "unit",
+                    "status": "reported",
+                    "detail": f"voltage-control deadband {value}: reported, not enforced "
+                              "(the static study has no voltage-control loop)"})
     return out
 
 

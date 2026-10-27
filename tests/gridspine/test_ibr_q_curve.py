@@ -38,7 +38,9 @@ def test_a_unit_can_fail_the_curve_at_part_load_and_pass_at_rated_p():
     assert half["p_mw"] == pytest.approx(10.0)
     assert half["available_mvar"] == pytest.approx(math.sqrt(21.0 ** 2 - 10.0 ** 2))
     assert half["q_max_req_mvar"] == pytest.approx(19.0) and half["q_min_req_mvar"] == pytest.approx(-19.0)
-    assert half["status"] == "fail" and half["shortfall_mvar"] == pytest.approx(19.0 - half["available_mvar"])
+    assert half["available_mvar"] == pytest.approx(18.466, abs=1e-3)
+    assert half["status"] == "fail" and half["shortfall_mvar"] == pytest.approx(19.0 - 18.466, abs=1e-3)
+    assert "deliver" in half["detail"] and "absorb" in half["detail"]          # both sides fall short
     assert rated["status"] == "pass" and rated["shortfall_mvar"] == 0.0
     assert rated["available_mvar"] == pytest.approx(math.sqrt(21.0 ** 2 - 20.0 ** 2))
     assert got[0.0]["status"] == "pass"
@@ -49,7 +51,7 @@ def test_a_unit_can_fail_the_curve_at_part_load_and_pass_at_rated_p():
 def test_both_sides_of_the_band_are_checked():
     # Delivering 0.1 pu at rated P is within reach; absorbing 0.4 pu (8 Mvar) is not.
     got = rows(ibr_q_curve(campus(bess_s=21.0), with_curve([[0.0, -0.1, 0.5], [1.0, -0.4, 0.1]])), "BESS1")
-    assert got[1.0]["status"] == "fail"
+    assert got[1.0]["status"] == "fail" and "deliver" not in got[1.0]["detail"]
     assert got[1.0]["shortfall_mvar"] == pytest.approx(8.0 - math.sqrt(21.0 ** 2 - 20.0 ** 2))
     assert "absorb" in got[1.0]["detail"]
 
@@ -58,7 +60,21 @@ def test_only_breakpoints_within_0_to_1_pu_and_rated_p_inside_the_curve_are_chec
     got = rows(ibr_q_curve(campus(), with_curve([[0.2, -0.1, 0.1], [0.8, -0.2, 0.2], [1.2, -0.3, 0.3]])), "PV1")
     assert sorted(got) == [0.2, 0.8, 1.0]
     got = rows(ibr_q_curve(campus(), with_curve([[0.2, -0.1, 0.1], [0.8, -0.2, 0.2]])), "PV1")
-    assert sorted(got) == [0.2, 0.8]                                   # rated P is outside the curve
+    assert sorted(got) == [0.2, 0.8, 1.0]                              # rated P is never skipped
+    assert got[1.0]["status"] == "reported" and "does not state rated P" in got[1.0]["detail"]
+
+
+def test_a_curve_ending_below_rated_p_reports_rated_p_never_passes_it():
+    got = rows(ibr_q_curve(campus(), with_curve([[0.0, -0.1, 0.1], [0.9, -0.2, 0.2]])), "BESS1")
+    assert sorted(got) == [0.0, 0.9, 1.0]
+    assert got[0.9]["status"] == "pass"
+    assert got[1.0]["status"] == "reported" and math.isnan(got[1.0]["shortfall_mvar"])
+    assert "does not state rated P" in got[1.0]["detail"]
+
+
+def test_points_below_zero_pu_are_outside_the_first_cut():
+    got = rows(ibr_q_curve(campus(), with_curve([[-1.0, -0.9, 0.9], [0.0, -0.1, 0.1], [1.0, -0.2, 0.2]])), "BESS1")
+    assert sorted(got) == [0.0, 1.0]
 
 
 def test_a_unit_without_a_rating_is_unknown_never_passed():
