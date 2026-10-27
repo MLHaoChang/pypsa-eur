@@ -1,3 +1,4 @@
+import { shortMcpToolName } from '../api/mcpSettings'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -380,6 +381,11 @@ export function ConfirmationCard() {
           ? guidedWording.header
           : <>Confirm · {pending.safety_tier}</>}
       </div>
+      {pending.external && (
+        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-external">
+          External tool · MCP server {pending.external.server}
+        </div>
+      )}
       {guidedWording?.note && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
           {guidedWording.note}
@@ -389,7 +395,9 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {(edit && (editCardWords(edit) || edit.says)) || guidedCardSummary(pending.tool_name, pending.args)}
+            {(edit && (editCardWords(edit) || edit.says)) || (pending.external
+              ? shortMcpToolName(pending.tool_name)
+              : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
           {/* P26 gate B2: a destructive card shows its raw call by default. */}
           <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
@@ -404,7 +412,7 @@ export function ConfirmationCard() {
       ) : (
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.tool_name}
+            {pending.external ? shortMcpToolName(pending.tool_name) : pending.tool_name}
           </div>
           <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
             {JSON.stringify(pending.args, null, 2)}
