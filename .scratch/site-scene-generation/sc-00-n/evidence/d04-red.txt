@@ -1,0 +1,14 @@
+E       Failed: DID NOT RAISE ValueError
+E       Failed: DID NOT RAISE ValueError
+ERROR    services.solve_queue:solve_queue.py:1502 solve_queue: job cfaa68a7-7db9-48ce-812b-0d7368ddd248 ('P') failed
+E       AssertionError: assert [UUID('231dc1...452fcea825c')] == []
+E         
+E         Left contains one more item: UUID('231dc145-8c45-4579-8912-3452fcea825c')
+E         Use -v to get more diff
+E       Failed: DID NOT RAISE ValueError
+ERROR    services.solve_queue:solve_queue.py:1502 solve_queue: job 7d241348-e474-4496-8bfc-61a1245868bf ('P') failed
+E       assert (0, 1) == (0, 0)
+E         
+E         At index 1 diff: 1 != 0
+E         Use -v to get more diff
+ERROR    services.solve_queue:solve_queue.py:1502 solve_queue: job 1e42652b-3108-4c48-b4fb-fc8fdf5cd625 ('FromTheFuture') failed

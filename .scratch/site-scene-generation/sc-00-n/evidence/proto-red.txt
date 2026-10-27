@@ -1,0 +1,8 @@
+ERROR tests/test_site_scene_proto_anchor.py
+ERROR tests/test_site_scene_proto_assistant.py
+ERROR tests/test_site_scene_proto_closure_privacy.py
+ERROR tests/test_site_scene_proto_flow_verdicts.py
+ERROR tests/test_site_scene_proto_generation.py
+ERROR tests/test_site_scene_proto_geometry.py
+ERROR tests/test_site_scene_proto_isolation.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 7 errors during collection !!!!!!!!!!!!!!!!!!!!

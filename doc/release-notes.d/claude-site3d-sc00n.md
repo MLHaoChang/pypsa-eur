@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The solve queue now refuses a job kind it does not know instead of running it as an electrical solve. Queuing one raises `unknown_job_kind`, and a queued job of that kind left over from a restart is marked failed with that condition rather than resumed. Jobs saved without a kind still run as solves.
