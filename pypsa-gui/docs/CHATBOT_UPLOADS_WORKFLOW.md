@@ -54,7 +54,7 @@ Roadmap to let users drop files into the chat panel (PDFs, images, Excel, Word) 
 
 0. Project-existence check via `Depends(get_loaded_project)` → 404 `project_not_found`.
 1. Read up to 25 MB; over → 413 `file_too_large`. Zero → 400 `empty_file`.
-2. **Magic-byte MIME sniff** via `python-magic` on raw bytes; declared MIME mismatch → 400 `mime_type_mismatch`; not in allowlist → 400 `unsupported_mime`.
+2. **Magic-byte MIME sniff** via `python-magic` on raw bytes; declared MIME mismatch → 400 `mime_type_mismatch`; not in allowlist → 400 `unsupported_mime`. A `.geojson`/`.kml` (or a declared geo type) that sniffs as JSON, XML, text or octet-stream becomes `application/geo+json` / `application/vnd.google-earth.kml+xml` only when `map_geometry_import.parse_features` reads it (over 8 MB → 413 `file_too_large`); otherwise it keeps its sniff, and a declared geo type that was never checked is refused.
 3. `file_id = sha256(bytes)[:16]`, then enter the locked critical section.
 
 ### Lock policy

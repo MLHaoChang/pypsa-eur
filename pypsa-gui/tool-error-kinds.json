@@ -427,6 +427,18 @@
       "surface": "inline",
       "why": "POST …/reports/{id}/roundtrip: the uploaded file is not a Word document the reader can open. Inline: the tool result names the file and the remedy (export again, edit in Word, upload the .docx); the assistant relays it."
     },
+    "rolling_horizon_invalid": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': a Horizon under 1 snapshot. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
+    },
+    "rolling_overlap_invalid": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': a negative Overlap. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
+    },
+    "rolling_overlap_exceeds_horizon": {
+      "surface": "inline",
+      "why": "update_solver_config (PUT /api/simulation/solver_config) refused a rolling-horizon window with solve_strategy 'rolling': an Overlap not shorter than the Horizon. The message says which setting to change; the EditCard preview re-raises it before any card. There is no conversation-wide recovery action."
+    },
     "sdk_not_installed": {
       "surface": "inline",
       "why": "The SDK the active profile's wire needs is missing from this build, surfaced as a 400 by the report generation routes (WP3); the chat turn reports it on its own error frame. Per-call; the message says so and the model relays it."
