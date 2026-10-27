@@ -10,8 +10,14 @@ import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
+import type { ReliabilityGoal } from '../api/flow'
+import {
+  goalPatchFromEdits, invalidateReliabilityGoal, useReliabilityGoal, type GoalEdits,
+} from '../hooks/useReliabilityGoal'
+import { ReliabilityGoalEditor } from '../components/reliabilityGoal/ReliabilityGoalEditor'
 import { invalidateNetworkQueries } from '../utils/projectActions'
 import { PageHeader } from '../components/PageKit'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import CarrierSelect from '../components/CarrierSelect'
 import GlobalConstraintForm, { NEW_CONSTRAINT, type GlobalConstraintRow } from './solver/GlobalConstraintForm'
 import { ScopeCards } from '../components/flowScope/ScopeCards'
@@ -147,6 +153,11 @@ export default function SolverSettings() {
   const { data: cfg } = useQuery({ queryKey: nk(currentProject, 'solverConfig'), queryFn: simulationApi.getSolverConfig })
   const { data: solvers } = useQuery({ queryKey: ['checkSolvers'], queryFn: simulationApi.checkSolvers })
   const [draft, setDraft] = useState<SolverConfig | null>(null)
+  // The reliability goal's editor (W3b-R): what was typed, per field. Valid
+  // edits go into the draft at once; Save sends only what changed.
+  const { goal } = useReliabilityGoal()
+  const [goalEdits, setGoalEdits] = useState<GoalEdits>({})
+  const goalError = goalPatchFromEdits(goalEdits).error
   // Snapshot of `cfg` at the moment `draft` was hydrated. Used at Save
   // time to compute a DIFF — we send only the fields the user actually
   // changed in this form, never the unchanged ones. Without this, Save
@@ -201,6 +212,9 @@ export default function SolverSettings() {
       // what we just persisted (or, on no-op, the same snapshot).
       baselineRef.current = JSON.parse(JSON.stringify(savedNext))
       qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'solverConfig') })
+      // Guided's Goal card and every Results study read the goal (W3b-R).
+      invalidateReliabilityGoal(qc, useUIStore.getState().currentProject)
+      setGoalEdits({})
       if (noOp) {
         toast('No changes to save', { icon: 'ℹ️' })
       } else {
@@ -252,7 +266,9 @@ export default function SolverSettings() {
     if (!blockRequest || !draft) return
     const [want, target] = blockRequest === 'sclopf'
       ? ['network', 'solver-sclopf-panel'] as const
-      : ['dispatch', 'solver-economic-assumptions'] as const
+      : blockRequest === 'goal'
+        ? ['network', 'solver-reliability-goal'] as const
+        : ['dispatch', 'solver-economic-assumptions'] as const
     if (tab !== want) { setTab(want); return }
     document.getElementById(target)?.scrollIntoView({ block: 'start' })
     clearBlockRequest()
@@ -907,7 +923,12 @@ export default function SolverSettings() {
       </section>
 
       {/* ── Value of Lost Load (VOLL) ────────────────────────── */}
-      <ReliabilityAssumptions draft={draft} patch={patch} />
+      <ReliabilityAssumptions draft={draft} patch={patch} goal={goal} goalEdits={goalEdits}
+        onGoalEdits={e => {
+          setGoalEdits(e)
+          const { patch: p, error } = goalPatchFromEdits(e)
+          if (!error) patch(p)
+        }} />
 
       {/* ── Stress scenarios (the registry the B/C sweep reads) ─── */}
       <StressConditionsSection project={currentProject} />
@@ -928,7 +949,8 @@ export default function SolverSettings() {
       <div className="flex gap-2 p-3 border-t border-border bg-bg">
         <button
           onClick={() => draft && save.mutate(draft)}
-          disabled={save.isPending}
+          disabled={save.isPending || goalError !== null}
+          title={goalError ?? undefined}
           className="flex-1 px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
         >{save.isPending ? 'Saving…' : 'Save settings'}</button>
         <button
@@ -943,6 +965,7 @@ export default function SolverSettings() {
             // mutation flow was rewritten to avoid.
             setDraft(cfg)
             baselineRef.current = JSON.parse(JSON.stringify(cfg))
+            setGoalEdits({})
           }}
           className="px-3 py-1.5 border border-border rounded text-xs text-muted hover:text-text"
         >Revert</button>
@@ -1488,6 +1511,19 @@ function Co2PricePerPeriod({
   )
 }
 
+/** The goal as the draft holds it, for a mount without the goal query: a set
+ *  value is stored, an unset one the default. */
+function goalFromDraft(d: SolverConfig): ReliabilityGoal {
+  const pick = <T,>(v: T | null | undefined, dflt: T) =>
+    (v != null ? { value: v, source: 'stored' as const } : { value: dflt, source: 'default' as const })
+  return {
+    target_lole_h: pick<number | null>(d.target_lole_h, null),
+    ens_cap_permyriad: pick<number | null>(d.ens_cap_permyriad, null),
+    mc_draws: pick(d.mc_draws, 500),
+    site_archetype: pick(d.site_archetype, 'strong_grid' as const),
+  }
+}
+
 // ReliabilityAssumptions lives under the Network tab. Single field (VOLL) —
 // when > 0 the backend injects a slack 'load_shedding' generator on every bus,
 // so the LP can drop demand instead of failing when supply is tight.
@@ -1495,11 +1531,26 @@ function Co2PricePerPeriod({
 // tested) without mounting the whole settings page: this component is pure
 // `(draft, patch)` with no hooks of its own.
 export function ReliabilityAssumptions({
-  draft, patch,
+  draft, patch, goal = null, goalEdits = {}, onGoalEdits,
 }: {
   draft: SolverConfig
   patch: (p: Partial<SolverConfig>) => void
+  /** The stored goal with its fallbacks; without it, the draft's values. */
+  goal?: ReliabilityGoal | null
+  goalEdits?: GoalEdits
+  /** Without it, a valid edit patches the draft directly. */
+  onGoalEdits?: (e: GoalEdits) => void
 }) {
+  const [ownEdits, setOwnEdits] = useState<GoalEdits>({})
+  const edits = onGoalEdits ? goalEdits : ownEdits
+  // The ENS the run uses: the draft's, else the template's (an ENS of 0 or
+  // none lets the template's stand; W3b-R PR1).
+  const ensShown = draft.ens_cap_permyriad || goal?.ens_cap_permyriad.value
+  const onEdits = onGoalEdits ?? ((e: GoalEdits) => {
+    setOwnEdits(e)
+    const { patch: p, error } = goalPatchFromEdits(e)
+    if (!error) patch(p)
+  })
   return (
     <section className="border border-border rounded">
       <div className="px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted">
@@ -1522,20 +1573,19 @@ export function ReliabilityAssumptions({
           this is set and the LP actually sheds.
         </p>
 
-        {/* ── Reliability target (adequacy spec §5.1) ─────────────── */}
+        {/* ── Reliability goal (W3b-R; adequacy spec §5.1) ───────── */}
         <div className="mt-3 pt-3 border-t border-border">
-          <NumberField
-            label="ENS target"
-            unit="‱ of demand"
-            value={draft.ens_cap_permyriad ?? 0}
-            step={0.1}
-            min={0}
-            onChange={v => patch({ ens_cap_permyriad: v > 0 ? v : null })}
-            hint="Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
-          />
-          {ensTargetWarning(draft.ens_cap_permyriad) && (
+          <div id="solver-reliability-goal" data-testid="solver-reliability-goal"
+            className="flex flex-col gap-2 mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+              Reliability goal
+            </span>
+            <ReliabilityGoalEditor mode="expert"
+              goal={goal ?? goalFromDraft(draft)} edits={edits} onChange={onEdits} />
+          </div>
+          {ensTargetWarning(ensShown) && (
             <p className="text-[10px] text-danger mt-1">
-              {ensTargetWarning(draft.ens_cap_permyriad)}
+              {ensTargetWarning(ensShown)}
             </p>
           )}
           <NumberField
@@ -2047,9 +2097,11 @@ function NumberField({
 //               on the passive-branch graph: lines + transformers)
 //   • custom  — pick a PyPSA algorithm and tune its parameters
 //
-// Clicking "Apply clustering" calls POST /api/network/cluster which mutates
-// the in-memory network and triggers full cache invalidation so the canvas
-// and tables refresh to the reduced topology.
+// "Apply clustering…" asks first (R1-single-run): Confirm calls POST
+// /api/network/cluster, which mutates the in-memory network (the network
+// middleware pushes an undo snapshot and clears the solve results) and
+// triggers full cache invalidation so the canvas and tables refresh to the
+// reduced topology. The done line's next step is the one gated Run.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ClusterMode = 'nodal' | 'zone' | 'region' | 'custom'
@@ -2089,11 +2141,29 @@ const DEFAULT_CLUSTER_REQ: ClusterRequest = {
   stubs:  { matching_attrs: [] },
 }
 
-function ClusteringSection() {
+export function ClusteringSection() {
   const qc = useQueryClient()
   const currentProject = useUIStore(s => s.currentProject)
+  const requestRunSolve = useUIStore(s => s.requestRunSolve)
   const { data: buses = [] } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const [req, setReq] = useState<ClusterRequest>(DEFAULT_CLUSTER_REQ)
+  const [confirming, setConfirming] = useState(false)
+  // The done line, pinned to the network revision and undo depth it left.
+  // The next network edit clears it; an undo (revision moves, depth drops)
+  // turns it into "Clustering undone." A Save keeps the revision, so it stays.
+  const [done, setDone] = useState<{ text: string; rev?: number; depth: number } | null>(null)
+  const [undone, setUndone] = useState(false)
+  const undoInfoQuery = (project: string | null) =>
+    ({ queryKey: nk(project, 'undoInfo'), queryFn: networkApi.undoInfo, staleTime: 0 })
+  const { data: undoInfo } = useQuery(undoInfoQuery(currentProject))
+  useEffect(() => {
+    if (!done || undoInfo?.network_revision == null) return
+    // The read right after clustering failed: pin to the next poll instead.
+    if (done.rev == null) { setDone({ ...done, rev: undoInfo.network_revision, depth: undoInfo.depth }); return }
+    if (undoInfo.network_revision === done.rev) return
+    setUndone(undoInfo.depth < done.depth)
+    setDone(null)
+  }, [done, undoInfo])
 
   // Context counts surfaced above the form: tells the user what they're
   // working with before they pick a mode. Counts come from /buses (already
@@ -2110,22 +2180,29 @@ function ClusteringSection() {
 
   const apply = useMutation({
     mutationFn: () => networkApi.applyClustering(req),
-    onSuccess: (res: { bus_count: number; line_count: number; message: string }) => {
+    onSuccess: async (res: { bus_count: number; line_count: number; message: string }) => {
       // Clustering reshapes the CURRENT project's network — every component
       // table + result is stale. Scope to this project's network roots (which
       // include `results`) rather than a bare `invalidateQueries()` that nuked
       // every resident project's cache; other open projects survive for B8.
       invalidateNetworkQueries(qc, useUIStore.getState().currentProject)
-      toast.success(res.message ?? `Clustered to ${res.bus_count} buses`)
+      setConfirming(false)
+      setUndone(false)
+      const text = `Clustered to ${res.bus_count} bus${res.bus_count === 1 ? '' : 'es'} · solve results cleared`
+      const info = await qc.fetchQuery(undoInfoQuery(useUIStore.getState().currentProject))
+        .catch(() => undefined)
+      setDone({ text, rev: info?.network_revision ?? undefined, depth: info?.depth ?? 0 })
     },
     onError: (e: { response?: { data?: { detail?: string } } } | Error) => {
       const msg = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
                 ?? (e as Error).message
+      setConfirming(false)
       toast.error(`Clustering failed: ${msg}`)
     },
   })
 
-  const setMode = (m: ClusterMode) => setReq(r => ({ ...r, mode: m }))
+  // A new choice makes the last done line stale.
+  const setMode = (m: ClusterMode) => { setDone(null); setUndone(false); setReq(r => ({ ...r, mode: m })) }
   const setAlgorithm = (a: ClusterAlgorithm) => setReq(r => ({ ...r, algorithm: a }))
   const patchK = (p: Partial<KmeansOpts>) => setReq(r => ({ ...r, kmeans: { ...r.kmeans!, ...p } }))
   const patchH = (p: Partial<HacOpts>) => setReq(r => ({ ...r, hac:    { ...r.hac!,    ...p } }))
@@ -2139,6 +2216,11 @@ function ClusteringSection() {
   }
 
   const showCustom = req.mode === 'custom'
+  const clusterInto =
+    req.mode === 'zone' ? `into ${nCountries} by country`
+    : req.mode === 'region' ? 'by sub-network'
+    : req.algorithm === 'stubs' ? 'by merging stub buses'
+    : `into ${req.n_clusters} (${req.algorithm})`
   const algoNeedsN = showCustom && req.algorithm !== 'stubs'
 
   return (
@@ -2325,11 +2407,11 @@ function ClusteringSection() {
             (would be a no-op). */}
         <div className="border-t border-border pt-3 flex items-center gap-2">
           <button
-            onClick={() => apply.mutate()}
+            onClick={() => setConfirming(true)}
             disabled={apply.isPending || req.mode === 'nodal'}
             className="flex-1 px-3 py-1.5 bg-accent text-white rounded text-xs font-medium hover:bg-accent/90 disabled:opacity-40"
           >
-            {apply.isPending ? 'Clustering…' : 'Apply clustering'}
+            {apply.isPending ? 'Clustering…' : 'Apply clustering…'}
           </button>
           <button
             onClick={() => setReq(DEFAULT_CLUSTER_REQ)}
@@ -2338,11 +2420,36 @@ function ClusteringSection() {
             Reset
           </button>
         </div>
+        {done && (
+          <div data-testid="clustering-done" role="status"
+            className="flex items-center gap-2 px-2 py-1.5 border border-accent/40 bg-accent/5 rounded text-[11px] text-text">
+            <span className="flex-1 min-w-0">{done.text}</span>
+            {/* The one gated Run (as RunFromReadiness), never a second solve path. */}
+            <button type="button" onClick={() => { setDone(null); requestRunSolve() }}
+              className="text-accent font-medium hover:underline">
+              Run the solve ›
+            </button>
+          </div>
+        )}
+        {undone && (
+          <p data-testid="clustering-undone" role="status" className="text-[11px] text-muted">Clustering undone.</p>
+        )}
         <p className="text-[10px] text-muted">
-          Clustering replaces the in-memory network with the reduced topology.
-          Save the project (header → Save) afterwards to persist; the operation
-          can't be undone in-session beyond ⌘Z range, so save first if uncertain.
+          Clustering replaces the network with the reduced topology and clears
+          the solve results. Undo (Ctrl+Z) reverts it; save the project (header → Save) to keep it.
         </p>
+        <ConfirmDialog
+          open={confirming}
+          title="Apply clustering?"
+          message={<>
+            Cluster {nBuses} bus{nBuses === 1 ? '' : 'es'} {clusterInto}? This clears any solve results.
+            You can undo it with Ctrl+Z.
+          </>}
+          confirmLabel="Apply clustering"
+          pending={apply.isPending}
+          onConfirm={() => apply.mutate()}
+          onCancel={() => setConfirming(false)}
+        />
       </div>
     </section>
   )

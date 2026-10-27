@@ -1,7 +1,7 @@
 # E1. Examples for any planning years
 
-Status: ready-for-agent
-Progress: E1a #540 and E1b #574 and #580 merged; E1c ammonia on branch `claude/e1c-planning-years-ammonia`; E1d single-year and IPP templates lack planning_spec.
+Status: done
+Progress: E1a #540, E1b #574 and #580, E1c #718, E1d #730 and the placeholder follow-up #733 merged; the report ledger follow-up is done (#704). The Builder's period preview is W2's.
 Type: task
 Gated: yes, the engine gatekeeper (session_01Fz66v1SpJnjGHky1RbUuqC). Each slice needs its own OK on its head.
 Model tier: opus
@@ -52,7 +52,7 @@ Read [workspace reconciliation](../workspace-reconciliation.md) §3.3, §12 (Q3 
   - `eh_ipp_hybrid`: build on IPP #510 (`cases()`, `cases.json` in `write_sidecars`) and ticket 05 after they merge. `YEAR` becomes a parameter: snapshots, profiles, COD, `FINANCIAL_CLOSE = start − 2`, `ANALYSIS_YEARS = end − start`.
   - Re-date `SERIES_NOTES` `currency_year` together with FINANCE `currency_year` and the price-series dates, or `template_series.basis_conflicts` refuses the create.
   - `tests/test_eh_ipp_cases.py` checks the `old` values.
-  - IPP GS-4 (#564, relayed by the coordinator 2026-10-21 22:15 CEST): the observed series `ipp_da_smard_2024` and `ipp_da_dk1_2024` are re-dated onto the template's 2030 calendar (hour of year kept, 29 Feb dropped, UTC kept) and labelled 2030 real money (assumed) to pass `basis_conflicts`. With free planning years, keep them on their native 2024 calendar and let the money-year rules apply instead of re-dating; today `eh_ipp.SERIES_NOTES` `currency_year` follows `YEAR`.
+  - IPP GS-4 (#564, relayed by the coordinator 2026-10-21 22:15 CEST): the observed series `ipp_da_smard_2024` and `ipp_da_dk1_2024` are re-dated onto the template's 2030 calendar (hour of year kept, 29 Feb dropped, UTC kept) and labelled 2030 real money (assumed) to pass `basis_conflicts`. With free planning years, keep them on their native 2024 calendar and let the money-year rules apply instead of re-dating; today `eh_ipp.SERIES_NOTES` `currency_year` follows `YEAR`. Superseded by owner decision E1D-IPP-1 (2026-10-26): re-dated onto the start year (hour of year kept, 29 Feb dropped) and taken as start-year money, ledgered.
 
 ## Open items
 

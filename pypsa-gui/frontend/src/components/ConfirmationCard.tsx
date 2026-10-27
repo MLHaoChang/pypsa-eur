@@ -1,3 +1,4 @@
+import { shortMcpToolName } from '../api/mcpSettings'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 
@@ -5,7 +6,7 @@ import { postChatConfirm } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 import { useUIStore } from '../store/uiStore'
 import { mismatchSentence } from '../utils/projectMismatch'
-import { EditCardTable, editCardOf } from './EditCard'
+import { EditCardTable, editCardOf, editCardWords } from './EditCard'
 
 // Tools that require an EXTRA typed-confirmation step (Phase 4 polish).
 // v4-MAJOR-1 / v6-F1: save_project force-overwrite needs the user to type
@@ -380,6 +381,11 @@ export function ConfirmationCard() {
           ? guidedWording.header
           : <>Confirm · {pending.safety_tier}</>}
       </div>
+      {pending.external && (
+        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-external">
+          External tool · MCP server {pending.external.server}
+        </div>
+      )}
       {guidedWording?.note && (
         <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
           {guidedWording.note}
@@ -389,7 +395,9 @@ export function ConfirmationCard() {
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
             data-testid="chat-confirmation-summary">
-            {edit?.says || guidedCardSummary(pending.tool_name, pending.args)}
+            {(edit && (editCardWords(edit) || edit.says)) || (pending.external
+              ? shortMcpToolName(pending.tool_name)
+              : guidedCardSummary(pending.tool_name, pending.args))}
           </div>
           {/* P26 gate B2: a destructive card shows its raw call by default. */}
           <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
@@ -404,7 +412,7 @@ export function ConfirmationCard() {
       ) : (
         <>
           <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-            {pending.tool_name}
+            {pending.external ? shortMcpToolName(pending.tool_name) : pending.tool_name}
           </div>
           <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
             {JSON.stringify(pending.args, null, 2)}
@@ -417,7 +425,8 @@ export function ConfirmationCard() {
       </p>}
       {pending.tool_name === 'apply_project_changes' && (review ? (
         <div className="mb-2 text-xs">
-          <div className="overflow-x-auto">
+          {/* LC-16: the edit card above already lists every row; the bare diff is the fallback. */}
+          {!edit && <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <caption className="text-left font-semibold mb-1">Changes to apply</caption>
               <thead><tr>{['Asset', 'Field', 'Old value', 'New value', 'Unit'].map(h => (
@@ -430,7 +439,7 @@ export function ConfirmationCard() {
                 ))}
               </tr>)}</tbody>
             </table>
-          </div>
+          </div>}
           <p className="mt-1 text-muted">Applies every value shown. Existing time-series overrides remain. Changes are left unsaved.</p>
         </div>
       ) : <p role="alert" className="mb-2 text-xs text-warn">

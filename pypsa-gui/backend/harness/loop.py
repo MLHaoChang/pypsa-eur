@@ -58,6 +58,7 @@ NO ANTHROPIC SDK IMPORT. `run_turn` drives an `LLMProvider` (the seam in
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import contextvars
 import logging
 import threading
@@ -1773,6 +1774,8 @@ def _run_turn_body(
     # W10 H2a — a bounded task's cap is decided once, here, after the workflow
     # rebinding above: the model cannot lift it mid-turn (budget.task_cap).
     session.turn_task_cap = harness_budget.task_cap(session)
+    session.turn_single_edit_applied = False
+    session.turn_redirects = {}
     from harness.compose import _results_card_addendum
     card_block = _results_card_addendum(session)
     _eventlog.context(session, "results_card", card_block)
@@ -2232,6 +2235,14 @@ def _run_turn_body(
                 return
             continue
 
+        from harness import edit_routing
+        from services import assistant_tasks
+        # A bound plan's next step runs as that step, with its own card; routing it
+        # to the preview would leave the plan unable to complete.
+        routable = [tu for tu in tool_uses
+                    if not assistant_tasks.is_next_step(session, tu.get("name"), tu.get("input") or {})]
+        session.turn_redirects = ({} if session.assurance_turn is not None or not edit_routing.preview_available() else
+                                  edit_routing.redirects(routable, session.turn_single_edit_applied))
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
@@ -2426,11 +2437,16 @@ def _tool_tier(session: ChatSession, tool_name: str) -> str:
     return mcp_client.tier_for(session, tool_name) or _safety_tier_for(tool_name)
 
 
-def _publish_hook(ctx, run_token):
+def _publish_hooks(ctx, run_token) -> dict:
+    """The detached monitor's run-evidence hooks; none without a run record."""
     if run_token is None:
-        return None
+        return {}
     from services import run_evidence
-    return lambda: run_evidence.publish_foreground_run(run_token, ctx)
+    return {
+        "on_terminal": lambda: run_evidence.publish_foreground_run(run_token, ctx),
+        "on_superseded": lambda: run_evidence.publish_foreground_superseded(run_token),
+        "is_pending": lambda: run_evidence.foreground_run_pending(run_token),
+    }
 
 
 def _dispatch_real_tool_call(
@@ -2475,6 +2491,16 @@ def _dispatch_real_tool_call(
     from harness import mcp_client
     external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
     tier = _tool_tier(session, tool_name)
+
+    # LC-16 slice C: a multi-asset edit goes through the one preview card. The
+    # refusal is for the model only, so it is sent before any frame: the user
+    # sees no failed card (harness/edit_routing.py).
+    redirect = None if external else (session.turn_redirects or {}).get(tool_use_id)
+    if redirect:
+        detail = {"error_kind": "use_project_preview", "message": redirect}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
+                                       "content": _error_result_content(detail, None, detail["error_kind"])})
+        return
 
     yield "tool_request", {
         "tool_use_id": tool_use_id,
@@ -2547,7 +2573,8 @@ def _dispatch_real_tool_call(
     # in Guided, so an edit is gated as Guided gates a write.
     from harness import edit_card as edit_cards
     is_edit = tier != "read" and not external and edit_cards.is_edit(tool_name)
-    guided = guided or is_edit
+    from harness.confirm import GUIDED_UNCARDED
+    guided = (guided and tool_name not in GUIDED_UNCARDED) or is_edit
     if tier in _confirm_tiers(guided):
         from services.chat_tools import PRE_DISPATCH_VALIDATORS
         validator = PRE_DISPATCH_VALIDATORS.get(tool_name)
@@ -2769,18 +2796,27 @@ def _dispatch_real_tool_call(
                     from harness.effects import execute
                     return execute(checked_turn, tool_name, args, handler)
                 from harness.experiment_execution import invoke
+                reviewed = contextlib.nullcontext()
                 if tool_name == 'apply_project_changes':
-                    from services.assistant_tools import confirmed_preview
-                    with confirmed_preview(confirmation_args['review_sha256']):
-                        return invoke(session, tool_name, args or {}, handler)
-                if edit_card is not None:
-                    edit_cards.require_current(tool_name, args or {}, edit_card)
-                    with edit_cards.approved(edit_card["digest"]):
-                        out = invoke(session, tool_name, args or {}, handler)
-                    if isinstance(out, dict):
-                        out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
-                    return out
-                return invoke(session, tool_name, args or {}, handler)
+                    from services.assistant_tools import confirmed_preview, preview_confirmation
+                    reviewed = confirmed_preview(confirmation_args['review_sha256'])
+                    # LC-16: the card the user approved, the review shown and
+                    # the stored preview the handler applies are one record.
+                    if edit_card is not None and (
+                            (edit_card.get("binding") or {}).get("review_sha256") != confirmation_args['review_sha256']
+                            or preview_confirmation(args.get("preview_id"))['review_sha256']
+                            != confirmation_args['review_sha256']):
+                        edit_cards._refuse("invalid_preview", "The reviewed preview changed; create and review a "
+                                           "new preview.", 409)
+                with reviewed:
+                    if edit_card is not None:
+                        edit_cards.require_current(tool_name, args or {}, edit_card)
+                        with edit_cards.approved(edit_card["digest"]):
+                            out = invoke(session, tool_name, args or {}, handler)
+                        if isinstance(out, dict):
+                            out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
+                        return out
+                    return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool
             # every session shares, so a call that never got a worker was
@@ -2928,7 +2964,13 @@ def _dispatch_real_tool_call(
             # Pydantic failures used to surface as opaque "tool_error" with a
             # multi-line body the UI truncated away — keep a short kind.
             error_kind = "validation_error"
-        msg = _redact_for_log(detail or exc)
+        # A refusal's detail is {"error_kind", "message"}: show the human
+        # message, not the dict repr. A lock refusal keeps its whole detail
+        # (the banner reads the holder from it).
+        shown = detail
+        if isinstance(detail, dict) and "lock" not in detail and isinstance(detail.get("message"), str) and detail["message"].strip():
+            shown = detail["message"]
+        msg = _redact_for_log(shown or exc)
         yield "tool_error", {
             "tool_use_id": tool_use_id,
             "tool_name": tool_name,
@@ -2992,7 +3034,7 @@ def _dispatch_real_tool_call(
                     session, active_ctx,
                     tool_use_id=tool_use_id,
                     tool_name=tool_name,
-                    on_terminal=None if task_path else _publish_hook(active_ctx, run_token),
+                    **({} if task_path else _publish_hooks(active_ctx, run_token)),
                 )
                 if task_path:
                     from harness import continuation
@@ -3177,7 +3219,7 @@ def _dispatch_real_tool_call(
         yield "choice_request", ui_event_payload
     elif isinstance(result, dict) and result.get("_ui_event"):
         ui_event_payload = {
-            k: v for k, v in result.items() if k != "_ui_event"
+            k: v for k, v in result.items() if k not in ("_ui_event", "highlight_facts")
         }
         # Keep a compact acknowledgement for the model (full navigate args stay
         # on the SSE ui_event frame for the frontend).
@@ -3198,6 +3240,11 @@ def _dispatch_real_tool_call(
             "period": ui_event_payload.get("period"),
             "snapshot_index": ui_event_payload.get("snapshot_index"),
             "canvas_view": ui_event_payload.get("canvas_view"),
+            # Live-voice 07 — Load flow source, window and highlighted branch.
+            "loadflow_source": ui_event_payload.get("loadflow_source"),
+            "window_from": ui_event_payload.get("window_from"),
+            "window_to": ui_event_payload.get("window_to"),
+            "highlight": result.get("highlight_facts"),
             # Issue 06 — open_run_result acknowledges the discussed run id.
             "run_id": ui_event_payload.get("run_id"),
             "section": ui_event_payload.get("section"),
@@ -3219,9 +3266,26 @@ def _dispatch_real_tool_call(
         acknowledgement = None
         if session.assurance_turn is None and session.navigation_turn is not None:
             from harness.navigation import issue
-            acknowledgement = issue(session.navigation_turn, {
-                **{k: v for k, v in ui_event_payload.items() if v is not None},
-                "tool_use_id": tool_use_id})
+            try:
+                acknowledgement = issue(session.navigation_turn, {
+                    **{k: v for k, v in ui_event_payload.items() if v is not None},
+                    "tool_use_id": tool_use_id})
+            except HTTPException as exc:
+                # The Load flow view changed between the tool and the ACK
+                # record: refuse as the tool would, and show nothing.
+                detail = exc.detail if isinstance(exc.detail, dict) else {}
+                kind = detail.get("error_kind", "loadflow_view_unavailable")
+                yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                     "error_kind": kind, "message": _redact_for_log(detail or exc)}
+                tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                               "is_error": True,
+                                               "content": _error_result_content(detail, exc, kind)})
+                return
+            loadflow_facts = (acknowledgement or {}).pop("loadflow", None)
+            if loadflow_facts:
+                # What the issued record bound, not the tool's earlier read.
+                result_for_model["highlight"] = loadflow_facts["highlight"]
+                result_for_model["source_binding"] = loadflow_facts["source_binding"]
             if acknowledgement:
                 ui_event_payload.update(acknowledgement=acknowledgement, tool_use_id=tool_use_id)
         yield "ui_event", ui_event_payload
@@ -3247,6 +3311,9 @@ def _dispatch_real_tool_call(
     })
     from services.reference_resolution import active_project_key
     session.note_touched_components(active_project_key(), tool_name, tu.get("input"))
+    if not external:
+        from harness import edit_routing
+        edit_routing.note_success(session, tool_name, tier, args)
     yield "tool_result", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,

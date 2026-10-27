@@ -44,6 +44,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import socket
+import subprocess
 import sys
 import time
 import uuid
@@ -151,6 +153,7 @@ class PromptResult:
     # Chat harness issue 20: the `turn_done` usage (the SESSION's running
     # total, so per-turn figures are differences; see per_turn_usage).
     usage: dict[str, Any] | None = None
+    session_id: str | None = None
     # In the real run_turn flow, `turn_done` is the success terminator. The
     # stream is closed by the backend right after - iter_lines() returns
     # cleanly. `session_done` is only emitted on error paths (abort, cap
@@ -245,7 +248,7 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
     if ctx.model:
         body["model"] = ctx.model
 
-    result = PromptResult(name=prompt.name, passed=False)
+    result = PromptResult(name=prompt.name, passed=False, session_id=session_id)
     start = time.monotonic()
 
     try:
@@ -747,16 +750,93 @@ def build_workflow_prompts() -> list[SmokePrompt]:
     ]
 
 
+# Issue 19: the MCP parity probe. `smoke/mcp_stub_server.py --http` runs on
+# this machine and is registered through the super-admin settings route (which
+# takes http servers only), on a fresh session so its tools are in that
+# session's fixed list. A read-only tool runs with no card; a tool without
+# hints gets one, on every provider. DELETE in cleanup.
+
+MCP_STUB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mcp_stub_server.py")
+MCP_SERVER_PREFIX = "smoke"
+
+
+def start_mcp_stub(base_url: str, session: requests.Session
+                   ) -> tuple[str, subprocess.Popen] | str:
+    """Start the stub and register it, enabled; a failure string otherwise."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    proc = subprocess.Popen([sys.executable, MCP_STUB, "--http", str(port)])
+    server_id = MCP_SERVER_PREFIX + uuid.uuid4().hex[:8]
+    url = f"http://127.0.0.1:{port}/mcp"
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            requests.post(url, json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+                          timeout=1)
+            break
+        except requests.RequestException:
+            if time.monotonic() > deadline:
+                proc.kill()
+                return "the MCP stub did not start"
+            time.sleep(0.2)
+    try:
+        r = session.put(f"{base_url}/api/chat/settings/mcp/servers/{server_id}",
+                        json={"enabled": True, "url": url}, timeout=10)
+    except requests.RequestException as exc:
+        proc.kill()
+        return f"MCP server PUT failed: {exc}"
+    if r.status_code != 200:
+        proc.kill()
+        return f"MCP server PUT -> {r.status_code} (the smoke user must be a super-admin)"
+    return server_id, proc
+
+
+def stop_mcp_stub(base_url: str, session: requests.Session, server_id: str,
+                  proc: subprocess.Popen) -> bool:
+    try:
+        ok = session.delete(f"{base_url}/api/chat/settings/mcp/servers/{server_id}",
+                            timeout=10).status_code == 200
+    except requests.RequestException:
+        ok = False
+    proc.kill()
+    proc.wait(timeout=5)
+    return ok
+
+
+def build_mcp_prompts(server_id: str) -> list[SmokePrompt]:
+    session_id = WORKFLOW_SESSION_PREFIX + uuid.uuid4().hex[:12]
+    run = "Run the tool mcp__{sid}__{tool} with exactly these arguments: {args}"
+    return [
+        SmokePrompt(
+            name="M1_external_read",
+            message=run.format(sid=server_id, tool="lookup", args='{"key": "a"}'),
+            expected_tools={f"mcp__{server_id}__lookup"},
+            session_id=session_id,
+        ),
+        SmokePrompt(
+            name="M2_external_write",
+            message=run.format(sid=server_id, tool="set_value", args='{"key": "a", "value": "b"}'),
+            expected_tools={f"mcp__{server_id}__set_value"},
+            expected_frames={"tool_pending_confirmation"},
+            session_id=session_id,
+        ),
+    ]
+
+
 _USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_create_tokens")
 
 
 def per_turn_usage(results: list[PromptResult]) -> list[dict[str, int] | None]:
     """What each turn added: `turn_done.usage` is the session's running total,
-    so a turn's own figures are the difference from the previous prompt's
-    (the battery runs every prompt in one session)."""
+    so a turn's own figures are the difference from the previous prompt's in
+    the same session (the MCP probe runs in a session of its own)."""
     out: list[dict[str, int] | None] = []
     prev = {k: 0 for k in _USAGE_KEYS}
+    session = None
     for r in results:
+        if r.session_id != session:
+            prev, session = {k: 0 for k in _USAGE_KEYS}, r.session_id
         u = r.usage if isinstance(r.usage, dict) else None
         if u is None or not u.get("reported", True):
             out.append(None)
@@ -794,6 +874,9 @@ def check_workflow_results(results: list[PromptResult]) -> list[str]:
     if w3 and w3.workflow_states:
         if (w3.workflow_states[-1] or {}).get("workflow") is not None:
             problems.append("W3: workflow_state after end_workflow is not null")
+    m1 = by.get("M1_external_read")
+    if m1 and "tool_pending_confirmation" in m1.frame_kinds:
+        problems.append("M1: a read-only external tool asked for confirmation")
     w5 = by.get("W5_multi_select")
     if w5 and w5.choice_requests:
         if w5.choice_requests[0].get("multi_select") is not True:
@@ -872,6 +955,13 @@ def main() -> int:
         if menu_problem is not None:
             return 1
         prompts = build_workflow_prompts()
+        started = start_mcp_stub(args.base_url, session)
+        if isinstance(started, str):
+            print(f"  MCP stub: {_red(started)}")
+            return 1
+        mcp_server_id, mcp_proc = started
+        print(f"  MCP stub: registered as {mcp_server_id}")
+        prompts += build_mcp_prompts(mcp_server_id)
     else:
         prompts = build_prompts(smoke_project)
     if args.prompts is not None:
@@ -904,6 +994,9 @@ def main() -> int:
             print(f"  --keep-project: smoke project {smoke_project} left on disk")
         _restore_project(args.base_url, session, original_project)
         print(f"  original_project restored: {original_project or '(none)'}")
+        if args.workflow:
+            removed = stop_mcp_stub(args.base_url, session, mcp_server_id, mcp_proc)
+            print(f"  MCP stub: {'removed' if removed else 'FAILED to remove (delete it in Settings)'}")
 
     overall = time.monotonic() - overall_start
     passes = sum(1 for r in results if r.passed)

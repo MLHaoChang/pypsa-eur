@@ -90,10 +90,28 @@ def test_every_panel_hover_key_is_in_the_catalogue():
     src = (FE_SRC / "pages" / "results" / "EhReferenceDesignPanel.tsx").read_text()
     keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", src))
     keys |= set(re.findall(r"'eh-pack-[a-z-]+', [^\]]*?, '([a-z_]+)'\]", src))
-    assert {"ens_cap_permyriad", "target_lole_h", "mc_seed", "dsr_buses",
-            "dtc_attribution", "levers", "stages", "archetype"} <= keys
+    assert {"mc_seed", "dsr_buses", "dtc_attribution", "levers", "stages",
+            "archetype"} <= keys
+    # W3b-R: the LOLE and ENS targets and the draws are the one reliability
+    # goal's, edited in Solver settings / the Goal card, never pack inputs.
+    assert not {"ens_cap_permyriad", "target_lole_h", "mc_draws"} & keys
     fields = G.load_guide("eh_fmea")["fields"]
     assert keys <= set(fields), keys - set(fields)
+
+
+def test_every_goal_hover_key_is_in_the_catalogue():
+    """W3b-R: the goal fields' hover help moved with them from the EH panel
+    to the one goal editor and the site-type select; same keys, same
+    catalogue."""
+    goal_dir = FE_SRC / "components" / "reliabilityGoal"
+    editor = (goal_dir / "ReliabilityGoalEditor.tsx").read_text()
+    site = (goal_dir / "SiteTypeSelect.tsx").read_text()
+    editor_keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", editor))
+    site_keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", site))
+    assert {"ens_cap_permyriad", "target_lole_h"} <= editor_keys
+    assert "archetype" in site_keys
+    fields = G.load_guide("eh_fmea")["fields"]
+    assert (editor_keys | site_keys) <= set(fields), (editor_keys | site_keys) - set(fields)
 
 
 # ── P24: plain-language terms for the hub-design step cards ────────────────

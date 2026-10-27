@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import math
 import os
 import pathlib
 import pickle
@@ -1327,6 +1328,7 @@ async def import_bundle(
     cfg_path = dest / "solver_config.json"
     from routers.simulation import _state
     stripped_fields: list[str] = []
+    dropped_goal: list[dict] = []
     if cfg_path.exists():
         cfg_data = json.loads(cfg_path.read_text())
         # `extra_functionality_code` is exec()-ed in-process with full FS and
@@ -1365,6 +1367,7 @@ async def import_bundle(
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
         _state["solver_config"] = _solver_config_from_dict(cfg_data)
+        dropped_goal = _dropped_goal(cfg_data)
     else:
         # Defaults, not the previously open project's config (WP1.1c review #2).
         from services.solver_service import SolverConfig
@@ -1447,6 +1450,9 @@ async def import_bundle(
         # authorized to set, so a stripped field is never a silent difference
         # between the uploaded bundle and the imported project.
         **({"stripped": stripped_fields} if stripped_fields else {}),
+        # Likewise each reliability-goal value the bundle carried that PUT
+        # would refuse: imported as "not set" (W3b-R), named here.
+        **({"dropped_goal": dropped_goal} if dropped_goal else {}),
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
@@ -1599,7 +1605,26 @@ def _solver_config_from_dict(data: dict):
     # The 'lpf' mode was removed in v1.x — coerce any legacy value to 'lopf'.
     if clean.get("mode") == "lpf":
         clean["mode"] = "lopf"
+    # The reliability goal (W3b-R) is validated as PUT validates it; a value
+    # PUT would refuse loads as "not set" (logged; load_project and bundle
+    # import also name it in their responses), never as a bad goal.
+    from services.reliability_goal import invalid_goal_fields
+    for key, value in invalid_goal_fields(clean).items():
+        logger.warning("solver_config: ignoring invalid %s=%r", key, value)
+        clean[key] = None
     return SolverConfig(**clean)
+
+
+def _dropped_goal(cfg_data: dict) -> list[dict]:
+    """The stored goal values a load ignores, as ``[{field, value}]``."""
+    from services.reliability_goal import invalid_goal_fields
+    return [{"field": k, "value": v if _json_finite(v) else str(v)}
+            for k, v in invalid_goal_fields(cfg_data).items()]
+
+
+def _json_finite(v) -> bool:
+    """A value a JSON response can carry as-is (no NaN / inf)."""
+    return not (isinstance(v, float) and not math.isfinite(v))
 
 
 def _unique_project_name(base: str) -> str:
@@ -1764,7 +1789,7 @@ def create_from_template(
     # The template's price series (IPP ticket 02): read, checked and minted into the
     # creating org's Library BEFORE the project row exists, so a bad series refuses the
     # create and leaves nothing behind (minting is idempotent on content).
-    template_series, series_refs = _mint_template_series(db, user, template_key)
+    template_series, series_refs = _mint_template_series(db, user, template_key, planned)
     _created_project = project_registry.create_root(db, user, requested)
     target_name = _created_project.name
     dest = project_registry.ensure_project_dir(_created_project)
@@ -1786,17 +1811,17 @@ def create_from_template(
             src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
             if src.is_file():
                 atomic_copy(src, dest / sidecar)
-        if template_series:
-            from services.library import bundle_pins
-            from services.library import template_series as TS
+    if site is None and template_series:
+        from services.library import bundle_pins
+        from services.library import template_series as TS
 
-            cfg_path = dest / "solver_config.json"
-            cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
-                                template_series, series_refs)
-            atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
-            # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
-            # reads `library_ref_stale` on the first open.
-            bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
+        cfg_path = dest / "solver_config.json"
+        cfg = TS.apply_refs(json.loads(cfg_path.read_text()) if cfg_path.is_file() else {},
+                            template_series, series_refs)
+        atomic_write_text(cfg_path, json.dumps(cfg, indent=2, sort_keys=True) + "\n")
+        # Pin what the config now names, as a save does (WP1.1c): an unpinned ref
+        # reads `library_ref_stale` on the first open.
+        bundle_pins.write_pins(dest, bundle_pins.collect_pins(cfg))
     if dc is not None and dc[1] is not None:
         # The opt-in's spec, dynamic envelope and ledger, per project
         # (`services.dc_load_profile.read_envelope`; get_eh_template serves it).
@@ -1915,14 +1940,26 @@ def create_from_template(
     }
 
 
-def _mint_template_series(db, user, template_key: str) -> tuple[list, dict]:
+def _mint_template_series(db, user, template_key: str, planned=None) -> tuple[list, dict]:
     """(the template's price series, {name: Library ref}) minted in the user's org; ([], {})
-    when it ships none. A bad series or meta is a typed 422 before anything is created."""
+    when it ships none. A bad series or meta is a typed 422 before anything is created.
+    ``planned`` (the module, Planning, spec) mints them for the entered years (E1d): written
+    and checked against that year's case, not the example's."""
+    import tempfile
+
     from services import library_acl
     from services.library import template_series as TS
 
+    mod, planning = (planned[0], planned[1]) if planned is not None else (None, None)
+    if mod is not None and template_key not in mod.PRICE_SERIES:
+        return [], {}
     try:
-        series = TS.read(_PROJECT_TEMPLATES_DIR / template_key)
+        with tempfile.TemporaryDirectory() as tmp:
+            if mod is None:
+                series = TS.read(_PROJECT_TEMPLATES_DIR / template_key)
+            else:
+                mod.PRICE_SERIES[template_key](tmp, mod._planned(template_key, planning))
+                series = TS.read(tmp)
         if not series:
             return [], {}
         org = library_acl.org_of(db, user)
@@ -1932,8 +1969,9 @@ def _mint_template_series(db, user, template_key: str) -> tuple[list, dict]:
                                          "has no organisation Library to store them in")
         # A ref the template names but does not ship is refused before minting.
         cfg_path = _PROJECT_TEMPLATES_DIR / template_key / "solver_config.json"
-        if cfg_path.is_file():
-            tpl_cfg = json.loads(cfg_path.read_text())
+        if mod is not None or cfg_path.is_file():
+            tpl_cfg = (json.loads(cfg_path.read_text()) if mod is None
+                       else mod.solver_config(template_key, planning))
             TS.apply_refs(tpl_cfg, series, {ts.name: _PlaceholderRef() for ts in series})
             # The illustrative series and the study's money basis must agree (gatekeeper).
             clash = TS.basis_conflicts(series, tpl_cfg.get("finance"))
@@ -3390,6 +3428,7 @@ def load_project(
 
     cfg_path = src / "solver_config.json"
     from routers.simulation import _state
+    dropped_goal: list[dict] = []
     if cfg_path.exists():
         data = json.loads(cfg_path.read_text())
         # Shared legacy-tolerant loader: filter to the live dataclass field set
@@ -3397,6 +3436,7 @@ def load_project(
         # otherwise raise TypeError) and coerce removed enum values. Same path
         # import_bundle uses, so both routes accept old files identically.
         _state["solver_config"] = _solver_config_from_dict(data)
+        dropped_goal = _dropped_goal(data)
     else:
         # No file → defaults, not the PREVIOUS project's config (which
         # `reset_network` carries forward): a later save would otherwise write
@@ -3543,7 +3583,8 @@ def load_project(
     )
     from routers.simulation import _state as _sim_state
     library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
-    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues}
+    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues,
+            **({"dropped_goal": dropped_goal} if dropped_goal else {})}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:

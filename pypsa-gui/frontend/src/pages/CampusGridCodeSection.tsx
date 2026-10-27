@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, FileText, Save, Sparkles, Trash2, Upload } from 'lucide-react'
 import {
-  campusApi, errorText,
+  campusApi, errorText as apiErrorText,
   type GridCodeDocument, type GridCodeDraft, type GridCodeSummary, type GridLimit,
 } from '../api/campusElectrical'
 import { Btn, Field, PageSection, Tag } from '../components/PageKit'
@@ -33,6 +33,13 @@ const SOURCE_TONE: Record<GridLimit['source'], 'ok' | 'warn' | 'accent'> = {
   code: 'accent', assumed: 'warn', extracted: 'warn',
 }
 
+/** The backend's refusal from a capital: its grid-code messages open in lower case.
+ *  A field path (`voltage_bands[0]: …`) opens the message as written. */
+const errorText = (e: unknown): string => {
+  const text = apiErrorText(e)
+  return /^[a-z]+(?![\w[.])/.test(text) ? text.charAt(0).toUpperCase() + text.slice(1) : text
+}
+
 /** A stored selection (`1-40,120-180`) as shown: en dashes, a space after each comma. */
 function pageRangesText(ranges: string): string {
   return ranges.split(',').map(r => r.trim().replace('-', '–')).join(', ')
@@ -48,7 +55,9 @@ function limitPaths(profile: GridCodeDraft['profile']): string[] {
   paths.push('q_range_demand', 'rvc_limit_pct')
   if (profile.campus_voltage) paths.push('campus_voltage')
   for (const key of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-    'thd_limit_pct', 'harmonic_limits_pct'] as const) {
+    'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
+    'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
+    'angle_limit_deg'] as const) {
     if (profile[key]) paths.push(key)
   }
   return paths
@@ -72,8 +81,19 @@ function limitLabel(path: string): string {
     pf_min_leading: 'Minimum power factor, leading',
     thd_limit_pct: 'Total harmonic distortion at the PCC',
     harmonic_limits_pct: 'Harmonic voltage by order at the PCC',
+    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from characteristic and injected orders',
+    pst_limit: 'Flicker severity Pst at the PCC',
+    plt_limit: 'Flicker severity Plt at the PCC',
+    unbalance_limit_pct: 'Voltage unbalance at the PCC',
+    current_tdd_standard: 'Current distortion (TDD) limits at the PCC',
+    q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; positive = the unit exports reactive power)',
+    voltage_deadband_pct: 'Voltage-control deadband per unit (reported, not checked)',
+    angle_limit_deg: 'Voltage-angle difference across a branch',
   }[path] ?? path
 }
+
+/** The current-distortion standards the engine knows (`CURRENT_TDD_STANDARDS`), by their published name. */
+const TDD_STANDARD_LABEL: Record<string, string> = { 'ieee519-2014': 'IEEE 519-2014' }
 
 function limitValue(path: string, lim: GridLimit): string {
   if (path.startsWith('voltage_bands')) return `${lim.kv_min}–${lim.kv_max} kV: ${lim.v_min}–${lim.v_max} pu`
@@ -82,10 +102,20 @@ function limitValue(path: string, lim: GridLimit): string {
   if (path === 'harmonic_limits_pct') {
     const orders = (lim as GridLimit & { orders?: Record<string, number> }).orders ?? {}
     return Object.entries(orders).sort(([a], [b]) => Number(a) - Number(b))
-      .map(([h, v]) => `h${h} ${v} %`).join(' · ')
+      .map(([h, v]) => `h${h}\u00A0${v}\u00A0%`).join(' · ')
   }
-  if (path === 'pf_min_lagging' || path === 'pf_min_leading') return `${lim.value}`
-  if (path === 'q_capability_pq') {
+  if (path === 'pf_min_lagging' || path === 'pf_min_leading' || path === 'pst_limit' || path === 'plt_limit') {
+    return `${lim.value}`
+  }
+  if (path === 'voltage_deadband_pct') return `±${lim.value}\u00A0%`
+  if (path === 'angle_limit_deg') return `${lim.value}°`
+  if (path === 'harmonic_resonance_clearance_h') return `±${lim.value}\u00A0h`
+  if (path === 'unbalance_limit_pct') return `${lim.value}\u00A0%\u00A0of\u00A0positive\u00A0sequence`
+  if (path === 'current_tdd_standard') {
+    const value = String((lim as { value?: unknown }).value ?? '')
+    return TDD_STANDARD_LABEL[value] ?? value
+  }
+  if (path === 'q_capability_pq' || path === 'q_capability_unit') {
     const points = (lim as GridLimit & { points?: [number, number, number][] }).points ?? []
     const pu = (v: number) => `${v}`.replace('-', '−')
     return points.map(([p, lo, hi]) => `P ${pu(p)} pu: Q ${pu(lo)} to ${pu(hi)} pu`).join(' · ')
@@ -466,7 +496,10 @@ function DraftReview({ name, id, onDraft, onPublished, onDelete }: {
                   <div className="font-medium">{limitLabel(path)}</div>
                   <div className="font-mono text-[10.5px] text-muted">{path}</div>
                 </td>
-                <td className="py-2 pr-3 tabular-nums whitespace-nowrap">{limitValue(path, lim)}</td>
+                {/* The by-order list runs to some 40 orders: it wraps, so the table keeps its width. */}
+                <td className={`py-2 pr-3 tabular-nums ${path === 'harmonic_limits_pct' ? 'min-w-[12rem] max-w-[20rem]' : 'whitespace-nowrap'}`}>
+                  {limitValue(path, lim)}
+                </td>
                 <td className="py-2 pr-3">
                   <div className="flex items-start gap-1.5">
                     <Tag tone={SOURCE_TONE[lim.source]}>{lim.source}</Tag>

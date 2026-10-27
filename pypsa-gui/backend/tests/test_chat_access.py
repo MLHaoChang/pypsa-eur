@@ -48,6 +48,30 @@ def test_access_reports_actual_confirmation_floors(client, monkeypatch):
     assert data['session'] is None
 
 
+@pytest.mark.parametrize(('ui_mode', 'restriction', 'expected'), [
+    ('guided', 'standard', 'none'), ('guided', 'confirm_changes', 'user'),
+    ('guided', 'read_only', 'blocked'), ('expert', 'standard', None),
+])
+def test_guided_names_the_tools_that_skip_its_write_card(client, session_ctx, monkeypatch,
+                                                          ui_mode, restriction, expected):
+    from harness import access
+    assert client.post('/api/projects/Access', params={'force': True, 'rebind': True}).status_code == 200
+    ctx = session_ctx(client)
+    monkeypatch.setattr(access.restrictions, 'read',
+                        lambda *_: {'mode': restriction, 'revision': str(uuid.uuid4())})
+    response = client.get('/api/chat/access', params={'project_id': ctx.project_uuid, 'ui_mode': ui_mode})
+    assert response.status_code == 200, response.text
+    uncarded = response.json()['guided_uncarded']
+    assert uncarded == ([] if expected is None else
+                        [{'tool': 'preview_project_changes', 'native': expected}])
+
+
+def test_no_guided_uncarded_tool_is_an_edit():
+    # The view reports these as Expert gates them; loop.py would still card an edit.
+    from harness import confirm, edit_card
+    assert not [name for name in confirm.GUIDED_UNCARDED if edit_card.is_edit(name)]
+
+
 def test_access_is_bound_to_authorized_current_project(client, other_org_client, session_ctx):
     assert client.post('/api/projects/Access', params={'force': True, 'rebind': True}).status_code == 200
     ctx = session_ctx(client)

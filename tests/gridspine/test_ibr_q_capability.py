@@ -64,9 +64,11 @@ def test_an_inverter_at_1_053_p_n_passes():
     assert got["BESS1"]["status"] == "pass"
 
 
-def test_a_unit_without_a_rating_is_reported_never_passed():
+@pytest.mark.parametrize("missing", [float("nan"), None])
+def test_a_unit_without_a_rating_is_reported_never_passed(missing):
     c = campus()
-    c.units.loc["PV1", "s_mva"] = float("nan")
+    c.units["s_mva"] = c.units["s_mva"].astype(object)      # so a None stays None
+    c.units.loc["PV1", "s_mva"] = missing
     got = by_unit(ibr_q_capability(c, US))
     assert got["PV1"]["status"] == "reported" and "rating not given" in got["PV1"]["detail"]
     assert got["TOTAL"]["status"] == "reported"

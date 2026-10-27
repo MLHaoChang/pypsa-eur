@@ -500,7 +500,10 @@ def _limits(profile: dict):
     for i, b in enumerate(bands if isinstance(bands, list) else []):
         yield f"voltage_bands[{i}]", b
     for key in ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
-                "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct"):
+                "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
+                "unbalance_limit_pct", "harmonic_resonance_clearance_h",
+                "q_capability_unit", "voltage_deadband_pct",
+                "pst_limit", "plt_limit", "current_tdd_standard", "angle_limit_deg"):
         if isinstance(profile.get(key), dict):
             yield key, profile[key]
 
@@ -884,7 +887,7 @@ def publish(project, profile_id: str, allow_unconfirmed: bool = False) -> dict:
     if open_limits and not allow_unconfirmed:
         raise HTTPException(
             status_code=409,
-            detail=f"draft {profile_id!r} has unconfirmed limits {open_limits}; confirm each against its quote, "
+            detail=f"draft {profile_id} has unconfirmed limits {', '.join(open_limits)}; confirm each against its quote, "
                    "or publish with allow_unconfirmed (every report row on them will then say extracted)",
         )
     with _lock(project):

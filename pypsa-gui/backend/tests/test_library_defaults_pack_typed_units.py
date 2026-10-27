@@ -24,7 +24,7 @@ from services.library.defaults_pack.loader import (
     CAPACITY_BASES, LEGACY_VERSIONS, DefaultsPackError, LegacyPackVersion, load_defaults_pack)
 
 TYPED = "2026-10-22"
-LATEST = "2026-10-25"      # MONEY-YEAR-1: the technology-data rows in 2025 money
+LATEST = "2026-10-26"      # money-year 01: the seed tariffs converted to 2025 money
 FIXTURES = Path(__file__).parent / "fixtures" / "defaults_pack"
 
 
@@ -220,7 +220,7 @@ def test_a_legacy_regional_version_is_refused_and_names_its_successor():
 
     with pytest.raises(LegacyPackVersion) as err:
         price_from_pack(_net(), "generators", "g", "onwind", version="2026-10-21", region="uk")
-    assert err.value.successor == TYPED
+    assert err.value.successor == LATEST    # the newest typed version shipped for the region
 
 
 def test_the_legacy_set_is_pinned():

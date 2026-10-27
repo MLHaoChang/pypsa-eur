@@ -793,23 +793,52 @@ def test_the_production_run_bills_on_the_engine_and_seeds_from_the_pack(
     rec = wait_run(client, "wp8-run", sid, timeout=1200.0)
     assert rec["status"] == "done", rec
     run = client.get(f"/api/projects/wp8-run/studies/{sid}/run").json()
+    # Money-year 01: the pin's seed tariff is WP0's with every money figure x
+    # the manifest's exact factor, and the technology rows keep their values,
+    # so the LP dispatches as in WP0 and each bill component is WP0's x factor.
+    from decimal import Decimal
+
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    factor = Decimal(manifest["money_year_conversion"]["factor"])
+
+    def in_pin_money(v):
+        return float(Decimal(repr(v)) * factor)
+
     tol = WP0["tolerances"]
     for option in ("none", "bess_2h"):
         bill = run["details"][option]["bill"]
         assert bill["engine"] == "tariff_engine" and bill["unavailable"] == {}, bill["unavailable"]
+        assert bill["currency_year"] == L.load_defaults().pack.finance.currency_year
         want = WP0["seed_bills"][DE][option]
-        assert close(bill["total"], want["total"], rel=tol["arithmetic_rel"])
+        assert close(bill["total"], in_pin_money(want["total"]), rel=tol["arithmetic_rel"])
         for key, value in want["by_component"].items():
             if key != "unavailable":
-                assert close(bill["by_component"][key], value, rel=tol["arithmetic_rel"],
-                             abs_=tol["arithmetic_abs"]), (option, key)
+                assert close(bill["by_component"][key], in_pin_money(value),
+                             rel=tol["arithmetic_rel"], abs_=tol["arithmetic_abs"]), (option, key)
         cfg = json.loads((project_storage_dir(f"wp8-run-opt-{option}")
                           / "solver_config.json").read_text())
         assert cfg["finance"]["price_basis"] == "real" and cfg["commercial"]["value_flows"]
     case = client.get(f"/api/projects/wp8-run/studies/{sid}/options/bess_2h/case").json()
     assert case["engine"] == "finance_engine" and case["status"] == "ok"
     assert "finance_rules_from_guided_defaults" not in case["honesty_notes"]
-    assert close(case["kpis"]["npv"], WP0["golden_s5"]["bess_2h"]["npv"], rel=1e-9)
+    # WP0's NPV re-priced on the pin: the bill savings x factor, the capex, FOM,
+    # replacements and salvage (technology rows, values kept) as WP0's. The
+    # same cash flows at x1 rebuild WP0's own NPV, which pins the rebuild.
+    g = WP0["golden_s5"]["bess_2h"]
+    rate, years = g["discount_rate"], g["horizon_years"]
+
+    def npv(savings):
+        flows = [-g["capex_total"]] + [savings - g["fom_annual"] - g["vom_annual"]] * years
+        for year, cost in g["replacements"].items():
+            flows[int(year)] -= cost
+        flows[years] += g["salvage_eur"]
+        return sum(v / (1 + rate) ** t for t, v in enumerate(flows))
+
+    assert close(npv(g["savings_annual"]), g["npv"], rel=1e-9)
+    assert close(case["kpis"]["capex_total"], g["capex_total"], rel=1e-9)
+    assert close(case["kpis"]["npv"], npv(in_pin_money(g["savings_annual"])), rel=1e-9)
 
 
 def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
@@ -834,8 +863,10 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
     assert legacy.ledger_version == L.LIBRARY_VERSION
     tariff_id = (study.intake.get("tariff") or {}).get("tariff_id", "de_industrial_illustrative")
     assert next(r for r in legacy.rows if r.key == "tariff").technical_name == tariff_id
+    # Stored before money-year 01, the study's money was the ledger's (2020).
     store.save_study(base, study.model_copy(update={"ledger": legacy,
-                                                    "ledger_version": legacy.ledger_version}))
+                                                    "ledger_version": legacy.ledger_version,
+                                                    "currency_year": 2020}))
     led = client.get(f"/api/projects/run-legacy/studies/{sid}/ledger").json()["ledger"]
     assert led["ledger_version"] == L.LIBRARY_VERSION
     r = client.put(f"/api/projects/run-legacy/studies/{sid}/ledger", json={"rows": [
@@ -860,3 +891,159 @@ def test_a_study_seeded_from_the_legacy_library_still_loads_and_runs(
     case = client.get(f"/api/projects/run-legacy/studies/{sid}/options/bess_2h/case")
     assert case.status_code == 409
     assert case.json()["detail"]["error_kind"] == "ledger_changed_since_run"
+
+
+def test_a_study_seeded_on_an_older_pack_runs_on_its_own_tariff(
+        client, api_project, studies_on, fake, project_row, project_storage_dir):
+    """
+    Money-year issue 01 (GK B condition 3, plan A C3/C4): a study stored
+    with a ledger seeded on 2026-10-05 (2020 EUR), or with a legacy
+    `LIBRARY_VERSION` one, still runs and values its cases after the pin
+    moved to the 2025 pack. Its seed tariff is read from the pack the ledger
+    names (`library.library_for_ledger`), never the pin's 2025 one: nothing
+    is refused ``currency_year_mixed``, and the run's bill is the one the
+    2026-10-05 defaults give on the same solved meter, while a ledger seeded
+    on the pin bills exactly the HICP factor more.
+    """
+    import json
+    from decimal import Decimal
+
+    from services.library.defaults_pack.loader import VERSIONS_DIR
+    from services.study import engine_adapter as A
+    from services.study import library as L
+    from services.study import packs
+    from services.study import questions as Q
+    from services.study import runner as R
+    from services.study import store
+    from tests.u2_targets import legacy_ledger
+
+    manifest = json.loads((VERSIONS_DIR / L.PACK_VERSION / "manifest.json").read_text("utf-8"))
+    factor = float(Decimal(manifest["money_year_conversion"]["factor"]))
+    old, pin = L.load_defaults(L.WP0_PACK_VERSION), L.load_defaults()
+    for name in ("run-1005", "run-legacy-lv"):
+        sid = _setup(client, api_project, name)
+        base = project_storage_dir(name)
+        study = store.load_study(base, sid)
+        question = Q.get_question(study.question_id)
+        if name == "run-1005":
+            ledger = L.seed_ledger(question, study.intake, old)
+        else:
+            ledger = legacy_ledger("de")
+            assert ledger.ledger_version == L.LIBRARY_VERSION
+        store.save_study(base, study.model_copy(update={
+            "ledger": ledger, "ledger_version": ledger.ledger_version, "currency_year": 2020}))
+        r = client.post(f"/api/projects/{name}/studies/{sid}/run", json={})
+        assert r.status_code == 202, r.text
+        rec = wait_run(client, name, sid)
+        assert rec["status"] == "done", rec
+        run = client.get(f"/api/projects/{name}/studies/{sid}/run").json()
+        bill = run["details"]["none"]["bill"]
+        assert bill["unavailable"] == {}, bill["unavailable"]
+        case = client.get(f"/api/projects/{name}/studies/{sid}/options/bess_2h/case")
+        assert case.status_code == 200, case.text
+        assert case.json()["engine"] == "finance_engine"
+        if name != "run-1005":
+            continue
+        n, _hash = R.fork_network_from_disk(project_row(f"{name}-opt-none"))
+
+        def components(led, lib, n=n, intake=study.intake):
+            c = A.bill(n, packs.option_commercial(
+                intake, led, lib, n.snapshots, export_series=run.get("export_series")))
+            return {k: getattr(c.by_component, k) for k in A.BILL_COMPONENT_KEYS}
+
+        on_old = components(ledger, old)
+        on_pin = components(L.seed_ledger(question, study.intake, pin), pin)
+        assert any(v for v in on_old.values())
+        for k, v in on_old.items():
+            if v is None:
+                assert on_pin[k] is None, k
+                continue
+            assert bill["by_component"][k] == pytest.approx(v, rel=1e-9, abs=1e-9), k
+            assert on_pin[k] == pytest.approx(v * factor, rel=1e-9, abs=1e-9), k
+
+
+def test_a_reset_row_on_an_older_ledger_comes_back_in_its_own_money_year(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 01 (GK B plan A C1): resetting rows of a stored ledger
+    seeded on 2026-10-05 brings them back from 2026-10-05 (2020 EUR), never
+    the pin's 2025 rows into a 2020 ledger; the ledger keeps its version and
+    still runs. A re-seed in the same request resets from the re-seeded
+    ledger's defaults (the pin).
+    """
+    from services.study import library as L
+    from services.study import questions as Q
+    from services.study import store
+
+    keys = ("battery_storage_eur_per_kwh", "demand_charge_price")
+    sid = _setup(client, api_project, "reset-1005")
+    base = project_storage_dir("reset-1005")
+    study = store.load_study(base, sid)
+    question = Q.get_question(study.question_id)
+    old, pin = (L.seed_ledger(question, study.intake, lib)
+                for lib in (L.load_defaults(L.WP0_PACK_VERSION), L.load_defaults()))
+    seed = {r.key: r for r in old.rows if r.key in keys}
+    # The pin relabels the battery row 2025 (MONEY-YEAR-1) and converts the demand charge.
+    assert all((seed[k].value, seed[k].currency_year) != next(
+        (r.value, r.currency_year) for r in pin.rows if r.key == k) for k in keys)
+    store.save_study(base, study.model_copy(update={
+        "ledger": old, "ledger_version": old.ledger_version, "currency_year": 2020}))
+    url = f"/api/projects/reset-1005/studies/{sid}/ledger"
+    r = client.put(url, json={"rows": [{"key": k, "value": 1.0, "unit": seed[k].unit} for k in keys]})
+    assert r.status_code == 200, r.text
+    r = client.put(url, json={"reset": list(keys)})
+    assert r.status_code == 200, r.text
+    led = r.json()["ledger"]
+    assert led["ledger_version"] == old.ledger_version
+    rows = {row["key"]: row for row in led["rows"]}
+    for k in keys:
+        assert rows[k]["value"] == seed[k].value and rows[k]["provenance"] == "library", k
+        assert rows[k]["currency_year"] == seed[k].currency_year == 2020, k
+    assert client.post(f"/api/projects/reset-1005/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "reset-1005", sid)["status"] == "done"
+    case = client.get(f"/api/projects/reset-1005/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 200, case.text
+
+    r = client.put(url, json={"reseed": True, "reset": list(keys)})
+    assert r.status_code == 200, r.text
+    led = r.json()["ledger"]
+    assert led["ledger_version"] == pin.ledger_version
+    rows = {row["key"]: row for row in led["rows"]}
+    for k in keys:
+        want = next(r for r in pin.rows if r.key == k)
+        assert (rows[k]["value"], rows[k]["currency_year"]) == (want.value, want.currency_year), k
+    # The study stays in 2020 (follow-up issue): its case is refused, and the
+    # refusal names the setting that fixes it (GK B, money-year 01).
+    assert client.post(f"/api/projects/reset-1005/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "reset-1005", sid)["status"] == "done"
+    case = client.get(f"/api/projects/reset-1005/studies/{sid}/options/bess_2h/case")
+    assert case.status_code == 422, case.text
+    detail = case.json()["detail"]
+    assert detail["error_kind"] == "currency_year_mixed"
+    assert "set the study's currency year to 2025 in its settings" in detail["message"]
+
+
+def test_a_ledger_naming_an_unshipped_pack_is_refused_never_read_on_the_pin(
+        client, api_project, studies_on, fake, project_storage_dir):
+    """
+    Money-year issue 01 (GK B plan A C2): a stored ledger whose defaults
+    this build does not ship is refused by name (run 409, ledger read 500),
+    never priced on the pin.
+    """
+    from services.study import store
+
+    sid = _setup(client, api_project, "unknown-pack")
+    base = project_storage_dir("unknown-pack")
+    study = store.load_study(base, sid)
+    label = "generic-defaults 2099-01-01 000000000000"
+    ledger = study.ledger.model_copy(update={"ledger_version": label})
+    store.save_study(base, study.model_copy(update={"ledger": ledger, "ledger_version": label}))
+    r = client.post(f"/api/projects/unknown-pack/studies/{sid}/run", json={})
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["error_kind"] == "ledger_defaults_unknown"
+    assert label in r.json()["detail"]["message"]
+    r = client.put(f"/api/projects/unknown-pack/studies/{sid}/ledger",
+                   json={"reset": ["battery_storage_eur_per_kwh"]})
+    assert r.status_code == 500, r.text
+    assert r.json()["detail"]["code"] == "study_library_unreadable"
+    assert label in r.json()["detail"]["message"]

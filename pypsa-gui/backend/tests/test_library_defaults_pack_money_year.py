@@ -41,12 +41,12 @@ def _rows(version: str) -> dict[str, dict]:
         return {r["key"]: r for r in csv.DictReader(fh)}
 
 
-def test_the_new_version_directly_succeeds_the_previous_and_is_the_latest():
+def test_the_new_version_directly_succeeds_the_previous():
     from services.library.defaults_pack import loader
 
     pins = json.loads((FIXTURES / "pack_hashes.json").read_text())["generic_defaults"]
     versions = loader.available_versions()
-    assert versions[versions.index(PREV) + 1] == NEW == versions[-1]
+    assert versions[versions.index(PREV) + 1] == NEW    # 2026-10-26 follows it (money-year 01)
     new, prev = loader.load_defaults_pack(NEW), loader.load_defaults_pack(PREV)
     assert new.hash == pins[NEW] != prev.hash == pins[PREV]
     assert new.typed and NEW not in loader.LEGACY_VERSIONS

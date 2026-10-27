@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, ArrowRight, Info, XCircle } from 'lucide-react'
+import { AlertTriangle, Info, XCircle } from 'lucide-react'
 import { FlowStateDot } from '../../components/FlowStateDot'
 import { FLOW_STATE_WORDS, type FlowItem, type FlowSectionId } from '../../api/flow'
 import { countOpen, countWords, fieldWords, isOpenItem } from '../../utils/flowItems'
@@ -35,7 +35,7 @@ function ItemRow({ item }: { item: FlowItem }) {
         onClick={() => openFlowTargetInPlace(item.target)}
         title={`Open ${field ?? 'this field'} here`}
         className="shrink-0 inline-flex items-center gap-1 text-[11px] text-accent hover:underline">
-        Open here <ArrowRight size={11} />
+        Open here ›
       </button>
       <button type="button" data-testid="section-item-expert"
         onClick={() => openFlowTarget(item.target)}
@@ -118,7 +118,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
               <button type="button" data-testid="readiness-open"
                 onClick={() => openFlowTargetInPlace(gate.blocker!.target)}
                 className="inline-flex items-center gap-1 text-accent hover:underline">
-                Open here <ArrowRight size={11} />
+                Open here ›
               </button>
               <button type="button" data-testid="readiness-open-expert"
                 onClick={() => openFlowTarget(gate.blocker!.target)}
@@ -166,7 +166,7 @@ export function GenericSectionCard({ id }: { id: FlowSectionId }) {
       <div>
         <button type="button" data-testid={`section-open-expert-${id}`} onClick={() => openSectionInExpert(id)}
           className="inline-flex items-center gap-1 rounded border border-border px-2.5 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
-          Open {meta.label.toLowerCase()} in Expert <ArrowRight size={11} />
+          Open {meta.label.toLowerCase()} in Expert ›
         </button>
       </div>
     </div>

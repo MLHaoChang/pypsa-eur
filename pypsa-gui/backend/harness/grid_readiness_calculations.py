@@ -17,8 +17,9 @@ from harness import profile_common as common
 PROFILE = "grid-readiness/1"
 REFUSALS = frozenset({"network_scope_required", "no_saved_project", "unknown_grid_code_profile",
                       "unsupported_snapshot_scope", "limits_changed_during_read"})
-# The warn band is the in-hour uplift; the CI rule; the band of concern (none stored); the per-order limits.
-NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion")
+# The warn band is the in-hour uplift; the CI rule; the band of concern (none stored); the per-order limits;
+# Pst and Plt, both judged.
+NOT_SCALAR = ("energization_peak:", "lole", "oscillation", "harmonic_distortion", "flicker", "current_distortion")
 CATEGORICAL = ("frequency_support", "dynamic:", "grid_former", "ride_through:")
 # Caveats the scorecard states, carried with a checked line so a pass never reads as final.
 CAVEATS = {"ramp_rate": "before mitigation", "rapid_voltage_change": "before mitigation; a screening upper bound",
@@ -52,7 +53,8 @@ def _registered():
     from services.adequacy import grid_readiness as G
 
     return {"scr": G.RULE_SCR, "ramp_rate": G.RULE_RAMP, "rapid_voltage_change": G.RULE_RVC,
-            "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE}
+            "rapid_voltage_change_infrequent": G.RULE_RVC, "reactive_range": G.RULE_REACTIVE,
+            "voltage_unbalance": G.RULE_UNBALANCE}
 
 
 def _named(row_id, prefixes):

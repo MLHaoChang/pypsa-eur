@@ -105,4 +105,26 @@ describe('mounted view acknowledgements', () => {
     expect(verified).toHaveBeenCalledOnce()
     stop()
   })
+
+  it('acknowledges a highlighted branch only once its row is shown and marked', async () => {
+    const action = { ...expected, target: { panel_id: 'results', highlight: { component: 'Line', name: 'L1' } } }
+    const stop = acknowledgeMountedView(action, () => true)
+    mount()
+    const row = document.createElement('tr')
+    row.dataset.branchRow = ''
+    row.dataset.branchClass = 'Transformer'
+    row.dataset.branchName = 'L1'
+    row.setAttribute('aria-current', 'true')
+    document.querySelector('[data-assurance-panel]')!.append(row)
+    await tick()
+    expect(client.post).not.toHaveBeenCalled()
+    row.dataset.branchClass = 'Line'
+    row.removeAttribute('aria-current')
+    await tick()
+    expect(client.post).not.toHaveBeenCalled()
+    row.setAttribute('aria-current', 'true')
+    await tick()
+    expect(client.post).toHaveBeenCalledOnce()
+    stop()
+  })
 })

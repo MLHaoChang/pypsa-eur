@@ -85,6 +85,13 @@ const sized = (): CampusState => ({
   },
 })
 
+// The site type heads the inputs (W3b-R): the stored reliability goal's.
+const goalApi = vi.hoisted(() => ({ getReliabilityGoal: vi.fn() }))
+vi.mock('../api/flow', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/flow')>()),
+  getReliabilityGoal: (...a: unknown[]) => goalApi.getReliabilityGoal(...a),
+}))
+
 function renderPanel(Panel: typeof CampusElectricalPanel = CampusElectricalPanel) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}><Panel /></QueryClientProvider>)
@@ -96,6 +103,9 @@ beforeEach(() => {
   useCampusRunNotice.setState({ notices: {} })
   vi.clearAllMocks()
   api.state.mockResolvedValue(empty)
+  goalApi.getReliabilityGoal.mockResolvedValue({
+    target_lole_h: { value: null, source: 'default' }, ens_cap_permyriad: { value: null, source: 'default' },
+    mc_draws: { value: 500, source: 'default' }, site_archetype: { value: 'off_grid', source: 'stored' } })
   commercial.getCommercial.mockResolvedValue({ poc_link: 'grid_import' })
   api.gridCodes.mockResolvedValue({ shipped: {}, published: [], drafts: [], documents: [], extraction_available: false })
   api.milpStatus.mockResolvedValue(null)
@@ -129,6 +139,16 @@ describe('CampusElectricalPanel', () => {
     api.state.mockRejectedValue(new Error('boom'))
     renderPanel(OnePart)
     expect(await screen.findByTestId('ic-site-connection')).toBeTruthy()
+  })
+
+  it('heads the inputs with the site type, the one Guided\'s Site card sets (W3b-R)', async () => {
+    renderPanel(OnePart)
+    const select = await screen.findByTestId('campus-site-type') as HTMLSelectElement
+    await waitFor(() => expect(select.value).toBe('off_grid'))
+    expect(goalApi.getReliabilityGoal).toHaveBeenCalledWith('Hub A')
+    // above the Site connection editor: the top of the panel
+    const site = await screen.findByTestId('ic-site-connection')
+    expect(select.compareDocumentPosition(site) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('does not show the Site connection editor on the study part', async () => {
@@ -450,6 +470,25 @@ describe('CampusElectricalPanel', () => {
     api.state.mockResolvedValue({ ...sized(), stale: true })
     renderPanel()
     expect(await screen.findByText(/changed since this run/i)).toBeTruthy()
+  })
+
+  it('says the grid code changed since the run in the results banner, once', async () => {
+    api.state.mockResolvedValue({ ...sized(), grid_code_changed: true })
+    renderPanel()
+    const banner = await screen.findByTestId('campus-results-stale')
+    expect(banner.textContent).toBe('Grid code changed since the last campus study run. Rerun the study to update.')
+    expect(screen.getAllByText(/Grid code changed since/)).toHaveLength(1)
+  })
+
+  it('shows the harmonic scan after the PCC compliance, and an empty state for a run without one', async () => {
+    api.state.mockResolvedValue(sized())
+    renderPanel()
+    const empty = await screen.findByTestId('scan-not-computed')
+    // After the PCC compliance table, in document order.
+    const compliance = screen.getByTestId('compliance-pcc_reactive')
+    expect(compliance.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByText('Not computed for this run. Rerun the study to add the scan.')).toBeTruthy()
+    expect(screen.queryByTestId('scan-chart')).toBeNull()
   })
 
   it('says plainly that this is a steady-state study', async () => {

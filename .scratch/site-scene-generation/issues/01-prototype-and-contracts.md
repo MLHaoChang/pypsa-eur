@@ -3,7 +3,7 @@
 
 # SC-00 — demonstrate the geometry and exchange contracts
 
-Status: needs-triage — specification proposed; not implemented
+Status: ready-for-agent — N milestone (owner decision SITE3D-START-1); B and P stay pending until a supported Blender and photo engine are available
 Type: prototype
 Dependencies: none
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
@@ -81,7 +81,7 @@ SC-00 N freezes these UI rules; SC-01 builds them. optional-site-workflow.md mir
    | Connection/PoC, transformer | Connection & grid card (`connection`), the field's or Transformer's drawer | `campusElectrical` panel / the Transformer's Properties |
    | Native result selection | Results → reports (`results`) | `results` panel, the run tab via `showResultsTab` |
 
-   Every jump that leaves Site 3D goes through `withReturn(...)` (`layout/flowNavigation.ts`, via `openFlowTarget` or `openFlowTargetInPlace`), shows "Back to 3D site" and lands on the same Site, part and selection. Today's `FlowReturn` records mode, section, panel, drawer, selected component and scroll, but not the map mode, Site id or part; SC-00 N freezes that extension and SC-01 adds it. A deep link to a block uses request-then-scroll (as `requestGridReadiness` does), never a bare `setSlidePanel`. In Guided the jump opens in place (`openFlowTargetInPlace`) and never switches to Expert.
+   Every jump that leaves Site 3D goes through `withReturn(...)` (`layout/flowNavigation.ts`, via `openFlowTarget` or `openFlowTargetInPlace`), shows "Back to Site 3D" and lands on the same Site, part and selection. Today's `FlowReturn` records mode, section, panel, drawer, selected component and scroll, but not the map mode, Site id or part; SC-00 N freezes that extension and SC-01 adds it. A deep link to a block uses request-then-scroll (as `requestGridReadiness` does), never a bare `setSlidePanel`. In Guided the jump opens in place (`openFlowTargetInPlace`) and never switches to Expert.
 5. **The four parts are not a stepper.** Part progress shows inside the Site 3D context only. It adds no rail, card or section-completion signal to the flow sidebar.
 6. **Wording.** A colon, not an em dash: "Buildings only: configure model elements to map them". Every unavailable layer or target shows a visible reason naming the missing input, with one "›" link to its home from rule 4. Never a tooltip alone, never one global "not ready".
 7. **Evidence.** Any UI SC-00 ships, even a prototype panel, needs real-app screenshots of each action state in rule 3, in Guided and in Expert.

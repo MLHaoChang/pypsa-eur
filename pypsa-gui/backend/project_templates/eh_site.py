@@ -593,7 +593,7 @@ def finance_inputs(p: dict) -> dict:
     owned_gen = [a for a in existing if a != "critical_feeder"]
     cand = candidate_names(p)
     return {
-        "currency": "EUR", "currency_year": 2020, "price_basis": "nominal",
+        "currency": "EUR", "currency_year": 2025, "price_basis": "nominal",
         "financial_close": f"{first - 1}-01-01",
         "cod_by_asset": {a: f"{first}-01-01" for a in existing},
         "capex_phasing": [1.0], "stage_capex_lead_years": 1, "contingency_share": 0.0,
@@ -822,11 +822,12 @@ def template_meta(p: dict, entered: list[str] | None = None) -> dict:
                                                "35 EUR/MWh 08-20 h, 20 EUR/MWh otherwise",
              "source": "synthetic",
              "note": "an illustrative network-use charge on top of the wholesale price; no "
-                     "demand charge; replace with the site's tariff"},
+                     "demand charge; replace with the site's tariff; synthetic, illustrative; no money year of "
+                     "its own; read in the case's money (2025)"},
             {"item": "existing site", "value": ", ".join(existing_assets(p))
                                                + f": COD {years[0]}-01-01, overnight cost 0",
              "source": "assumed", "note": "in service at the first period and sunk"},
-            {"item": "money year", "value": "pack prices (2020 price data) are read as real base-year EUR",
+            {"item": "money year", "value": "pack prices (2025 EUR) are read as real base-year EUR",
                "source": "assumed",
                "note": "held flat to the base year, then escalated from it at the case's rates; "
                        "nothing is converted with a price index"},

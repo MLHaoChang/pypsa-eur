@@ -191,7 +191,9 @@ def test_the_held_tariff_is_an_assumed_warning_in_the_flow(client, tmp_projects_
 def test_the_ledger_says_the_pack_money_year_is_not_re_dated():
     meta = T.template_meta(TID, _plan(UNEVEN))
     row = next(r for r in meta["ledger"] if r["item"] == "money year")
-    assert "2020" in row["value"] and "does not re-date" in row["note"]
+    from services.library.defaults_pack.loader import load_defaults_pack
+    pack_year = load_defaults_pack(T.TEMPLATE_PACK_VERSION).finance.currency_year
+    assert f"({pack_year} EUR)" in row["value"] and "does not re-date" in row["note"]
 
 
 # ── 5. growth values the example has no figure for ─────────────────────────
@@ -238,14 +240,15 @@ def test_a_shifted_year_is_a_placeholder_with_the_examples_value_by_stage():
 def test_an_example_year_in_another_stage_says_why_its_value_is_not_used():
     """dates [2035]: 2035 is the example's third stage but this planning's
     second, so it takes the second stage's 24 MW; the note says so, and says
-    the check stays unknown (setting a placeholder is a follow-up)."""
+    the check stays unknown until the IT load series is edited."""
     meta = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045, "dates": [2035]}))
     row = next(r for r in meta["ledger"] if r["item"] == "placeholder it_mw 2035")
     assert row["value"] == 24.0
     assert "the example's 2035 value is not used: this planning puts 2035 in stage 2, so it " \
            "takes 24 MW" in row["note"]
     assert "IT load" in row["label"] and "it load" not in row["note"]
-    assert "stays unknown" in row["note"] and "E1-set-growth-placeholders" in row["note"]
+    assert "unknown until it is set" in row["note"]
+    assert "editing the IT load series for 2035 sets it" in row["note"]
     other = T.template_meta(TID, _plan({"start_year": 2027, "end_year": 2045,
                                         "dates": [2030, 2038]}))
     row = next(r for r in other["ledger"] if r["item"] == "placeholder it_mw 2038")
@@ -462,12 +465,14 @@ def test_dc_load_at_the_native_years_is_refused_against_entered_years(client, tm
     assert detail["code"] == detail["error_kind"] == "dc_load_invalid" and "[2028, 2031, 2036]" in detail["message"]
 
 
-def test_planning_is_not_a_parameter_of_a_template_without_native_years(client, tmp_projects_dir):
+def test_an_unknown_parameter_beside_planning_is_refused(client, tmp_projects_dir):
+    # E1d gave the single-year data center native years, so ``planning`` is
+    # one of its parameters now; any other key is still refused.
     r = client.post("/api/projects/from_template/eh_datacenter", params={"name": "dc_single"},
-                    json={"planning": {"start_year": 2028, "end_year": 2040}})
+                    json={"planning": {"start_year": 2028, "end_year": 2040}, "growth": 1})
     assert r.status_code == 422
     detail = r.json()["detail"]
-    assert detail["code"] == detail["error_kind"] == "template_params_invalid" and detail["field"] == "planning"
+    assert detail["code"] == detail["error_kind"] == "template_params_invalid" and detail["field"] == "growth"
 
 
 @pytest.mark.live_solve

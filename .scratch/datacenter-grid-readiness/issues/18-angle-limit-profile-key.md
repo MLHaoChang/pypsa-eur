@@ -3,7 +3,7 @@
 
 # Planning criteria: an angle-limit key in the grid-code profile
 
-Status: ready-for-agent
+Status: done (#763, 8dfc5925)
 Type: task
 Blocked by: none (follows 13, merged in #708)
 Gated: **yes** (gridspine)

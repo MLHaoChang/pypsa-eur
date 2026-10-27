@@ -300,6 +300,14 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
 _OPENAI_TOOL_LIMIT = 128
 from harness.toolsets import CONTROL_TOOLS as _HARNESS_TOOL_NAMES, filter_tools
 _SELECTION_STOP_WORDS = frozenset({"the", "and", "for", "with", "this", "that", "from", "then", "once", "using", "call", "please", "tool", "tools"})
+# Curated (trigger words, read tools) pairs. A query word in the triggers offers
+# the tools ahead of description matches, so words other tools' descriptions
+# share cannot crowd them out. Every name must be a read tool in the catalogue.
+_SELECTION_INTENTS = (
+    # Result plausibility (VS2 "do these results make sense?").
+    (frozenset({"sense", "plausible", "plausibility", "realistic", "reasonable", "sanity", "believable"}),
+     ("project_readiness", "validate_network", "diagnose_network")),
+)
 
 
 @lru_cache(maxsize=512)
@@ -311,7 +319,8 @@ def _tool_vocabulary(name: str, description: str):
 def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -> list[dict[str, Any]]:
     """Rank a large catalogue while keeping original order for prefix caching.
 
-    Explicit tool names always outrank generic description matches. Recent
+    Explicit tool names always outrank generic description matches, and
+    `_SELECTION_INTENTS` tools for a matching query word come next. Recent
     calls keep referential follow-ups useful; harness controls remain offered.
     Every declaration remains eligible on later turns, never deleted globally.
     """
@@ -319,6 +328,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         return tools
     query = query.lower()[:8000]
     words = {w for w in re.findall(r"[a-z0-9]+", query) if len(w) > 2} - _SELECTION_STOP_WORDS
+    intent = {name for triggers, names in _SELECTION_INTENTS if words & triggers for name in names}
     recent = []
     for message in list(history or [])[-32:]:
         content = message.get("content")
@@ -341,7 +351,7 @@ def _bounded_tools(tools: list[dict[str, Any]], query: str = "", history=None) -
         name = tool["name"]
         explicit = bool(re.search(r"(?<![a-z0-9_])" + re.escape(name) + r"(?![a-z0-9_])", query))
         name_words, description_words = _tool_vocabulary(name, tool.get("description", ""))
-        return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(name in discovered), int(explicit), int(name in recent),
+        return (int(name in _HARNESS_TOOL_NAMES), int(name in task_tools), int(name in discovered), int(explicit), int(name in intent), int(name in recent),
                 4 * len(words & name_words) + len(words & description_words), -index)
     chosen = {i for i, _ in sorted(enumerate(tools), key=rank, reverse=True)[:_OPENAI_TOOL_LIMIT]}
     return [tool for i, tool in enumerate(tools) if i in chosen]

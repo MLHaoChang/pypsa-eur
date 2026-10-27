@@ -27,6 +27,7 @@
 // run is going on, and says once it ends whether the results it saved are the
 // run asked for.
 import { assetLabel } from './results/investment/financeModel'
+import { SiteTypeSelect } from '../components/reliabilityGoal/SiteTypeSelect'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Play, RefreshCw, Save, Square, Wand2, Workflow } from 'lucide-react'
@@ -45,6 +46,8 @@ import { ConnectionLimits } from '../components/gridReadiness/ConnectionLimits'
 import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
+import CampusHarmonicScanSection from './CampusHarmonicScanSection'
+import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
 import { useCampusMilpJob } from './useCampusMilpJob'
@@ -84,6 +87,11 @@ const STATUS_TONE: Record<CheckStatus, 'ok' | 'err' | 'neutral' | 'warn'> = {
 
 function num(v: number | null | undefined, digits = 2): string {
   return v == null || !isFinite(v) ? '—' : v.toFixed(digits).replace(/\.?0+$/, m => (m.startsWith('.') ? '' : m))
+}
+
+/** A figure and its unit; a missing figure is "—" alone, with no unit after it. */
+function numU(v: number | null | undefined, unit: string, digits = 2): string {
+  return v == null || !isFinite(v) ? '—' : `${num(v, digits)}\u00A0${unit}`
 }
 
 function where(period: number | null | undefined, hour: number | null | undefined, kase?: string | null): string {
@@ -140,11 +148,16 @@ function CampusView({ name, part }: { name: string; part: CampusPart }) {
   const qc = useQueryClient()
   // The site connection is the project's, not the campus study's: it shows even when the campus read fails
   // or the project is not a hub, because Economics and Investment send the user here to set it.
-  const lead = part === 'inputs' ? (
+  // The site type (W3b-R) heads the panel: the reliability goal's, which every
+  // reliability study runs; Guided sets it on the Site card.
+  const lead = part === 'inputs' ? (<>
+    <PageSection title="Site type" hint="The grid connection every reliability study assumes">
+      <SiteTypeSelect mode="expert" testId="campus-site-type" label="Grid connection" />
+    </PageSection>
     <PageSection title="Site connection" hint="The point of connection the bill and the investment case read">
       <SiteConnectionEditor />
     </PageSection>
-  ) : null
+  </>) : null
   const notice = useCampusRunNotice(s => s.notices[name])
   const setNotice = useCampusRunNotice(s => s.set)
   const lost: LostRun | null = notice?.lost ?? null
@@ -637,9 +650,11 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           run. They are replaced when it ends.
         </p>
       )}
-      {state.stale && (
-        <p className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
-          The campus file or the project has changed since this run. Run the study again before using these numbers.
+      {(state.stale || state.grid_code_changed) && (
+        <p data-testid="campus-results-stale" className="text-[12px] text-warn border border-warn/40 rounded px-3 py-2">
+          {state.stale && 'The campus file or the project has changed since this run. Run the study again before using these numbers.'}
+          {state.stale && state.grid_code_changed && ' '}
+          {state.grid_code_changed && GRID_CODE_CHANGED}
         </p>
       )}
       {design && <CampusInvestmentSection state={state} />}
@@ -702,7 +717,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </table>
         </TableScroll>
         <p className="text-[11px] text-muted mt-2">
-          PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
+          PCC reactive band {req.q_limit_mvar == null ? '—' : `±${numU(req.q_limit_mvar, 'Mvar')}`} ({req.clause}); P_ref {numU(req.p_ref_mw, 'MW')}, {req.p_ref_from}.
         </p>
         {rms.length > 0 && (
           <p data-testid="compliance-rms" className="text-[11px] text-muted mt-1">
@@ -710,6 +725,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </p>
         )}
       </PageSection>}
+
+      {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
 
       {design && <>
       <PageSection title="Transformers" hint="worst selected hour, intact and N-1, with the design margin">
@@ -747,8 +764,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
               {r.compensation.map(c => (
                 <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
                   <td className="py-1 pr-3 capitalize">{c.direction}</td>
-                  <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
-                  <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
+                  <td className="pr-3 tabular-nums">required {numU(c.required_mvar, 'Mvar')}</td>
+                  <td className="pr-3 tabular-nums font-semibold">recommended {numU(c.recommended_mvar, 'Mvar')}</td>
                   <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
                 </tr>
               ))}

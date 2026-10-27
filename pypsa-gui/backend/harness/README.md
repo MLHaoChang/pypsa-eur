@@ -176,7 +176,10 @@ query selections describe a next turn, not a running turn. The read-only view is
 not an action capability, remaining-budget estimate, complete readiness check or
 permission to incur charges. Unknown usage is unavailable rather than zero.
 Locks are inspected without pruning expired rows; busy chat state returns 409
-without waiting behind a turn's session lock. The response is `no-store`;
+without waiting behind a turn's session lock. In Guided, `guided_uncarded`
+lists each `confirm.GUIDED_UNCARDED` tool with its native disposition (computed
+as Expert gates it, under the saved restriction), so the view names the
+exceptions to Guided's write row; Expert returns `[]` (LC-16 B9). The response is `no-store`;
 dispatch and effect commit keep their own current checks. The dock's **Access
 and approvals** disclosure hides stale/failed or mismatched-scope reads. Existing
 Confirmation/Choice cards and Activity remain the decision paths. See
@@ -239,9 +242,12 @@ component (`frontend/src/components/EditCard.tsx`).
   (`catalogue.tool_edits_network`) or a project setting (`SETTINGS_EDITS`).
   Every other write-tier tool is in `NOT_EDITS` with its reason;
   `tests/test_edit_card.py` fails on an unclassified new write tool. An edit
-  is gated as Guided gates a write, so Expert shows the card too.
+  is gated as Guided gates a write, so Expert shows the card too. The reverse
+  holds for `confirm.GUIDED_UNCARDED` (`preview_project_changes`): it stores a
+  record and changes nothing, so Guided gates it as Expert does and the apply
+  card is the one approval (OJ-21).
 - **Preview.** `preview(tool, args)` returns `{version, kind, tool, rows,
-  says, complete, digest}`, or refuses before any card (`unknown_field`,
+  says, complete, binding, sets, digest}`, or refuses before any card (`unknown_field`,
   `derived_field`, `read_only_field`, `invalid_edit_value`,
   `component_not_found`, `edit_refused`). Component rows come from running the
   NATIVE handler on an isolated copy (`workflow_tools._isolated`, change log
@@ -256,14 +262,44 @@ component (`frontend/src/components/EditCard.tsx`).
 - **Receipt.** The tool result gains `_edit_receipt`: each row read back
   natively, `outcome: verified` only when every value equals the card's `new`
   (otherwise `uncertain`), `results_stale` (the last solve's input fingerprint
-  differs from now) and `undo: {tool: 'undo_last', available}`.
+  differs from now) and `undo: {tool: 'undo_last', available}`. A card with
+  `sets` passes them on, so Guided words the receipt as the card did; each set
+  also lists `inactive_names`, which the table marks "(inactive)".
 - **Adding an edit kind** (TS-04's series refinement, a new settings tool):
   `edit_card.register(tool, Adapter(kind, preview, readback))`, where
   `preview(args)` returns rows `{component_class, name, field, label, old,
   new, unit, role}` and `readback(args, rows)` the stored values in row order.
+  An optional `Adapter.binding(args)` returns a dict the card carries as
+  `binding` and its digest covers (a stored record the edit applies).
+  An optional `Adapter.sets(args)` returns the set lines the card carries as
+  `sets` (LC-16 OJ-22), also under its digest; `says` then names each set
+  once ("selector · N assets · field × 1.2 (+20 %)") instead of its members.
   An edit without an adapter still gets a card of kind `arguments`
   (`complete: false`): the requested values, no old value claimed, and its
   receipt is never `verified`.
+- **Multi-asset routing (LC-16 slice C, `harness/edit_routing.py`).** Before
+  dispatching a model response, the loop computes `session.turn_redirects`:
+  `bulk_update_components` on two or more names, and `update_component` when
+  the response holds another such single edit or one was already applied this
+  turn, are refused with `use_project_preview` when the preview takes every
+  field (`assistant_tools.preview_kind`, the preview's own test, per class).
+  The refusal is model-only: no frame, one `is_error` tool_result per call,
+  its message carrying the names-form `changes` for `preview_project_changes`
+  (calls of that response only, never an applied edit). A text field, a flag
+  the preview cannot take or a rename keeps its own card. An applied single
+  edit counts until an execution-tier success (a run, an applied preview);
+  assurance turns and external tools are not routed. HTTP routes are unchanged.
+- **Settings cards (LC-16 slice C, OJ-44).** `update_solver_config`,
+  `update_meta` and `set_investment_period_weightings` run their own handler on
+  an isolated copy (`edit_card._sandbox`), so the card refuses what the route
+  refuses (`invalid_edit_value` for a schema error, `edit_refused` for a route
+  refusal). Solver rows carry the Settings panel's `label`, `unit` and, for
+  enumerated values, `words` (Guided shows them); shares carry a `%` `display`;
+  `old_applies: false` marks an old value the old settings did not use (the
+  card shows "—"); a dict setting is one row per key (`load_scalers.<key>`).
+  A move to rolling dispatch adds an asset-less `note`, which the card shows
+  under its table. `finance` and `commercial` refuse with `settings_own_route`.
+  Weightings are one row per period and column (`years.<period>`), by period.
 - **Campus island: `campus_apply_gfm_settings` (W10 R3).** The grid-forming
   recommendation's apply, one card for the Control › Grid-forming tab and the
   copilot. The adapter names its section (`Adapter.section_id="assets"`, rows
@@ -665,8 +701,12 @@ component's Edit form with `open_editor` at read tier without saving, and switch
 to every canvas view.
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
-the eligible registry using explicit names, always-available controls, recent
-calls, and query terms, then retains catalogue order for prefix caching. The
+the eligible registry using always-available controls, pending plan tools,
+discovered tools, explicit names, the curated intent map, recent calls, and
+query terms, in that rank order, then retains catalogue order for prefix caching.
+The intent map (`_SELECTION_INTENTS` in `providers/wiring.py`) offers fixed read
+tools for a query word such as "sense" or "plausible", so no description text
+elsewhere in the catalogue can crowd them out. The
 exact selected set supplies the dispatch allowlist; `session_init.tool_count`
 describes the first request. After a toolset switch or intentional project
 rebinding the next request receives the refreshed catalogue and allowlist;
@@ -814,9 +854,9 @@ IDs. Task views stay within the ordinary result budget.
 
 A denied confirmation leaves a step pending. An interrupted effectful call
 requires review; native exports count as effectful despite their legacy read
-tier. Each step can be retried at most twice; `resolve_task_step` requires ordinary destructive confirmation to
-record verified completion or an explicit retry; completion comes from native
-evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
+tier. Each step can be retried at most twice; `resolve_task_step` requires
+ordinary destructive confirmation to record verified completion or an explicit
+retry; completion comes from native evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
 still-running originating session or detached timeout worker. `cancel_task`
 stops future task steps and retains checkpoints; it never aborts a queued job.
 Tasks live in the authorized project directory, are atomically replaced,
@@ -833,6 +873,27 @@ copy and stores an owner/project-bound preview. `apply_project_changes`
 requires normal execution confirmation, unchanged inputs, an idle project,
 and the existing foreign-lock/study/undo gates. It commits a validated private
 candidate, retains unsaved work, and refuses interrupted application replay.
+LC-16: one preview spans several assets of the eight component classes, each
+change an `attribute` that `get_component_schema` types as a number or
+boolean in its stored unit; derived, read-only, negative and non-finite values
+refuse, and one missing name refuses everything (`change_component_missing`,
+naming it and up to five existing names). The rows come from the native bulk
+handler on a copy (`edit_card._sandbox_rows`), and a number column the asset
+never set is created there, as a single edit does. `apply_project_changes` is
+an edit card (`parameter_edit`) whose `binding` is `{preview_id,
+review_sha256}`; the loop refuses `invalid_preview` when the approved card's
+binding is not the record the handler applies. Records are version 2 (with
+`rows`); older records fail closed. One apply is one `undo_last` step.
+A change may give `select` (`carrier`, `bus` — any `bus*` port — and/or
+`all: true`, inactive members included) instead of `names`, and `operation
+{scale: f}` (0 < f ≤ 1000) instead of `value`; `_resolve_changes` resolves
+both on the server into per-name absolute changes before the ordinary checks,
+so the record stores resolved rows and the input fingerprint refuses an apply
+after a member was added or removed. Refusals, all before any record:
+`change_selection_empty`, `invalid_change_selector`, `invalid_change_value`
+(non-whole integer, unset old value, per-unit share scaled above 1 except Link
+efficiencies) and `change_series_shadowed` (a member's field has a time
+series; absolute rows too). The record keeps `sets` for the card.
 Previews are limited to a complete review of at most 20 values fitting a
 3800-character card; larger changes must be split. Legacy/clipped records need
 a new preview. The card renders an old/new/unit table on both surfaces and
@@ -869,7 +930,8 @@ review. Verified failed/uncertain steps may be explicitly reconciled through
 the normal confirmation gate. Interactive `ask_user` answers are user messages,
 so choice requests run outside durable action steps. Preview application
 confirmation includes the immutable old/new/unit diff while the actual handler
-still receives only its catalogue arguments; chat renders the preview table.
+still receives only its catalogue arguments; chat renders the preview table,
+or, when the confirmation carries a complete edit card, the card alone.
 
 ### Plan jobs and continuation (LC-05, LC-12)
 
@@ -1016,7 +1078,8 @@ brief grants nothing: every write or run step keeps its own card.
   (`get_simulation_log_history`, `diagnose_network`, `validate_network`) for
   a run step, the read-back for an edit. It runs nothing. A failed effectful
   step is refused (`task_step_needs_retry`) until `resolve_task_step(retry)`.
-  After two retries, `task_step_retry_limit` leaves the failed step unchanged and the correction tells the assistant to stop and let the user decide.
+  After two retries, `task_step_retry_limit` leaves the failed step unchanged
+  and the correction tells the assistant to stop and let the user decide.
 
 ## Recorded runs, load flow, and experiment plans
 
@@ -1047,7 +1110,22 @@ the live network stay out of it.
 
 Retention keeps section artifacts for the 20 newest manifests and manifest
 records for 200 runs. Older section directories are removed; a later read of
-a pruned section is `evidence_unavailable`.
+a pruned section is `evidence_unavailable`. Orphaned running markers (below)
+count toward the 200 and are removed with the rest. Runs are ordered by
+`started_at`, or by the file's mtime when that is missing or unparsable.
+
+A running marker is live only while the process that wrote it still owes the
+manifest. The app runs one worker, so after a restart or crash every leftover
+marker is read as `interrupted` with the warning `process_exited`. It has no
+`finished_at` and no evidence. That reading is derived when the marker is read.
+Nothing is written, so reads stay read-only. A queued job restored at boot
+claims its run id again and is live once more.
+
+A session abort ends the foreground solver monitor's log bridge, but not the
+solve. The monitor keeps waiting for that solve, identified by the log queue
+and thread the solver state held when the monitor started, and publishes it
+once. If another solve replaces it first, the run is published `interrupted`
+with `outcome_superseded`; the other solve's outcome is never attached to it.
 
 Publishers are best-effort. An unsaved scratch network produces no record, and
 a recording failure does not fail the solve.
@@ -1152,6 +1230,18 @@ false: the summary has no N-1 check and no voltage limits. An unsolved,
 stale, running, infeasible, or failed solve returns `status: unavailable`
 with a typed `unavailable_kind`. Branches with a missing or zero rating, or
 with no flow data, appear in `skipped` and stay out of the ranking.
+
+`ui_open_panel(panel_id='results', results_tab='loadflow')` takes optional
+`loadflow_source`, `window_from`/`window_to` (both or neither) and
+`highlight_branch` `{component: Line|Transformer, name}`, normally copied from
+the summary's `ui_reference`. With any of them, `harness/navigation.loadflow_target`
+reads the view once: an unavailable view refuses `loadflow_view_unavailable`
+(with its `unavailable_kind`) and a branch outside the network refuses
+`unknown_branch`, both with no event. The model's result says whether the
+branch is ranked and shown; a skipped branch (no rating, no flow data) is
+neither loaded nor unloaded. `navigation.issue` repeats that read under the
+guard that issues the ACK, binds the view's `binding` verbatim and adds the
+highlight to the ACK `target`. Without these arguments the call is unchanged.
 
 A `run_id` argument reads a stored `loadflow` section when that artifact
 exists. With no such section the result is

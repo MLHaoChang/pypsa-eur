@@ -232,6 +232,12 @@ export interface SolverConfig {
   ens_cap_permyriad?: number | null
   // Per-zone ceiling as a multiple of the target (zone = bus country).
   ens_zone_cap_multiple?: number | null
+  // The reliability goal (W3b-R, `GET /projects/{name}/flow/reliability_goal`
+  // resolves it): allowed shortfall in h/yr, MC draws (integer 1–2000) and
+  // the site type. null = not set (the template's or the study's default).
+  target_lole_h?: number | null
+  mc_draws?: number | null
+  site_archetype?: 'strong_grid' | 'weak_flexible' | 'off_grid' | null
   // Firm-capacity (planning reserve margin) standard, Phase 8 §1: a FRACTION
   // (0.15 = 15%) of each active period's peak that derated firm capacity must
   // cover; null = off. Schema bounds are ge=0, le=5.

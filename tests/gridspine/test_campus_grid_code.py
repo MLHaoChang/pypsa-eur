@@ -623,3 +623,72 @@ def test_an_extracted_harmonic_limit_is_listed_and_confirmed():
     out = confirm_limit(p, "thd_limit_pct")
     assert out["thd_limit_pct"]["source"] == "code" and out["thd_limit_pct"]["page"] == 9
     assert "thd_limit_pct" not in unconfirmed(out)
+
+
+# --- flicker limits (grid-to-process issue 17, PR 2) ---------------------------
+
+
+@pytest.mark.parametrize("name", ["eu_rfg_dcc_ce", "generic_assumed"])
+def test_the_european_and_generic_profiles_carry_assumed_iec_flicker_limits(name):
+    from gridspine.static.flicker import Limits, limits_from_profile
+
+    p = load_grid_code(name)
+    for key in ("pst_limit", "plt_limit"):
+        assert p[key]["source"] == "assumed" and "61000-3-7" in p[key]["clause"]
+        assert "not an emission limit allocated to this installation" in p[key]["clause"]
+    limits, cited = limits_from_profile(p)
+    assert limits == Limits(pst=0.8, plt=0.6)
+    assert [c["key"] for c in cited] == ["pst_limit", "plt_limit"]
+
+
+def test_the_us_profile_sets_no_flicker_limit():
+    p = load_grid_code("us_ieee2800_nerc")
+    assert "pst_limit" not in p and "plt_limit" not in p
+
+
+def test_flicker_limits_are_optional_and_either_may_stand_alone():
+    for key in ("pst_limit", "plt_limit"):
+        base = _harmonic()
+        base.pop(key)
+        validate_profile("p", base)
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda p: p["pst_limit"].update(value=0.0), "pst_limit value must be a positive number"),
+    (lambda p: p["plt_limit"].update(value="0.6"), "plt_limit value must be a positive number"),
+    (lambda p: p["pst_limit"].pop("clause"), "pst_limit has no clause"),
+    (lambda p: p["plt_limit"].pop("source"), "plt_limit has no source"),
+])
+def test_bad_flicker_limits_are_refused(mutate, match):
+    p = _harmonic()
+    mutate(p)
+    with pytest.raises(ContractError, match=match):
+        validate_profile("p", p)
+
+
+# --- the current-distortion standard (datacenter readiness 12, part 1) -------
+
+
+@pytest.mark.parametrize("name", ["eu_rfg_dcc_ce", "generic_assumed"])
+def test_the_european_and_generic_profiles_name_ieee_519_as_an_assumed_placeholder(name):
+    lim = load_grid_code(name)["current_tdd_standard"]
+    assert lim["value"] == "ieee519-2014" and lim["source"] == "assumed"
+    assert "placeholder" in lim["clause"] and "IEEE 519-2014 Tables 2-4" in lim["clause"]
+    assert "SAGC" not in lim["clause"]
+
+
+def test_the_us_profile_names_no_current_distortion_standard():
+    assert "current_tdd_standard" not in load_grid_code("us_ieee2800_nerc")
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda p: p.update(current_tdd_standard={"value": "iec61000-3-12", "clause": "c", "source": "assumed"}),
+     "current_tdd_standard value must be one of"),
+    (lambda p: p.update(current_tdd_standard={"value": "ieee519-2014", "source": "assumed"}),
+     "current_tdd_standard has no clause"),
+])
+def test_a_bad_current_distortion_standard_is_refused(mutate, match):
+    p = _harmonic()
+    mutate(p)
+    with pytest.raises(ContractError, match=match):
+        validate_profile("p", p)

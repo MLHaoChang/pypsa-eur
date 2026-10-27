@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): When the assistant opens Load flow for a line or transformer, the tab switches to the source and snapshot window it summarised, marks that branch's row in Branch loading and scrolls to it; the navigation counts as shown only once that row is on screen. This works the same in Guided, where Load flow opens as a temporary advanced tab.

@@ -33,6 +33,74 @@ PANELS = frozenset(
 )
 
 
+# Live-voice 07: optional Load flow arguments on a results/loadflow navigate.
+# Source and window bind through the view's own binding; the highlight joins
+# the ACK target.
+LOADFLOW_KEYS = ("loadflow_source", "window_from", "window_to", "highlight")
+
+
+def loadflow_target(source, window_from, window_to, highlight):
+    """Read the Load flow view once and place the requested branch in it.
+
+    Returns ``(view, facts)``; ``facts`` is None without a highlight. Raises a
+    typed refusal when the view is unavailable or the branch is unknown. The
+    caller holds (or takes) the network guard, so the binding and the branch
+    facts come from the same read.
+    """
+    from services.loadflow_summary import get_loadflow_view
+
+    with network_guard():
+        if PyPSAService.get_active_context().network is None:
+            _refuse_no_network()
+        try:
+            view = get_loadflow_view(source or "lopf", window_from, window_to)
+        except HTTPException as exc:
+            # The axis can shrink after the tool's own check: refuse as it would.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            if detail.get("error_kind") in ("invalid_loadflow_window", "invalid_loadflow_argument"):
+                raise HTTPException(400, {
+                    "error_kind": "invalid_navigation", "field": "window_from",
+                    "message": detail.get("message") or "The snapshot window is not valid."}) from None
+            raise
+        if view.get("status") != "ok":
+            raise HTTPException(409, {
+                "error_kind": "loadflow_view_unavailable",
+                "unavailable_kind": view.get("unavailable_kind"),
+                "message": view.get("message") or "The load flow view is unavailable."})
+        if highlight is None:
+            return view, None
+        cls, name = highlight["component"], highlight["name"]
+        facts = {"component": cls, "name": name}
+        rows = view.get("rows") or []
+        for rank, row in enumerate(rows, start=1):
+            if row.get("class") == cls and row.get("name") == name:
+                return view, {**facts, "ranked": True, "rank": rank, "shown": True,
+                              "basis": row.get("basis")}
+        for skip in view.get("skipped") or []:
+            if skip.get("class") == cls and skip.get("name") == name:
+                return view, {**facts, "ranked": False, "shown": False,
+                              "reason": skip.get("reason"),
+                              "note": "Not ranked, so neither loaded nor unloaded can be said."}
+        network = PyPSAService.get_network()
+        table = network.lines if cls == "Line" else network.transformers
+        if name not in table.index:
+            raise HTTPException(404, {
+                "error_kind": "unknown_branch", "component": cls, "name": name,
+                "message": f"{cls} '{name}' is not in this project's network."})
+        # Present but in neither shown list: only a truncated list can hide it.
+        rows_cut, skipped_cut = bool(view.get("rows_truncated")), bool(view.get("skipped_truncated"))
+        ranked = True if rows_cut and not skipped_cut else False if skipped_cut and not rows_cut else None
+        reason = {True: "outside_shown_rows", False: "skipped_list_truncated",
+                  None: "outside_shown_lists"}[ranked]
+        return view, {**facts, "ranked": ranked, "shown": False, "reason": reason}
+
+
+def _refuse_no_network():
+    raise HTTPException(409, {
+        "error_kind": "loadflow_view_unavailable", "unavailable_kind": "no_network",
+        "message": "No project network is open, so there is no load flow to show."})
+
+
 def cursor_id(owner, session_id):
     return str(uuid.uuid5(uuid.UUID(owner), "navigation/" + session_id))
 
@@ -61,15 +129,27 @@ def begin_turn(turn, generation):
 
 
 def issue(turn, payload):
+    """Issue an ACK for a mounted-view navigate, or None when none applies.
+
+    With Load flow arguments the view is re-read here, under the guard that
+    issues the record, and a refusal raises the same typed HTTPException as
+    the tool; the returned ACK then carries ``loadflow`` facts for the model.
+    """
     target = {k: v for k, v in payload.items() if k in {"panel_id", "results_tab"}}
+    loadflow = {k: payload[k] for k in LOADFLOW_KEYS if k in payload}
     if (
         payload.get("kind") != "navigate"
         or target.get("panel_id") not in PANELS
-        or set(payload) - {"kind", "panel_id", "results_tab", "tool_use_id"}
+        or set(payload) - {"kind", "panel_id", "results_tab", "tool_use_id", *LOADFLOW_KEYS}
         or ("results_tab" in target and target["panel_id"] != "results")
+        or (loadflow and target != {"panel_id": "results", "results_tab": "loadflow"})
     ):
         return None
+    if "highlight" in loadflow:
+        target["highlight"] = dict(loadflow["highlight"])
     ctx = PyPSAService.get_active_context()
+    if loadflow and ctx.network is None:
+        _refuse_no_network()
     if ctx.network is None:
         # Networkless study navigation remains submitted until a study-specific
         # revision adapter exists. Do not invent a network fingerprint or abort
@@ -98,7 +178,14 @@ def issue(turn, payload):
         }
         # Only this results adapter can attest displayed data today. Other
         # version-1 actions retain their explicit mounted-view meaning.
-        if target == {"panel_id": "results", "results_tab": "loadflow"}:
+        facts = None
+        if loadflow:
+            view, facts = loadflow_target(loadflow.get("loadflow_source"),
+                                          loadflow.get("window_from"),
+                                          loadflow.get("window_to"),
+                                          loadflow.get("highlight"))
+            record.update(version=2, source_binding=view["binding"])
+        elif target == {"panel_id": "results", "results_tab": "loadflow"}:
             from services.loadflow_summary import get_loadflow_view
 
             view = get_loadflow_view()
@@ -139,6 +226,9 @@ def issue(turn, payload):
         }
         if record["version"] == 2:
             issued["source_binding"] = record["source_binding"]
+        if loadflow:
+            issued["loadflow"] = {"source_binding": record["source_binding"],
+                                  "highlight": facts}
         return issued
 
 

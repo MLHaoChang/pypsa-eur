@@ -140,7 +140,7 @@ describe('grid codes: upload', () => {
     const input = await screen.findByLabelText('Grid-code document')
     const file = pdf()
     await userEvent.upload(input, file)
-    expect(await screen.findByText(/^the PDF has 292 pages;.*such as 1-40, 120-180$/)).toBeTruthy()
+    expect(await screen.findByText(/^The PDF has 292 pages;.*such as 1-40, 120-180$/)).toBeTruthy()
     await userEvent.type(screen.getByLabelText('Pages (optional)'), '1-40')
     await userEvent.upload(input, file)
     await waitFor(() => expect(api.uploadGridCodeDocument).toHaveBeenCalledTimes(2))
@@ -235,7 +235,11 @@ describe('grid codes: extract', () => {
     expect(thd).toContain('3 %')
     const orders = screen.getByTestId('limit-harmonic_limits_pct').textContent
     expect(orders).toContain('Harmonic voltage by order at the PCC')
-    expect(orders).toContain('h5 2 % · h7 2 % · h11 1.5 %')
+    expect(orders).toContain('h5\u00A02\u00A0% · h7\u00A02\u00A0% · h11\u00A01.5\u00A0%')
+    // The by-order list wraps rather than widening the whole table; a single value stays on one line.
+    const cells = screen.getByTestId('limit-harmonic_limits_pct').querySelectorAll('td')
+    expect(cells[1].className).not.toContain('whitespace-nowrap')
+    expect(screen.getByTestId('limit-thd_limit_pct').querySelectorAll('td')[1].className).toContain('whitespace-nowrap')
   })
 
   it('shows no SAGC-type row for a profile without those limits', async () => {
@@ -245,8 +249,126 @@ describe('grid codes: extract', () => {
     await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
     await screen.findByTestId('limit-rvc_limit_pct')
     for (const path of ['rvc_limit_infrequent_pct', 'q_capability_pq', 'pf_min_lagging', 'pf_min_leading',
-      'thd_limit_pct', 'harmonic_limits_pct']) {
+      'thd_limit_pct', 'harmonic_limits_pct', 'harmonic_resonance_clearance_h', 'pst_limit', 'plt_limit',
+      'unbalance_limit_pct', 'current_tdd_standard', 'q_capability_unit', 'voltage_deadband_pct',
+      'angle_limit_deg']) {
       expect(screen.queryByTestId(`limit-${path}`)).toBeNull()
+    }
+  })
+
+  it('shows the flicker limits a profile sets', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      pst_limit: { value: 0.8, clause: 'generic clause', source: 'code' as const },
+      plt_limit: { value: 0.6, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const pst = (await screen.findByTestId('limit-pst_limit')).textContent
+    expect(pst).toContain('Flicker severity Pst at the PCC')
+    expect(pst).toContain('0.8')
+    const plt = screen.getByTestId('limit-plt_limit').textContent
+    expect(plt).toContain('Flicker severity Plt at the PCC')
+    expect(plt).toContain('0.6')
+  })
+
+  it('shows the power-quality limits of DC 12: unbalance, resonance clearance and the TDD standard', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      unbalance_limit_pct: { value: 2, clause: 'generic clause', source: 'code' as const },
+      harmonic_resonance_clearance_h: { value: 0.5, clause: 'generic clause', source: 'code' as const },
+      current_tdd_standard: { value: 'ieee519-2014', clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const ub = (await screen.findByTestId('limit-unbalance_limit_pct')).textContent
+    expect(ub).toContain('Voltage unbalance at the PCC')
+    // Non-breaking spaces: the unit wraps as a whole.
+    expect(ub).toContain('2\u00A0%\u00A0of\u00A0positive\u00A0sequence')
+    const rc = screen.getByTestId('limit-harmonic_resonance_clearance_h').textContent
+    expect(rc).toContain('Harmonic resonance clearance from characteristic and injected orders')
+    expect(rc).toContain('±0.5\u00A0h')
+    const tdd = screen.getByTestId('limit-current_tdd_standard').textContent
+    expect(tdd).toContain('Current distortion (TDD) limits at the PCC')
+    expect(tdd).toContain('IEEE 519-2014')
+    expect(tdd).not.toContain('ieee519')
+    // Backend order: resonance after the harmonic orders, unbalance and TDD after the flicker limits.
+    const ids = screen.getAllByTestId(/^limit-/).map(e => e.dataset.testid)
+    expect(ids.indexOf('limit-harmonic_resonance_clearance_h')).toBeLessThan(ids.indexOf('limit-unbalance_limit_pct'))
+    expect(ids.indexOf('limit-unbalance_limit_pct')).toBeLessThan(ids.indexOf('limit-current_tdd_standard'))
+  })
+
+  it('shows the per-unit capability curve apart from the PCC band, and the deadband', async () => {
+    const base = draft()
+    const points: [number, number, number][] = [[0, -0.1, 0.1], [1, -0.3, 0.3]]
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      q_capability_pq: { clause: 'generic clause', source: 'code', points },
+      q_capability_unit: { clause: 'generic clause', source: 'code', points },
+      voltage_deadband_pct: { value: 0.5, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const unit = (await screen.findByTestId('limit-q_capability_unit')).textContent
+    expect(unit).toContain('Reactive capability per generating unit')
+    expect(unit).toContain("pu of the unit's rated P")
+    expect(unit).toContain('positive = the unit exports reactive power')
+    expect(unit).not.toContain('PCC')
+    // The same text as the PCC band: one formatter for both.
+    expect(unit).toContain('P 0 pu: Q −0.1 to 0.1 pu · P 1 pu: Q −0.3 to 0.3 pu')
+    expect(screen.getByTestId('limit-q_capability_pq').textContent).toContain('at the PCC')
+    const db = screen.getByTestId('limit-voltage_deadband_pct').textContent
+    expect(db).toContain('Voltage-control deadband')
+    expect(db).toContain('not checked')
+    expect(db).toContain('±0.5\u00A0%')
+  })
+
+  it('shows the voltage-angle limit (DC 18) in degrees', async () => {
+    const base = draft()
+    api.extractGridCode.mockResolvedValue(draft({ profile: { ...base.profile,
+      angle_limit_deg: { value: 30, clause: 'generic clause', source: 'code' as const } } }))
+    renderPanel()
+    const row = await screen.findByTestId(`document-${DOC_ID}`)
+    await userEvent.click(within(row).getByRole('button', { name: 'Extract limits' }))
+    const angle = (await screen.findByTestId('limit-angle_limit_deg')).textContent
+    expect(angle).toContain('Voltage-angle difference across a branch')
+    expect(angle).toContain('30°')
+  })
+
+  it('confirms the per-unit curve and the deadband by their own paths', async () => {
+    const d = draft({ unconfirmed: ['q_capability_unit', 'voltage_deadband_pct'] })
+    const doc = { source: 'extracted' as const, page: 31, quote: 'generic quote' }
+    d.profile.q_capability_unit = { clause: 'generic clause', ...doc, points: [[0, -0.1, 0.1], [1, -0.3, 0.3]] }
+    d.profile.voltage_deadband_pct = { value: 0.5, clause: 'generic clause', ...doc }
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110', d.unconfirmed)] }))
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    api.confirmGridCodeLimit.mockResolvedValue(d)
+    for (const path of ['q_capability_unit', 'voltage_deadband_pct']) {
+      const limit = await screen.findByTestId(`limit-${path}`)
+      expect(limit.textContent).toContain('generic quote')
+      await userEvent.click(within(limit).getByRole('button', { name: /^Confirm/ }))
+      await waitFor(() => expect(api.confirmGridCodeLimit).toHaveBeenCalledWith('Hub A', 'vde_4110', path))
+    }
+  })
+
+  it('confirms the DC 12 limits by their own paths', async () => {
+    const paths = ['harmonic_resonance_clearance_h', 'unbalance_limit_pct', 'current_tdd_standard']
+    const d = draft({ unconfirmed: paths })
+    const doc = { clause: 'generic clause', source: 'extracted' as const, page: 31, quote: 'generic quote' }
+    d.profile.harmonic_resonance_clearance_h = { value: 0.5, ...doc }
+    d.profile.unbalance_limit_pct = { value: 2, ...doc }
+    d.profile.current_tdd_standard = { value: 'ieee519-2014', ...doc }
+    api.gridCodes.mockResolvedValue(list({ drafts: [summary('vde_4110', d.unconfirmed)] }))
+    api.getGridCodeDraft.mockResolvedValue(d)
+    renderPanel()
+    await userEvent.click(await screen.findByRole('button', { name: 'Review draft vde_4110' }))
+    api.confirmGridCodeLimit.mockResolvedValue(d)
+    for (const path of paths) {
+      const limit = await screen.findByTestId(`limit-${path}`)
+      expect(limit.textContent).toContain('generic quote')
+      await userEvent.click(within(limit).getByRole('button', { name: /^Confirm/ }))
+      await waitFor(() => expect(api.confirmGridCodeLimit).toHaveBeenCalledWith('Hub A', 'vde_4110', path))
     }
   })
 

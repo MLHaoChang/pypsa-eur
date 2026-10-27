@@ -1229,6 +1229,97 @@ def recalculate_line_lengths() -> dict:
     return _h()
 
 
+# ── Network topology and sites (8) — LV08 B1 ────────────────────────────────
+#
+# Thin wrappers over `routers/network.py`, `routers/geocode.py` and the
+# `routers/projects.py` site routes, in process through `_route`: the routes'
+# validation, lock checks, upstream timeouts and refusals apply unchanged.
+
+_ASSET_REFERENCE_VIEWS = ("asset_costs", "asset_schema", "attribute_catalog")
+
+
+def get_asset_reference(view: str, component: str | None = None) -> dict:
+    """One of the network's asset reference reads, by `view`."""
+    from routers import network as R
+
+    if view not in _ASSET_REFERENCE_VIEWS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": f"view must be one of {list(_ASSET_REFERENCE_VIEWS)}, got {_cut(view, 40)!r}"})
+    if view == "asset_costs":
+        return R.get_asset_costs()
+    if not component:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"view {view!r} needs component"})
+    if view == "asset_schema":
+        return R.get_asset_schema(component)
+    return R.get_attribute_catalog(component)
+
+
+def geocode_place(query: str) -> list[dict]:
+    """`GET /api/geocode`: the configured geocoder's matches (its own timeout)."""
+    from routers.geocode import geocode_search as _h
+    from services import geocode
+
+    query = (query or "").strip()
+    if not 1 <= len(query) <= geocode.MAX_QUERY_CHARS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": f"query must be 1 to {geocode.MAX_QUERY_CHARS} characters"})
+    return _h(q=query)
+
+
+def derive_lengths_from_geometry(keys: list[str] | None = None) -> dict:
+    """`POST /api/network/lengths/from_geometry`: lengths only; impedances are previewed."""
+    from models.schemas import LengthsFromGeometryRequest
+    from routers.network import lengths_from_geometry as _h
+
+    return _h(LengthsFromGeometryRequest(keys=keys))
+
+
+def rescale_line_impedances(lines: list[dict]) -> dict:
+    """`POST /api/network/lines/rescale_impedances`: the consented values, as sent."""
+    from pydantic import ValidationError
+
+    from models.schemas import ImpedanceRescaleRequest
+    from routers.network import rescale_impedances as _h
+
+    try:
+        body = ImpedanceRescaleRequest(lines=lines)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _h(body)
+
+
+def reset_network() -> dict:
+    """`POST /api/network/reset`, with this chat's session unbound as the route does."""
+    from routers.network import reset_network as _h
+    return _route(_h)
+
+
+def get_project_sites(name: str, site_id: str | None = None) -> dict:
+    """The site document, plus one site's cached context when `site_id` is given."""
+    from routers import projects as R
+
+    _authorized_project(name)  # the per-project ACL, as every project read runs it
+    out = {"sites": _route(R.get_sites, name)}
+    if site_id:
+        out["context"] = _route(R.get_site_context, name, site_id)
+    return out
+
+
+def set_project_sites(name: str, sites: dict) -> dict:
+    """`PUT .../sites`: the whole validated site document."""
+    from routers.projects import put_sites as _h
+    return _route(_h, name, sites)
+
+
+def fetch_site_context(name: str, site_id: str) -> dict:
+    """`POST .../sites/{site_id}/context`: fetch upstream (bounded) and cache."""
+    from routers.projects import fetch_site_context as _h
+    return _route(_h, name, site_id)
+
+
 # ── Snapshots (4) ───────────────────────────────────────────────────────────
 
 
@@ -1937,6 +2028,261 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
             "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
                               "items": len(bound.get("items") or [])},
             "replaced": replaced}
+
+
+# ── LV08 B2a (12) — live-voice 08 slice B2 ──────────────────────────────────
+# Library series and meter data, Library item edits, finance inputs, the PoC
+# state, the value-flow designer, the billing preview, the investment-case
+# abort and the stress profile packs. Each calls its route's own router handler
+# in process (`_route` / `_library_call`), so ACL, validation and refusals are
+# the route's; the tools only bound what reaches the model.
+
+# Tool-side refusals of set_finance_inputs' arguments (gatekeeper F1), as
+# literals for the manifest guard.
+_FINANCE_TOOL_ERROR_KINDS = (
+    {"error_kind": "finance_if_match_required"},
+    {"error_kind": "finance_clear_invalid"},
+)
+# get_library_series' page of points: default, cap, and the JSON budget the
+# page is trimmed to (under the chat's per-result cap with the envelope).
+_SERIES_PAGE_DEFAULT = 48
+_SERIES_PAGE_MAX = 500
+_SERIES_PAGE_CHARS = 2400
+
+
+def _awaited(handler):
+    """An async router handler as a sync callable `_route` can inject into: the
+    coroutine is driven inside `_route`'s `_acting()` block, while its db
+    session is open. `functools.wraps` keeps the signature `_route` reads."""
+    import functools
+
+    @functools.wraps(handler)
+    def run(*args, **kwargs):
+        return _sync(handler(*args, **kwargs))
+
+    return run
+
+
+def _active_upload(file_id: str):
+    """`(filename, UploadFile)` for an upload of the ACTIVE project; another
+    project's id is the upload service's 404. The bytes go to the route as
+    they are: its size cap (413) and parsers (422) decide."""
+    import io
+
+    from fastapi import UploadFile
+
+    from services import upload_service
+
+    with _acting():   # identity before the file is read (as import_urdb_tariff)
+        pass
+    project = _require_active_project()
+    data = upload_service.get_upload_bytes(project, file_id)
+    filename = upload_service.get_upload_meta(project, file_id).filename
+    return UploadFile(filename=filename, file=io.BytesIO(data))
+
+
+def list_library_series(offset: int = 0, limit: int | None = None) -> dict:
+    from routers.library import list_series as _h
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, org_id=None)]
+    return _paginate(rows, offset, limit)
+
+
+def get_library_series(name: str, version: int | None = None, offset: int = 0,
+                       limit: int | None = None) -> dict:
+    """One series' ref, meta and statistics, and a bounded page of its points —
+    never the whole series (a year at 15 min is 35 040 points)."""
+    import math
+
+    from routers.library import get_series as _h
+
+    if offset < 0:
+        raise HTTPException(400, f"offset must be >= 0, got {offset}")
+    if limit is not None and limit < 1:
+        raise HTTPException(400, f"limit must be >= 1, got {limit}")
+    out = _library_call(_h, name, version=version, org_id=None)
+    ts, vals = out.timestamps, out.values
+    finite = [v for v in vals if math.isfinite(v)]
+    size = min(_SERIES_PAGE_DEFAULT if limit is None else limit, _SERIES_PAGE_MAX)
+    page_ts, page_vals = ts[offset:offset + size], vals[offset:offset + size]
+    # Trim to the JSON budget: always keep one point, so `offset` can advance.
+    while len(page_ts) > 1 and len(json.dumps([page_ts, page_vals])) > _SERIES_PAGE_CHARS:
+        keep = max(1, len(page_ts) * 3 // 4)
+        page_ts, page_vals = page_ts[:keep], page_vals[:keep]
+    meta = out.meta or {}
+    if len(json.dumps(meta, default=str)) > 600:
+        notes = meta.get("notes") if isinstance(meta.get("notes"), list) else None
+        meta = {k: v for k, v in meta.items() if k != "notes"}
+        if notes is not None:
+            meta["notes"] = _fit([str(n) for n in notes], 300)
+            meta["notes_total"] = len(notes)
+        if len(json.dumps(meta, default=str)) > 600:
+            meta = {"keys": sorted(meta)[:30], "truncated": True}
+    return {"ref": out.ref.model_dump(mode="json"), "timezone": out.timezone, "meta": meta,
+            "points": len(vals), "first": ts[0] if ts else None, "last": ts[-1] if ts else None,
+            "min": min(finite) if finite else None, "max": max(finite) if finite else None,
+            "mean": (sum(finite) / len(finite)) if finite else None,
+            "page": {"offset": offset, "returned": len(page_ts),
+                     "has_more": offset + len(page_ts) < len(vals),
+                     "timestamps": page_ts, "values": page_vals}}
+
+
+def import_library_series(file_id: str, name: str, timezone: str | None = None) -> dict:
+    """An UPLOADED CSV/xlsx (never an LLM-emitted blob) → a Library series,
+    through `POST /api/library/series/upload` (its cap, parser and store)."""
+    from routers.library import upload_series as _h
+
+    upload = _active_upload(file_id)
+    ref = _library_call(_awaited(_h), file=upload, name=name, timezone=timezone,
+                        source="upload", org_id=None)
+    return {"ref": ref.model_dump(mode="json")}
+
+
+def import_meter_data(file_id: str, name: str, unit: str, settlement: str = "15min",
+                      label: str = "start", timezone: str | None = None) -> dict:
+    """An UPLOADED meter file → a Library kW series and the monthly history,
+    through `POST /api/library/meter_data`."""
+    from routers.library import upload_meter_data as _h
+
+    upload = _active_upload(file_id)
+    out = _library_call(_awaited(_h), file=upload, name=name, unit=unit,
+                        settlement=settlement, label=label, timezone=timezone,
+                        org_id=None).model_dump(mode="json")
+    notes = out.get("notes") or []
+    out["notes_total"] = len(notes)
+    out["notes"] = _fit([_safe_text(n, 120) for n in notes])
+    return out
+
+
+def put_library_item(kind: str, name: str, payload: dict, meta: dict | None = None) -> dict:
+    """Save a Library item through `PUT /api/library/items/{kind}/{name}`, in the
+    acting user's own org (the route's `_target_org`, write)."""
+    from routers.library import ItemIn, put_item as _h
+
+    try:
+        body = ItemIn(payload=payload, meta=meta or {})
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=_safe_text(exc, 300)) from exc
+    return _library_call(_h, _library_kind(kind), name, body, org_id=None).model_dump(mode="json")
+
+
+def get_finance_inputs() -> dict:
+    from routers.simulation import get_finance as _h
+    return _h()
+
+
+def set_finance_inputs(if_match: str, finance: dict | None = None, clear: bool = False) -> dict:
+    """Replace (or, with clear=true, remove) the finance inputs through
+    `PUT /api/simulation/finance`, always with the digest the model read
+    (gatekeeper F1: no '*', no implicit clear)."""
+    from routers.simulation import FinanceIn, put_finance as _h
+
+    tag = (if_match or "").strip()
+    if tag.strip('"').strip() in ("", "*"):
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_if_match_required",
+            "message": "pass the `digest` get_finance_inputs returned as if_match; "
+                       "'*' is refused"})
+    if clear and finance is not None:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_clear_invalid",
+            "message": "clear=true removes every finance input: pass no `finance` with it"})
+    if not clear and finance is None:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "finance_clear_invalid",
+            "message": "pass the whole `finance` object, or clear=true to remove every "
+                       "finance input"})
+    return _h(FinanceIn(finance=None if clear else finance), if_match=tag)
+
+
+def get_poc_state() -> dict:
+    from routers.simulation import get_poc_state as _h
+    return _h()
+
+
+def _fit_rows(rows: list, budget: int) -> tuple[list, int]:
+    """As many leading `rows` as fit `budget` JSON chars (at least one)."""
+    out, used = [], 0
+    for r in rows:
+        cost = len(json.dumps(r, default=str)) + 2
+        if out and used + cost > budget:
+            break
+        out.append(r)
+        used += cost
+    return out, len(rows)
+
+
+def get_value_flow_designer(offset: int = 0, limit: int | None = None) -> dict:
+    """The designer context with its asset list paged and the other lists cut
+    to fit (each with its total), so a large site stays under the cap."""
+    from routers.simulation import get_value_flow_designer as _h
+
+    out = dict(_h())
+    assets = _paginate(list(out.pop("assets", None) or []), offset, limit)
+    page = {k: assets[k] for k in ("offset", "returned", "has_more")}
+    # The asset page takes most of the budget; the other lists share ~900 chars.
+    assets_items, _ = _fit_rows(assets["items"], 1900)
+    page["returned"] = len(assets_items)
+    page["has_more"] = assets["offset"] + len(assets_items) < assets["total_count"]
+    for key in ("tariff_items", "contract_parties", "group_members", "default_externals"):
+        rows = out.get(key)
+        if isinstance(rows, list):
+            out[key], total = _fit_rows(rows, 220)
+            if len(out[key]) < total:
+                out[f"{key}_total"] = total
+    out["assets"] = assets_items
+    out["assets_total"] = assets["total_count"]
+    out["assets_page"] = page
+    return out
+
+
+def preview_billing(tariff: dict) -> dict:
+    """The last solve's dispatch billed under a DRAFT tariff through
+    `POST /api/results/billing/preview` — which stores nothing. The per-period
+    line detail is left out (the summary carries each period's per-item
+    totals); a summary too large for the chat is cut to its totals."""
+    from routers.results import BillingPreviewIn, preview_billing as _h
+
+    try:
+        body = BillingPreviewIn(tariff=tariff)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=_safe_text(exc, 300)) from exc
+    out = _payload_or_no_data("billing_preview", _h(body), _RESULTS_NO_DATA_MESSAGE)
+    if out.get("status") == "no_data":
+        return out
+    result = {"summary": out.get("summary"), "flags": out.get("flags"),
+              "provenance": out.get("provenance"), "gap": out.get("gap")}
+    if len(json.dumps(result, default=str)) > MAX_PAGE_CHARS:
+        result["summary"] = {k: (None if v is None else {"total": v.get("total"),
+                                                         "total_supported": v.get(
+                                                             "total_supported")})
+                             for k, v in (out.get("summary") or {}).items()}
+        result["summary_per_item"] = "omitted to fit the chat"
+    if len(json.dumps(result, default=str)) > MAX_PAGE_CHARS:
+        periods = list(result["summary"].items())
+        kept, _ = _fit_rows(periods, 1500)
+        result["summary"] = dict(kept)
+        result["summary_periods_total"] = len(periods)
+        result["provenance"] = {"preview": True}
+    return result
+
+
+def abort_investment_case() -> dict:
+    """
+    Ask a running investment-case run to stop at its next stage; it stores
+    nothing. IDEMPOTENT, and 200 even when the run has already finished; 404
+    only when no run was recorded in this session (as abort_adequacy_study).
+    """
+    from routers.results import post_investment_case_abort as _h
+    return _h()
+
+
+def list_stress_profile_packs(name: str, offset: int = 0, limit: int | None = None) -> dict:
+    """The shipped profile packs, under the project's own authorization."""
+    from routers.adequacy_worksheet import get_stress_profile_packs as _h
+    packs = _route(_h, project=_authorized_project(name)).get("packs") or []
+    return _paginate(list(packs), offset, limit)
+
+# ── end LV08 B2a ────────────────────────────────────────────────────────────
 
 
 # ── Site connection (IC U1 follow-up, item b) ──────────────────────────────
@@ -3013,6 +3359,141 @@ def generate_study_report(project: str, study_id: str, format: str = "docx") -> 
             "stale": out.get("stale"), "stale_reasons": out.get("stale_reasons") or []}
 
 
+# ── Decision study records (6) — LV08 B1 ────────────────────────────────────
+#
+# The rest of `routers/studies.py`, the same way as the six above: in process
+# through `_route`, with the PATH project resolved by `_authorized_project`, so
+# every refusal the routes raise passes through unchanged.
+
+_STUDY_VIEWS = ("summary", "ledger", "option_case", "report")
+
+
+def list_decision_studies(project: str, include_library: bool = False) -> dict:
+    """The project's studies (`GET .../studies/`), plus the library on request."""
+    from routers import studies as R
+
+    ap = _authorized_project(project)
+    out = {"studies": _route(R.list_studies, project=ap)}
+    if include_library:
+        out["library"] = _route(R.get_study_library, project=ap)
+    return out
+
+
+def get_decision_study(project: str, study_id: str, view: str = "summary",
+                       option_id: str | None = None) -> dict:
+    """One study read: its record, ledger, one option's case or its report."""
+    from routers import studies as R
+
+    if view not in _STUDY_VIEWS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_view_invalid",
+            "message": f"view must be one of {list(_STUDY_VIEWS)}, got {_cut(view, 40)!r}"})
+    if view == "option_case" and not option_id:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_view_invalid",
+            "message": "view 'option_case' needs option_id (the study's options list them)"})
+    ap = _authorized_project(project)
+    if view == "ledger":
+        return _route(R.get_ledger, study_id, project=ap)
+    if view == "option_case":
+        return _route(R.get_option_case, study_id, option_id, project=ap)
+    if view == "report":
+        return _route(R.get_report, study_id, project=ap)
+    return _route(R.get_study, study_id, project=ap)
+
+
+def preview_decision_study_intake(project: str, intake: dict) -> dict:
+    """`POST .../studies/preview`: the intake's load and baseline bill; writes nothing."""
+    from routers.studies import PreviewRequest, preview_intake as _h
+
+    return _route(_h, PreviewRequest(intake=intake or {}), project=_authorized_project(project))
+
+
+def update_decision_study(project: str, study_id: str, name: str | None = None,
+                          step: str | None = None, intake: dict | None = None,
+                          settings: dict | None = None) -> dict:
+    """`PATCH .../studies/{id}`: only the fields sent are written."""
+    from routers.studies import StudyPatch, patch_study as _h
+
+    fields = {k: v for k, v in (("name", name), ("step", step), ("intake", intake),
+                                ("settings", settings)) if v is not None}
+    from pydantic import ValidationError
+
+    try:
+        body = StudyPatch(**fields)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _route(_h, study_id, body, project=_authorized_project(project))
+
+
+def abort_decision_study(project: str, study_id: str, stage: str = "options") -> dict:
+    """Stop a running options run or tornado; idempotent like the routes."""
+    from routers import studies as R
+
+    if stage not in _STUDY_STAGES:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_stage_invalid",
+            "message": f"stage must be one of {list(_STUDY_STAGES)}, got {_cut(stage, 40)!r}"})
+    ap = _authorized_project(project)
+    handler = R.abort_findings_tornado if stage == "tornado" else R.abort_study_run
+    return {"stage": stage, **_route(handler, study_id, project=ap)}
+
+
+def delete_decision_study(project: str, study_id: str) -> dict:
+    """`DELETE .../studies/{id}`: the study and the option forks it owns."""
+    from routers.studies import delete_study as _h
+
+    _route(_h, study_id, project=_authorized_project(project))
+    return {"deleted": study_id}
+
+
+# ── Project settings and scope (5) — LV08 B1 ────────────────────────────────
+
+
+def get_site_template_form() -> dict:
+    """The generic-site template's form data (global, read-only)."""
+    from routers.projects import get_site_template_form as _h
+    return _route(_h)
+
+
+def get_project_flow_scope(name: str) -> dict:
+    """`GET .../flow/scope`: the stored scope or the template's preset."""
+    from routers.flow import get_flow_scope as _h
+    return _h(project=_authorized_project(name))
+
+
+def update_project_flow_scope(name: str, scope: dict) -> dict:
+    """`PUT .../flow/scope`: the whole `{version, groups, options}` document."""
+    from routers.flow import put_flow_scope as _h
+    return _route(_h, scope, project=_authorized_project(name))
+
+
+def update_project_scenario_metadata(name: str, description: str | None | _Unset = _UNSET,
+                                     scenario_type: str | _Unset = _UNSET) -> dict:
+    """`PATCH .../scenario`: only the keys sent are written (null clears)."""
+    from models.schemas import UpdateScenarioRequest
+    from routers.projects import update_scenario_metadata as _h
+
+    from pydantic import ValidationError
+
+    try:
+        body = UpdateScenarioRequest(**{k: v for k, v in (("description", description),
+                                                          ("scenario_type", scenario_type))
+                                        if v is not _UNSET})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _route(_h, name, body)
+
+
+def update_project_settings(name: str, derive_lengths_from_geometry: bool) -> dict:
+    """`PATCH .../settings`: the project's settings table in metadata.json."""
+    from models.schemas import UpdateProjectSettingsRequest
+    from routers.projects import update_project_settings as _h
+
+    body = UpdateProjectSettingsRequest(derive_lengths_from_geometry=derive_lengths_from_geometry)
+    return _route(_h, name, body)
+
+
 # ── Validation (3) ──────────────────────────────────────────────────────────
 
 
@@ -3257,6 +3738,15 @@ def put_stress_scenarios(name: str, scenarios: list) -> dict:
                   project=_authorized_project(name))
 
 
+def save_fmea_worksheet(name: str, manual_rows: list, overlays: dict) -> dict:
+    """Replace the FMEA sidecar wholesale (B3), through `_route` so the
+    route's foreign-lock check and its 422 on a broken row apply."""
+    from routers.adequacy_worksheet import WorksheetPut
+    from routers.adequacy_worksheet import put_worksheet as _h
+    return _route(_h, body=WorksheetPut(manual_rows=manual_rows, overlays=overlays),
+                  project=_authorized_project(name))
+
+
 def get_eh_template(name: str) -> dict:
     """The Energy Hub template a project was created from (P19): recommended
     archetype, pack overrides, stages, DtC attribution and study notes."""
@@ -3275,6 +3765,17 @@ def get_project_flow(name: str) -> dict:
     from routers.flow import get_project_flow as _h
 
     return _route(_h, project=_authorized_project(name))
+
+
+def get_reliability_goal(name: str) -> dict:
+    """The project's reliability goal (W3b-R) as every study resolves it,
+    through the same handler as ``GET /api/projects/{name}/flow/reliability_goal``.
+    Reads the open project only (409 otherwise), as ``get_project_flow`` does."""
+    from routers.flow import _require_open, get_reliability_goal as _h
+
+    project = _authorized_project(name)
+    _require_open(project)
+    return _route(_h, project=project)
 
 
 def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
@@ -3430,7 +3931,7 @@ def run_mc_study(
 
 
 def run_coupling_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     eps0: float | None = None,
@@ -3443,6 +3944,8 @@ def run_coupling_loop(
 
     `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
     on a multi-year horizon, and say which basis you used when reporting.
+    Omitted, it and `draws` are the project's reliability goal (W3b-R); the
+    result's `goal_sources` names where each came from.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
     return _campaign_gated(
@@ -3459,7 +3962,7 @@ def run_coupling_loop(
 
 
 def run_margin_loop(
-    target_lole_h: float,
+    target_lole_h: float | None = None,
     draws: int | None = None,
     seed: int | None = None,
     max_solves: int | None = None,
@@ -3473,6 +3976,8 @@ def run_margin_loop(
     There is deliberately no starting-margin parameter: the start is a
     MEASUREMENT taken by a probing solve, and a user-supplied one is the
     single number here that can silently make the study worthless.
+    An omitted `target_lole_h` or `draws` is the project's reliability goal
+    (W3b-R), named in the result's `goal_sources`.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
     return _campaign_gated(
@@ -3488,7 +3993,7 @@ def run_margin_loop(
 
 
 def run_eh_study(
-    archetype: str,
+    archetype: str | None = None,
     stages: list | None = None,
     budget_solves: int | None = None,
     pack_overrides: dict | None = None,
@@ -3503,6 +4008,9 @@ def run_eh_study(
     Applies the pack, runs the EH pipeline, and persists a
     ``ReferenceDesignReport`` for ``get_adequacy_results('eh_reference_design')``.
     Poll ``get_adequacy_results('eh_study')`` while it runs.
+    An omitted ``archetype``, ``pack_overrides`` LOLE / ENS target or
+    ``mc.draws`` is the project's reliability goal (W3b-R); a value passed
+    here wins for this run, and ``goal_sources`` names each one's source.
     """
     from routers.results import EhStudyRequest, post_eh_study as _h
     return _campaign_gated(
@@ -3560,12 +4068,46 @@ def solve_queue_abort(job_id: str) -> dict:
 
 
 def solve_queue_clear_finished() -> dict:
-    """N1: read-tier — drops listing entries only, idempotent."""
+    """Write tier (B3; it was read): the POST drops every org's finished
+    listing entries. Idempotent, no disk or solver effect."""
     # P-1: super-admin only, so this 403s for an ordinary chat caller. That is
     # the intended outcome — the queue is process-global and the clear crosses
     # every org.
     from routers.solve_queue import clear_finished as _h
     return _route(_h)
+
+
+# ── Solve queue controls (live-voice 08 B3) (4) ─────────────────────────────
+#
+# One wrapper per Solve Queue panel route, through `_route`: the routes own
+# the visibility and per-user checks and requeue's holder check.
+
+_JOB_LOG_DEFAULT_LINES = 200
+_JOB_LOG_MAX_LINES = 2000  # the catalogue schema's `maximum`
+
+
+def solve_queue_job_log(job_id: str, max_lines: int | None = None) -> dict:
+    from routers.solve_queue import job_log_history as _h
+    out = _route(_h, job_id)
+    lines = list(out.get("lines") or [])
+    keep = max(1, min(int(max_lines or _JOB_LOG_DEFAULT_LINES), _JOB_LOG_MAX_LINES))
+    return {"status": out.get("status"), "lines": lines[-keep:],
+            "total_lines": len(lines), "truncated": len(lines) > keep}
+
+
+def solve_queue_cancel_queued() -> dict:
+    from routers.solve_queue import cancel_queued as _h
+    return _route(_h)
+
+
+def solve_queue_dismiss(job_id: str) -> dict:
+    from routers.solve_queue import dismiss_job as _h
+    return _route(_h, job_id)
+
+
+def solve_queue_requeue(job_id: str) -> dict:
+    from routers.solve_queue import requeue_job as _h
+    return _route(_h, job_id)
 
 
 # ── Renewable profile generator (6) — profile_gen Tasks 6–8 ─────────────────
@@ -3658,6 +4200,83 @@ def compare_profiles(project_id: str, a: str, b: str, component: str | None = No
     from routers.profiles import compare_profiles as _h
     return _profile_route(_h, a=a, b=b, component=component,
                           proj=_authorized_project(project_id))
+
+
+# ── Time series and weather (live-voice 08 B3) (6) ──────────────────────────
+
+
+def get_current_series(project_id: str, component_type: str, attribute: str,
+                       component: str) -> dict:
+    from routers.profiles import get_current_series as _h
+    return _profile_route(_h, component_type=component_type, attribute=attribute,
+                          component=component, proj=_authorized_project(project_id))
+
+
+def get_weather_choice(project_id: str) -> dict:
+    from routers.profiles import get_weather_choice as _h
+    return _profile_route(_h, proj=_authorized_project(project_id))
+
+
+def set_weather_choice(project_id: str, source: str, year: int) -> dict:
+    from routers.profiles import WeatherChoice, put_weather_choice as _h
+    return _profile_route(_h, body=WeatherChoice(source=source, year=year),
+                          proj=_authorized_project(project_id))
+
+
+def pending_profile_from_current(project_id: str, component_type: str,
+                                 attribute: str, component: str) -> dict:
+    from routers.profiles import CurrentSeriesRequest, pending_from_current as _h
+    body = CurrentSeriesRequest(component_type=component_type, attribute=attribute,
+                                component=component)
+    return _profile_route(_h, body, proj=_authorized_project(project_id))
+
+
+def _profile_upload(handler, project_id: str, file_id: str, **form) -> dict:
+    """Run an async multipart profile route on a chat upload of THIS project.
+
+    The blob is resolved only under the authorized project's own upload store,
+    so another project's `file_id` is `upload_not_found`. It reaches the route
+    as an `UploadFile` over the open blob with its stored filename and content
+    type, so the route's own chunked size cap (`read_capped`) and parsing run
+    unchanged and nothing is buffered before that cap. Async, so `_route` cannot
+    drive it (its `with _acting()` would close `db` before the coroutine ran):
+    the dependencies are injected inside the block, as `_import_raw` does.
+    """
+    from fastapi import UploadFile
+    from starlette.datastructures import Headers
+
+    from services import upload_service
+    from services.profile_gen.refusals import public_message
+
+    proj = _authorized_project(project_id)
+    meta = upload_service.get_upload_meta(proj.name, file_id, project_dir=proj.directory)
+    blob = upload_service.get_upload_path(proj.name, file_id, project_dir=proj.directory)
+    try:
+        with blob.open("rb") as fh, _acting() as (db, user):
+            upload = UploadFile(file=fh, filename=meta.filename,
+                                headers=Headers({"content-type": meta.mime}))
+            return _sync(handler(file=upload, proj=proj, db=db, user=user, **form))
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001 — as `_profile_route`: the type, never the text
+        raise HTTPException(
+            status_code=500, detail=public_message(exc, route=handler.__name__),
+        ) from exc
+
+
+def upload_load_profiles_file(project_id: str, file_id: str, unit: str | None = None,
+                              timezone: str | None = None, year: int | None = None,
+                              annual_mwh: float | None = None) -> dict:
+    from routers.profiles import upload_load_profiles as _h
+    return _profile_upload(_h, project_id, file_id, unit=unit, timezone=timezone,
+                           year=year, annual_mwh=annual_mwh)
+
+
+def upload_series_file(project_id: str, file_id: str, component_type: str,
+                       attribute: str, component: str) -> dict:
+    from routers.profiles import upload_series as _h
+    return _profile_upload(_h, project_id, file_id, component_type=component_type,
+                           attribute=attribute, component=component)
 
 
 def generate_renewable_profile(project_id: str, points: list | None = None,
@@ -4987,11 +5606,19 @@ def ui_open_panel(
     compare_b: str | None = None,
     compare_tab: str | None = None,
     canvas_view: str | None = None,
+    loadflow_source: str | None = None,
+    window_from: int | None = None,
+    window_to: int | None = None,
+    highlight_branch: dict | None = None,
 ) -> dict:
     """
     Navigate the GUI. Emits a ``ui_event`` SSE frame (kind=navigate) that
     ChatPanel applies to uiStore — slide panels, Results sub-tabs, bottom
     asset tabs, and the A|B compare rail.
+
+    Load flow arguments (live-voice 07) need panel results and results_tab
+    loadflow. With any of them the view is read first: an unavailable view or
+    an unknown branch refuses with no event. Without them the call is unchanged.
     """
     from harness.catalogue import (
         BOTTOM_TAB_ENUM, COMPARE_TAB_ENUM, RESULTS_TAB_ENUM, SAFETY_PANEL_ENUM,
@@ -5025,6 +5652,14 @@ def ui_open_panel(
             "error_kind": "invalid_navigation", "field": "canvas_view",
             "message": "Choose blank for topology, or satellite, hybrid or site for map.",
         })
+    loadflow = _loadflow_navigation_args(panel_id, results_tab, loadflow_source,
+                                         window_from, window_to, highlight_branch)
+    facts = None
+    if loadflow:
+        from harness.navigation import loadflow_target
+
+        _view, facts = loadflow_target(loadflow.get("loadflow_source"), loadflow.get("window_from"),
+                                       loadflow.get("window_to"), loadflow.get("highlight"))
     event: dict[str, Any] = {
         "_ui_event": True,
         "kind": "navigate",
@@ -5032,6 +5667,9 @@ def ui_open_panel(
     }
     if results_tab:
         event["results_tab"] = results_tab
+    event.update(loadflow)
+    if facts is not None:
+        event["highlight_facts"] = facts
     if bottom_tab:
         event["bottom_tab"] = bottom_tab
     if compare_rail is not None:
@@ -5045,6 +5683,45 @@ def ui_open_panel(
     if canvas_view is not None:
         event["canvas_view"] = canvas_view
     return event
+
+
+def _loadflow_navigation_args(panel_id, results_tab, source, window_from, window_to,
+                              highlight) -> dict:
+    """Validate the optional Load flow navigation arguments (shape only)."""
+    def refuse(field: str, message: str) -> None:
+        raise HTTPException(400, detail={
+            "error_kind": "invalid_navigation", "field": field, "message": message})
+
+    given = {k: v for k, v in (("loadflow_source", source), ("window_from", window_from),
+                               ("window_to", window_to), ("highlight", highlight))
+             if v is not None}
+    if not given:
+        return {}
+    if panel_id != "results" or results_tab != "loadflow":
+        refuse(next(iter(given)), "Load flow arguments need panel_id results and results_tab loadflow.")
+    if source is not None and source not in ("lopf", "ac_pf"):
+        refuse("loadflow_source", "Choose lopf or ac_pf.")
+    if (window_from is None) != (window_to is None):
+        refuse("window_from", "Give window_from and window_to together, or neither.")
+    if window_from is not None:
+        if type(window_from) is not int or type(window_to) is not int:
+            refuse("window_from", "Window positions are integer snapshot indexes.")
+        if window_from < 0 or window_to < window_from:
+            refuse("window_from", "Use 0 <= window_from <= window_to.")
+        network = PyPSAService.get_active_context().network
+        n_snapshots = len(network.snapshots) if network is not None else 0
+        # No network: the view read below refuses with no_network instead.
+        if network is not None and not 0 <= window_from <= window_to < n_snapshots:
+            refuse("window_from", f"Use 0 <= window_from <= window_to < {n_snapshots}.")
+    if highlight is not None:
+        if (not isinstance(highlight, dict) or set(highlight) != {"component", "name"}
+                or highlight["component"] not in ("Line", "Transformer")
+                or not isinstance(highlight["name"], str)
+                or not 1 <= len(highlight["name"]) <= 128):
+            refuse("highlight_branch",
+                   "highlight_branch is {component: Line or Transformer, name: 1-128 characters}.")
+        given["highlight"] = {"component": highlight["component"], "name": highlight["name"]}
+    return given
 
 
 def ui_set_snapshot(snapshot_iso: str, period: int | None = None) -> dict:
@@ -6004,6 +6681,8 @@ def apply_demand_from_excel(
         except ImportError:  # pragma: no cover — only fails if routers/network refactor breaks paths
             _user_ts = None
             _user_ts_lock = None
+        from services import growth_placeholders
+        prior = growth_placeholders.before(n, "loads", "p_set", [load_name])
         # Direct dataframe write so the LP sees the new demand on next solve.
         if value_col in n.loads_t.p_set.columns or load_name in n.loads_t.p_set.columns:
             n.loads_t.p_set[load_name] = aligned
@@ -6014,6 +6693,8 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+        # A user's load profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
     from services import change_log_service
     tile_note = (
@@ -7741,6 +8422,227 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
     "batch_delete_components": _validate_batch_delete_components,
 }
 
+# ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity tools ─────────
+#
+# Each tool calls its GUI route's own router handler in-process (the route in
+# `catalogue.TOOL_ROUTES`), so validation, refusals and writes are the route's.
+# The tool only shapes what comes back so a read stays under the result cap.
+
+# Under `_truncate_result`'s 4000, with room for the `truncated` note itself.
+_B2B_BUDGET = 3500
+
+
+def _b2b_fit(payload: dict, budget: int = _B2B_BUDGET) -> dict:
+    """
+    `payload` under `budget` serialised chars: the largest list (reached through
+    dicts) loses as many tail items as the excess needs, until it fits, and
+    `truncated` names each trimmed list's path with its total and how many are
+    shown. Every list keeps its first item. The input is not mutated.
+    """
+    import copy
+
+    out = copy.deepcopy(payload)
+    trimmed: dict[str, tuple[dict, Any, int]] = {}
+
+    def lists(obj: dict, path: tuple):
+        for key, value in obj.items():
+            if isinstance(value, list) and len(value) > 1:
+                yield path + (str(key),), obj, key, value
+            elif isinstance(value, dict):
+                yield from lists(value, path + (str(key),))
+
+    while (excess := _json_len(out) - budget) > 0:
+        found = [(_json_len(v), p, parent, key, v) for p, parent, key, v in lists(out, ())]
+        if not found:
+            break
+        size, path, parent, key, value = max(found, key=lambda row: row[0])
+        per_item = max(1, size // len(value))
+        drop = min(len(value) - 1, max(1, -(-excess // per_item)))
+        trimmed.setdefault(".".join(path), (parent, key, len(value)))
+        parent[key] = value[: len(value) - drop]
+    if trimmed:
+        out["truncated"] = {path: {"total": total, "shown": len(parent[key])}
+                            for path, (parent, key, total) in trimmed.items()}
+    return out
+
+
+def get_osm_suggestions(name: str, bbox: str, offset: int = 0, limit: int | None = None) -> dict:
+    """The map's OSM suggestion layer for `bbox`, one row per way, without coordinates."""
+    from routers.projects import osm_suggestions as _h
+
+    doc = _route(_h, name, bbox)
+    rows = []
+    for key, points in (("lines", "points"), ("areas", "polygon")):
+        for feature in doc.get(key) or []:
+            tags = feature.get("tags") or {}
+            rows.append({"kind": feature.get("kind"), "osm_id": feature.get("id"),
+                         "name": tags.get("name"), "voltage": tags.get("voltage"),
+                         "operator": tags.get("operator"),
+                         "n_points": len(feature.get(points) or [])})
+    return {"bbox": doc.get("bbox"), "attribution": doc.get("attribution"),
+            "cached": doc.get("cached"), "lines_total": len(doc.get("lines") or []),
+            "areas_total": len(doc.get("areas") or []), **_paginate(rows, offset, limit)}
+
+
+def preview_library_reference(component_class: str, name: str, technology: str, projection_year: int,
+                              confirm: list[str] | None = None) -> dict:
+    """The Library reference dialog's preview (`POST /api/library_reference/preview`)."""
+    from routers.network_library_reference import ReferenceApplyIn
+    from routers.network_library_reference import preview_library_reference as _h
+
+    body = ReferenceApplyIn(component_class=component_class, name=name, technology=technology,
+                            projection_year=projection_year, confirm=list(confirm or []))
+    return _b2b_fit(_route(_h, body))
+
+
+def _b2b_body_request(data: bytes, path: str):
+    """A one-shot POST `Request` carrying `data` as its raw body, for a handler
+    that reads its body itself (its own size and format checks then run)."""
+    from starlette.requests import Request
+
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.disconnect"}
+        sent = True
+        return {"type": "http.request", "body": data, "more_body": False}
+
+    headers = [(b"content-type", b"application/octet-stream"),
+               (b"content-length", str(len(data)).encode())]
+    return Request({"type": "http", "method": "POST", "path": path, "headers": headers,
+                    "query_string": b""}, receive)
+
+
+def import_map_geometry(name: str, file_id: str, apply: bool = False, tolerance_m: float = 50.0) -> dict:
+    """
+    An UPLOADED GeoJSON/KML file of the active project through the map's import
+    route. The bytes are the upload's (never model-emitted); the route parses,
+    caps, lock-checks on apply and writes.
+    """
+    from routers.projects import import_map_geometry as _h
+    from services import upload_service
+
+    with _acting():   # identity before the file is read
+        pass
+    active = _require_active_project()
+    if name != active:
+        # The upload is the active project's: writing it into another project
+        # would apply one project's file to the other (GK B follow-up on #769).
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "upload_project_mismatch",
+            "message": f"file_id is an upload of the active project {active!r}; "
+                       f"import into that project, or switch to {name!r} and upload there"})
+    data = upload_service.get_upload_bytes(active, file_id)
+    request = _b2b_body_request(data, f"/api/projects/{name}/map_layout/import")
+    with _acting() as (db, user):
+        # Async handler: driven inside the identity scope, so its db stays open.
+        report = _sync(_h(name, request, apply=apply, tolerance_m=tolerance_m, db=db, user=user))
+    out = {k: v for k, v in report.items() if k not in ("routes", "sites")}
+    routes, sites = report.get("routes") or [], report.get("sites") or []
+    out.update({
+        "routes_total": len(routes), "sites_total": len(sites),
+        "unmatched_total": len(report.get("unmatched") or []),
+        "routes": [{"feature": r.get("feature"), "label": r.get("label"), "key": r.get("key"),
+                    "how": r.get("how"), "reversed": r.get("reversed"),
+                    "n_points": len(r.get("points") or [])} for r in routes],
+        "sites": [{"feature": s.get("feature"), "id": s.get("id"), "name": s.get("name"),
+                   "buses": s.get("buses"), "n_vertices": len(s.get("boundary") or [])} for s in sites],
+    })
+    return _b2b_fit(out)
+
+
+def list_result_assets(offset: int = 0, limit: int | None = None) -> dict:
+    """The Results asset picker's list (`GET /api/results/asset/assets`), paged."""
+    from routers.asset_results import list_assets as _h
+
+    return _paginate(_h()["assets"], offset, limit)
+
+
+def get_curtailment_by_cause(offset: int = 0, limit: int | None = None) -> dict:
+    """`GET /api/results/curtailment/by_cause`, its plants as paged rows."""
+    from routers.results import get_curtailment_by_cause as _h
+
+    body = _h()
+    if getattr(body, "status_code", None) == 204:
+        return _no_data("curtailment_by_cause", _RESULTS_NO_DATA_MESSAGE)
+    plants = body.get("plants") or {}
+    rows = [{"plant": plant, **row} for plant, row in plants.items()]
+    head = {k: v for k, v in body.items() if k != "plants"}
+    return {**head, **_paginate(rows, offset, limit)}
+
+
+def get_eh_readiness(archetype: str, budget_solves: int | None = None, stages: list[str] | str | None = None,
+                     dtc_attribution: str | None = None, pack_overrides: Any = None) -> dict:
+    """
+    `GET /api/results/eh_readiness` with the route's own query values: `stages`
+    comma-joined, `pack_overrides` as its JSON text, so the route validates both.
+    """
+    from routers.results import get_eh_readiness as _h
+
+    if isinstance(stages, (list, tuple)):
+        stages = ",".join(str(s) for s in stages)
+    overrides = None if pack_overrides is None else json.dumps(pack_overrides)
+    return _b2b_fit(_h(archetype, budget_solves=budget_solves, stages=stages or None,
+                       dtc_attribution=dtc_attribution, pack_overrides=overrides))
+
+
+def get_report_capabilities() -> dict:
+    from routers.reports import get_report_capabilities as _h
+
+    return _route(_h, project=_report_project())
+
+
+def get_report_evidence_hash() -> dict:
+    from routers.reports import get_evidence_hash as _h
+
+    return _route(_h, project=_report_project())
+
+
+def _report_section_row(section: dict) -> dict:
+    return {"section_id": section.get("section_id"), "heading": section.get("heading"),
+            "source": section.get("source"), "status": section.get("status")}
+
+
+def get_report_version(report_id: str, version: int, section_id: str | None = None) -> dict:
+    """One stored version: meta + section rows, or one section compacted as `get_report` does."""
+    from routers.reports import get_report_version as _h
+
+    raw = _route(_h, report_id, version, project=_report_project())
+    head = {k: raw.get(k) for k in _REPORT_HEADER_KEYS}
+    sections = list(raw.get("sections") or [])
+    if section_id is None:
+        return _b2b_fit({
+            **head, "sections": [_report_section_row(s) for s in sections],
+            "message": "get_report_version(report_id, version, section_id=...) reads one "
+                       "section; get_report_table pages a table.",
+        })
+    match = next((s for s in sections if s.get("section_id") == section_id), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail={
+            "error_kind": "report_section_not_found",
+            "message": (f"Report {report_id} version {version} has no section {section_id!r}; "
+                        "it has: " + ", ".join(str(s.get("section_id")) for s in sections)),
+        })
+    compact = _compact_section(match, raw.get("tables") or {}, raw.get("figures") or {})
+    return _b2b_fit({**head, "section": compact})
+
+
+def create_evidence_report(title: str | None = None) -> dict:
+    """The Reports panel's evidence-only report (`POST …/reports`); the route checks the lock."""
+    from routers.reports import CreateReportBody, create_report as _h
+
+    out = _route(_h, CreateReportBody(title=title), project=_report_project())
+    document = out.pop("document", None) or {}
+    rid = out.get("report_id")
+    return _b2b_fit({
+        **out,
+        "sections": [_report_section_row(s) for s in document.get("sections") or []],
+        "message": f"Stored as report {rid}: get_report('{rid}') reads it.",
+    })
+
+
 # ── Registry entry-point ────────────────────────────────────────────────────
 
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
@@ -7876,6 +8778,15 @@ DISPATCHERS: dict[str, Any] = {
     # write_topology (2)
     "cluster_network": cluster_network,
     "recalculate_line_lengths": recalculate_line_lengths,
+    # network topology and sites (8) — LV08 B1
+    "get_asset_reference": get_asset_reference,
+    "geocode_place": geocode_place,
+    "derive_lengths_from_geometry": derive_lengths_from_geometry,
+    "rescale_line_impedances": rescale_line_impedances,
+    "reset_network": reset_network,
+    "get_project_sites": get_project_sites,
+    "set_project_sites": set_project_sites,
+    "fetch_site_context": fetch_site_context,
     # write_snapshots (4)
     "set_snapshots": set_snapshots,
     "set_snapshot_weightings": set_snapshot_weightings,
@@ -7919,6 +8830,7 @@ DISPATCHERS: dict[str, Any] = {
     "put_stress_scenarios": put_stress_scenarios,
     "get_eh_template": get_eh_template,
     "get_project_flow": get_project_flow,
+    "get_reliability_goal": get_reliability_goal,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
     "suggest_eh_setup": suggest_eh_setup,
@@ -7940,6 +8852,18 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
+    # live-voice 08 B3
+    "solve_queue_job_log": solve_queue_job_log,
+    "solve_queue_cancel_queued": solve_queue_cancel_queued,
+    "solve_queue_dismiss": solve_queue_dismiss,
+    "solve_queue_requeue": solve_queue_requeue,
+    "save_fmea_worksheet": save_fmea_worksheet,
+    "get_current_series": get_current_series,
+    "get_weather_choice": get_weather_choice,
+    "set_weather_choice": set_weather_choice,
+    "pending_profile_from_current": pending_profile_from_current,
+    "upload_load_profiles_file": upload_load_profiles_file,
+    "upload_series_file": upload_series_file,
     # Renewable profile generator (6)
     "list_profile_presets": list_profile_presets,
     "get_profile_parameters": get_profile_parameters,
@@ -8024,6 +8948,19 @@ DISPATCHERS: dict[str, Any] = {
     "get_study_findings": get_study_findings,
     "explain_verdict": explain_verdict,
     "generate_study_report": generate_study_report,
+    # decision study records (6) — LV08 B1
+    "list_decision_studies": list_decision_studies,
+    "get_decision_study": get_decision_study,
+    "preview_decision_study_intake": preview_decision_study_intake,
+    "update_decision_study": update_decision_study,
+    "abort_decision_study": abort_decision_study,
+    "delete_decision_study": delete_decision_study,
+    # project settings and scope (5) — LV08 B1
+    "get_site_template_form": get_site_template_form,
+    "get_project_flow_scope": get_project_flow_scope,
+    "update_project_flow_scope": update_project_flow_scope,
+    "update_project_scenario_metadata": update_project_scenario_metadata,
+    "update_project_settings": update_project_settings,
     # project_mgmt (21)
     "list_projects": list_projects,
     "read_result": read_result,
@@ -8129,6 +9066,39 @@ DISPATCHERS: dict[str, Any] = {
 }
 
 
+# LV08 B2a (12) — live-voice 08 slice B2: registered before the lock and
+# study gates below wrap DISPATCHERS, so they apply to these as to the rest.
+DISPATCHERS.update({
+    "list_library_series": list_library_series,
+    "get_library_series": get_library_series,
+    "import_library_series": import_library_series,
+    "import_meter_data": import_meter_data,
+    "put_library_item": put_library_item,
+    "get_finance_inputs": get_finance_inputs,
+    "set_finance_inputs": set_finance_inputs,
+    "get_poc_state": get_poc_state,
+    "get_value_flow_designer": get_value_flow_designer,
+    "preview_billing": preview_billing,
+    "abort_investment_case": abort_investment_case,
+    "list_stress_profile_packs": list_stress_profile_packs,
+})
+# end LV08 B2a
+# ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity tools ─────────
+# Before the lock/study gating below, which wraps what DISPATCHERS holds.
+DISPATCHERS.update({
+    "get_osm_suggestions": get_osm_suggestions,
+    "preview_library_reference": preview_library_reference,
+    "import_map_geometry": import_map_geometry,
+    "list_result_assets": list_result_assets,
+    "get_curtailment_by_cause": get_curtailment_by_cause,
+    "get_eh_readiness": get_eh_readiness,
+    "get_report_capabilities": get_report_capabilities,
+    "get_report_evidence_hash": get_report_evidence_hash,
+    "get_report_version": get_report_version,
+    "create_evidence_report": create_evidence_report,
+})
+
+
 # ── Foreign-lock gate at the dispatch seam (fix-wave F1) ────────────────────
 #
 # The write middleware in `main.py` refuses a non-holder's write to
@@ -8179,6 +9149,13 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/simulation/queue",
     "/api/simulation/queue/clear_finished",
     "/api/simulation/queue/{job_id}/abort",
+    # B3, mirroring main's exempt set for the queue controls the new tools
+    # reach. `requeue` is exempt there BECAUSE `requeue_job` runs its own
+    # holder check on the project it resolves from the job (main.py's "pair"),
+    # so a foreign lock still refuses it, in the handler.
+    "/api/simulation/queue/cancel_queued",
+    "/api/simulation/queue/{job_id}/dismiss",
+    "/api/simulation/queue/{job_id}/requeue",
     # The study ABORTS, mirroring `main._FOREIGN_LOCK_GATE_EXEMPT_EXACT`. This
     # set had only the three queue paths, so `abort_adequacy_study` — which
     # routes to these — was refused under a foreign lock in chat while the
@@ -8192,6 +9169,7 @@ _LOCK_GATE_EXEMPT_PATHS = frozenset({
     "/api/results/margin_loop/abort",
     "/api/results/coupling_loop/abort",
     "/api/results/eh_study/abort",
+    "/api/results/investment_case/abort",  # as main.py (LV08 B2a)
     # Latent today — `validate_network` is tiered `read`, so the tier filter
     # skips it before this set is consulted — but HTTP exempts preflight on
     # purpose, and the per-route parity test found the two sets disagreeing

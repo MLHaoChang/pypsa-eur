@@ -2294,6 +2294,66 @@
       "technical_name": "spectrum_post_filter"
      },
      {
+      "key": "flicker_step_mva",
+      "group": "performance",
+      "label": "Largest power step",
+      "help": "The largest single change in the unit's apparent power, for the flicker screen. 0 declares a steady load. Leave empty when unknown: the check then reads unknown.",
+      "unit_display": "MVA",
+      "unit_storage": "MVA",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "flicker_step_mva"
+     },
+     {
+      "key": "flicker_changes_per_min",
+      "group": "performance",
+      "label": "Changes per minute",
+      "help": "How often the power step happens, for the flicker screen: switching on and switching off each count, so one on/off cycle a minute is 2. 0 declares a steady load. Leave empty when unknown: the check then reads unknown.",
+      "unit_display": "1/min",
+      "unit_storage": "1/min",
+      "scale": 1.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "flicker_changes_per_min"
+     },
+     {
+      "key": "single_phase_share",
+      "group": "performance",
+      "label": "Single-phase share",
+      "help": "The share of the unit's rated apparent power drawn between two phases or phase to neutral, for the unbalance screen. 0 declares a balanced three-phase load. Leave empty when unknown: the check then reads unknown.",
+      "unit_display": "%",
+      "unit_storage": "fraction",
+      "scale": 100.0,
+      "kind": "number",
+      "options": [],
+      "required": false,
+      "key_param": false,
+      "derived": false,
+      "reveal_when": {
+       "eh_process": true
+      },
+      "part": null,
+      "blank": "clear",
+      "technical_name": "single_phase_share"
+     },
+     {
       "key": "outage_rate_value",
       "group": "performance",
       "label": "Forced-outage rate",

@@ -13,7 +13,7 @@ import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStud
 import { useUIStore } from '../../../store/uiStore'
 import { nk } from '../../../utils/queryKeys'
 import { studyHasResults } from '../flow'
-import { useHubDesignStore } from '../hubDesignStore'
+import { useReliabilityGoal } from '../../../hooks/useReliabilityGoal'
 import {
   ARCHETYPE_SHORT, actionLabel, actionTexts, askText, stressScenarioText,
 } from '../delegate'
@@ -96,7 +96,7 @@ export function ImproveCard() {
   const { study } = useHubStudy()
   const { review } = useHubReview(studyHasResults(study))
   const { template } = useHubTemplate()
-  const archetype = useHubDesignStore(s => s.archetype)
+  const { archetype } = useReliabilityGoal()
   const sweep = useStartFmeaSweep()
   const liveStudy = useLiveStudyRunning()
   // P26: follow a sweep started here on FmeaTab's own query and options, so

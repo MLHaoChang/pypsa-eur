@@ -176,7 +176,7 @@ from gridspine.ranking.campus import campus_metrics, island_metrics, select_camp
 from gridspine.schema.campus import HOURLY_CSV, PCC_CSV, validate_hourly, validate_pcc
 from gridspine.schema.contracts import ContractError
 from gridspine.static.campus_flow import SizingCriteria, held_transformers, size_transformers, solve_cases
-from gridspine.static.campus_reactive import ibr_q_capability, reactive_need, requirement_from, size_compensation
+from gridspine.static.campus_reactive import ibr_q_capability, ibr_q_curve, reactive_need, requirement_from, size_compensation
 from gridspine.static.campus_compliance import OPEN_TIE_CLAUSE, campus_compliance
 from gridspine.static.campus_invest import ParallelRules, period_spans, select_assets
 from gridspine.static.campus_milp import select_assets_milp
@@ -212,6 +212,7 @@ SHORT_CIRCUIT_CSV = "campus_short_circuit.csv"
 COMPLIANCE_CSV = "campus_compliance.csv"
 #: IEEE 2800's IBR reactive capability, when the profile states it.
 IBR_CAPABILITY_CSV = "campus_ibr_capability.csv"
+IBR_Q_CURVE_CSV = "campus_ibr_q_curve.csv"
 #: What the profile requires that a steady-state study cannot show.
 REPORTED_REQUIREMENTS_JSON = "campus_reported_requirements.json"
 INVESTMENT_CSV = "campus_investment.csv"
@@ -279,17 +280,18 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-def draft_from_project(network_path, island=None) -> CampusDraft:
+def draft_from_project(network_path, island=None, f_hz=None) -> CampusDraft:
     """A campus draft from the saved, solved project at ``network_path``.
     An unsolved project is refused here. The draft itself needs no dispatch,
     but the study does, and the user should hear it now rather than at run
     time. ``island``, the project's validated island sidecar, is passed to
     ``draft_campus`` (campus island plan I1, I9b): the campus then carries
-    its island data. Without it the draft is unchanged."""
+    its island data. Without it the draft is unchanged. ``f_hz`` is
+    ``draft_campus``'s own parameter, passed through."""
     n = load_solved_network(network_path)
     if not is_solved(n):
         raise ContractError("the project is not solved; solve it and save, then draft the campus")
-    return draft_campus(n, island=island)
+    return draft_campus(n, island=island, f_hz=f_hz)
 
 
 def check_campus(spec: dict) -> None:
@@ -754,11 +756,16 @@ def size_campus(run_dir, criteria: SizingCriteria = SizingCriteria(), profile: s
         _write_text_atomic(run_dir / IBR_CAPABILITY_CSV, ibr.to_csv(index=False))
     else:
         (run_dir / IBR_CAPABILITY_CSV).unlink(missing_ok=True)       # an earlier profile's table
+    curve = ibr_q_curve(campus, code)
+    if curve is not None:
+        _write_text_atomic(run_dir / IBR_Q_CURVE_CSV, curve.to_csv(index=False))
+    else:
+        (run_dir / IBR_Q_CURVE_CSV).unlink(missing_ok=True)          # an earlier profile's table
     reported = reported_requirements(code)
     _write_text_atomic(run_dir / REPORTED_REQUIREMENTS_JSON, json.dumps(reported, indent=2))
     return {"transformers": sizing, "compensation": comp, "requirement": requirement,
             "short_circuit": short_circuit, "compliance": compliance, "ibr_capability": ibr,
-            "reported_requirements": reported}
+            "ibr_q_curve": curve, "reported_requirements": reported}
 
 
 def invest_campus(run_dir, library=None, criteria: SizingCriteria = SizingCriteria(), profile: str = DEFAULT_PROFILE,
@@ -861,6 +868,16 @@ def _sk_source(campus: dict, n) -> tuple[str, bool]:
     return SK_CAMPUS, False
 
 
+def _unchanged_project(run_dir: Path):
+    """The project network a run was prepared from, refused when it changed
+    since (its sha256 is in the manifest)."""
+    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
+    network_path = Path(manifest["network_path"])
+    if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
+        raise ContractError("the project changed since this campus run was prepared; prepare the run again")
+    return load_solved_network(network_path)
+
+
 def harmonic_units(n, poc: str) -> pd.DataFrame:
     """The harmonic sources of a project network, all lumped at ``poc``: every
     Link that is a process unit (``eh_process``) or names a
@@ -882,6 +899,34 @@ def harmonic_units(n, poc: str) -> pd.DataFrame:
     return out
 
 
+def _screen_inputs(run_dir, profile, profile_dirs):
+    """A prepared run's campus description, its project network (refused when
+    it changed since the run was prepared) and the grid-code profile."""
+    n = _unchanged_project(run_dir)
+    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
+    return campus, n, load_grid_code(profile, extra_dirs=profile_dirs)
+
+
+def _screen_frame(pocs, units, unit_assumed, sk_source, typical, profile, limit_assumed, poc_columns,
+                  unit_columns) -> pd.DataFrame:
+    """One ``level`` ``poc`` row per PoC and one ``unit`` row per unit, with
+    the S_k source, the profile and the ``assumed`` flag."""
+    frames = []
+    for level, df, extra in (("poc", pocs, bool(unit_assumed.any())), ("unit", units, unit_assumed)):
+        df = df.copy()
+        df.insert(0, "level", level)
+        df["sk_mva_source"] = sk_source
+        df["profile"] = profile
+        df["assumed"] = limit_assumed | typical | extra
+        if typical:
+            df["note"] = df["note"].map(lambda s: f"S_k is {SK_TYPICAL}, so no verdict here is a pass to "
+                                                  f"rely on; {s}")
+        frames.append(df)
+    columns = ["level", *dict.fromkeys((*unit_columns[:2], *poc_columns, *unit_columns)),
+               "sk_mva_source", "profile", "assumed"]
+    return pd.concat(frames, ignore_index=True).reindex(columns=columns)
+
+
 def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
     """The harmonic screen of a prepared run (``static/harmonics.py``),
     written to ``campus_harmonics.csv``: one ``level`` ``poc`` row and one
@@ -895,13 +940,7 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
     from gridspine.static import harmonics as hm
 
     run_dir = Path(run_dir)
-    manifest = json.loads(_require(run_dir, CAMPUS_MANIFEST).read_text())
-    network_path = Path(manifest["network_path"])
-    if not network_path.is_file() or _sha256_file(network_path) != manifest["network_sha256"]:
-        raise ContractError("the project changed since this campus run was prepared; prepare the run again")
-    campus = yaml.safe_load(_require(run_dir, CAMPUS_YAML).read_text())
-    n = load_solved_network(network_path)
-    code = load_grid_code(profile, extra_dirs=profile_dirs)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
     limits, cited = hm.limits_from_profile(code)
 
     pcc = campus["campus"]["pcc"]
@@ -912,19 +951,136 @@ def harmonics_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), l
 
     limit_assumed = not cited or any(c["source"] != "code" for c in cited)
     unit_demo = study.units["spectrum_source"].astype(str).str.startswith("demo")
-    frames = []
-    for level, df, demo in (("poc", study.pocs, bool(unit_demo.any())), ("unit", study.units, unit_demo)):
-        df = df.copy()
-        df.insert(0, "level", level)
-        df["sk_mva_source"] = sk_source
-        df["profile"] = profile
-        df["assumed"] = limit_assumed | typical | demo
-        if typical:
-            df["note"] = df["note"].map(lambda s: f"S_k is {SK_TYPICAL}, so no verdict here is a pass to "
-                                                  f"rely on; {s}")
-        frames.append(df)
-    columns = ["level", *dict.fromkeys((*hm.UNIT_COLUMNS[:2], *hm.POC_COLUMNS, *hm.UNIT_COLUMNS)),
-               "sk_mva_source", "profile", "assumed"]
-    out = pd.concat(frames, ignore_index=True).reindex(columns=columns)
+    out = _screen_frame(study.pocs, study.units, unit_demo, sk_source, typical, profile, limit_assumed,
+                        hm.POC_COLUMNS, hm.UNIT_COLUMNS)
     _write_text_atomic(run_dir / HARMONICS_CSV, out.to_csv(index=False))
     return out
+
+
+# --- the flicker screen (grid-to-process issue 17) ---------------------------
+
+FLICKER_CSV = "campus_flicker.csv"
+
+
+def flicker_units(n, poc: str) -> pd.DataFrame:
+    """The fluctuating loads of a project network, all lumped at ``poc``:
+    every Link that is a process unit (``eh_process``) or names a flicker
+    step. A unit with an input missing is kept (the screen says "no input")."""
+    links = n.links
+
+    def col(name, default):
+        return links[name] if name in links.columns else pd.Series(default, index=links.index, dtype=object)
+
+    process = col("eh_process", False).map(lambda v: str(v).strip().lower() in ("true", "1", "1.0"))
+    chosen = links.index[process | col("flicker_step_mva", None).notna()]
+    return pd.DataFrame({"unit": list(chosen), "poc": poc,
+                         "step_mva": list(col("flicker_step_mva", None).reindex(chosen)),
+                         "changes_per_min": list(col("flicker_changes_per_min", None).reindex(chosen))},
+                        columns=["unit", "poc", "step_mva", "changes_per_min"])
+
+
+def flicker_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()) -> pd.DataFrame:
+    """The flicker screen of a prepared run (``static/flicker.py``), written
+    to ``campus_flicker.csv``: one ``level`` ``poc`` row and one ``unit`` row
+    per process unit, with S_k and its source as in ``harmonics_campus``."""
+    from gridspine.static import flicker as fl
+
+    run_dir = Path(run_dir)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
+    limits, cited = fl.limits_from_profile(code)
+
+    pcc = campus["campus"]["pcc"]
+    poc = str(pcc["bus"])
+    sk_source, typical = _sk_source(campus, n)
+    study = fl.flicker_table(flicker_units(n, poc), {poc: _pcc_sk_min(pcc)}, limits)
+
+    limit_assumed = not cited or any(c["source"] != "code" for c in cited)
+    out = _screen_frame(study.pocs, study.units, pd.Series(False, index=study.units.index), sk_source, typical,
+                        profile, limit_assumed, fl.POC_COLUMNS, fl.UNIT_COLUMNS)
+    _write_text_atomic(run_dir / FLICKER_CSV, out.to_csv(index=False))
+    return out
+
+
+# --- the current-distortion screen (datacenter readiness 12, part 1) --------
+
+TDD_CSV = "campus_tdd.csv"
+
+
+def _rated_load_mva(campus) -> float | None:
+    """I_L as MVA: the rated campus load, sum p_mw / pf over the ``load``
+    units (all behind the one PCC). None when the campus has none."""
+    loads = campus.units[campus.units["kind"] == "load"]
+    if loads.empty:
+        return None
+    return float((loads["p_mw"] / loads["pf"]).sum())
+
+
+def tdd_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=(), law: str = "iec") -> pd.DataFrame:
+    """The current-distortion screen of a prepared run
+    (``static/current_tdd.py``), written to ``campus_tdd.csv``: one ``level``
+    ``poc`` row for the PCC.
+
+    The harmonic sources and their spectra are the harmonic screen's
+    (``harmonic_units``), S_sc is the PCC's minimum case with its source as in
+    ``harmonics_campus``, and I_L is the rated campus load (``assumed``). The
+    profile's ``current_tdd_standard`` names the limits; without it the row
+    is ``unknown``. A project's Links are process units, never generation, so
+    no unit is flagged ``generation`` here."""
+    from gridspine.static import current_tdd as td
+
+    run_dir = Path(run_dir)
+    campus, n, code = _screen_inputs(run_dir, profile, profile_dirs)
+    standard, _ = td.standard_from_profile(code)
+
+    pcc = campus["campus"]["pcc"]
+    poc = str(pcc["bus"])
+    sk_source, typical = _sk_source(campus, n)
+    pocs = td.tdd_table(harmonic_units(n, poc), {poc: _pcc_sk_min(pcc)}, {poc: _rated_load_mva(build_campus(campus))},
+                        {poc: float(pcc["vn_kv"])}, standard, law=law, basis=(td.STRICTER, td.I_L_NOTE))
+    # Every row is assumed: I_L is the rated campus load, and the table values are not verified. The screen
+    # has PoC rows only, so the unit level is empty.
+    out = _screen_frame(pocs, pocs.iloc[0:0], pd.Series(dtype=bool), sk_source, typical, profile, True,
+                        td.POC_COLUMNS, td.POC_COLUMNS)
+    _write_text_atomic(run_dir / TDD_CSV, out.to_csv(index=False))
+    return out
+
+
+# --- the harmonic impedance scan (datacenter grid readiness issue 12) -------
+
+HARMONIC_SCAN_CSV = "campus_harmonic_scan.csv"
+HARMONIC_ENVELOPE_CSV = "campus_harmonic_envelope.csv"
+HARMONIC_RESONANCE_CSV = "campus_harmonic_resonance.csv"
+
+
+def harmonic_scan_campus(run_dir, profile: str = DEFAULT_PROFILE, profile_dirs=()):
+    """The harmonic impedance scan of a prepared run from its PCC
+    (``static/harmonic_scan.py``), written to ``campus_harmonic_scan.csv``
+    (R(h), X(h) per short-circuit case and capacitor state),
+    ``campus_harmonic_envelope.csv`` and ``campus_harmonic_resonance.csv``.
+
+    The orders that count are 6k +- 1 and every order a harmonic source's
+    spectrum injects (vendor or demo default, as the harmonic screen takes
+    them), read from the project network, which must be unchanged since the
+    run was prepared. Returns the ``ScanStudy``."""
+    from gridspine.static import harmonic_scan as hs
+    from gridspine.static import harmonics as hm
+
+    run_dir = Path(run_dir)
+    n = _unchanged_project(run_dir)
+    campus = load_run_campus(run_dir)
+    bus, cases, notes = hs.campus_cases(campus)
+    spectrum_orders, demo = set(), False
+    for _, u in harmonic_units(n, str(campus.net.bus.at[bus, "name"])).iterrows():
+        spectrum, source = hm.unit_spectrum(u["harmonic_source"], u["harmonic_spectrum"])
+        spectrum_orders.update(h for h, pct in (spectrum or {}).items() if pct > 0)
+        demo |= bool(spectrum) and source.startswith("demo")
+    limit, cited = hs.clearance_from_profile(load_grid_code(profile, extra_dirs=profile_dirs))
+    not_code = bool(cited) and cited[0]["source"] != "code"
+    if not_code:
+        notes.append(f"the resonance clearance is {cited[0]['source']}, not the grid code's")
+    study = hs.impedance_scan(campus.net, bus, cases, spectrum_orders=sorted(spectrum_orders), spectrum_demo=demo,
+                              limit_h=limit, limit_assumed=not_code, notes=notes)
+    for name, df in ((HARMONIC_SCAN_CSV, study.scan), (HARMONIC_ENVELOPE_CSV, study.envelope),
+                     (HARMONIC_RESONANCE_CSV, study.resonance)):
+        _write_text_atomic(run_dir / name, df.to_csv(index=False))
+    return study

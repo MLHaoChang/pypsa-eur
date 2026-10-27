@@ -171,7 +171,7 @@ from services.solver_service import (
 )
 from services import study_state as _study_state
 from services.ac_pf_service import run_ac_pf_stage
-from services.validation_service import has_errors, validate_for_run
+from services.validation_service import has_errors, rolling_window_problems, validate_for_run
 from starlette.responses import StreamingResponse
 
 
@@ -536,6 +536,16 @@ def _gate_user_code(submitted: dict, db, actor) -> None:
         )
 
 
+_ROLLING_KEYS = frozenset({"solve_strategy", "rolling_horizon", "rolling_overlap"})
+# `error_kind` literals (the tool-error manifest derives kinds from them): the
+# chat forwards the kind, and the EditCard preview re-raises it before a card.
+_ROLLING_REFUSALS = {d["error_kind"]: d for d in (
+    {"error_kind": "rolling_horizon_invalid"},
+    {"error_kind": "rolling_overlap_invalid"},
+    {"error_kind": "rolling_overlap_exceeds_horizon"},
+)}
+
+
 @router.put("/solver_config")
 def update_solver_config(
     cfg: SolverConfigSchema,
@@ -613,6 +623,7 @@ def update_solver_config(
         rebound = submitted["commercial"] is not None
     with PyPSAService.get_solver_state_lock():
         merged = asdict(_state["solver_config"])
+        stored = dict(merged)
         if rebound:
             # The value-flow config is owned by its own route: keep what is
             # stored NOW (read under the lock, so a concurrent value-flows edit
@@ -621,6 +632,16 @@ def update_solver_config(
             submitted["commercial"]["value_flows"] = (
                 current.get("value_flows") if isinstance(current, dict) else None)
         merged.update(submitted)
+        # Checked on the MERGED values (a partial PUT may set one of them), and
+        # only when this PUT changes one: a stored legacy pair, or the settings
+        # form echoing it unchanged, must not block unrelated edits (the
+        # pre-flight check still refuses it at solve).
+        if any(submitted[k] != stored.get(k) for k in _ROLLING_KEYS & submitted.keys()):
+            problems = rolling_window_problems(int(merged["rolling_horizon"]), int(merged["rolling_overlap"]),
+                                               merged.get("solve_strategy", "full"))
+            if problems:
+                kind, message = problems[0]
+                raise HTTPException(422, {**_ROLLING_REFUSALS[kind], "message": message})
         _state["solver_config"] = SolverConfig(**merged)
         return asdict(_state["solver_config"])
 
@@ -1412,12 +1433,16 @@ def abort():
     raise HTTPException(400, "No simulation running")
 
 
-def ac_pf_refusal(n) -> tuple[str, str] | None:
+def ac_pf_refusal(n, config) -> tuple[str, str] | None:
     """``(error_kind, message)`` for why `/run_ac_pf` would refuse ``n`` (its
     400), or None. Only a solved network with ``fresh`` dispatch has an LP
-    dispatch to fix. One copy for the route and for the load-flow verdict
-    (`services.run_separability`)."""
+    dispatch to fix, and the first Stage-2 error (``_check_stage2_ac_pf`` under
+    ``config``) refuses too: ``fresh`` only compares column sets, so an
+    attribute edit after the solve (r=0, x=0) still passes the dispatch checks.
+    Stage-2 warnings don't refuse. One copy for the route and for the
+    load-flow verdict (`services.run_separability`)."""
     from services.dispatch_status import dispatch_status
+    from services.validation_service import _check_stage2_ac_pf
 
     if not getattr(n, "is_solved", False):
         return "ac_pf_not_solved", "No LOPF solution to fix dispatch from. Run /run first."
@@ -1439,7 +1464,20 @@ def ac_pf_refusal(n) -> tuple[str, str] | None:
         return ("ac_pf_already_run",
                 "AC power flow already ran on this solve, and its values replaced the "
                 "optimisation's. Run the solve again first.")
+    for issue in _check_stage2_ac_pf(n, config):
+        if issue.severity == "error":
+            return issue.code, issue.message
     return None
+
+
+# The refusals `/run_ac_pf` answers with a structured detail, so the chat tool
+# result carries the kind. Literal dicts so the tool-error-kind manifest
+# (`tests/test_tool_error_kind_manifest.py`) derives each kind.
+_AC_PF_KIND_DETAIL = {
+    "ac_pf_already_run": {"error_kind": "ac_pf_already_run"},
+    "stage2_multi_period": {"error_kind": "stage2_multi_period"},
+    "stage2_zero_impedance": {"error_kind": "stage2_zero_impedance"},
+}
 
 
 @router.post("/run_ac_pf")
@@ -1532,12 +1570,11 @@ def run_ac_pf():
             if existing is not None and existing.is_alive():
                 raise HTTPException(409, "Simulation already running")
             # stale state (worker died) → fall through and claim
-        _refusal = ac_pf_refusal(n)
+        _refusal = ac_pf_refusal(n, _state["solver_config"])
         if _refusal is not None:
-            if _refusal[0] == "ac_pf_already_run":
-                # Structured so the chat tool result carries the kind.
-                raise HTTPException(400, {"error_kind": "ac_pf_already_run",
-                                          "message": _refusal[1]})
+            _detail = _AC_PF_KIND_DETAIL.get(_refusal[0])
+            if _detail is not None:
+                raise HTTPException(400, {**_detail, "message": _refusal[1]})
             raise HTTPException(400, _refusal[1])
         # Atomic claim — lifecycle reset + thread handle in one apply, so no
         # window where status="running" but thread is unset.

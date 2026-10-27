@@ -12,9 +12,15 @@
 // this path samples an outage. The sentence is what stops "margin met" being
 // read as "target met".
 import { describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReactElement } from 'react'
 import type { SolverConfig } from '../api/types'
 import { ReliabilityAssumptions } from './SolverSettings'
+
+// The goal editor's labels read the hover-help catalogue (a query).
+const render = (ui: ReactElement) => rtlRender(
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 const DRAFT = {
   voll: 3000,

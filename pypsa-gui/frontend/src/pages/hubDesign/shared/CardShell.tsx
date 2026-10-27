@@ -3,7 +3,6 @@
 // footer with "Ask about this" and "Let the assistant do this" (§5.7).
 import type { ReactNode } from 'react'
 import { ArrowRight, MessageCircleQuestion, Sparkles } from 'lucide-react'
-import type { EhArchetype } from '../../../api/simulation'
 import {
   ASK_TITLE, ask, delegate, delegateTitle, footerAskText, footerDelegateText,
 } from '../delegate'
@@ -13,6 +12,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { useTerm } from './Term'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { useChatReadiness } from '../../../hooks/useChatProfiles'
+import { useReliabilityGoal } from '../../../hooks/useReliabilityGoal'
 
 /** UX M8 (U3): why "Let the assistant do this" is off without a usable
  *  assistant. The cards still work by hand; the setup is offered once,
@@ -83,7 +83,7 @@ export function CardShell({ step, testId, title, next, children }: {
   children: ReactNode
 }) {
   const intro = useTerm(INTRO_KEY[step])
-  const archetype = useHubDesignStore(s => s.archetype) as EhArchetype
+  const { archetype } = useReliabilityGoal()
   const setStep = useHubDesignStore(s => s.setStep)
   // A1-FE: the steps whose footer request edits the network (Site fixes the
   // gaps, Improve applies a recommendation) and Goal (its VOLL fix) wait

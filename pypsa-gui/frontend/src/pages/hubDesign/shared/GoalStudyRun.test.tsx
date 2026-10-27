@@ -1,5 +1,6 @@
 // Guided-mode spec §5.3, now in section 9 (design §3.3): Run posts exactly what the
-// Expert panel's `buildEhStudyBody` builds for the same inputs; VOLL ≤ 0
+// Expert panel's `buildGoalFreeStudyBody` builds for the same inputs — no goal
+// field, the backend fills them from the stored goal (W3b-R); VOLL ≤ 0
 // blocks the run and offers the assistant fix; running / failed / aborted are
 // read from the study record (P24-BE gate N2).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,7 +9,8 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi, simulationApi } from '../../../api/simulation'
 import { useUIStore } from '../../../store/uiStore'
-import { buildEhStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
+import { buildGoalFreeStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
+import { goal } from '../../../test/fixtures/reliabilityGoal'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
 import { DC_TEMPLATE, readiness } from '../testFixtures'
 import { GoalStudyRun, RELIABILITY_OUT_OF_SCOPE } from './GoalStudyRun'
@@ -28,16 +30,18 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 
 // The scope (W4a): unread by default, so Run shows; one test reads a scope with Reliability off.
 const getFlowScope = vi.fn()
+const getReliabilityGoal = vi.fn()
 vi.mock('../../../api/flow', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../api/flow')>()
-  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a) }
+  return { ...actual, getFlowScope: (...a: unknown[]) => getFlowScope(...a),
+    getReliabilityGoal: (...a: unknown[]) => getReliabilityGoal(...a) }
 })
 
 beforeEach(() => {
   getFlowScope.mockReturnValue(new Promise(() => {}))
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
-  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
-    step: 'goal', archetype: 'weak_flexible' })
+  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true, step: 'goal' })
+  getReliabilityGoal.mockResolvedValue(goal({ site_archetype: ['weak_flexible', 'template'] }))
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
   vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
   vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
@@ -55,36 +59,48 @@ function mount() {
 
 
 describe('GoalStudyRun run', () => {
-  it('posts the Expert panel\'s body for the same inputs', async () => {
+  it('posts the Expert panel\'s body for the same inputs, without the goal fields', async () => {
+    getReliabilityGoal.mockResolvedValue(goal({ target_lole_h: [3, 'stored'],
+      ens_cap_permyriad: [5, 'stored'], mc_draws: [800, 'stored'], site_archetype: ['weak_flexible', 'stored'] }))
     const user = mount()
-    useHubDesignStore.setState({ loleTarget: '3', ensCap: '5', loleSource: 'user' })
     await waitFor(() => expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(false))
     await user.click(screen.getByTestId('hub-run-start'))
-    const expected = buildEhStudyBody('weak_flexible',
-      { ...formFromTemplate(DC_TEMPLATE), loleTarget: '3', ensCap: '5' }).body
+    const expected = buildGoalFreeStudyBody('weak_flexible', formFromTemplate(DC_TEMPLATE)).body
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
-    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]).toEqual(expected)
-    expect(expected?.pack_overrides).toMatchObject({ import_p_nom_mw: 40, target_lole_h: 3,
-      ens_cap_permyriad: 5, certification_metric: 'mc_lole' })
+    const sent = vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]
+    expect(sent).toEqual(expected)
+    // the site type's rules still apply (weak_flexible keeps the import cap) …
+    expect(sent.pack_overrides).toEqual({ import_p_nom_mw: 40 })
+    // … and no goal field rides: the backend fills them from the stored goal
+    expect(sent).not.toHaveProperty('archetype')
+    expect(sent).not.toHaveProperty('mc')
   })
 
   it('an own network runs from the empty pack form', async () => {
     vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
-    useHubDesignStore.setState({ archetype: 'strong_grid' })
+    getReliabilityGoal.mockResolvedValue(goal())
     vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
       pack_defaults: { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' } }))
     const user = mount()
     await waitFor(() => expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(false))
     await user.click(screen.getByTestId('hub-run-start'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith(
-      buildEhStudyBody('strong_grid', EMPTY_PACK_FORM).body))
+      buildGoalFreeStudyBody('strong_grid', EMPTY_PACK_FORM).body))
+    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]).toEqual({})
   })
 
-  it('an invalid goal blocks the run with the builder\'s own message', async () => {
+  it('an unreadable goal blocks the run with a message, never a guessed site type', async () => {
+    getReliabilityGoal.mockRejectedValue(new Error('500'))
     mount()
-    useHubDesignStore.setState({ loleTarget: '-1', loleSource: 'user' })
     await waitFor(() => expect(screen.getByTestId('hub-run-blocked')).toBeTruthy())
-    expect(screen.getByTestId('hub-run-blocked').textContent).toContain('LOLE target must be ≥ 0 h/yr')
+    expect(screen.getByTestId('hub-run-blocked').textContent).toContain('The reliability goal could not be read.')
+    expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('waits for the goal before it can run', async () => {
+    getReliabilityGoal.mockReturnValue(new Promise(() => {}))
+    mount()
+    await new Promise(r => setTimeout(r, 20))
     expect((screen.getByTestId('hub-run-start') as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -222,11 +238,8 @@ describe('GoalStudyRun when the template read failed', () => {
     expect(screen.getByTestId('hub-run-start').getAttribute('title')).toBeNull()
     await user.click(screen.getByTestId('hub-run-start'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
-    const form = { ...formFromTemplate(DC_TEMPLATE),
-      loleTarget: useHubDesignStore.getState().loleTarget,
-      ensCap: useHubDesignStore.getState().ensCap }
     expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0])
-      .toEqual(buildEhStudyBody('weak_flexible', form).body)
+      .toEqual(buildGoalFreeStudyBody('weak_flexible', formFromTemplate(DC_TEMPLATE)).body)
   })
 
   it('an own network (template read → null) runs as before', async () => {

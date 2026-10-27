@@ -33,19 +33,19 @@ check() { # check <name> <expected-substring|""> <actual output> <exit>
 t="$work/t.jsonl"
 go() { out=$(run "$@"); code=$?; }
 
-transcript "$t" 10 100000 50000            # 150010: below 200k
+transcript "$t" 10 200000 50000            # 250010: below 300k
 go s1 "$t"; check "below limit is silent" "" "$out" $code
 
-transcript "$t" 10 150000 50000            # 200010
-go s1 "$t"; check "at limit warns" "Context at 200k (limit 200k): write your hand-off note (steward Rotation) and send it to the coordinator now." "$out" $code
+transcript "$t" 10 250000 50000            # 300010
+go s1 "$t"; check "at limit warns" "Context at 300k (limit 300k): write your hand-off note (steward Rotation) and send it to the coordinator now." "$out" $code
 jq -e '.hookSpecificOutput.hookEventName == "PostToolUse"' <<<"$out" >/dev/null || { echo "FAIL: output shape"; fail=1; }
 
 go s1 "$t"; check "same level is silent" "" "$out" $code
-transcript "$t" 10 150000 59000            # 209010: +9k
+transcript "$t" 10 250000 59000            # 309010: +9k
 go s1 "$t"; check "+9k is silent" "" "$out" $code
-transcript "$t" 10 150000 70000            # 220010: +20k
-go s1 "$t"; check "+20k warns again" "Context at 220k" "$out" $code
-go s2 "$t"; check "another session warns on its own" "Context at 220k" "$out" $code
+transcript "$t" 10 250000 70000            # 320010: +20k
+go s1 "$t"; check "+20k warns again" "Context at 320k" "$out" $code
+go s2 "$t"; check "another session warns on its own" "Context at 320k" "$out" $code
 
 : >"$HOME/.claude-coordinator"
 transcript "$t" 10 250000 55000            # 305010
@@ -62,8 +62,8 @@ out=$(echo '{}' | "$hook"); code=$?; check "no transcript_path" "" "$out" $code
 # A transcript larger than the tail window still finds the newest usage.
 filler='{"type":"user","message":{"content":"'"$(head -c 300 /dev/zero | tr '\0' x)"'"}}'
 { for _ in $(seq 1 3000); do echo "$filler"; done
-  echo '{"type":"assistant","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":249999}}}'; } >"$work/big.jsonl"
-go s5 "$work/big.jsonl"; check "big transcript" "Context at 250k" "$out" $code
+  echo '{"type":"assistant","message":{"usage":{"input_tokens":1,"cache_read_input_tokens":349999}}}'; } >"$work/big.jsonl"
+go s5 "$work/big.jsonl"; check "big transcript" "Context at 350k" "$out" $code
 
 ((fail)) && exit 1
 echo "all passed"

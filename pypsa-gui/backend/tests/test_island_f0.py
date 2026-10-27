@@ -238,9 +238,9 @@ def test_a_campus_save_that_changes_f_hz_drops_the_island_study(hub):
     ce.save_campus(hub, yaml.safe_dump(spec))
     assert not study.is_file()
     study.write_text("{}")
-    ce.draft(hub, overwrite=True)                            # the draft states 50 Hz again
-    assert campus_f_hz(project_registry.project_dir(hub)) == 50.0
-    assert not study.is_file()
+    ce.draft(hub, overwrite=True)                            # the redraft keeps the file's 60 Hz
+    assert campus_f_hz(project_registry.project_dir(hub)) == 60.0
+    assert study.is_file()                                   # f0 unchanged: the study stays
 
 
 # ── no 50 Hz value outside the stated default ───────────────────────────────

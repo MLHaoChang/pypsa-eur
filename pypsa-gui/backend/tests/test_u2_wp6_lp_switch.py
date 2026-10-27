@@ -198,14 +198,19 @@ def golden_run(tmp_path_factory):
 def _run_golden(client, api_project, project_row, project_storage_dir, cache):
     if cache:
         return cache
+    from services.study import library as L
+
     intake = {**SF.site_intake(), "pv": {"enabled": False}}
     api_project("wp6-golden-src")
-    r = create_pack_study(client, "wp6-golden-src", "wp6-golden", intake=intake)
-    assert r.status_code == 201, r.text
-    sid = r.json()["study_id"]
-    r = client.post(f"/api/projects/wp6-golden/studies/{sid}/run", json={})
-    assert r.status_code == 202, r.text
-    rec = wait_run(client, "wp6-golden", sid, timeout=1200.0)
+    # The study seeds from the WP0 pack GOLDEN was recorded on (money-year 01 rider 3).
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(L, "PACK_VERSION", L.WP0_PACK_VERSION)
+        r = create_pack_study(client, "wp6-golden-src", "wp6-golden", intake=intake)
+        assert r.status_code == 201, r.text
+        sid = r.json()["study_id"]
+        r = client.post(f"/api/projects/wp6-golden/studies/{sid}/run", json={})
+        assert r.status_code == 202, r.text
+        rec = wait_run(client, "wp6-golden", sid, timeout=1200.0)
     assert rec["status"] == "done", rec
     base = project_row("wp6-golden")
     forks = {o: project_row(f"wp6-golden-opt-{o}") for o in ("none", "bess_2h")}

@@ -27,6 +27,11 @@ from services.asset_schema.schema import CLASS_ATTR, composite_parts, part_colum
 from services.solver.periodized_costs import _annuity
 
 
+def class_label(component_class: str) -> str:
+    """The class in the user's words, as the edit card names it (`frontend/src/utils/componentLabels.ts`)."""
+    return "Storage" if component_class == "StorageUnit" else component_class
+
+
 def number(v: Any) -> float | None:
     """A finite-or-inf float, or None for a missing or NaN value."""
     if v is None:
@@ -76,7 +81,7 @@ def derive_composite(component_class: str, parts: Mapping[str, Any], *, discount
             continue
         life = number(parts.get(spec.column("lifetime")) if spec.own_lifetime else asset_lifetime)
         if life is None or not math.isfinite(life) or life <= 0:
-            raise ValueError(f"{component_class} {spec.name} part is priced but has no lifetime")
+            raise ValueError(f"{class_label(component_class)} {spec.name} part is priced but has no lifetime")
         share = number(parts.get(spec.column("fom_share"))) or 0.0
         per_unit = overnight * (scales.get(spec.scale_by, 1.0) if spec.scale_by else 1.0)
         capital += per_unit * _annuity(float(discount_rate), life)

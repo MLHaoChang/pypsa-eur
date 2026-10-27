@@ -67,6 +67,21 @@ profiles:
         0.2, 45: 0.2, 46: 0.2, 47: 0.43, 48: 0.2, 49: 0.42, 50: 0.2}
       clause: "not set by RfG/DCC; IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)"
       source: assumed
+    # Flicker severity at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-7
+    # indicative planning levels for HV-EHV (MV is 0.9 / 0.7), used whole as the limit on this site's contribution.
+    pst_limit:
+      value: 0.8
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    plt_limit:
+      value: 0.6
+      clause: "not set by RfG/DCC; IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "not set by RfG/DCC; placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
+      source: assumed
     # What a steady-state study cannot show, reported as "dynamic study needed"
     # and never counted as passed (plan 2026-10-14 e2e demo, section 7.3). The
     # clauses and ranges below were not re-read against the adopted text when
@@ -137,6 +152,21 @@ profiles:
         0.22, 35: 0.58, 36: 0.21, 37: 0.55, 38: 0.21, 39: 0.2, 40: 0.21, 41: 0.5, 42: 0.21, 43: 0.47, 44:
         0.2, 45: 0.2, 46: 0.2, 47: 0.43, 48: 0.2, 49: 0.42, 50: 0.2}
       clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-6 Table 2 indicative planning levels for individual harmonic voltages at HV-EHV, % of the fundamental (not verified against the text here)"
+      source: assumed
+    # Flicker severity at the connection point (grid-to-process issue 17). Demo values: IEC TR 61000-3-7
+    # indicative planning levels for HV-EHV (MV is 0.9 / 0.7), used whole as the limit on this site's contribution.
+    pst_limit:
+      value: 0.8
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-7 indicative planning level for short-term flicker severity Pst at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    plt_limit:
+      value: 0.6
+      clause: "generic placeholder until a real code is supplied: IEC TR 61000-3-7 indicative planning level for long-term flicker severity Plt at HV-EHV; a planning level, not an emission limit allocated to this installation (margin overstated); not verified against the text here"
+      source: assumed
+    # The current-distortion standard of the TDD screen (datacenter readiness 12). Demo: a placeholder.
+    current_tdd_standard:
+      value: ieee519-2014
+      clause: "generic placeholder until a real code is supplied: placeholder; IEEE 519-2014 Tables 2-4 current distortion limits by PCC voltage and Isc/IL (not verified against the text here)"
       source: assumed
 
   us_ieee2800_nerc:

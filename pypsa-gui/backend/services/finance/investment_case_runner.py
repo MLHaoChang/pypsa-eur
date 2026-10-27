@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from models.finance import FinanceInputs
 from services.finance.case import FinanceCase, FinanceRefused
+from services.reliability_goal import goal_free_config
 
 logger = logging.getLogger("pypsa_gui.results")
 
@@ -126,7 +127,7 @@ def assumptions_digest(*, finance: dict | None, commercial: dict | None, dispatc
     commercial = commercial if isinstance(commercial, dict) else None
     parts = {
         "solver_config": json_digest(None if solver is None else
-                                     _numbers_by_value({k: v for k, v in solver.items()
+                                     _numbers_by_value({k: v for k, v in goal_free_config(solver).items()
                                                         if k not in ("finance", "commercial")})),
         "finance": finance_digest(finance),
         "value_flows": json_digest((commercial or {}).get("value_flows")),

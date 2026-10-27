@@ -2,7 +2,7 @@
 
 What the engine gatekeeper applies to every review, so a successor reads this file instead of a hand-off note's rule list. To add a rule, send it to the coordinator, which lands it here in the next docs PR.
 
-Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sha>: <what was checked>` or `GK NOT OK @<sha>: <what to fix>` (owner decision VERDICT-PR). Plan reviews go to the coordinator, because there is no PR yet. The verdict must be the first line of the comment; the attribution footer goes last.
+Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sha>: <what was checked>` or `GK NOT OK @<sha>: <what to fix>` (owner decision VERDICT-PR). Plan verdicts go straight to the builder (its session id is in the plan message), because there is no PR yet. The verdict must be the first line of the comment; the attribution footer goes last. The PR comment is the verdict. Message the coordinator only for a NO-GO the builder disputes, a NOT OK that blocks a merge, or a standing ruling to record. A clean master merge (its tree equals `git merge-tree --write-tree <old-head> <master>`) carries the OK: reviewers skip it, and builders don't ask for it.
 
 ## Review setup
 
@@ -19,9 +19,18 @@ Post each verdict as a PR comment, with the attribution footer: `GK OK @<full sh
 - Run root `tests/` and `pypsa-gui/backend` tests in separate pytest invocations: mixing them fails on the `tests._shard` plugin.
 - A PR that adds an import of gridspine or another third-party module to `pypsa-gui/backend`: run `tests/test_packaging_requirements.py` at the trial merge (the frozen-app pin test; #707 missed it).
 
+- A PR that adds a route: run `test_route_chat_disposition`, `test_project_route_acl_policy` and `test_write_surface_lock_policy` at the trial merge (#725 and #741 both missed it).
+
 - A PR that touches project templates: check native byte-identity. Load `eh_templates` by path, `write_sidecars` into a temp dir per `TEMPLATE_META` id, and `filecmp` each file against `project_templates/<id>/`.
 
 - A plan or PR that hooks "user writes to `_user_ts`": list the writers with `git grep -nE "user_ts\[[^]]*\]\s*=[^=]"` and check each is hooked.
+
+- A plan that adds fields to `SolverConfig`: check whether they feed `workflow_tools._network_input_fingerprint` and the investment-case digest. Inert fields (goal settings that change no LP input) must be excluded, with a test that changing them leaves both unchanged.
+
+- A PR that widens which fields a bulk or preview path can write: check that it runs the same validators as the single-edit path (`update_component`'s `_check_investment_parts` was the #738 case).
+
+- Byte-identity against master's tests: copy master's test file into the PR worktree and run it there (a recording pytest plugin can capture rows). Running it from the master worktree imports master's code even with PYTHONPATH on the PR, because the rootdir wins.
+- A merge commit M has no hand resolution when `git merge-tree --write-tree M^1 M^2` equals `M^{tree}`.
 
 ## Known container-only failures
 
@@ -39,6 +48,7 @@ Probe tests that monkeypatch `_probe` can hide dispatcher-signature bugs: ask fo
 ## Engineering rules
 
 - Grid source impedance derived from an entered S_k'' carries the IEC 60909 voltage factor c (Z = c·Un²/S_k''; S_sc2 = S_k''/c), in every screen: unbalance, the flicker note, the impedance scan.
+- TDD and other ratio screens (Isc/IL) use the entered S_k'' without the c factor; `td.STRICTER` is only for a band computed from S_sc,min.
 - A shipped demo limit that is an IEC planning level says so in its clause: "planning level, not an emission limit allocated to this installation".
 - A new scorecard input read from a component is registered as an editable field end to end (FieldSpec, model, schemas, attrs_doc, fieldLabels, fixture) in the same PR.
 - E1 growth placeholders: setting `nh3_delivery_tpd` converts t/d to MWh_NH3/h (× 5.166/24), with a test.

@@ -46,7 +46,8 @@ def _ledger(defaults=None):
     from services.study import library as L
     from services.study import questions as Q
 
-    return L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), defaults or L.load_defaults())
+    # The WP0 pack the site case is built on (`sf.site_library`, money-year 01 rider 3).
+    return L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(), defaults or sf.site_library())
 
 
 def _solved_ic(option):
@@ -199,11 +200,10 @@ def _charging_per_mwh_discharged(option):
     """
     import numpy as np
 
-    from services.study import library as L
     from services.study import packs
 
     n, _cfg, _compiled, ledger = _solved_ic(option)
-    tariff = packs.effective_tariff(sf.site_intake(), ledger, L.load_defaults(), n.snapshots)
+    tariff = packs.effective_tariff(sf.site_intake(), ledger, sf.site_library(), n.snapshots)
     su = n.storage_units_t
     p = su.p["battery"].to_numpy()
     charge = su.p_store["battery"].to_numpy() if "battery" in su.p_store else np.clip(-p, 0, None)

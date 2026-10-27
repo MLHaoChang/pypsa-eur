@@ -105,6 +105,13 @@ RULE_REACTIVE = {"comparator": ">=", "otherwise": "warn", "tolerance": 1e-9}
 #: The harmonic row's THD (or, with no THD limit, its worst order) against its limit. The verdict also reads
 #: the per-order limits, which the row does not store as a scalar.
 RULE_HARMONIC = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The flicker row's Pst (or, with no Pst limit, its Plt) against its limit. The verdict reads both.
+RULE_FLICKER = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The unbalance row's u2 against its limit (DC grid readiness 12): a screening upper bound, so over it warns.
+RULE_UNBALANCE = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
+#: The current-distortion row's TDD against its limit (DC-SURFACE-1). The verdict also reads the per-order
+#: limits, which the row does not store as a scalar.
+RULE_TDD = {"comparator": "<=", "otherwise": "warn", "tolerance": 1e-9}
 #: The oscillation row's after-mitigation value only (the before verdict also
 #: reads the band of concern, which is not a scalar): in band, ≤ the limit.
 RULE_OSC = {"comparator": "<=", "otherwise": "fail", "tolerance": 1e-9}
@@ -318,8 +325,7 @@ def _peak_rows(inp: _Inputs) -> list[dict]:
                              note=(f"{r['period']}: not set ({', '.join(r['unset'])}): the "
                                    "period takes the example's same-stage value, a placeholder "
                                    "that is not a value to check against, so the period stays unknown "
-                                   "(setting a placeholder is follow-up "
-                                   "E1-set-growth-placeholders)"),
+                                   "until it is set; editing the period's series sets it"),
                              section="connection", target=target))
             continue
         uplift = _in_hour_uplift_mw(inp, r["period"])
@@ -598,6 +604,325 @@ def _harmonic_row(inp: _Inputs) -> dict:
                         else int(poc["worst_order"]), "worst_u_h_pct": worst,
                         "failing_orders": list(poc["failing_orders"] or []), "no_input_units": missing,
                         "demo_spectrum_units": demo}
+    return row
+
+
+_TDD_UNIT = "%\u00a0of\u00a0I_L"
+#: Where the TDD row's short-circuit level and load current come from (``current_tdd.tdd_table``'s ``basis``).
+#: S_sc is the entered S_k'' as is: the Isc/IL ratio derives no impedance, so no c factor (GK ruling on #754).
+_TDD_SK_NOTE = ("S_sc: the fault level entered at the PoC, not IEEE 519's maximum short-circuit current, so the "
+                "band can differ from the standard's")
+_TDD_IL_IMPORT = "I_L: the connection's rated import at the PoC, not IEEE 519's average monthly maximum demand"
+_TDD_IL_PROCESS = ("I_L: the process units' rated load only, not the site's maximum demand; the band may be "
+                   "looser than IEEE 519's")
+
+
+def _poc_vn_kv(n) -> float | None:
+    """The nominal voltage of the PoC bus whose S_k'' is ``_poc_sk_mva``'s (the smallest)."""
+    if "eh_poc" not in n.buses.columns or "eh_sk_mva" not in n.buses.columns:
+        return None
+    pocs = [(_num(n.buses.at[b, "eh_sk_mva"]), _num(n.buses.at[b, "v_nom"])) for b in n.buses.index
+            if n.buses.at[b, "eh_poc"] is True or str(n.buses.at[b, "eh_poc"]).lower() in ("true", "1")]
+    pocs = [(sk, vn) for sk, vn in pocs if sk is not None and sk > 0]
+    return min(pocs)[1] if pocs else None
+
+
+def _tdd_row(inp: _Inputs) -> dict:
+    """The current distortion the process units draw at the PoC (DC grid readiness 12 part 1,
+    ``gridspine.static.current_tdd``): the single-PoC form of ``tdd_table``, every unit lumped at the PoC,
+    S_sc from ``_poc_sk_mva``, I_L the connection's rated import (else the process units' rated load), judged on
+    the standard the profile's ``current_tdd_standard`` names. Every row is assumed: I_L is not IEEE 519's."""
+    import pandas as pd
+
+    rid, req = "current_distortion", "Current distortion (TDD) at the PoC from the site's drives and heaters"
+    unit_target = _target("assets", "Link", None, "harmonic_source")
+    try:
+        from gridspine.drivers.campus_study import harmonic_units
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import current_tdd as td
+        from gridspine.static import harmonics as hm
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The current-distortion screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=note, project_value=None,
+                    verdict="unknown", assumed=True, note=note, section="assets", target=unit_target)
+    standard, cited = td.standard_from_profile(inp.profile)
+    if standard is None:
+        return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT,
+                    source=inp.profile_error or "The grid code names no current-distortion standard",
+                    project_value=None, verdict="unknown", assumed=True,
+                    note="The grid code names no current-distortion standard", section="assets",
+                    target=unit_target)
+    source = f"{_profile_title(inp)}: {cited[0]['clause']}"
+    units = harmonic_units(inp.n, "PoC") if inp.n is not None else None
+    if units is None or units.empty:
+        return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
+                    verdict="unknown", assumed=True,
+                    note="No process unit on this project: the screen reads each drive's or heater's Harmonic "
+                         "source and Rated apparent power",
+                    section="assets", target=_target("assets", "Link", None, "eh_process"))
+    sk = _poc_sk_mva(inp.n)
+    if sk is None:
+        return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
+                    verdict="unknown", assumed=True, note="No short-circuit level at the point of connection",
+                    section="assets",
+                    target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                                   "eh_sk_mva"))
+    demo = []
+    for rec in units.to_dict("records"):
+        try:
+            _, spectrum_source = hm.unit_spectrum(rec["harmonic_source"], rec["harmonic_spectrum"])
+        except ContractError as exc:
+            # One unit's malformed stored input reads as unknown here, not a failed scorecard.
+            field = "harmonic_spectrum" if str(exc).startswith("Harmonic spectrum") else "harmonic_source"
+            return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
+                        verdict="unknown", assumed=True, note=f"{rec['unit']}: {exc}", section="assets",
+                        target=_target("assets", "Link", rec["unit"], field))
+        if spectrum_source.startswith("demo"):
+            demo.append(rec["unit"])
+    rated = pd.to_numeric(units["rated_mva"], errors="coerce")
+    if inp.connection_mw:
+        i_l, i_l_note = inp.connection_mw, _TDD_IL_IMPORT
+    else:
+        i_l, i_l_note = (float(rated.sum()) if rated.notna().any() else None), _TDD_IL_PROCESS
+    vn_kv = _poc_vn_kv(inp.n)
+    poc = td.tdd_table(units, {"PoC": sk}, {"PoC": i_l}, {"PoC": vn_kv}, standard,
+                       basis=(_TDD_SK_NOTE, i_l_note)).iloc[0]
+    tdd, limit = _num(poc["tdd_pct"]), _num(poc["tdd_limit_pct"])
+    missing = list(poc["no_input_units"] or [])
+    if poc["verdict"] == "unknown" and poc["band"] is None:
+        # tdd_table's own guards: no voltage, or no load current at the PoC. Without a connection rating I_L
+        # is the process units' rated load, so Go to field opens the first unit without a rating.
+        unrated = units.loc[rated.isna(), "unit"]
+        if vn_kv is None:
+            target = _target("connection", "Bus", None, "v_nom")
+        elif i_l_note == _TDD_IL_PROCESS and len(unrated):
+            target = _target("assets", "Link", unrated.iloc[0], "rated_mva")
+        else:
+            target = _target("connection", "Link", inp.link, "p_nom")
+        return _row(rid, req, rule=RULE_TDD, limit=None, unit=_TDD_UNIT, source=source, project_value=None,
+                    verdict="unknown", assumed=True, note=str(poc["note"]), section="assets", target=target)
+    if missing:
+        first = missing[0]
+        rated = pd.to_numeric(units.set_index("unit")["rated_mva"], errors="coerce").get(first)
+        target = _target("assets", "Link", first, "rated_mva" if pd.isna(rated) else "harmonic_source")
+    elif demo:
+        # As the harmonic row: Go to field opens the first unit whose spectrum is a topology's demo default.
+        target = _target("assets", "Link", demo[0], "harmonic_spectrum")
+    else:
+        target = unit_target
+    notes = []
+    if missing:
+        notes.append(f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Harmonic source "
+                     "or Rated apparent power; a unit without them blocks a pass.")
+    else:
+        notes.append(f"Current distortion {tdd:.4g} % of the load current against {limit:g} %.")
+    notes.append(f"IEEE 519-2014 {poc['table']}: short-circuit ratio {poc['isc_il']:.3g}, "
+                 f"band {str(poc['band']).replace('<=', '≤')}.")
+    worst, worst_lim = _num(poc["worst_i_h_pct"]), _num(poc["worst_limit_pct"])
+    if not missing and worst is not None and pd.notna(poc["worst_order"]):
+        notes.append(f"Worst order {int(poc['worst_order'])}: {worst:.3g} %"
+                     + (f" (limit {worst_lim:g} %)." if worst_lim is not None else "."))
+    if poc["failing_orders"]:
+        notes.append("Orders over their limit: " + ", ".join(map(str, poc["failing_orders"])) + ".")
+    if demo and not missing:
+        notes.append("Demo default spectrum for " + ", ".join(map(str, demo)) + " (no vendor spectrum entered).")
+    notes.append(f"{_TDD_SK_NOTE}. {i_l_note}. Screening: above the limit, run a harmonic load-flow study.")
+    verdict = {"pass": "pass", "fail": RULE_TDD["otherwise"]}.get(poc["verdict"], "unknown")
+    row = _row(rid, req, rule=RULE_TDD, limit=limit, unit=_TDD_UNIT, source=source,
+               project_value=None if missing else round(tdd, 4), verdict=verdict, assumed=True,
+               note=" ".join(notes), section="assets", target=target)
+    row["tdd"] = {"sk_mva": sk, "i_l_mva": i_l, "isc_il": float(poc["isc_il"]), "table": poc["table"],
+                  "band": poc["band"], "tdd_pct": tdd, "tdd_limit_pct": limit,
+                  "worst_order": None if pd.isna(poc["worst_order"]) else int(poc["worst_order"]),
+                  "failing_orders": list(poc["failing_orders"] or []), "no_input_units": missing,
+                  "label": td.LABEL}
+    return row
+
+
+#: The scorecard has one S_k'' per PoC and no sequence network, so its row is the single-PoC form of
+#: ``gridspine.static.unbalance``: S_sc2 = S_k'' / c_max (S_k'' = c U^2 / |Z|; the largest c gives the smallest
+#: S_sc2, conservative whichever case S_k'' is) with Z2 = Z1, no transfer from other PoCs and no min/max bands.
+_UNBALANCE_BAND = "PoC S_k''"
+#: Non-breaking spaces: the unit wraps to the next line as a whole, never inside "positive sequence".
+_UNBALANCE_UNIT = "%\u00a0of\u00a0positive\u00a0sequence"
+_UNBALANCE_SCREENING = ("It assumes every unit sits on one phase pair at the PoC, equal negative- and "
+                        "positive-sequence impedance, and no background unbalance. The negative-sequence "
+                        "short-circuit power is the entered fault level divided by the IEC 60909 voltage factor "
+                        "(c max). Above the limit, run an unbalanced load-flow study.")
+
+
+def _unbalance_row(inp: _Inputs) -> dict:
+    """The negative-sequence voltage unbalance the single-phase process load causes at the PoC (DC grid
+    readiness 12, ``gridspine.static.unbalance``): S_unbal = Σ single_phase_share · rated_mva over the
+    process units, S_sc2 from ``_poc_sk_mva``, judged on the profile's ``unbalance_limit_pct``."""
+    import pandas as pd
+
+    rid, req = "voltage_unbalance", "Voltage unbalance at the PoC from the site's single-phase load"
+    unit_target = _target("assets", "Link", None, "single_phase_share")
+    try:
+        from gridspine.drivers.campus_study import harmonic_units
+        from gridspine.schema.contracts import ContractError
+        from gridspine.static import unbalance as ub
+        from gridspine.static.island_sc_seq import c_factor
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The unbalance screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit=_UNBALANCE_UNIT, source=note,
+                    project_value=None, verdict="unknown", assumed=True, note=note, section="assets",
+                    target=unit_target)
+    limit, cited = ub.limit_from_profile(inp.profile)
+    if not cited:
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=None, unit=_UNBALANCE_UNIT,
+                    source=inp.profile_error or ub.NO_LIMIT, project_value=None, verdict="unknown",
+                    assumed=True, note=ub.NO_LIMIT, section="assets", target=unit_target)
+    source = f"{_profile_title(inp)}: {cited[0]['clause']}"
+    lim_assumed = cited[0]["source"] != "code"
+    units = harmonic_units(inp.n, "PoC") if inp.n is not None else None
+    if units is None or units.empty:
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
+                    project_value=None, verdict="unknown", assumed=True,
+                    note="No process unit on this project: the screen reads each unit's Single-phase share "
+                         "and Rated apparent power",
+                    section="assets", target=_target("assets", "Link", None, "eh_process"))
+    shares = (inp.n.links["single_phase_share"] if "single_phase_share" in inp.n.links.columns
+              else pd.Series(None, index=inp.n.links.index, dtype=object))
+    loads = pd.DataFrame({"load": units["unit"], "poc": units["poc"], "s_mva": units["rated_mva"],
+                          "single_phase_share": list(shares.reindex(units["unit"]))})
+    try:
+        s_unbal, _, missing = ub.unbalanced_mva(loads)
+    except ContractError as exc:
+        # One unit's malformed stored share reads as unknown here, not a failed scorecard.
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
+                    project_value=None, verdict="unknown", assumed=True, note=str(exc), section="assets",
+                    target=unit_target)
+    missing = missing["PoC"]
+    sk = _poc_sk_mva(inp.n)
+    if sk is None:
+        return _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
+                    project_value=None, verdict="unknown", assumed=True,
+                    note="No short-circuit level at the point of connection", section="assets",
+                    target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                                   "eh_sk_mva"))
+    s_sc2 = sk / c_factor(None, "max")
+    u2 = ub.u2_pct(s_unbal["PoC"], s_sc2)
+    verdict, margin = ub.judge(u2, limit)
+    if missing:
+        if verdict != "fail":
+            verdict = "unknown"
+        # A unit without inputs leaves u2 a floor, so the row shows no number; a floor above 0 is said in words.
+        notes = [f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Single-phase share "
+                 "or Rated apparent power; a unit without them blocks a pass."]
+        if u2 > 0:
+            notes.append(f"At least {u2:.4g} % from the units with inputs.")
+    else:
+        notes = [f"Screening upper bound: {s_unbal['PoC']:.4g} MVA of single-phase load ÷ {s_sc2:.4g} MVA "
+                 f"negative-sequence short-circuit power = {u2:.2g} %."]
+    notes.append(_UNBALANCE_SCREENING)
+    verdict = {"pass": "pass", "fail": RULE_UNBALANCE["otherwise"]}.get(verdict, "unknown")
+    row = _row(rid, req, rule=RULE_UNBALANCE, limit=limit, unit=_UNBALANCE_UNIT, source=source,
+               project_value=None if missing else round(u2, 4), verdict=verdict,
+               assumed=True if missing else lim_assumed or _marking_assumed(inp.marking("fault_level")),
+               note=" ".join(notes), section="assets",
+               target=_target("assets", "Link", missing[0], "single_phase_share") if missing else unit_target)
+    row["unbalance"] = {"s_unbalanced_mva": s_unbal["PoC"], "s_sc2_mva": s_sc2, "margin_pct": margin,
+                        "band": _UNBALANCE_BAND, "no_input_units": missing, "label": ub.LABEL}
+    return row
+
+
+_FLICKER_SCREENING = ("a screening estimate (IEC 61000-3-7 analytic method, d = step / S_k, rectangular steps, "
+                      "Plt = Pst for a steady pattern) that ignores the grid X/R and the operator's allocation of the "
+                      "planning level; units summed with alpha 3 (assumed; units stepping together are not "
+                      "covered); S_k is the entered S_k'' with the IEC 60909 c factor, so d may be understated "
+                      "by up to 1.1; above the limit a flicker-meter study is needed")
+
+
+def _flicker_row(inp: _Inputs) -> dict:
+    """The flicker severity the process units cause at the PoC (grid-to-process issue 17,
+    ``gridspine.static.flicker``): every unit lumped at the PoC, S_k from ``_poc_sk_mva``, judged on whichever
+    of ``pst_limit`` and ``plt_limit`` the profile sets."""
+    rid, req = "flicker", "Flicker severity at the PoC from the site's stepping loads"
+    unit_target = _target("assets", "Link", None, "flicker_step_mva")
+    try:
+        from gridspine.drivers.campus_study import flicker_units
+        from gridspine.static import flicker as fl
+    except ImportError as exc:  # pragma: no cover - build-shape branch
+        note = f"The flicker screen needs gridspine ({exc})"
+        return _row(rid, req, rule=RULE_FLICKER, limit=None, unit="Pst", source=note, project_value=None,
+                    verdict="unknown", assumed=True, note=note, section="assets", target=unit_target)
+    limits, cited = fl.limits_from_profile(inp.profile)
+    if not cited:
+        return _row(rid, req, rule=RULE_FLICKER, limit=None, unit="Pst",
+                    source=inp.profile_error or "The grid code sets no flicker limit", project_value=None,
+                    verdict="unknown", assumed=True, note="The grid code sets no flicker limit",
+                    section="assets", target=unit_target)
+    lim_assumed = any(c["source"] != "code" for c in cited)
+    # Plt equals Pst in this screen, so the smaller limit binds: the row shows that quantity.
+    by_pst = limits.pst is not None and (limits.plt is None or limits.pst <= limits.plt)
+    limit, unit = (limits.pst, "Pst") if by_pst else (limits.plt, "Plt")
+    part = {"pst_limit": "Pst", "plt_limit": "Plt"}
+    source = f"{_profile_title(inp)}: " + "; ".join(f"{part[c['key']]}: {c['clause']}" for c in cited)
+    units = flicker_units(inp.n, "PoC") if inp.n is not None else None
+    if units is None or units.empty:
+        return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True,
+                    note="No process unit on this project: the screen reads each unit's Largest power step and "
+                         "Changes per minute",
+                    section="assets", target=_target("assets", "Link", None, "eh_process"))
+    sk = _poc_sk_mva(inp.n)
+    fault_assumed = _marking_assumed(inp.marking("fault_level"))
+    if sk is None:
+        return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source, project_value=None,
+                    verdict="unknown", assumed=True, note="No short-circuit level at the point of connection",
+                    section="assets",
+                    target=_target("connection", "Bus", (inp.marking("fault_level") or {}).get("entity"),
+                                   "eh_sk_mva"))
+    labels = {"flicker_step_mva": fl.STEP_LABEL, "flicker_changes_per_min": fl.RATE_LABEL}
+    for rec in units.to_dict("records"):
+        for field, col in (("flicker_step_mva", "step_mva"), ("flicker_changes_per_min", "changes_per_min")):
+            v = _num(rec[col])
+            if v is not None and v < 0:
+                # One unit's malformed stored input reads as unknown here, not a failed scorecard.
+                return _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source,
+                            project_value=None, verdict="unknown", assumed=True,
+                            note=f"{rec['unit']}: {labels[field]} must be 0 or more, got {v:g}", section="assets",
+                            target=_target("assets", "Link", rec["unit"], field))
+    study = fl.flicker_table(units, {"PoC": sk}, limits)
+    poc = study.pocs.iloc[0]
+    by_unit = study.units.set_index("unit")
+    missing, outside = list(poc["no_input_units"]), list(poc["outside_range_units"])
+    notes, first = [], None
+    for name in missing:
+        u = by_unit.loc[name]
+        fields = [f for f, v in (("flicker_step_mva", u["step_mva"]), ("flicker_changes_per_min",
+                                                                       u["changes_per_min"])) if _num(v) is None]
+        first = first or (name, fields[0])
+        notes.append(f"{name}: " + " and ".join(labels[f] for f in fields)
+                     + (" is" if len(fields) == 1 else " are") + " not set")
+    for name in outside:
+        u = by_unit.loc[name]
+        too_fast = 60.0 / u["changes_per_min"] < fl.MIN_INTERVAL_S - fl.TOLERANCE if u["changes_per_min"] else False
+        first = first or (name, "flicker_changes_per_min" if too_fast else "flicker_step_mva")
+        notes.append(f"{name}: outside the analytic method ({u['note']})")
+    known = study.units.dropna(subset=["pst"])
+    if first is None and not known.empty:
+        first = (known.loc[known["pst"].idxmax(), "unit"], "flicker_step_mva")
+    target = _target("assets", "Link", first[0] if first else None, first[1] if first else "flicker_step_mva")
+    p, plt = _num(poc["pst"]), _num(poc["plt"])
+    if p is not None:
+        notes.insert(0, f"Pst {p:.4g}" + (f" (limit {limits.pst:g})" if by_pst else "")
+                     + f", Plt {plt:.4g}" + (f" (limit {limits.plt:g})" if limits.plt is not None else ""))
+    if limits.pst is None or limits.plt is None:
+        notes.append(f"judged on {unit} only: the grid code sets no {'Plt' if by_pst else 'Pst'} limit")
+    elif p is not None:
+        notes.append(f"{unit} binds: Plt equals Pst for a steady pattern")
+    if missing or outside:
+        notes.append("a unit without its inputs or outside the method blocks a pass")
+    notes.append(f"S_k {sk:g} MVA; {_FLICKER_SCREENING}")
+    verdict = {"pass": "pass", "fail": RULE_FLICKER["otherwise"]}.get(poc["verdict"], "unknown")
+    row = _row(rid, req, rule=RULE_FLICKER, limit=limit, unit=unit, source=source,
+               project_value=p if by_pst else plt, verdict=verdict, assumed=lim_assumed or fault_assumed,
+               note="; ".join(notes), section="assets", target=target)
+    row["flicker"] = {"sk_mva": sk, "pst": p, "plt": plt, "pst_limit": limits.pst, "plt_limit": limits.plt,
+                      "no_input_units": missing, "outside_range_units": outside}
     return row
 
 
@@ -951,8 +1276,9 @@ def grid_readiness(project_dir, network, profile_id: str, *, profile_dirs=(),
     profile, error = _load_profile(profile_id, profile_dirs)
     inp = _Inputs(project_dir, network, profile, error, eh_study, study_edited)
     rows = [*_scr_rows(inp), *_peak_rows(inp), _ramp_row(inp), _oscillation_row(inp),
-            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _reactive_row(inp), *_support_rows(inp),
-            *_island_rows(inp), _lole_row(inp)]
+            _rvc_row(inp), _rvc_infrequent_row(inp), _harmonic_row(inp), _tdd_row(inp), _flicker_row(inp),
+            _unbalance_row(inp),
+            _reactive_row(inp), *_support_rows(inp), *_island_rows(inp), _lole_row(inp)]
     _after_battery(inp, rows)
     settings = {"ramp_rate": ("connection_ramp", _generic_ramp(inp)),
                 "oscillation": ("oscillation", GENERIC_OSCILLATION_PCT),
@@ -1001,7 +1327,10 @@ def grid_readiness_for(project, profile: str | None = None) -> dict:
         with ce._netcdf_lock():
             n = pypsa.Network(str(nc))
     record, edited = _active_study(d)
-    return grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+    out = grid_readiness(d, n, profile, profile_dirs=(codes,), eh_study=record, study_edited=edited)
+    # SCORECARD-STALE-1: whether this profile is still the code the last campus run was held to.
+    out["profile"]["since_run"] = ce.grid_code_since_run(project, profile)
+    return out
 
 
 def _known_profiles(codes: pathlib.Path) -> set | None:

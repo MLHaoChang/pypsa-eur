@@ -35,7 +35,7 @@ const SHOWN: Record<string, string> = {
 const EDITABLE: Record<string, { unit: string; max: number | null; hint: string }> = {
   ramp_rate: { unit: 'MW/min', max: null, hint: 'above 0' },
   oscillation: { unit: '% of connection, peak-to-peak', max: 100, hint: 'above 0, at most 100' },
-  scr: { unit: '', max: null, hint: '' },
+  scr: { unit: 'MVA', max: null, hint: '' },
 }
 
 const SOURCES: { id: GridLimitSource; label: string }[] = [

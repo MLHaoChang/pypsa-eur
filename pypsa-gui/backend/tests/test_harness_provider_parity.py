@@ -222,3 +222,24 @@ def test_the_battery_asks_a_multi_select_question_and_checks_the_card():
     multi = _result("W5_multi_select", usage, ["choice_request"])
     multi.choice_requests = [{"options": [{"label": "A"}], "multi_select": True}]
     assert not any("W5" in p for p in s.check_workflow_results([multi]))
+
+
+def test_the_battery_runs_an_external_read_tool_bare_and_a_write_behind_a_card():
+    """Issue 19: the MCP probe's prompts are ones the stub scripts, and a card
+    on the read-only tool fails the run."""
+    s = _smoke()
+    import importlib.util, pathlib
+    stub_path = pathlib.Path(s.__file__).with_name("stub_openai_endpoint.py")
+    spec = importlib.util.spec_from_file_location("stub_for_mcp", stub_path)
+    stub = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(stub)
+    m1, m2 = s.build_mcp_prompts("smokeab12")
+    assert m1.session_id == m2.session_id
+    assert stub._scripted_call(m1.message) == ("mcp__smokeab12__lookup", {"key": "a"})
+    assert stub._scripted_call(m2.message)[0] == "mcp__smokeab12__set_value"
+    assert m2.expected_frames == {"tool_pending_confirmation"}
+    usage = {"input_tokens": 1, "reported": True}
+    carded = _result("M1_external_read", usage, ["tool_pending_confirmation"])
+    assert any(p.startswith("M1:") for p in s.check_workflow_results([carded]))
+    bare = _result("M1_external_read", usage, ["tool_request"])
+    assert not any(p.startswith("M1:") for p in s.check_workflow_results([bare]))
