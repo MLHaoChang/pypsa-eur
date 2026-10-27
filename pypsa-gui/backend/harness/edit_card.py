@@ -1525,11 +1525,12 @@ register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_
 
 # update_decision_study: the stored study's name, intake and settings.
 
-STUDY_LEAF_CAP = 12  # intake keys one study card shows; the rest become one summary row
+STUDY_LEAF_CAP = 12  # rows one study card shows; the rest become one summary row
 _SECRET_KEY = ("token", "secret", "password", "api_key", "apikey", "credential")
 
 
-def _study_record(args: dict) -> dict:
+def _study(args: dict):
+    """The stored study (read through the store, not a route) and its project."""
     from services import chat_tools
     from services.study import store
 
@@ -1538,35 +1539,15 @@ def _study_record(args: dict) -> dict:
     if not isinstance(study_id, str):
         _refuse("empty_edit", "Name the study to edit.")
     try:
-        return store.load_study(project.directory, study_id).model_dump(mode="json", by_alias=True)
+        return store.load_study(project.directory, study_id)
     except store.StudyNotFound:
         _refuse("study_not_found", "Study not found.", 404)
     except store.StudyUnreadable:
         _refuse("study_unreadable", "The study record on disk cannot be read.", 500)
 
 
-def _study_cell(key: str, value):
-    """A study value as a card cell: a secret-like key only says whether it is set; a list or
-    object is summarised, never dumped."""
-    if any(word in key.lower() for word in _SECRET_KEY):
-        return None if value is None else "set"
-    if isinstance(value, list):
-        return f"{len(value)} items"
-    if isinstance(value, dict):
-        return f"{len(value)} fields"
-    return _setting(value)
-
-
-def _study_row(name: str, field: str, label: str, old, new, *, says_name: str | None = None) -> dict:
-    row = _settings_row(name, field, label, None, None, says_name=says_name)
-    row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
-    if row["old"] == "set" and row["new"] == "set":
-        row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
-    return row
-
-
-def _study_after(args: dict, old: dict) -> dict:
-    """The record the PATCH would store, validated as `patch_study` validates it; nothing is saved."""
+def _study_after(args: dict, old):
+    """The study the PATCH would store, from the route's own pure validator; nothing is saved."""
     from pydantic import ValidationError
 
     from routers import studies
@@ -1578,70 +1559,105 @@ def _study_after(args: dict, old: dict) -> dict:
         _refuse("invalid_edit_value", "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
                                                for e in exc.errors(include_url=False)[:3]))
     try:
-        studies._refuse_outside_mvp1(body.settings)
-        load = (body.intake or {}).get("load")
-        if isinstance(load, dict) and "csv_text" in load:
-            raise HTTPException(422, "load.csv_text is only accepted while creating a study; "
-                                     "upload the file and set load.upload_id instead")
-        if body.step is not None and (body.intake is None or set(body.intake) - {body.step}):
-            raise HTTPException(422, f"a PATCH for step {body.step!r} may only carry intake[{body.step!r}]")
-        data = dict(old)
-        if body.name is not None:
-            data["name"] = body.name
-        if body.intake is not None:
-            data["intake"] = {**old["intake"], **body.intake}
-        if body.settings is not None:
-            data.update(body.settings.model_dump(mode="json", exclude_unset=True))
-        try:
-            updated = studies.DecisionStudy.model_validate(data)
-        except ValidationError as exc:
-            raise HTTPException(422, exc.errors(include_url=False, include_context=False)) from None
-        if body.intake is not None and "tariff" in body.intake:
-            studies._refuse_bad_tariff(updated.intake)
+        studies._refuse_unless_enabled()
+        studies._refuse_bad_patch(body)
+        return studies._patched_study(old, body)
     except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("error_kind"):
+            raise
         _refuse("invalid_edit_value", exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str),
                 exc.status_code)
-    return updated.model_dump(mode="json", by_alias=True)
+
+
+def _intake_words() -> dict:
+    from services.study.intake_words import INTAKE_WORDS
+
+    return INTAKE_WORDS
+
+
+def _study_cell(field: str, value):
+    """A study value in the panel's words. A secret-like key only says whether it is set; a
+    list or object is summarised, never dumped."""
+    words = _intake_words()["settings"].get(field.removeprefix("settings."))
+    if any(word in field.lower() for word in _SECRET_KEY):
+        return None if value is None else "set"
+    if words and value is not None:
+        if "words" in words:
+            return words["words"].get(value, value)
+        if "format" in words:
+            return words["format"].format(value)
+        if "default" in words:  # the basis: one sentence for the only basis this version has
+            return words["default"] if value == {"terms": "real", "tax": "pre", "subsidy": "excl"} else _setting(value)
+    if isinstance(value, list):
+        return f"{len(value)} items"
+    if isinstance(value, dict):
+        return f"{len(value)} fields"
+    return _setting(value)
+
+
+def _study_row(field: str, label: str, old, new, *, unit: str = "", says_name: str | None = None) -> dict:
+    row = _settings_row("Study", field, label, None, None, unit, says_name=says_name or label)
+    row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
+    if row["old"] == "set" and row["new"] == "set":
+        row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
+    return row
+
+
+def _title(key: str) -> str:
+    return key.replace("_", " ").capitalize()
+
+
+def _intake_rows(old: dict, new: dict, steps: list[str]) -> list[dict]:
+    """One row per changed field inside each named step, in the panel's step and field words."""
+    words = _intake_words()
+    rows = []
+    for step in steps:
+        before, after = old.get(step), new.get(step)
+        step_label = words["steps"].get(step, _title(step))
+        if isinstance(before, dict) or isinstance(after, dict):
+            before, after = before or {}, after or {}
+            leaves = [k for k in dict.fromkeys([*before, *after]) if not _same(before.get(k), after.get(k))]
+            for leaf in leaves:
+                word = words["fields"].get(f"{step}.{leaf}", {})
+                rows.append(_study_row(f"intake.{step}.{leaf}", f"{step_label} \u00b7 {word.get('label', _title(leaf))}",
+                                       before.get(leaf), after.get(leaf), unit=word.get("unit", "")))
+        elif not _same(before, after):
+            rows.append(_study_row(f"intake.{step}", step_label, before, after))
+    return rows
 
 
 def _decision_study_preview(args: dict) -> list[dict]:
-    old = _study_record(args)
+    old = _study(args)
     new = _study_after(args, old)
+    before, after = old.model_dump(mode="json", by_alias=True), new.model_dump(mode="json", by_alias=True)
     rows = []
-
-    def add(field, label, before, after):
-        if not _same(before, after):
-            rows.append(_study_row("Study", field, label, before, after, says_name=f"Study {label[0].lower()}{label[1:]}"
-                                   if not label.startswith("Intake") else label))
-
-    if args.get("name") is not None:
-        add("name", "Name", old.get("name"), new.get("name"))
-    intake = args.get("intake")
-    if isinstance(intake, dict):
-        changed = [k for k in intake if not _same(old["intake"].get(k), new["intake"].get(k))]
-        for k in changed[:STUDY_LEAF_CAP]:
-            add(f"intake.{k}", f"Intake \u203a {k}", old["intake"].get(k), new["intake"].get(k))
-        if len(changed) > STUDY_LEAF_CAP:
-            rows.append(_note("", "", "intake", f"{len(changed) - STUDY_LEAF_CAP} more intake answers change."))
-    settings = args.get("settings")
-    if isinstance(settings, dict):
-        for key in settings:
-            if settings[key] is not None:
-                add(f"settings.{key}", key.replace("_", " ").capitalize(), old.get(key), new.get(key))
+    if args.get("name") is not None and not _same(before["name"], after["name"]):
+        rows.append(_study_row("name", "Study name", before["name"], after["name"]))
+    if isinstance(args.get("intake"), dict):
+        intake = _intake_rows(before["intake"], after["intake"], list(args["intake"]))
+        rows += intake[:STUDY_LEAF_CAP]
+        if len(intake) > STUDY_LEAF_CAP:
+            rows.append(_note("", "", "intake", f"{len(intake) - STUDY_LEAF_CAP} more intake answers change."))
+    for key, value in (args.get("settings") or {}).items() if isinstance(args.get("settings"), dict) else []:
+        if value is not None and not _same(before.get(key), after.get(key)):
+            label = _intake_words()["settings"].get(key, {}).get("label", _title(key))
+            rows.append(_study_row(f"settings.{key}", label, before.get(key), after.get(key)))
     if not rows:
         _refuse("empty_edit", "The study already has these values.")
     return rows
 
 
 def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
-    record = _study_record(args)
+    record = _study(args).model_dump(mode="json", by_alias=True)
     out = []
     for row in rows:
         if row["role"] == "note":
             out.append(None)
             continue
-        head, _, tail = row["field"].partition(".")
-        value = (record.get("intake") or {}).get(tail) if head == "intake" else record.get(tail or head)
+        parts = row["field"].split(".")
+        value = record
+        for part in ([parts[0]] if parts[0] != "settings" else [parts[1]]) if parts[0] != "intake" else parts:
+            value = value.get(part) if isinstance(value, dict) else None
         cell = _study_cell(row["field"], value)
         out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
     return out

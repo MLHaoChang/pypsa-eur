@@ -119,7 +119,7 @@ def test_decision_study_shows_name_intake_and_settings_old_to_new(client, api_pr
     card = edit_card.preview("update_decision_study", args)
     by_field = {r["field"]: r for r in card["rows"]}
     assert (by_field["name"]["old"], by_field["name"]["new"]) == (stored["name"], "Renamed")
-    assert by_field["settings.currency_year"]["new"] == 2030
+    assert by_field["settings.currency_year"]["new"] == "EUR of 2030"
     assert card["says"].startswith("Study name ")
     with pytest.raises(HTTPException) as same:  # the stored name again: nothing to change
         edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "name": stored["name"]})
@@ -211,3 +211,48 @@ def test_study_intake_is_capped_summarised_and_redacted(client, api_project, stu
     rotated = edit_card.preview("update_decision_study", {**base, "intake": {"api_token": "hunter3"}})
     assert _cells(rotated) == [("intake.api_token", "set", "set (changed)")]
     assert "hunter" not in repr(rotated)
+
+
+def test_a_real_intake_step_shows_one_row_per_changed_field_in_the_panels_words(client, api_project, studies_on):
+    source = api_project("card-step")
+    study_id, project = _start(source, "card-step-base")
+    base = {"project": project, "study_id": study_id}
+    card = edit_card.preview("update_decision_study", {**base, "intake": {"site": {"zone": "DE", "connection_mw": 5.0}},
+                                                      "settings": {"currency_year": 2030}})
+    rows = {r["field"]: r for r in card["rows"]}
+    site = rows["intake.site.connection_mw"]
+    assert (site["label"], site["unit"], site["old"], site["new"]) == ("Your site \u00b7 Grid connection limit", "MW", 2.0, 5.0)
+    assert "intake.site.zone" not in rows  # unchanged inside the step: no row
+    year = rows["settings.currency_year"]
+    assert (year["label"], year["new"]) == ("Currency year", "EUR of 2030")
+    assert "fields" not in repr([r["old"] for r in card["rows"]])  # never "N fields \u2192 N fields"
+    chat_tools.update_decision_study(project, study_id, intake={"site": {"zone": "DE", "connection_mw": 5.0}},
+                                     settings={"currency_year": 2030})
+    args = {**base, "intake": {"site": {"zone": "DE", "connection_mw": 5.0}}, "settings": {"currency_year": 2030}}
+    assert edit_card.ADAPTERS["update_decision_study"].readback(args, card["rows"]) == [r["new"] for r in card["rows"]]
+
+
+def test_the_study_perspective_shows_the_panels_words(client, api_project, studies_on):
+    study_id, project = _start(api_project("card-persp"), "card-persp-base")
+    for value in ("developer", "investor"):  # not implemented in this version: the route's refusal
+        with pytest.raises(HTTPException) as exc:
+            edit_card.preview("update_decision_study", {"project": project, "study_id": study_id,
+                                                        "settings": {"perspective": value}})
+        assert exc.value.status_code == 422
+    from services.study.intake_words import INTAKE_WORDS
+
+    assert INTAKE_WORDS["settings"]["perspective"]["words"]["site_owner"] == "The site owner\u2019s"
+
+
+def test_studies_disabled_refuses_with_the_handlers_refusal(client, api_project, studies_on, monkeypatch):
+    from routers import studies
+
+    study_id, project = _start(api_project("card-off"), "card-off-base")
+
+    def off():
+        raise HTTPException(404, {"error_kind": "decision_studies_disabled", "message": "Decision studies are off."})
+
+    monkeypatch.setattr(studies, "require_decision_studies_enabled", off)
+    with pytest.raises(HTTPException) as exc:
+        edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "name": "x"})
+    assert (exc.value.status_code, exc.value.detail["error_kind"]) == (404, "decision_studies_disabled")
