@@ -711,8 +711,12 @@ component's Edit form with `open_editor` at read tier without saving, and switch
 to every canvas view.
 
 Official OpenAI requests offer at most 128 tools per turn. Wiring selects from
-the eligible registry using explicit names, always-available controls, recent
-calls, and query terms, then retains catalogue order for prefix caching. The
+the eligible registry using always-available controls, pending plan tools,
+discovered tools, explicit names, the curated intent map, recent calls, and
+query terms, in that rank order, then retains catalogue order for prefix caching.
+The intent map (`_SELECTION_INTENTS` in `providers/wiring.py`) offers fixed read
+tools for a query word such as "sense" or "plausible", so no description text
+elsewhere in the catalogue can crowd them out. The
 exact selected set supplies the dispatch allowlist; `session_init.tool_count`
 describes the first request. After a toolset switch or intentional project
 rebinding the next request receives the refreshed catalogue and allowlist;
@@ -860,9 +864,9 @@ IDs. Task views stay within the ordinary result budget.
 
 A denied confirmation leaves a step pending. An interrupted effectful call
 requires review; native exports count as effectful despite their legacy read
-tier. Each step can be retried at most twice; `resolve_task_step` requires ordinary destructive confirmation to
-record verified completion or an explicit retry; completion comes from native
-evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
+tier. Each step can be retried at most twice; `resolve_task_step` requires
+ordinary destructive confirmation to record verified completion or an explicit
+retry; completion comes from native evidence only (LC-23 SC-12, below), never from the caller's `result`. Reconciliation refuses a
 still-running originating session or detached timeout worker. `cancel_task`
 stops future task steps and retains checkpoints; it never aborts a queued job.
 Tasks live in the authorized project directory, are atomically replaced,
@@ -1084,7 +1088,8 @@ brief grants nothing: every write or run step keeps its own card.
   (`get_simulation_log_history`, `diagnose_network`, `validate_network`) for
   a run step, the read-back for an edit. It runs nothing. A failed effectful
   step is refused (`task_step_needs_retry`) until `resolve_task_step(retry)`.
-  After two retries, `task_step_retry_limit` leaves the failed step unchanged and the correction tells the assistant to stop and let the user decide.
+  After two retries, `task_step_retry_limit` leaves the failed step unchanged
+  and the correction tells the assistant to stop and let the user decide.
 
 ## Recorded runs, load flow, and experiment plans
 

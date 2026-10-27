@@ -89,6 +89,11 @@ function num(v: number | null | undefined, digits = 2): string {
   return v == null || !isFinite(v) ? '—' : v.toFixed(digits).replace(/\.?0+$/, m => (m.startsWith('.') ? '' : m))
 }
 
+/** A figure and its unit; a missing figure is "—" alone, with no unit after it. */
+function numU(v: number | null | undefined, unit: string, digits = 2): string {
+  return v == null || !isFinite(v) ? '—' : `${num(v, digits)}\u00A0${unit}`
+}
+
 function where(period: number | null | undefined, hour: number | null | undefined, kase?: string | null): string {
   if (period == null) return ''
   return [`${period}`, hour == null ? null : `h${hour}`, kase || null].filter(Boolean).join(' · ')
@@ -712,7 +717,7 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </table>
         </TableScroll>
         <p className="text-[11px] text-muted mt-2">
-          PCC reactive band ±{num(req.q_limit_mvar)} Mvar ({req.clause}); P_ref {num(req.p_ref_mw)} MW, {req.p_ref_from}.
+          PCC reactive band {req.q_limit_mvar == null ? '—' : `±${numU(req.q_limit_mvar, 'Mvar')}`} ({req.clause}); P_ref {numU(req.p_ref_mw, 'MW')}, {req.p_ref_from}.
         </p>
         {rms.length > 0 && (
           <p data-testid="compliance-rms" className="text-[11px] text-muted mt-1">
@@ -759,8 +764,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
               {r.compensation.map(c => (
                 <tr key={c.direction} data-testid={`comp-${c.direction}`} className="border-t border-border first:border-0">
                   <td className="py-1 pr-3 capitalize">{c.direction}</td>
-                  <td className="pr-3 tabular-nums">required {num(c.required_mvar)} Mvar</td>
-                  <td className="pr-3 tabular-nums font-semibold">recommended {num(c.recommended_mvar)} Mvar</td>
+                  <td className="pr-3 tabular-nums">required {numU(c.required_mvar, 'Mvar')}</td>
+                  <td className="pr-3 tabular-nums font-semibold">recommended {numU(c.recommended_mvar, 'Mvar')}</td>
                   <td className="text-muted">{where(c.worst_period, c.worst_hour)}</td>
                 </tr>
               ))}

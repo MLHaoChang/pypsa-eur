@@ -887,7 +887,7 @@ def publish(project, profile_id: str, allow_unconfirmed: bool = False) -> dict:
     if open_limits and not allow_unconfirmed:
         raise HTTPException(
             status_code=409,
-            detail=f"draft {profile_id!r} has unconfirmed limits {open_limits}; confirm each against its quote, "
+            detail=f"draft {profile_id} has unconfirmed limits {', '.join(open_limits)}; confirm each against its quote, "
                    "or publish with allow_unconfirmed (every report row on them will then say extracted)",
         )
     with _lock(project):
