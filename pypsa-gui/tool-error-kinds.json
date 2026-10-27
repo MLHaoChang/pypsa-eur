@@ -1319,6 +1319,10 @@
       "surface": "inline",
       "why": "get_run_evidence refuses a malformed section name. The assistant selects an existing lowercase snake_case evidence section."
     },
+    "invalid_results_argument": {
+      "surface": "inline",
+      "why": "get_results refuses a malformed run_id. The assistant takes a run id from list_project_runs instead of inventing one."
+    },
     "invalid_run_status": {
       "surface": "inline",
       "why": "list_project_runs refuses an unknown status filter. The assistant uses one of the native run statuses instead of inventing a state."

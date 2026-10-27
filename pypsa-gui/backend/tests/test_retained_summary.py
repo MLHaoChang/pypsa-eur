@@ -148,3 +148,13 @@ def test_an_oversized_section_is_dropped_not_the_manifest(oj_grid, monkeypatch):
     detail = run_evidence.get_run_evidence(run['run_id'])
     assert detail['status'] == 'completed'
     assert {'results_summary_not_captured', 'loadflow_not_captured'} <= set(detail['warnings'])
+
+
+@pytest.mark.parametrize('run_id', ['', '../x', 'a' * 65, 7])
+def test_a_malformed_run_id_is_refused(run_id):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        chat_tools.get_results(result_kind='statistics', run_id=run_id)
+    assert exc.value.status_code == 422
+    assert exc.value.detail['error_kind'] == 'invalid_results_argument'
