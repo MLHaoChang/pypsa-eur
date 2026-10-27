@@ -111,9 +111,9 @@ def test_a_filled_site_is_complete_and_ready(client, site):
     assert {s: _states(body)[s] for s in INPUTS} == {s: "complete" for s in INPUTS}
     assert body["run_ready"] is True and body["run_blocker"] is None
     assert body["notes"] == [] and body["deferred"] is False
-    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
     assert body["verdicts"] == {"optimisation": {"ready": True, "blocker": None},
-                                "study": None}
+                                "study": None, "loadflow": None}
     rows = {s["section"]: s for s in body["sections"]}
     assert rows["readiness"]["state"] is None and rows["readiness"]["summary"] == "0 to do, 0 to check"
     assert rows["results"]["state"] is None and rows["results"]["freshness"] == "not_run"
@@ -566,7 +566,7 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     # Per run kind: the optimisation is the preflight's verdict alone, so a
     # client driving Run LOPF is not blocked by the study's refusal.
     pre = client.post("/api/simulation/preflight").json()
-    assert body["run_request"] == {"optimisation": True, "study": True}
+    assert body["run_request"] == {"optimisation": True, "study": True, "loadflow": False}
     assert body["verdicts"]["optimisation"]["ready"] is pre["ok"] is True
     assert body["verdicts"]["study"]["ready"] is False
     assert body["verdicts"]["study"]["blocker"] == body["run_blocker"]
@@ -820,3 +820,170 @@ def test_a_generation_only_site_with_a_load_is_held_to_the_study(client, tmp_pro
     assert body["run_request"]["study"] is True
     assert "presence_voll" in _codes(body, "scenarios")      # the template ships VoLL 0
 
+
+
+# ── Load flow, a run kind of its own (W4b) ──────────────────────────────────
+#
+# The Run requests the load flow exactly when What the Run computes › Load
+# flow is on (`run_ac_pf_after_lopf`). Stage 2's own refusals are its items
+# (`source: "loadflow"`), so they block the load flow's verdict, not the
+# optimisation's; `run_ready` stays the AND over the requested kinds and agrees
+# with /preflight, which validates /run with Stage 2 included.
+
+def _pf_network(*, r: float = 0.05, x: float = 0.5) -> pypsa.Network:
+    from tests.test_run_separability import _line_network
+
+    n = _line_network()
+    n.lines.loc["ab", ["r", "x"]] = [r, x]
+    return n
+
+
+def _every_item(body) -> list[dict]:
+    return [i for s in body["sections"] for i in s["items"]]
+
+
+def _wait_idle(client, timeout: float = 60.0) -> dict:
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        st = client.get("/api/simulation/status").json()
+        if st.get("status") != "running":
+            return st
+        time.sleep(0.2)
+    raise AssertionError("the run did not finish")
+
+
+def test_load_flow_off_is_not_requested(client, site):
+    body = _flow(client, site(_pf_network(), name="lf_off"))
+    assert body["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
+    assert body["verdicts"]["loadflow"] is None
+    assert body["run_ready"] is True
+    assert not any(i["source"] == "loadflow" for i in _every_item(body))
+
+
+def test_a_zero_impedance_line_blocks_each_kind_once(client, site, set_cfg, monkeypatch):
+    """x = 0 is the optimisation's own refusal; r = x = 0 is also Stage 2's.
+    Each kind has its item, each shown once (UX), and /preflight agrees."""
+    name = site(_pf_network(r=0.0, x=0.0), name="lf_zero")
+    set_cfg(run_ac_pf_after_lopf=True)
+    body = _assert_equivalent(client, monkeypatch, name)
+    assert body["run_request"]["loadflow"] is True
+    items = _every_item(body)
+    stage2 = [i for i in items if i["code"] == "stage2_zero_impedance"]
+    assert len(stage2) == 1 and stage2[0]["source"] == "loadflow" and stage2[0]["blocking"]
+    assert [i["source"] for i in items if i["code"] == "line_x_invalid"] == ["validation"]
+    assert body["verdicts"]["optimisation"]["blocker"]["code"] == "line_x_invalid"
+    assert body["verdicts"]["loadflow"]["blocker"]["code"] == "stage2_zero_impedance"
+    assert body["run_ready"] is False
+
+
+def test_a_stage_two_refusal_blocks_the_load_flow_alone(client, site, set_cfg, monkeypatch):
+    name = site(_pf_network(), name="lf_roll")
+    set_cfg(run_ac_pf_after_lopf=True, solve_strategy="rolling")
+    body = _assert_equivalent(client, monkeypatch, name)
+    hits = [i for i in _every_item(body) if i["code"] == "rolling_with_ac_pf"]
+    assert len(hits) == 1, hits
+    assert hits[0]["source"] == "loadflow" and hits[0]["blocking"] and hits[0]["in_scope"]
+    assert body["run_ready"] is False
+    assert body["verdicts"]["optimisation"] == {"ready": True, "blocker": None}
+    assert body["verdicts"]["loadflow"]["ready"] is False
+    assert body["verdicts"]["loadflow"]["blocker"] == body["run_blocker"]
+    assert body["run_blocker"]["code"] == "rolling_with_ac_pf"
+    assert not any(n["code"] == "rolling_with_ac_pf" for n in body["notes"])
+    # Switched off, the same project is ready and its Run requests no load
+    # flow; readiness counts the load flow's item once.
+    set_cfg(run_ac_pf_after_lopf=False)
+    off = _assert_equivalent(client, monkeypatch, name)
+    assert off["run_ready"] is True and off["verdicts"]["loadflow"] is None
+
+    def todo(b) -> int:
+        row = next(s for s in b["sections"] if s["section"] == "readiness")
+        return int(row["summary"].split(" ", 1)[0])
+    assert todo(body) == todo(off) + 1
+
+
+def test_a_deferred_flow_answers_the_load_flow_not_ready(client, site, set_cfg, monkeypatch):
+    name = site(_pf_network(), name="lf_busy")
+    set_cfg(run_ac_pf_after_lopf=True)
+    monkeypatch.setattr(sim_router, "_solver_in_flight", lambda: True)
+    body = _flow(client, name)
+    assert body["deferred"] is True
+    assert body["run_request"]["loadflow"] is True
+    assert body["verdicts"]["loadflow"]["ready"] is False
+    assert _kinds(body)["loadflow"] == "running"
+
+
+def _put(client, component: str, name: str, **fields) -> None:
+    """An edit through the HTTP seam, which bumps the edit counter."""
+    row = next(r for r in client.get(f"/api/network/{component}").json() if r["name"] == name)
+    r = client.put(f"/api/network/{component}/{name}", json={**row, **fields})
+    assert r.status_code == 200, r.text
+
+
+def _kinds(body) -> dict:
+    return next(s for s in body["sections"] if s["section"] == "results")["freshness_by_kind"]
+
+
+def _bump(client, bound_ctx, times: int = 1) -> None:
+    """An edit seam crossed without touching the dispatch (the chat seam)."""
+    from services import dirty_state
+
+    with bound_ctx(client):
+        for _ in range(times):
+            dirty_state.bump_revision()
+
+
+def test_load_flow_freshness_follows_its_inputs(client, site, set_cfg, edit, bound_ctx):
+    name = site(_pf_network(), name="lf_fresh")
+    set_cfg(run_ac_pf_after_lopf=True)
+    body = _flow(client, name)
+    assert _kinds(body) == {"optimisation": "not_run", "study": None, "loadflow": "not_run"}
+
+    assert client.post("/api/simulation/run").status_code == 200
+    assert _wait_idle(client)["condition"] == "lopf+ac_pf_ok"
+    body = _flow(client, name)
+    assert _kinds(body) == {"optimisation": "fresh", "study": None, "loadflow": "fresh"}
+    assert next(s for s in body["sections"] if s["section"] == "results")["freshness"] == "fresh"
+
+    # An edit that leaves the dispatch's shape fresh: the power flow read the
+    # network before it, so the load flow alone is stale.
+    _bump(client, bound_ctx)
+    assert _kinds(_flow(client, name)) == {"optimisation": "fresh", "study": None,
+                                           "loadflow": "stale"}
+    # A topology change: the dispatch itself is stale.
+    with edit() as n:
+        n.add("Load", "l2", bus="a", p_set=1.0)
+    assert _kinds(_flow(client, name)) == {"optimisation": "stale", "study": None,
+                                           "loadflow": "stale"}
+    # An HTTP edit clears the dispatch: neither has results any more.
+    _put(client, "loads", "l", p_set=11.0)
+    assert _kinds(_flow(client, name)) == {"optimisation": "not_run", "study": None,
+                                           "loadflow": "not_run"}
+
+
+def test_a_standalone_load_flow_is_fresh_until_an_edit(client, site, bound_ctx):
+    name = site(_pf_network(), name="lf_alone")
+    assert client.post("/api/simulation/run").status_code == 200
+    _wait_idle(client)
+    # Not requested: no load flow results, so not run.
+    assert _kinds(_flow(client, name))["loadflow"] == "not_run"
+    assert client.post("/api/simulation/run_ac_pf").status_code == 200
+    assert _wait_idle(client)["status"] == "completed"
+    assert _kinds(_flow(client, name))["loadflow"] == "fresh"
+    _bump(client, bound_ctx)
+    assert _kinds(_flow(client, name))["loadflow"] == "stale"
+
+
+def test_load_flow_freshness_survives_a_save_and_reload(client, site, set_cfg, bound_ctx):
+    """Gatekeeper L3: the edit counter travels with the results, so after a
+    reload the same number of edits never reads fresh again."""
+    name = site(_pf_network(), name="lf_reload")
+    set_cfg(run_ac_pf_after_lopf=True)
+    _bump(client, bound_ctx, 3)                           # the PF runs at a counter above 0
+    assert client.post("/api/simulation/run").status_code == 200
+    _wait_idle(client)
+    r = client.post(f"/api/projects/{name}", params={"force": True})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/projects/{name}").status_code == 200
+    assert _kinds(_flow(client, name))["loadflow"] == "fresh"
+    _bump(client, bound_ctx)
+    assert _kinds(_flow(client, name))["loadflow"] == "stale"

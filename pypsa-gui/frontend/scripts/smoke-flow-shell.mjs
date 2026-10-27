@@ -256,7 +256,7 @@ async function walk(browser, template, args) {
       'broken: Run is disabled')
     const groups = await issuesGroups()
     console.log(`    ..  Issues groups: ${groups.map(g => `${g.id}(${g.rows})`).join(', ') || 'none'}`)
-    const wantGroups = new Set(flow.sections.filter(s => s.items.some(i => i.source === 'validation' && isOpen(i)))
+    const wantGroups = new Set(flow.sections.filter(s => s.items.some(i => (i.source === 'validation' || i.source === 'loadflow') && isOpen(i)))
       .map(s => s.section))
     for (const w of wantGroups) check(groups.some(g => g.id === w), `broken issues: a ${w} group (the server has validation items there)`)
     check(groups.every(g => g.id === 'other' || SECTIONS.includes(g.id)), 'broken issues: every group is a flow section')

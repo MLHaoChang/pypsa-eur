@@ -321,6 +321,13 @@ def run_ac_pf_stage(
     def phase(msg: str) -> None:
         log_queue.put(f"[PHASE] {msg}")
 
+    # The edit counter this PF reads (W4b freshness), taken under the caller's
+    # network lock before any work: the SOLVING ctx when a worker bound one
+    # (the queue solves a background project), else the request's own.
+    from services import dirty_state
+
+    revision = dirty_state.revision(PyPSAService._transient_target(ensure=False))
+
     # Two gates, both required:
     #
     #   1. `n.is_solved` covers the genuine "no LP has ever run" case for
@@ -502,6 +509,7 @@ def run_ac_pf_stage(
         "ac_pf_stripped_voll_slacks": stripped,
         "ac_pf_converged_count": n_ok,
         "ac_pf_total_snapshots": n_total,
+        "ac_pf_network_revision": revision,
     }
 
 

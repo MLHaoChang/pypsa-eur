@@ -103,10 +103,13 @@ MATRIX: dict[str, Row] = {r.kind: r for r in (
                 "_state lopf_results / ac_pf_results",
         locks_and_state="the network lock for the whole PF; not abortable",
         implicit_steps="none; it needs a dispatch, so it is bundled with the optimisation",
-        freshness="dispatch_status must be 'fresh' (the topology shape: a parameter edit after "
-                  "the solve still reads fresh)",
+        freshness="dispatch_status must be 'fresh' to start (the topology shape: a parameter "
+                  "edit after the solve still reads fresh); its results read stale once the "
+                  "edit counter moved past the ac_pf_network_revision the PF recorded (W4b)",
         evidence=(_T + "test_loadflow_needs_a_fresh_dispatch",
                   _T + "test_loadflow_in_a_run_that_optimises_is_the_optimisations_verdict",
+                  _T + "test_loadflow_switched_on_is_the_runs_own_verdict",
+                  "tests/test_project_flow.py::test_load_flow_freshness_follows_its_inputs",
                   _T + "test_the_bundled_load_flow_answers_for_stage_two_on",
                   _T + "test_verdicts_defer_instead_of_waiting_on_a_held_lock",
                   _T + "test_the_load_flow_overwrites_the_lp_flows")),
@@ -267,6 +270,18 @@ def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict, *,
             "blocker": {"code": issue.code, "message": issue.message, "section": sec}}
 
 
+def _bundled(optimisation: dict, loadflow: dict) -> dict:
+    """The Run with Load flow on (W4b): the optimisation's verdict AND Stage 2's
+    own, the first blocker in flow order (the flow's ``run_blocker`` over the two)."""
+    from services import flow_sections as F
+
+    blockers = [b for b in (optimisation["blocker"], loadflow["blocker"]) if b is not None]
+    if not blockers:
+        return optimisation
+    first = min(blockers, key=lambda b: F.SECTION_IDS.index(b["section"]))
+    return {**optimisation, "ready": False, "blocker": first}
+
+
 def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: str,
              db=None, org_id=None, size_source: str = "capacity_run") -> dict[str, dict]:
     """``{kind: {ready, deferred, blocker}}`` for the open project at
@@ -277,7 +292,8 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
     the flow's first blocking item in flow order. ``sclopf``, and ``loadflow``
     when ``optimisation`` is among ``kinds`` (Stage 2, the
     ``run_ac_pf_after_lopf`` option), answer for switching their option ON:
-    the validator with the option set (the flow's verdict once it is set).
+    the validator with the option set (the flow's verdict once it is set; for
+    the load flow, the optimisation's and its own Stage-2 items together).
     ``loadflow`` alone is the standalone route's refusal. ``fixed_sizes``
     (sizing off, F1) answers for setting ``fixed_sizes`` to ``size_source``
     ("capacity_run" or "nameplate"). A row that is not runnable reads
@@ -299,6 +315,8 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
                 flow = flow_service.project_flow(project_dir, cache_key=cache_key,
                                                  db=db, org_id=org_id)
             v = flow["verdicts"]["study" if kind == "study" else "optimisation"]
+            if kind == "loadflow" and flow["verdicts"].get("loadflow") is not None:
+                v = _bundled(v, flow["verdicts"]["loadflow"])
             out[kind] = (_blocked("no_study_request",
                                   "The project has no reliability study to run (no EH template).")
                          if v is None else {**v, "deferred": flow["deferred"]})

@@ -51,6 +51,32 @@ describe('useRunGate', () => {
     expect(header.result.current.blocked).toBe(false)
   })
 
+  it('the header Run blocks on the load flow it runs (Stage 2 of /run)', async () => {
+    const lfTarget = { ...target, section: 'scenarios', component: null, entity: null, field: null }
+    const lf = { section: 'scenarios', message: 'Scenarios & optimisation: load flow with rolling', code: 'rolling_with_ac_pf', target: lfTarget } as const
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({
+      ...base, run_request: { optimisation: true, study: false, loadflow: true },
+      run_ready: false, run_blocker: lf,
+      verdicts: { optimisation: { ready: true, blocker: null }, study: null, loadflow: { ready: false, blocker: lf } },
+    } as never)
+    const { result } = renderHook(() => useRunGate('optimisation'), { wrapper })
+    await waitFor(() => expect(result.current.blocked).toBe(true))
+    expect(result.current.blocker?.code).toBe('rolling_with_ac_pf')
+    expect(result.current.reason).toBe(lf.message)
+  })
+
+  it('with both blocked, the header gives the first blocker in flow order', async () => {
+    const lf = { section: 'scenarios', message: 'Scenarios & optimisation: stage 2', code: 'stage2_zero_impedance', target: { ...target, section: 'scenarios' } } as const
+    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({
+      ...base, run_request: { optimisation: true, study: false, loadflow: true },
+      run_ready: false, run_blocker: blocker,
+      verdicts: { optimisation: { ready: false, blocker }, study: null, loadflow: { ready: false, blocker: lf } },
+    } as never)
+    const { result } = renderHook(() => useRunGate('optimisation'), { wrapper })
+    await waitFor(() => expect(result.current.blocked).toBe(true))
+    expect(result.current.blocker).toEqual(blocker)
+  })
+
   it('keeps notes beside an enabled Run', async () => {
     const note = { section: 'project', message: 'Project & site: no location', target }
     vi.mocked(flowApi.getProjectFlow).mockResolvedValue({

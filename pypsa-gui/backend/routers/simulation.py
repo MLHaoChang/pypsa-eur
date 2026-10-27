@@ -1570,6 +1570,7 @@ def run_ac_pf():
             ac_pf_stripped_voll_slacks=None,
             ac_pf_converged_count=None,
             ac_pf_total_snapshots=None,
+            ac_pf_network_revision=None,
             thread=t,
             kind="ac_pf",   # see the `kind` note on the LP claim above
         )
