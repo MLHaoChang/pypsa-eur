@@ -219,3 +219,133 @@ def test_an_outsider_is_refused_before_any_old_value(client, api_project, second
             edit_card.preview(tool, args)
         assert exc.value.status_code in (403, 404), tool
         assert "old" not in json.dumps(exc.value.detail), tool
+
+
+# ── gatekeeper fixes: disabled studies, foreign lock, receipts that can fail, text caps ──
+
+@pytest.fixture
+def colleague(_auth_db, seeded_identity):
+    """A second user in the SAME org (so the ACL passes and only the lock can refuse)."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from db.models import OrgMembership, User
+    from services.auth_service import hash_password
+
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        user = User(id=uuid.uuid4(), email=f"colleague-{uuid.uuid4().hex[:6]}@example.com",
+                    password_hash=hash_password("irrelevant"), status="active", is_super_admin=False,
+                    created_at=datetime.now(tz=UTC))
+        db.add(user)
+        db.flush()
+        db.add(OrgMembership(id=uuid.uuid4(), user_id=user.id, org_id=seeded_identity["org_id"], role="admin"))
+        db.commit()
+        return user.id
+
+
+def test_set_study_parameter_card_refuses_a_disabled_feature_before_any_lookup(client, api_project, monkeypatch):
+    from routers import studies
+
+    def off():
+        raise HTTPException(404, {"error_kind": "studies_disabled"})
+
+    monkeypatch.setattr(studies, "require_decision_studies_enabled", off)
+    project = api_project("rec-off")
+    args = {"project": project, "study_id": "no-such-study", "key": "discount_rate",
+            "value": 0.06, "unit": "per unit"}
+    card_refusal = _refusal("set_study_parameter", args)
+    with pytest.raises(HTTPException) as handler:
+        chat_tools.set_study_parameter(project, "no-such-study", "discount_rate", 0.06, "per unit")
+    assert (card_refusal.status_code, card_refusal.detail) == (handler.value.status_code, handler.value.detail)
+    assert card_refusal.detail["error_kind"] == "studies_disabled"
+
+
+def test_a_foreign_lock_refuses_each_card_where_it_refuses_the_tool(client, api_project, colleague, studies_on):
+    name = api_project("rec-lock")
+    study_id, study_project = _start(api_project("rec-lock-src"), "rec-lock-base")
+    for project in (name, study_project):
+        assert client.post(f"/api/projects/{project}/lock").status_code == 200
+    chat_tools.set_acting_user(colleague)
+    calls = (
+        ("put_stress_scenarios", {"name": name, "scenarios": [_scenario()]},
+         lambda: chat_tools.put_stress_scenarios(name, [_scenario()])),
+        ("record_asset_health", {"name": name, "entries": [_entry()]},
+         lambda: chat_tools.record_asset_health(name, [_entry()])),
+        ("update_project_layout", {"name": name, "layout": _layout()},
+         lambda: chat_tools.update_project_layout(name, _layout())),
+        ("set_study_parameter", _study_args(study_project, study_id),
+         lambda: chat_tools.set_study_parameter(study_project, study_id, "discount_rate", 0.06, "per unit")),
+    )
+    for tool, args, run in calls:
+        refusal = _refusal(tool, args)
+        with pytest.raises(HTTPException) as handler:
+            run()
+        assert refusal.status_code == handler.value.status_code == 409, tool
+        assert refusal.detail["error_kind"] == handler.value.detail["error_kind"] == "project_locked", tool
+        assert refusal.detail == handler.value.detail, tool  # the handler's refusal, no card, no old value
+
+
+def _unwritten_receipt(tool, args):
+    """The card for `args`, and its readback with the store left untouched."""
+    card = edit_card.preview(tool, args)
+    return card["rows"], edit_card.ADAPTERS[tool].readback(args, card["rows"])
+
+
+def test_layout_edit_hidden_by_a_count_reads_back_uncertain_until_written(client, api_project):
+    name = api_project("rec-layout-fp")
+    chat_tools.update_project_layout(name, _layout(x=1))
+    args = {"name": name, "layout": _layout(x=50)}  # same node count, moved coordinates
+    rows, stored = _unwritten_receipt("update_project_layout", args)
+    (nodes,) = [r for r in rows if r["field"] == "layout.nodes"]
+    assert nodes["old"] == "2 items" and nodes["new"] == "2 items (changed)" and nodes["fingerprint"]
+    assert stored != [r["new"] for r in rows]  # the store is unchanged: the receipt cannot verify
+    chat_tools.update_project_layout(name, args["layout"])
+    assert edit_card.ADAPTERS["update_project_layout"].readback(args, rows) == [r["new"] for r in rows]
+
+
+def test_stress_series_edit_reads_back_uncertain_until_written(client, api_project):
+    name = api_project("rec-stress-fp")
+    prof = {"id": "p", "kind": "profiles", "frequency_per_year": 1.0, "renewable_availability": {"G1": [0.1, 0.2]}}
+    chat_tools.put_stress_scenarios(name, [prof])
+    new = {**prof, "renewable_availability": {"G1": [0.1, 0.9]}}
+    args = {"name": name, "scenarios": [new]}
+    rows, stored = _unwritten_receipt("put_stress_scenarios", args)
+    assert stored != [r["new"] for r in rows]
+    chat_tools.put_stress_scenarios(name, [new])
+    assert edit_card.ADAPTERS["put_stress_scenarios"].readback(args, rows) == [r["new"] for r in rows]
+
+
+def test_asset_health_edit_reads_back_uncertain_until_written(client, api_project):
+    name = api_project("rec-health-fp")
+    chat_tools.record_asset_health(name, [_entry()])
+    args = {"name": name, "entries": [_entry(rate=0.05)]}
+    rows, stored = _unwritten_receipt("record_asset_health", args)
+    assert stored != [r["new"] for r in rows]
+    chat_tools.record_asset_health(name, args["entries"])
+    assert edit_card.ADAPTERS["record_asset_health"].readback(args, rows) == [r["new"] for r in rows]
+
+
+def test_study_parameter_edit_reads_back_uncertain_until_written(client, api_project, studies_on):
+    study_id, project = _start(api_project("rec-ledger-fp-src"), "rec-ledger-fp")
+    args = _study_args(project, study_id, source="x")
+    rows, stored = _unwritten_receipt("set_study_parameter", args)
+    assert stored != [r["new"] for r in rows]
+    chat_tools.set_study_parameter(project, study_id, "discount_rate", 0.06, "per unit", source="x")
+    assert edit_card.ADAPTERS["set_study_parameter"].readback(args, rows) == [r["new"] for r in rows]
+
+
+def test_long_text_is_capped_and_an_edit_past_the_cap_still_shows(client, api_project):
+    name = api_project("rec-cap")
+    head = "h" * 150
+    chat_tools.record_asset_health(name, [_entry(note=head + "A")])
+    args = {"name": name, "entries": [_entry(note=head + "B")]}
+    rows, stored = _unwritten_receipt("record_asset_health", args)
+    (note,) = [r for r in rows if r["field"].endswith(":note")]
+    assert len(note["old"]) <= 121 and note["new"].endswith("… (changed)") and note["fingerprint"]
+    assert stored != [r["new"] for r in rows]
+    chat_tools.record_asset_health(name, args["entries"])
+    assert edit_card.ADAPTERS["record_asset_health"].readback(args, rows) == [r["new"] for r in rows]
+    long_name = {**_scenario("long"), "name": "n" * 300}
+    card = edit_card.preview("put_stress_scenarios", {"name": name, "scenarios": [long_name]})
+    assert all(len(r["label"]) < 200 for r in card["rows"] if r["role"] != "note")
