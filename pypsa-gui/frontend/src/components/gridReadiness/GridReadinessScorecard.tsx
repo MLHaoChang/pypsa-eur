@@ -200,7 +200,7 @@ function ScoreRow({ row, mode, onJump, fieldLabels, noAssistant }: {
     <li data-testid={`gr-row-${row.id}`} className="flex flex-col gap-1 px-4 py-2.5 border-t border-border first:border-t-0">
       <div className="flex flex-wrap items-start gap-2">
         <VerdictChip verdict={row.verdict} />
-        <div className="flex-1 min-w-[14rem] break-words text-[12px] [overflow-wrap:anywhere]">
+        <div className="flex-1 min-w-[14rem] break-words text-[12px]">
           <div className="font-semibold text-text">{row.requirement}</div>
           {missing && <div data-testid="gr-missing" className="text-muted">{row.note}</div>}
           <div className="text-muted">
