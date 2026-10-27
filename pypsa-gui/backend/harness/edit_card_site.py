@@ -10,7 +10,8 @@ caller's access was checked the way the handler checks it.
 """
 from __future__ import annotations
 
-import hashlib
+import hmac
+import os
 import json
 from collections.abc import Callable
 from typing import Any
@@ -40,8 +41,11 @@ def _blank(value) -> bool:
     return value is None or value == {} or value == []
 
 
+_SALT = os.urandom(16)  # per process: a fingerprint on a card can not be used to guess a secret value
+
+
 def _fingerprint(value) -> str:
-    return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    return hmac.new(_SALT, json.dumps(value, sort_keys=True, default=str).encode(), "sha1").hexdigest()[:12]
 
 
 def _short(text: str) -> str:
