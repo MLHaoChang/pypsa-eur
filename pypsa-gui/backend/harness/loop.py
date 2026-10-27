@@ -1774,6 +1774,8 @@ def _run_turn_body(
     # W10 H2a — a bounded task's cap is decided once, here, after the workflow
     # rebinding above: the model cannot lift it mid-turn (budget.task_cap).
     session.turn_task_cap = harness_budget.task_cap(session)
+    session.turn_single_edit_applied = False
+    session.turn_redirects = {}
     from harness.compose import _results_card_addendum
     card_block = _results_card_addendum(session)
     _eventlog.context(session, "results_card", card_block)
@@ -2233,6 +2235,9 @@ def _run_turn_body(
                 return
             continue
 
+        from harness import edit_routing
+        session.turn_redirects = ({} if session.assurance_turn is not None else
+                                  edit_routing.redirects(tool_uses, session.turn_single_edit_applied))
         tool_results_for_next_turn: list[dict[str, Any]] = []
         # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
@@ -2481,6 +2486,16 @@ def _dispatch_real_tool_call(
     from harness import mcp_client
     external = mcp_client.server_for(session, tool_name)   # an MCP tool's server (issue 19)
     tier = _tool_tier(session, tool_name)
+
+    # LC-16 slice C: a multi-asset edit goes through the one preview card. The
+    # refusal is for the model only, so it is sent before any frame: the user
+    # sees no failed card (harness/edit_routing.py).
+    redirect = None if external else (session.turn_redirects or {}).get(tool_use_id)
+    if redirect:
+        detail = {"error_kind": "use_project_preview", "message": redirect}
+        tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id, "is_error": True,
+                                       "content": _error_result_content(detail, None, detail["error_kind"])})
+        return
 
     yield "tool_request", {
         "tool_use_id": tool_use_id,
@@ -3291,6 +3306,9 @@ def _dispatch_real_tool_call(
     })
     from services.reference_resolution import active_project_key
     session.note_touched_components(active_project_key(), tool_name, tu.get("input"))
+    if not external:
+        from harness import edit_routing
+        edit_routing.note_success(session, tool_name, tier, args)
     yield "tool_result", {
         "tool_use_id": tool_use_id,
         "tool_name": tool_name,

@@ -68,8 +68,12 @@ def test_the_undo_constants_match_the_middleware():
 def test_a_turn_of_edits_is_one_undo_step_through_run_turn(g1_at_100):
     """End to end through `run_turn`: two edits in one turn, one undo step, and
     that step returns the network to where the turn began."""
+    # The second edit also sets a text field: two numeric single edits in one
+    # response go through the one preview card instead (LC-16 slice C).
+    second = _set(175.0)
+    second["attrs"]["carrier"] = "wind"
     calls = [("tu-a", "update_component", _set(150.0)),
-             ("tu-b", "update_component", _set(175.0))]
+             ("tu-b", "update_component", second)]
     client = FakeAnthropicClient([
         ([_tool_use_event(*c) for c in calls],
          _FakeFinalMessage(content=[_tool_use_block(*c) for c in calls],

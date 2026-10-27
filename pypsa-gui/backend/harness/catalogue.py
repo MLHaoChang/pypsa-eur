@@ -517,6 +517,8 @@ TOOLS: list[dict[str, Any]] = [
         "update_global_constraint (dedicated partial-PUT mitigation); other "
         "7 classes → generic _update_component. To rename any class, pass "
         "new_name or attrs.name (bus names starting 'ic:' are reserved). "
+        "Several assets in one request go through preview_project_changes "
+        "(one card): a second numeric edit in a turn is refused toward it. "
         "Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -555,7 +557,9 @@ TOOLS: list[dict[str, Any]] = [
         "Undoable as part of this turn (one undo reverts the turn's network "
         "edits). Backend coerces values against "
         "df[col].dtype; "
-        "all-or-nothing on unknown names. Safety: write.",
+        "all-or-nothing on unknown names. In chat, numeric fields on two or "
+        "more names are refused toward preview_project_changes (one card); "
+        "use this tool for text fields and flags it cannot take. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "names": {"type": "array", "items": {"type": "string"}},

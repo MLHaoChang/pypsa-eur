@@ -575,6 +575,20 @@ def _shadowing_series(klass, names, attribute, network, user_ts):
     return [n for n in names if n in columns or (component_attr, attribute, n) in (user_ts or {})]
 
 
+PREVIEW_CLASSES = frozenset(_PreviewChange.model_fields["component_class"].annotation.__args__)
+
+
+def preview_kind(component_class, attribute):
+    """'number' or 'boolean' when `preview_project_changes` takes this field of
+    this class, else None: the one eligibility test, which chat routing
+    (`harness/edit_routing.py`) reuses."""
+    from harness import edit_card
+
+    if component_class not in PREVIEW_CLASSES:
+        return None
+    return _parameter_kind(edit_card._fields(component_class).get(attribute))
+
+
 def _preview_changes(changes, network, user_ts=None):
     """Parse and check a preview before any sandbox work: every member exists,
     every field is an editable number or flag, at most 20 entity × field rows."""
@@ -613,7 +627,7 @@ def _preview_changes(changes, network, user_ts=None):
     seen = set()
     for change in parsed:
         field = edit_card._fields(change.component_class).get(change.attribute)
-        kind = _parameter_kind(field)
+        kind = preview_kind(change.component_class, change.attribute)
         if kind is None:
             workflow._refuse("invalid_change_attribute", f"{change.component_class}.{change.attribute} is not a numeric "
                              "or true/false parameter of that class. Read get_component_schema.")

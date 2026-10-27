@@ -94,6 +94,27 @@ it('a Settings row names the unit alone and shows the rounded value without a st
   expect(screen.queryByTestId('chat-edit-display')).toBeNull()
 })
 
+it.each([['expert', 'full', 'rolling'], ['guided', 'Full LP', 'Rolling horizon']] as const)(
+  'a solver card (OJ-44) in %s mode: values, a "—" old value that did not apply, the note under the table',
+  (uiMode, oldWord, newWord) => {
+    useUIStore.setState({ uiMode })
+    const pending = useChatStore.getState().pending!
+    const strategy = { component_class: 'Settings', name: 'Solver settings', field: 'solve_strategy',
+      label: 'Solve strategy', old: 'full', new: 'rolling', unit: '', role: 'typed',
+      words: { old: 'Full LP', new: 'Rolling horizon' } }
+    const horizon = { component_class: 'Settings', name: 'Solver settings', field: 'rolling_horizon',
+      label: 'Horizon', old: 168, new: 24, unit: 'snapshots', role: 'typed', old_applies: false }
+    const note = { component_class: '', name: '', field: 'solve_strategy', label: 'solve_strategy', old: null,
+      new: null, unit: '', role: 'note', note: 'Rolling dispatch solves the horizon in windows.' }
+    useChatStore.setState({ pending: { ...pending, edit_card: { ...card, rows: [strategy, horizon, note] } } })
+    render(<ConfirmationCard />)
+    const [s, h] = screen.getAllByTestId('chat-edit-row-typed').map(r => within(r).getAllByRole('cell').map(c => c.textContent))
+    expect(s.slice(2, 4)).toEqual([oldWord, newWord])
+    expect(h.slice(2, 5)).toEqual(['\u2014', '24', 'snapshots'])
+    expect(screen.queryByTestId('chat-edit-row-note')).toBeNull()
+    expect(screen.getByTestId('chat-edit-card-note').textContent).toBe('Rolling dispatch solves the horizon in windows.')
+  })
+
 it('a component the change creates reads as created, not as true/false', () => {
   const pending = useChatStore.getState().pending!
   const created = { component_class: 'Carrier', name: 'AC', field: 'exists', label: 'exists', old: false, new: true,
