@@ -355,6 +355,20 @@ def _tap_hours_moved(taps):
     return len({(r["period"], r["hour"]) for r in taps if r["moved_by"]})
 
 
+def _ibr_q_curve_not_computed(run: Path) -> bool:
+    """A run from before the per-unit Q-curve table was kept, held to a grid code that states the curve
+    (``q_capability_unit``): its results say to rerun. A run since keeps its profile (``PROFILE_USED_FILE``),
+    so a missing table there means the grid code has no curve or the campus no IBR unit."""
+    if (run / cs.IBR_Q_CURVE_CSV).is_file() or (run / PROFILE_USED_FILE).is_file():
+        return False
+    try:
+        profile = json.loads((run.parent / SETTINGS_FILE).read_text())["profile"]
+        code = cs.load_grid_code(profile, extra_dirs=(run.parent / GRID_CODES_SUBDIR,))
+    except Exception:  # noqa: BLE001 - no settings or a profile that no longer loads: nothing to say
+        return False
+    return "q_capability_unit" in code
+
+
 def _results(run: Path):
     if not (run / cs.COMPLIANCE_CSV).is_file():
         return None
@@ -369,6 +383,10 @@ def _results(run: Path):
         "short_circuit": _read_csv(run / cs.SHORT_CIRCUIT_CSV),
         "compliance": _read_csv(run / cs.COMPLIANCE_CSV),
         "reactive": _read_csv(run / cs.REACTIVE_CSV),
+        # DC 15: each IBR unit against the grid code's per-unit reactive capability curve; None when the grid
+        # code has no curve or the campus no IBR unit, and for a run from before the table was kept.
+        "ibr_q_curve": _read_csv(run / cs.IBR_Q_CURVE_CSV),
+        "ibr_q_curve_not_computed": _ibr_q_curve_not_computed(run),
         "requirement": json.loads((run / cs.REQUIREMENT_JSON).read_text()),
         # What the grid code requires that no steady-state check can show ("needs an RMS study"); [] for a run
         # from before it was kept.

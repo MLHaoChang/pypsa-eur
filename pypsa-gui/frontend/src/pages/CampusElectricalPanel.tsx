@@ -47,6 +47,7 @@ import { SiteConnectionEditor } from './economics/SiteConnectionLink'
 import CampusGridCodeSection, { GRID_CODES_KEY } from './CampusGridCodeSection'
 import CampusInvestmentSection, { TableScroll, formatEur, iterationsText } from './CampusInvestmentSection'
 import CampusHarmonicScanSection from './CampusHarmonicScanSection'
+import CampusUnitQCurveSection from './CampusUnitQCurveSection'
 import { GRID_CODE_CHANGED } from '../components/gridReadiness/GridReadinessScorecard'
 import CampusIslandSection, { ISLAND_REPORT_KEY } from './CampusIslandSection'
 import CampusLibrarySection from './CampusLibrarySection'
@@ -725,6 +726,8 @@ function ResultsSection({ state, pending, show = 'all' }: { state: CampusState; 
           </p>
         )}
       </PageSection>}
+
+      {grid && <CampusUnitQCurveSection rows={r.ibr_q_curve} notComputed={r.ibr_q_curve_not_computed} />}
 
       {grid && <CampusHarmonicScanSection scan={r.harmonic_scan} />}
 

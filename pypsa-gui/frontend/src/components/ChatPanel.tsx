@@ -3559,6 +3559,7 @@ export default function ChatPanel({ companionAccessTarget = null, companionChoic
               <>
                 <AssistantResultCard result={m.tool_result} disabled={streaming || notReady || Boolean(mismatchLine)}
                   continuation={continuationLine(m.tool_result, m.origin_project)}
+                  toolWords={uiMode === 'guided' ? guidedToolPhrase : undefined}
                   onRequest={(text) => useChatStore.getState().sendRequest(text, { source: 'assistant-task' })} />
                 <ToolProgressDetails toolUseId={m.tool_use_id} />
               </>

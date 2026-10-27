@@ -227,7 +227,7 @@ def test_a_template_opens_with_its_preset(client, tmp_projects_dir, tid, preset_
     assert [c["id"] for c in body["cards"]] == [c.id for c in S.CARDS]
     flow = _flow(client, name)
     assert flow["scope"]["preset_id"] == preset_id
-    assert flow["run_request"] == {"optimisation": True, "study": True}
+    assert flow["run_request"] == {"optimisation": True, "study": True, "loadflow": False}
 
 
 def test_the_own_site_preset_follows_its_site_type(client, tmp_projects_dir):
@@ -260,7 +260,7 @@ def test_reliability_off_takes_the_study_out_of_the_run(client, tmp_projects_dir
                                                   if g != "reliability"]})
     assert off["source"] == "project"
     body = _flow(client, name)
-    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
     assert body["verdicts"]["study"] is None
     rel = [i for s in body["sections"] for i in s["items"] if i["card"] == "reliability"]
     assert rel, "out-of-scope items stay in the payload"
@@ -383,7 +383,8 @@ def test_no_scope_file_reads_exactly_as_before(client, tmp_projects_dir, project
     # Master's rule: every EH template requests the study, except a load-less
     # generation-only plant (#485's IPP hybrid).
     generation_only = bool(template.get("generation_only"))
-    assert preset["run_request"] == {"optimisation": True, "study": not generation_only}
+    assert preset["run_request"] == {"optimisation": True, "study": not generation_only,
+                                    "loadflow": False}
     items = [i for s in preset["sections"] for i in s["items"]]
     assert all(i["in_scope"] for i in items)
     (project_storage_dir(name) / S.SCOPE_FILE).write_text(json.dumps(_all_on(template)))
@@ -404,7 +405,7 @@ def test_a_project_without_a_template_keeps_its_payload(client, install_network,
                                                       "rebind": True}).status_code == 200
     body = _flow(client, "plain")
     assert body["scope"]["preset_id"] == "blank"
-    assert body["run_request"] == {"optimisation": True, "study": False}
+    assert body["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
     assert all(i["in_scope"] for s in body["sections"] for i in s["items"])
     assert not any(s["state"] == "not_needed" for s in body["sections"])
 
@@ -440,7 +441,7 @@ def test_a_study_refusal_with_reliability_off_blocks_nothing(client, tmp_project
     assert refused["in_scope"] is False and refused["blocking"] is False
     _no_out_of_scope_blocker(off)
     pre = client.post("/api/simulation/preflight").json()
-    assert off["run_request"] == {"optimisation": True, "study": False}
+    assert off["run_request"] == {"optimisation": True, "study": False, "loadflow": False}
     assert off["run_ready"] is pre["ok"] is True
     assert off["run_blocker"] is None
 

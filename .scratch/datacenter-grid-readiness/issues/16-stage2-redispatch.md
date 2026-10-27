@@ -3,7 +3,7 @@
 
 # Planning criteria: redispatch as a stage-2 remedial action
 
-Status: ready-for-agent
+Status: done (#731, 18d50649)
 Type: task
 Blocked by: none (follows 13, merged in #708)
 Gated: **yes** (gridspine)

@@ -1,10 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import AssistantResultCard from './AssistantResultCard'
+import { useUIStore } from '../store/uiStore'
 afterEach(cleanup)
 const task = { task_id: '0ba037fe-bc46-43d3-a9c2-9b587c9cd50e', title: 'Refine grid', status: 'ready',
   completed_steps: 2, total_steps: 4, next_step: { tool: 'wait_for_job', status: 'pending' } }
 it('shows durable progress and sends ordinary resume/cancel requests', () => {
+  useUIStore.setState({ uiMode: 'expert' })
   const onRequest = vi.fn()
   render(<AssistantResultCard result={{ _task: task }} disabled={false} onRequest={onRequest} />)
   expect(screen.getByText('ready · 2 / 4 steps')).toBeTruthy()
@@ -70,4 +72,56 @@ it('LC-12: a held continuation offers Continue now; other states are plain lines
   rerender(<AssistantResultCard result={{ _task: task }} disabled={false} onRequest={vi.fn()}
     continuation={{ state: 'continued' }} />)
   expect(screen.queryByTestId('task-continuation-line')).toBeNull()
+})
+it('LC-02: lists the plan steps with their states, the applied changes, and the waiting job ID', () => {
+  useUIStore.setState({ uiMode: 'expert' })
+  const plan = { ...task, status: 'waiting_job', completed_steps: 1, total_steps: 3,
+    steps: [{ id: 'cap', tool: 'set_component_attribute', status: 'completed' },
+      { id: 'solve', tool: 'solve_network', status: 'waiting' }, { id: 'chart', tool: 'create_chart', status: 'pending' }],
+    next_step: { id: 'solve', tool: 'solve_network', status: 'waiting', job_id: 'job-42' },
+    changes: ['Set G1 marginal cost 10 → 20 currency/MWh'] }
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
+  const steps = screen.getAllByTestId('assistant-task-step')
+  expect(steps.map(s => [s.dataset.status, s.textContent])).toEqual([
+    ['completed', 'set_component_attribute · done'], ['waiting', 'solve_network · waiting for job job-42'],
+    ['pending', 'create_chart · to do']])
+  expect(steps[1].getAttribute('aria-current')).toBe('step')
+  const applied = screen.getByTestId('assistant-task-applied')
+  expect([...applied.querySelectorAll('li')].map(li => li.textContent)).toEqual(['Set G1 marginal cost 10 → 20 currency/MWh'])
+  cleanup()
+  // A waiting step that is not the next one has no job to name.
+  render(<AssistantResultCard result={{ _task: { ...plan, next_step: plan.steps[2] } }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('solve_network · waiting for a job')
+  cleanup()
+  // Guided says what waits, without the job ID.
+  useUIStore.setState({ uiMode: 'guided' })
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('solve_network · waiting for a background job')
+  // Guided words the status and Next lines too; Expert keeps the stored ids (above).
+  expect(screen.getByText('Waiting for a background job · 1 / 3 steps')).toBeTruthy()
+  expect(screen.getByText('Next: solve_network (waiting for a background job)')).toBeTruthy()
+  cleanup()
+  render(<AssistantResultCard result={{ _task: { ...plan, status: 'ready', next_step: plan.steps[2] } }} disabled={false}
+    onRequest={vi.fn()} toolWords={() => 'make a chart'} />)
+  expect(screen.getByText('Ready · 1 / 3 steps')).toBeTruthy()
+  expect(screen.getByText('Next: make a chart (to do)')).toBeTruthy()
+  useUIStore.setState({ uiMode: 'expert' })
+})
+it('LC-02: names steps in words when given, shows the brief phase and says when steps are left out', () => {
+  const plan = { ...task, steps: [{ id: 'a', tool: 'generate_report', status: 'failed' }], step_details_truncated: true,
+    next_step: { id: 'a', tool: 'generate_report', status: 'failed' },
+    brief: { objective: 'Size the battery', phase: { card: 'capacity', index: 1, of: 2 } } }
+  render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()}
+    toolWords={(t) => t === 'generate_report' ? 'start writing the project report' : t} />)
+  expect(screen.getByTestId('assistant-task-step').textContent).toBe('start writing the project report · failed')
+  expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 1 of 2: Capacity expansion')
+  expect(screen.getByText('Some steps are not listed.')).toBeTruthy()
+  expect(screen.queryByTestId('assistant-task-applied')).toBeNull()
+})
+it('LC-02: names the brief phase by its results card label, hand-off included', () => {
+  const plan = (card: string) => ({ ...task, brief: { objective: 'Size the battery', phase: { card, index: 4, of: 4 } } })
+  const { rerender } = render(<AssistantResultCard result={{ _task: plan('hand-off') }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 4 of 4: Hand-off')
+  rerender(<AssistantResultCard result={{ _task: plan('grid') }} disabled={false} onRequest={vi.fn()} />)
+  expect(screen.getByTestId('assistant-task-phase').textContent).toBe('Size the battery · phase 4 of 4: AC power flow & grid')
 })
