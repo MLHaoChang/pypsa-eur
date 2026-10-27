@@ -7,7 +7,7 @@ Each case, in Expert and Guided: `before/lc16c-<case>-<mode>-before.png` (full p
 - `solver`: solve strategy full → rolling, horizon 48 snapshots, with the rolling note. The horizon's old value shows "—" because it did not apply under full; the Expert receipt now says the same (fixed in 02c9cac).
 - `economics`: discount rate 7 → 5 % (stored as 0.05), default lifetime 25 → 30 yr.
 - `name`: network name oj-grid → Harbour grid.
-- `weightings`: 2030 Years 1 → 10, 2040 Years 1 → 10, 2040 Objective 1 → 0.5.
+- `weightings`: 2030 Years 1 → 10 yr, 2040 Years 1 → 10 yr, 2040 Objective 1 → 0.5. Re-shot at 1196c02 after UX asked for "yr" on the Years rows.
 - `bulk`: "Set L1 and L2 to 500 MVA" as bulk_update_components is refused with the preview form, and lands on one multi-asset preview card (L1, L2 300 → 500 MVA), then one receipt.
 
 "No unit" on unitless rows is the agreed UX follow-up, not this PR. The Horizon unit stays "snapshots".
