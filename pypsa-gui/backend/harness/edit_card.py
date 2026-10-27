@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import hmac
 import json
 import math
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -981,6 +983,30 @@ def _setting(value):
     return value if not isinstance(value, str) or len(value) <= TEXT_CAP else value[:TEXT_CAP] + "\u2026"
 
 
+_SALT = os.urandom(16)  # per process: a fingerprint on a card can not be used to guess a value
+
+
+def _fingerprint(value) -> str:
+    return hmac.new(_SALT, json.dumps(value, sort_keys=True, default=str).encode(), "sha1").hexdigest()[:12]
+
+
+def _hide_cut(row: dict, old, new) -> dict:
+    """A text cut at TEXT_CAP can read the same before and after an edit that differs past the cut.
+    Such a row says "(changed)" and carries a fingerprint of the new value, so the receipt can tell
+    a written edit from an unwritten one."""
+    if row["old"] == row["new"] and not _same(old, new):
+        row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = _fingerprint(new)
+    return row
+
+
+def _settle(row: dict, value):
+    """The stored value as the receipt compares it with the row's `new`."""
+    if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+        return row["new"]
+    return _setting(value)
+
+
 def _solver_row(key: str, old, new, *, applies: bool = True) -> dict:
     base = key.split(".")[0]
     label, unit, words = _SOLVER_WORDS.get(base, (key, "", None))
@@ -1363,7 +1389,7 @@ def _settings_row(name: str, field: str, label: str, old, new, unit: str = "", *
            "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
     if says_name:
         row["says_name"] = says_name
-    return row
+    return _hide_cut(row, old, new)
 
 
 def _project_name(args: dict) -> str:
@@ -1521,7 +1547,7 @@ def _scenario_preview(args: dict) -> list[dict]:
 
 def _scenario_readback(args: dict, rows: list[dict]) -> list[Any]:
     stored = _stored_scenario(args)
-    return [_setting(stored[row["field"]]) for row in rows]
+    return [_settle(row, stored[row["field"]]) for row in rows]
 
 
 register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_preview, _scenario_readback,
@@ -1605,7 +1631,8 @@ def _study_row(field: str, label: str, old, new, *, unit: str = "", says_name: s
     row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
     if row["old"] == "set" and row["new"] == "set":
         row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
-    return row
+        return row
+    return _hide_cut(row, old, new)
 
 
 def _title(key: str) -> str:
@@ -1667,6 +1694,9 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
         for part in ([parts[0]] if parts[0] != "settings" else [parts[1]]) if parts[0] != "intake" else parts:
             value = value.get(part) if isinstance(value, dict) else None
         cell = _study_cell(row["field"], value)
+        if str(row["new"]).endswith(" (changed)") and row.get("fingerprint") == _fingerprint(value):
+            out.append(row["new"])
+            continue
         out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
     return out
 
