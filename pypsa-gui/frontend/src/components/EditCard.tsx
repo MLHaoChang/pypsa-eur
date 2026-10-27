@@ -23,6 +23,11 @@ export interface EditCardRow {
   role: 'typed' | 'derived' | 'follows' | 'at_solve' | 'note'
   note?: string
   display?: { old: number | null; new: number | null; unit: string }
+  /** A setting's values in the Settings panel's words, which Guided shows ("Rolling horizon"). */
+  words?: { old: Scalar; new: Scalar }
+  /** False when the old value did not apply under the old settings (a rolling horizon
+   *  while the strategy was full): the old cell shows "—". */
+  old_applies?: boolean
   readback?: Scalar
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
@@ -204,6 +209,19 @@ export function editCardHeader(card: EditCard): string {
   return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
 }
 
+/** A row's old and new cells. Guided shows a setting's value in the panel's words; an old
+ * value that did not apply shows "—". */
+function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string, string] {
+  const known = r.old_known !== false
+  const words = guided ? r.words : undefined
+  const old = r.old_applies === false ? '\u2014'
+    : words ? (words.old == null ? show(r.old) : String(words.old))
+    : r.display && known && typeof r.old === 'number' ? showDisplay(r.display.old) : value(r.old, known)
+  const now = words ? (words.new == null ? show(r.new) : String(words.new))
+    : r.display ? showDisplay(r.display.new) : value(r.new)
+  return [old, now]
+}
+
 /** The Guided headline: each typed change in the table's words and display unit
  * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
 export function editCardWords(card: EditCard): string {
@@ -212,9 +230,7 @@ export function editCardWords(card: EditCard): string {
     ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
     const asset = assetWords(r.component_class, r.name)
     if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
-    const known = r.old_known !== false
-    const old = r.display && known && typeof r.old === 'number' ? showDisplay(r.display.old) : cellValue(r.old, known)
-    const now = r.display ? showDisplay(r.display.new) : cellValue(r.new)
+    const [old, now] = rowValues(r, true)
     const unit = r.display?.unit || r.unit
     return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
   })].join('; ')
@@ -254,6 +270,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
             <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
           ))}</tr></thead>
           <tbody>{card.rows.map((r, i) => {
+            if (r.role === 'note' && !r.component_class && !r.name) return null
             if (r.role === 'note') {
               return (
                 <tr key={i} className="text-muted" data-testid="chat-edit-row-note">
@@ -293,10 +310,8 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                       : r.role === 'at_solve' ? (r.note ?? 'Set at solve time') : 'Follows from the change'}
                   </span>}
                 </td>
-                <td className="p-1 border-b border-border break-words">
-                  {r.display && r.old_known !== false && typeof r.old === 'number' ? showDisplay(r.display.old) : value(r.old, r.old_known !== false)}</td>
-                <td className="p-1 border-b border-border break-words font-medium">
-                  {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
+                <td className="p-1 border-b border-border break-words">{rowValues(r, guided, value)[0]}</td>
+                <td className="p-1 border-b border-border break-words font-medium">{rowValues(r, guided, value)[1]}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
                   {r.display && r.display.unit !== r.unit && typeof r.new === 'number' && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
@@ -308,6 +323,9 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
           })}</tbody>
         </table>
       </div>
+      {card.rows.filter(r => r.role === 'note' && !r.component_class && !r.name).map((r, i) => (
+        <p key={i} className="mt-1 text-muted" data-testid="chat-edit-card-note">{r.note}</p>
+      ))}
       {!card.complete && <p className="mt-1 text-muted" data-testid="chat-edit-card-partial">
         These are the requested values. The current values were not read for this kind of change.
       </p>}
