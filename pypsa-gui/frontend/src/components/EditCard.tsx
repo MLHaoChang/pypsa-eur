@@ -236,8 +236,9 @@ export function editCardWords(card: EditCard): string {
     const unit = r.display?.unit || r.unit
     return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
   })]
-  // A long card keeps its headline short; the table below lists every row.
-  return lines.length <= HEADLINE_CAP ? lines.join('; ')
+  // A long card keeps its headline short; the table below lists every row. One hidden line
+  // is not worth "and 1 more", so it shows.
+  return lines.length <= HEADLINE_CAP + 1 ? lines.join('; ')
     : `${lines.slice(0, HEADLINE_CAP).join('; ')}; and ${lines.length - HEADLINE_CAP} more changes`
 }
 

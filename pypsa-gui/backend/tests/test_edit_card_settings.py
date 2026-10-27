@@ -39,6 +39,7 @@ def test_flow_scope_shows_the_changed_option_old_to_new(client, api_project):
     trial, card = _toggle(name, chat_tools.get_project_flow_scope(name)["scope"])
     assert card["complete"] and card["kind"] == "settings_edit"
     assert [(r["old"], r["new"]) for r in card["rows"]] == [(True, False)]
+    assert "\u203a" not in card["rows"][0]["label"] and " \u00b7 " in card["rows"][0]["label"]  # data, not a link
     assert "Included \u2192 Not included" in card["says"]
     args = {"name": name, "scope": trial}
     chat_tools.update_project_flow_scope(name, trial)
@@ -256,3 +257,6 @@ def test_studies_disabled_refuses_with_the_handlers_refusal(client, api_project,
     with pytest.raises(HTTPException) as exc:
         edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "name": "x"})
     assert (exc.value.status_code, exc.value.detail["error_kind"]) == (404, "decision_studies_disabled")
+    with pytest.raises(HTTPException) as unknown:  # the gate comes before the study lookup
+        edit_card.preview("update_decision_study", {"project": project, "study_id": "no-such-study", "name": "x"})
+    assert (unknown.value.status_code, unknown.value.detail["error_kind"]) == (404, "decision_studies_disabled")

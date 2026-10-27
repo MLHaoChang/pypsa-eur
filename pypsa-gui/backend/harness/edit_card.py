@@ -1394,7 +1394,7 @@ def _flow_scope_preview(args: dict) -> list[dict]:
     try:
         new = flow_scope.validate(args.get("scope"), has_template=template is not None, no_load=no_load)
     except flow_scope.ScopeError as exc:
-        _refuse(exc.error_kind, exc.message)
+        raise HTTPException(422, {"error_kind": exc.error_kind, "message": exc.message})  # the store's own kind
     old = flow_scope.read_scope(project.directory, template, settings, no_load=no_load)
     before, after = _scope_flat(old), _scope_flat(new)
     rows = []
@@ -1405,7 +1405,7 @@ def _flow_scope_preview(args: dict) -> list[dict]:
         if card == "group":
             label = flow_scope.CARD_BY_ID[option].label
         else:
-            label = f"{flow_scope.CARD_BY_ID[card].label} › {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
+            label = f"{flow_scope.CARD_BY_ID[card].label} \u00b7 {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
         row = _settings_row("Scope", key, label, before.get(key, False), after.get(key, False), says_name=label)
         row["words"] = {"old": "Included" if row["old"] else "Not included",
                         "new": "Included" if row["new"] else "Not included"}
@@ -1627,6 +1627,9 @@ def _intake_rows(old: dict, new: dict, steps: list[str]) -> list[dict]:
 
 
 def _decision_study_preview(args: dict) -> list[dict]:
+    from routers import studies
+
+    studies._refuse_unless_enabled()  # the route gates first, before it looks up any study
     old = _study(args)
     new = _study_after(args, old)
     before, after = old.model_dump(mode="json", by_alias=True), new.model_dump(mode="json", by_alias=True)
