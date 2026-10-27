@@ -127,6 +127,14 @@
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
     },
+    "finance_if_match_required": {
+      "surface": "inline",
+      "why": "set_finance_inputs was called without the digest get_finance_inputs returned, or with '*'. The model reads the finance inputs first and passes their digest as if_match."
+    },
+    "finance_clear_invalid": {
+      "surface": "inline",
+      "why": "set_finance_inputs got neither a finance object nor clear=true, or both. The model sends the whole finance object, or clear=true alone when the user asked to remove every finance input."
+    },
     "finance_inputs_invalid": {
       "surface": "inline",
       "why": "The stored finance inputs do not validate (the route's 422 lists the errors). The model tells the user which fields; they are corrected in the Investment tab."

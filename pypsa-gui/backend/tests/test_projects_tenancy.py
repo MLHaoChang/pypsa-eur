@@ -1218,6 +1218,23 @@ def test_clear_finished_is_not_refused_by_active_project_foreign_lock(session_lo
         assert r.status_code != 409, r.text
 
 
+def test_investment_case_abort_is_not_refused_by_active_project_foreign_lock(session_local):
+    """
+    The investment-case abort only sets the study's stop event, like the other
+    study aborts. Gated, a foreign lock would trap a running case with no way
+    to stop it (LV08 B2a). The point is that it is NOT 409 `project_locked`.
+    """
+    _org, user_a, user_b, project = _seed_two_user_project(session_local)
+
+    with _client_for(user_a.email) as client_a, _client_for(user_b.email) as client_b:
+        assert client_a.post(f"/api/projects/{project.id}/activate").status_code == 200
+        assert client_a.post(f"/api/projects/{project.id}/lock").status_code == 200
+        assert client_b.post(f"/api/projects/{project.id}/activate").status_code == 200
+
+        r = client_b.post("/api/results/investment_case/abort")
+        assert r.status_code != 409, r.text
+
+
 def test_preflight_is_not_refused_by_active_project_foreign_lock(session_local):
     """
     `POST /api/simulation/preflight` is a read-only diagnostic: it calls

@@ -196,15 +196,12 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('GET', '/api/projects/{name}/profiles/current'): 'Time series panel',
     ('GET', '/api/projects/{name}/profiles/weather'): 'Time series panel',
     ('GET', '/api/projects/{name}/reports/{report_id}/figures/{figure_id}'): 'Reports panel',
-    ('GET', '/api/projects/{name}/stress_profile_packs'): 'Projects page / Workspace panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/ledger.csv'): 'Decision studies panel',
     ('GET', '/api/projects/{name}/studies/{study_id}/options/{option_id}/case.xlsx'): 'Decision studies panel',
     ('GET', '/api/results/energy_flows.csv'): 'Results panel',
     ('GET', '/api/results/investment_case/export.xlsx'): 'Results panel',
     ('GET', '/api/results/process_uc_check'): 'Results panel',
     ('GET', '/api/results/process_view'): 'Results panel',
-    ('GET', '/api/simulation/commercial/poc'): 'Simulation and commercial configuration panels',
-    ('GET', '/api/simulation/value_flows/designer'): 'Simulation and commercial configuration panels',
     ('POST', '/api/campus-electrical/{name}/island/cuts/apply/cancel'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/island/preset'): 'Campus electrical panel',
     ('POST', '/api/campus-electrical/{name}/library/reset'): 'Campus electrical panel',
@@ -218,8 +215,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('POST', '/api/projects/{name}/flow/ack'): 'Projects page / Workspace panel',
     ('POST', '/api/projects/{name}/profiles/from-current'): 'Time series panel',
     ('POST', '/api/projects/{name}/profiles/shape'): 'Time series panel',
-    ('POST', '/api/results/billing/preview'): 'Results panel',
-    ('POST', '/api/results/investment_case/abort'): 'Results panel',
     ('POST', '/api/simulation/queue/cancel_queued'): 'Solve queue panel',
     ('POST', '/api/simulation/queue/{job_id}/dismiss'): 'Solve queue panel',
     ('POST', '/api/simulation/queue/{job_id}/requeue'): 'Solve queue panel',
@@ -227,7 +222,6 @@ KNOWN_GAPS: dict[tuple[str, str], str] = {
     ('PUT', '/api/campus-electrical/{name}/grid-readiness/limits/{item}'): 'Campus electrical panel',
     ('PUT', '/api/projects/{name}/profiles/weather'): 'Time series panel',
     ('PUT', '/api/projects/{name}/worksheet'): 'Projects page / Workspace panel',
-    ('PUT', '/api/simulation/finance'): 'Simulation and commercial configuration panels',
 }
 _KNOWN_GAPS_CEILING = 70
 

@@ -56,6 +56,8 @@ SETTINGS_EDITS = frozenset({
     # LV08 B1: a study's intake/settings and the project's scope, labels and settings.
     "update_decision_study", "update_project_flow_scope", "update_project_scenario_metadata",
     "update_project_settings",
+    # LV08 B2a: Library writes (as import_urdb_tariff) and the finance inputs.
+    "import_library_series", "import_meter_data", "put_library_item", "set_finance_inputs",
     # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
     "import_map_geometry",
 })

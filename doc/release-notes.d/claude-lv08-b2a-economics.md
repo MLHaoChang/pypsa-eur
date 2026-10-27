@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The in-app assistant can now read the Library series, the point-of-connection state, the value-flow designer, the stress profile packs and the finance inputs, import meter data and series files, preview the bill under a draft tariff, edit Library items and the finance inputs, and abort an investment case.
