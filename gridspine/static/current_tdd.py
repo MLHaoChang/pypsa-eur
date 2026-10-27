@@ -109,15 +109,6 @@ TABLES = (
     )),
 )
 
-LEDGER = (
-    "the band uses the minimum short-circuit level, while IEEE 519 uses the maximum short-circuit "
-    "current, so the screen is stricter than the standard",
-    "I_L is the rated campus load, not IEEE 519's average of monthly maximum demands",
-    "the IEEE 519-2014 table values are from memory and not verified against the text (assumed)",
-    "a ratio exactly on a band boundary takes the stricter band",
-    "Isc/IL takes the caller's S_k'' as given, with no IEC 60909 voltage factor c; IEEE 519's Isc is the "
-    "maximum fault current, so leaving c out lowers the ratio and makes the screen stricter",
-)
 STRICTER = ("band from S_sc,min, while IEEE 519 uses the maximum short-circuit current, so the screen is "
             "stricter than the standard")
 I_L_NOTE = "I_L: rated campus load, not IEEE 519's average of monthly maximum demands"
