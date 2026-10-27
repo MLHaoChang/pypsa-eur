@@ -664,3 +664,31 @@ def test_bad_flicker_limits_are_refused(mutate, match):
     mutate(p)
     with pytest.raises(ContractError, match=match):
         validate_profile("p", p)
+
+
+# --- the current-distortion standard (datacenter readiness 12, part 1) -------
+
+
+@pytest.mark.parametrize("name", ["eu_rfg_dcc_ce", "generic_assumed"])
+def test_the_european_and_generic_profiles_name_ieee_519_as_an_assumed_placeholder(name):
+    lim = load_grid_code(name)["current_tdd_standard"]
+    assert lim["value"] == "ieee519-2014" and lim["source"] == "assumed"
+    assert "placeholder" in lim["clause"] and "IEEE 519-2014 Tables 2-4" in lim["clause"]
+    assert "SAGC" not in lim["clause"]
+
+
+def test_the_us_profile_names_no_current_distortion_standard():
+    assert "current_tdd_standard" not in load_grid_code("us_ieee2800_nerc")
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda p: p.update(current_tdd_standard={"value": "iec61000-3-12", "clause": "c", "source": "assumed"}),
+     "current_tdd_standard value must be one of"),
+    (lambda p: p.update(current_tdd_standard={"value": "ieee519-2014", "source": "assumed"}),
+     "current_tdd_standard has no clause"),
+])
+def test_a_bad_current_distortion_standard_is_refused(mutate, match):
+    p = _harmonic()
+    mutate(p)
+    with pytest.raises(ContractError, match=match):
+        validate_profile("p", p)
