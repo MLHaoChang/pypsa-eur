@@ -571,6 +571,10 @@
       "surface": "inline",
       "why": "Decision study chat tool (U3): run_decision_study was asked for a stage other than options or tornado. The model's slip; it reads the message and asks again."
     },
+    "study_view_invalid": {
+      "surface": "inline",
+      "why": "Decision study chat tool (LV08 B1): get_decision_study was asked for a view other than summary, ledger, option_case or report, or for option_case without option_id. The model's slip; it reads the message and asks again."
+    },
     "time_column_parse_error": {
       "surface": "banner",
       "why": "The time column could not be parsed as datetimes; the user must fix the input."
