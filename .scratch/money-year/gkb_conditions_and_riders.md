@@ -25,3 +25,9 @@ What has moved on since:
 (c) If site_fixture switches to the WP0_PACK_VERSION constant (plan A), it still counts as rider 3's pin. Keep its one-line reason.
 
 PLAN A changes (GK B 23:33Z): C1 reset_rows on stored ledger's library (after reseed if same request); C2 strict parse, LibraryError names ledger_version, _library_for_or_500 → 500 naming reason, no new cache; C3 docstring: LIBRARY_VERSION→10-05 is what master did; test a LIBRARY_VERSION stored ledger runs without currency_year_mixed; C4 same-bill vs value computed on 10-05, rtol 1e-9; C5 PR body classifies all 16 load_defaults callers.
+
+R1–R4, verbatim (GK B session_01VH95FbpjNzxVG6BqcVzcjZ → session_01NEaJ9tPn9bhwxGrvA3cgDv, 2026-10-26 22:42:47Z; "option (i), list them in this PR"):
+R1. One literal key per row in `_PACK_ROWS_NOT_SEEDED`, with no prefix or wildcard match, because a key is a contract. A script can generate the list, but commit it as literal entries. Reasons are short category tokens like the existing one (e.g. "campus_only", "heat_kit_only", "refinery_only"), with a comment line per category.
+R2. Stale guard: a test that every key in `_PACK_ROWS_NOT_SEEDED` exists in the live pack, so no entry outlives its row. If the load already refuses unknown keys, name that test instead.
+R3. No hidden seed gap: the PR body says that no listed row is a technology the guided ledger already maps under another key (a newer PV or battery cost row, for example). For each listed row whose technology appears in `_PACK_TECH_ROWS`, either seed it or say why the old row stays the source.
+R4. Condition (3) still applies: old pinned studies load byte-identically. Adding entries to this dict must not change `ledger_hash` or the pack hash of the 2026-10-05 load, so test it there.
