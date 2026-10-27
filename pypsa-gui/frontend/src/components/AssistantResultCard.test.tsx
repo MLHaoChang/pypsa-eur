@@ -6,6 +6,7 @@ afterEach(cleanup)
 const task = { task_id: '0ba037fe-bc46-43d3-a9c2-9b587c9cd50e', title: 'Refine grid', status: 'ready',
   completed_steps: 2, total_steps: 4, next_step: { tool: 'wait_for_job', status: 'pending' } }
 it('shows durable progress and sends ordinary resume/cancel requests', () => {
+  useUIStore.setState({ uiMode: 'expert' })
   const onRequest = vi.fn()
   render(<AssistantResultCard result={{ _task: task }} disabled={false} onRequest={onRequest} />)
   expect(screen.getByText('ready · 2 / 4 steps')).toBeTruthy()
@@ -96,6 +97,15 @@ it('LC-02: lists the plan steps with their states, the applied changes, and the 
   useUIStore.setState({ uiMode: 'guided' })
   render(<AssistantResultCard result={{ _task: plan }} disabled={false} onRequest={vi.fn()} />)
   expect(screen.getAllByTestId('assistant-task-step')[1].textContent).toBe('solve_network · waiting for a background job')
+  // Guided words the status and Next lines too; Expert keeps the stored ids (above).
+  expect(screen.getByText('Waiting for a background job · 1 / 3 steps')).toBeTruthy()
+  expect(screen.getByText('Next: solve_network (waiting for a background job)')).toBeTruthy()
+  cleanup()
+  render(<AssistantResultCard result={{ _task: { ...plan, status: 'ready', next_step: plan.steps[2] } }} disabled={false}
+    onRequest={vi.fn()} toolWords={() => 'make a chart'} />)
+  expect(screen.getByText('Ready · 1 / 3 steps')).toBeTruthy()
+  expect(screen.getByText('Next: make a chart (to do)')).toBeTruthy()
+  useUIStore.setState({ uiMode: 'expert' })
 })
 it('LC-02: names steps in words when given, shows the brief phase and says when steps are left out', () => {
   const plan = { ...task, steps: [{ id: 'a', tool: 'generate_report', status: 'failed' }], step_details_truncated: true,
