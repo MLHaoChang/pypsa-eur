@@ -1,6 +1,7 @@
 import { EditReceiptLine, editReceiptOf, setLine, type EditCardSet } from './EditCard'
 import { formatElapsed, useElapsed } from '../hooks/useElapsed'
 import { useUIStore } from '../store/uiStore'
+import { CARD_GROUPS } from '../pages/results/groups'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -17,12 +18,18 @@ function object(value: unknown): Record<string, unknown> | null {
 
 /** LC-02: a plan step's state in words; an unknown state shows as stored. */
 const STEP_WORDS: Record<string, string> = {
-  pending: 'to do', running: 'running', waiting: 'waiting for job', completed: 'done', failed: 'failed', uncertain: 'needs review',
+  pending: 'to do', running: 'running', waiting: 'waiting for a job', completed: 'done', failed: 'failed', uncertain: 'needs review',
+}
+
+/** A brief's card in the results' words; the backend's 'hand-off' is the 'handoff' group. */
+function cardLabel(card: unknown): string {
+  const id = card === 'hand-off' ? 'handoff' : String(card ?? '')
+  return CARD_GROUPS.find(g => g.id === id)?.label ?? id
 }
 
 /** LC-02: the plan's steps (the current phase's, with a brief), each with its state; the next step is marked. */
-function PlanSteps({ task, next, toolWords }: {
-  task: Record<string, unknown>; next: Record<string, unknown> | null; toolWords?: (tool: string) => string
+function PlanSteps({ task, next, guided, toolWords }: {
+  task: Record<string, unknown>; next: Record<string, unknown> | null; guided: boolean; toolWords?: (tool: string) => string
 }) {
   const steps = Array.isArray(task.steps) ? task.steps.map(object).filter((s): s is Record<string, unknown> =>
     s !== null && typeof s.tool === 'string' && typeof s.status === 'string') : []
@@ -31,21 +38,26 @@ function PlanSteps({ task, next, toolWords }: {
   const changes = Array.isArray(task.changes) ? task.changes.filter((c): c is string => typeof c === 'string') : []
   return <>
     {brief && phase && <div data-testid="assistant-task-phase">
-      {String(brief.objective ?? '')} · phase {Number(phase.index)} of {Number(phase.of)}: {String(phase.card ?? '')}
+      {String(brief.objective ?? '')} · phase {Number(phase.index)} of {Number(phase.of)}: {cardLabel(phase.card)}
     </div>}
     {steps.length > 0 && <ol aria-label="Plan steps" className="my-1 list-decimal pl-5">
       {steps.map((s, i) => {
         const current = next !== null && next.id === s.id
-        const job = current && s.status === 'waiting' && typeof next.job_id === 'string' ? ` ${next.job_id}` : ''
+        // Guided says what waits; Expert names the next step's job by its ID.
+        const job = s.status === 'waiting' && current && !guided && typeof next.job_id === 'string' ? next.job_id : null
+        const state = s.status === 'waiting' && guided ? 'waiting for a background job'
+          : job ? `waiting for job ${job}` : STEP_WORDS[String(s.status)] ?? String(s.status)
         const tool = String(s.tool)
         return <li key={typeof s.id === 'string' ? s.id : i} data-testid="assistant-task-step" data-status={String(s.status)}
           aria-current={current ? 'step' : undefined} className={current ? 'font-medium' : 'text-muted'}>
-          {toolWords ? toolWords(tool) : tool} · {STEP_WORDS[String(s.status)] ?? String(s.status)}{job}
+          {toolWords ? toolWords(tool) : tool} · {state}
         </li>
       })}
     </ol>}
     {task.step_details_truncated === true && <p className="text-muted">Some steps are not listed.</p>}
-    {changes.length > 0 && <div data-testid="assistant-task-applied">Applied: {changes.join('; ')}</div>}
+    {changes.length > 0 && <div data-testid="assistant-task-applied">Applied
+      <ul className="list-disc pl-5">{changes.map((c, i) => <li key={i}>{c}</li>)}</ul>
+    </div>}
   </>
 }
 
@@ -99,7 +111,7 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
       <div className="font-medium">{String(task?.title ?? 'Task')}</div>
       <div>{status} · {Number(task?.completed_steps ?? 0)} / {Number(task?.total_steps ?? 0)} steps</div>
       {next && <div>Next: {String(next.tool ?? '')} ({String(next.status ?? '')})</div>}
-      <PlanSteps task={task!} next={next} toolWords={toolWords} />
+      <PlanSteps task={task!} next={next} guided={guided} toolWords={toolWords} />
       {status === 'waiting_job' && continuation && <WaitingLine line={continuation} />}
       {status === 'needs_review' && <p>Verify the previous action before retrying. Its effects may already exist.</p>}
       <div className="mt-1 flex gap-2">

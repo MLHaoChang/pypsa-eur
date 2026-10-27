@@ -104,13 +104,18 @@ the next tool, although each step's `_task` view carries the step list, the
 brief phase, the waiting job ID and the applied edit receipts (`changes`).
 
 RED: `AssistantResultCard.test.tsx` LC-02 cases (2 failed). GREEN: the card
-lists each step with its state in words (to do, running, waiting for job
-<job ID>, done, failed, needs review), marks the next step `aria-current`,
-shows the brief's objective and phase, says when steps are left out, and lists
-what was applied. Guided names steps with `guidedToolPhrase`; Expert by tool.
-Both surfaces mount the same `ChatPanel`, so dock and companion agree.
+lists each step with its state in words (to do, running, waiting for a job,
+done, failed, needs review), marks the next step `aria-current`, shows the
+brief's objective and phase by its results card label (`CARD_GROUPS`; the
+backend's `hand-off` is `handoff`), says when steps are left out, and lists
+what was applied. Guided names steps with `guidedToolPhrase` and says
+"waiting for a background job"; Expert names the tool and the next step's job
+ID. The plan card lives in the dock transcript; the companion shows the turn's
+outcome line ("Show answer" opens the dock), as before.
 Checks: AssistantResultCard, ChatPanel, continuation, sendRequest and
-usePlanContinuation suites 215/215; `tsc -b` clean. No backend change.
+usePlanContinuation suites 216/216; `tsc -b` clean. No backend change.
+UX shots (`pr792/` on `claude/campus-ic-02-05-shots`): built app, real login
+and project, chat stream fed `_task` views written by `assistant_tasks._view`.
 
 Left for other packages: a generic "what I understood" line for unchecked
 turns has no backend frame to show (LC-C7 residual); navigation/rebind races
