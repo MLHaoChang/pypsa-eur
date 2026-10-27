@@ -141,9 +141,17 @@ def test_the_parts_leave_the_lp_identical(option):
 
 # ── C4: the real pre-tax basis; rows 21-34 ────────────────────────────────
 
+def _money_year(ledger) -> int:
+    """The money year of the pack the ledger was seeded from (its seed tariff's)."""
+    from services.study import library as L
+
+    return L.library_for_ledger(ledger).pack.finance.currency_year
+
+
 def _compile(ledger, owned=("battery", "grid_import", "grid_export"), **kw):
     return _C().finance_from_ledger(ledger, model_year=sf.SITE_YEAR, owned_assets=owned,
-                                    tariff_meta={"currency": "EUR", "currency_year": 2020,
+                                    tariff_meta={"currency": "EUR",
+                                                 "currency_year": _money_year(ledger),
                                                  "tariff_id": "t"}, **kw)
 
 
@@ -162,8 +170,10 @@ def test_the_finance_inputs_are_the_real_pre_tax_basis_from_rows_21_to_34():
 
     from models.finance import ESCALATION_CLASSES
 
-    fin = _compile(_pack_ledger(), owned=("pv", "battery")).inputs
-    assert fin.price_basis == "real" and fin.currency == "EUR" and fin.currency_year == 2020
+    led = _pack_ledger()
+    fin = _compile(led, owned=("pv", "battery")).inputs
+    assert fin.price_basis == "real" and fin.currency == "EUR"
+    assert fin.currency_year == _defaults().pack.finance.currency_year == _money_year(led)
     assert fin.escalation == {c: 0.0 for c in ESCALATION_CLASSES}
     assert fin.inflation is None
     assert fin.wacc_nominal == fin.cost_of_equity == 0.07
@@ -189,7 +199,13 @@ def test_a_legacy_ledger_takes_the_guided_rules_disclosed():
     legacy = legacy_ledger("de")
     assert not any(r.key == "contingency_share" for r in legacy.rows)
     got = _compile(legacy)
-    want = _compile(_pack_ledger())
+    # A legacy ledger reads the WP0 pack (2020 EUR), so it is compared with a
+    # ledger seeded from that pack, not the pin's (money-year 01).
+    from services.study import library as L
+    from services.study import questions as Q
+
+    want = _compile(L.seed_ledger(Q.BESS_AT_SITE, sf.site_intake(),
+                                  L.load_defaults(L.WP0_PACK_VERSION)))
     assert got.inputs == want.inputs
     assert got.notes == ("finance_rules_from_guided_defaults",)
     assert want.notes == ()

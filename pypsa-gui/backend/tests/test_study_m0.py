@@ -168,7 +168,11 @@ def test_a_tariff_change_reseeds_the_supplied_tariffs_rows(client, api_project, 
         "step": "tariff", "intake": {"tariff": {"tariff_id": "de_industrial_illustrative"}}})
     assert r.status_code == 200, r.text
     rows = {x["key"]: x for x in r.json()["ledger"]["rows"]}
-    assert rows["demand_charge_price"]["value"] == 9000.0
+    from services.study import library as lib
+
+    seed = lib.load_defaults().tariffs["de_industrial_illustrative"]  # the pin's seed tariff
+    # 9000 (2020 EUR) x 1.2573346011408, exactly; the pin states it once.
+    assert rows["demand_charge_price"]["value"] == seed.demand_charge.price_per_mw_per_period == 11316.0114102672
     assert rows["demand_charge_price"]["provenance"] == "library"
     assert rows["tariff"]["technical_name"] == "de_industrial_illustrative"
 

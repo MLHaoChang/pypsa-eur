@@ -1179,7 +1179,6 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
 
     from db.models import Project
     from services.study import forks as study_forks
-    from services.study import library as study_library
     from services.study import store
 
     question = Q.get_question(study.question_id)
@@ -1203,8 +1202,8 @@ def load_inputs(study, base_dir, db, base_uuid: str) -> StudyInputs:
     if not run_hashes.engine_recorded(hashes, run):
         raise FindingsRefused(409, run_hashes.ENGINE_STALE, run_hashes.EARLIER_VERSION)
     _refuse_unavailable_finance(run, question)
-    library = study_library.load_defaults()
     try:
+        library = packs.library_for(ledger)
         tariff = packs.effective_tariff(study.intake, ledger, library)
         # The engine's commercial config at the run's ledger and series: what
         # every centre case and bound is compiled from (`_compiled`).

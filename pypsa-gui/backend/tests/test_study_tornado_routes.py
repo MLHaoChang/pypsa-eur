@@ -18,9 +18,11 @@ from tests.test_study_runner import FakeSolver
 
 # Two energy bands AND a demand charge, so both dispatch-sensitive drivers
 # (the energy-price level and the demand-charge price) have a bar.
+# Money-year 01: stated in 2025 EUR, the study's money year, since
+# `currency_year_mixed` refuses a 2020 tariff against the 2025 rows.
 TOU_DC = {
     "tariff_id": "tou_dc_test", "name": "Two bands and a demand charge", "source": "test",
-    "source_year": 2026, "currency": "EUR", "currency_year": 2020, "billing_period": "month",
+    "source_year": 2026, "currency": "EUR", "currency_year": 2025, "billing_period": "month",
     "energy_bands": [
         {"label": "peak", "price_per_mwh": 160.0,
          "applies": {"weekdays": [0, 1, 2, 3, 4], "hours": list(range(8, 20))}},
@@ -538,7 +540,7 @@ def test_a_tariff_without_a_currency_year_takes_the_cases_year(
     v = r.json()["verdict"]
     assert v["status"] == "ok"
     npv = next(f for f in v["headline_kpis"] if f["key"] == "battery_npv")
-    assert npv["currency_year"] == 2020 and npv["basis"] is not None
+    assert npv["currency_year"] == 2025 and npv["basis"] is not None
 
 
 def test_a_tornado_on_an_earlier_run_is_stale(client, api_project, studies_on, fake):
