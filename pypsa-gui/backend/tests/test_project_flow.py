@@ -906,6 +906,47 @@ def test_a_stage_two_refusal_blocks_the_load_flow_alone(client, site, set_cfg, m
     assert todo(body) == todo(off) + 1
 
 
+def _run_refusal_codes(client) -> set[str] | None:
+    """POST /api/simulation/run and wait: the error codes its own validation
+    refused with, or None when the run was not refused for validation."""
+    import re
+
+    assert client.post("/api/simulation/run").status_code == 200
+    st = _wait_idle(client)
+    if st["condition"] != "validation_failed":
+        return None
+    lines = client.get("/api/simulation/log_history").json()["lines"]
+    return {m.group(1) for ln in lines if "[VALIDATION] ERROR" in ln
+            for m in [re.search(r"\[([a-z0-9_]+)\]\s*$", ln)] if m}
+
+
+def test_run_refuses_exactly_what_its_verdict_says(client, site, set_cfg):
+    """Gatekeeper L2: /run itself refuses with run_verdict's blocker, and its
+    Stage-2 refusal goes with Load flow."""
+    name = site(_pf_network(r=0.0, x=0.0), name="lf_run")
+    set_cfg(run_ac_pf_after_lopf=True)
+    body = _flow(client, name)
+    codes = _run_refusal_codes(client)
+    assert body["run_verdict"]["ready"] is False
+    assert codes is not None and body["run_verdict"]["blocker"]["code"] in codes
+    assert "stage2_zero_impedance" in codes
+    set_cfg(run_ac_pf_after_lopf=False)
+    codes = _run_refusal_codes(client)
+    assert codes is not None and "stage2_zero_impedance" not in codes   # x = 0 still refuses
+
+
+def test_run_refuses_the_load_flow_alone_and_runs_without_it(client, site, set_cfg):
+    name = site(_pf_network(), name="lf_run2")
+    set_cfg(run_ac_pf_after_lopf=True, solve_strategy="rolling")
+    body = _flow(client, name)
+    codes = _run_refusal_codes(client)
+    assert codes is not None and body["run_verdict"]["blocker"]["code"] in codes
+    assert body["run_verdict"]["blocker"]["code"] == "rolling_with_ac_pf"
+    set_cfg(run_ac_pf_after_lopf=False)
+    assert _flow(client, name)["run_verdict"]["ready"] is True
+    assert _run_refusal_codes(client) is None
+
+
 def test_a_deferred_flow_answers_the_load_flow_not_ready(client, site, set_cfg, monkeypatch):
     name = site(_pf_network(), name="lf_busy")
     set_cfg(run_ac_pf_after_lopf=True)
