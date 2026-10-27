@@ -31,7 +31,7 @@ Log each event in the state file as `- HH:MMZ ...` ([Time](#time)); `board.py` l
 
 Every wake re-reads the whole context, so fewer wakes cost less.
 - Merges follow the sessions' `premerge ok <sha>` reports. Never `subscribe_pr_activity`: a subscription costs about 3 wakes and 3k tokens of boilerplate per PR.
-- The sweep routine fires every 6 hours, as a safety net.
+- The sweep routine fires every 6 hours, as a safety net. A second routine, cron `9 */2 * * *` UTC, refreshes the dashboards every 2 hours (owner decision DASH-2H-1); a dashboard with no change since its last refresh is skipped and logged. Token usage refreshes once per Berlin day (TOKENS-DAILY-1).
 - Call `list_triggers` with `enabled: true`; the full list is large.
 - With no live session, `update_trigger` the routine to `enabled: false`. The next `create_session` re-enables it.
 - A routine created with `create_new_session_on_fire` starts without the repo and without the session tools, so the sweep stays in this session.
@@ -49,7 +49,7 @@ A long context is this session's largest cost. Rotate to a fresh coordinator whe
 2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for MLHaoChang/pypsa-eur. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
-3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
+3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` each live session the new id. When any session rotates, reviewer or builder, tell every peer that works with it the new id at once.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
 
@@ -142,9 +142,9 @@ The owner has three dashboards. Each keeps its data, and any state needed to reb
 
 | Dashboard | Link | Datasets | Refresh |
 |---|---|---|---|
-| Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | With each owner report that changes a PR or a session |
-| Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | After a merge that finishes an issue, and on every sweep |
-| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | On every sweep (owner decision USAGE-REVIVE-1) |
+| Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | Every 2 h (DASH-2H-1 routine), plus with each owner report that changes a PR or a session |
+| Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | Every 2 h (DASH-2H-1 routine), plus after a merge that finishes an issue |
+| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | Once a day, in the 20:09 UTC firing (TOKENS-DAILY-1; USAGE-REVIVE-1 set the method) |
 
 Every refresh uploads a file (Artifact `publish`, `asset: true`, `url` set to that dashboard) and points the dataset at it: an `ArtifactData` update that sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result (after a rotation, a `get` returns it).
 
@@ -177,6 +177,7 @@ Each refresh is three calls, made at most once per owner report:
   - `list_sessions`: save it and return the `sessions.py` summary;
   - `get_session` of another session.
 - A PR with no session (the coordinator's own, or one whose driver rotated or is Codex, when only CI and premerge are left): start `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` and `timeout` 7200000, one PR per call. It prints READY, FAIL, MACOS or TIMEOUT on the first hit: rerun it after a push. Backend shards take ~60 min; when the wait would pass ~60 min, run premerge directly instead. Sessions drive the CI of their own PRs. Push small mechanical fixes yourself; your own branch's hook blocks force pushes.
+- A `ci-only <pr> <sha>` hand-off from a session: archive the session, run `ciwait.sh` on the PR, push small mechanical fixes yourself, and open a fresh session from its hand-off note for anything bigger.
 - Remote branch deletion is blocked by the classifier: it is the owner's job.
 - A verdict sent to an archived session id is lost: relay it to the successor.
 - `list_sessions` with `limit: 100` overflows a subagent: use `limit: 25` and have it copy the saved tool-results JSON to the file. `list_pull_requests` overflows too: parse its saved file with python.
