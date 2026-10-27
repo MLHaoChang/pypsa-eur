@@ -1446,8 +1446,8 @@ export function EhReferenceDesignPanel() {
 
           {!study && !report && !hasAnyTable && (
             <p className="text-[10px] text-muted" data-testid="eh-not-run">
-              No Energy Hub study has been run in this session yet. Pick an
-              archetype and run the study to get a reference-design report.
+              No Energy Hub study has been run in this session yet. Run the
+              study to get a reference-design report.
             </p>
           )}
 
