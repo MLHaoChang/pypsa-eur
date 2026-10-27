@@ -284,6 +284,16 @@ def _harmonic_scan(run: Path, profile: str, profile_dirs) -> None:
     (run / HARMONIC_SCAN_META).write_text(json.dumps(meta))
 
 
+def _scan_note(note: str) -> str:
+    """A scan note as the panel shows it: in words, from a capital. gridspine's
+    notes name their input fields (``pcc.sk_normal_mva``); the app names none."""
+    from gridspine.static import harmonic_scan as hs
+
+    if note == hs.NO_NORMAL:
+        return "The normal case is not scanned: no normal short-circuit level is entered"
+    return note[:1].upper() + note[1:]
+
+
 def _harmonic_scan_results(run: Path) -> dict | None:
     """The scan for ``get_state``: ``{error}`` when it could not run, else its
     meta with the resonance rows and the envelope (h, |Z| max, X min and max);
@@ -295,7 +305,8 @@ def _harmonic_scan_results(run: Path) -> dict | None:
     if not meta.is_file():
         return None
     env = pd.read_csv(run / cs.HARMONIC_ENVELOPE_CSV)
-    return {**json.loads(meta.read_text()),
+    meta = json.loads(meta.read_text())
+    return {**meta, "notes": [_scan_note(n) for n in meta.get("notes") or []],
             "resonance": _read_csv(run / cs.HARMONIC_RESONANCE_CSV) or [],
             "envelope": _records(env[["h", "z_max_ohm", "x_min_ohm", "x_max_ohm"]])}
 

@@ -35,12 +35,24 @@ export function characteristicOrders(hMax: number): number[] {
   return out
 }
 
+/** gridspine's capacitor state "C1=2/3;C2=0/1" in words: "Capacitor banks C1: 2 of 3 steps, C2: 0 of 1 step".
+ *  null without a switched bank ("none"). */
+export function capStateText(state: string | null | undefined): string | null {
+  if (!state || state === 'none') return null
+  const banks = state.split(';').map(part => {
+    const m = /^(.*)=(\d+)\/(\d+)$/.exec(part)
+    return m ? `${m[1]}: ${m[2]} of ${m[3]} ${m[3] === '1' ? 'step' : 'steps'}` : part
+  })
+  return `${banks.length === 1 ? 'Capacitor bank' : 'Capacitor banks'} ${banks.join(', ')}`
+}
+
 function ResonanceRow({ r }: { r: HarmonicResonance }) {
+  const caps = capStateText(r.cap_state)
   return (
     <tr data-testid="scan-resonance" className="border-t border-border">
       <td className="py-1 pr-3 align-top whitespace-nowrap">
         {CASE_LABEL[r.case] ?? r.case}
-        {r.cap_state && <span className="block text-muted">{r.cap_state}</span>}
+        {caps && <span className="block text-muted">{caps}</span>}
       </td>
       <td className="pr-3 align-top whitespace-nowrap tabular-nums">
         h {fig(r.h_r)} · {figUnit(r.f_hz, 'Hz', 4)} · |Z| {figUnit(r.z_peak_ohm, 'Ω')}
@@ -53,7 +65,7 @@ function ResonanceRow({ r }: { r: HarmonicResonance }) {
       </td>
       <td className="align-top">
         <span className="inline-flex items-center gap-1.5">
-          <VerdictChip verdict={r.verdict === 'flag' ? 'fail' : 'pass'} />
+          <VerdictChip verdict={r.verdict === 'flag' ? 'warn' : 'pass'} />
           {r.assumed && <Tag tone="warn">assumed</Tag>}
         </span>
       </td>
@@ -83,11 +95,11 @@ export default function CampusHarmonicScanSection({ scan }: { scan: HarmonicScan
   }
   const hMax = scan.envelope.length ? scan.envelope[scan.envelope.length - 1].h : 50
   const orders = characteristicOrders(hMax)
-  const fails = scan.resonance.filter(r => r.verdict === 'flag').length
+  const inside = scan.resonance.filter(r => r.verdict === 'flag').length
   return (
     <PageSection title={title}
       hint={scan.resonance.length
-        ? `${scan.resonance.length} ${scan.resonance.length === 1 ? 'resonance' : 'resonances'} · ${fails} inside the clearance`
+        ? `${scan.resonance.length} ${scan.resonance.length === 1 ? 'resonance' : 'resonances'} · ${inside} inside the clearance`
         : 'no resonance found'}>
       <div className="px-4 py-3 flex flex-col gap-2">
         <div data-testid="scan-chart" className="h-[220px]">
@@ -106,13 +118,13 @@ export default function CampusHarmonicScanSection({ scan }: { scan: HarmonicScan
                 stroke="var(--color-text)" strokeWidth={1.25} />
               {scan.resonance.map((r, i) => (
                 <ReferenceDot key={i} x={r.h_r} y={r.z_peak_ohm} r={3.5}
-                  fill={r.verdict === 'flag' ? 'var(--color-danger)' : 'var(--color-muted)'} stroke="none" />
+                  fill={r.verdict === 'flag' ? 'var(--color-warn)' : 'var(--color-muted)'} stroke="none" />
               ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
         <p data-testid="scan-caption" className="text-[11px] text-muted">
-          Dotted lines: the characteristic orders 6k±1 (5, 7, 11, 13 …). Dots: the resonances, red inside the
+          Dotted lines: the characteristic orders 6k±1 (5, 7, 11, 13 …). Dots: the resonances, amber inside the
           clearance.
         </p>
         {scan.resonance.length > 0 ? (

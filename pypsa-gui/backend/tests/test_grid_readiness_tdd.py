@@ -67,6 +67,8 @@ def test_over_the_limit_warns_and_names_the_failing_orders(tmp_path):
 def test_a_ratio_of_exactly_20_takes_the_stricter_band(tmp_path, sk, band, limit):
     row = _row(tmp_path, _harmonic_site(spectrum=SPECTRUM, sk=sk))
     assert row["tdd"]["band"] == band and row["limit"] == limit
+    # The note writes the band as people read it: "≤ 20", never the "<=" of the data.
+    assert f"band {band.replace('<=', '≤')}." in row["note"] and "<=" not in row["note"]
 
 
 def test_without_a_connection_rating_i_l_is_the_process_units_rated_load(tmp_path):

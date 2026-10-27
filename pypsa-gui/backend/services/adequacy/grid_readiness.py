@@ -709,7 +709,8 @@ def _tdd_row(inp: _Inputs) -> dict:
                      "or Rated apparent power; a unit without them blocks a pass.")
     else:
         notes.append(f"Current distortion {tdd:.3g} % of the load current against {limit:g} %.")
-    notes.append(f"IEEE 519-2014 {poc['table']}: short-circuit ratio {poc['isc_il']:.3g}, band {poc['band']}.")
+    notes.append(f"IEEE 519-2014 {poc['table']}: short-circuit ratio {poc['isc_il']:.3g}, "
+                 f"band {str(poc['band']).replace('<=', '≤')}.")
     worst, worst_lim = _num(poc["worst_i_h_pct"]), _num(poc["worst_limit_pct"])
     if not missing and worst is not None and pd.notna(poc["worst_order"]):
         notes.append(f"Worst order {int(poc['worst_order'])}: {worst:.3g} %"

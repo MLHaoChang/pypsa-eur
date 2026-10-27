@@ -50,6 +50,9 @@ def test_the_run_scans_after_sizing_and_the_state_reads_the_scan_back(hub):  # n
     assert scan["envelope"] and set(scan["envelope"][0]) == {"h", "z_max_ohm", "x_min_ohm", "x_max_ohm"}
     assert isinstance(scan["resonance"], list)
     assert "screening" in scan["label"]
+    # The test campus enters no normal short-circuit level: the note says so in words, with no parameter name.
+    assert "The normal case is not scanned: no normal short-circuit level is entered" in scan["notes"]
+    assert all(n[0].isupper() and "sk_normal_mva" not in n for n in scan["notes"])
     # The scan keeps IEC 60909's c factor on the grid's source: the basis says so, the app never overrides S_k.
     assert any("c = 1.1 in the max case" in line for line in scan["basis"])
     run = ce.campus_dir(hub) / "run"

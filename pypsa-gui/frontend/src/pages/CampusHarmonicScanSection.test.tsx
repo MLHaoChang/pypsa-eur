@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen, within } from '@testing-library/react'
 import type { HarmonicResonance, HarmonicScan } from '../api/campusElectrical'
-import CampusHarmonicScanSection, { characteristicOrders } from './CampusHarmonicScanSection'
+import CampusHarmonicScanSection, { capStateText, characteristicOrders } from './CampusHarmonicScanSection'
 
 afterEach(() => cleanup())
 
 const resonance = (over: Partial<HarmonicResonance> = {}): HarmonicResonance => ({
-  case: 'max', cap_state: 'all capacitors in', h_r: 7.3, f_hz: 365, z_peak_ohm: 41.2, prominence: 3,
+  case: 'max', cap_state: 'MV_CAP=1/2', h_r: 7.3, f_hz: 365, z_peak_ohm: 41.2, prominence: 3,
   nearest_order: 7, order_set: '6k±1', margin_h: 0.3, limit_h: 0.5, verdict: 'flag', assumed: false, note: null,
   ...over,
 })
@@ -24,16 +24,25 @@ describe('CampusHarmonicScanSection', () => {
     expect(characteristicOrders(26)).toEqual([5, 7, 11, 13, 17, 19, 23, 25])
   })
 
-  it('shows a resonance inside the clearance as a fail, with its margin against the limit', () => {
+  it('shows a resonance inside the clearance as a warn (a screen, not a breach), with its margin against the limit', () => {
     render(<CampusHarmonicScanSection scan={scan()} />)
     const row = screen.getByTestId('scan-resonance')
-    expect(within(row).getByTestId('gr-verdict').dataset.verdict).toBe('fail')
+    expect(within(row).getByTestId('gr-verdict').dataset.verdict).toBe('warn')
+    expect(within(row).getByTestId('gr-verdict').textContent).toContain('Warn')
     expect(within(row).getByTestId('scan-clearance').textContent).toBe('0.3 h · limit ±0.5 h')
     expect(row.textContent).toContain('Maximum short circuit')
     expect(row.textContent).toContain('h 7 (6k±1)')
     expect(screen.getByTestId('scan-caption').textContent).toContain('6k±1 (5, 7, 11, 13 …)')
+    expect(screen.getByTestId('scan-caption').textContent).toContain('amber inside the clearance')
     expect(screen.getByTestId('scan-limit').textContent).toContain('Clearance ±0.5 h: Test code §1')
     expect(screen.getByTestId('scan-chart')).toBeTruthy()
+  })
+
+  it('writes the capacitor state in words, never as "MV_CAP=1/2"', () => {
+    render(<CampusHarmonicScanSection scan={scan()} />)
+    expect(screen.getByTestId('scan-resonance').textContent).toContain('Capacitor bank MV_CAP: 1 of 2 steps')
+    expect(capStateText('C1=0/1;C2=3/3')).toBe('Capacitor banks C1: 0 of 1 step, C2: 3 of 3 steps')
+    expect(capStateText('none')).toBeNull()
   })
 
   it('shows a missing figure as a dash alone, never a dash with its unit', () => {
