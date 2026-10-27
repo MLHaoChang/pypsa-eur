@@ -3,7 +3,7 @@
 
 # Planning criteria: post-contingency voltage band from the grid-code profile
 
-Status: ready-for-agent
+Status: done (#720, 670d5e1e)
 Type: task
 Blocked by: none (follows 13, merged in #708)
 Gated: **yes** (gridspine)
