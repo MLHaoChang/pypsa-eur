@@ -17,7 +17,8 @@ export interface RunGate {
   checking: boolean
 }
 
-/** `optimisation` is the gate of the header's Run (it queues the optimisation);
+/** `optimisation` is the gate of the header's Run: `/run`'s own verdict
+ *  (`run_verdict`, the optimisation and, with Load flow on, its Stage 2);
  *  `all` is the AND over every requested kind (`run_ready`), which the
  *  readiness section reports. */
 export function useRunGate(kind: 'optimisation' | 'all' = 'optimisation'): RunGate {
@@ -25,7 +26,7 @@ export function useRunGate(kind: 'optimisation' | 'all' = 'optimisation'): RunGa
   if (!flow || flow.deferred) {
     return { blocked: false, reason: null, blocker: null, notes: [], checking: !!flow?.deferred }
   }
-  const verdict = kind === 'optimisation' ? flow.verdicts?.optimisation : null
+  const verdict = kind === 'optimisation' ? (flow.run_verdict ?? flow.verdicts?.optimisation) : null
   const ready = verdict ? verdict.ready : flow.run_ready
   if (ready) return { blocked: false, reason: null, blocker: null, notes: flow.notes, checking: false }
   const blocker = verdict ? verdict.blocker : flow.run_blocker
@@ -37,3 +38,4 @@ export function useRunGate(kind: 'optimisation' | 'all' = 'optimisation'): RunGa
     checking: false,
   }
 }
+

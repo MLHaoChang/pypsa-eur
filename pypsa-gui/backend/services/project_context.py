@@ -310,6 +310,9 @@ RESULT_STATE_KEYS = (
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
+    # W4b: the edit counter the load flow ran at (its freshness, like the EH
+    # study's `network_revision`). Persisted beside the counter in metadata.json.
+    "ac_pf_network_revision",
     # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record — derived
     # at save, mapped onto `eh_study` at hydrate, always None in memory.
     "eh_study_record",
@@ -590,6 +593,7 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    ac_pf_network_revision: Any = None   # int: `network_revision` at the PF's start
     # P33b D-1: the on-disk mirror of a FINISHED `eh_study` record (no thread,
     # no stop event). Result state so it rides `results_state.pkl`, but it is
     # DERIVED at save from the live record and CONSUMED at hydrate (mapped onto
