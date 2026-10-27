@@ -213,7 +213,7 @@ def _attach_tariff_preview(args: dict) -> list[dict]:
     stored = _solver_commercial() or {}
     old = _tariff_cell(stored)
     if isinstance(stored.get("import_tariff_ref"), dict) and stored["import_tariff_ref"] == ref:
-        _refuse("empty_edit", f"Tariff {name!r} version {ref['version']} is already attached.")
+        _refuse("empty_edit", f"Tariff “{name}” version {ref['version']} is already attached.")
     return [_settings_row("Commercial", "import_tariff_ref", "Import tariff", old, _tariff_cell(commercial),
                           says_name="Import tariff")]
 
@@ -261,14 +261,14 @@ def _urdb_plan(args: dict):
             model = items_store.validate_payload("tariff", payload)
             if common.is_common("tariff", item_name):
                 raise items_store.LibraryItemCommonReadonly(
-                    f"tariff {item_name!r} is a shipped common Library item and cannot be overwritten; "
+                    f"tariff “{item_name}” is a shipped common Library item and cannot be overwritten; "
                     "store your own version under another name")
         except ValueError as exc:
             _refuse("urdb_invalid", str(exc)[:500], 422)
         latest = items_store.latest_ref(db, org, "tariff", item_name)
         latest_payload = items_store.resolve(db, org, latest) if latest is not None else None
         if latest is not None and latest.hash == hashing.library_item_digest(model):
-            _refuse("empty_edit", f"Library tariff {item_name!r} already holds this rate (version {latest.version}).")
+            _refuse("empty_edit", f"Library tariff “{item_name}” already holds this rate (version {latest.version}).")
         return item_name, payload, latest, latest_payload
 
 

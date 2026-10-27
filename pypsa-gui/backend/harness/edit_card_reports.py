@@ -145,7 +145,7 @@ register("set_report_template", Adapter("settings_edit", _template_preview, _tem
 
 # ── set_report_mapping: the stored plan that places report sections under template headings ──
 
-_BUSY_PLAN = ("A report job is running — wait for it to finish (or abort it) before saving a "
+_BUSY_PLAN = ("A report job is running: wait for it to finish (or abort it) before saving a "
               "mapping plan; a mapping job would overwrite it when it finishes.")
 _ENTRY_LABELS = {"action": "Action", "new_text": "New text", "section_ids": "Report sections"}
 _MAX_NAMES = 3
@@ -270,7 +270,7 @@ register("set_report_mapping", Adapter("settings_edit", _mapping_preview, _mappi
 
 # ── import_edited_report: an edited Word copy becomes the report's next version ──
 
-_BUSY_MERGE = ("A report job is writing this project's reports — wait for it to finish (or abort "
+_BUSY_MERGE = ("A report job is writing this project's reports: wait for it to finish (or abort "
                "it) before merging an edited copy.")
 _SOURCE_WORDS = {"llm": "assistant-written", "user_edit": "your edit", "code": "computed"}
 
