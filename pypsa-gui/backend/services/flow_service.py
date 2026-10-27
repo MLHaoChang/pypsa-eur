@@ -81,6 +81,7 @@ from typing import Any
 from services import flow_scope as S
 from services import flow_sections as F
 from services.issue_titles import ISSUE_TITLES
+from services.validation_service import STAGE2_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -445,19 +446,13 @@ def _readiness_key(revision: int, voll: float, template: dict, cfg_hash: str) ->
 
 # ── Sources ─────────────────────────────────────────────────────────────────
 
-# Stage 2's own refusals in `validate_for_run` (W4b): raised only with Load flow
-# on, so they are the load flow's items (`source: "loadflow"`) and block its
-# verdict, not the optimisation's. /run still refuses on them (it runs Stage 2).
-LOADFLOW_CODES = frozenset({
-    "stage2_multi_period", "stage2_zero_impedance", "stage2_no_explicit_slack",
-    "stage2_multi_slack", "rolling_with_ac_pf", "myopic_with_ac_pf"})
-
-
 def _validation_items(issues, connection_links: frozenset[str]) -> list[dict]:
     out = []
     for i in issues:
         section = F.file_issue(i.code, i.component_class or "", i.name or "", connection_links)
-        source = "loadflow" if i.code in LOADFLOW_CODES else "validation"
+        # Stage 2's own refusals are the load flow's items (W4b): they block its
+        # verdict, not the optimisation's; /run still refuses on them.
+        source = "loadflow" if i.code in STAGE2_CODES else "validation"
         out.append(_item(i.code, i.severity, i.message, source, section,
                          component=i.component_class or "", entity=i.name or "",
                          blocking=i.severity == "error", title=ISSUE_TITLES.get(i.code)))
@@ -877,7 +872,7 @@ def _freshness(n, *, running: bool) -> str:
     return "not_run"
 
 
-def _loadflow_freshness(n, *, running: bool) -> str:
+def _loadflow_freshness(dispatch: str, *, running: bool) -> str:
     """The load flow's own freshness (W4b, S4): its results exist, the dispatch
     it read is still fresh, and the network was not edited since it ran (the
     edit counter it recorded, `ac_pf_network_revision`). A result without a
@@ -885,16 +880,14 @@ def _loadflow_freshness(n, *, running: bool) -> str:
     if running:
         return "running"
     from services import dirty_state
-    from services.dispatch_status import dispatch_status
     from services.pypsa_service import PyPSAService
 
-    state = PyPSAService.get_solver_state()
+    try:
+        state = PyPSAService.get_solver_state()
+    except Exception:                                    # noqa: BLE001
+        state = {}
     if state.get("ac_pf_results") is None:
         return "not_run"
-    try:
-        dispatch = dispatch_status(n)
-    except Exception:                                    # noqa: BLE001
-        dispatch = "none"
     if dispatch == "none":                               # cleared by an edit, as the solve's
         return "not_run"
     captured = state.get("ac_pf_network_revision")
@@ -921,7 +914,10 @@ def _freshness_by_kind(n, *, solving: bool, has_study: bool) -> dict[str, str | 
                     else "fresh" if dispatch == "fresh" else "not_run")
     study = None
     if has_study:
-        record = PyPSAService.get_solver_state().get("eh_study")
+        try:
+            record = PyPSAService.get_solver_state().get("eh_study")
+        except Exception:                                # noqa: BLE001
+            record = None
         if study_state.running_study() is not None:
             study = "running"
         elif not (isinstance(record, dict) and record.get("status") == "done"):
@@ -929,7 +925,7 @@ def _freshness_by_kind(n, *, solving: bool, has_study: bool) -> dict[str, str | 
         else:
             study = "stale" if study_state.edited_since(record) is True else "fresh"
     return {"optimisation": optimisation, "study": study,
-            "loadflow": _loadflow_freshness(n, running=solving)}
+            "loadflow": _loadflow_freshness(dispatch, running=solving)}
 
 
 def _loadflow_requested(facts) -> bool:
@@ -1044,6 +1040,8 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
             if study_requested:
                 deferred = {"deferred_reason": _LOCK_BUSY_REASON}
     n = PyPSAService.get_network()
+    # A solve (/run or /run_ac_pf) is what runs the optimisation and the load
+    # flow; `running` also counts a study, as the one `freshness` word does.
     solving = _solver_in_flight()
     running = solving or study_state.running_study() is not None
     freshness = _freshness(n, running=running)
@@ -1070,6 +1068,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                  "verdicts": {"optimisation": not_ready,
                               "study": not_ready if study_requested else None,
                               "loadflow": not_ready if loadflow_requested else None},
+                 "run_verdict": not_ready,
                  "notes": [], "scope": scope, "deferred": True,
                  "deferred_reason": reason}, [])
 
@@ -1159,6 +1158,11 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
                              if loadflow_requested else None)}
     blocker = first_blocking(("validation",) + (("eh_study",) if study_requested else ())
                              + (("loadflow",) if loadflow_requested else ()))
+    # What /run itself answers (the header's Run): the optimisation and, with
+    # Load flow on, its Stage 2; never the study, which has its own start.
+    lopf_blocker = first_blocking(("validation",) + (("loadflow",) if loadflow_requested
+                                                     else ()))
+    run_verdict = {"ready": lopf_blocker is None, "blocker": lopf_blocker}
     # Notes: every display-only gap (a non-blocking error, or a presence rule's
     # warning such as the missing site location) not yet acknowledged.
     notes = [_pointer(r["label"], it) for r in rows for it in r["items"]
@@ -1166,7 +1170,7 @@ def _collect(project_dir: pathlib.Path, *, cache_key: str, db=None,
              and (it["severity"] == "error" or it["code"] in PRESENCE_RULES)
              and r.get("state") != "not_needed"]
     return ({"sections": rows, "run_ready": blocker is None, "run_blocker": blocker,
-             "run_request": run_request, "verdicts": verdicts,
+             "run_request": run_request, "verdicts": verdicts, "run_verdict": run_verdict,
              "notes": notes, "scope": scope, "deferred": False, "deferred_reason": None},
             items)
 

@@ -270,18 +270,6 @@ def _option_verdict(project_dir: pathlib.Path, kind: str, flow_verdict: dict, *,
             "blocker": {"code": issue.code, "message": issue.message, "section": sec}}
 
 
-def _bundled(optimisation: dict, loadflow: dict) -> dict:
-    """The Run with Load flow on (W4b): the optimisation's verdict AND Stage 2's
-    own, the first blocker in flow order (the flow's ``run_blocker`` over the two)."""
-    from services import flow_sections as F
-
-    blockers = [b for b in (optimisation["blocker"], loadflow["blocker"]) if b is not None]
-    if not blockers:
-        return optimisation
-    first = min(blockers, key=lambda b: F.SECTION_IDS.index(b["section"]))
-    return {**optimisation, "ready": False, "blocker": first}
-
-
 def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: str,
              db=None, org_id=None, size_source: str = "capacity_run") -> dict[str, dict]:
     """``{kind: {ready, deferred, blocker}}`` for the open project at
@@ -316,7 +304,7 @@ def verdicts(project_dir: pathlib.Path, kinds: tuple[str, ...], *, cache_key: st
                                                  db=db, org_id=org_id)
             v = flow["verdicts"]["study" if kind == "study" else "optimisation"]
             if kind == "loadflow" and flow["verdicts"].get("loadflow") is not None:
-                v = _bundled(v, flow["verdicts"]["loadflow"])
+                v = flow["run_verdict"]          # /run's own: the optimisation and Stage 2
             out[kind] = (_blocked("no_study_request",
                                   "The project has no reliability study to run (no EH template).")
                          if v is None else {**v, "deferred": flow["deferred"]})

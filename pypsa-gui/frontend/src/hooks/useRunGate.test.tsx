@@ -58,23 +58,12 @@ describe('useRunGate', () => {
       ...base, run_request: { optimisation: true, study: false, loadflow: true },
       run_ready: false, run_blocker: lf,
       verdicts: { optimisation: { ready: true, blocker: null }, study: null, loadflow: { ready: false, blocker: lf } },
+      run_verdict: { ready: false, blocker: lf },
     } as never)
     const { result } = renderHook(() => useRunGate('optimisation'), { wrapper })
     await waitFor(() => expect(result.current.blocked).toBe(true))
     expect(result.current.blocker?.code).toBe('rolling_with_ac_pf')
     expect(result.current.reason).toBe(lf.message)
-  })
-
-  it('with both blocked, the header gives the first blocker in flow order', async () => {
-    const lf = { section: 'scenarios', message: 'Scenarios & optimisation: stage 2', code: 'stage2_zero_impedance', target: { ...target, section: 'scenarios' } } as const
-    vi.mocked(flowApi.getProjectFlow).mockResolvedValue({
-      ...base, run_request: { optimisation: true, study: false, loadflow: true },
-      run_ready: false, run_blocker: blocker,
-      verdicts: { optimisation: { ready: false, blocker }, study: null, loadflow: { ready: false, blocker: lf } },
-    } as never)
-    const { result } = renderHook(() => useRunGate('optimisation'), { wrapper })
-    await waitFor(() => expect(result.current.blocked).toBe(true))
-    expect(result.current.blocker).toEqual(blocker)
   })
 
   it('keeps notes beside an enabled Run', async () => {

@@ -112,6 +112,9 @@ export interface ProjectFlow {
    *  requested kinds. `study` is null when the Run has no study, `loadflow`
    *  when Load flow is off (Stage 2's own refusals are its items). */
   verdicts: { optimisation: FlowVerdict, study: FlowVerdict | null, loadflow?: FlowVerdict | null }
+  /** What `/run` itself answers (the header's Run): the optimisation and,
+   *  with Load flow on, its Stage 2, the first blocker in flow order. */
+  run_verdict?: FlowVerdict
   /** Display-only gaps (non-blocking errors), shown beside an enabled Run. */
   notes: FlowNote[]
   /** What the Run computes (W4a): stored, or the template's preset. */

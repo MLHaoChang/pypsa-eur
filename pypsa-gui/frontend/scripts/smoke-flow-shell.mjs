@@ -25,7 +25,7 @@
  *  3. Issues (Expert): every open item sits under its own flow section's
  *     header, and a header's count is its items.
  *  4. Run gate: Expert's Run is disabled exactly when /flow says
- *     `verdicts.optimisation` (else `run_ready`) is false, naming the blocker;
+ *     `run_verdict` (else `verdicts.optimisation`, else `run_ready`) is false, naming the blocker;
  *     Guided shows the same verdict on the Readiness card.
  *  5. Switch back to Guided: the section is unchanged.
  *  6. Resume: a reload (in either mode) reopens the section it was left in.
@@ -170,7 +170,7 @@ async function walk(browser, template, args) {
       return groups
     }
     const verdictOf = f => {
-      const v = f.verdicts?.optimisation
+      const v = f.run_verdict ?? f.verdicts?.optimisation
       return { ready: v ? v.ready : f.run_ready, blocker: v ? v.blocker : f.run_blocker }
     }
 

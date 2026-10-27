@@ -1153,6 +1153,15 @@ def _check_myopic_capacity_lock(n, periods) -> list[Issue]:
     return out
 
 
+# Every code `validate_for_run` raises only because Load flow is on
+# (`run_ac_pf_after_lopf`): the load flow's own refusals, which the project
+# flow files under the load flow's verdict (W4b). A new Stage-2 check adds its
+# code here.
+STAGE2_CODES = frozenset({
+    "stage2_multi_period", "stage2_zero_impedance", "stage2_no_explicit_slack",
+    "stage2_multi_slack", "rolling_with_ac_pf", "myopic_with_ac_pf"})
+
+
 def _check_stage2_ac_pf(n, cfg) -> list[Issue]:
     """
     Pre-flight checks for the Stage 2 (post-LOPF AC Power Flow) workflow.

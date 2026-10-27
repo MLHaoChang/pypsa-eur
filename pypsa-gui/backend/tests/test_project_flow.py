@@ -570,6 +570,7 @@ def test_r4_a_study_start_refusal_blocks_run(client, tmp_projects_dir, monkeypat
     assert body["verdicts"]["optimisation"]["ready"] is pre["ok"] is True
     assert body["verdicts"]["study"]["ready"] is False
     assert body["verdicts"]["study"]["blocker"] == body["run_blocker"]
+    assert body["run_verdict"] == body["verdicts"]["optimisation"]   # /run has no study
 
 
 def test_r4_in_flight(client, site, monkeypatch):
@@ -874,6 +875,8 @@ def test_a_zero_impedance_line_blocks_each_kind_once(client, site, set_cfg, monk
     assert body["verdicts"]["optimisation"]["blocker"]["code"] == "line_x_invalid"
     assert body["verdicts"]["loadflow"]["blocker"]["code"] == "stage2_zero_impedance"
     assert body["run_ready"] is False
+    # /run's own verdict (the header's Run) is the first of the two in flow order.
+    assert body["run_verdict"] == {"ready": False, "blocker": body["run_blocker"]}
 
 
 def test_a_stage_two_refusal_blocks_the_load_flow_alone(client, site, set_cfg, monkeypatch):
@@ -888,12 +891,14 @@ def test_a_stage_two_refusal_blocks_the_load_flow_alone(client, site, set_cfg, m
     assert body["verdicts"]["loadflow"]["ready"] is False
     assert body["verdicts"]["loadflow"]["blocker"] == body["run_blocker"]
     assert body["run_blocker"]["code"] == "rolling_with_ac_pf"
+    assert body["run_verdict"] == body["verdicts"]["loadflow"]
     assert not any(n["code"] == "rolling_with_ac_pf" for n in body["notes"])
     # Switched off, the same project is ready and its Run requests no load
     # flow; readiness counts the load flow's item once.
     set_cfg(run_ac_pf_after_lopf=False)
     off = _assert_equivalent(client, monkeypatch, name)
     assert off["run_ready"] is True and off["verdicts"]["loadflow"] is None
+    assert off["run_verdict"] == off["verdicts"]["optimisation"]
 
     def todo(b) -> int:
         row = next(s for s in b["sections"] if s["section"] == "readiness")
