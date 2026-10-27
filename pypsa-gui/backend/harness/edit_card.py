@@ -1538,12 +1538,12 @@ def _study(args: dict):
     study_id = args.get("study_id")
     if not isinstance(study_id, str):
         _refuse("empty_edit", "Name the study to edit.")
-    try:
-        return store.load_study(project.directory, study_id)
-    except store.StudyNotFound:
-        _refuse("study_not_found", "Study not found.", 404)
-    except store.StudyUnreadable:
-        _refuse("study_unreadable", "The study record on disk cannot be read.", 500)
+    # Matched by equality among the project's own studies, so the id from the chat call never
+    # becomes part of a file path here (the route's store lookup validates it the same way).
+    for study in store.list_studies(project.directory):
+        if study.study_id == study_id:
+            return study
+    _refuse("study_not_found", "Study not found.", 404)
 
 
 def _study_after(args: dict, old):
