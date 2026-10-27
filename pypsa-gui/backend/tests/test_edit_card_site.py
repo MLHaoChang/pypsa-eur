@@ -376,3 +376,51 @@ def test_sites_refuse_what_the_route_refuses_and_an_outsider(client, api_project
     with pytest.raises(HTTPException) as exc:
         edit_card.preview("set_project_sites", {"name": name, "sites": {"version": 1, "sites": [_site()]}})
     assert exc.value.status_code in (403, 404)
+
+
+# ── the route's order, the Library's own checks, long texts ─────────────────
+
+def test_finance_a_bad_body_is_refused_422_before_a_stale_tag_is_412(edge):
+    chat_tools.set_finance_inputs(_digest(), _finance())
+    stale = _digest()
+    chat_tools.set_finance_inputs(stale, {**chat_tools.get_finance_inputs()["finance"], "wacc_nominal": 0.0777})
+    bad = {"finance": {"currency": "EUR", "nonsense": 1}, "if_match": stale}  # `stale` no longer matches
+    assert _refusal("set_finance_inputs", bad, 422)["error_kind"] == "invalid_edit_value"
+    ok = {"finance": {**chat_tools.get_finance_inputs()["finance"], "wacc_nominal": 0.05}, "if_match": stale}
+    assert _refusal("set_finance_inputs", ok, 412)["error_kind"] == "finance_changed"
+
+
+def test_urdb_import_of_a_shipped_name_is_refused_by_the_librarys_own_check(urdb_project):
+    from services.library import common
+
+    shipped = common.names("tariff")[0]
+    args = {"file_id": _upload((ORACLES / "r1_leap_year.reopt.json").read_bytes()), "name": shipped,
+            "valid_from": "2023-01-01"}
+    detail = _refusal("import_urdb_tariff", args, 422)
+    assert detail["error_kind"] == "urdb_invalid" and "shipped common Library item" in detail["message"]
+
+
+def test_urdb_import_uses_the_librarys_prepare_item(urdb_project, monkeypatch):
+    from services.library import items as I
+
+    seen = []
+    real = I.prepare_item
+    monkeypatch.setattr(I, "prepare_item", lambda *a, **k: seen.append(a[:2]) or real(*a, **k))
+    edit_card.preview("import_urdb_tariff", {"file_id": _upload((ORACLES / "r1_leap_year.reopt.json").read_bytes()),
+                                             "name": "viaprep", "valid_from": "2023-01-01"})
+    assert seen == [("tariff", "viaprep")]
+
+
+def test_sites_a_long_name_changed_past_the_cap_is_uncertain_until_stored(client, api_project, session):
+    name = api_project("card-sites-long")
+    long_a, long_b = "N" * 130 + "a", "N" * 130 + "b"
+    first = {"name": name, "sites": {"version": 1, "sites": [_site(name=long_a)]}}
+    _dispatch(session, "set_project_sites", first)
+    args = {"name": name, "sites": {"version": 1, "sites": [_site(name=long_b)]}}
+    card = edit_card.preview("set_project_sites", args)
+    (row,) = card["rows"]
+    assert row["old"] == "N" * 120 + "…" and row["new"] == row["old"] + " (changed)" and row["fingerprint"]
+    assert edit_card.receipt(card, args)["outcome"] == "uncertain", "the store still holds the old name"
+    _, _, result = _dispatch(session, "set_project_sites", args)
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert edit_card.receipt(card, args)["outcome"] == "verified"

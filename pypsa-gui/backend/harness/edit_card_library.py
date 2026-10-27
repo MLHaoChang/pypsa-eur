@@ -17,45 +17,69 @@ from fastapi import HTTPException
 from harness.edit_card import (
     STUDY_LEAF_CAP, _SECRET_KEY, Adapter, _note, _refuse, _same, _setting, _settings_row, _title, register,
 )
+from harness.edit_card_site import _fingerprint
 
-_KIND_WORDS = {"tariff": "Tariff", "contract": "Contract", "connection_agreement": "Connection agreement"}
+_TEXT_CAP = 120  # a free-text string the card shows is cut here
+_KIND_WORDS ={"tariff": "Tariff", "contract": "Contract", "connection_agreement": "Connection agreement"}
 
 
 # ── cells ───────────────────────────────────────────────────────────────────
 
+def _short(text: str) -> str:
+    """A free-text string as the card shows it: cut at `_TEXT_CAP` characters."""
+    return text if len(text) <= _TEXT_CAP else text[:_TEXT_CAP] + "…"
+
+
 def _cell(field: str, value):
     """A value as the card shows it: a secret-like key only says it is set, a list or an
-    object is summarised and never dumped."""
+    object is summarised and never dumped, a long text is cut."""
     if any(word in field.lower() for word in _SECRET_KEY):
         return None if value in (None, "") else "set"
     if isinstance(value, list):
         return f"{len(value)} items"
     if isinstance(value, dict):
         return f"{len(value)} fields"
+    if isinstance(value, str):
+        return _short(value)
     return _setting(value)
 
 
 def _row(name: str, field: str, label: str, old, new, unit: str = "") -> dict:
     """A settings row for two stored values. Cells that read the same while the values
-    differ (a rotated secret, an edited list) say so on the new side."""
+    differ (a rotated secret, an edited list, a long text cut alike) say so on the new side
+    and carry a fingerprint of the new value, which the receipt compares to the stored one."""
     row = _settings_row(name, field, label, None, None, unit, says_name=label)
     row["old"], row["new"] = _cell(field, old), _cell(field, new)
     if row["old"] is not None and row["old"] == row["new"] and not _same(old, new):
         row["new"] = f"{row['new']} (changed)"
+        row["fingerprint"] = _fingerprint(new)
     return row
 
 
 def _text_row(name: str, field: str, label: str, old: str | None, new: str | None, *, changed: bool = False,
-              unit: str = "") -> dict:
+              unit: str = "", fingerprint_of=None) -> dict:
+    """A row of two cell texts. `fingerprint_of` is the new value behind the cell: the row then
+    carries its fingerprint, and one whose two cells read the same says "(changed)"."""
     row = _settings_row(name, field, label, old, new, unit, says_name=label)
     if changed and old is not None and old == new:
         row["new"] = f"{new} (changed)"
+    if fingerprint_of is not None:
+        row["fingerprint"] = _fingerprint(fingerprint_of)
     return row
 
 
-def _settle(row: dict, cell):
-    """The stored cell, written as the row's `new` when that only adds the "(changed)" mark."""
-    return row["new"] if row["new"] == f"{cell} (changed)" else cell
+_DIFFERS = "differs from the card"
+
+
+def _settle(row: dict, cell, value=None):
+    """The stored cell. A row with a fingerprint reads back as its `new` only when the stored
+    value has that fingerprint; the same cell on another value cannot pass for it."""
+    fingerprint = row.get("fingerprint")
+    if fingerprint is None:
+        return cell
+    if _fingerprint(value) == fingerprint:
+        return row["new"]
+    return cell if cell != row["new"] else _DIFFERS
 
 
 def _refuse_http(exc: HTTPException):
@@ -72,8 +96,9 @@ def _capped(rows: list[dict], what: str) -> list[dict]:
 
 
 def _read_rows(rows: list[dict], read) -> list[Any]:
-    """A readback: one stored cell per row, none for a note."""
-    return [None if row["role"] == "note" else _settle(row, read(row)) for row in rows]
+    """A readback: one stored cell per row, none for a note. `read(row)` gives `(cell, value)`:
+    the cell as the card writes it and the stored value behind it."""
+    return [None if row["role"] == "note" else _settle(row, *read(row)) for row in rows]
 
 
 # ── the Library: org, old versions ──────────────────────────────────────────
@@ -219,12 +244,15 @@ def _put_item_readback(args: dict, rows: list[dict]) -> list[Any]:
     def read(row):
         field = row["field"]
         if field == "version":
-            return None if version is None else f"v{version}"
+            cell = None if version is None else f"v{version}"
+            return cell, cell
         if payload is None:
-            return None
+            return None, None
         if field.startswith("meta."):
-            return _cell(field, (meta or {}).get(field.removeprefix("meta.")))
-        return _cell(field, _dig(payload, tuple(field.removeprefix("payload.").split("."))))
+            value = (meta or {}).get(field.removeprefix("meta."))
+        else:
+            value = _dig(payload, tuple(field.removeprefix("payload.").split(".")))
+        return _cell(field, value), value
 
     return _read_rows(rows, read)
 
@@ -342,8 +370,10 @@ def _series_readback_for(args: dict, rows: list[dict]) -> list[Any]:
     def read(row):
         field = row["field"]
         if field == "version":
-            return None if version is None else f"v{version}"
-        return meta.get(field) if field in _METER_META else cells.get(field)
+            cell = None if version is None else f"v{version}"
+        else:
+            cell = meta.get(field) if field in _METER_META else cells.get(field)
+        return cell, cell
 
     return _read_rows(rows, read)
 
@@ -429,7 +459,16 @@ def _site_cell(sites: dict, site_id: str) -> str | None:
     site = next((s for s in sites["sites"] if isinstance(s, dict) and s.get("id") == site_id), None)
     if site is None:
         return None
-    return f"{site['name']} · {len(site['boundary'])} vertices · {len(site['buses'])} buses"
+    return f"{_short(str(site['name']))} · {len(site['boundary'])} vertices · {len(site['buses'])} buses"
+
+
+def _site_body(site: dict) -> dict:
+    """What identifies a site apart from its id, which every match draws fresh."""
+    return {key: site.get(key) for key in ("name", "buses", "boundary", "origin", "placements")}
+
+
+def _site_matches(sites: dict, fingerprint: str) -> int:
+    return sum(1 for s in sites["sites"] if isinstance(s, dict) and _fingerprint(_site_body(s)) == fingerprint)
 
 
 def _map_import(args: dict):
@@ -488,7 +527,7 @@ def _length_rows(dest, plan: dict) -> list[dict]:
 
 
 def _map_preview(args: dict) -> list[dict]:
-    from services import map_layout_service
+    from services import map_layout_service, site_service
 
     dest, plan, report, derive = _map_import(args)
     if plan is None:
@@ -503,10 +542,20 @@ def _map_preview(args: dict) -> list[dict]:
         old_points = map_layout_service.route_points(before_layout, key)
         if old_points != map_layout_service.route_points(plan["layout"], key) or old != new:
             routes.append(_text_row(_IMPORT, f"route:{key}", f"{_IMPORT} · Routes · {key}", old, new,
-                                    changed=True))
+                                    changed=True, fingerprint_of=map_layout_service.route_points(plan["layout"], key)))
     # A site's id is drawn fresh by every match, so a row is keyed by the file's feature, never by that id.
-    sites = [_text_row(_IMPORT, f"site:{found['feature']}", f"{_IMPORT} · Sites · {found['name']}",
-                       None, _site_cell(plan["sites"], sid)) for found, sid in zip(report["sites"], plan["site_ids"])]
+    # The row carries a fingerprint of the site the card computed and how many identical sites the
+    # project holds already, so the receipt needs one more than that.
+    sites, seen = [], {}
+    stored = {s["id"]: s for s in plan["sites"]["sites"] if isinstance(s, dict)} if plan["sites"] else {}
+    old_sites = site_service.read_sites(dest) if plan["sites"] is not None else {"sites": []}
+    for found, sid in zip(report["sites"], plan["site_ids"]):
+        body = _site_body(stored[sid])
+        row = _text_row(_IMPORT, f"site:{found['feature']}", f"{_IMPORT} · Sites · {_short(str(found['name']))}",
+                        None, _site_cell(plan["sites"], sid), fingerprint_of=body)
+        row["prior"] = _site_matches(old_sites, row["fingerprint"]) + seen.get(row["fingerprint"], 0)
+        seen[row["fingerprint"]] = seen.get(row["fingerprint"], 0) + 1
+        sites.append(row)
     rows = _capped(routes, "routes") + _capped(sites, "sites")
     if derive:
         lengths = _length_rows(dest, plan)
@@ -534,12 +583,15 @@ def _map_readback(args: dict, rows: list[dict]) -> list[Any]:
     def read(row):
         field = row["field"]
         if field.startswith("route:"):
-            return _route_cell(layout, field.removeprefix("route:"))
-        if field.startswith("site:"):  # the site this row added: one that reads as the card said
-            cells = [_site_cell(sites, s["id"]) for s in sites["sites"] if isinstance(s, dict)]
-            return row["new"] if row["new"] in cells else (cells[-1] if cells else None)
+            key = field.removeprefix("route:")
+            return _route_cell(layout, key), map_layout_service.route_points(layout, key)
+        if field.startswith("site:"):  # the site this row added: more identical sites than before the write
+            found = [_site_body(s) for s in sites["sites"]
+                     if isinstance(s, dict) and _fingerprint(_site_body(s)) == row["fingerprint"]]
+            return (row["new"], found[0]) if len(found) > row["prior"] else (None, None)
         frame = network.lines if row["component_class"] == "Line" else network.links
-        return float(frame.at[row["name"], "length"]) if row["name"] in frame.index else None
+        length = float(frame.at[row["name"], "length"]) if row["name"] in frame.index else None
+        return length, length
 
     return _read_rows(rows, read)
 

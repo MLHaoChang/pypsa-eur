@@ -175,7 +175,8 @@ def test_secret_like_keys_only_say_set():
     row = cards._row("Library tariff", "meta.api_token", "t", "old-secret", "new-secret")
     assert (row["old"], row["new"]) == ("set", "set (changed)")
     assert cards._row("x", "meta.api_token", "t", None, "s")["old"] is None
-    assert cards._settle(row, "set") == "set (changed)"
+    assert cards._settle(row, "set", "new-secret") == "set (changed)"
+    assert cards._settle(row, "set", "old-secret") == "set"  # the same cell on another value is not the new one
     listed = cards._row("x", "payload.items", "t", [1, 2], [3, 4])
     assert (listed["old"], listed["new"]) == ("2 items", "2 items (changed)")
 
@@ -328,3 +329,99 @@ def test_map_import_refuses_what_the_route_refuses_and_an_outsider(geo, second_i
                         ).status_code in (403, 404)
     finally:
         chat_tools.set_acting_user(str(seeded_identity["user_id"]))
+
+
+# ── a "(changed)" row verifies only when the store holds the new value ───────
+
+def _outcome(tool, args):
+    """The receipt of a fresh card for `args`, read straight from the store (nothing is run)."""
+    card = edit_card.preview(tool, args)
+    return card, edit_card.receipt(card, args)["outcome"]
+
+
+def test_put_library_item_changed_rows_are_uncertain_until_the_store_holds_the_new_value(bound):
+    _, session = bound
+    first = {"kind": "tariff", "name": "fp-tariff", "payload": TARIFF, "meta": {"description": "a" * 130 + "A"}}
+    _dispatch(session, "put_library_item", first)
+    changed = copy.deepcopy(TARIFF)
+    changed["items"][0]["periods"][0]["rate"] = 0.21  # an edit inside the list keeps its count
+    args = {**first, "payload": changed, "meta": {"description": "a" * 130 + "B"}}
+    card, outcome = _outcome("put_library_item", args)
+    cells = {r["field"]: r for r in card["rows"]}
+    assert cells["payload.items"]["old"] == "1 items" and cells["payload.items"]["new"] == "1 items (changed)"
+    assert cells["meta.description"]["new"].endswith(" (changed)") and cells["meta.description"]["fingerprint"]
+    assert len(cells["meta.description"]["old"]) <= 122
+    assert outcome == "uncertain", "the store still holds the old item"
+    _, _, result, _ = _dispatch(session, "put_library_item", args)
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
+def test_a_secret_rotation_reads_back_only_when_stored():
+    row = cards._row("Library tariff", "meta.api_token", "t", "old-secret", "new-secret")
+    assert "old-secret" not in json.dumps(row) and "new-secret" not in json.dumps(row)
+    assert cards._settle(row, "set", "old-secret") == "set"
+    assert cards._settle(row, "set", "new-secret") == row["new"]
+
+
+def test_map_import_route_with_the_same_bend_count_verifies_only_once_written(geo):
+    name, session, _ = geo
+    old = [[6.3, 53.2], [6.5, 53.5], [6.7, 53.2]]
+    new = [[6.3, 53.3], [6.5, 53.6], [6.7, 53.3]]
+    for points in (old, new):
+        fid = _geo_file(name, line([A_NEAR, *points, B_NEAR], name="L1"))
+        args = {"name": name, "file_id": fid, "apply": True}
+        card, outcome = _outcome("import_map_geometry", args)
+        row = next(r for r in card["rows"] if r["field"] == "route:line:L1")
+        if points is old:
+            assert (row["old"], row["new"]) == ("straight line", "3 bend points")
+        else:
+            assert (row["old"], row["new"]) == ("3 bend points", "3 bend points (changed)")
+        assert outcome == "uncertain", "the layout does not hold these points yet"
+        _, _, result, _ = _dispatch(session, "import_map_geometry", args)
+        assert result["_edit_receipt"]["outcome"] == "verified"
+        assert edit_card.receipt(card, args)["outcome"] == "verified"
+
+
+def test_map_import_site_receipt_needs_the_site_the_card_computed(geo):
+    from services import site_service
+
+    name, session, pdir = geo
+    # A stored site of the same name, vertex count and bus count, but another boundary.
+    other = [[5.98, 52.98], [6.02, 52.98], [6.02, 53.02], [5.98, 53.02]]
+    site_service.write_sites(pdir, {"version": 1, "sites": [{
+        "id": "pre", "name": "Plot", "buses": ["A"], "boundary": other,
+        "origin": {"lng": 6.0, "lat": 53.0}, "placements": {}}]})
+    fid = _geo_file(name, polygon(SQUARE, name="Plot"))
+    args = {"name": name, "file_id": fid, "apply": True}
+    card, outcome = _outcome("import_map_geometry", args)
+    (row,) = [r for r in card["rows"] if r["field"].startswith("site:")]
+    assert row["new"].startswith("Plot · 4 vertices · 1 buses") and row["prior"] == 0
+    assert outcome == "uncertain", "a stored site with the same name and counts is not this site"
+    _, _, result, _ = _dispatch(session, "import_map_geometry", args)
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    # The same file again adds an identical second site; with the first one stored, the unwritten
+    # store must not pass for the written one.
+    again = {"name": name, "file_id": _geo_file(name, polygon(SQUARE, name="Plot")), "apply": True}
+    card, outcome = _outcome("import_map_geometry", again)
+    (row,) = [r for r in card["rows"] if r["field"].startswith("site:")]
+    assert row["prior"] == 1 and outcome == "uncertain"
+    _, _, result, _ = _dispatch(session, "import_map_geometry", again)
+    assert result["_edit_receipt"]["outcome"] == "verified"
+    assert len(site_service.read_sites(pdir)["sites"]) == 3
+
+
+def test_apply_leaves_the_first_document_unwritten_when_the_second_is_bad(tmp_path):
+    from services import map_geometry_import as mgi, map_layout_service as ml, site_service as ss
+
+    ml.write_map_layout(tmp_path, {"version": 1, "routes": {}, "bubbles": {}})
+    layout_before = (tmp_path / "map_layout.json").read_bytes()
+    bad_site = {"id": "s1", "name": "Plot", "buses": ["A"], "boundary": SQUARE[:2],  # two vertices: not a boundary
+                "origin": {"lng": 6.0, "lat": 53.0}}
+    report = {"routes": [{"key": "line:L1", "points": [BEND]}], "sites": [bad_site]}
+    with pytest.raises(ss.SitesInvalid):
+        mgi.plan_apply(tmp_path, report)
+    with pytest.raises(ss.SitesInvalid):
+        mgi.apply_report(tmp_path, report)
+    assert (tmp_path / "map_layout.json").read_bytes() == layout_before
+    assert not (tmp_path / "sites.json").exists()

@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from harness.edit_card import (STUDY_LEAF_CAP, _SECRET_KEY, Adapter, _note, _refuse, _sandbox,
                                _setting, _settings_row, register)
 
+_TEXT_CAP = 120
 _SECTION = "commercial"  # Commercial & parties, where the flow lists these settings
 
 
@@ -43,6 +44,11 @@ def _fingerprint(value) -> str:
     return hashlib.sha1(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()[:12]
 
 
+def _short(text: str) -> str:
+    """A free-text string as the card shows it: cut at `_TEXT_CAP` characters."""
+    return text if len(text) <= _TEXT_CAP else text[:_TEXT_CAP] + "\u2026"
+
+
 def _title(key: str) -> str:
     return key.replace("_", " ").capitalize()
 
@@ -62,6 +68,8 @@ def _cell(path: tuple, value):
         return _count(len(value), "item")
     if isinstance(value, dict):
         return _count(len(value), "field")
+    if isinstance(value, str):
+        return _short(value)
     return _setting(value)
 
 
@@ -193,10 +201,10 @@ def _tariff_cell(commercial: dict | None):
     commercial = commercial or {}
     ref = commercial.get("import_tariff_ref")
     if isinstance(ref, dict):
-        return f"{ref.get('id')} v{ref.get('version')}"
+        return _short(f"{ref.get('id')} v{ref.get('version')}")
     inline = commercial.get("import_tariff")
     if isinstance(inline, dict) or commercial.get("import_tariff_id"):
-        return f"{(inline or {}).get('name') or commercial.get('import_tariff_id')} (inline)"
+        return f"{_short(str((inline or {}).get('name') or commercial.get('import_tariff_id')))} (inline)"
     return None
 
 
@@ -234,8 +242,6 @@ def _urdb_plan(args: dict):
     checked before the upload is read or any old item is."""
     from routers import library
     from services import chat_tools
-    from services.commercial import hashing
-    from services.library import common
     from services.library import items as items_store
     from services.library import urdb
 
@@ -248,7 +254,7 @@ def _urdb_plan(args: dict):
         body = chat_tools._urdb_request(file_id, name, **{key: args[key] for key in keys if key in args})
         item_name = library._item_name(body.name)
         try:
-            tariff, _refusals, _notes = urdb.urdb_to_tariff(
+            tariff, _refusals, notes = urdb.urdb_to_tariff(
                 body.urdb_response, name=item_name, cyclic_year=body.cyclic_year,
                 accept_partial=body.accept_partial, tariff_id=body.tariff_id,
                 jurisdiction=body.jurisdiction, valid_from=body.valid_from)
@@ -257,17 +263,15 @@ def _urdb_plan(args: dict):
         except ValueError as exc:
             _refuse("urdb_invalid", str(exc)[:500], 422)
         payload = tariff.model_dump(mode="json")
-        try:  # the Library's own refusals of a payload or a shipped name
-            model = items_store.validate_payload("tariff", payload)
-            if common.is_common("tariff", item_name):
-                raise items_store.LibraryItemCommonReadonly(
-                    f"tariff “{item_name}” is a shipped common Library item and cannot be overwritten; "
-                    "store your own version under another name")
+        meta = {"source": "urdb", "provider": "OpenEI URDB", "notes": notes,
+                "description": str(body.urdb_response.get("label") or "")[:500] or None}
+        try:  # the Library's own refusals of a payload, a meta or a shipped name: the write's checks
+            prepared = items_store.prepare_item("tariff", item_name, payload, meta)
         except ValueError as exc:
             _refuse("urdb_invalid", str(exc)[:500], 422)
         latest = items_store.latest_ref(db, org, "tariff", item_name)
         latest_payload = items_store.resolve(db, org, latest) if latest is not None else None
-        if latest is not None and latest.hash == hashing.library_item_digest(model):
+        if latest is not None and latest.hash == prepared.digest:
             _refuse("empty_edit", f"Library tariff “{item_name}” already holds this rate (version {latest.version}).")
         return item_name, payload, latest, latest_payload
 
@@ -363,18 +367,18 @@ def _finance_preview(args: dict) -> list[dict]:
     if simulation._solver_in_flight_ctx(PyPSAService.get_active_context()):
         _refuse("solver_in_flight", "A solve is running on this project; change the finance inputs after it "
                 "finishes.", 409)
-    old = _stored_finance()
-    stale = simulation._entity_tag(tag)
-    if stale != "*" and stale != finance_digest(old):
-        _refuse("finance_changed", "The finance inputs changed since they were read; reload and re-apply the edit.",
-                412)
     new = None
-    if body.finance is not None:
+    if body.finance is not None:  # the route validates the body (422) before it compares the tag (412)
         try:
             new = finance_inputs_or_422(body.finance).model_dump(mode="json")
         except HTTPException as exc:
             detail = exc.detail if isinstance(exc.detail, dict) else {}
             _refuse("invalid_edit_value", str(detail.get("message") or exc.detail)[:300], exc.status_code)
+    old = _stored_finance()
+    stale = simulation._entity_tag(tag)
+    if stale != "*" and stale != finance_digest(old):
+        _refuse("finance_changed", "The finance inputs changed since they were read; reload and re-apply the edit.",
+                412)
     if new is None:
         if old is None:
             _refuse("empty_edit", "No finance inputs are stored; there is nothing to clear.")
@@ -424,7 +428,7 @@ def _vf_keyed(value_flows):
 
 def _vf_cell(path: tuple, value):
     if path[0] == "participants" and len(path) == 2 and isinstance(value, dict):
-        return f"{value.get('role')} · {value.get('name')}"
+        return f"{_short(str(value.get('role')))} · {_short(str(value.get('name')))}"
     return _cell(path, value)
 
 
@@ -516,7 +520,7 @@ def _sites_cell(path: tuple, value):
 
 
 def _sites_label(doc: dict) -> Callable[[tuple], str]:
-    names = {sid: site.get("name") or sid for sid, site in doc.items()}
+    names = {sid: _short(str(site.get("name") or sid)) for sid, site in doc.items()}
 
     def label(path: tuple) -> str:
         if path[0] == "sites":
