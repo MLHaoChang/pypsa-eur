@@ -1318,3 +1318,202 @@ def _gfm_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 # Section 5: the Controls block of each converter-coupled asset (card-workspaces.md §3.3).
 register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets"))
+
+
+# ── Project settings and scope: LV08 B1 (Q3-CARDS-1) ───────────────────────
+# Each preview reads the old value from the store its tool writes and takes the new
+# value from the tool's own validation; nothing here recomputes a value.
+
+def _settings_row(name: str, field: str, label: str, old, new, unit: str = "", *, says_name: str | None = None) -> dict:
+    row = {"component_class": "Settings", "name": name, "field": field, "label": label,
+           "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
+    if says_name:
+        row["says_name"] = says_name
+    return row
+
+
+def _leaf_rows(name: str, prefix: str, old: dict, new: dict, label) -> list[dict]:
+    """One row per top-level key whose stored value differs."""
+    return [_settings_row(name, f"{prefix}{key}", label(key), old.get(key), new.get(key))
+            for key in dict.fromkeys([*old, *new]) if not _same(old.get(key), new.get(key))]
+
+
+def _project_name(args: dict) -> str:
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip():
+        _refuse("empty_edit", "Name the project to edit.")
+    return name
+
+
+# update_project_flow_scope: the stored scope (or the template's preset) → the validated scope.
+
+def _scope_state(args: dict):
+    from routers import flow
+    from services import chat_tools, flow_service
+
+    project = chat_tools._authorized_project(_project_name(args))
+    template = flow_service.read_template(project.directory)
+    settings = flow._solver_settings(project)
+    return project, template, flow._no_load(project, template), settings
+
+
+def _scope_flat(scope: dict) -> dict:
+    flat = {f"group.{g}": True for g in scope.get("groups", [])}
+    for card, chosen in (scope.get("options") or {}).items():
+        flat.update({f"{card}.{o}": True for o in chosen})
+    return flat
+
+
+def _flow_scope_preview(args: dict) -> list[dict]:
+    from services import flow_scope
+
+    project, template, no_load, settings = _scope_state(args)
+    try:
+        new = flow_scope.validate(args.get("scope"), has_template=template is not None, no_load=no_load)
+    except flow_scope.ScopeError as exc:
+        _refuse(exc.error_kind, exc.message)
+    old = flow_scope.read_scope(project.directory, template, settings, no_load=no_load)
+    before, after = _scope_flat(old), _scope_flat(new)
+    rows = []
+    for key in dict.fromkeys([*before, *after]):
+        if before.get(key) == after.get(key):
+            continue
+        card, _, option = key.partition(".")
+        if card == "group":
+            label = flow_scope.CARD_BY_ID[option].label
+        else:
+            label = f"{flow_scope.CARD_BY_ID[card].label} › {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
+        rows.append(_settings_row("Scope", key, label, before.get(key, False), after.get(key, False),
+                                  says_name=label))
+    if not rows:
+        _refuse("empty_edit", "This scope is already the project's scope.")
+    return rows
+
+
+def _flow_scope_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services import flow_scope
+
+    project, template, no_load, settings = _scope_state(args)
+    flat = _scope_flat(flow_scope.read_scope(project.directory, template, settings, no_load=no_load))
+    return [flat.get(row["field"], False) for row in rows]
+
+
+register("update_project_flow_scope", Adapter("settings_edit", _flow_scope_preview, _flow_scope_readback,
+                                              section_id="project"))
+
+
+# update_project_settings: the `settings` table in metadata.json.
+
+def _stored_project_setting(args: dict):
+    from services import chat_tools, project_registry, project_settings
+
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, _project_name(args))
+        project_dir = project_registry.project_dir(project)
+    try:
+        meta = json.loads((project_dir / "metadata.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _refuse("project_unsaved", f"Save '{project.name}' before changing its settings.", 409)
+    table = meta.get(project_settings.SETTINGS_KEY) if isinstance(meta, dict) else None
+    return table.get(project_settings.DERIVE_LENGTHS) if isinstance(table, dict) else None
+
+
+def _project_settings_preview(args: dict) -> list[dict]:
+    from services import project_settings
+
+    flag = args.get("derive_lengths_from_geometry")
+    if not isinstance(flag, bool):
+        _refuse("invalid_edit_value", "Derive lengths from geometry takes true or false.")
+    return [_settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry",
+                          _stored_project_setting(args), flag)]
+
+
+def _project_settings_readback(args: dict, rows: list[dict]) -> list[Any]:
+    return [_setting(_stored_project_setting(args))]
+
+
+register("update_project_settings", Adapter("settings_edit", _project_settings_preview,
+                                            _project_settings_readback, section_id="project"))
+
+
+# update_project_scenario_metadata: the project row's description and type.
+
+_SCENARIO_FIELDS = {"description": ("scenario_description", "Scenario description"),
+                    "scenario_type": ("scenario_type", "Scenario type")}
+
+
+def _stored_scenario(args: dict) -> dict:
+    from services import chat_tools, project_registry
+
+    with chat_tools._acting() as (db, user):
+        project = project_registry.resolve_project(db, user, _project_name(args))
+        return {key: getattr(project, column) for key, (column, _) in _SCENARIO_FIELDS.items()}
+
+
+def _scenario_preview(args: dict) -> list[dict]:
+    sent = [key for key in _SCENARIO_FIELDS if key in args]
+    if not sent:
+        _refuse("empty_edit", "Name a description or a scenario type to change.")
+    old = _stored_scenario(args)
+    rows = []
+    for key in sent:
+        value = args[key]
+        if key == "description":
+            value = (value or "").strip() or None  # as the route stores it
+        rows.append(_settings_row("Scenario", key, _SCENARIO_FIELDS[key][1], old[key], value))
+    return rows
+
+
+def _scenario_readback(args: dict, rows: list[dict]) -> list[Any]:
+    stored = _stored_scenario(args)
+    return [_setting(stored[row["field"]]) for row in rows]
+
+
+register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_preview, _scenario_readback,
+                                                    section_id="project"))
+
+
+# update_decision_study: the stored study's name, intake and settings.
+
+def _study_record(args: dict) -> dict:
+    from routers import studies
+    from services import chat_tools
+
+    project = chat_tools._authorized_project(args.get("project"))
+    study_id = args.get("study_id")
+    if not isinstance(study_id, str):
+        _refuse("empty_edit", "Name the study to edit.")
+    return studies._load(project, study_id).model_dump(mode="json", by_alias=True)
+
+
+def _decision_study_preview(args: dict) -> list[dict]:
+    old = _study_record(args)
+    rows = []
+    if args.get("name") is not None:
+        rows.append(_settings_row("Study", "name", "Study name", old.get("name"), args["name"]))
+    intake = args.get("intake")
+    if isinstance(intake, dict):
+        rows += _leaf_rows("Study intake", "intake.", old.get("intake") or {}, {**(old.get("intake") or {}), **intake},
+                           lambda key: f"Intake › {key}")
+    settings = args.get("settings")
+    if isinstance(settings, dict):
+        rows += [_settings_row("Study settings", f"settings.{key}", f"Study {key.replace('_', ' ')}",
+                               old.get(key), value)
+                 for key, value in settings.items() if value is not None]
+    if not rows:
+        _refuse("empty_edit", "Name a study field to change.")
+    return rows
+
+
+def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
+    record = _study_record(args)
+    out = []
+    for row in rows:
+        head, _, tail = row["field"].partition(".")
+        out.append(_setting((record.get("intake") or {}).get(tail) if head == "intake"
+                            else record.get(tail or head)))
+    return out
+
+
+register("update_decision_study", Adapter("settings_edit", _decision_study_preview, _decision_study_readback,
+                                          section_id="project"))
