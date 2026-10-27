@@ -261,7 +261,7 @@ it('names the Guided tools that skip the write card with their actual rule', asy
   get.mockResolvedValue({ ...snapshot(), guided_uncarded: [{ tool: 'preview_project_changes', native: 'none' }] })
   mount()
   fireEvent.click(screen.getByRole('button', { name: 'Access and approvals' }))
-  expect(await screen.findByText(/In Guided, these Write tools skip the Write row's card/)).toBeTruthy()
+  expect(await screen.findByText(/In Guided, these Write tools have their own rule/)).toBeTruthy()
   expect(screen.getByRole('listitem').textContent).toBe('Preview project changes · No approval card')
 })
 it('adds no Guided exception line when there are none', async () => {

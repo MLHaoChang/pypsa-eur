@@ -66,6 +66,12 @@ def test_guided_names_the_tools_that_skip_its_write_card(client, session_ctx, mo
                         [{'tool': 'preview_project_changes', 'native': expected}])
 
 
+def test_no_guided_uncarded_tool_is_an_edit():
+    # The view reports these as Expert gates them; loop.py would still card an edit.
+    from harness import confirm, edit_card
+    assert not [name for name in confirm.GUIDED_UNCARDED if edit_card.is_edit(name)]
+
+
 def test_access_is_bound_to_authorized_current_project(client, other_org_client, session_ctx):
     assert client.post('/api/projects/Access', params={'force': True, 'rebind': True}).status_code == 200
     ctx = session_ctx(client)

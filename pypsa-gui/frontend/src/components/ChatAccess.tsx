@@ -85,7 +85,7 @@ export default function ChatAccess({ checked, companion = false }: { checked: bo
             </tr>)}</tbody>
           </table>
           {current.guided_uncarded.length > 0 && <div>
-            <p>In Guided, these Write tools skip the Write row's card: each only stores a pending change, and the step that applies it shows the card.</p>
+            <p>In Guided, these Write tools have their own rule: each only stores a pending change, and the step that applies it shows the Write row's card.</p>
             <ul>{current.guided_uncarded.map(row =>
               <li key={row.tool}>{toolLabel(row.tool)} · {disposition[row.native]}</li>)}</ul>
           </div>}
