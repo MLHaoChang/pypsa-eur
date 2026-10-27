@@ -83,6 +83,20 @@ def test_without_a_connection_rating_i_l_is_the_process_units_rated_load(tmp_pat
     assert row["tdd"]["band"] == "50-100" and row["limit"] != with_import["limit"]
 
 
+def _no_load_current():
+    """No connection rating and no process unit rated: I_L is unknown on the process-unit fallback."""
+    n = _harmonic_site(spectrum=SPECTRUM)
+    n.links.at["grid_import", "p_nom"] = 0.0
+    n.links.at["compressor", "rated_mva"] = math.nan
+    return n
+
+
+def test_no_load_current_on_the_process_unit_fallback_points_at_the_units_rating(tmp_path):
+    row = _row(tmp_path, _no_load_current())
+    assert row["verdict"] == "unknown" and row["project_value"] is None
+    assert row["target"] == {**row["target"], "component": "Link", "entity": "compressor", "field": "rated_mva"}
+
+
 def test_no_standard_in_the_grid_code_is_unknown(tmp_path):
     row = _row(tmp_path, _harmonic_site(spectrum=SPECTRUM), "no_tdd", profile_dirs=(_without_standard(tmp_path),))
     assert row["verdict"] == "unknown" and row["limit"] is None and row["project_value"] is None
@@ -125,7 +139,7 @@ def test_every_target_is_a_registered_field(tmp_path):
     n_proc.links["eh_process"] = [False, False]
     n_proc.links["harmonic_source"] = ["", ""]
     for n in (_harmonic_site(spectrum=SPECTRUM), _harmonic_site(source=""), _harmonic_site(spectrum="5:three"),
-              _harmonic_site(spectrum=SPECTRUM, sk=math.nan), n_proc):
+              _harmonic_site(spectrum=SPECTRUM, sk=math.nan), n_proc, _no_load_current()):
         rows = _rows(G.grid_readiness(tmp_path, n, PROFILE))
         t = rows["current_distortion"]["target"]
         if t["field"] == "eh_sk_mva":

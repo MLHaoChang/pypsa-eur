@@ -1202,6 +1202,18 @@ def test_an_extracted_pq_limit_is_unconfirmed_and_quote_checked(hub, fake_api, k
     assert out["review"]["limits"][key] == {"quote_found": False, "found_on_page": None}
 
 
+def test_an_angle_limit_at_or_past_90_degrees_is_refused_at_save(hub, fake_api):
+    _extracted_in(hub, fake_api, tool_input())
+    edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])
+    edited["angle_limit_deg"] = {"value": 120.0, "clause": "Test code §1", "source": "code"}
+    with pytest.raises(HTTPException) as exc:
+        gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert _status(exc) == 422 and "angle_limit_deg" in str(exc.value.detail)
+    edited["angle_limit_deg"]["value"] = 45.0
+    out = gc.save_draft(hub, "tso", yaml.safe_dump(edited, sort_keys=False))
+    assert yaml.safe_load(out["yaml"])["angle_limit_deg"]["value"] == 45.0
+
+
 def test_confirming_the_tdd_standard_makes_it_code(hub, fake_api):
     _extracted_in(hub, fake_api, tool_input())
     edited = yaml.safe_load(gc.get_draft(hub, "tso")["yaml"])

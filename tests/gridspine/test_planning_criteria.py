@@ -951,6 +951,17 @@ def test_a_bad_profile_angle_limit_is_refused(value):
         _angle_profile(value)
 
 
+@pytest.mark.parametrize("value", [90.0, 120.0, 360.0])
+def test_a_profile_angle_limit_at_or_past_90_degrees_is_refused(value):
+    with pytest.raises(ContractError, match="angle_limit_deg value must be an angle below 90 degrees"):
+        _angle_profile(value)
+
+
+@pytest.mark.parametrize("value", [0.5, 30.0, 89.9])
+def test_a_profile_angle_limit_below_90_degrees_is_kept(value):
+    assert _angle_profile(value)["angle_limit_deg"]["value"] == value
+
+
 def test_a_profile_angle_limit_needs_a_clause_and_an_extracted_one_its_page():
     p = _profile((0.0, 1000.0, 0.9, 1.1))
     p["angle_limit_deg"] = {"value": 30.0, "source": "code"}
