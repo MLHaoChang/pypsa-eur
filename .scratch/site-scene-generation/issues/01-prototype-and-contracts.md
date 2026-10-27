@@ -3,7 +3,7 @@
 
 # SC-00 — demonstrate the geometry and exchange contracts
 
-Status: needs-triage — specification proposed; not implemented
+Status: ready-for-agent — N milestone (owner decision SITE3D-START-1); B and P stay pending until a supported Blender and photo engine are available
 Type: prototype
 Dependencies: none
 Baseline: master 9988f9899a3bf8e80f51272529f18ea70599b90c
