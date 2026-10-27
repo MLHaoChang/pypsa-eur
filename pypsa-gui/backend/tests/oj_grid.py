@@ -50,7 +50,8 @@ def build_oj_grid() -> pypsa.Network:
     n.add('Generator', 'Solar', bus='B3', p_nom=SOLAR_MW, marginal_cost=0, carrier='solar',
           p_max_pu=pd.Series(SOLAR_PU, index=n.snapshots))
     n.add('Load', 'Demand', bus='B3', p_set=LOAD_MW)
+    # The power part's lifetime, so pricing it (OJ-21) passes the priced-part check.
     n.add('StorageUnit', 'Battery', bus='B3', p_nom=20, max_hours=4,
-          efficiency_store=0.9, efficiency_dispatch=0.9)
+          efficiency_store=0.9, efficiency_dispatch=0.9, inv_power_lifetime=15.0)
     n.add('Store', 'H2 tank', bus='B3', e_nom=500, standing_loss=0.01)
     return n

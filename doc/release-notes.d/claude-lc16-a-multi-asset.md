@@ -1,0 +1,1 @@
+* Feat(pypsa-gui): The assistant updates parameters of several assets at once, across component classes, on one old → new card with one approval, one native read-back and one undo; a missing asset name refuses the whole batch and names the assets that exist (LC-16 A, owner journeys OJ-21, OJ-23 and OJ-26).

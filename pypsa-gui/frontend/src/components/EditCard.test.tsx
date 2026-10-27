@@ -221,3 +221,18 @@ it('a row without a display value rounds a long number but keeps years, tiny val
   expect(tiny).toContain('0.00001')
   expect(tiny).toContain('no limit')
 })
+
+it('the project change preview says "not set" and, in Guided, the field in words (LC-16 UX)', () => {
+  const preview = { preview_id: 'p', valid: true, changes_total: 1, diff: [{ component_class: 'StorageUnit',
+    name: 'Battery', attribute: 'inv_power_overnight', label: 'Power part: overnight cost',
+    before: 'not set', after: 150, unit: 'EUR/kW' }] }
+  for (const [mode, field] of [['expert', 'inv_power_overnight'], ['guided', 'Power part: overnight cost']]) {
+    useUIStore.setState({ uiMode: mode as 'expert' | 'guided' })
+    render(<AssistantResultCard result={preview} disabled={false} onRequest={vi.fn()} />)
+    const cells = within(screen.getByRole('table', { name: 'Project change preview' })).getAllByRole('cell')
+      .map(c => c.textContent)
+    expect(cells).toEqual(['Battery', field, 'not set', '150', 'EUR/kW'])
+    expect(screen.queryByText(/nan/)).toBeNull()
+    cleanup()
+  }
+})

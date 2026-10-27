@@ -97,6 +97,9 @@ class Adapter:
     # The flow section a settings edit lands in, when its rows name no component (a card
     # with a class-keyed row gets its section from the component).
     section_id: str | None = None
+    # What else the card binds (in its digest) beside its rows: the stored
+    # review an `apply_project_changes` card shows.
+    binding: Callable[[dict], dict] | None = None
 
 
 ADAPTERS: dict[str, Adapter] = {}
@@ -136,10 +139,17 @@ def _says(rows: list[dict]) -> str:
     def one(row):
         if row["field"] == "exists":
             return f"{'adds' if row['new'] else 'removes'} {row['component_class']} {row['name']}"
-        unit = f" {row['unit']}" if row.get("unit") else ""
-        old = "?" if row.get("old") is None and row.get("old_known") is False else _number(row.get("old"))
+        # The card's display unit (150 EUR/kW, stored as 150000 EUR/MW), as EditCard.tsx shows it.
+        shown = row.get("display")
+        old, new, unit = (shown["old"], shown["new"], shown["unit"]) if shown else (row.get("old"), row["new"], row.get("unit"))
+        unit = f" {unit}" if unit else ""
+        # The card's own words for an absent value (EditCard.tsx): never "None".
+        old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        new = "not set" if new is None else _number(new)
+        stored = (f" (stored as {_number(row['new'])} {row['unit']})"
+                  if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
-        return f"{what} {old} → {_number(row['new'])}{unit}"
+        return f"{what} {old} → {new}{unit}{stored}"
     return "; ".join(one(row) for row in rows if row["role"] == "typed")
 
 
@@ -176,6 +186,8 @@ def preview(tool_name: str, args: dict, *, with_state: bool = True) -> dict:
     sections = _attach_targets(rows)
     card = {"version": VERSION, "kind": adapter.kind, "tool": tool_name, "rows": rows,
             "says": _says(rows), "complete": adapter is not _ARGUMENTS}
+    if adapter.binding is not None:
+        card["binding"] = adapter.binding(args or {})
     if not sections and adapter.section_id:
         from services import flow_sections as F
 
@@ -523,16 +535,23 @@ def _sandbox_rows(component_class: str, targets: list[tuple[str, dict]], run: Ca
                    "unit": _carrier_unit(field.get("unit_storage") or field.get("native_unit") or "",
                                          candidate.network, after, new_name),
                    "role": "typed" if column in attrs else "derived" if field.get("derived") else "follows"}
-            scale = field.get("display_scale")
-            if scale not in (None, 1, 1.0) and _numeric(new):
-                row["display"] = {"old": old * scale if _numeric(old) else None, "new": new * scale,
-                                  "unit": field.get("unit_display")}
-            rows.append(row)
+            rows.append(_with_display(row, field))
     targets_now = {(component_class, n) for name, attrs in targets for n in (name, attrs.get("name", name))}
     rows += _existence_rows(active.network, candidate.network, targets_now)
     rows += _solve_time_rows(component_class, candidate.network, attr, [attrs.get("name", name) for name, attrs in targets])
     rows += _cost_notes(component_class, candidate.network, attr, targets, rows)
     return rows
+
+
+def _with_display(row: dict, field: dict) -> dict:
+    """A row in the field's display unit too (EUR/kW for a stored EUR/MW), so
+    every card, receipt and undo shows one value in one unit."""
+    scale = field.get("display_scale")
+    old, new = row["old"], row["new"]
+    if scale not in (None, 1, 1.0) and (_numeric(new) or _numeric(old)):
+        row["display"] = {"old": old * scale if _numeric(old) else None,
+                          "new": new * scale if _numeric(new) else None, "unit": field.get("unit_display")}
+    return row
 
 
 def _carrier_unit(unit: str, network, frame, name: str) -> str:
@@ -662,6 +681,28 @@ def _bulk_preview(args: dict) -> list[dict]:
 
 register("update_component", Adapter("parameter_edit", _update_component_preview, _component_readback))
 register("bulk_update_components", Adapter("parameter_edit", _bulk_preview, _component_readback))
+
+
+# ── Several assets in one reviewed preview: apply_project_changes (LC-16) ──
+#
+# The rows are the stored preview's, rechecked against the live inputs by
+# `preview_confirmation`; the card binds that preview's review_sha256, so the
+# card the user approves is provably the preview the handler applies.
+
+def _project_changes_preview(args: dict) -> list[dict]:
+    from services.assistant_tools import preview_card
+
+    return preview_card(args.get("preview_id"))[0]
+
+
+def _project_changes_binding(args: dict) -> dict:
+    from services.assistant_tools import preview_card
+
+    return preview_card(args.get("preview_id"))[1]
+
+
+register("apply_project_changes", Adapter("parameter_edit", _project_changes_preview, _component_readback,
+                                           binding=_project_changes_binding))
 
 
 # ── Library references: apply_library_reference ───────────────────────────
@@ -875,7 +916,7 @@ def _undo_preview(args: dict) -> list[dict]:
 
     import pypsa
 
-    from services import undo_service
+    from services import chat_tools, undo_service
     from services.pypsa_service import PyPSAService
 
     netcdf = undo_service.peek()
@@ -890,20 +931,23 @@ def _undo_preview(args: dict) -> list[dict]:
     finally:
         path.unlink(missing_ok=True)
     now = PyPSAService.get_network()
-    rows, more = [], 0
+    rows, more, described = [], 0, {}
     for component in now.components:
         klass, current = component.name, component.static
         if klass in SKIP_CLASSES:
             continue
         before = restored.components[klass].static
         defaults = component.defaults
-        inputs = [c for c in current.columns if c in before.columns
-                  and "Input" in str(defaults.at[c, "status"] if c in defaults.index else "Input")]
+        # A column the undone edit created (an investment part) is absent from
+        # the restored frame: the undo takes it back to "not set".
+        inputs = [c for c in current.columns
+                  if "Input" in str(defaults.at[c, "status"] if c in defaults.index else "Input")]
         for name in current.index.union(before.index):
             if name not in before.index or name not in current.index:
                 change = [("exists", name in current.index, name in before.index)]
             else:
-                change = [(c, _scalar(current.at[name, c]), _scalar(before.at[name, c])) for c in inputs]
+                change = [(c, _scalar(current.at[name, c]),
+                           _scalar(before.at[name, c]) if c in before.columns else None) for c in inputs]
             for field, old, new in change:
                 if not (_plain(old) and _plain(new)) or (_blank(old) and _blank(new)) or _same(old, new):
                     continue
@@ -911,9 +955,15 @@ def _undo_preview(args: dict) -> list[dict]:
                     more += 1
                     continue
                 unit = str(defaults.at[field, "unit"]) if field in defaults.index else ""
-                rows.append({"component_class": klass, "name": str(name), "field": field, "label": field,
-                             "old": old, "new": new, "unit": "" if unit in ("n/a", "nan") else unit,
-                             "role": "typed"})
+                # The app's own fields (an investment part) carry their unit and
+                # label in the class schema, as the edit card that set them did.
+                if klass not in described:
+                    described[klass] = _fields(klass) if klass in chat_tools._COMPONENT_CREATE_SCHEMAS else {}
+                known = described[klass].get(field) or {}
+                unit = known.get("unit_storage") or known.get("native_unit") or unit
+                rows.append(_with_display({"component_class": klass, "name": str(name), "field": field,
+                                           "label": known.get("label", field), "old": old, "new": new,
+                                           "unit": "" if unit in ("n/a", "nan") else unit, "role": "typed"}, known))
     if more:
         rows.append(_note("", "", "more", f"and {more} more values this undo restores"))
     if not rows:
@@ -934,7 +984,8 @@ def _undo_readback(args: dict, rows: list[dict]) -> list[Any]:
         if row["field"] == "exists":
             out.append(row["name"] in frame.index)
         else:
-            out.append(frame.at[row["name"], row["field"]] if row["name"] in frame.index else None)
+            out.append(frame.at[row["name"], row["field"]]
+                       if row["name"] in frame.index and row["field"] in frame.columns else None)
     return out
 
 

@@ -34,6 +34,11 @@ DESTRUCTIVE_TIERS = frozenset(["destructive", "execution", "execution_long_runni
 # are carded one after the other (dispatch is sequential and blocks on each).
 GUIDED_CONFIRM_TIERS = DESTRUCTIVE_TIERS | frozenset(["write"])
 
+# Write-tier tools Guided gates as Expert does (LC-16 OJ-21, "one card, one
+# approval in Expert or Guided"): each stores a record and changes nothing in
+# the project, and the tool that applies it carries the approval card.
+GUIDED_UNCARDED = frozenset(["preview_project_changes"])
+
 # A tool name absent from the catalogue gets the card in every mode.
 UNKNOWN_TOOL_TIER = "destructive"
 
@@ -66,7 +71,7 @@ def confirmation_policy(tier: str, *, guided: bool = False, external: bool = Fal
 
 def confirmation_revision() -> tuple:
     """Server-derived effective rules; a changed set invalidates open decisions."""
-    return (DESTRUCTIVE_TIERS, GUIDED_CONFIRM_TIERS, AUTO_APPROVE_TIERS,
+    return (DESTRUCTIVE_TIERS, GUIDED_CONFIRM_TIERS, GUIDED_UNCARDED, AUTO_APPROVE_TIERS,
             harness_session.CONFIRMATION_TTL_SECONDS)
 
 
