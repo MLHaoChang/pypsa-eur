@@ -257,6 +257,43 @@ def test_loadflow_in_a_run_that_optimises_is_the_optimisations_verdict(
     assert v["loadflow"]["blocker"]["section"] == v["optimisation"]["blocker"]["section"] == "loads"
 
 
+def test_loadflow_switched_on_is_the_runs_own_verdict(client, site, set_cfg, bound_ctx,
+                                                    project_storage_dir):
+    """W4b (gatekeeper L7): with Load flow on, the bundled load flow answers for
+    the optimisation and its own Stage-2 items together, the first in flow
+    order; the optimisation alone does not see Stage 2's refusals."""
+    name = site(_line_network(), name="lf_on")
+    set_cfg(run_ac_pf_after_lopf=True, solve_strategy="rolling")
+    kinds = ("optimisation", "loadflow")
+    v = _verdicts(client, bound_ctx, project_storage_dir, name, *kinds)
+    flow = _pf._flow(client, name)
+    assert v["optimisation"] == _flow_verdict(flow, "optimisation")
+    assert v["optimisation"]["ready"] is True
+    assert v["loadflow"] == _flow_verdict(flow, "loadflow")
+    assert v["loadflow"]["blocker"]["code"] == "rolling_with_ac_pf"
+    # Switched off, the same kind answers for switching it on: the same refusal.
+    set_cfg(run_ac_pf_after_lopf=False)
+    off = _verdicts(client, bound_ctx, project_storage_dir, name, *kinds)
+    assert off["loadflow"]["ready"] is False
+    assert off["loadflow"]["blocker"]["code"] == "rolling_with_ac_pf"
+    # Alone, it is the standalone route's refusal (no dispatch yet).
+    alone = _verdicts(client, bound_ctx, project_storage_dir, name, "loadflow")
+    assert alone["loadflow"]["blocker"]["code"] == "ac_pf_not_solved"
+
+
+def test_loadflow_switched_on_reports_the_first_blocker_in_flow_order(
+        client, site, set_cfg, edit, bound_ctx, project_storage_dir):
+    name = site(_line_network(), name="lf_on2")
+    set_cfg(run_ac_pf_after_lopf=True)
+    with edit() as n:
+        n.lines.loc["ab", ["r", "x"]] = [0.0, 0.0]
+        n.loads.loc["l", "p_set"] = float("nan")
+    v = _verdicts(client, bound_ctx, project_storage_dir, name, "optimisation", "loadflow")
+    flow = _pf._flow(client, name)
+    assert v["loadflow"]["ready"] is False
+    assert v["loadflow"]["blocker"] == flow["run_blocker"]
+
+
 def test_the_load_flow_overwrites_the_lp_flows(client, site, bound_ctx):
     """Shared state: Stage 2 rewrites the LP's flows and voltages in place; the
     LP's are kept aside in `lopf_results`."""
