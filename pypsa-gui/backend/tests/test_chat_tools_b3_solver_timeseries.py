@@ -178,6 +178,11 @@ def test_job_log_returns_the_tail_and_404s_an_unknown_job(
     assert err.value.status_code == 404
 
 
+def test_job_log_max_lines_matches_the_schema_bound():
+    schema = next(t for t in TOOLS if t["name"] == "solve_queue_job_log")["input_schema"]
+    assert schema["properties"]["max_lines"]["maximum"] == chat_tools._JOB_LOG_MAX_LINES
+
+
 def test_job_log_keeps_only_the_last_lines(monkeypatch):
     from routers import solve_queue as sq
 
@@ -354,6 +359,9 @@ def test_another_orgs_project_is_refused(client, api_project, second_identity, a
     with pytest.raises(HTTPException) as err:
         chat_tools.DISPATCHERS[name](**{key: project}, **kwargs)
     assert err.value.status_code in (403, 404), (name, err.value.status_code)
+    # the project is resolved first: the refusal is the ACL's, not a missing file
+    assert not (isinstance(err.value.detail, dict)
+                and err.value.detail.get("error_kind") == "upload_not_found"), name
 
 
 def _upload(client, project, filename, body, mime="text/csv") -> str:

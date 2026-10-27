@@ -3602,13 +3602,14 @@ def solve_queue_clear_finished() -> dict:
 # the visibility and per-user checks and requeue's holder check.
 
 _JOB_LOG_DEFAULT_LINES = 200
+_JOB_LOG_MAX_LINES = 2000  # the catalogue schema's `maximum`
 
 
 def solve_queue_job_log(job_id: str, max_lines: int | None = None) -> dict:
     from routers.solve_queue import job_log_history as _h
     out = _route(_h, job_id)
     lines = list(out.get("lines") or [])
-    keep = max(1, min(int(max_lines or _JOB_LOG_DEFAULT_LINES), 2000))
+    keep = max(1, min(int(max_lines or _JOB_LOG_DEFAULT_LINES), _JOB_LOG_MAX_LINES))
     return {"status": out.get("status"), "lines": lines[-keep:],
             "total_lines": len(lines), "truncated": len(lines) > keep}
 
@@ -3754,13 +3755,12 @@ def _profile_upload(handler, project_id: str, file_id: str, **form) -> dict:
 
     The blob is resolved only under the authorized project's own upload store,
     so another project's `file_id` is `upload_not_found`. It reaches the route
-    as an `UploadFile` with its stored filename and content type, so the
-    route's own size cap and parsing run unchanged. Async, so `_route` cannot
+    as an `UploadFile` over the open blob with its stored filename and content
+    type, so the route's own chunked size cap (`read_capped`) and parsing run
+    unchanged and nothing is buffered before that cap. Async, so `_route` cannot
     drive it (its `with _acting()` would close `db` before the coroutine ran):
     the dependencies are injected inside the block, as `_import_raw` does.
     """
-    import io
-
     from fastapi import UploadFile
     from starlette.datastructures import Headers
 
@@ -3770,10 +3770,10 @@ def _profile_upload(handler, project_id: str, file_id: str, **form) -> dict:
     proj = _authorized_project(project_id)
     meta = upload_service.get_upload_meta(proj.name, file_id, project_dir=proj.directory)
     blob = upload_service.get_upload_path(proj.name, file_id, project_dir=proj.directory)
-    upload = UploadFile(file=io.BytesIO(blob.read_bytes()), filename=meta.filename,
-                        headers=Headers({"content-type": meta.mime}))
     try:
-        with _acting() as (db, user):
+        with blob.open("rb") as fh, _acting() as (db, user):
+            upload = UploadFile(file=fh, filename=meta.filename,
+                                headers=Headers({"content-type": meta.mime}))
             return _sync(handler(file=upload, proj=proj, db=db, user=user, **form))
     except HTTPException:
         raise
