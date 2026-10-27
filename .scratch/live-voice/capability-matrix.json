@@ -4633,8 +4633,8 @@
       "backend_routes": 506,
       "gui_routes": 466,
       "limitation": 84,
-      "needs-tool": 102,
-      "tool": 280,
+      "needs-tool": 91,
+      "tool": 291,
       "unclassified": 0
     },
     "limitations_by_reason": {
@@ -4723,19 +4723,6 @@
         "POST /api/library_reference/preview",
         "POST /api/projects/import-folder",
         "POST /api/projects/{name}/map_layout/import"
-      ],
-      "network-topology": [
-        "GET /api/geocode",
-        "GET /api/network/asset_costs",
-        "GET /api/network/asset_schema/{component}",
-        "GET /api/network/catalog/{component}",
-        "GET /api/projects/{name}/sites",
-        "GET /api/projects/{name}/sites/{site_id}/context",
-        "POST /api/network/lengths/from_geometry",
-        "POST /api/network/lines/rescale_impedances",
-        "POST /api/network/reset",
-        "POST /api/projects/{name}/sites/{site_id}/context",
-        "PUT /api/projects/{name}/sites"
       ],
       "projects": [
         "GET /api/projects/from_template/eh_site/form",
@@ -4909,12 +4896,6 @@
         "issue": "08",
         "family": "import-export",
         "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:network-topology",
-        "issue": "08",
-        "family": "network-topology",
-        "summary": "11 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
         "id": "route-parity:needs-tool:projects",

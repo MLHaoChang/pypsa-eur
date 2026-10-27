@@ -1229,6 +1229,96 @@ def recalculate_line_lengths() -> dict:
     return _h()
 
 
+# ── Network topology and sites (8) — LV08 B1 ────────────────────────────────
+#
+# Thin wrappers over `routers/network.py`, `routers/geocode.py` and the
+# `routers/projects.py` site routes, in process through `_route`: the routes'
+# validation, lock checks, upstream timeouts and refusals apply unchanged.
+
+_ASSET_REFERENCE_VIEWS = ("asset_costs", "asset_schema", "attribute_catalog")
+
+
+def get_asset_reference(view: str, component: str | None = None) -> dict:
+    """One of the network's asset reference reads, by `view`."""
+    from routers import network as R
+
+    if view not in _ASSET_REFERENCE_VIEWS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": f"view must be one of {list(_ASSET_REFERENCE_VIEWS)}, got {_cut(view, 40)!r}"})
+    if view == "asset_costs":
+        return R.get_asset_costs()
+    if not component:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args", "message": f"view {view!r} needs component"})
+    if view == "asset_schema":
+        return R.get_asset_schema(component)
+    return R.get_attribute_catalog(component)
+
+
+def geocode_place(query: str) -> list[dict]:
+    """`GET /api/geocode`: the configured geocoder's matches (its own timeout)."""
+    from routers.geocode import geocode_search as _h
+    from services import geocode
+
+    query = (query or "").strip()
+    if not 1 <= len(query) <= geocode.MAX_QUERY_CHARS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "invalid_tool_args",
+            "message": f"query must be 1 to {geocode.MAX_QUERY_CHARS} characters"})
+    return _h(q=query)
+
+
+def derive_lengths_from_geometry(keys: list[str] | None = None) -> dict:
+    """`POST /api/network/lengths/from_geometry`: lengths only; impedances are previewed."""
+    from models.schemas import LengthsFromGeometryRequest
+    from routers.network import lengths_from_geometry as _h
+
+    return _h(LengthsFromGeometryRequest(keys=keys))
+
+
+def rescale_line_impedances(lines: list[dict]) -> dict:
+    """`POST /api/network/lines/rescale_impedances`: the consented values, as sent."""
+    from pydantic import ValidationError
+
+    from models.schemas import ImpedanceRescaleRequest
+    from routers.network import rescale_impedances as _h
+
+    try:
+        body = ImpedanceRescaleRequest(lines=lines)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _h(body)
+
+
+def reset_network() -> dict:
+    """`POST /api/network/reset`, with this chat's session unbound as the route does."""
+    from routers.network import reset_network as _h
+    return _route(_h)
+
+
+def get_project_sites(name: str, site_id: str | None = None) -> dict:
+    """The site document, plus one site's cached context when `site_id` is given."""
+    from routers import projects as R
+
+    out = {"sites": _route(R.get_sites, name)}
+    if site_id:
+        out["context"] = _route(R.get_site_context, name, site_id)
+    return out
+
+
+def set_project_sites(name: str, sites: dict) -> dict:
+    """`PUT .../sites`: the whole validated site document."""
+    from routers.projects import put_sites as _h
+    return _route(_h, name, sites)
+
+
+def fetch_site_context(name: str, site_id: str) -> dict:
+    """`POST .../sites/{site_id}/context`: fetch upstream (bounded) and cache."""
+    from routers.projects import fetch_site_context as _h
+    return _route(_h, name, site_id)
+
+
 # ── Snapshots (4) ───────────────────────────────────────────────────────────
 
 
@@ -7956,6 +8046,15 @@ DISPATCHERS: dict[str, Any] = {
     # write_topology (2)
     "cluster_network": cluster_network,
     "recalculate_line_lengths": recalculate_line_lengths,
+    # network topology and sites (8) — LV08 B1
+    "get_asset_reference": get_asset_reference,
+    "geocode_place": geocode_place,
+    "derive_lengths_from_geometry": derive_lengths_from_geometry,
+    "rescale_line_impedances": rescale_line_impedances,
+    "reset_network": reset_network,
+    "get_project_sites": get_project_sites,
+    "set_project_sites": set_project_sites,
+    "fetch_site_context": fetch_site_context,
     # write_snapshots (4)
     "set_snapshots": set_snapshots,
     "set_snapshot_weightings": set_snapshot_weightings,

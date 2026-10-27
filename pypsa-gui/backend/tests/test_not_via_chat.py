@@ -74,7 +74,7 @@ def test_the_issue_rows_are_declared():
     ('Share this project with Anna', 'project_members'), ('Change my password', 'sign_in_and_password'),
     ('Set my Anthropic API key', 'assistant_keys_and_profiles'), ('Pause the solve queue', 'solve_queue_instance_controls'),
     ('Unpause the solve queue', 'solve_queue_instance_controls'),
-    ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Geocode the site address', 'map_layout_and_sites'),
+    ('Resume the paused solve queue', 'solve_queue_instance_controls'), ('Replace the site thumbnail', 'map_layout_and_sites'),
 ])
 def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     from services.not_via_chat import NOT_VIA_CHAT
@@ -90,7 +90,7 @@ def test_refusal_goals_find_their_entry(discovery, goal, entry_id):
     'Import a URDB tariff', 'List the tariffs in the library', 'Upload this CSV as the load profile',
     'Set the load profile from the uploaded file', 'Resume my task', 'Resume the plan',
     'Switch to my OpenAI profile', 'Switch to my Anthropic profile', 'Pause my goal', 'Pause the plan',
-    'Extract the grid code from this PDF',
+    'Extract the grid code from this PDF', 'Geocode the site address',
 ])
 def test_ordinary_goals_get_no_refusal(discovery, goal):
     assert 'not_via_chat' not in chat_tools.find_capabilities(goal)
