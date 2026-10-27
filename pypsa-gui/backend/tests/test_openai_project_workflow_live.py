@@ -54,28 +54,39 @@ def workflow_environment(client, session_ctx, _auth_db, tmp_path, monkeypatch):
         PyPSAService.reset_request_context(binding)
 
 
+def last_preview_id(request):
+    """apply_project_changes takes the preview_id the prior preview returned."""
+    found = re.findall(r"preview_id\W+([0-9a-f-]{36})", json.dumps(request.messages[-1]))
+    assert found, request.messages[-1]
+    return {"preview_id": found[-1]}
+
+
 def phases(names):
     return [
         ("baseline", f"In this disposable integration test, create a new ieee39 project named {BASE!r}. "
-         "Read its generators, set every generator's marginal_cost to 10 using one bulk update, "
+         "Read its generators, set every generator's marginal_cost to 10 with one preview and apply, "
          "run the simulation, verify completed simulation status before saving the solved project, then read cost_breakdown. "
          "Report the actual baseline objective and cost. I authorize these prescribed test operations. "
          "Use tools to execute them now, do not stop at a plan or ask a preference question. "
-         "Relevant tools: create_project_from_template, list_components, bulk_update_components, "
+         "Relevant tools: create_project_from_template, list_components, preview_project_changes, apply_project_changes, "
          "run_simulation, save_project, get_results, get_simulation_status.", [
              ("create_project_from_template", {"template_id": "ieee39", "new_name": BASE}),
              ("list_components", {"component_class": "Generator", "limit": 100}),
-             ("bulk_update_components", {"component_class": "Generator", "names": names, "updates": {"marginal_cost": 10}}),
+             ("preview_project_changes", {"changes": [{"component_class": "Generator", "names": names,
+                                                     "attribute": "marginal_cost", "value": 10}]}),
+            ("apply_project_changes", last_preview_id),
              ("run_simulation", {}), ("get_simulation_status", {}), ("save_project", {"name": BASE}),
              ("get_results", {"result_kind": "cost_breakdown"})]),
         ("sensitivity", f"Branch {BASE!r} into a new scenario named {SENS!r}, activate that scenario, "
          "set every generator's marginal_cost to 20, rerun, verify completed status, save the solved scenario, and read its cost "
          "and objective. Compare both saved scenarios for economics and explain the cost change. "
-         "Keep the baseline unchanged. Use create_scenario, activate_project, bulk_update_components, "
+         "Keep the baseline unchanged. Use create_scenario, activate_project, preview_project_changes, apply_project_changes, "
          "run_simulation, save_project, get_results, get_simulation_status, compare_scenarios.", [
              ("create_scenario", {"base": BASE, "new_name": SENS, "description": "Uniform marginal cost sensitivity 10 to 20"}),
              ("activate_project", {"project_id": SENS}),
-             ("bulk_update_components", {"component_class": "Generator", "names": names, "updates": {"marginal_cost": 20}}),
+             ("preview_project_changes", {"changes": [{"component_class": "Generator", "names": names,
+                                                     "attribute": "marginal_cost", "value": 20}]}),
+            ("apply_project_changes", last_preview_id),
              ("run_simulation", {}), ("get_simulation_status", {}), ("save_project", {"name": SENS}),
              ("get_results", {"result_kind": "cost_breakdown"}),
              ("compare_scenarios", {"project_a": BASE, "project_b": SENS, "focus": "economics"})]),
@@ -229,6 +240,10 @@ class WaitingFakeProvider(FakeProvider):
         if thread is not None and thread.is_alive():
             thread.join(timeout=240)
             assert not thread.is_alive(), "solver fixture timed out"
+        turn = self._turns[0] if self._turns else {}
+        for block in turn.get("blocks", []) if isinstance(turn, dict) else []:
+            if callable(block.get("input")):
+                block["input"] = block["input"](request)
         yield from super().stream(request)
 
 

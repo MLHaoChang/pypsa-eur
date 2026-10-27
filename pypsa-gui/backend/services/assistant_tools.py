@@ -734,6 +734,21 @@ def _idle(ctx, project):
         workflow._refuse("project_busy", "Wait for the current solve before previewing or applying changes.", 409)
 
 
+def _preview_fingerprint(ctx):
+    """Input fingerprint as the apply will see it.
+
+    The undo snapshot taken before an apply copies profiles held only in the
+    network's _t tables into the user time series; take the fingerprint over
+    that copy so a preview on such a project is not stale at its own apply.
+    """
+    from types import SimpleNamespace
+    from services.user_timeseries import _backup_network_ts_to_user_ts
+    store = dict(ctx.user_ts)
+    _backup_network_ts_to_user_ts(ctx.network, store)
+    return workflow._network_input_fingerprint(
+        SimpleNamespace(network=ctx.network, solver_state=ctx.solver_state, user_ts=store))
+
+
 def preview_project_changes(changes: list[dict]) -> dict:
     project, root, owner = _project()
     with PyPSAService.get_lock():
@@ -741,7 +756,7 @@ def preview_project_changes(changes: list[dict]) -> dict:
         _idle(ctx, project)
         absolute, sets = _resolve_changes(changes, ctx.network)
         parsed = _preview_changes(absolute, ctx.network, ctx.user_ts)
-        fingerprint = workflow._network_input_fingerprint(ctx)
+        fingerprint = _preview_fingerprint(ctx)
         _, diffs, rows, validation = _preview_candidate(ctx, parsed)
         preview_id = str(uuid.uuid4())
         record = {"version": 2, "preview_id": preview_id, "project_id": str(project.id), "owner_id": owner,
@@ -785,7 +800,7 @@ def apply_project_changes(preview_id: str) -> dict:
         _idle(ctx, project)
         if record.get("applied"):
             return {"preview_id": preview_id, "project_id": str(project.id), "applied": True, "reused": True}
-        if workflow._network_input_fingerprint(ctx) != record["fingerprint"]:
+        if _preview_fingerprint(ctx) != record["fingerprint"]:
             workflow._refuse("preview_stale", "Project inputs changed; create and review a new preview.", 409)
         candidate, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record["changes"], ctx.network, ctx.user_ts))
         if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):
@@ -975,7 +990,7 @@ def preview_confirmation(preview_id):
         if record.get('applied') or record.get('applying'):
             workflow._refuse('invalid_preview', 'Preview was already applied or interrupted; inspect inputs and create a new preview.', 409)
         ctx = PyPSAService.get_active_context()
-        if workflow._network_input_fingerprint(ctx) != record['fingerprint']:
+        if _preview_fingerprint(ctx) != record['fingerprint']:
             workflow._refuse('preview_stale', 'Project inputs changed; create and review a new preview.', 409)
         _, diffs, rows, _ = _preview_candidate(ctx, _preview_changes(record['changes'], ctx.network))
         if _review_body(diffs, rows) != _review_body(record['diff'], record['rows']):

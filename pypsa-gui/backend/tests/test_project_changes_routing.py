@@ -362,3 +362,81 @@ def test_weightings_refuse_what_the_route_refuses(periods, updates):
         update_investment_period_weightings({"updates": updates})
     assert failure.value.status_code == 400
     pd.testing.assert_frame_equal(PyPSAService.get_network().investment_period_weightings, before)
+
+
+# --- A bound plan's next step is exempt from the routing (loop.py), only that step ---
+
+PLAN_STEP = {"component_class": "Line", "names": ["L1", "L2"], "updates": {"s_nom": 500}}
+
+
+def _loop_turn(session, *calls):
+    """One model response through the real loop; every card is approved."""
+    from harness.providers.fake import FakeProvider
+    provider = FakeProvider([{"blocks": [{"type": "tool_use", "id": f"tu-{i}", "name": name, "input": args}
+                                         for i, (name, args) in enumerate(calls)]},
+                             {"blocks": [{"type": "text", "text": "done"}]}])
+    frames = []
+    for event, data in chat_service.run_turn(session, "edit the lines", provider=provider):
+        frames.append((event, data))
+        if event == "tool_pending_confirmation":
+            session.record_decision(data["confirmation_token"], "approve")
+    results = [b for m in provider.requests[1].messages for b in (m.get("content") or [])
+               if isinstance(b, dict) and b.get("type") == "tool_result"]
+    return frames, results
+
+
+def _redirected(results):
+    return [r for r in results if r.get("is_error") and edit_routing.KIND in json.dumps(r.get("content"), default=str)]
+
+
+def _lines():
+    n = PyPSAService.get_network()
+    return n.lines.at["L1", "s_nom"], n.lines.at["L2", "s_nom"]
+
+
+def _plan(session):
+    from services import assistant_tasks
+    task = assistant_tasks.start_task("Raise both lines", [
+        {"id": "raise", "tool": "bulk_update_components", "args": PLAN_STEP}], "routing-plan")
+    assert session.task_id == task["task_id"]
+    return task["task_id"]
+
+
+def _status(task_id):
+    from services import assistant_tasks
+    return assistant_tasks._read(task_id)[1]
+
+
+def test_the_plans_next_step_keeps_its_card_and_runs_as_the_step(mixed):  # noqa: F811 — the fixture
+    _, session, _ = mixed
+    task_id = _plan(session)
+    frames, results = _loop_turn(session, ("bulk_update_components", PLAN_STEP))
+    assert any(e == "tool_pending_confirmation" for e, _ in frames), frames
+    assert not _redirected(results), results
+    assert _lines() == (500, 500)
+    task = _status(task_id)
+    assert task["steps"][0]["status"] == "completed" and task["status"] == "completed", task
+    # A completed plan exempts nothing: the same call is routed to the preview.
+    frames, results = _loop_turn(session, ("bulk_update_components", PLAN_STEP))
+    assert len(_redirected(results)) == 1 and not any(e == "tool_pending_confirmation" for e, _ in frames)
+
+
+def test_a_call_that_is_not_the_next_step_is_still_routed(mixed):  # noqa: F811 — the fixture
+    _, session, _ = mixed
+    task_id = _plan(session)
+    other = {**PLAN_STEP, "updates": {"s_nom": 450}}
+    frames, results = _loop_turn(session, ("bulk_update_components", other))
+    assert len(_redirected(results)) == 1, results
+    assert not any(e == "tool_pending_confirmation" for e, _ in frames)
+    assert _lines() == (300, 300)
+    assert _status(task_id)["steps"][0]["status"] != "completed"
+
+
+def test_a_cancelled_plan_exempts_nothing(mixed):  # noqa: F811 — the fixture
+    from services import assistant_tasks
+    _, session, _ = mixed
+    assistant_tasks.cancel_task(_plan(session))
+    frames, results = _loop_turn(session, ("bulk_update_components", PLAN_STEP))
+    assert len(_redirected(results)) == 1, results
+    assert not any(e == "tool_pending_confirmation" for e, _ in frames)
+    assert _lines() == (300, 300)

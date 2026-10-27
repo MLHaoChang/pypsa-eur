@@ -238,6 +238,19 @@ def test_one_undo_restores_the_whole_batch(mixed):
     assert values() == BEFORE
 
 
+def test_a_profile_held_only_on_the_network_does_not_stale_the_preview(mixed):
+    # A template project carries its profiles in the network's _t tables only;
+    # the undo snapshot before the apply copies them into the user time series.
+    from services.user_timeseries import _user_ts
+    ctx, session, _ = mixed
+    PyPSAService.get_network().loads_t.p_set["D1"] = [5.0, 6.0]
+    assert not dict(_user_ts)
+    preview = chat_tools.preview_project_changes(OJ21)
+    frames = dispatch(session, "apply_project_changes", {"preview_id": preview["preview_id"]})
+    assert not [d for e, d in frames if e == "tool_error"], frames
+    assert values() == (500, 450, 150000, 63)
+
+
 def test_card_for_one_preview_cannot_approve_another(mixed):
     first = chat_tools.preview_project_changes(OJ21[:2])
     second = chat_tools.preview_project_changes(OJ21[2:])
