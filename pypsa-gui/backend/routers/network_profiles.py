@@ -26,7 +26,7 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
-from services import change_log_service
+from services import change_log_service, growth_placeholders
 from services.http_filenames import content_disposition
 from services.profile_shapes import (
     _double_peak_profile,
@@ -289,16 +289,21 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
     # an unmatched one is discarded anyway and its blanks are not the user's
     # problem.
     _reject_nonfinite_timeseries(df[matched], display_class, attribute)
-    with _user_ts_lock:
-        for col in matched:
-            key = (comp_attr, attribute, col)
-            _user_ts[key] = df[col].astype(float)
-            # The upload replaces the series, so any engine provenance from
-            # `assign_profile` no longer describes it.
-            _user_ts_meta.pop(key, None)
+    # One PyPSA-lock block, so the growth placeholders' prior peaks stay current.
     with PyPSAService.get_lock():
+        prior = growth_placeholders.before(n, comp_attr, attribute, matched)
+        with _user_ts_lock:
+            for col in matched:
+                key = (comp_attr, attribute, col)
+                _user_ts[key] = df[col].astype(float)
+                # The upload replaces the series, so any engine provenance from
+                # `assign_profile` no longer describes it.
+                _user_ts_meta.pop(key, None)
         _ensure_snapshots_cover_user_ts(n)
         _reapply_user_ts_to_network(n)
+        # A user upload sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, comp_attr, attribute,
+                                     {c: df[c] for c in matched}, prior)
     names_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
     cls_lower = display_class.lower()
     change_log_service.log(

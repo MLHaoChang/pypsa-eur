@@ -503,6 +503,14 @@
       "surface": "inline",
       "why": "run_ac_pf_stage was refused: AC power flow already ran on this solve and its results replaced the LOPF values, so a second run would take them as the LP baseline. The model tells the user to re-run the LOPF first."
     },
+    "stage2_multi_period": {
+      "surface": "inline",
+      "why": "run_ac_pf_stage was refused: multi_investment_periods is on, and PyPSA's power flow takes a flat snapshot index only. The detail says to use a single investment period; there is no conversation-wide recovery action."
+    },
+    "stage2_zero_impedance": {
+      "surface": "inline",
+      "why": "run_ac_pf_stage was refused: a line has r=0 and x=0 (an edit after the solve), which makes the admittance matrix singular. The detail names the fix (a non-zero reactance); there is no conversation-wide recovery action."
+    },
     "solver_in_flight": {
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."

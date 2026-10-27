@@ -969,10 +969,6 @@ def _growth_rows(kind: str, staged, *, source_set: str = "example", overrides=No
     return rows
 
 
-#: The follow-up that lets a placeholder be set (until then it stays one).
-PLACEHOLDER_FOLLOW_UP = "E1-set-growth-placeholders"
-
-
 def _in_words(label: str) -> str:
     """``Energized import`` → ``energized import``; an acronym stays (``IT load``)."""
     return label if label[1:2].isupper() or label[1:2].isdigit() else label[:1].lower() + label[1:]
@@ -981,8 +977,8 @@ def _in_words(label: str) -> str:
 def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
     """One assumed ledger row per placeholder growth value (the flow lists it
     as a warning to confirm; gatekeeper E1 condition 3). It says which stage
-    the value comes from, and that it stays a placeholder: nothing sets one
-    yet (``PLACEHOLDER_FOLLOW_UP``)."""
+    the value comes from, and that it stays a placeholder until the user edits
+    the series it names (``services.growth_placeholders``)."""
     out = []
     years: dict[str, list[int]] = {}
     for g in growth:
@@ -1000,6 +996,8 @@ def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
                    f"{stage}, so it takes {value}")
         else:
             why = f"the example has no {_in_words(label)} for {y}; it takes its stage {stage} value, {value}"
+        how = (f"editing every load's {y} series sets it" if g["kind"] == "load_scale"
+               else f"editing the {_in_words(label)} series for {y} sets it")
         out.append({
             "item": f"placeholder {g['kind']} {y}",
             "label": f"{label} {y} (placeholder)",
@@ -1008,10 +1006,10 @@ def _placeholder_ledger(growth: list[dict], native: Planning) -> list[dict]:
             "source": "assumed",
             "note": (f"not set: {why} (the example is built for {_years_text(native.years)}). A "
                      "placeholder, never interpolated: "
-                     + ("the peak check and the scorecard read this period unknown, and it "
-                        "stays unknown for this period" if g["kind"] in _PEAK_KINDS else
-                        "the investment case flags it, and it stays flagged")
-                     + f" (setting a placeholder is follow-up {PLACEHOLDER_FOLLOW_UP})"),
+                     + ("the peak check and the scorecard read this period unknown until "
+                        "it is set" if g["kind"] in _PEAK_KINDS else
+                        "the investment case flags it until it is set")
+                     + f"; {how}"),
             "section": section, "panel": None, "component": component, "entity": entity,
             "field": field})
     return out

@@ -64,6 +64,11 @@ A profile may carry these optional keys:
     ``orders`` ``{h: % of the fundamental}``, h a whole number 2..50, each
     limit a positive number. The harmonic screen judges on whichever of
     the two is set.
+``harmonic_resonance_clearance_h``
+    The least distance, in harmonic orders, between a network resonance
+    seen from the connection point and an order that counts (6k +- 1 and
+    the units' spectra) (datacenter grid readiness issue 12, the harmonic
+    impedance scan), a positive number.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -111,11 +116,13 @@ PROFILE_ID = re.compile(r"[a-z0-9_]{1,64}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
-                  "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct")
+                  "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
+                  "harmonic_resonance_clearance_h")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
-                          "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "dynamic_requirements", "notes",
+                          "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct", "harmonic_resonance_clearance_h",
+                          "dynamic_requirements", "notes",
                           "document", "name"})
 #: Every key a voltage band may carry.
 BAND_KEYS = frozenset({"kv_min", "kv_max", "kv_max_inclusive", "v_min", "v_max", "v_max_30min",
@@ -213,7 +220,8 @@ def _check_profile(name, p):
     missing = [k for k in _REQUIRED if k not in p]
     if missing:
         raise ContractError(f"{where} is missing {missing}")
-    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct"):
+    for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
+                "harmonic_resonance_clearance_h"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)

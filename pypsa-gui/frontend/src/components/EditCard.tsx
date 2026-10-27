@@ -21,7 +21,7 @@ export interface EditCardRow {
   unit: string
   role: 'typed' | 'derived' | 'follows' | 'at_solve' | 'note'
   note?: string
-  display?: { old: number | null; new: number; unit: string }
+  display?: { old: number | null; new: number | null; unit: string }
   readback?: Scalar
   /** Where the field lives in the project flow (api/flow.ts FlowTarget). */
   target?: FlowTarget
@@ -130,6 +130,20 @@ export function editCardHeader(card: EditCard): string {
   return [...byKey].map(([key, names]) => key ? `${key} \u203a ${names.join(', ')}` : names.join(', ')).join('; ')
 }
 
+/** The Guided headline: each typed change in the table's words and display unit
+ * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
+export function editCardWords(card: EditCard): string {
+  return card.rows.filter(r => r.role === 'typed').map(r => {
+    const asset = assetWords(r.component_class, r.name)
+    if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
+    const known = r.old_known !== false
+    const old = r.display && known && typeof r.old === 'number' ? showDisplay(r.display.old) : cellValue(r.old, known)
+    const now = r.display ? showDisplay(r.display.new) : cellValue(r.new)
+    const unit = r.display?.unit || r.unit
+    return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
+  }).join('; ')
+}
+
 /** Show the field where it lives, without leaving the chat: the component's own
  * Properties (`panel` null) or the section's panel. */
 function showInProperties(target: FlowTarget) {
@@ -202,7 +216,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                   {r.display ? showDisplay(r.display.new) : value(r.new)}</td>
                 <td className="p-1 border-b border-border break-words">
                   {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
-                  {r.display && r.display.unit !== r.unit && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
+                  {r.display && r.display.unit !== r.unit && typeof r.new === 'number' && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     stored as {show(r.new)} {r.unit}
                   </span>}
                 </td>
