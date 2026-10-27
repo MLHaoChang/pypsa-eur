@@ -3,7 +3,7 @@
 
 # Fast critical-line evidence and precise assistant navigation
 
-Status: ready-for-agent
+Status: done
 Type: task
 
 This is one illustrative domain fixture under the mandatory
@@ -62,3 +62,14 @@ Still open: the typed UI navigation (open `results_tab='loadflow'`, same source/
 highlight/scroll to a line, ACK with project/run/source/section/generation, hidden-tab route),
 the live-chat acceptance journey on every harness provider, and a shared client/server metric
 source (the tab still computes loading in the browser from the same inputs and convention).
+
+Done (live-voice 07, PR A backend + PR B UI): `ui_open_panel` takes `loadflow_source`,
+`window_from`, `window_to` and `highlight_branch`; the navigation is checked against the view
+before it is issued, and the ACK binds source, window, data and the highlighted branch. The tab
+applies the source and window, marks the branch row (`aria-current`) and scrolls to it, and
+acknowledges only once that row is shown. Guided keeps Branch loading hidden and offers
+"Show in Expert >" with Back. The typed-chat journey runs on every harness provider; Branch
+loading reads the server's shared calculation. Known gaps: a refusal at issue time on a checked
+turn has no typed channel back to the model; a branch outside the shown rows, or one with a
+truncated name, is never acknowledged; multi-period networks whose snapshot labels repeat per
+period may not resolve the window, so they stay unacknowledged.

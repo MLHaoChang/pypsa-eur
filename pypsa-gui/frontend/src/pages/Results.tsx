@@ -183,6 +183,7 @@ export default function Results() {
   const pickTab = (t: ResultsTab) => {
     manualNavigation()
     setRequestedTab(null)
+    useUIStore.getState().setResultsHighlight(null)
     setTab(t)
   }
   // UX overhaul S3: the tab last used in each group, so returning to a group
@@ -502,11 +503,16 @@ export default function Results() {
   const [windowNote, setWindowNote] = useState<string | null>(null)
   useEffect(() => {
     if (!resultsWindowRequest || !firstSnap16 || !lastSnap16) return
-    const from16 = resultsWindowRequest.start.replace(' ', 'T').slice(0, 16)
-    const to16 = resultsWindowRequest.end.replace(' ', 'T').slice(0, 16)
+    // Live-voice 07: the assistant names a window by snapshot positions.
+    const request = 'fromIndex' in resultsWindowRequest
+      ? { start: snap?.snapshots?.[resultsWindowRequest.fromIndex], end: snap?.snapshots?.[resultsWindowRequest.toIndex] }
+      : resultsWindowRequest
+    if (!request.start || !request.end) { clearResultsWindowRequest(); return }
+    const from16 = request.start.replace(' ', 'T').slice(0, 16)
+    const to16 = request.end.replace(' ', 'T').slice(0, 16)
     const clampedFrom = from16 < firstSnap16 ? firstSnap16 : from16
     const clampedTo = to16 > lastSnap16 ? lastSnap16 : to16
-    const chartWindow = readableWindow(resultsWindowRequest.start, resultsWindowRequest.end)
+    const chartWindow = readableWindow(request.start, request.end)
     const horizon = readableWindow(firstSnap16, lastSnap16)
     if (from16 > to16) {
       setWindowNote(`The chart's window (${chartWindow}) ends before it starts, so Results shows the horizon as loaded.`)
@@ -520,7 +526,7 @@ export default function Results() {
         : null)
     }
     clearResultsWindowRequest()
-  }, [resultsWindowRequest, firstSnap16, lastSnap16, clearResultsWindowRequest])
+  }, [resultsWindowRequest, firstSnap16, lastSnap16, clearResultsWindowRequest, snap])
 
   // datetime-local inputs return "YYYY-MM-DDTHH:mm"; PyPSA ISO timestamps are
   // "YYYY-MM-DDTHH:mm:ss". The resolveRange string compare doesn't need

@@ -1,6 +1,6 @@
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup, waitFor } from '@testing-library/react'
+import { render, cleanup, waitFor, screen, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -230,4 +230,22 @@ it('Run again is the header Run, through the gate; without AC power flow it says
   expect(getByTestId('loadflow-run-again').textContent).toContain('AC power flow was not part of this run')
   getByTestId('loadflow-switch-on-acpf').click()
   expect(useUIStore.getState().activeSlidePanel).toBe('simparams')
+})
+
+it('Guided keeps Branch loading hidden and gives the assistant branch a route to Expert', async () => {
+  vi.mocked(resultsEvidenceApi.loadflow).mockClear()
+  useUIStore.setState({ uiMode: 'guided', resultSource: 'ac_pf', resultsHighlight: { component: 'Line', name: 'L 7' }, flowReturn: null })
+  renderPage()
+  const notice = await screen.findByText(/Load flow for Line 'L 7' \(AC power flow\) is an Expert view\./)
+  expect(screen.queryByTestId('branch-loading')).toBeNull()
+  expect(resultsEvidenceApi.loadflow).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Show in Expert >' }))
+  const ui = useUIStore.getState()
+  expect(notice.isConnected).toBe(false)
+  expect(ui.uiMode).toBe('expert')
+  expect(ui.activeSlidePanel).toBe('results')
+  expect(ui.resultsTabRequest).toBe('loadflow')
+  expect(ui.resultsHighlight).toEqual({ component: 'Line', name: 'L 7' })
+  expect(ui.flowReturn?.mode).toBe('guided')
+  useUIStore.setState({ uiMode: 'expert', resultsHighlight: null })
 })

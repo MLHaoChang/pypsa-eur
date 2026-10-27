@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, Legend } from 'recharts'
 import { resultsEvidenceApi } from '../../api/resultsEvidence'
@@ -20,6 +21,11 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
     staleTime: 0, refetchOnMount: 'always',
   })
   const data = query.data
+  // Live-voice 07: the assistant's branch is marked and scrolled into view.
+  const highlight = useUIStore(s => s.resultsHighlight)
+  const setHighlight = useUIStore(s => s.setResultsHighlight)
+  const highlightRef = useRef<HTMLTableRowElement | null>(null)
+  useEffect(() => { highlightRef.current?.scrollIntoView?.({ block: 'nearest' }) }, [highlight, data])
   if (!enabled || query.isPending || query.isFetching) return <p role="status">Loading matching load-flow evidence…</p>
   if (query.isError) return <p role="status">Load-flow evidence unavailable. Try again after checking the project and solve.</p>
   if (data?.status !== 'ok') {
@@ -56,8 +62,13 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
     {data.rows_truncated && <p role="status">Showing the first 500 ranked branches.</p>}
     <div className="overflow-auto max-h-80 border border-border rounded">
       <table className="w-full text-xs"><thead><tr>{['Branch', 'Basis', 'Rating MVA', 'Configured MVA', 'Optimized MVA (s_nom_opt)', 'Peak flow', 'Weighted mean flow', 'Peak limit %', 'Peak rating %', 'Weighted mean limit %', 'At limit h', 'Over limit h', 'Coverage'].map(t => <th key={t} className="p-2 text-left">{t}</th>)}</tr></thead>
-        <tbody>{rows.map(r => (
-          <tr key={r.asset_key ?? `${r.class}:${r.name}`}>
+        <tbody>{rows.map(r => {
+          const highlighted = highlight?.component === r.class && highlight.name === r.name
+          return (
+          <tr key={r.asset_key ?? `${r.class}:${r.name}`} data-branch-row data-branch-class={r.class} data-branch-name={r.name}
+            aria-current={highlighted ? 'true' : undefined} ref={highlighted ? highlightRef : undefined}
+            className={highlighted ? 'bg-accent/10 ring-1 ring-inset ring-accent' : undefined}
+            onClick={highlight ? () => setHighlight(null) : undefined}>
             <td className="p-2">{r.class}: {r.name}{r.name_truncated ? ' (name truncated)' : ''}</td>
             <td>{r.basis === 'active_power_proxy' ? 'Active power (MW)' : 'Apparent power (MVA)'}</td>
             <td>{number(r.rating.value)} ({r.rating.basis})</td>
@@ -70,7 +81,8 @@ export default function BranchLoading({ from, to, enabled }: { from: number; to:
             <td>{number(r.h_at_limit)}</td><td>{number(r.h_over_limit)}</td>
             <td>{r.snapshots_with_data ?? data.window?.snapshots} snapshots{r.terminals ? ' · bus 0 only' : ''}</td>
           </tr>
-        ))}</tbody>
+          )
+        })}</tbody>
       </table>
     </div>
     {(data.skipped ?? []).map(r => <p key={`${r.class}:${r.name}`} className="text-xs text-muted mt-1">{r.class}: {r.name} — unavailable: {r.reason}</p>)}

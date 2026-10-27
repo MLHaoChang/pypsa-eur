@@ -518,7 +518,11 @@ interface UIStore {
   resultsSectionRequest: string | null
   /** One-shot: the Results Horizon filter opens on this window (a checked chart's
    *  "Open in Results"), as snapshot labels. Consumed and cleared by the Results shell. */
-  resultsWindowRequest: { start: string; end: string } | null
+  resultsWindowRequest: { start: string; end: string } | { fromIndex: number; toIndex: number } | null
+  /** Live-voice 07: the branch the assistant pointed at in Load flow's Branch
+   *  loading table. Cleared by the next navigation, a tab, source or project
+   *  change, or a row click in that table. */
+  resultsHighlight: { component: string; name: string } | null
   // Economics opens on this tab once (the commercial library's "Open Tariffs & contracts").
   economicsTabRequest: 'basis' | 'assets' | 'tariffs' | null
   // Solver Settings opens on this block once (the lifetime and CO₂ links in Assets and Economics).
@@ -673,7 +677,8 @@ interface UIStore {
   requestResultsTab: (tab: string, section?: string) => void
   clearResultsTabRequest: () => void
   clearResultsSectionRequest: () => void
-  requestResultsWindow: (window: { start: string; end: string }) => void
+  requestResultsWindow: (window: { start: string; end: string } | { fromIndex: number; toIndex: number }) => void
+  setResultsHighlight: (highlight: { component: string; name: string } | null) => void
   clearResultsWindowRequest: () => void
   requestEconomicsTab: (tab: 'basis' | 'assets' | 'tariffs') => void
   clearEconomicsTabRequest: () => void
@@ -771,6 +776,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   resultsTabRequest: null,
   resultsSectionRequest: null,
   resultsWindowRequest: null,
+  resultsHighlight: null,
   economicsTabRequest: null,
   solverBlockRequest: null,
   gridReadinessRequest: false,
@@ -932,7 +938,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
     const byProject = state.currentProject
       ? { ...state.resultSourceByProject, [state.currentProject]: v }
       : state.resultSourceByProject
-    return { resultSource: v, resultSourceByProject: byProject }
+    return { resultSource: v, resultSourceByProject: byProject, resultsHighlight: null }
   }) },
   setFlowOverlayKind: (k) => set({ flowOverlayKind: k === 'q' ? 'q' : 'p' }),
   setResultsSnapshotIdx: (i) => set({ resultsSnapshotIdx: Math.max(0, Math.floor(i)) }),
@@ -1028,6 +1034,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
   clearResultsSectionRequest: () => set({ resultsSectionRequest: null }),
   requestResultsWindow: (window) => set({ resultsWindowRequest: window }),
   clearResultsWindowRequest: () => set({ resultsWindowRequest: null }),
+  setResultsHighlight: (highlight) => set({ resultsHighlight: highlight }),
   requestEconomicsTab: (tab) => set({ economicsTabRequest: tab }),
   clearEconomicsTabRequest: () => set({ economicsTabRequest: null }),
   requestSolverBlock: (block) => set({ solverBlockRequest: block }),
@@ -1114,6 +1121,7 @@ export const useUIStore = create<UIStore>((set, get) => ({
         assetDetailRequest: null,
         // Issue 06 — discussed run ids are project-scoped; drop on switch.
         discussedRun: null,
+        resultsHighlight: null,
         // P30 gate S-2: the same hazard for a pending Edit request — it must
         // not open project B's same-named bus in Edit.
         propertiesEditRequest: null,

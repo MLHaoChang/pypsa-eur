@@ -20,6 +20,7 @@ import { useUIStore } from '../../store/uiStore'
 import ResultState, { StatePill } from '../../components/ResultState'
 import { nk } from '../../utils/queryKeys'
 import { openPanel } from './openPanel'
+import { openResultsTabInExpert } from '../../layout/flowNavigation'
 
 // Branch loading is the native, source-attested server projection used by
 // get_loadflow_summary. Bus/reactive/voltage/loss diagnostics retain their
@@ -66,6 +67,8 @@ export default function LoadFlow() {
   // user flips the AC PF toggle (P2). Backend honours the param via ?source=.
   const { resultSource, setResultSource } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
+  const guided = useUIStore(s => s.uiMode === 'guided')
+  const resultsHighlight = useUIStore(s => s.resultsHighlight)
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // per-snapshot queries below can be windowed before any payload exists.
@@ -452,7 +455,12 @@ export default function LoadFlow() {
             </div>
           )}
         </div>
-        <BranchLoading from={win.from} to={win.to} enabled={winValid} />
+        {/* Branch loading is an Expert view; the assistant's branch gets a route there. */}
+        {!guided ? <BranchLoading from={win.from} to={win.to} enabled={winValid} />
+          : resultsHighlight && <p role="status" className="text-xs">
+            Load flow for {resultsHighlight.component} '{resultsHighlight.name}' ({resultSource === 'ac_pf' ? 'AC power flow' : 'LOPF'}) is an Expert view.{' '}
+            <button type="button" className="underline" onClick={() => openResultsTabInExpert('loadflow')}>Show in Expert &gt;</button>
+          </p>}
       </section>
 
       {/* ── Time-series view mode (weekly / monthly / full timeframe) ─────── */}
