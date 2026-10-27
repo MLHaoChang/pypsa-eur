@@ -715,7 +715,7 @@ def _tdd_row(inp: _Inputs) -> dict:
         notes.append(f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Harmonic source "
                      "or Rated apparent power; a unit without them blocks a pass.")
     else:
-        notes.append(f"Current distortion {tdd:.3g} % of the load current against {limit:g} %.")
+        notes.append(f"Current distortion {tdd:.4g} % of the load current against {limit:g} %.")
     notes.append(f"IEEE 519-2014 {poc['table']}: short-circuit ratio {poc['isc_il']:.3g}, "
                  f"band {str(poc['band']).replace('<=', '≤')}.")
     worst, worst_lim = _num(poc["worst_i_h_pct"]), _num(poc["worst_limit_pct"])
@@ -812,7 +812,7 @@ def _unbalance_row(inp: _Inputs) -> dict:
         notes = [f"{', '.join(map(str, missing))} {'has' if len(missing) == 1 else 'have'} no Single-phase share "
                  "or Rated apparent power; a unit without them blocks a pass."]
         if u2 > 0:
-            notes.append(f"At least {u2:.2g} % from the units with inputs.")
+            notes.append(f"At least {u2:.4g} % from the units with inputs.")
     else:
         notes = [f"Screening upper bound: {s_unbal['PoC']:.4g} MVA of single-phase load ÷ {s_sc2:.4g} MVA "
                  f"negative-sequence short-circuit power = {u2:.2g} %."]
