@@ -1627,6 +1627,9 @@ def _intake_rows(old: dict, new: dict, steps: list[str]) -> list[dict]:
 
 
 def _decision_study_preview(args: dict) -> list[dict]:
+    from routers import studies
+
+    studies._refuse_unless_enabled()  # the route gates first, before it looks up any study
     old = _study(args)
     new = _study_after(args, old)
     before, after = old.model_dump(mode="json", by_alias=True), new.model_dump(mode="json", by_alias=True)

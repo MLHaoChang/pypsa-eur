@@ -257,3 +257,6 @@ def test_studies_disabled_refuses_with_the_handlers_refusal(client, api_project,
     with pytest.raises(HTTPException) as exc:
         edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "name": "x"})
     assert (exc.value.status_code, exc.value.detail["error_kind"]) == (404, "decision_studies_disabled")
+    with pytest.raises(HTTPException) as unknown:  # the gate comes before the study lookup
+        edit_card.preview("update_decision_study", {"project": project, "study_id": "no-such-study", "name": "x"})
+    assert (unknown.value.status_code, unknown.value.detail["error_kind"]) == (404, "decision_studies_disabled")
