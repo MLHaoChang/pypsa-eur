@@ -1394,7 +1394,7 @@ def _flow_scope_preview(args: dict) -> list[dict]:
     try:
         new = flow_scope.validate(args.get("scope"), has_template=template is not None, no_load=no_load)
     except flow_scope.ScopeError as exc:
-        _refuse(exc.error_kind, exc.message)
+        raise HTTPException(422, {"error_kind": exc.error_kind, "message": exc.message})  # the store's own kind
     old = flow_scope.read_scope(project.directory, template, settings, no_load=no_load)
     before, after = _scope_flat(old), _scope_flat(new)
     rows = []

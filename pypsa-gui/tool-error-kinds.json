@@ -1587,6 +1587,18 @@
       "surface": "inline",
       "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The native handler refused the edit on the isolated copy; the message carries the handler's reason."
     },
+    "forbidden": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The caller may not edit this project; the model tells the user."
+    },
+    "project_unsaved": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The project has no saved metadata yet; the model asks the user to save it first."
+    },
+    "study_not_found": {
+      "surface": "inline",
+      "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The named study does not exist; the model lists the studies and retries."
+    },
     "empty_edit": {
       "surface": "inline",
       "why": "A chat edit card's own refusal (harness/edit_card.py `_refuse`), raised before any card or change; the model reads the message and answers in prose in the same turn, so it stays the gray tool line. The call named nothing to change; the model asks what to change."
