@@ -53,6 +53,8 @@ SETTINGS_EDITS = frozenset({
     "campus_set_island_config", "campus_set_library", "campus_apply_gfm_settings", "campus_draft_campus",
     "set_report_mapping", "set_report_template", "import_edited_report",
     "apply_commercial_document_values",
+    # LV08 B2b: routes, sites and (setting on) Line/Link lengths from an uploaded file
+    "import_map_geometry",
 })
 
 # Write-tier tools that are not edits, and why. A new write tool must be put
@@ -79,6 +81,8 @@ NOT_EDITS = {
     "gridspine_assess_connection": "a computation on the saved network",
     "campus_extract_grid_code": "reads a document into a study file",
     "campus_run_island_study": "a computation on copies of the saved network",
+    # LV08 B2b
+    "create_evidence_report": "a new report record from the current evidence",
 }
 
 

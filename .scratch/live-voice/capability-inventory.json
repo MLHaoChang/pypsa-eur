@@ -1,6 +1,6 @@
 {
   "format_version": 1,
-  "generated_at": "2026-10-26",
+  "generated_at": "2026-10-27",
   "status": "source inventory; behavioral coverage and GUI parameter mapping pending implementation",
   "sources": [
     "pypsa-gui/backend/harness/catalogue.py",
@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 289,
+  "tool_count": 299,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -5370,7 +5370,10 @@
       "name": "preview_equipment_mapping",
       "toolsets": [],
       "route": [
-        "_service_call_"
+        [
+          "POST",
+          "/api/equipment_table/preview"
+        ]
       ],
       "input_keys": [
         "upload_id",
@@ -5427,7 +5430,10 @@
       "name": "preview_document_values",
       "toolsets": [],
       "route": [
-        "_service_call_"
+        [
+          "POST",
+          "/api/document_values/preview"
+        ]
       ],
       "input_keys": [
         "upload_id",
@@ -5480,7 +5486,10 @@
       "name": "preview_commercial_document_values",
       "toolsets": [],
       "route": [
-        "_service_call_"
+        [
+          "POST",
+          "/api/document_values/commercial/preview"
+        ]
       ],
       "input_keys": [
         "upload_id",
@@ -6022,7 +6031,10 @@
         "gridspine"
       ],
       "route": [
-        "_service_call_"
+        [
+          "GET",
+          "/api/results/run-view"
+        ]
       ],
       "input_keys": [
         "run_id",
@@ -6205,7 +6217,10 @@
       "name": "get_energy_flows",
       "toolsets": [],
       "route": [
-        "_service_call_"
+        [
+          "GET",
+          "/api/results/energy_flows"
+        ]
       ],
       "input_keys": [
         "period",
@@ -6222,7 +6237,10 @@
       "name": "get_load_shape",
       "toolsets": [],
       "route": [
-        "_service_call_"
+        [
+          "GET",
+          "/api/results/load_shape"
+        ]
       ],
       "input_keys": [
         "view",
@@ -6243,7 +6261,10 @@
         "results"
       ],
       "route": [
-        "_service_call_"
+        [
+          "GET",
+          "/api/results/loadflow-view"
+        ]
       ],
       "input_keys": [
         "source",
@@ -6613,6 +6634,214 @@
       ],
       "safety_tier": "read",
       "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_osm_suggestions",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/map_layout/osm_suggestions"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "bbox",
+        "offset",
+        "limit"
+      ],
+      "required": [
+        "name",
+        "bbox"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "aad73e63c38860b93ed6d9e19a41e00e31d3b8bdf4af63598ebef6860a0a5c35",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "preview_library_reference",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/library_reference/preview"
+        ]
+      ],
+      "input_keys": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year",
+        "confirm"
+      ],
+      "required": [
+        "component_class",
+        "name",
+        "technology",
+        "projection_year"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d66c30b50d2d1a901bb3645a22784cf4ebcbada49b826b9ea608a161c88d7231",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "import_map_geometry",
+      "toolsets": [],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/map_layout/import"
+        ]
+      ],
+      "input_keys": [
+        "name",
+        "file_id",
+        "apply",
+        "tolerance_m"
+      ],
+      "required": [
+        "name",
+        "file_id"
+      ],
+      "safety_tier": "write",
+      "schema_sha256": "70bc2068b22c68f0e0c3817bedd81b27734d36c8a38239a2205bcbcd914bc947",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "list_result_assets",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/results/asset/assets"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "afaca79305d91acd73b598e80af283b363bc089c5a48c7549d68338505d0ab55",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_curtailment_by_cause",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/results/curtailment/by_cause"
+        ]
+      ],
+      "input_keys": [
+        "offset",
+        "limit"
+      ],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "afaca79305d91acd73b598e80af283b363bc089c5a48c7549d68338505d0ab55",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_eh_readiness",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/results/eh_readiness"
+        ]
+      ],
+      "input_keys": [
+        "archetype",
+        "budget_solves",
+        "stages",
+        "dtc_attribution",
+        "pack_overrides"
+      ],
+      "required": [
+        "archetype"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "d2e0a9342ebd7a1ba9c7229daa45e3981bec0885b2a32fe9e9011fd35a3938eb",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_capabilities",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/capabilities"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_evidence_hash",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/evidence_hash"
+        ]
+      ],
+      "input_keys": [],
+      "required": [],
+      "safety_tier": "read",
+      "schema_sha256": "f46214ddb4149412b1dae0e108a13e830215d92ca96c3b6cd8610259f9825941",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_report_version",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/reports/{report_id}/versions/{version}"
+        ]
+      ],
+      "input_keys": [
+        "report_id",
+        "version",
+        "section_id"
+      ],
+      "required": [
+        "report_id",
+        "version"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "1ac421660c82e796435425c255bb41b7028754bc6c895899e85c06cf67b12803",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "create_evidence_report",
+      "toolsets": [
+        "results"
+      ],
+      "route": [
+        [
+          "POST",
+          "/api/projects/{name}/reports"
+        ]
+      ],
+      "input_keys": [
+        "title"
+      ],
+      "required": [],
+      "safety_tier": "write",
+      "schema_sha256": "ef3b1970c8b86eef1d17c7500b88e8495b55e2fef30eff8399783ad924bf07e6",
       "behavioral_fixture": "pending"
     }
   ],

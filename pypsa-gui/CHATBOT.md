@@ -790,6 +790,10 @@ reaches the model with the route's own message.
 | `regenerate_report_section` | execution | One section again from the latest version, optionally under an `instruction`; saved as the next version, every other section byte-identical. Same job slot as `generate_report`. |
 | `export_report_docx` | write | One version as a `.docx` `agent_export` chip (`report_<id>_v<N>.docx` unless `filename` is given), with a "Numbers to check" appendix listing the unverified numbers. |
 | `delete_report` | destructive | The report with every version and figure; refused under a foreign edit lock. |
+| `create_evidence_report` | write | The Reports panel's evidence-only report (no prose from a model), stored as version 1 under `title?`; returns the meta and section rows. Refused under a foreign edit lock. |
+| `get_report_version` | read | One stored version by `report_id` and `version`: meta plus `{section_id, heading, source, status}` rows, or one section (`section_id`) compacted as `get_report` does, bounded under the cap. |
+| `get_report_capabilities` | read | `{pdf}`: whether this host can export a PDF. |
+| `get_report_evidence_hash` | read | The hash of the current evidence and `sections_ok` of `sections_total`; compare with a report's `evidence_hash`. |
 
 What the model must and must not do with a report:
 

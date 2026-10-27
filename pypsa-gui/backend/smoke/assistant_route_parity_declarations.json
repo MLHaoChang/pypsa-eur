@@ -412,6 +412,11 @@
    "reason": "app-shell"
   },
   {
+   "method": "POST",
+   "path": "/api/projects/import-folder",
+   "reason": "app-shell"
+  },
+  {
    "method": "GET",
    "path": "/api/projects/unclaimed",
    "reason": "admin"
@@ -644,21 +649,6 @@
    "family": "gridspine-campus"
   },
   {
-   "method": "POST",
-   "path": "/api/document_values/commercial/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/document_values/preview",
-   "family": "import-export"
-  },
-  {
-   "method": "POST",
-   "path": "/api/equipment_table/preview",
-   "family": "import-export"
-  },
-  {
    "method": "GET",
    "path": "/api/geocode",
    "family": "network-topology"
@@ -709,11 +699,6 @@
    "family": "economics-investment"
   },
   {
-   "method": "POST",
-   "path": "/api/library_reference/preview",
-   "family": "import-export"
-  },
-  {
    "method": "GET",
    "path": "/api/network/asset_costs",
    "family": "network-topology"
@@ -754,11 +739,6 @@
    "family": "projects"
   },
   {
-   "method": "POST",
-   "path": "/api/projects/import-folder",
-   "family": "import-export"
-  },
-  {
    "method": "GET",
    "path": "/api/projects/{name}/flow/scope",
    "family": "projects"
@@ -767,16 +747,6 @@
    "method": "PUT",
    "path": "/api/projects/{name}/flow/scope",
    "family": "projects"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/map_layout/import",
-   "family": "import-export"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/map_layout/osm_suggestions",
-   "family": "import-export"
   },
   {
    "method": "GET",
@@ -807,26 +777,6 @@
    "method": "PUT",
    "path": "/api/projects/{name}/profiles/weather",
    "family": "timeseries-horizon"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/reports",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/capabilities",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/evidence_hash",
-   "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
-   "family": "reports"
   },
   {
    "method": "PATCH",
@@ -924,49 +874,14 @@
    "family": "solver-simulation"
   },
   {
-   "method": "GET",
-   "path": "/api/results/asset/assets",
-   "family": "all-results"
-  },
-  {
    "method": "POST",
    "path": "/api/results/billing/preview",
    "family": "economics-investment"
   },
   {
-   "method": "GET",
-   "path": "/api/results/curtailment/by_cause",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/eh_readiness",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/energy_flows",
-   "family": "all-results"
-  },
-  {
    "method": "POST",
    "path": "/api/results/investment_case/abort",
    "family": "economics-investment"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/load_shape",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/loadflow-view",
-   "family": "all-results"
-  },
-  {
-   "method": "GET",
-   "path": "/api/results/run-view",
-   "family": "all-results"
   },
   {
    "method": "GET",
@@ -1030,6 +945,26 @@
    "method": "POST",
    "path": "/api/simulation/preflight",
    "reason": "runs the /run validation without solving"
+  },
+  {
+   "method": "POST",
+   "path": "/api/library_reference/preview",
+   "reason": "plans on an isolated copy; stores no card, undo step or edit"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/preview",
+   "reason": "route docstring: writes nothing (document_values.preview)"
+  },
+  {
+   "method": "POST",
+   "path": "/api/equipment_table/preview",
+   "reason": "route docstring: writes nothing (equipment_table.preview)"
+  },
+  {
+   "method": "POST",
+   "path": "/api/document_values/commercial/preview",
+   "reason": "route docstring: writes nothing (document_values_commercial.preview)"
   }
  ],
  "binding_overrides": [
@@ -1124,7 +1059,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "GET",
@@ -1136,7 +1071,7 @@
     "/api/chat/navigation/{action_id}",
     "/api/chat/operations/{operation_id}"
    ],
-   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/\u2026; a session id never equals those literals"
+   "reason": "chat/answers, decisions, evidence and other literal chat routes register before chat/{session_id}/…; a session id never equals those literals"
   },
   {
    "method": "POST",

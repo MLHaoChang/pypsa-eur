@@ -2,9 +2,9 @@
  "counts": {
   "backend_routes": 506,
   "gui_routes": 466,
-  "limitation": 84,
-  "needs-tool": 102,
-  "tool": 280,
+  "limitation": 85,
+  "needs-tool": 84,
+  "tool": 297,
   "unclassified": 0
  },
  "format_version": 1,
@@ -939,22 +939,28 @@
    "reason": "conversation-transport"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/documentValues.ts"
    ],
    "method": "POST",
-   "path": "/api/document_values/commercial/preview"
+   "path": "/api/document_values/commercial/preview",
+   "tools": [
+    "preview_commercial_document_values"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/documentValues.ts"
    ],
    "method": "POST",
-   "path": "/api/document_values/preview"
+   "path": "/api/document_values/preview",
+   "tools": [
+    "preview_document_values"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -993,13 +999,16 @@
    "reason": "conversation-transport"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/equipmentTable.ts"
    ],
    "method": "POST",
-   "path": "/api/equipment_table/preview"
+   "path": "/api/equipment_table/preview",
+   "tools": [
+    "preview_equipment_mapping"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "needs-tool",
@@ -1453,13 +1462,16 @@
    "path": "/api/library/series/{name}"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/libraryReferences.ts"
    ],
    "method": "POST",
-   "path": "/api/library_reference/preview"
+   "path": "/api/library_reference/preview",
+   "tools": [
+    "preview_library_reference"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -2658,13 +2670,13 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "limitation",
    "gui_files": [
     "api/projects.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/import-folder"
+   "path": "/api/projects/import-folder",
+   "reason": "app-shell"
   },
   {
    "class": "tool",
@@ -2878,22 +2890,28 @@
    "reason": "ui-local-state"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/mapLayout.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/map_layout/import"
+   "path": "/api/projects/{name}/map_layout/import",
+   "tools": [
+    "import_map_geometry"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "import-export",
+   "class": "tool",
    "gui_files": [
     "api/mapLayout.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/map_layout/osm_suggestions"
+   "path": "/api/projects/{name}/map_layout/osm_suggestions",
+   "tools": [
+    "get_osm_suggestions"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -3124,31 +3142,40 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "POST",
-   "path": "/api/projects/{name}/reports"
+   "path": "/api/projects/{name}/reports",
+   "tools": [
+    "create_evidence_report"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/capabilities"
+   "path": "/api/projects/{name}/reports/capabilities",
+   "tools": [
+    "get_report_capabilities"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/evidence_hash"
+   "path": "/api/projects/{name}/reports/evidence_hash",
+   "tools": [
+    "get_report_evidence_hash"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3318,13 +3345,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "reports",
+   "class": "tool",
    "gui_files": [
     "api/reports.ts"
    ],
    "method": "GET",
-   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}"
+   "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
+   "tools": [
+    "get_report_version"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -3901,13 +3931,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "pages/results/asset/api.ts"
    ],
    "method": "GET",
-   "path": "/api/results/asset/assets"
+   "path": "/api/results/asset/assets",
+   "tools": [
+    "list_result_assets"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4051,13 +4084,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/results/curtailment/by_cause"
+   "path": "/api/results/curtailment/by_cause",
+   "tools": [
+    "get_curtailment_by_cause"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4108,13 +4144,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/simulation.ts"
    ],
    "method": "GET",
-   "path": "/api/results/eh_readiness"
+   "path": "/api/results/eh_readiness",
+   "tools": [
+    "get_eh_readiness"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4201,13 +4240,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/energyFlows.ts"
    ],
    "method": "GET",
-   "path": "/api/results/energy_flows"
+   "path": "/api/results/energy_flows",
+   "tools": [
+    "get_energy_flows"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "limitation",
@@ -4422,22 +4464,28 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/loadShape.ts"
    ],
    "method": "GET",
-   "path": "/api/results/load_shape"
+   "path": "/api/results/load_shape",
+   "tools": [
+    "get_load_shape"
+   ],
+   "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/resultsEvidence.ts"
    ],
    "method": "GET",
-   "path": "/api/results/loadflow-view"
+   "path": "/api/results/loadflow-view",
+   "tools": [
+    "get_loadflow_summary"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",
@@ -4596,13 +4644,16 @@
    "via": "tool_routes"
   },
   {
-   "class": "needs-tool",
-   "family": "all-results",
+   "class": "tool",
    "gui_files": [
     "api/resultsEvidence.ts"
    ],
    "method": "GET",
-   "path": "/api/results/run-view"
+   "path": "/api/results/run-view",
+   "tools": [
+    "get_run_evidence"
+   ],
+   "via": "tool_routes"
   },
   {
    "class": "tool",

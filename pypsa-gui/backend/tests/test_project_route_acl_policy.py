@@ -89,7 +89,8 @@ UNAMBIGUOUS_PROJECT_ARGS = frozenset({"project_id", "base", "project_name"})
 _COMPONENT = "a component on the ACTIVE project, whose ACL was established at activate"
 TOOL_NAME_IS_NOT_A_PROJECT: dict[str, str] = {
     **{t: _COMPONENT for t in (
-        "apply_library_reference", "attach_tariff", "cascade_delete_bus", "create_carrier",
+        "apply_library_reference", "preview_library_reference",  # LV08 B2b
+        "attach_tariff", "cascade_delete_bus", "create_carrier",
         "create_component", "delete_component", "delete_timeseries",
         "delete_vintage_bounds", "explain_investment",
         "generate_exemplary_timeseries", "get_asset_results", "get_component",

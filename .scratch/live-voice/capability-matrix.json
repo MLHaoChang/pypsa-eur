@@ -4632,15 +4632,15 @@
     "counts": {
       "backend_routes": 506,
       "gui_routes": 466,
-      "limitation": 84,
-      "needs-tool": 102,
-      "tool": 280,
+      "limitation": 85,
+      "needs-tool": 84,
+      "tool": 297,
       "unclassified": 0
     },
     "limitations_by_reason": {
       "account-auth": 7,
       "admin": 13,
-      "app-shell": 7,
+      "app-shell": 8,
       "assistant-self-config": 19,
       "binary-transfer": 7,
       "conversation-transport": 26,
@@ -4648,15 +4648,6 @@
       "ui-local-state": 3
     },
     "needs_tool_by_family": {
-      "all-results": [
-        "GET /api/results/asset/assets",
-        "GET /api/results/curtailment/by_cause",
-        "GET /api/results/eh_readiness",
-        "GET /api/results/energy_flows",
-        "GET /api/results/load_shape",
-        "GET /api/results/loadflow-view",
-        "GET /api/results/run-view"
-      ],
       "economics-investment": [
         "GET /api/library/series",
         "GET /api/library/series/{name}",
@@ -4715,15 +4706,6 @@
         "PUT /api/campus-electrical/{name}/grid-codes/drafts/{profile_id}",
         "PUT /api/campus-electrical/{name}/grid-readiness/limits/{item}"
       ],
-      "import-export": [
-        "GET /api/projects/{name}/map_layout/osm_suggestions",
-        "POST /api/document_values/commercial/preview",
-        "POST /api/document_values/preview",
-        "POST /api/equipment_table/preview",
-        "POST /api/library_reference/preview",
-        "POST /api/projects/import-folder",
-        "POST /api/projects/{name}/map_layout/import"
-      ],
       "network-topology": [
         "GET /api/geocode",
         "GET /api/network/asset_costs",
@@ -4746,12 +4728,6 @@
       ],
       "reliability-adequacy": [
         "GET /api/projects/{name}/stress_profile_packs"
-      ],
-      "reports": [
-        "GET /api/projects/{name}/reports/capabilities",
-        "GET /api/projects/{name}/reports/evidence_hash",
-        "GET /api/projects/{name}/reports/{report_id}/versions/{version}",
-        "POST /api/projects/{name}/reports"
       ],
       "solver-simulation": [
         "GET /api/simulation/queue/{job_id}/log_history",
@@ -4881,12 +4857,6 @@
         "summary": "Hosted profile, device and latency gates and the prolonged mixed-domain conversation are not run; an architecture review does not certify production behavior."
       },
       {
-        "id": "route-parity:needs-tool:all-results",
-        "issue": "08",
-        "family": "all-results",
-        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:economics-investment",
         "issue": "08",
         "family": "economics-investment",
@@ -4905,12 +4875,6 @@
         "summary": "31 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
-        "id": "route-parity:needs-tool:import-export",
-        "issue": "08",
-        "family": "import-export",
-        "summary": "7 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
         "id": "route-parity:needs-tool:network-topology",
         "issue": "08",
         "family": "network-topology",
@@ -4927,12 +4891,6 @@
         "issue": "08",
         "family": "reliability-adequacy",
         "summary": "1 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
-      },
-      {
-        "id": "route-parity:needs-tool:reports",
-        "issue": "08",
-        "family": "reports",
-        "summary": "4 GUI routes have no typed assistant tool (route_parity.needs_tool_by_family)."
       },
       {
         "id": "route-parity:needs-tool:solver-simulation",
