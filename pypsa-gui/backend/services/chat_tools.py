@@ -3104,6 +3104,141 @@ def generate_study_report(project: str, study_id: str, format: str = "docx") -> 
             "stale": out.get("stale"), "stale_reasons": out.get("stale_reasons") or []}
 
 
+# ── Decision study records (6) — LV08 B1 ────────────────────────────────────
+#
+# The rest of `routers/studies.py`, the same way as the six above: in process
+# through `_route`, with the PATH project resolved by `_authorized_project`, so
+# every refusal the routes raise passes through unchanged.
+
+_STUDY_VIEWS = ("summary", "ledger", "option_case", "report")
+
+
+def list_decision_studies(project: str, include_library: bool = False) -> dict:
+    """The project's studies (`GET .../studies/`), plus the library on request."""
+    from routers import studies as R
+
+    ap = _authorized_project(project)
+    out = {"studies": _route(R.list_studies, project=ap)}
+    if include_library:
+        out["library"] = _route(R.get_study_library, project=ap)
+    return out
+
+
+def get_decision_study(project: str, study_id: str, view: str = "summary",
+                       option_id: str | None = None) -> dict:
+    """One study read: its record, ledger, one option's case or its report."""
+    from routers import studies as R
+
+    if view not in _STUDY_VIEWS:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_view_invalid",
+            "message": f"view must be one of {list(_STUDY_VIEWS)}, got {_cut(view, 40)!r}"})
+    if view == "option_case" and not option_id:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_view_invalid",
+            "message": "view 'option_case' needs option_id (the study's options list them)"})
+    ap = _authorized_project(project)
+    if view == "ledger":
+        return _route(R.get_ledger, study_id, project=ap)
+    if view == "option_case":
+        return _route(R.get_option_case, study_id, option_id, project=ap)
+    if view == "report":
+        return _route(R.get_report, study_id, project=ap)
+    return _route(R.get_study, study_id, project=ap)
+
+
+def preview_decision_study_intake(project: str, intake: dict) -> dict:
+    """`POST .../studies/preview`: the intake's load and baseline bill; writes nothing."""
+    from routers.studies import PreviewRequest, preview_intake as _h
+
+    return _route(_h, PreviewRequest(intake=intake or {}), project=_authorized_project(project))
+
+
+def update_decision_study(project: str, study_id: str, name: str | None = None,
+                          step: str | None = None, intake: dict | None = None,
+                          settings: dict | None = None) -> dict:
+    """`PATCH .../studies/{id}`: only the fields sent are written."""
+    from routers.studies import StudyPatch, patch_study as _h
+
+    fields = {k: v for k, v in (("name", name), ("step", step), ("intake", intake),
+                                ("settings", settings)) if v is not None}
+    from pydantic import ValidationError
+
+    try:
+        body = StudyPatch(**fields)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _route(_h, study_id, body, project=_authorized_project(project))
+
+
+def abort_decision_study(project: str, study_id: str, stage: str = "options") -> dict:
+    """Stop a running options run or tornado; idempotent like the routes."""
+    from routers import studies as R
+
+    if stage not in _STUDY_STAGES:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "study_stage_invalid",
+            "message": f"stage must be one of {list(_STUDY_STAGES)}, got {_cut(stage, 40)!r}"})
+    ap = _authorized_project(project)
+    handler = R.abort_findings_tornado if stage == "tornado" else R.abort_study_run
+    return {"stage": stage, **_route(handler, study_id, project=ap)}
+
+
+def delete_decision_study(project: str, study_id: str) -> dict:
+    """`DELETE .../studies/{id}`: the study and the option forks it owns."""
+    from routers.studies import delete_study as _h
+
+    _route(_h, study_id, project=_authorized_project(project))
+    return {"deleted": study_id}
+
+
+# ── Project settings and scope (5) — LV08 B1 ────────────────────────────────
+
+
+def get_site_template_form() -> dict:
+    """The generic-site template's form data (global, read-only)."""
+    from routers.projects import get_site_template_form as _h
+    return _route(_h)
+
+
+def get_project_flow_scope(name: str) -> dict:
+    """`GET .../flow/scope`: the stored scope or the template's preset."""
+    from routers.flow import get_flow_scope as _h
+    return _h(project=_authorized_project(name))
+
+
+def update_project_flow_scope(name: str, scope: dict) -> dict:
+    """`PUT .../flow/scope`: the whole `{version, groups, options}` document."""
+    from routers.flow import put_flow_scope as _h
+    return _route(_h, scope, project=_authorized_project(name))
+
+
+def update_project_scenario_metadata(name: str, description: str | None | _Unset = _UNSET,
+                                     scenario_type: str | _Unset = _UNSET) -> dict:
+    """`PATCH .../scenario`: only the keys sent are written (null clears)."""
+    from models.schemas import UpdateScenarioRequest
+    from routers.projects import update_scenario_metadata as _h
+
+    from pydantic import ValidationError
+
+    try:
+        body = UpdateScenarioRequest(**{k: v for k, v in (("description", description),
+                                                          ("scenario_type", scenario_type))
+                                        if v is not _UNSET})
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors(include_url=False)) from exc
+    return _route(_h, name, body)
+
+
+def update_project_settings(name: str, derive_lengths_from_geometry: bool) -> dict:
+    """`PATCH .../settings`: the project's settings table in metadata.json."""
+    from models.schemas import UpdateProjectSettingsRequest
+    from routers.projects import update_project_settings as _h
+
+    body = UpdateProjectSettingsRequest(derive_lengths_from_geometry=derive_lengths_from_geometry)
+    return _route(_h, name, body)
+
+
 # ── Validation (3) ──────────────────────────────────────────────────────────
 
 
@@ -8205,6 +8340,19 @@ DISPATCHERS: dict[str, Any] = {
     "get_study_findings": get_study_findings,
     "explain_verdict": explain_verdict,
     "generate_study_report": generate_study_report,
+    # decision study records (6) — LV08 B1
+    "list_decision_studies": list_decision_studies,
+    "get_decision_study": get_decision_study,
+    "preview_decision_study_intake": preview_decision_study_intake,
+    "update_decision_study": update_decision_study,
+    "abort_decision_study": abort_decision_study,
+    "delete_decision_study": delete_decision_study,
+    # project settings and scope (5) — LV08 B1
+    "get_site_template_form": get_site_template_form,
+    "get_project_flow_scope": get_project_flow_scope,
+    "update_project_flow_scope": update_project_flow_scope,
+    "update_project_scenario_metadata": update_project_scenario_metadata,
+    "update_project_settings": update_project_settings,
     # project_mgmt (21)
     "list_projects": list_projects,
     "read_result": read_result,
