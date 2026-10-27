@@ -178,10 +178,15 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         old, new, unit = (shown["old"], shown["new"], shown["unit"]) if shown else (row.get("old"), row["new"], row.get("unit"))
         unit = f" {unit}" if unit else ""
         # The card's own words for an absent value (EditCard.tsx): never "None".
+        words = row.get("words") or {}
         old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        if words and not shown:  # the card's own words for an enumerated value
+            old, new_words = words.get("old", old), words.get("new")
         if row.get("old_applies") is False:
             old = "\u2014"  # a setting that did not apply, as the card shows it
         new = "not set" if new is None else _number(new)
+        if words and not shown:
+            new = new_words if new_words is not None else new
         stored = (f" (stored as {_number(row['new'])} {row['unit']})"
                   if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
@@ -1446,7 +1451,10 @@ def _project_settings_preview(args: dict) -> list[dict]:
     if not isinstance(flag, bool):
         _refuse("invalid_edit_value", "Derive lengths from geometry takes true or false.")
     old = _stored_project_setting(args)
-    row = _settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry", old, flag)
+    if old is flag:
+        _refuse("empty_edit", "Derive lengths from geometry is already " + ("on." if flag else "off."))
+    row = _settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry", old, flag,
+                        says_name="Derive lengths from geometry")
     row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if flag else "Off"}
     return [row]
 
@@ -1466,9 +1474,7 @@ _SCENARIO_FIELDS = {"description": ("scenario_description", "Scenario descriptio
 
 
 def _stored_scenario(args: dict) -> dict:
-    from services import chat_tools, project_registry
-
-    from services import project_acl
+    from services import chat_tools, project_acl, project_registry
 
     with chat_tools._acting() as (db, user):
         project_registry.require_user(user)
@@ -1479,16 +1485,32 @@ def _stored_scenario(args: dict) -> dict:
 
 
 def _scenario_preview(args: dict) -> list[dict]:
+    from pydantic import ValidationError
+    from models.schemas import UpdateScenarioRequest
+    from routers import projects
+
     sent = [key for key in _SCENARIO_FIELDS if key in args]
     if not sent:
         _refuse("empty_edit", "Name a description or a scenario type to change.")
+    try:
+        body = UpdateScenarioRequest(**{key: args[key] for key in sent})
+    except ValidationError as exc:
+        _refuse("invalid_edit_value", "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                                               for e in exc.errors()[:3]))
     old = _stored_scenario(args)
     rows = []
     for key in sent:
-        value = args[key]
-        if key == "description":
-            value = (value or "").strip() or None  # as the route stores it
-        rows.append(_settings_row("Scenario", key, _SCENARIO_FIELDS[key][1], old[key], value))
+        value = getattr(body, key)
+        try:  # the handler's own normalisers and refusals
+            value = (projects._reject_legacy_tag((value or "").strip() or None) if key == "description"
+                     else projects._validated_scenario_type(value))
+        except HTTPException as exc:
+            _refuse("invalid_edit_value", str(exc.detail), exc.status_code)
+        if not _same(old[key], value):
+            label = _SCENARIO_FIELDS[key][1]
+            rows.append(_settings_row("Scenario", key, label, old[key], value, says_name=label))
+    if not rows:
+        _refuse("empty_edit", "The scenario already has these values.")
     return rows
 
 
@@ -1535,32 +1557,79 @@ def _study_cell(key: str, value):
     return _setting(value)
 
 
-def _study_row(name: str, field: str, label: str, old, new) -> dict:
-    row = _settings_row(name, field, label, None, None)
+def _study_row(name: str, field: str, label: str, old, new, *, says_name: str | None = None) -> dict:
+    row = _settings_row(name, field, label, None, None, says_name=says_name)
     row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
+    if row["old"] == "set" and row["new"] == "set":
+        row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
     return row
+
+
+def _study_after(args: dict, old: dict) -> dict:
+    """The record the PATCH would store, validated as `patch_study` validates it; nothing is saved."""
+    from pydantic import ValidationError
+
+    from routers import studies
+
+    fields = {k: args[k] for k in ("name", "step", "intake", "settings") if args.get(k) is not None}
+    try:
+        body = studies.StudyPatch(**fields)
+    except ValidationError as exc:
+        _refuse("invalid_edit_value", "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                                               for e in exc.errors(include_url=False)[:3]))
+    try:
+        studies._refuse_outside_mvp1(body.settings)
+        load = (body.intake or {}).get("load")
+        if isinstance(load, dict) and "csv_text" in load:
+            raise HTTPException(422, "load.csv_text is only accepted while creating a study; "
+                                     "upload the file and set load.upload_id instead")
+        if body.step is not None and (body.intake is None or set(body.intake) - {body.step}):
+            raise HTTPException(422, f"a PATCH for step {body.step!r} may only carry intake[{body.step!r}]")
+        data = dict(old)
+        if body.name is not None:
+            data["name"] = body.name
+        if body.intake is not None:
+            data["intake"] = {**old["intake"], **body.intake}
+        if body.settings is not None:
+            data.update(body.settings.model_dump(mode="json", exclude_unset=True))
+        try:
+            updated = studies.DecisionStudy.model_validate(data)
+        except ValidationError as exc:
+            raise HTTPException(422, exc.errors(include_url=False, include_context=False)) from None
+        if body.intake is not None and "tariff" in body.intake:
+            studies._refuse_bad_tariff(updated.intake)
+    except HTTPException as exc:
+        _refuse("invalid_edit_value", exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str),
+                exc.status_code)
+    return updated.model_dump(mode="json", by_alias=True)
 
 
 def _decision_study_preview(args: dict) -> list[dict]:
     old = _study_record(args)
+    new = _study_after(args, old)
     rows = []
+
+    def add(name, field, label, before, after):
+        if not _same(before, after):
+            rows.append(_study_row(name, field, label, before, after, says_name=label))
+
     if args.get("name") is not None:
-        rows.append(_study_row("Study", "name", "Study name", old.get("name"), args["name"]))
+        add("Study", "name", "Study name", old.get("name"), new.get("name"))
     intake = args.get("intake")
     if isinstance(intake, dict):
-        stored = old.get("intake") or {}
-        changed = [k for k in intake if not _same(stored.get(k), intake[k])]
-        rows += [_study_row("Study intake", f"intake.{k}", f"Intake \u203a {k}", stored.get(k), intake[k])
-                 for k in changed[:STUDY_LEAF_CAP]]
+        changed = [k for k in intake if not _same(old["intake"].get(k), new["intake"].get(k))]
+        for k in changed[:STUDY_LEAF_CAP]:
+            add("Study intake", f"intake.{k}", f"Intake \u203a {k}", old["intake"].get(k), new["intake"].get(k))
         if len(changed) > STUDY_LEAF_CAP:
             rows.append(_note("", "", "intake", f"{len(changed) - STUDY_LEAF_CAP} more intake answers change."))
     settings = args.get("settings")
     if isinstance(settings, dict):
-        rows += [_study_row("Study settings", f"settings.{key}", f"Study {key.replace('_', ' ')}",
-                            old.get(key), value)
-                 for key, value in settings.items() if value is not None]
+        for key in settings:
+            if settings[key] is not None:
+                label = f"Study {key.replace('_', ' ')}"
+                add("Study settings", f"settings.{key}", label, old.get(key), new.get(key))
     if not rows:
-        _refuse("empty_edit", "Name a study field to change.")
+        _refuse("empty_edit", "The study already has these values.")
     return rows
 
 
@@ -1573,7 +1642,8 @@ def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
             continue
         head, _, tail = row["field"].partition(".")
         value = (record.get("intake") or {}).get(tail) if head == "intake" else record.get(tail or head)
-        out.append(_study_cell(row["field"], value))
+        cell = _study_cell(row["field"], value)
+        out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
     return out
 
 

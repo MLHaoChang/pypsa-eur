@@ -16,12 +16,6 @@ def studies_on(monkeypatch):
     yield from enable_studies(monkeypatch)
 
 
-@pytest.fixture
-def outsider(second_identity):
-    chat_tools.set_acting_user(second_identity["user_id"])
-    yield
-
-
 def _cells(card):
     return [(r["field"], r["old"], r["new"]) for r in card["rows"]]
 
@@ -45,7 +39,10 @@ def test_flow_scope_shows_the_changed_option_old_to_new(client, api_project):
     trial, card = _toggle(name, chat_tools.get_project_flow_scope(name)["scope"])
     assert card["complete"] and card["kind"] == "settings_edit"
     assert [(r["old"], r["new"]) for r in card["rows"]] == [(True, False)]
-    assert "\u2192 False" in card["says"]
+    assert "Included \u2192 Not included" in card["says"]
+    args = {"name": name, "scope": trial}
+    chat_tools.update_project_flow_scope(name, trial)
+    assert edit_card.ADAPTERS["update_project_flow_scope"].readback(args, card["rows"]) == [False]
 
 
 def test_flow_scope_adding_an_option_was_off(client, api_project):
@@ -73,10 +70,11 @@ def test_project_settings_not_set_then_old_to_new_then_unchanged(client, api_pro
     args = {"name": name, "derive_lengths_from_geometry": True}
     first = edit_card.preview("update_project_settings", args)
     assert _cells(first) == [("derive_lengths_from_geometry", None, True)]
-    assert first["says"] == "Project settings derive_lengths_from_geometry not set → True"
+    assert first["says"] == "Derive lengths from geometry not set \u2192 On"
     chat_tools.update_project_settings(name, True)
-    again = edit_card.preview("update_project_settings", args)
-    assert _cells(again) == [("derive_lengths_from_geometry", True, True)]
+    with pytest.raises(HTTPException) as same:
+        edit_card.preview("update_project_settings", args)
+    assert same.value.detail["error_kind"] == "empty_edit"
     flipped = edit_card.preview("update_project_settings", {**args, "derive_lengths_from_geometry": False})
     assert _cells(flipped) == [("derive_lengths_from_geometry", True, False)]
     with pytest.raises(HTTPException):
@@ -87,15 +85,30 @@ def test_scenario_metadata_old_new_unchanged_and_cleared(client, api_project):
     name = api_project("card-scenario")
     first = edit_card.preview("update_project_scenario_metadata", {"name": name, "description": "cold winter"})
     assert _cells(first) == [("description", None, "cold winter")]
+    assert first["says"] == "Scenario description not set \u2192 cold winter"
     chat_tools.update_project_scenario_metadata(name, description="cold winter", scenario_type="stress")
-    same = edit_card.preview("update_project_scenario_metadata", {"name": name, "description": " cold winter "})
-    assert _cells(same) == [("description", "cold winter", "cold winter")]
+    with pytest.raises(HTTPException) as same:
+        edit_card.preview("update_project_scenario_metadata", {"name": name, "description": " cold winter "})
+    assert same.value.detail["error_kind"] == "empty_edit"
     cleared = edit_card.preview("update_project_scenario_metadata",
                                 {"name": name, "description": None, "scenario_type": "baseline"})
     assert _cells(cleared) == [("description", "cold winter", None), ("scenario_type", "stress", "baseline")]
-    assert "cold winter → not set" in cleared["says"]
+    assert "cold winter \u2192 not set" in cleared["says"]
     reread = edit_card.ADAPTERS["update_project_scenario_metadata"].readback({"name": name}, cleared["rows"])
     assert reread == ["cold winter", "stress"]
+
+
+def test_scenario_metadata_refuses_what_the_handler_refuses(client, api_project):
+    name = api_project("card-scenario-bad")
+    with pytest.raises(HTTPException) as bad:
+        edit_card.preview("update_project_scenario_metadata", {"name": name, "scenario_type": "nonsense"})
+    assert bad.value.status_code == 400
+    with pytest.raises(HTTPException) as legacy:
+        edit_card.preview("update_project_scenario_metadata", {"name": name, "description": "[stress] cold"})
+    assert legacy.value.status_code == 400
+    with pytest.raises(HTTPException) as long:
+        edit_card.preview("update_project_scenario_metadata", {"name": name, "description": "x" * 501})
+    assert long.value.status_code == 422
 
 
 def test_decision_study_shows_name_intake_and_settings_old_to_new(client, api_project, studies_on):
@@ -106,12 +119,27 @@ def test_decision_study_shows_name_intake_and_settings_old_to_new(client, api_pr
     card = edit_card.preview("update_decision_study", args)
     by_field = {r["field"]: r for r in card["rows"]}
     assert (by_field["name"]["old"], by_field["name"]["new"]) == (stored["name"], "Renamed")
-    assert by_field["settings.currency_year"]["old"] == stored.get("currency_year")
-    unchanged = edit_card.preview("update_decision_study", {**args, "name": stored["name"], "settings": {}})
-    assert _cells(unchanged) == [("name", stored["name"], stored["name"])]
-    with pytest.raises(HTTPException) as empty:
-        edit_card.preview("update_decision_study", {"project": project, "study_id": study_id})
-    assert empty.value.detail["error_kind"] == "empty_edit"
+    assert by_field["settings.currency_year"]["new"] == 2030
+    assert card["says"].startswith("Study name ")
+    with pytest.raises(HTTPException) as same:  # the stored name again: nothing to change
+        edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "name": stored["name"]})
+    assert same.value.detail["error_kind"] == "empty_edit"
+    unset = edit_card.preview("update_decision_study", {"project": project, "study_id": study_id,
+                                                        "intake": {"brand_new_answer": "yes"}})
+    assert _cells(unset) == [("intake.brand_new_answer", None, "yes")]
+    assert "not set \u2192 yes" in unset["says"]
+
+
+def test_decision_study_refuses_what_the_handler_refuses(client, api_project, studies_on):
+    source = api_project("card-study-bad")
+    study_id, project = _start(source, "card-study-bad-base")
+    base = {"project": project, "study_id": study_id}
+    for extra in ({"name": "x" * 121}, {"intake": {"load": {"csv_text": "a,b"}}}, {"step": "tariff"},
+                  {"settings": {"perspective": "not_a_perspective"}}):
+        with pytest.raises(HTTPException) as exc:
+            edit_card.preview("update_decision_study", {**base, **extra})
+        assert exc.value.status_code in (422, 400), extra
+        assert exc.value.detail["error_kind"] == "invalid_edit_value", extra
 
 
 # ── GK B conditions: previews write nothing, ACL first, verified readback, caps ──
@@ -132,11 +160,15 @@ def test_previews_write_nothing(client, api_project, project_storage_dir, studie
     assert {n: dir_hash(project_storage_dir(n)) for n in before} == before
 
 
-def test_an_outsider_gets_the_handlers_refusal_not_old_values(client, api_project, outsider, studies_on):
+def test_an_outsider_gets_the_handlers_refusal_not_old_values(client, api_project, second_identity, studies_on):
     name = api_project("card-acl")
+    study_id, study_project = _start(api_project("card-acl-src"), "card-acl-base")
+    scope = chat_tools.get_project_flow_scope(name)["scope"]
+    chat_tools.set_acting_user(second_identity["user_id"])  # after the owner's setup
     for tool, args in (("update_project_settings", {"name": name, "derive_lengths_from_geometry": True}),
                        ("update_project_scenario_metadata", {"name": name, "description": "x"}),
-                       ("update_decision_study", {"project": name, "study_id": "s1", "name": "x"})):
+                       ("update_project_flow_scope", {"name": name, "scope": scope}),
+                       ("update_decision_study", {"project": study_project, "study_id": study_id, "name": "x"})):
         with pytest.raises(HTTPException) as exc:
             edit_card.preview(tool, args)
         assert exc.value.status_code in (403, 404), tool
@@ -164,11 +196,18 @@ def test_readback_after_the_real_call_equals_new(client, api_project, studies_on
 def test_study_intake_is_capped_summarised_and_redacted(client, api_project, studies_on):
     source = api_project("card-cap")
     study_id, project = _start(source, "card-cap-base")
-    intake = {f"k{i}": [1, 2, 3] for i in range(edit_card.STUDY_LEAF_CAP + 3)}
-    intake["api_token"] = "hunter2"
-    card = edit_card.preview("update_decision_study", {"project": project, "study_id": study_id, "intake": intake})
+    base = {"project": project, "study_id": study_id}
+    intake = {"api_token": "hunter2", **{f"k{i}": [1, 2, 3] for i in range(edit_card.STUDY_LEAF_CAP + 3)}}
+    card = edit_card.preview("update_decision_study", {**base, "intake": intake})
     shown = [r for r in card["rows"] if r["role"] == "typed"]
     assert len(shown) == edit_card.STUDY_LEAF_CAP
-    assert all(r["new"] in ("3 items", "set") for r in shown)
+    secret = next(r for r in shown if r["field"] == "intake.api_token")
+    assert (secret["old"], secret["new"]) == (None, "set")
+    assert all(r["new"] == "3 items" for r in shown if r is not secret)
     assert "hunter2" not in repr(card)
     assert any(r["role"] == "note" for r in card["rows"])
+    # A rotated secret is not "unchanged", and still never appears.
+    chat_tools.update_decision_study(project, study_id, intake={"api_token": "hunter2"})
+    rotated = edit_card.preview("update_decision_study", {**base, "intake": {"api_token": "hunter3"}})
+    assert _cells(rotated) == [("intake.api_token", "set", "set (changed)")]
+    assert "hunter" not in repr(rotated)
