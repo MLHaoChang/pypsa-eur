@@ -279,17 +279,18 @@ def _write_text_atomic(path: Path, text: str) -> None:
         raise
 
 
-def draft_from_project(network_path, island=None) -> CampusDraft:
+def draft_from_project(network_path, island=None, f_hz=None) -> CampusDraft:
     """A campus draft from the saved, solved project at ``network_path``.
     An unsolved project is refused here. The draft itself needs no dispatch,
     but the study does, and the user should hear it now rather than at run
     time. ``island``, the project's validated island sidecar, is passed to
     ``draft_campus`` (campus island plan I1, I9b): the campus then carries
-    its island data. Without it the draft is unchanged."""
+    its island data. Without it the draft is unchanged. ``f_hz`` is
+    ``draft_campus``'s own parameter, passed through."""
     n = load_solved_network(network_path)
     if not is_solved(n):
         raise ContractError("the project is not solved; solve it and save, then draft the campus")
-    return draft_campus(n, island=island)
+    return draft_campus(n, island=island, f_hz=f_hz)
 
 
 def check_campus(spec: dict) -> None:

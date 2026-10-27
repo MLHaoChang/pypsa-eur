@@ -55,7 +55,7 @@ from typing import Any, Literal, Mapping
 import numpy as np
 import pandas as pd
 
-from services import change_log_service
+from services import change_log_service, growth_placeholders
 from services.dispatch_status import clear_dispatch
 from services.profile_gen.engine import ProfileGenError
 from services.profile_gen.families import family_of, get_family
@@ -1493,28 +1493,33 @@ def assign_profile(
     # (None for a value an imported series left unset).
     with PyPSAService.get_lock():
         old = _dense(n, n.components[component_type].name, attribute, [component])[:, 0]
-    finite = old[np.isfinite(old)]
-    before = ({"peak": float(finite.max()), "mean": float(finite.mean()),
-               "min": float(finite.min())} if len(finite) else None)
+        prior = growth_placeholders.before(n, key[0], key[1], [key[2]],
+                                           project_dir=getattr(ctx, "storage_dir", None))
+        finite = old[np.isfinite(old)]
+        before = ({"peak": float(finite.max()), "mean": float(finite.mean()),
+                   "min": float(finite.min())} if len(finite) else None)
 
-    # Store write under the store lock, network write under the PyPSA lock —
-    # the same two-lock dance as the upload path (`_apply_profile_upload`).
-    # Overwrite semantics: regeneration replaces the same key.
-    with _user_ts_lock:
-        ctx.user_ts[key] = aligned
-        ctx.user_ts_meta[key] = full_meta
-        if companion is not None:
-            ckey = ("links", "p_min_pu", component)
-            ctx.user_ts[ckey] = companion
-            companion_meta = {k: v for k, v in full_meta.items()
-                              if k not in ("replaced_series", "target", "meaning")}
-            ctx.user_ts_meta[ckey] = {
-                **companion_meta, "target": ["links", "p_min_pu"],
-                "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
-                "companion_of": "p_max_pu",
-                "meaning": "reverse bound scaled by the same availability"}
-    with PyPSAService.get_lock():
+        # Store write under the store lock, nested in the PyPSA lock held since
+        # the read above, so the growth placeholders' prior peaks stay current —
+        # the same nesting as the upload path (`_apply_profile_upload`).
+        # Overwrite semantics: regeneration replaces the same key.
+        with _user_ts_lock:
+            ctx.user_ts[key] = aligned
+            ctx.user_ts_meta[key] = full_meta
+            if companion is not None:
+                ckey = ("links", "p_min_pu", component)
+                ctx.user_ts[ckey] = companion
+                companion_meta = {k: v for k, v in full_meta.items()
+                                  if k not in ("replaced_series", "target", "meaning")}
+                ctx.user_ts_meta[ckey] = {
+                    **companion_meta, "target": ["links", "p_min_pu"],
+                    "kind": f"{full_meta.get('kind', 'availability')} (reverse bound)",
+                    "companion_of": "p_max_pu",
+                    "meaning": "reverse bound scaled by the same availability"}
         _reapply_user_ts_to_network(n, store=ctx.user_ts)
+        # A user's profile sets the growth placeholders it covers (E1 follow-up).
+        growth_placeholders.mark_set(n, key[0], key[1], {key[2]: aligned}, prior,
+                                     project_dir=getattr(ctx, "storage_dir", None))
         # A new profile invalidates solved dispatch exactly like a topology
         # edit — flip freshness so Results can't serve the old solve.
         dispatch_cleared = clear_dispatch(n)

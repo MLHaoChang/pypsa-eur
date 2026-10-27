@@ -210,7 +210,8 @@ def test_an_example_year_keeps_its_value_set():
     row = next(r for r in meta["ledger"] if r["item"] == "placeholder load_scale 2038")
     assert row["value"] == "residential ×1.4, hospital_load ×1.2"
     assert "it takes its stage 3 value, residential ×1.4, hospital_load ×1.2 (" in row["note"]
-    assert "peak check" in row["note"] and "stays unknown" in row["note"]
+    assert "peak check" in row["note"] and "unknown until it is set" in row["note"]
+    assert "editing every load's 2038 series sets it" in row["note"]
 
 
 def test_an_unset_h2_offtake_leaves_the_electric_peak_as_it_was():

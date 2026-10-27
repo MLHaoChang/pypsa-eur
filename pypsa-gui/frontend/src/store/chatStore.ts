@@ -107,6 +107,8 @@ export interface PendingConfirmationCard {
   expires_at_epoch_ms: number
   /** LC-04: the old → new rows of a chat edit (harness/edit_card.py). */
   edit_card?: unknown
+  /** Issue 19: set when the tool comes from an admin's MCP server (harness/confirm.py). */
+  external?: { server: string }
 }
 
 export interface ChatUsageAcc {

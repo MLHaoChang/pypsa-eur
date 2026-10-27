@@ -1,10 +1,16 @@
 // Step 3 — Goal (guided-mode spec §5.3): how much shortfall per year is
-// acceptable, how strict to be on energy (advanced), the price of undelivered
-// energy (read-only, with an assistant fix). The Run is in section 9,
-// Readiness and run (`shared/GoalStudyRun.tsx`): this card sets the goal.
+// acceptable, how strict to be on energy and how many simulation runs
+// (advanced), the price of undelivered energy (read-only, with an assistant
+// fix). The Run is in section 9, Readiness and run (`shared/GoalStudyRun.tsx`):
+// this card sets the goal. The goal is the project's one stored reliability
+// goal (W3b-R): the editor is Expert's Solver settings one, and "Save goal"
+// writes only the fields typed here.
 import { useEffect, useState } from 'react'
 import StressScenarioEditor from '../../results/StressScenarioEditor'
 import { useHubDesignStore } from '../hubDesignStore'
+import { useUIStore } from '../../../store/uiStore'
+import { goalPatchFromEdits, useReliabilityGoal, type GoalEdits } from '../../../hooks/useReliabilityGoal'
+import { ReliabilityGoalEditor } from '../../../components/reliabilityGoal/ReliabilityGoalEditor'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
 import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
@@ -15,13 +21,20 @@ import { useInScope } from '../../../components/flowScope/useFlowScope'
 import { ScopeGate } from '../../../components/flowScope/ScopeGate'
 
 export function GoalCard() {
-  const { project, running, readiness, voll, vollMissing } = useGoalStudy()
+  const { project, running, voll, vollMissing } = useGoalStudy()
   const liveStudy = useLiveStudyRunning()
-  const loleTarget = useHubDesignStore(s => s.loleTarget)
-  const ensCap = useHubDesignStore(s => s.ensCap)
-  const setLoleTarget = useHubDesignStore(s => s.setLoleTarget)
-  const setEnsCap = useHubDesignStore(s => s.setEnsCap)
+  const { goal, save } = useReliabilityGoal()
+  const [edits, setEdits] = useState<GoalEdits>({})
+  const { patch, error: editError } = goalPatchFromEdits(edits)
+  const edited = Object.keys(patch).length > 0
+  const saveGoal = () => save.mutate(patch, { onSuccess: () => setEdits({}) })
   const [advanced, setAdvanced] = useState(false)
+  // "Change in Scenarios & optimisation ›" from a Results study asks for the
+  // goal (`openReliabilityGoal`): in Guided this card is its home.
+  const blockRequest = useUIStore(s => s.solverBlockRequest)
+  useEffect(() => {
+    if (blockRequest === 'goal') useUIStore.getState().clearSolverBlockRequest()
+  }, [blockRequest])
   // A link to the stress editor opens "More settings" once.
   const advancedRequested = useHubDesignStore(s => s.goalAdvancedRequested)
   useEffect(() => {
@@ -33,7 +46,8 @@ export function GoalCard() {
   // hides and the study is not run. VOLL stays: the optimisation prices lost
   // load with it (modular-cards §2).
   const reliabilityOn = useInScope('reliability', 'goal_study')
-  const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
+  const loleText = edits.target_lole_h ?? (goal?.target_lole_h.source !== 'default'
+    ? String(goal?.target_lole_h.value ?? '') : '')
 
   return (
     <CardShell step="goal" testId="hub-card-goal" title="Goal">
@@ -42,22 +56,17 @@ export function GoalCard() {
         <ScopeGate card="reliability" option="goal_study" testId="hub-goal-out-of-scope">{null}</ScopeGate>
       )}
       {reliabilityOn && <>
-      <label className="flex flex-col gap-1 text-[12px]">
-        <span className="font-semibold text-text">
-          <Term k="shortfall_hours">Allowed shortfall (hours per year)</Term>
+      <ReliabilityGoalEditor mode="guided" goal={goal} edits={edits}
+        onChange={setEdits} disabled={running || !goal}
+        fields={advanced ? ['target_lole_h', 'ens_cap_permyriad', 'mc_draws'] : ['target_lole_h']} />
+      {/* The field shows the goal as stored ("not set"), as Expert does; a
+          typical value is only suggested here, never shown as a default. */}
+      {loleText.trim() === '' && (
+        <span className="text-[12px] text-muted" data-testid="hub-goal-empty-hint">
+          No goal yet. Type how many hours per year without power you can accept (for example 3)
+          to get a pass or fail answer.
         </span>
-        <input type="number" step="any" min={0} data-testid="hub-goal-lole"
-          value={loleTarget} disabled={running}
-          placeholder="e.g. 3"
-          onChange={e => setLoleTarget(e.target.value)}
-          className="w-32 rounded border border-border bg-bg px-2 py-1 font-mono text-[12px] text-text" />
-        {loleTarget.trim() === '' && (
-          <span className="text-muted" data-testid="hub-goal-empty-hint">
-            No goal yet. Type how many hours per year without power you can accept (for example 3)
-            to get a pass or fail answer.
-          </span>
-        )}
-      </label>
+      )}
 
       <div className="flex flex-col gap-2">
         <button type="button" data-testid="hub-goal-advanced" aria-expanded={advanced}
@@ -65,17 +74,27 @@ export function GoalCard() {
           className="self-start text-[11px] text-muted hover:text-accent">
           {advanced ? '▾' : '▸'} More settings
         </button>
-        {advanced && (
-          <label className="flex flex-col gap-1 text-[12px]">
-            <span className="font-semibold text-text">
-              <Term k="energy_strictness">Energy strictness (parts per 10 000 of yearly energy)</Term>
-            </span>
-            <input type="number" step="any" min={0} data-testid="hub-goal-ens"
-              value={ensCap} disabled={running}
-              placeholder={ensDefault != null ? `${ensDefault} (default)` : 'default'}
-              onChange={e => setEnsCap(e.target.value)}
-              className="w-32 rounded border border-border bg-bg px-2 py-1 font-mono text-[12px] text-text" />
-          </label>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" data-testid="hub-goal-save" onClick={saveGoal}
+          disabled={!edited || editError !== null || save.isPending || running}
+          className="rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
+          {save.isPending ? 'Saving…' : 'Save goal'}
+        </button>
+        {!edited && !save.isSuccess && (
+          <span data-testid="hub-goal-no-changes" className="text-[12px] text-muted">
+            No changes to save.
+          </span>
+        )}
+        {save.isSuccess && !edited && (
+          <span data-testid="hub-goal-saved" role="status" className="text-[12px] text-muted">
+            Saved.
+          </span>
+        )}
+        {save.isError && (
+          <span data-testid="hub-goal-save-error" className="text-[12px] text-warn">
+            The goal was not saved. Try again.
+          </span>
         )}
       </div>
       </>}

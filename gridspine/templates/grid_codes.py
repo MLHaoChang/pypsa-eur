@@ -64,6 +64,11 @@ A profile may carry these optional keys:
     ``orders`` ``{h: % of the fundamental}``, h a whole number 2..50, each
     limit a positive number. The harmonic screen judges on whichever of
     the two is set.
+``harmonic_resonance_clearance_h``
+    The least distance, in harmonic orders, between a network resonance
+    seen from the connection point and an order that counts (6k +- 1 and
+    the units' spectra) (datacenter grid readiness issue 12, the harmonic
+    impedance scan), a positive number.
 ``pst_limit``, ``plt_limit``
     The short-term and long-term flicker severity limits at the connection
     point (grid-to-process issue 17), positive numbers. The flicker screen
@@ -72,11 +77,6 @@ A profile may carry these optional keys:
     The standard whose current-distortion limits the TDD screen applies at
     the connection point (datacenter readiness 12), one of
     ``CURRENT_TDD_STANDARDS``. Without it the TDD screen reads unknown.
-``harmonic_resonance_clearance_h``
-    The least distance, in harmonic orders, between a network resonance
-    seen from the connection point and an order that counts (6k +- 1 and
-    the units' spectra) (datacenter grid readiness issue 12, the harmonic
-    impedance scan), a positive number.
 ``dynamic_requirements``
     What a steady-state study cannot show (ride-through, RoCoF, frequency
     response, pending rules): ``{id, requirement, value, clause, source,
@@ -125,8 +125,8 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 _DOCUMENT_KEYS = ("sha256", "filename", "title")
 _SINGLE_LIMITS = ("q_range_demand", "rvc_limit_pct", "campus_voltage", "q_range_ibr", "rvc_limit_infrequent_pct",
                   "q_capability_pq", "pf_min_lagging", "pf_min_leading", "thd_limit_pct", "harmonic_limits_pct",
-                  "pst_limit", "plt_limit", "current_tdd_standard",
-                  "harmonic_resonance_clearance_h")
+                  "harmonic_resonance_clearance_h", "pst_limit", "plt_limit",
+                  "current_tdd_standard")
 #: Every key a profile may carry; any other is loaded with a warning.
 PROFILE_KEYS = frozenset({"title", "voltage_bands", "q_range_demand", "rvc_limit_pct", "campus_voltage",
                           "q_range_ibr", "rvc_limit_infrequent_pct", "q_capability_pq", "pf_min_lagging",
@@ -233,8 +233,7 @@ def _check_profile(name, p):
     if missing:
         raise ContractError(f"{where} is missing {missing}")
     for key in ("q_range_demand", "rvc_limit_pct", "q_range_ibr", "rvc_limit_infrequent_pct", "thd_limit_pct",
-                "pst_limit", "plt_limit",
-                "harmonic_resonance_clearance_h"):
+                "harmonic_resonance_clearance_h", "pst_limit", "plt_limit"):
         if key not in p:
             continue                                   # q_range_demand and rvc_limit_pct are required
         _check_limit(key, p[key], where)

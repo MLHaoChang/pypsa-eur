@@ -9,6 +9,7 @@ const disposition = { none: 'No approval card', policy: 'Server policy (audited)
 const tierNames: Record<string, string> = {
   read: 'Read', write: 'Write', destructive: 'Destructive', execution: 'Execute', execution_long_running: 'Long-running work',
 }
+const toolLabel = (tool: string) => tool.charAt(0).toUpperCase() + tool.slice(1).replace(/_/g, ' ')
 const blockers: Record<string, string> = {
   chat_policy_unavailable: 'Chat policy is unavailable. Server configuration must be repaired before starting a turn.',
   project_writes_locked: 'Project writes are locked by another user. Reads remain available.',
@@ -83,6 +84,11 @@ export default function ChatAccess({ checked, companion = false }: { checked: bo
               <td className="pr-1">{disposition[row.native]}</td><td>{disposition[row.external]}</td>
             </tr>)}</tbody>
           </table>
+          {current.guided_uncarded.length > 0 && <div>
+            <p>In Guided, these Write tools have their own rule: each only stores a pending change, and the step that applies it shows the Write row's card.</p>
+            <ul>{current.guided_uncarded.map(row =>
+              <li key={row.tool}>{toolLabel(row.tool)} · {disposition[row.native]}</li>)}</ul>
+          </div>}
           <p>No approval card does not grant access. Tool availability, locks, checked scope and action-specific validation still apply.
             External non-read calls always need confirmation. Saved context cannot grant permission.</p>
           <p>{current.checking.effective_for_selection

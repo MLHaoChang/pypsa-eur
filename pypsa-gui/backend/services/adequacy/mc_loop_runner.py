@@ -93,8 +93,12 @@ def start_mc(
         transition_probs,
     )
 
+    # W3b-R: omitted draws are the project's one stored goal.
+    from services.reliability_goal import active_goal, goal_sources as _sources
+    goal = active_goal(solver_state)
     draws = getattr(body, "draws", None)
-    draws = 500 if draws is None else int(draws)
+    goal_sources = {"mc_draws": _sources(goal, {"mc_draws"} if draws is not None else set())["mc_draws"]}
+    draws = goal["mc_draws"]["value"] if draws is None else int(draws)
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
     if draws > MAX_DRAWS:
@@ -207,6 +211,7 @@ def start_mc(
     # resolve a different dict and write its result where no reader looks.
     stop_event = _threading.Event()
     record: dict = {"status": "running", "result": None, "error": None,
+                    "goal_sources": goal_sources,
                     "started_at": time.time(), "thread": None,
                     "stop_event": stop_event}
 
@@ -347,6 +352,6 @@ def start_mc(
                           name="adequacy-mc")
     record["thread"] = t
     publish_study("mc", record, t)
-    return {"status": "running", "draws": draws, "seed": seed,
+    return {"status": "running", "draws": draws, "seed": seed, "goal_sources": goal_sources,
             "cov_target": cov_target, "elcc_assets": len(assets),
             "elcc_portfolio": want_portfolio}

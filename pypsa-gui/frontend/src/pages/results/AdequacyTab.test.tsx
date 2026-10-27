@@ -151,6 +151,8 @@ describe('AdequacyTab — the ★ mount invariant, no-data state', () => {
     renderTab()
     const line = await screen.findByTestId('adequacy-no-target')
     expect((line.textContent ?? '').length).toBeGreaterThan(30)
+    // W3b-R: the ENS target lives in the one reliability goal editor.
+    expect(screen.getByTestId('adequacy-no-target-goal').textContent).toBe('reliability goal ›')
   })
 })
 

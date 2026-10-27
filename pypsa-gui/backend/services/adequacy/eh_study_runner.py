@@ -250,11 +250,11 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
     ``lock_blocking=False`` (the polled flow) a held lock raises
     `EhStudyLockBusy` instead of waiting."""
     body = body or EhStudyRequest()
-    archetype = getattr(body, "archetype", None)
-    if archetype is None:
-        raise HTTPException(
-            422,
-            "archetype is required: one of strong_grid, weak_flexible, off_grid")
+    # W3b-R: each goal field the request omits (site type, LOLE, ENS, draws)
+    # is the project's one stored goal.
+    from services.reliability_goal import active_goal, eh_request_with_goal
+    body, goal_sources = eh_request_with_goal(body, active_goal(solver_state))
+    archetype = body.archetype
     if archetype not in _PACK_FACTORY:
         raise HTTPException(
             422,
@@ -338,6 +338,7 @@ def check_eh_study_start(body: EhStudyRequest | None, *, solver_state: dict,
                                    ("mc_cov_target", mc_opts.cov_target))
                  if v is not None}
     return {"body": body, "archetype": archetype, "budget": budget, "stages": stages,
+            "goal_sources": goal_sources,
             "cfg": cfg, "n": n, "lock": lock, "pack": pack, "raw_dtc": raw_dtc,
             "dtc_attribution": dtc_attribution, "dtc_config": dtc_config,
             "dsr_buses": dsr_buses, "mc_kwargs": mc_kwargs}
@@ -379,6 +380,8 @@ def start_eh_study(
         "budget_solves": budget,
         "pack_overrides": normalised_overrides(body.pack_overrides),
         "dtc_attribution": dtc_attribution,
+        # Where each goal field came from: stored / template / default / override.
+        "goal_sources": plan["goal_sources"],
         # The rest of the request (P19–P22 gate): a re-run built from this
         # record must not silently drop the user's MC / DSR / DtC choices.
         "mc": dict(body.mc) if body.mc else None,
@@ -469,4 +472,5 @@ def start_eh_study(
         "study": "eh_study",
         "archetype": archetype,
         "budget_solves": budget,
+        "goal_sources": plan["goal_sources"],
     }

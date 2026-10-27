@@ -1,6 +1,7 @@
 // The Guided Run (design §3.3: one Run): in section 9, Readiness and run. It
-// starts the reliability study with the goal set on the Goal card, through the
-// same `buildEhStudyBody` the Expert panel uses. Disabled exactly when the
+// starts the reliability study with the goal set on the Goal card (the stored
+// goal, filled in by the backend), through the same `buildGoalFreeStudyBody`
+// the Expert panel uses. Disabled exactly when the
 // flow's verdict (`useRunGate('all')`) or the study's own inputs say it would
 // be refused; the reason is shown, never a silent grey button.
 //
@@ -48,7 +49,7 @@ export function GoalStudyRun() {
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-run-start"
           onClick={() => run.mutate()}
-          disabled={running || run.isPending || built.error !== null || vollMissing || !project
+          disabled={running || run.isPending || built.body === null || vollMissing || !project
             || templateUnknown || gate.blocked || !reliabilityOn}
           title={templateUnknown ? 'The template could not be read — retry below.'
             : !reliabilityOn ? outOfScopeTitle : undefined}
