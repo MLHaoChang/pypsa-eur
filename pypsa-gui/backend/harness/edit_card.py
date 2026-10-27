@@ -160,6 +160,8 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         unit = f" {unit}" if unit else ""
         # The card's own words for an absent value (EditCard.tsx): never "None".
         old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        if row.get("old_applies") is False:
+            old = "\u2014"  # a setting that did not apply, as the card shows it
         new = "not set" if new is None else _number(new)
         stored = (f" (stored as {_number(row['new'])} {row['unit']})"
                   if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")

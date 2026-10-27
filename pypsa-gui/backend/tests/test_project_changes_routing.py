@@ -288,6 +288,8 @@ def test_solver_card_rolling_rows_and_note(grid):
     assert note["note"] == edit_card.ROLLING_NOTE and note["component_class"] == "" and note["name"] == ""
     receipt = frame(frames, "tool_result")["result"]["_edit_receipt"]
     assert receipt["outcome"] == "verified"
+    # The Expert receipt says what the card shows: a horizon that did not apply was "—", not 168.
+    assert "rolling_horizon — → 24 snapshots" in card["says"] and receipt["says"] == card["says"]
     cfg = sim_router._state["solver_config"]
     assert (cfg.solve_strategy, cfg.rolling_horizon) == ("rolling", 24)
 
