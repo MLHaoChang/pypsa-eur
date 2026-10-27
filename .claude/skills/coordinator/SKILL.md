@@ -19,7 +19,11 @@ Work from a checkout of current master. Before a sweep, run `git switch master &
    - Done when every live session is on the sessions board with its current state.
 3. **Merge pass.** Run [Merging](#merging) on every PR the state file lists as pending.
    Done when each one is merged or has a named blocker in the log.
-4. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in CEST. Ask every question as `AskUserQuestion` options, per `AGENTS.md`, and write the same question and options in the turn's final reply text, so a worker restart cannot lose it.
+4. **Capacity.** Count the builders actually building, not landing, held or waiting on a merge chain. The **builder target** is 10 unless the owner sets another. While the count is below it, run `python3 scripts/coord/frontier.py --open-prs <prs> --sessions <sessions>` (inputs below) and open each package that shares no likely files with running work, per [Taking on tasks](#taking-on-tasks). A listed package you hold back gets its blocker in the log.
+   - `<prs>`: one `<pr> <changed path>` line per open PR, from `git diff --name-only origin/master...pr/$n | sed "s/^/$n /"`.
+   - `<sessions>`: the `sessions.py` output, or one issue path per line.
+   Done when builders ≥ target, the frontier is empty, or every remaining package names its blocker.
+5. **Owner.** Do [Dashboard](#dashboard) if anything changed, then message the owner only with what landed or what needs a decision, times in CEST. State "builders N/target, frontier M". Ask every question as `AskUserQuestion` options, per `AGENTS.md`, and write the same question and options in the turn's final reply text, so a worker restart cannot lose it.
 
 Log each event in the state file as `- HH:MMZ ...` ([Time](#time)); `board.py` logs its own edits.
 
@@ -27,7 +31,7 @@ Log each event in the state file as `- HH:MMZ ...` ([Time](#time)); `board.py` l
 
 Every wake re-reads the whole context, so fewer wakes cost less.
 - Merges follow the sessions' `premerge ok <sha>` reports. Never `subscribe_pr_activity`: a subscription costs about 3 wakes and 3k tokens of boilerplate per PR.
-- The sweep routine fires every 6 hours, as a safety net.
+- The sweep routine fires every 6 hours, as a safety net. A second routine, cron `9 */2 * * *` UTC, refreshes the dashboards every 2 hours (owner decision DASH-2H-1); a dashboard with no change since its last refresh is skipped and logged. Token usage refreshes once per Berlin day (TOKENS-DAILY-1).
 - Call `list_triggers` with `enabled: true`; the full list is large.
 - With no live session, `update_trigger` the routine to `enabled: false`. The next `create_session` re-enables it.
 - A routine created with `create_new_session_on_fire` starts without the repo and without the session tools, so the sweep stays in this session.
@@ -36,16 +40,16 @@ Every wake re-reads the whole context, so fewer wakes cost less.
 
 A long context is this session's largest cost. Rotate to a fresh coordinator when `get_session` (no id) shows `context_usage.used_tokens` above 300k (owner decision COORD-CTX-1), or once a day, whichever comes first. The scratchpad is per session, so the new coordinator gets the state as content, not as files.
 
-1. **Brief.** Write a coordinator brief at the top of the state file (`## Coordinator brief`, with [Time](#time)'s stamp):
+1. **Brief.** Write a coordinator brief at the top of the state file (`## Coordinator brief`, with [Time](#time)'s stamp). It holds live state only; the standing rules are in this skill, which the new coordinator reads:
    - pending PRs, each with its head SHA and the gatekeeper's OK for that SHA;
    - live sessions, each with its id and package;
-   - owner decisions in force, in the owner's words;
+   - owner decisions not yet in `docs/agents/owner-decisions.md`, in the owner's words;
    - open owner questions;
    - each dashboard's link and its datasets' last `ArtifactData` `if_version`, and the routine's trigger id.
 2. **Create.** `create_session` the new coordinator on this session's model, with a prompt that carries the brief's full text and says: "You are the coordinator for MLHaoChang/pypsa-eur. Read `.claude/skills/coordinator/SKILL.md`. First, save the brief below as the top of `coordinator-state.md` in your scratchpad, rebuild `board/board.json` from the dashboard's published file, put your own id (`get_session`) in `docs/agents/coordinator.md` through a tiny PR, and `send_message` me when the brief is saved."
    The new coordinator runs `touch ~/.claude-coordinator` (see the top of this skill).
    The new coordinator also runs Artifact `open` on each dashboard in [Dashboard](#dashboard). The app lists only the artifacts a session has published or opened, so without it the owner's panel shows no dashboard after a rotation.
-3. **Hand over the routine.** `update_trigger` the sweep routine with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
+3. **Hand over the routines.** `update_trigger` each routine (the sweep and the dashboard refresh) with `persistent_session_id` set to the new id. If `update_trigger` has no such field, `delete_trigger` and `create_trigger` again with the same cron and prompt.
 4. **Tell the sessions.** `send_message` each live session the new id. When any session rotates, reviewer or builder, tell every peer that works with it the new id at once.
 5. **Archive** this session once the new coordinator confirms the brief is saved. Relay anything that reaches this session before then.
 
@@ -64,6 +68,8 @@ Append every owner decision to `docs/agents/owner-decisions.md`, in the PR that 
 **Permission requests (owner decision PERM-1).** A session's `PERMISSION ...` message goes to the owner as one `AskUserQuestion`, with the exact command pattern and what it reaches. On a yes, add exactly that pattern to `permissions.allow` in `.claude/settings.json` (e.g. `Bash(npx impeccable:*)`, never broader than asked) in a tiny OWN-PR, add an owner-decisions row, merge and tell the session to merge master. Never widen a pattern on your own.
 
 Report only what has happened. Tell the owner a message went out after `send_message` returns, not before.
+
+Verify an option against its issue file (`frontier.py`) before offering it to the owner: an issue with an open `Blocked by` cannot open.
 
 Verify a session's facts before acting on them: re-run premerge rather than trusting a reported SHA, overlap or green.
 
@@ -101,14 +107,11 @@ After `create_session`, re-enable the sweep routine if [Wakes](#wakes) disabled 
 
 Leave `outcome_branch` unset, so the session can open each PR on its own `claude/*` branch. A session bound to one push branch has to hand its fixes over as patches.
 
-Always pass `source_url`, `model`, `title` and `tags` (lowercase `team:<lead|review|build|assurance>`) on `create_session`. Before opening a package, check `git log origin/master` for it: it may have landed.
+Always pass `source_url` `https://github.com/MLHaoChang/pypsa-eur`, `model`, `title` and `tags` (lowercase `team:<lead|review|build|assurance>`) on `create_session`. Before opening a package, check `git log origin/master` for it: it may have landed.
 
-Send `docs/agents/session-brief.md`, filled in, as the first message. The brief carries everything the session needs:
-- the owner's decisions, with the owner's own words for the goal;
-- file pointers and the master SHA it starts from;
-- who reviews it (the gatekeeper for engine code);
-- a "Context budget" paragraph: the context size at which to hand off.
-- what "done" looks like.
+Build the brief with `python3 scripts/coord/brief.py` (`--help`; template `docs/agents/session-brief.md`) and send the file it writes as the first message. From flags it takes the task (the owner's own words for the goal, and what "done" looks like), decisions, file pointers, the master SHA, the reviewer and the stream; it builds "Stay out of" from the open PRs' files and the live sessions (the inputs of Sweep's Capacity step); and it appends Context budget (hand off at 300k, USE-2), Process, and for stream DC the CONFIDENTIALITY text (SAGC-1). Paste a rotating session's hand-off note into the task verbatim. When the brief is long, write it to the scratchpad and have a Sonnet subagent call `create_session` with it verbatim.
+
+Never tell a session to disregard an auto-mode or classifier flag; it sends the coordinator a `PERMISSION` message. A builder with uncommitted helper scripts pushes them before you archive it.
 
 When a package's last PR merges, read the session's hand-off note, `archive_session` it, and open the next package fresh from that note. Context stays short that way. Every tool call re-reads the whole context, and Sonnet prices cache reads the same as Opus, so a long-lived session costs more than its model tier saves.
 
@@ -119,14 +122,15 @@ Merge one PR at a time. The coordinator merges a PR whose premerge ends in `ok t
 1. Start from a session's `premerge ok <sha>` report. The session drives its PR's CI, so run `scripts/coord/premerge.sh <pr>` once, here; it covers conflicts, overlap, the semantic tests on a trial merge, template sync and every check run on the head. Done when it ends in `RESULT: ok to merge <sha>`.
    - On "TEMPLATE NOT UPDATED", ask the session to port the change to `templates/agent-coordination/`.
    - When the change is specific to this project, rerun with `PREMERGE_TEMPLATE_SYNC=skip` instead and log why.
-   - Run premerge from a detached origin/master worktree: `git worktree add --detach <scratch>/wt-pm origin/master`, then `git checkout -q --detach origin/master` after each fetch, with `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python`. Never leave a trial merge half-done there (`git merge --abort`): a dirty wt-pm broke ciwait once.
+   - Run premerge from a detached origin/master worktree. Once: `git worktree add --detach <scratch>/wt-pm origin/master`, then `ln -sfn /home/user/pypsa-eur/pypsa-gui/frontend/node_modules <scratch>/wt-pm/pypsa-gui/frontend/node_modules`. Before each run: `git fetch -q origin && git checkout -q --detach origin/master`, then `PREMERGE_PYTHON=/root/.venv-pypsa-gui/bin/python scripts/coord/premerge.sh <pr> > <scratch>/pmN.txt 2>&1` and `grep -E '^head:|^RESULT|OK @|NOT OK' <scratch>/pmN.txt`. Never leave a trial merge half-done there (`git merge --abort`): a dirty wt-pm broke ciwait once.
 2. For gridspine and IC engine changes, the gatekeeper's OK must be on the PR; for a PR that changes UI, the UX reviewer's too (owner decision VERDICT-PR). Reviewers post `GK OK @<sha>` / `UX OK @<sha>` as PR comments and the coordinator relays nothing. Premerge's "reviewer verdicts" section prints each as `current`, `carries (clean master merge)` or `stale`. Missing and stale OKs don't block premerge, so you decide: a gated PR needs a current or carried OK from each reviewer it needs. A `NOT OK` newer than the last OK blocks. Two gatekeepers review by area (owner decision GK-SPLIT-1): GK A for gridspine, DC, grid-to-process and IC/adequacy engine code, GK B for the harness, app, finance and outsourced work. A PR spanning both gets one lead GK, named by the coordinator. Any push after a GK or UX OK needs a re-OK, unless it is a clean base merge whose tree equals `git merge-tree --write-tree <old-head> origin/master`. A hand-resolved conflict always needs a re-OK.
-3. Call `merge_pull_request` with `expectedHeadSha` set to the full 40-character `head:` line. GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged. Read `head.ref` from `pull_request_read get` for the merge commit title "Merge pull request #N from <owner>/<head.ref>"; retry once on a GitHub 500.
+3. Call `merge_pull_request` with `merge_method` merge, `expectedHeadSha` set to the full 40-character `head:` line and `commit_title` "Merge pull request #N from MLHaoChang/<head.ref>". Read `head.ref` from `pull_request_read get`, or `git ls-remote origin | grep <sha>`; never a placeholder (#767 merged as ".../PLACEHOLDER"). GitHub's mergeable state is the one check premerge leaves out; a refused merge reports it. Done when GitHub reports the PR merged. Retry once on a GitHub 500.
 4. Tell each dependent session the state file lists for this PR, then go on to the next PR. Each premerge run measures against the new master.
 
 **A blocked PR:**
 - **Code overlap or a conflict.** Ask the PR's session to merge master in, as a merge commit, then wait for CI on the new head. Premerge waives a code overlap whose files all have tests that pass on a clean trial merge; only the rest blocks.
 - **The head moved** while the PR was green: a session pushed, even if the push was an unneeded master merge. The new head is the head, so wait for its CI. History stays as pushed: the coordinator asks sessions for merges and never asks for resets or force-pushes.
+- **A JSON-chain PR behind master**, until TOOLSEL-1 (#771) lands: premerge's semantic tests miss `tests/test_vs2_results_walk_journey.py`. In wt-pm: `git merge -q --no-commit <head>`; `(cd pypsa-gui/backend && /root/.venv-pypsa-gui/bin/python -m pytest -q -o addopts='' tests/test_vs2_results_walk_journey.py | tail -1)` (~3.5 min, 14 tests); `git merge --abort`. A carried OK checks `[ "$(git merge-tree --write-tree <old-head> <master-sha>)" = "$(git rev-parse <new-head>^{tree})" ]`.
 - **Two PRs both touch `harness/catalogue.py`.** The second merges master and reruns `smoke/assistant_inventory.py --write`. `capability-inventory.json` is regenerated each time, never hand-merged.
 - **A runner-less macOS job** (owner decision 2026-10-21). When `Integration (macos)` has been queued for over 30 minutes with no runner and every other check is green, cancel that workflow run (`actions_run_trigger`, `cancel_workflow_run`). Then rerun premerge: it waives the cancelled job, and the PR merges under that waiver.
 - **A README or error-kinds overlap** (owner decisions 2026-10-21). Premerge itself treats `harness/README.md` as docs, and waives a `tool-error-kinds.json` overlap when both sides only add lines, the trial merge is clean and the manifest test passes. Don't ask for a master merge for these.
@@ -138,20 +142,22 @@ The owner has three dashboards. Each keeps its data, and any state needed to reb
 
 | Dashboard | Link | Datasets | Refresh |
 |---|---|---|---|
-| Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | With each owner report that changes a PR or a session |
-| Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | After a merge that finishes an issue, and on every sweep |
-| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | On every sweep (owner decision USAGE-REVIVE-1) |
+| Coordinator board | https://claude.ai/artifact/GCvn8s9zSM6JfwsJ4bsATk | `datasets/board` | Every 2 h (DASH-2H-1 routine), plus with each owner report that changes a PR or a session |
+| Feature progress | https://claude.ai/artifact/4LgN19kQBYxwMNnDnnoybL | `datasets/tasks` | Every 2 h (DASH-2H-1 routine), plus after a merge that finishes an issue |
+| Token usage | https://claude.ai/artifact/Y4gNYH7a7Ns43GaGfNmg68 | `datasets/daily`, `datasets/sessions`, `state/usage` | Once a day, in the 20:09 UTC firing (TOKENS-DAILY-1; USAGE-REVIVE-1 set the method) |
 
 Every refresh uploads a file (Artifact `publish`, `asset: true`, `url` set to that dashboard) and points the dataset at it: an `ArtifactData` update that sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result (after a rotation, a `get` returns it).
 
 **Coordinator board.** All three boards share one dataset, `datasets/board`. Its file, `board.json`, is `{rows: [...]}`, and each row's `board` field (`prs`, `sessions` or `merged`) says which table shows it. The page splits the rows with one calc per board.
+
+A row is `{board:'merged',pr,title,stream,merged:'HH:MM'}`, `{board:'prs',pr,title,stream,state,head}` or `{board:'sessions',session,doing,waiting_on,needs_you}`.
 
 Each refresh is three calls, made at most once per owner report:
 1. One Bash call, `python3 scripts/coord/board.py` (`--help` lists the flags). From flags it upserts or removes session rows, adds merged rows, adds or removes pr rows, appends one line to the state file and prints the path of `board.json`, ready for upload.
 2. Upload that path with Artifact `publish`, `asset: true`, `url` set to the dashboard.
 3. One `ArtifactData` update to `datasets/board`. It sets `source.url` from the upload reply and `updated: {at, by}`, with `if_version` taken from the last write's result.
 
-**Feature progress.** One row per subcomponent: each `.scratch/<feature>/issues/*.md` on master, plus the polish backlog, with a `stage` (Done, In review, In progress, Ready, Needs triage, Needs owner, Won't do) and a `note`. The owner wants it high level: core feature, area, percentage built and the names of what is missing. Status lines on master lag merges, so in-flight stages come from the state file. To refresh, download the current file (Artifact `read`, `path` set to the asset id in `datasets/tasks`'s `source.url`), change the rows' `stage` and `note` with a short Python edit, upload it and update `datasets/tasks`.
+**Feature progress.** One row per subcomponent: each `.scratch/<feature>/issues/*.md` on master, plus the polish backlog, with a `stage` (Done, In review, In progress, Ready, Blocked by NN, Needs triage, Needs owner, Won't do) and a `note`. The owner wants it high level: core feature, area, percentage built and the names of what is missing. A `.scratch` row's `stage` comes from `python3 scripts/coord/frontier.py --stages --open-prs <prs> --sessions <sessions>` (inputs: Sweep's Capacity step), never by hand; only `note` and the polish rows are edited by hand. To refresh, download the current file (Artifact `read`, `path` set to the asset id in `datasets/tasks`'s `source.url`), set the stages from that output and the notes with a short Python edit, upload it and update `datasets/tasks`.
 
 **Token usage.** Tokens and API-equivalent cost per Berlin day, over every Claude Code session on the account (Cowork sessions are not listed).
 
@@ -167,10 +173,13 @@ Each refresh is three calls, made at most once per owner report:
 - Read check runs through `premerge.sh`, which prints only the runs that block, never through one-off check-run reads per PR.
 - Start a long command with the tool's own background option. A `&` inside a background command detaches it, and its completion notice never arrives.
 - Session admin runs in a Haiku subagent (Agent tool, `model: haiku`) that returns one line, so the JSON dumps (~2.5k tokens each) stay out of this context:
-  - retire a session: rename it "Done · …", then `archive_session`;
+  - retire a session: rename it "Done · …", then `archive_session` (direct calls are fine too);
   - `list_sessions`: save it and return the `sessions.py` summary;
   - `get_session` of another session.
-- A PR with no session (the coordinator's own): start `scripts/coord/ciwait.sh <max-min ≤ 118> <pr>...` with the Bash tool's `run_in_background`. It prints READY, FAIL, MACOS or TIMEOUT on the first hit. Sessions drive the CI of their own PRs. `ciwait.sh` exits on the FIRST hit: rerun it after a push or for the remaining PRs. Own a PR with no session (its driver rotated, or Codex) with ciwait, and push small mechanical fixes yourself.
+- A PR with no session (the coordinator's own, or one whose driver rotated or is Codex, when only CI and premerge are left): start `scripts/coord/ciwait.sh 118 <pr>` with the Bash tool's `run_in_background` and `timeout` 7200000, one PR per call. It prints READY, FAIL, MACOS or TIMEOUT on the first hit: rerun it after a push. Backend shards take ~60 min; when the wait would pass ~60 min, run premerge directly instead. Sessions drive the CI of their own PRs. Push small mechanical fixes yourself; your own branch's hook blocks force pushes.
+- A `ci-only <pr> <sha>` hand-off from a session: archive the session, run `ciwait.sh` on the PR, push small mechanical fixes yourself, and open a fresh session from its hand-off note for anything bigger.
+- Remote branch deletion is blocked by the classifier: it is the owner's job.
+- A verdict sent to an archived session id is lost: relay it to the successor.
 - `list_sessions` with `limit: 100` overflows a subagent: use `limit: 25` and have it copy the saved tool-results JSON to the file. `list_pull_requests` overflows too: parse its saved file with python.
 - `list_events` output is large too. Save it and read it with `python3 scripts/coord/events.py <file> --chars 200`: each assistant event's time, text and last tool call. Read a session's events only that way, from a saved file.
 - Read a PR's file list with `git diff --stat origin/master...<head>`; `pull_request_read get_files` returns hundreds of thousands of characters on a large PR (684k on #491).

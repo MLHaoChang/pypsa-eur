@@ -669,11 +669,6 @@
    "family": "import-export"
   },
   {
-   "method": "GET",
-   "path": "/api/geocode",
-   "family": "network-topology"
-  },
-  {
    "method": "POST",
    "path": "/api/gridspine/{name}/capacity",
    "family": "gridspine-campus"
@@ -697,36 +692,6 @@
    "method": "POST",
    "path": "/api/library_reference/preview",
    "family": "import-export"
-  },
-  {
-   "method": "GET",
-   "path": "/api/network/asset_costs",
-   "family": "network-topology"
-  },
-  {
-   "method": "GET",
-   "path": "/api/network/asset_schema/{component}",
-   "family": "network-topology"
-  },
-  {
-   "method": "GET",
-   "path": "/api/network/catalog/{component}",
-   "family": "network-topology"
-  },
-  {
-   "method": "POST",
-   "path": "/api/network/lengths/from_geometry",
-   "family": "network-topology"
-  },
-  {
-   "method": "POST",
-   "path": "/api/network/lines/rescale_impedances",
-   "family": "network-topology"
-  },
-  {
-   "method": "POST",
-   "path": "/api/network/reset",
-   "family": "network-topology"
   },
   {
    "method": "POST",
@@ -762,26 +727,6 @@
    "method": "GET",
    "path": "/api/projects/{name}/reports/{report_id}/versions/{version}",
    "family": "reports"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/sites",
-   "family": "network-topology"
-  },
-  {
-   "method": "PUT",
-   "path": "/api/projects/{name}/sites",
-   "family": "network-topology"
-  },
-  {
-   "method": "GET",
-   "path": "/api/projects/{name}/sites/{site_id}/context",
-   "family": "network-topology"
-  },
-  {
-   "method": "POST",
-   "path": "/api/projects/{name}/sites/{site_id}/context",
-   "family": "network-topology"
   },
   {
    "method": "GET",
