@@ -73,12 +73,12 @@ function limitLabel(path: string): string {
     pf_min_leading: 'Minimum power factor, leading',
     thd_limit_pct: 'Total harmonic distortion at the PCC',
     harmonic_limits_pct: 'Harmonic voltage by order at the PCC',
-    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from the orders that count',
+    harmonic_resonance_clearance_h: 'Harmonic resonance clearance from characteristic orders',
     pst_limit: 'Flicker severity Pst at the PCC',
     plt_limit: 'Flicker severity Plt at the PCC',
     unbalance_limit_pct: 'Voltage unbalance at the PCC',
     current_tdd_standard: 'Current distortion (TDD) limits at the PCC',
-    q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; + = unit delivers)',
+    q_capability_unit: 'Reactive capability per generating unit (pu of the unit\'s rated P; positive = the unit exports reactive power)',
     voltage_deadband_pct: 'Voltage-control deadband per unit (reported, not checked)',
   }[path] ?? path
 }

@@ -310,7 +310,7 @@ describe('grid codes: extract', () => {
     const unit = (await screen.findByTestId('limit-q_capability_unit')).textContent
     expect(unit).toContain('Reactive capability per generating unit')
     expect(unit).toContain("pu of the unit's rated P")
-    expect(unit).toContain('+ = unit delivers')
+    expect(unit).toContain('positive = the unit exports reactive power')
     expect(unit).not.toContain('PCC')
     // The same text as the PCC band: one formatter for both.
     expect(unit).toContain('P 0 pu: Q −0.1 to 0.1 pu · P 1 pu: Q −0.3 to 0.3 pu')
