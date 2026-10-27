@@ -1,6 +1,7 @@
 import { EditReceiptLine, editReceiptOf, setLine, type EditCardSet } from './EditCard'
 import { formatElapsed, useElapsed } from '../hooks/useElapsed'
 import { useUIStore } from '../store/uiStore'
+import { openScenariosHighlight } from './uiNavigate'
 
 /** LC-12: where a plan's waiting job stands in this view. */
 export type ContinuationLine =
@@ -57,7 +58,10 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
     && /^\/api\/projects\/[^/?#]+\/uploads\/[0-9a-f]{16}\/blob$/.test(data.download_url)
     ? data.download_url : null
   const preview = typeof data.preview_id === 'string' && data.valid === true && Array.isArray(data.diff) ? data : null
-  if (!taskId && !link && !preview) return null
+  // LC-17: a sweep's cases, opened in Scenarios on the user's click (never automatically).
+  const sweepCases = typeof data.baseline_project_id === 'string' && Array.isArray(data.cases)
+    ? data.cases.map(object).map(c => c?.project_id).filter((id): id is string => typeof id === 'string').slice(0, 4) : []
+  if (!taskId && !link && !preview && !sweepCases.length) return null
   return <div className="mt-1 rounded border border-border p-2 font-sans text-xs" data-testid="assistant-result-card">
     {taskId && <div data-testid="assistant-task-card">
       <div className="font-medium">{String(task?.title ?? 'Task')}</div>
@@ -105,6 +109,10 @@ export default function AssistantResultCard({ result, disabled, onRequest, conti
       <p className="text-muted">No network changes applied. Applying requires confirmation.</p>
     </div>}
     {next && typeof next.error === 'string' && <p className="text-amber-400">{next.error}</p>}
+    {sweepCases.length > 0 && <button type="button" className="text-accent hover:underline" data-testid="assistant-sweep-open"
+      onClick={() => openScenariosHighlight(sweepCases)}>
+      Open the new case{sweepCases.length === 1 ? '' : 's'} in Scenarios ›
+    </button>}
     {link && <a href={link} download={typeof data.filename === 'string' ? data.filename : undefined}
       className="text-accent hover:underline" data-testid="assistant-file-download">
       Download {typeof data.filename === 'string' ? data.filename : 'file'}

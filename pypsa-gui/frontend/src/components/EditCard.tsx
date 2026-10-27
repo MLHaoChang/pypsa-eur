@@ -128,7 +128,7 @@ function show(value: Scalar | undefined, known = true): string {
 
 /** A card cell's number without a display value: six significant digits, never fewer than its whole
  * part, no grouping ("2030" stays a year); "no limit", "not set" and "Not read" stay `show`'s. */
-export function cellValue(value: Scalar | undefined, known = true): string {
+function cellValue(value: Scalar | undefined, known = true): string {
   if (typeof value !== 'number' || !known || !Number.isFinite(value)) return show(value, known)
   return String(Number(value.toPrecision(Math.max(6, Math.trunc(Math.abs(value)).toString().length))))
 }
@@ -140,13 +140,13 @@ function clip(quote: string): string {
 }
 
 /** A value in its display unit, rounded for reading (the stored value stays in the small line). */
-export function showDisplay(value: number | null | undefined): string {
+function showDisplay(value: number | null | undefined): string {
   if (value === null || value === undefined) return 'not set'
   return value.toLocaleString(undefined, { maximumFractionDigits: Math.abs(value) >= 100 ? 2 : 4 })
 }
 
 /** "Generator 'pv'": the class in the user's words and the component's name. */
-export function assetWords(componentClass: string, name: string): string {
+function assetWords(componentClass: string, name: string): string {
   // "Settings" is a bucket, not a thing: the unit or item is named as it is ("BESS_NEW")
   if (componentClass === 'Settings') return name
   return componentClass ? `${componentLabel(componentClass)} '${name}'` : name
@@ -250,13 +250,16 @@ function showInProperties(target: FlowTarget) {
   ui.setHighlightedComponent({ type: target.component, name: target.entity })
 }
 
-export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
+/** Another card's words for the same table (the LC-17 sweep card: a case name, Base and Case). */
+export interface EditTableLabels { header?: string; caption?: string; old?: string; new?: string; noUnit?: string }
+
+export function EditCardTable({ card, guided, labels }: { card: EditCard; guided: boolean; labels?: EditTableLabels }) {
   const inactive = new Set((card.sets ?? []).flatMap(g => (g.inactive_names ?? []).map(n => `${g.component_class}\u0000${n}`)))
   const asset = (r: EditCardRow) => {
     const words = (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
     return inactive.has(`${r.component_class}\u0000${r.name}`) ? `${words} (inactive)` : words
   }
-  const header = editCardHeader(card)
+  const header = labels?.header ?? editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
       {header && <div className="font-medium mb-1" data-testid="chat-edit-header">{header}</div>}
@@ -265,8 +268,8 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
       ))}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
-          <caption className="text-left font-semibold mb-1">Changes to apply</caption>
-          <thead><tr>{['Asset', 'Field', 'Old', 'New', 'Unit'].map(h => (
+          <caption className="text-left font-semibold mb-1">{labels?.caption ?? 'Changes to apply'}</caption>
+          <thead><tr>{['Asset', 'Field', labels?.old ?? 'Old', labels?.new ?? 'New', 'Unit'].map(h => (
             <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
           ))}</tr></thead>
           <tbody>{card.rows.map((r, i) => {
@@ -313,7 +316,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                 <td className="p-1 border-b border-border break-words">{rowValues(r, guided, value)[0]}</td>
                 <td className="p-1 border-b border-border break-words font-medium">{rowValues(r, guided, value)[1]}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
+                  {exists ? '' : (r.display?.unit || r.unit || (labels?.noUnit ?? 'No unit'))}
                   {r.display && r.display.unit !== r.unit && typeof r.new === 'number' && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     stored as {show(r.new)} {r.unit}
                   </span>}

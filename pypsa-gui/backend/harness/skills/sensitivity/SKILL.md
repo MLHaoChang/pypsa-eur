@@ -29,5 +29,7 @@ use them only when the user asks for a recorded experiment receipt.
    compare_to=<baseline id>)`; name a failed case with the cause `get_task`
    gives (`steps[].cases[].error`) and report the others anyway. Never give a
    number for a failed or unverified case.
-6. **Show.** Open the Scenarios panel with the cases highlighted:
-   `ui_open_panel(panel_id='scenarios', highlight_projects=[<case project ids>])`.
+6. **Show.** Do not open the Scenarios panel by yourself: the sweep's result
+   in chat carries the link "Open the new cases in Scenarios", which opens the
+   panel with them highlighted. Use `ui_open_panel(panel_id='scenarios',
+   highlight_projects=[<case project ids>])` only when the user asks to see them.

@@ -976,6 +976,7 @@ function ScenarioNodeRow({
           <div className="flex items-center gap-2">
             <span className="text-[13px] font-semibold text-text truncate">{node.project.name}</span>
             {isCurrent && <Tag tone="accent">active</Tag>}
+            {highlighted && <Tag tone="accent">New</Tag>}
             {missing && <Tag tone="err">files missing</Tag>}
             {scenType && <Tag tone={SCEN_TYPE_TONE[scenType]}>{scenType}</Tag>}
             {node.project.study_owned && (

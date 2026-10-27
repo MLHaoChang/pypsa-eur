@@ -95,6 +95,16 @@ type NavigationRequest = {
   highlight_projects?: string[]
 }
 
+/** LC-17: open Scenarios with these cases highlighted, with "Back to <origin>". */
+export function openScenariosHighlight(ids: string[]): void {
+  manualNavigation()
+  withReturnFrom(() => {
+    const ui = useUIStore.getState()
+    ui.setSlidePanel('scenarios')
+    ui.setScenariosHighlight(ids)
+  })
+}
+
 export function applyUiNavigate(d: NavigationRequest, expectedEpoch?: number): boolean {
   if (expectedEpoch !== undefined && expectedEpoch !== navigationEpoch()) return false
   if (d.kind === 'set_snapshot' && typeof d.snapshot_index !== 'number') return true
@@ -190,7 +200,9 @@ function apply(d: NavigationRequest) {
     || panel === 'reports' || panel === 'campusElectrical' || panel === 'campusStudy' || panel === 'campusResults' || panel === 'decision'
     || panel === 'economics' || panel === 'profiles'
   ) {
-    ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
+    // LC-17 (UX): Scenarios opened from chat keeps "Back to <origin>".
+    if (panel === 'scenarios') withReturnFrom(() => useUIStore.getState().setSlidePanel('scenarios'))
+    else ui.setSlidePanel(panel as NonNullable<typeof ui.activeSlidePanel>)
   }
 
   if (d.results_tab) ui.requestResultsTab(d.results_tab)
