@@ -4266,6 +4266,18 @@ def get_layout(
     return data if isinstance(data, dict) else {}
 
 
+def _serialized_layout(layout: dict) -> str:
+    """The text `layout.json` would hold, or the 413 for a document over the cap.
+    The route and the chat edit card both call this."""
+    serialized = json.dumps(layout, separators=(",", ":"))
+    if len(serialized.encode("utf-8")) > _MAX_LAYOUT_BYTES:
+        raise HTTPException(
+            413,
+            f"Layout document exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MB cap.",
+        )
+    return serialized
+
+
 @router.put("/{name}/layout")
 def put_layout(
     name: str,
@@ -4304,12 +4316,7 @@ def put_layout(
     _check_project_lock(db, lock_project, user)
     # Compact (no indent): layout.json is a machine-written coordinate blob,
     # never hand-read — pretty-printing only inflates the on-disk size.
-    serialized = json.dumps(layout, separators=(",", ":"))
-    if len(serialized.encode("utf-8")) > _MAX_LAYOUT_BYTES:
-        raise HTTPException(
-            413,
-            f"Layout document exceeds the {_MAX_LAYOUT_BYTES // (1024 * 1024)} MB cap.",
-        )
+    serialized = _serialized_layout(layout)
     _atomic_write_text(dest / "layout.json", serialized)
     return {"saved": name}
 
