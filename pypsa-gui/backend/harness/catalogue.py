@@ -3702,7 +3702,7 @@ TOOLS: list[dict[str, Any]] = [
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
         "least-cost one; null when there are none), notes}. Say these with the numbers: costs "
-        "are reference values from cited public sources (tag literature) or "
+        "are reference values from cited public sources or "
         "assumed where none was found, unless the user replaced them with "
         "quotes (datasheet or measured); neither literature nor assumed is a "
         "quote, so quote assumed ones as orders of magnitude; the on-load taps act "

@@ -86,7 +86,7 @@ export { guidedCardSummary } from './ConfirmationCard'
 
 // Phase D — extensions accepted by the file picker / drag-drop overlay.
 // Matches the upload_service.ALLOWED_MIME_TYPES allowlist.
-const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.nc,.zip,.m,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx'
+export const UPLOAD_ACCEPT = '.xlsx,.xls,.csv,.nc,.zip,.m,.pdf,.png,.jpg,.jpeg,.webp,.gif,.docx,.geojson,.kml'
 const UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
 // F2 — every localStorage touch in this panel is a UI PREFERENCE: a dismissed
