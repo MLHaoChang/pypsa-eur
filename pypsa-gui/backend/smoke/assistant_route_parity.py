@@ -382,7 +382,8 @@ def build(app=None, declarations: dict | None = None, frontend: tuple | None = N
             row |= {'class': 'tool', 'tools': sorted(tools), 'via': via}
             if key in limitations or key in needs:
                 # Not a failure: the PR that serves a route leaves its declaration,
-                # so two such PRs never edit the same lines. `--prune` deletes it.
+                # so two such PRs never edit the same lines.
+                # `smoke/prune_stale_declarations.py --apply` deletes it.
                 stale.append({'method': key[0], 'path': key[1], 'tools': sorted(tools)})
         elif key in needs:
             row |= {'class': 'needs-tool', 'family': needs[key].get('family')}

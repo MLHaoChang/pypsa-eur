@@ -17,7 +17,7 @@ def add_tool(name, route, after_tool, kind, params, args, body_anchor):
     cat = B / 'harness/catalogue.py'
     line = next(l for l in cat.read_text().splitlines() if l.startswith(f'    _t("{after_tool}",'))
     edit(cat, line + '\n', line + '\n' + f'    _t("{name}", "Proof tool {name} for the RETRO-COST-1 merge-order test. '
-         f'Safety: read.", {params}, {list(json.loads(json.dumps(list(eval(params)))))}),\n')
+         f'Safety: read.", {params}, {list(json.loads(params))}),\n')
     rline = next(l for l in cat.read_text().splitlines() if l.startswith(f'    "{after_tool}": ['))
     edit(cat, rline + '\n', rline + '\n' + f'    "{name}": [{route!r}],\n')
     ct = B / 'services/chat_tools.py'
