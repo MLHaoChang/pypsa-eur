@@ -154,7 +154,10 @@ def start_coupling_loop(
     from services.adequacy.sweep import _solve_once, preserve_bus_topology
 
     # ── the synchronous 422 set ───────────────────────────────────────────
-    target = getattr(body, "target_lole_h", None)
+    # W3b-R: an omitted target or draws is the project's one stored goal
+    # (its h/yr target on this network's horizon basis).
+    from services.reliability_goal import active_loop_goal
+    target, draws, goal_sources = active_loop_goal(body, solver_state)
     try:
         target = float(target) if target is not None else None
     except (TypeError, ValueError):
@@ -165,10 +168,10 @@ def start_coupling_loop(
             "target_lole_h is required and must be > 0: the loop searches for "
             "the cheapest cap whose plan meets a RELIABILITY STANDARD, and a "
             "target of zero (or none) is not a standard — it is the demand "
-            "that no draw ever sheds an hour, which no finite plan can buy")
+            "that no draw ever sheds an hour, which no finite plan can buy. "
+            "Set the reliability goal's allowed shortfall in Scenarios & "
+            "optimisation")
 
-    draws = getattr(body, "draws", None)
-    draws = 500 if draws is None else int(draws)
     if draws < 1:
         raise HTTPException(422, "draws must be a positive number of samples")
     if draws > MAX_DRAWS:
@@ -391,6 +394,7 @@ def start_coupling_loop(
         "study": "coupling_loop",
         "status": "running",
         "target_lole_h": target,
+        "goal_sources": goal_sources,
         "basis": basis,
         "horizon_years": nyears,
         "draws": draws,
@@ -528,7 +532,8 @@ def start_coupling_loop(
                 return (
                     f"A plan meeting {target:g} h was verified at ε* = "
                     f"{cap_text}‱, and that cap has been APPLIED to your "
-                    f"solver settings (ens_cap_permyriad = {cap_text}) and "
+                    f"reliability goal's energy strictness (solver settings "
+                    f"ens_cap_permyriad = {cap_text}) and "
                     "re-solved — the network you are holding is the certified "
                     "plan.")
             return (
@@ -637,4 +642,4 @@ def start_coupling_loop(
     return {"status": "running", "target_lole_h": target, "draws": draws,
             "seed": seed, "eps0": eps0, "max_solves": max_solves,
             "restore": restore, "basis": basis,
-            "resolution_floor_h": floor_h}
+            "resolution_floor_h": floor_h, "goal_sources": goal_sources}

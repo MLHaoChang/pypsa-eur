@@ -10,7 +10,7 @@
     "pypsa-gui/backend/models/energy_hub.py",
     "pypsa-gui/backend/services/adequacy/mc.py"
   ],
-  "tool_count": 288,
+  "tool_count": 289,
   "tools": [
     {
       "name": "resolve_project_target",
@@ -1938,11 +1938,9 @@
         "max_solves",
         "restore"
       ],
-      "required": [
-        "target_lole_h"
-      ],
+      "required": [],
       "safety_tier": "execution",
-      "schema_sha256": "e01317c1dae21150ff3d374a5e36f5aaa21f5c7a33a28c00de88e1a268b4b3f8",
+      "schema_sha256": "75012b7496d2cbf55c3c4bad8375db8389c05a56a48f8a754316355e7c90fee3",
       "behavioral_fixture": "pending"
     },
     {
@@ -1963,11 +1961,9 @@
         "max_solves",
         "restore"
       ],
-      "required": [
-        "target_lole_h"
-      ],
+      "required": [],
       "safety_tier": "execution",
-      "schema_sha256": "ddc64ca2dfc995139ce4f81648c8d424699876fd378a763f6ed2503ccc7e104e",
+      "schema_sha256": "e3288573a36ab33c6f24f5bfa67efd59a97b0ec24184e83e8e08f00bf7a32383",
       "behavioral_fixture": "pending"
     },
     {
@@ -1991,11 +1987,9 @@
         "dsr_buses",
         "mc"
       ],
-      "required": [
-        "archetype"
-      ],
+      "required": [],
       "safety_tier": "execution",
-      "schema_sha256": "6b687b1aa90682edb3b9a1f9cd8fab696b9a6a3e7ad93a0a295948f6988f350c",
+      "schema_sha256": "5d591ad4fa73186b98078137eb890db840d4ad4cc3f70d59586f626c041dad9f",
       "behavioral_fixture": "pending"
     },
     {
@@ -6590,6 +6584,25 @@
         [
           "GET",
           "/api/projects/{name}/flow"
+        ]
+      ],
+      "input_keys": [
+        "name"
+      ],
+      "required": [
+        "name"
+      ],
+      "safety_tier": "read",
+      "schema_sha256": "b092fc73e07dc975397ed4c615785a92e5c3794ce845b6e5cdaadbce0c29ddaf",
+      "behavioral_fixture": "pending"
+    },
+    {
+      "name": "get_reliability_goal",
+      "toolsets": [],
+      "route": [
+        [
+          "GET",
+          "/api/projects/{name}/flow/reliability_goal"
         ]
       ],
       "input_keys": [
