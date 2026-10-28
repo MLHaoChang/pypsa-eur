@@ -47,7 +47,7 @@ function goHome(home: unknown): void {
 /** "› Snapshots" beside an unreadable scene (UX SC-01b plan, condition 3). */
 function SnapshotsLink() {
   return (
-    <button type="button" data-testid="scene-snapshots-link" className="text-accent hover:underline"
+    <button type="button" data-testid="scene-snapshots-link" className="whitespace-nowrap text-accent hover:underline"
       onClick={() => withReturnFromSite3D(() => useUIStore.getState().setSlidePanel('snapshots'))}>
       › Snapshots
     </button>
@@ -193,11 +193,11 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
         </div>
       )}
       {refusal && (
-        <div role="alert" className="flex items-center gap-2 text-[11px] text-danger">
-          <span>{refusal}</span>
-          <button type="button" data-testid="scene-refusal-generate" className="text-accent hover:underline"
-            onClick={() => { clearRefusal(project); setPart('generate') }}>› Generate</button>
-          <button type="button" onClick={() => clearRefusal(project)} className="text-muted hover:text-text">Dismiss</button>
+        <div role="alert" className="text-[11px] text-danger">
+          {refusal}{' '}
+          <button type="button" data-testid="scene-refusal-generate" className="whitespace-nowrap text-accent hover:underline"
+            onClick={() => { clearRefusal(project); setPart('generate') }}>› Generate</button>{' '}
+          <button type="button" onClick={() => clearRefusal(project)} className="whitespace-nowrap text-muted hover:text-text">Dismiss</button>
         </div>
       )}
       {enabled?.unbound_keys && enabled.unbound_keys.length > 0 && (
@@ -312,10 +312,10 @@ export default function SiteScenePanel({ site, contextBuildings }: { site: Site;
       )}
 
       {error && (
-        <div role="alert" data-testid="scene-error" className="flex items-center gap-2 text-[11px] text-danger">
-          <span>{error.copy}</span>
-          {error.reload && <button type="button" onClick={reload} className="underline text-text hover:text-accent">Reload</button>}
-          {error.snapshots && <SnapshotsLink />}
+        <div role="alert" data-testid="scene-error" className="text-[11px] text-danger">
+          {error.copy}
+          {error.reload && <> <button type="button" onClick={reload} className="whitespace-nowrap underline text-text hover:text-accent">Reload</button></>}
+          {error.snapshots && <> <SnapshotsLink /></>}
         </div>
       )}
     </div>
