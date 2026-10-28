@@ -178,10 +178,15 @@ def _says(rows: list[dict], sets: list[dict] = ()) -> str:
         old, new, unit = (shown["old"], shown["new"], shown["unit"]) if shown else (row.get("old"), row["new"], row.get("unit"))
         unit = f" {unit}" if unit else ""
         # The card's own words for an absent value (EditCard.tsx): never "None".
+        words = row.get("words") or {}
         old = ("?" if row.get("old_known") is False else "not set") if old is None else _number(old)
+        if words and not shown:  # the card's own words for an enumerated value
+            old, new_words = words.get("old", old), words.get("new")
         if row.get("old_applies") is False:
             old = "\u2014"  # a setting that did not apply, as the card shows it
         new = "not set" if new is None else _number(new)
+        if words and not shown:
+            new = new_words if new_words is not None else new
         stored = (f" (stored as {_number(row['new'])} {row['unit']})"
                   if shown and _numeric(row["new"]) and shown["unit"] != row.get("unit") else "")
         what = row.get("says_name") or f"{row['name']} {row['field']}"  # words, not the raw path
@@ -1342,3 +1347,324 @@ def _gfm_readback(args: dict, rows: list[dict]) -> list[Any]:
 
 # Section 5: the Controls block of each converter-coupled asset (card-workspaces.md §3.3).
 register("campus_apply_gfm_settings", Adapter("settings_edit", _gfm_preview, _gfm_readback, section_id="assets"))
+
+
+# ── Project settings and scope: LV08 B1 (Q3-CARDS-1) ───────────────────────
+# Each preview reads the old value from the store its tool writes and takes the new
+# value from the tool's own validation; nothing here recomputes a value.
+
+def _settings_row(name: str, field: str, label: str, old, new, unit: str = "", *, says_name: str | None = None) -> dict:
+    row = {"component_class": "Settings", "name": name, "field": field, "label": label,
+           "old": _setting(old), "new": _setting(new), "unit": unit, "role": "typed"}
+    if says_name:
+        row["says_name"] = says_name
+    return row
+
+
+def _project_name(args: dict) -> str:
+    name = args.get("name")
+    if not isinstance(name, str) or not name.strip():
+        _refuse("empty_edit", "Name the project to edit.")
+    return name
+
+
+# update_project_flow_scope: the stored scope (or the template's preset) → the validated scope.
+
+def _scope_state(args: dict):
+    from routers import flow
+    from services import chat_tools, flow_service
+
+    project = chat_tools._authorized_project(_project_name(args))
+    template = flow_service.read_template(project.directory)
+    settings = flow._solver_settings(project)
+    return project, template, flow._no_load(project, template), settings
+
+
+def _scope_flat(scope: dict) -> dict:
+    flat = {f"group.{g}": True for g in scope.get("groups", [])}
+    for card, chosen in (scope.get("options") or {}).items():
+        flat.update({f"{card}.{o}": True for o in chosen})
+    return flat
+
+
+def _flow_scope_preview(args: dict) -> list[dict]:
+    from services import flow_scope
+
+    project, template, no_load, settings = _scope_state(args)
+    try:
+        new = flow_scope.validate(args.get("scope"), has_template=template is not None, no_load=no_load)
+    except flow_scope.ScopeError as exc:
+        raise HTTPException(422, {"error_kind": exc.error_kind, "message": exc.message})  # the store's own kind
+    old = flow_scope.read_scope(project.directory, template, settings, no_load=no_load)
+    before, after = _scope_flat(old), _scope_flat(new)
+    rows = []
+    for key in dict.fromkeys([*before, *after]):
+        if before.get(key) == after.get(key):
+            continue
+        card, _, option = key.partition(".")
+        if card == "group":
+            label = flow_scope.CARD_BY_ID[option].label
+        else:
+            label = f"{flow_scope.CARD_BY_ID[card].label} \u00b7 {dict(flow_scope.CARD_BY_ID[card].options)[option]}"
+        row = _settings_row("Scope", key, label, before.get(key, False), after.get(key, False), says_name=label)
+        row["words"] = {"old": "Included" if row["old"] else "Not included",
+                        "new": "Included" if row["new"] else "Not included"}
+        rows.append(row)
+    if not rows:
+        _refuse("empty_edit", "This scope is already the project's scope.")
+    return rows
+
+
+def _flow_scope_readback(args: dict, rows: list[dict]) -> list[Any]:
+    from services import flow_scope
+
+    project, template, no_load, settings = _scope_state(args)
+    flat = _scope_flat(flow_scope.read_scope(project.directory, template, settings, no_load=no_load))
+    return [flat.get(row["field"], False) for row in rows]
+
+
+register("update_project_flow_scope", Adapter("settings_edit", _flow_scope_preview, _flow_scope_readback,
+                                              section_id="project"))
+
+
+# update_project_settings: the `settings` table in metadata.json.
+
+def _stored_project_setting(args: dict):
+    from services import chat_tools, project_registry, project_settings
+
+    with chat_tools._acting() as (db, user):
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, _project_name(args))
+        project_dir = project_registry.project_dir(project)
+    try:
+        meta = json.loads((project_dir / "metadata.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        _refuse("project_unsaved", f"Save '{project.name}' before changing its settings.", 409)
+    table = meta.get(project_settings.SETTINGS_KEY) if isinstance(meta, dict) else None
+    return table.get(project_settings.DERIVE_LENGTHS) if isinstance(table, dict) else None
+
+
+def _project_settings_preview(args: dict) -> list[dict]:
+    from services import project_settings
+
+    flag = args.get("derive_lengths_from_geometry")
+    if not isinstance(flag, bool):
+        _refuse("invalid_edit_value", "Derive lengths from geometry takes true or false.")
+    old = _stored_project_setting(args)
+    if old is flag:
+        _refuse("empty_edit", "Derive lengths from geometry is already " + ("on." if flag else "off."))
+    row = _settings_row("Project settings", project_settings.DERIVE_LENGTHS, "Derive lengths from geometry", old, flag,
+                        says_name="Derive lengths from geometry")
+    row["words"] = {"old": "not set" if old is None else "On" if old else "Off", "new": "On" if flag else "Off"}
+    return [row]
+
+
+def _project_settings_readback(args: dict, rows: list[dict]) -> list[Any]:
+    return [_setting(_stored_project_setting(args))]
+
+
+register("update_project_settings", Adapter("settings_edit", _project_settings_preview,
+                                            _project_settings_readback, section_id="project"))
+
+
+# update_project_scenario_metadata: the project row's description and type.
+
+_SCENARIO_FIELDS = {"description": ("scenario_description", "Scenario description"),
+                    "scenario_type": ("scenario_type", "Scenario type")}
+
+
+def _stored_scenario(args: dict) -> dict:
+    from services import chat_tools, project_acl, project_registry
+
+    with chat_tools._acting() as (db, user):
+        project_registry.require_user(user)
+        project = project_registry.resolve_project(db, user, _project_name(args))
+        if not project_acl.can_delete_project(db, user, project):  # the handler's own check
+            _refuse("forbidden", f"You do not have permission to edit '{project.name}'", 403)
+        return {key: getattr(project, column) for key, (column, _) in _SCENARIO_FIELDS.items()}
+
+
+def _scenario_preview(args: dict) -> list[dict]:
+    from pydantic import ValidationError
+    from models.schemas import UpdateScenarioRequest
+    from routers import projects
+
+    sent = [key for key in _SCENARIO_FIELDS if key in args]
+    if not sent:
+        _refuse("empty_edit", "Name a description or a scenario type to change.")
+    try:
+        body = UpdateScenarioRequest(**{key: args[key] for key in sent})
+    except ValidationError as exc:
+        _refuse("invalid_edit_value", "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                                               for e in exc.errors()[:3]))
+    old = _stored_scenario(args)
+    rows = []
+    for key in sent:
+        value = getattr(body, key)
+        try:  # the handler's own normalisers and refusals
+            value = (projects._reject_legacy_tag((value or "").strip() or None) if key == "description"
+                     else projects._validated_scenario_type(value))
+        except HTTPException as exc:
+            _refuse("invalid_edit_value", str(exc.detail), exc.status_code)
+        if not _same(old[key], value):
+            label = _SCENARIO_FIELDS[key][1]
+            rows.append(_settings_row("Scenario", key, label, old[key], value, says_name=label))
+    if not rows:
+        _refuse("empty_edit", "The scenario already has these values.")
+    return rows
+
+
+def _scenario_readback(args: dict, rows: list[dict]) -> list[Any]:
+    stored = _stored_scenario(args)
+    return [_setting(stored[row["field"]]) for row in rows]
+
+
+register("update_project_scenario_metadata", Adapter("settings_edit", _scenario_preview, _scenario_readback,
+                                                    section_id="project"))
+
+
+# update_decision_study: the stored study's name, intake and settings.
+
+STUDY_LEAF_CAP = 12  # rows one study card shows; the rest become one summary row
+_SECRET_KEY = ("token", "secret", "password", "api_key", "apikey", "credential")
+
+
+def _study(args: dict):
+    """The stored study (read through the store, not a route) and its project."""
+    from services import chat_tools
+    from services.study import store
+
+    project = chat_tools._authorized_project(args.get("project"))
+    study_id = args.get("study_id")
+    if not isinstance(study_id, str):
+        _refuse("empty_edit", "Name the study to edit.")
+    # Matched by equality among the project's own studies, so the id from the chat call never
+    # becomes part of a file path here (the route's store lookup validates it the same way).
+    for study in store.list_studies(project.directory):
+        if study.study_id == study_id:
+            return study
+    _refuse("study_not_found", "Study not found.", 404)
+
+
+def _study_after(args: dict, old):
+    """The study the PATCH would store, from the route's own pure validator; nothing is saved."""
+    from pydantic import ValidationError
+
+    from routers import studies
+
+    fields = {k: args[k] for k in ("name", "step", "intake", "settings") if args.get(k) is not None}
+    try:
+        body = studies.StudyPatch(**fields)
+    except ValidationError as exc:
+        _refuse("invalid_edit_value", "; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}"
+                                               for e in exc.errors(include_url=False)[:3]))
+    try:
+        studies._refuse_unless_enabled()
+        studies._refuse_bad_patch(body)
+        return studies._patched_study(old, body)
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict) and exc.detail.get("error_kind"):
+            raise
+        _refuse("invalid_edit_value", exc.detail if isinstance(exc.detail, str) else json.dumps(exc.detail, default=str),
+                exc.status_code)
+
+
+def _intake_words() -> dict:
+    from services.study.intake_words import INTAKE_WORDS
+
+    return INTAKE_WORDS
+
+
+def _study_cell(field: str, value):
+    """A study value in the panel's words. A secret-like key only says whether it is set; a
+    list or object is summarised, never dumped."""
+    words = _intake_words()["settings"].get(field.removeprefix("settings."))
+    if any(word in field.lower() for word in _SECRET_KEY):
+        return None if value is None else "set"
+    if words and value is not None:
+        if "words" in words:
+            return words["words"].get(value, value)
+        if "format" in words:
+            return words["format"].format(value)
+        if "default" in words:  # the basis: one sentence for the only basis this version has
+            return words["default"] if value == {"terms": "real", "tax": "pre", "subsidy": "excl"} else _setting(value)
+    if isinstance(value, list):
+        return f"{len(value)} items"
+    if isinstance(value, dict):
+        return f"{len(value)} fields"
+    return _setting(value)
+
+
+def _study_row(field: str, label: str, old, new, *, unit: str = "", says_name: str | None = None) -> dict:
+    row = _settings_row("Study", field, label, None, None, unit, says_name=says_name or label)
+    row["old"], row["new"] = _study_cell(field, old), _study_cell(field, new)
+    if row["old"] == "set" and row["new"] == "set":
+        row["new"] = "set (changed)"  # a secret never shows, but a rotation is not "unchanged"
+    return row
+
+
+def _title(key: str) -> str:
+    return key.replace("_", " ").capitalize()
+
+
+def _intake_rows(old: dict, new: dict, steps: list[str]) -> list[dict]:
+    """One row per changed field inside each named step, in the panel's step and field words."""
+    words = _intake_words()
+    rows = []
+    for step in steps:
+        before, after = old.get(step), new.get(step)
+        step_label = words["steps"].get(step, _title(step))
+        if isinstance(before, dict) or isinstance(after, dict):
+            before, after = before or {}, after or {}
+            leaves = [k for k in dict.fromkeys([*before, *after]) if not _same(before.get(k), after.get(k))]
+            for leaf in leaves:
+                word = words["fields"].get(f"{step}.{leaf}", {})
+                rows.append(_study_row(f"intake.{step}.{leaf}", f"{step_label} \u00b7 {word.get('label', _title(leaf))}",
+                                       before.get(leaf), after.get(leaf), unit=word.get("unit", "")))
+        elif not _same(before, after):
+            rows.append(_study_row(f"intake.{step}", step_label, before, after))
+    return rows
+
+
+def _decision_study_preview(args: dict) -> list[dict]:
+    from routers import studies
+
+    studies._refuse_unless_enabled()  # the route gates first, before it looks up any study
+    old = _study(args)
+    new = _study_after(args, old)
+    before, after = old.model_dump(mode="json", by_alias=True), new.model_dump(mode="json", by_alias=True)
+    rows = []
+    if args.get("name") is not None and not _same(before["name"], after["name"]):
+        rows.append(_study_row("name", "Study name", before["name"], after["name"]))
+    if isinstance(args.get("intake"), dict):
+        intake = _intake_rows(before["intake"], after["intake"], list(args["intake"]))
+        rows += intake[:STUDY_LEAF_CAP]
+        if len(intake) > STUDY_LEAF_CAP:
+            rows.append(_note("", "", "intake", f"{len(intake) - STUDY_LEAF_CAP} more intake answers change."))
+    for key, value in (args.get("settings") or {}).items() if isinstance(args.get("settings"), dict) else []:
+        if value is not None and not _same(before.get(key), after.get(key)):
+            label = _intake_words()["settings"].get(key, {}).get("label", _title(key))
+            rows.append(_study_row(f"settings.{key}", label, before.get(key), after.get(key)))
+    if not rows:
+        _refuse("empty_edit", "The study already has these values.")
+    return rows
+
+
+def _decision_study_readback(args: dict, rows: list[dict]) -> list[Any]:
+    record = _study(args).model_dump(mode="json", by_alias=True)
+    out = []
+    for row in rows:
+        if row["role"] == "note":
+            out.append(None)
+            continue
+        parts = row["field"].split(".")
+        value = record
+        for part in ([parts[0]] if parts[0] != "settings" else [parts[1]]) if parts[0] != "intake" else parts:
+            value = value.get(part) if isinstance(value, dict) else None
+        cell = _study_cell(row["field"], value)
+        out.append(row["new"] if cell == "set" and row["new"] == "set (changed)" else cell)
+    return out
+
+
+register("update_decision_study", Adapter("settings_edit", _decision_study_preview, _decision_study_readback,
+                                          section_id="project"))

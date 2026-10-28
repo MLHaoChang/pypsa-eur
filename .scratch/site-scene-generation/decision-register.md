@@ -3,7 +3,7 @@
 
 # Contract decision register
 
-Status: all decisions below are unresolved implementation gates; architecture rules already specified remain binding
+Status: D01–D05, D08, D11 and D12 have proposed SC-00 N closures in [sc-00-n/decisions.md](sc-00-n/decisions.md), accepted only through the GK B and UX OK on that PR's merged head; D06 is traced and open (blocks SC-02); D07, D09 and D10 are unresolved. Architecture rules already specified remain binding
 
 These are questions requiring source inspection/prototype evidence, not invitations to redesign the agreed workflow. The implementation agent proposes a closure; the applicable owner/coordinator/reviewer accepts it through existing rules. No acceptance or reviewer contact is implied here. Populate the decision record before the blocked unit starts; link exact records from its PR.
 

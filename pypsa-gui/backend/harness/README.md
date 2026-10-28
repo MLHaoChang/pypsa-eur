@@ -290,6 +290,16 @@ component (`frontend/src/components/EditCard.tsx`).
   the preview cannot take or a rename keeps its own card. An applied single
   edit counts until an execution-tier success (a run, an applied preview);
   assurance turns and external tools are not routed. HTTP routes are unchanged.
+- **Project settings cards (Q3-CARDS-1).** `update_project_flow_scope`,
+  `update_project_settings`, `update_project_scenario_metadata` and
+  `update_decision_study` write to files and rows, not the network, so their
+  adapters read the old value from the store the tool writes and take the new
+  value from its validator; a preview writes nothing and checks the caller's
+  access first. A value the user names always shows (old = new when unchanged,
+  "not set" when absent); a whole-document payload (scope, study intake) shows
+  only what differs. Study intake shows at most `STUDY_LEAF_CAP` rows plus a
+  note, summarises lists and objects, and shows a secret-like key only as "set".
+  `tests/test_edit_card.py` pins the tools still without an adapter.
 - **Settings cards (LC-16 slice C, OJ-44).** `update_solver_config`,
   `update_meta` and `set_investment_period_weightings` run their own handler on
   an isolated copy (`edit_card._sandbox`), so the card refuses what the route

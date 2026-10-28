@@ -1709,6 +1709,7 @@ def _run_turn_body(
     with session._lock:
         selection_history = list(session.messages)
     selected_tools = [] if clarifying_scope else _tools_payload_for_profile(profile, message, history=selection_history)
+    from harness import assurance
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
@@ -1718,6 +1719,8 @@ def _run_turn_body(
         "tool_count": len(selected_tools),
         "profile_id": profile.id,
         "profile_label": profile.label,
+        # A checked turn's projection replaces this with its "checking" state.
+        "assurance": assurance.legacy_state(),
     }
 
     # Seed conversation history. Caller-supplied message_history wins for
@@ -2683,6 +2686,21 @@ def _dispatch_real_tool_call(
             tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
                                            "is_error": True, "content": _error_result_content(detail, exc, kind)})
             return
+    sweep_card = None
+    if tool_name == "run_sensitivity_sweep" and session.assurance_turn is None:
+        # LC-17: every case's base → case rows from the saved baseline; a
+        # refusal here (unsaved baseline, name conflict) means no card.
+        from harness import sweep_card as sweep_cards
+        try:
+            sweep_card = sweep_cards.preview(args or {})
+        except Exception as exc:
+            detail = getattr(exc, "detail", None)
+            kind = detail.get("error_kind", "sweep_preview_unavailable") if isinstance(detail, dict) else "sweep_preview_unavailable"
+            yield "tool_error", {"tool_use_id": tool_use_id, "tool_name": tool_name,
+                                 "error_kind": kind, "message": _redact_for_log(detail or exc)}
+            tool_results_collector.append({"type": "tool_result", "tool_use_id": tool_use_id,
+                                           "is_error": True, "content": _error_result_content(detail, exc, kind)})
+            return
     from harness import confirm as confirmation_gate
     policy_revision = confirmation_gate.confirmation_revision()
     approved = yield from _confirm_destructive_tool(
@@ -2697,6 +2715,7 @@ def _dispatch_real_tool_call(
         restriction_mode=restriction['mode'] if restriction else 'standard',
         restriction_snapshot=restriction,
         edit_card=edit_card,
+        sweep_card=sweep_card,
     )
     if not approved:
         return
@@ -2831,6 +2850,8 @@ def _dispatch_real_tool_call(
                         if isinstance(out, dict):
                             out = {**out, "_edit_receipt": edit_cards.receipt(edit_card, args or {})}
                         return out
+                    if sweep_card is not None:
+                        sweep_cards.require_current(args or {}, sweep_card)
                     return invoke(session, tool_name, args or {}, handler)
             # PER_TOOL_TIMEOUT_SECONDS is a budget for RUNNING the handler.
             # `future.result(timeout=...)` alone measured queue + run on a pool

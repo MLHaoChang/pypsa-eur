@@ -224,16 +224,22 @@ function rowValues(r: EditCardRow, guided: boolean, value = cellValue): [string,
 
 /** The Guided headline: each typed change in the table's words and display unit
  * ("Line 'L1', Capacity 300 → 500 MVA"), never the raw field or the stored unit. */
+export const HEADLINE_CAP = 4
+
 export function editCardWords(card: EditCard): string {
   const members = setMembers(card)
-  return [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
+  const lines = [...(card.sets ?? []).map(g => cardSetLine(card, g, true)),
     ...card.rows.filter(r => r.role === 'typed' && !inSet(members, r)).map(r => {
     const asset = assetWords(r.component_class, r.name)
     if (r.field === 'exists') return `${r.new ? 'Adds' : 'Removes'} ${asset}`
     const [old, now] = rowValues(r, true)
     const unit = r.display?.unit || r.unit
     return `${asset}, ${r.label} ${old} \u2192 ${now}${unit ? ` ${unit}` : ''}`
-  })].join('; ')
+  })]
+  // A long card keeps its headline short; the table below lists every row. One hidden line
+  // is not worth "and 1 more", so it shows.
+  return lines.length <= HEADLINE_CAP + 1 ? lines.join('; ')
+    : `${lines.slice(0, HEADLINE_CAP).join('; ')}; and ${lines.length - HEADLINE_CAP} more changes`
 }
 
 /** Show the field where it lives, without leaving the chat: the component's own
@@ -250,13 +256,16 @@ function showInProperties(target: FlowTarget) {
   ui.setHighlightedComponent({ type: target.component, name: target.entity })
 }
 
-export function EditCardTable({ card, guided }: { card: EditCard; guided: boolean }) {
+/** Another card's words for the same table (the LC-17 sweep card: a case name, Base and Case). */
+export interface EditTableLabels { header?: string; caption?: string; old?: string; new?: string; noUnit?: string }
+
+export function EditCardTable({ card, guided, labels }: { card: EditCard; guided: boolean; labels?: EditTableLabels }) {
   const inactive = new Set((card.sets ?? []).flatMap(g => (g.inactive_names ?? []).map(n => `${g.component_class}\u0000${n}`)))
   const asset = (r: EditCardRow) => {
     const words = (r.name ? assetWords(r.component_class, r.name) : r.component_class) || '—'
     return inactive.has(`${r.component_class}\u0000${r.name}`) ? `${words} (inactive)` : words
   }
-  const header = editCardHeader(card)
+  const header = labels?.header ?? editCardHeader(card)
   return (
     <div className="mb-2 text-xs" data-testid="chat-edit-card">
       {header && <div className="font-medium mb-1" data-testid="chat-edit-header">{header}</div>}
@@ -265,8 +274,8 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
       ))}
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
-          <caption className="text-left font-semibold mb-1">Changes to apply</caption>
-          <thead><tr>{['Asset', 'Field', 'Old', 'New', 'Unit'].map(h => (
+          <caption className="text-left font-semibold mb-1">{labels?.caption ?? 'Changes to apply'}</caption>
+          <thead><tr>{['Asset', 'Field', labels?.old ?? 'Old', labels?.new ?? 'New', 'Unit'].map(h => (
             <th key={h} scope="col" className="p-1 border-b border-border">{h}</th>
           ))}</tr></thead>
           <tbody>{card.rows.map((r, i) => {
@@ -313,7 +322,7 @@ export function EditCardTable({ card, guided }: { card: EditCard; guided: boolea
                 <td className="p-1 border-b border-border break-words">{rowValues(r, guided, value)[0]}</td>
                 <td className="p-1 border-b border-border break-words font-medium">{rowValues(r, guided, value)[1]}</td>
                 <td className="p-1 border-b border-border break-words">
-                  {exists ? '' : (r.display?.unit || r.unit || 'No unit')}
+                  {exists ? '' : (r.display?.unit || r.unit || (labels?.noUnit ?? 'No unit'))}
                   {r.display && r.display.unit !== r.unit && typeof r.new === 'number' && <span className="block text-[10px] text-muted" data-testid="chat-edit-display">
                     stored as {show(r.new)} {r.unit}
                   </span>}

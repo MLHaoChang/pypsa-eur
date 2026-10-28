@@ -478,6 +478,13 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
+        "run_id (statistics and cost_breakdown only) answers for one run as "
+        "{status, scope, result_kind, data, run}: the newest completed run whose "
+        "inputs are still current answers with the current read (scope current); "
+        "any other run answers from the results kept when it finished (scope "
+        "historical; the Results tabs still show the current results), or "
+        "unavailable for a run without them. Never quote current results for "
+        "another run. With run_id, source, detail, offset and limit are ignored. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
@@ -485,6 +492,7 @@ TOOLS: list[dict[str, Any]] = [
             "detail": {"type": "string", "enum": ["summary", "lines"]},
             "offset": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1},
+            "run_id": {"type": "string", "maxLength": 64},
         },
         ["result_kind"],
     ),
@@ -2364,7 +2372,8 @@ TOOLS: list[dict[str, Any]] = [
         "highlight_branch from get_loadflow_summary's ui_reference to open the same source and "
         "window and highlight one line or transformer. Only when one of these is given, an "
         "unavailable view or an unknown branch refuses with no navigation; the result's highlight "
-        "says whether the branch is ranked and shown. Safety: read.",
+        "says whether the branch is ranked and shown. With panel_id scenarios, highlight_projects "
+        "(1–4 project ids, e.g. a sweep's new cases) highlights them in the scenario tree. Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "canvas_view": {"type": "string", "enum": ["blank", "satellite", "hybrid", "site"]},
@@ -2386,6 +2395,7 @@ TOOLS: list[dict[str, Any]] = [
                 "required": ["component", "name"],
                 "additionalProperties": False,
             },
+            "highlight_projects": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"type": "string"}},
         },
         ["panel_id"],
     ),
@@ -2465,7 +2475,7 @@ TOOLS: list[dict[str, Any]] = [
         "changes: component_class, names (1–100), attribute, value. Numeric engineering inputs only; "
         "*_extendable flags require booleans. No solver code or topology rewrites. Existing time-series overrides "
         "still override static values. Reuses matching, solved cases; refuses name/input conflicts and unsaved "
-        "baseline/case edits. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
+        "baseline/case edits. Omit new_name to use the name derived from the changes (battery-capex-70pct), shown on the card. Returns per-case project IDs/jobs or reused objectives, with explicit partial failures. "
         "After waiting for jobs, get_study_evidence(section='simulation', compare_to=baseline_project_id) "
         "compares each saved result. Study refinement uses gridspine_update_config and gridspine_run_pipeline. "
         "The confirmation authorizes these bounded changes and queued solves. Safety: execution.",
@@ -2479,7 +2489,7 @@ TOOLS: list[dict[str, Any]] = [
                         "attribute": {"type": "string", "enum": ["marginal_cost", "capital_cost", "p_nom", "p_nom_min", "p_nom_max", "p_nom_extendable", "p_min_pu", "p_max_pu", "efficiency", "p_set", "q_set", "s_nom", "s_nom_min", "s_nom_max", "s_nom_extendable", "s_max_pu", "r", "x", "max_hours", "efficiency_store", "efficiency_dispatch", "e_nom", "e_nom_min", "e_nom_max", "e_nom_extendable", "e_min_pu", "e_max_pu"]},
                         "value": {"type": ["number", "boolean"]}},
                     "required": ["component_class", "names", "attribute", "value"]}}},
-                "required": ["new_name", "changes"]}}}, ["baseline_project_id", "cases"],
+                "required": ["changes"]}}}, ["baseline_project_id", "cases"],
     ),
     _t(
         "use_toolset",
@@ -3717,7 +3727,7 @@ TOOLS: list[dict[str, Any]] = [
         "result the investment case's extra owner assets come from; the joint "
         "optimisation's when it is fresh and found its own choice, else this "
         "least-cost one; null when there are none), notes}. Say these with the numbers: costs "
-        "are reference values from cited public sources (tag literature) or "
+        "are reference values from cited public sources or "
         "assumed where none was found, unless the user replaced them with "
         "quotes (datasheet or measured); neither literature nor assumed is a "
         "quote, so quote assumed ones as orders of magnitude; the on-load taps act "
@@ -4832,7 +4842,7 @@ TOOLS.extend([
     _t("create_chart", "Generate a downloadable PNG from server-side numeric component data. Select 1–8 asset names and an input/output attribute; max 5000 rows. source=result requires fresh solved data. Returns file metadata and coverage/provenance; no arbitrary expression/code. Safety: write.", {"component": {"type": "string", "enum": ["Generator", "Load", "Line", "Link", "StorageUnit", "Store", "Bus", "Transformer"]}, "attribute": {"type": "string"}, "names": {"type": "array", "minItems": 1, "maxItems": 8, "items": {"type": "string"}}, "source": {"type": "string", "enum": ["input", "result"]}}, ["component", "attribute", "names"]),
     _t("build_delivery", "Bundle 1–20 authorized upload IDs into a downloadable ZIP (25 MB max) with content hashes and a provenance manifest. Reuse existing exports, charts and reports; no file bytes in model context. Safety: write.", {"file_ids": {"type": "array", "minItems": 1, "maxItems": 20, "items": {"type": "string"}}, "filename": {"type": "string"}}, ["file_ids"]),
     # The project flow (B1, design §3.4): the same payload GET …/flow serves.
-    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request and verdicts (each run kind's own verdict: optimisation, and study when the Run includes it), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
+    _t("get_project_flow", "The project flow of the OPEN project: one row per flow section, in flow order, each with state complete|warning|incomplete|not_needed (unknown while a solve runs), required, summary and items {code, severity, message, title (the check's plain title, or null), source, target {section, panel, component, entity, field}, blocking, acknowledged}; plus run_ready (exactly whether the server would accept the run), run_blocker (the first blocking item, or null; its message reads \"<section>: <title> (<entity>)\" and its detail is the item's own message), run_request {optimisation, study, loadflow} (which run kinds the Run includes), verdicts (each included kind's own verdict {ready, blocker}: optimisation, study, loadflow; null when not included), run_verdict (what the header Run itself answers: the optimisation and, with Load flow on, its load flow; never the study), the results row's freshness_by_kind (fresh|stale|not_run|running per kind: optimisation, study, loadflow; the Run button shows how many included kinds are stale), notes (display-only gaps that do not block Run) and deferred. Use it to say what is left to do, section by section, and to check a step's section after an edit. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     _t("get_reliability_goal", "The project's one reliability goal as the EH study, Monte-Carlo, coupling and margin loops resolve it when a call leaves a field out: {target_lole_h (allowed shortfall, h/yr), ens_cap_permyriad (energy strictness, ‱ of demand), mc_draws, site_archetype}, each {value, source: stored|template|default}. Change it with update_solver_config. 409 when the project is not the open one. Safety: read.", {"name": {"type": "string"}}, ["name"]),
     # ── LV08 B2b (live-voice issue 08 slice B2): GUI-route parity ─────────
     # Each calls its GUI route's own handler in-process (TOOL_ROUTES below);

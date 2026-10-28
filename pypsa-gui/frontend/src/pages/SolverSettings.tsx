@@ -10,6 +10,7 @@ import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { openSectionInExpert } from '../layout/flowNavigation'
 import { nk } from '../utils/queryKeys'
+import { errorText } from '../utils/errorText'
 import type { ReliabilityGoal } from '../api/flow'
 import {
   goalPatchFromEdits, invalidateReliabilityGoal, useReliabilityGoal, type GoalEdits,
@@ -221,7 +222,7 @@ export default function SolverSettings() {
         toast.success('Solver settings saved')
       }
     },
-    onError: () => toast.error('Could not save solver settings'),
+    onError: (e) => toast.error(errorText(e, 'Could not save solver settings')),
   })
 
   // Pre-run validation lives in the dedicated Issues panel — opened via

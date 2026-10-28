@@ -422,10 +422,11 @@ def reconcile_on_boot() -> tuple[int, int]:
     interrupted = 0
     resumed = 0
     storage_missing = 0
+    unknown_kind = 0
     try:
         from db.models import SolveJobRow
         from db.session import SessionLocal
-        from services.solve_queue import solve_queue
+        from services.solve_queue import KIND_SOLVE, KINDS, solve_queue
 
         running = load_by_status(("running",))
         if running:
@@ -441,6 +442,10 @@ def reconcile_on_boot() -> tuple[int, int]:
                 db.commit()
 
         for row in load_by_status(("queued",)):
+            if (row.get("kind") or KIND_SOLVE) not in KINDS:
+                _fail_unknown_kind(row)
+                unknown_kind += 1
+                continue
             if _storage_dir_gone(row):
                 _fail_storage_missing(row)
                 storage_missing += 1
@@ -453,8 +458,8 @@ def reconcile_on_boot() -> tuple[int, int]:
         return interrupted, resumed
     logger.info(
         "solve-queue boot reconciliation: %d job(s) marked interrupted, %d resumed, "
-        "%d failed (project directory gone)",
-        interrupted, resumed, storage_missing,
+        "%d failed (project directory gone), %d failed (unknown job kind)",
+        interrupted, resumed, storage_missing, unknown_kind,
     )
     return interrupted, resumed
 
@@ -492,6 +497,34 @@ def _storage_dir_gone(row: dict) -> bool:
             "read; restoring the job", storage_dir, row.get("id"))
         return False
     return not stat.S_ISDIR(st.st_mode)
+
+
+def _fail_unknown_kind(row: dict) -> None:
+    """
+    Mark a queued row whose kind this build does not know `failed` with
+    `UNKNOWN_KIND_CONDITION` (SC-00 N, D04). It is never restored, so it can
+    never fall through to an electrical solve.
+    """
+    from db.models import SolveJobRow
+    from db.session import SessionLocal
+    from services.solve_queue import UNKNOWN_KIND_CONDITION
+
+    with SessionLocal() as db:
+        orm = db.get(SolveJobRow, row["id"])
+        if orm is None:
+            return
+        orm.status = "failed"
+        orm.finished_at = datetime.now(tz=UTC)
+        orm.condition = UNKNOWN_KIND_CONDITION
+        orm.error = (
+            f"This queued job has kind {row.get('kind')!r}, which this version "
+            "cannot run, so it was not started."
+        )
+        db.commit()
+    logger.warning(
+        "solve-queue boot reconciliation: job %s for project %r failed — unknown kind %r",
+        row["id"], row.get("project_id"), row.get("kind"),
+    )
 
 
 def _fail_storage_missing(row: dict) -> None:

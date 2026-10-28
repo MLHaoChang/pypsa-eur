@@ -224,6 +224,9 @@ def _view(task, fresh=False, current=None):
            "status": state, "completed_steps": sum(s["status"] == "completed" for s in task["steps"]),
            "total_steps": len(task["steps"]),
            "steps": [{k: s[k] for k in ("id", "tool", "status")} for s in task["steps"]]}
+    for entry, s in zip(out["steps"], task["steps"]):
+        if (s.get("job") or {}).get("cases"):
+            entry["cases"] = s["job"]["cases"]  # LC-17: each case's outcome and a failed one's cause
     brief = task.get("brief")
     if brief:
         for entry in out["steps"]:
@@ -584,6 +587,8 @@ def settle_job(path, ticket, job_id, native_status, step_status, result=None):
 
 def _settle(task, step, native_status, step_status, result):
     step["status"] = step_status
+    if isinstance(result, dict) and result.get("cases"):
+        step["job"]["cases"] = result["cases"]  # LC-17: each queued case's own outcome
     if step_status == "completed":
         step["result"] = {"job_id": step["job"]["job_id"], "final_status": "completed", **(result or {})}
         step.pop("error", None)
@@ -663,7 +668,8 @@ def _continuation_message(task, job):
     # The plan's title carries the request's words, so the turn is offered the
     # tools its remaining steps need (the 128-tool selection reads the message).
     from harness.run_lifecycle import continuation_note
-    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){continuation_note(job['outcome'])}"
+    cases = "".join(f"; {c.get('name') or c.get('project_id')}: {c['status']}" for c in job.get("cases") or [])
+    return f"job {job['job_id']} finished: {job['outcome']} (plan: {task['title']}){cases}{continuation_note(job['outcome'])}"
 
 
 def dismiss_continuation(session, job_id):

@@ -519,6 +519,12 @@ def run_sensitivity_sweep(baseline_project_id: str, cases: list[dict]) -> dict:
     from services.safe_names import fold
     if not isinstance(cases, list) or not 1 <= len(cases) <= 4:
         _refuse("invalid_sensitivity_cases", "Provide between 1 and 4 cases per sweep.")
+    if any(isinstance(case, dict) and not case.get("new_name") for case in cases):
+        # LC-17: a case without a name takes the one its card showed.
+        from harness import sweep_card
+        with chat_tools._acting() as (db, user):
+            base = project_registry.resolve_project(db, user, baseline_project_id)
+            cases = sweep_card.named(cases, _load_context(base).network)
     from harness.experiment_execution import assert_sweep_admission
     from harness.experiment_reconciliation import checkpoint
     assert_sweep_admission(baseline_project_id, cases)
