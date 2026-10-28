@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): Time Series tabs, sub-tabs and upload pane use plain field words instead of PyPSA attribute names, and a single zero-cost generator warning now opens that generator's drawer in Guided.

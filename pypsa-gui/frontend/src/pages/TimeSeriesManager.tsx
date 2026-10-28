@@ -66,8 +66,8 @@ interface TabConfig {
 }
 
 const TABS: TabConfig[] = [
-  { id: 'loads',        label: 'Loads',          subtitle: 'p_set · MW',           unit: 'MW',                       attribute: 'p_set',    component: 'loads'      },
-  { id: 'renewable',    label: 'Renewables',      subtitle: 'p_max_pu × p_nom · MW', unit: 'MW', scaleByPnom: true, attribute: 'p_max_pu', component: 'generators' },
+  { id: 'loads',        label: 'Loads',          subtitle: 'Demand · MW',           unit: 'MW',                       attribute: 'p_set',    component: 'loads'      },
+  { id: 'renewable',    label: 'Renewables',      subtitle: 'Available output · MW', unit: 'MW', scaleByPnom: true, attribute: 'p_max_pu', component: 'generators' },
   // Conventional / Demand Response / Links share the multi-attribute pattern
   // (one tab, sub-toggle for which attribute to upload). The `attribute` here
   // is the default; the actual attribute is overridden per-render by the
@@ -83,7 +83,6 @@ type ConvAttr = 'p_max_pu' | 'p_min_pu' | 'marginal_cost'
 interface ConvAttrConfig {
   id: ConvAttr
   label: string
-  shortLabel: string
   Icon: typeof Gauge
   description: string
   /** Display unit. p_max_pu / p_min_pu are dimensionless 0-1; marginal_cost
@@ -93,12 +92,12 @@ interface ConvAttrConfig {
 }
 
 const CONV_ATTRS: ConvAttrConfig[] = [
-  { id: 'p_max_pu',      label: 'Availability', shortLabel: 'p_max_pu',      Icon: Gauge, unit: 'pu',
+  { id: 'p_max_pu',      label: 'Availability', Icon: Gauge, unit: 'pu',
     description: 'Time-varying upper bound on dispatch (e.g. nuclear refuelling, coal outages, hydro derating).' },
-  { id: 'p_min_pu',      label: 'Must-run',     shortLabel: 'p_min_pu',      Icon: ArrowDownToLine, unit: 'pu',
-    description: 'Time-varying minimum dispatch — forces the plant to produce at least p_min_pu × p_nom every hour.' },
-  { id: 'marginal_cost', label: 'Marginal cost', shortLabel: 'marginal_cost', Icon: Coins, unit: '€/MWh',
-    description: 'Hourly dispatch cost (€/MWh). Overrides the static `marginal_cost` per snapshot — fuel-price traces, market scenarios. Cleared via uploading a profile of all-NaN cells.' },
+  { id: 'p_min_pu',      label: 'Must-run',     Icon: ArrowDownToLine, unit: 'pu',
+    description: 'Time-varying minimum dispatch — forces the plant to produce at least this share of its capacity every hour.' },
+  { id: 'marginal_cost', label: 'Marginal cost', Icon: Coins, unit: '€/MWh',
+    description: 'Hourly dispatch cost (€/MWh). Overrides the static price per hour — fuel-price traces, market scenarios. Cleared via uploading a profile of all-NaN cells.' },
 ]
 
 // Demand-Response sub-attributes. PyPSA-Eur models DR as a Generator that
@@ -107,11 +106,11 @@ const CONV_ATTRS: ConvAttrConfig[] = [
 // €/MWh activation penalty. `p_min_pu` is included for users modelling
 // forced-shed minimums but isn't the common case.
 const DR_ATTRS: ConvAttrConfig[] = [
-  { id: 'p_max_pu',      label: 'Shedding availability', shortLabel: 'p_max_pu', Icon: Gauge, unit: 'pu',
+  { id: 'p_max_pu',      label: 'Shedding availability', Icon: Gauge, unit: 'pu',
     description: 'Time-varying upper bound on the DR generator dispatch (0–1). 1.0 = full DR capacity can be shed at this snapshot; 0 = DR unavailable.' },
-  { id: 'p_min_pu',      label: 'Forced-shed minimum', shortLabel: 'p_min_pu', Icon: ArrowDownToLine, unit: 'pu',
+  { id: 'p_min_pu',      label: 'Forced-shed minimum', Icon: ArrowDownToLine, unit: 'pu',
     description: 'Time-varying minimum DR activation — forces the LP to shed at least this much demand every hour. Rare; usually 0.' },
-  { id: 'marginal_cost', label: 'Activation cost', shortLabel: 'marginal_cost', Icon: Coins, unit: '€/MWh',
+  { id: 'marginal_cost', label: 'Activation cost', Icon: Coins, unit: '€/MWh',
     description: 'Per-MWh penalty the LP pays for activating DR. Drives the merit-order placement of DR relative to thermal plants.' },
 ]
 
@@ -121,11 +120,11 @@ const DR_ATTRS: ConvAttrConfig[] = [
 // penalties beyond what bus0's marginal price already captures).
 type LinkAttr = 'p_max_pu' | 'p_min_pu' | 'marginal_cost'
 const LINK_ATTRS: ConvAttrConfig[] = [
-  { id: 'p_max_pu',      label: 'Availability', shortLabel: 'p_max_pu', Icon: Gauge, unit: 'pu',
+  { id: 'p_max_pu',      label: 'Availability', Icon: Gauge, unit: 'pu',
     description: 'Time-varying upper bound on |p0| ÷ p_nom_opt. Caps how much the Link can dispatch each hour.' },
-  { id: 'p_min_pu',      label: 'Must-run', shortLabel: 'p_min_pu', Icon: ArrowDownToLine, unit: 'pu',
-    description: 'Time-varying minimum dispatch (forces the Link to dispatch at least this much). Pair with the same p_max_pu profile to make the Link follow an exact must-run schedule (e.g. fixed datacenter load).' },
-  { id: 'marginal_cost', label: 'Marginal cost', shortLabel: 'marginal_cost', Icon: Coins, unit: '€/MWh',
+  { id: 'p_min_pu',      label: 'Must-run', Icon: ArrowDownToLine, unit: 'pu',
+    description: 'Time-varying minimum dispatch (forces the Link to dispatch at least this much). Pair with the same availability profile to make the Link follow an exact must-run schedule (e.g. fixed datacenter load).' },
+  { id: 'marginal_cost', label: 'Marginal cost', Icon: Coins, unit: '€/MWh',
     description: 'Per-MWh dispatch cost for the Link itself (in addition to bus0 input cost). Drives the LP’s decision on when to use this Link vs alternatives.' },
 ]
 
@@ -138,9 +137,9 @@ interface LoadSectionConfig {
 
 const LOAD_SECTIONS: LoadSectionConfig[] = [
   { id: 'electricity', label: 'Electricity', Icon: Zap,
-    shapeNote: 'Double-peak daily profile (morning + evening) scaled to each load’s p_set.' },
+    shapeNote: 'Double-peak daily profile (morning + evening) scaled to each load’s demand.' },
   { id: 'hydrogen',    label: 'Hydrogen',    Icon: Atom,
-    shapeNote: 'Industrial baseline (~95 % weekday, ~60 % weekend) scaled to each load’s p_set.' },
+    shapeNote: 'Industrial baseline (~95 % weekday, ~60 % weekend) scaled to each load’s demand.' },
   { id: 'heat',        label: 'Heat',        Icon: Flame,
     shapeNote: 'Morning + evening heat-demand peaks with a low overnight floor; minimal weekend reduction.' },
   { id: 'other',       label: 'Other',       Icon: Layers,
@@ -1781,7 +1780,7 @@ export default function TimeSeriesManager() {
             >
               <Icon size={12} />
               <span>{a.label}</span>
-              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.shortLabel}</span>
+              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.unit === 'pu' ? '0–1' : a.unit}</span>
             </button>
           )
         })}
@@ -1800,7 +1799,7 @@ export default function TimeSeriesManager() {
             >
               <Icon size={12} />
               <span>{a.label}</span>
-              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.shortLabel}</span>
+              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.unit === 'pu' ? '0–1' : a.unit}</span>
             </button>
           )
         })}
@@ -1819,7 +1818,7 @@ export default function TimeSeriesManager() {
             >
               <Icon size={12} />
               <span>{a.label}</span>
-              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.shortLabel}</span>
+              <span className={`text-[9px] font-mono ${active ? 'text-accent' : 'text-muted/70'}`}>{a.unit === 'pu' ? '0–1' : a.unit}</span>
             </button>
           )
         })}
@@ -2027,7 +2026,7 @@ export default function TimeSeriesManager() {
                 title={activeTab === 'loads'
                   ? `Download joint template for ${sectionCfg.label.toLowerCase()} loads`
                   : (activeTab === 'conventional' || activeTab === 'dr' || activeTab === 'links')
-                    ? `Download ${activeAttrCfg.label.toLowerCase()} (${activeAttrCfg.shortLabel}) template`
+                    ? `Download ${activeAttrCfg.label.toLowerCase()} template`
                     : 'Download joint template'}
               >
                 <FileSpreadsheet size={13} />
@@ -2157,15 +2156,13 @@ export default function TimeSeriesManager() {
             ) : activeTab === 'links' ? (
               <>
                 <p>• Remaining columns: one per link, named exactly as the link name</p>
-                <p>• Values: <span className="font-mono">{activeAttrCfg.shortLabel}</span>{' '}in{' '}
-                  <span className="font-mono">{activeAttrCfg.unit}</span>
-                  {activeAttrCfg.unit === 'pu' && ' (0 to 1)'}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
+                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
                 {linkAttr === 'p_min_pu' && (
                   <p className="text-[10px] text-amber-600">
                     Tip: to model a fixed-profile must-run Link (e.g. a datacenter), upload the
-                    SAME file as both <span className="font-mono">p_max_pu</span> AND
-                    {' '}<span className="font-mono">p_min_pu</span>. The LP will then dispatch the
+                    SAME file as both availability AND must-run floor. The LP will then dispatch the
                     Link exactly on the profile (no freedom either way).
                   </p>
                 )}
@@ -2173,29 +2170,27 @@ export default function TimeSeriesManager() {
             ) : activeTab === 'dr' ? (
               <>
                 <p>• Remaining columns: one per DR generator, named exactly as the generator name</p>
-                <p>• Values: <span className="font-mono">{activeAttrCfg.shortLabel}</span>{' '}in{' '}
-                  <span className="font-mono">{activeAttrCfg.unit}</span>
-                  {activeAttrCfg.unit === 'pu' && ' (0 to 1)'}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
+                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
               </>
             ) : activeTab === 'conventional' ? (
               <>
                 <p>• Remaining columns: one per generator, named exactly as the generator name</p>
-                <p>• Values: <span className="font-mono">{activeAttrCfg.shortLabel}</span>{' '}in{' '}
-                  <span className="font-mono">{activeAttrCfg.unit}</span>
-                  {activeAttrCfg.unit === 'pu' && ' (0 to 1)'}</p>
+                <p>• Values: {fieldLabel(activeAttrCfg.id)}{' '}in{' '}
+                  {activeAttrCfg.unit === 'pu' ? 'a share from 0 to 1' : <span className="font-mono">{activeAttrCfg.unit}</span>}</p>
                 <p className="pt-1 text-[10px]">{activeAttrCfg.description}</p>
                 {convAttr === 'p_min_pu' && (
                   <p className="text-[10px] text-amber-600">
                     Note: a hard must-run floor can cause infeasibility if demand falls below
-                    Σ <span className="font-mono">p_min_pu · p_nom</span>. Configure load-shedding or a slack generator.
+                    the must-run floor × capacity. Configure load-shedding or a slack generator.
                   </p>
                 )}
                 {convAttr === 'marginal_cost' && (
                   <p className="text-[10px] text-amber-600">
-                    Note: overrides the static <span className="font-mono">marginal_cost</span> per
+                    Note: overrides the static price per
                     snapshot during solve. Reverts on save → reload only if the project's network.nc
-                    captures generators_t.marginal_cost (it does). Empty cells fall back to the static
+                    captures the hourly prices (it does). Empty cells fall back to the static
                     scalar.
                   </p>
                 )}
@@ -2203,7 +2198,7 @@ export default function TimeSeriesManager() {
             ) : (
               <>
                 <p>• Remaining columns: one per generator, named exactly as the generator name</p>
-                <p>• Values: capacity factor in <span className="font-mono">pu</span> (0 to 1)</p>
+                <p>• Values: available output as a share of capacity, 0 to 1</p>
               </>
             )}
             <p>• Formats: <span className="font-mono">.xlsx</span>, <span className="font-mono">.xls</span>, <span className="font-mono">.csv</span></p>
