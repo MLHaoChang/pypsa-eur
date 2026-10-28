@@ -512,7 +512,10 @@ TOOLS: list[dict[str, Any]] = [
         "get_aggregate_load",
         "Time-aligned sum of load p_set across loads (by explicit names CSV "
         "or by section). Returns {index, values, total_loads, "
-        "loads_with_profile, peak, mean}. Safety: read.",
+        "loads_with_profile, unknown_names, loads_without_profile, complete, "
+        "gaps, peak, mean}. A repeated name counts once; a missing or "
+        "non-finite step is null, not 0. peak and mean are null unless "
+        "complete is true; gaps says why the sum is partial. Safety: read.",
         {
             "section": {"type": "string"},
             "names": {"type": "string"},
