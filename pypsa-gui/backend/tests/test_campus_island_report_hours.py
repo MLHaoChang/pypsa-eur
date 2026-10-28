@@ -199,18 +199,21 @@ def test_the_every_hour_e1_table_holds_its_failing_rows_only(saved):
     assert "2 of 4" in t["title"]
 
 
-def test_the_every_hour_e1_table_shows_the_first_failing_rows_of_a_year(saved, monkeypatch):
+def test_the_every_hour_e1_table_shows_the_worst_failing_rows_of_a_year(saved, monkeypatch):
     import services.campus_island_report as R
 
     monkeypatch.setattr(R, "E1_ROWS_SHOWN", 3)
     cols = F.E1_HOURLY_COLUMNS
+    worst = {1: 0.1, 3: 0.5, 5: 0.2, 7: float("inf"), 9: 0.3, 11: 0.05}
     _freq(_run_dir(saved), e1_rows=[
-        _row(cols, period=0, hour=h, scenario="seamless", event="E1", direction="up", ok=h % 2 == 0, nadir_hz=47.0)
+        _row(cols, period=0, hour=h, scenario="seamless", event="E1", direction="up", ok=h % 2 == 0, nadir_hz=47.0,
+             worst=worst.get(h, 0.0))
         for h in range(12)])
     t = _tables(island_report(saved))["freq_e1_hourly"]
     at = {c: i for i, c in enumerate(t["columns"])}
-    assert [r[at["hour"]] for r in t["rows"]] == [1, 3, 5]
-    assert "6 of 12 rows; the first 3 shown" in t["title"]
+    assert [r[at["hour"]] for r in t["rows"]] == [7, 3, 9]
+    assert "6 of 12 rows; the 3 worst by exceedance shown, all of them in the run's campus_freq_e1_hourly.csv" \
+        in t["title"]
 
 
 def test_the_frequency_summary_names_what_fails(saved):

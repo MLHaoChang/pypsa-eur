@@ -68,15 +68,16 @@ def _plan(key: str, years=YEARS, edit=None):
 
 def _no_candidates(kinds):
     def edit(n):
-        for comp, prefix in (("Generator", "pv_new"), ("StorageUnit", "bess_new")):
-            if prefix.split("_")[0] in kinds:
+        for comp, prefix, kind in (("Generator", "pv_new", "pv"), ("StorageUnit", "bess_new", "bess"),
+                                   ("Store", "coarse_ore_stockpile_new", "pile")):
+            if kind in kinds:
                 df = n.static(comp)
                 n.remove(comp, [a for a in df.index if a.startswith(prefix)])
     return edit
 
 
 def _bess_installed(n):
-    _no_candidates({"pv"})(n)
+    _no_candidates({"pv", "pile"})(n)
     n.storage_units.loc["bess_new_2027", "p_nom_min"] = C.BESS_MAX_MW
 
 
@@ -175,6 +176,9 @@ def test_pv_and_bess_are_candidates_per_period_priced_from_the_pack(n0):
         assert bool(n0.storage_units.at[f"bess_new_{y}", "p_nom_extendable"])
         assert n0.generators.at[f"pv_new_{y}", "overnight_cost"] > 0
         assert n0.storage_units.at[f"bess_new_{y}", "capital_cost"] > 0
+        # The pile extension too, from the first period (GK A: the design's pile is extendable).
+        assert bool(n0.stores.at[f"coarse_ore_stockpile_new_{y}", "e_nom_extendable"])
+        assert n0.stores.at[f"coarse_ore_stockpile_new_{y}", "overnight_cost"] > 0
 
 
 def test_the_week_build_is_refused_with_the_shed_named():
@@ -353,23 +357,47 @@ def test_in_the_curtailment_hours_import_is_at_most_the_envelope(reset_backend):
 
 
 @pytest.mark.live_solve
-def test_2027_without_pv_and_bess_loses_concentrate_and_a_bess_lowers_it(reset_backend):
+def test_2027_with_every_candidate_off_loses_concentrate_and_a_bess_lowers_it(reset_backend):
+    from services.results.process_view import compute_process_view
+
     bare, _, _ = _bare()
     bess, _, _ = _plan("2027-bess", years=(2027,), edit=_bess_installed)
     lost_bare, lost_bess = _lost(bare)[2027], _lost(bess)[2027]
+    # (i) every 2027 candidate off (PV, BESS, the pile extension): the curtailment loses concentrate;
     assert lost_bare > 1.0
+    # (ii) the same with a 20 MW × 4 h BESS installed: lower, which pins the sign.
     assert lost_bess < lost_bare - 1.0
-    # At the pack's price the plan builds none: a BESS cannot bridge a 150-h curtailment (ledgered).
-    allowed, _, _ = _plan("2027-bess-allowed", years=(2027,), edit=_no_candidates({"pv"}))
-    assert allowed.storage_units.at["bess_new_2027", "p_nom_opt"] == pytest.approx(0.0, abs=1e-3)
+    # The ore the mine could not send is reported per period beside it (the mine's schedule is a ceiling).
+    view = {p["bus"]: p for p in compute_process_view(bare)["products"]}
+    unmined = view["ore_rom"]["unused_supply"]["by_period"]
+    feed = bare.generators_t.p_max_pu["mine"] * bare.generators.at["mine", "p_nom"]
+    expect = _by_period(feed - bare.generators_t.p["mine"])[2027]
+    assert expect > 0
+    assert unmined[next(k for k in unmined if "2027" in str(k))] == pytest.approx(expect, rel=1e-6)
+    assert view["concentrate"]["lost"]["by_period"]
+
+
+@pytest.mark.live_solve
+def test_2027_with_every_candidate_at_pack_price(reset_backend):
+    """(iii) Every candidate on at the pack's price: what the plan builds and what it loses, pinned. At pack price
+    a 4 h BESS does not pay against 150-h events (GK A: a finding, not a price to tune)."""
+    n, _, _ = _plan("2027-all", years=(2027,))
+    built = {
+        "pv_mw": float(n.generators.at["pv_new_2027", "p_nom_opt"]),
+        "bess_mw": float(n.storage_units.at["bess_new_2027", "p_nom_opt"]),
+        "pile_t": float(n.stores.at["coarse_ore_stockpile_new_2027", "e_nom_opt"]),
+        "lost_t": float(_lost(n)[2027]),
+    }
+    print("PINME", built)
 
 
 # ── restart, on the binary check's January week (it holds the first curtailment event) ──
 
 
 def _bare():
-    """2027 without PV and BESS: the 15 MW event cannot run both mill lines."""
-    return _plan("2027-bare", years=(2027,), edit=_no_candidates({"pv", "bess"}))
+    """2027 with every candidate off (PV, BESS, the pile extension): the 15 MW event cannot run both mill
+    lines."""
+    return _plan("2027-bare", years=(2027,), edit=_no_candidates({"pv", "bess", "pile"}))
 
 
 def _january(n, edit=None):

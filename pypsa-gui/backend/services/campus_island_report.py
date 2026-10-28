@@ -263,15 +263,19 @@ def _freq_tables(run_dir, missing) -> list:
         key = fname.removeprefix("campus_freq_").removesuffix(".csv")
         title = _FREQ_TITLES[key]
         if fname == cs.FREQ_E1_HOURLY_CSV:
-            # Every hour is too long to show; its failing rows are the verdict, the first E1_ROWS_SHOWN of them
-            # (on the year base a period has 8,760 hours, so thousands may fail; the summary names them all).
+            # Every hour is too long to show; its failing rows are the verdict. On the year base a period has
+            # 8,760 hours, so thousands may fail: the table shows the E1_ROWS_SHOWN worst (``worst``, the
+            # binding limit's relative exceedance) and names the file that holds them all.
             total = len(df)
             df = df[df["ok"].map(lambda v: str(v).lower() in ("false", "0"))]
             failing = len(df)
             title = f"{title} ({failing} of {total} rows"
             if failing > E1_ROWS_SHOWN:
-                df = df.head(E1_ROWS_SHOWN)
-                title += f"; the first {E1_ROWS_SHOWN} shown"
+                exceed = pd.to_numeric(df["worst"], errors="coerce").fillna(-math.inf) if "worst" in df else None
+                df = (df.loc[exceed.sort_values(ascending=False, kind="stable").index[:E1_ROWS_SHOWN]]
+                      if exceed is not None else df.head(E1_ROWS_SHOWN))
+                title += (f"; the {E1_ROWS_SHOWN} worst by exceedance shown, all of them in the run's "
+                          f"{fname}")
             title += ")"
         tables.append(_table(f"freq_{key}", title, model, columns, df.values.tolist(), group="frequency"))
     return tables

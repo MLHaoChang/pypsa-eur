@@ -94,7 +94,7 @@ SITE_KV = 33.0
 PV_MAX_MW = 40.0
 BESS_MAX_MW = 20.0
 BESS_HOURS = 4.0
-#: The stockpile extension: a candidate from 2030 (the 2027 pile is the 24 h it has), priced per t live.
+#: The stockpile extension: a candidate in every period (design: the pile is extendable), priced per t live.
 STOCKPILE_EUR_PER_T = 25.0
 STOCKPILE_LIFETIME = 25.0
 STOCKPILE_MAX_T = 60_000.0
@@ -286,12 +286,11 @@ def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> 
                 p_nom_max=BESS_MAX_MW, max_hours=BESS_HOURS, efficiency_store=0.95,
                 efficiency_dispatch=0.95, build_year=y)
         T._price(net, "storage_units", b, "battery")
-        if y != years[0]:
-            s = f"coarse_ore_stockpile_new_{y}"
-            net.add("Store", s, bus="ore_fine", carrier="ore", e_nom=0.0, e_nom_extendable=True,
-                    e_nom_max=STOCKPILE_MAX_T, build_year=y, lifetime=STOCKPILE_LIFETIME)
-            # Overnight, annuitised by PyPSA at the discount rate (as the pack's PV rows).
-            net.stores.loc[s, ["overnight_cost", "discount_rate"]] = [STOCKPILE_EUR_PER_T, DISCOUNT_RATE]
+        s = f"coarse_ore_stockpile_new_{y}"
+        net.add("Store", s, bus="ore_fine", carrier="ore", e_nom=0.0, e_nom_extendable=True,
+                e_nom_max=STOCKPILE_MAX_T, build_year=y, lifetime=STOCKPILE_LIFETIME)
+        # Overnight, annuitised by PyPSA at the discount rate (as the pack's PV rows).
+        net.stores.loc[s, ["overnight_cost", "discount_rate"]] = [STOCKPILE_EUR_PER_T, DISCOUNT_RATE]
 
     S.stage_network(n, years, load_scale={y: {"shipments": vessel_t(y) / vessel_t(last)} for y in years},
                     energization={"grid_import": [CONNECTION_MW[y] for y in years]},
@@ -373,8 +372,8 @@ def _ledger() -> list[dict]:
                  "(inventory_cadence_needs_year). The same synthetic year repeats in each period"},
         {"item": "ore feed (mine)", "value": f"{feed} t/h ({' / '.join(map(str, YEARS))})", "source": "demo",
          "note": "about 19–29 kt/d, a mid-size copper concentrator. The mine is an ore Generator whose fixed "
-                 "schedule is its upper bound: ore the plant cannot take is not mined, and the lost "
-                 "concentrate shows at the next vessel"},
+                 "schedule is a ceiling: ore the plant cannot take is not mined (the process view's "
+                 "unused_supply on ore_rom, per period), and the lost concentrate shows at the next vessel"},
         {"item": "grinding specific energy (Bond)",
          "value": f"W = 10·Wi·(1/√P80 − 1/√F80) = {bond_kwh_t():.2f} kWh/t ball-mill duty "
                   f"(Wi {BOND_WI:g} kWh/t, F80 {BOND_F80_UM / 1000:g} mm, P80 {BOND_P80_UM:g} µm)",
@@ -400,8 +399,8 @@ def _ledger() -> list[dict]:
         {"item": "coarse-ore stockpile", "value": f"{STOCKPILE_H:g} h live at the 2027 feed "
                                                   f"({STOCKPILE_H * FEED_TPH[YEARS[0]]:,.0f} t)",
          "source": "demo",
-         "note": f"an extension is a candidate from 2030 ({STOCKPILE_EUR_PER_T:g} EUR/t live, "
-                 f"{STOCKPILE_LIFETIME:g} years, up to {STOCKPILE_MAX_T:,.0f} t); 2027 has the pile it has"},
+         "note": f"an extension is a candidate in every period ({STOCKPILE_EUR_PER_T:g} EUR/t live, "
+                 f"{STOCKPILE_LIFETIME:g} years, up to {STOCKPILE_MAX_T:,.0f} t)"},
         {"item": "mill p_min_pu, min up / min down", "value": f"{MILL_P_MIN_PU:g}, {MILL_MIN_UP_H} h / "
                                                               f"{MILL_MIN_DOWN_H} h",
          "source": "demo",
@@ -489,7 +488,7 @@ def _meta(T) -> dict:
             f"{' → '.join(f'{FEED_TPH[y]:g}' for y in YEARS)} t/h of ore over {T._years_text(YEARS)} "
             "through a crusher, a coarse-ore stockpile, 2 (then 3) mill lines and flotation to a "
             "concentrate shed that loads a vessel every 21 days. The 2027 connection is non-firm "
-            "(25 MW, curtailed to 15 MW in 300 h), firm from 2030; PV and BESS candidates per period. "
+            "(25 MW, curtailed to 15 MW in 300 h), firm from 2030; PV, BESS and stockpile-extension candidates per period. "
             "Planned on the hourly chronological year, so the shed carries across shipments."),
         "recommended_archetype": "weak_flexible",
         "pack_overrides": {},
