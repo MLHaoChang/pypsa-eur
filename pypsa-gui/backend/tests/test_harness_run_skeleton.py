@@ -251,7 +251,7 @@ def test_a_never_tunable_attr_is_refused_at_load(entry):
 def test_a_stage_tool_without_its_bound_context_test_is_refused():
     profile = copy.deepcopy(run_profiles.EH_SITE)
     profile['stages']['inputs'] = {'actions': [{'tool': 'fetch_site_context', 'args': {}}], 'rules': []}
-    with pytest.raises(run_profiles.ProfileError, match='bound-context'):
+    with pytest.raises(run_profiles.ProfileError, match='run.s own project'):
         run_profiles.load(profile)
 
 
@@ -402,6 +402,7 @@ def test_b1_an_edit_after_the_input_gate_rechecks_it_before_the_solve(session, s
     PyPSAService.get_network().generators.at['G1', 'bus'] = 'B1'
     view = tasks.resume_task(task['task_id'])
     assert stages(view)['input_gate']['status'] == 'passed' and view['status'] == 'paused_at_card'
+    refused('task_pause_needs_user', tasks.resume_task, task['task_id'])  # refused while the card waits
     assert [s['id'] for s in stored(root, task['task_id'])['steps'] if s['id'].startswith('solve.')] == ['solve.1']
 
 
@@ -512,3 +513,15 @@ def test_resume_rechecks_a_failed_gate_from_native_facts_only(session, site, mon
     assert stored(root, task['task_id'])['run']['stages']['input_gate']['attempts'] == 2
     with pytest.raises(TypeError):
         tasks.resume_task(task['task_id'], result={'passed': True})
+
+
+def test_another_projects_context_never_spends_a_gate(session, site):
+    """A run advanced with the foreground of another project writes nothing:
+    no not_evaluated gate, no attempt used."""
+    _, root = site
+    task = start('run-foreign')
+    path = tasks._path(task['task_id'])[0]
+    before = stored(root, task['task_id'])
+    with foreground(two_buses()) as front:
+        tasks._advance_run(path, front)
+    assert stored(root, task['task_id']) == before

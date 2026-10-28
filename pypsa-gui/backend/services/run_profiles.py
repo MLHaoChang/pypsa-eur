@@ -85,8 +85,8 @@ GENERIC: dict[str, dict] = {
         _rule("sv.solve.state", "solve.state", "eq", "completed", basis="The run's own solve job finished."),
     ]},
     "result_gate": {"actions": [], "rules": CORE_RESULT_RULES},
-    "explore": {"skip": "Explore cases come with the loops (study harness issue 04)."},
-    "report": {"skip": "The report stage comes with study harness issue 07."},
+    "explore": {"skip": "Exploring cases is not part of a run yet."},
+    "report": {"skip": "The run report is not part of a run yet."},
     "handoff": {"actions": [], "rules": []},
 }
 
@@ -102,7 +102,7 @@ def _check_tunable(entries):
         component, attr = str(entry["component"]), str(entry["attr"])
         if attr in NEVER_TUNABLE or "grid_code" in attr or component.split(":")[0] in _NEVER_COMPONENTS:
             raise ProfileError(f"{component}.{attr} is never tunable: the agent changes design levers, "
-                               "never the question (§6.0).")
+                               "never the question.")
 
 
 def load(profile: dict) -> dict:
@@ -129,7 +129,7 @@ def load(profile: dict) -> dict:
             if set(action) != {"tool", "args"} or not isinstance(action["args"], dict):
                 raise ProfileError(f"Stage {name}: each action has tool and args.")
             if action["tool"] not in BOUND_CONTEXT_TOOLS:
-                raise ProfileError(f"Stage {name}: {action['tool']} has no bound-context test (§6.6).")
+                raise ProfileError(f"Stage {name}: {action['tool']} is not yet shown to work on the run's own project.")
         _check_tunable(stage.get("tunable", []))
         try:
             rules = [run_gates.check_rule(r) for r in stage.get("rules", [])]

@@ -503,8 +503,8 @@ def _advance_run(path, ctx=None):
             run = task.get("run")
             if not run or run["status"] != "running" or task["status"] in ("cancelled", "completed", "paused_at_card"):
                 return
-            if not _may_write(task):
-                return  # the view shows the gate as due
+            if str(ctx.project_uuid) != task["project_id"] or not _may_write(task):
+                return  # another project's context, or no edit right: the view shows the gate as due
             profile = run_profiles.resolve(run["profile"])
             name = run["stage"]
             stage = run["stages"][name]
