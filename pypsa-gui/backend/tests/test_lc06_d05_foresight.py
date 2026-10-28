@@ -208,8 +208,8 @@ def test_a_half_year_horizon_charges_half_the_annual_capex(seam):
     def per_mw(gen, years):
         return gen['capital_cost'] * years + sum(weights) * gen['marginal_cost']
 
-    assert nyears == 0.5
     assert state['objective'] == pytest.approx(6 * per_mw(cheap, nyears) + 4 * per_mw(backup, nyears))
+    assert nyears == 0.5
     # The annual (unperiodised) figure is a different number.
     assert 6 * per_mw(cheap, 1) + 4 * per_mw(backup, 1) != pytest.approx(state['objective'])
 
@@ -297,8 +297,11 @@ UC_HOURS = 168
 
 def hard_uc() -> pypsa.Network:
     rng = np.random.default_rng(0)
-    gens = {f'U{i}': dict(p_nom=20, committable=True, p_min_pu=0.4, min_up_time=3,
+    # Feasible without a limit: every unit starts off (up_time_before=0) and
+    # an uncommitted peaker covers any load the units cannot.
+    gens = {f'U{i}': dict(p_nom=20, committable=True, p_min_pu=0.4, min_up_time=3, up_time_before=0,
                           marginal_cost=10.0 + i, start_up_cost=50.0 * (i + 1)) for i in range(8)}
+    gens['Peaker'] = dict(p_nom=200, marginal_cost=200.0)
     return one_bus((1,) * UC_HOURS, rng.uniform(20, 140, UC_HOURS), gens)
 
 
@@ -307,6 +310,13 @@ def failed_on_the_limit(state):
     assert state['objective'] is None
     assert state['failure']['category'] == 'time_limit'
     assert any('without a feasible solution' in line for line in log_lines())
+
+
+def test_the_hard_uc_solves_without_a_limit(seam):
+    # The control for the next test: the same MIP is feasible, so only the limit stops it.
+    state = seam(hard_uc(), mip_gap=0.05)()
+    assert (state['status'], state['condition']) == ('completed', 'optimal'), state
+    assert math.isfinite(state['objective'])
 
 
 def test_a_real_time_limit_without_an_incumbent_is_a_failed_run(seam):

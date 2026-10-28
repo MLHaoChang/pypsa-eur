@@ -247,6 +247,7 @@ VARIANTS: list[dict] = [
              'update_solver_config run_simulation get_simulation_status get_simulation_log_history list_project_runs get_run_evidence',
              B + 'test_lc06_d05_foresight.py::test_an_unbounded_lp_is_refused_before_the_solver',
              B + 'test_lc06_d05_foresight.py::test_an_unavailable_solver_is_refused_by_the_real_dispatcher',
+             B + 'test_lc06_d05_foresight.py::test_the_hard_uc_solves_without_a_limit',
              B + 'test_lc06_d05_foresight.py::test_a_real_time_limit_without_an_incumbent_is_a_failed_run',
              B + 'test_lc06_d05_foresight.py::test_a_limit_stop_without_an_incumbent_fails_at_every_call_site',
              B + 'test_lc06_d05_foresight.py::test_a_limit_stop_with_an_incumbent_completes_but_never_reads_as_optimal',
