@@ -23,21 +23,12 @@ def ic(client, install_network, session_ctx, monkeypatch):
     from tests.test_investment_case_routes import (
         STUDY_URL, _fake_build, _poll, _put_fin, _s2_inputs, _solved)
 
-    import contextvars
-
-    from services import workflow_tools
-    from services.pypsa_service import PyPSAService
+    from services import run_gates, workflow_tools
 
     def on(fn):
-        # The harness's binding (`services.run_gates._on`): the run project's
-        # context, whatever the calling request has bound.
-        ctx = session_ctx(client)
-
-        def call():
-            PyPSAService._turn_cell.set(None)
-            PyPSAService.bind_request_context(ctx)
-            return fn()
-        return contextvars.copy_context().run(call)
+        # The harness's binding: the run project's context, whatever the
+        # calling request has bound.
+        return run_gates._on(session_ctx(client), fn)
 
     def read():
         return F.read(session_ctx(client), on)
@@ -107,6 +98,45 @@ def test_a_case_whose_network_was_edited_is_not_run(ic, client, session_ctx):
 def test_a_running_or_failed_case_is_not_run(status, reason):
     assert F.classify({"status": status, "report": {"present": True, "stale": False}}) \
         == {"state": "not_run", "basis": None, "reasons": [reason]}
+
+
+# ── the harness gate (`run_gates.FACTS["ic.counterfactual"]`) ────────────────
+
+RULE = {"id": "ic.counterfactual", "fact": "ic.counterfactual", "op": "eq",
+        "value": "established", "severity": "warn", "basis": "issue 11"}
+
+
+def _gate(client, session_ctx):
+    from services import run_gates
+
+    env = run_gates.Env(task={}, ctx=session_ctx(client), project=None, project_dir=None)
+    (result,) = run_gates.evaluate([run_gates.check_rule(RULE)], env)
+    return result
+
+
+def test_the_gate_passes_an_established_case(ic, client, session_ctx):
+    run, _read = ic
+    run(BUYS)
+    result = _gate(client, session_ctx)
+    assert result["verdict"] == "pass" and "reason" not in result
+    assert result["facts"][0]["value"] == "established"
+    assert result["facts"][0]["source"] == "services.ic_counterfactual.read:state"
+
+
+def test_the_gate_leaves_a_not_established_case_unevaluated_with_its_flags(ic, client,
+                                                                          session_ctx):
+    run, _read = ic
+    run(UNSERVED)
+    result = _gate(client, session_ctx)
+    assert result["verdict"] == "not_evaluated"
+    assert result["reason"] == "not_established: counterfactual_not_established:owner_conversion_load"
+    assert result["facts"][0]["value"] == "not_established"
+
+
+def test_the_gate_leaves_no_case_unevaluated(ic, client, session_ctx):
+    result = _gate(client, session_ctx)
+    assert (result["verdict"], result["reason"]) == ("not_evaluated", "not_run: no_case")
+    assert result["facts"][0]["value"] == "not_run"
 
 
 def test_the_text_quotes_the_cases_own_sentences():
