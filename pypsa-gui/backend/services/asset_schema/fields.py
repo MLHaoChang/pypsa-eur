@@ -418,7 +418,7 @@ LINK: tuple[FieldSpec, ...] = (
               reveal_when={"eh_process": True}),
     FieldSpec("i_start_pu", "performance", "Start current multiple", "The starting current as a "
               "multiple of rated current, when the maker states it. Leave empty to use the start method's default "
-              "(6, 3 or 1).", "pu", "pu", reveal_when={"eh_process": True}),
+              "(6, 3 or 1).", "× rated", "pu", reveal_when={"eh_process": True}),
     *_outages(with_cf_flag=False),
 )
 

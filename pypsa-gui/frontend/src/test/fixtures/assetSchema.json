@@ -2402,7 +2402,7 @@
       "group": "performance",
       "label": "Start current multiple",
       "help": "The starting current as a multiple of rated current, when the maker states it. Leave empty to use the start method's default (6, 3 or 1).",
-      "unit_display": "pu",
+      "unit_display": "× rated",
       "unit_storage": "pu",
       "scale": 1.0,
       "kind": "number",

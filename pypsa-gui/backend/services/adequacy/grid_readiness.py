@@ -977,7 +977,8 @@ def _q_gfm_mvar(inp: _Inputs) -> tuple[float | None, str | None]:
         q = rating * math.tan(math.acos(pf))
         have += q
         parts.append(f"{name} {q:.3g} Mvar")
-    note = f"Q_gfm {have:.4g} Mvar ({', '.join(parts) or 'no grid-forming storage'})"
+    note = (f"Q_gfm {have:.4g} Mvar ({', '.join(parts) or 'no grid-forming storage'}) as rating × tan(acos rated "
+            "power factor), an assumed capability")
     if unstated:
         note += f"; {', '.join(unstated)} counted zero: no size or no rated power factor"
     return have, note

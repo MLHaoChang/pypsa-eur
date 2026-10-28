@@ -63,8 +63,8 @@ LEDGER = (
     "dU = (S_start * sin phi_start - Q_gfm) / S_sc is the reactive-power form of dU = (dP * R + dQ * X) / U^2 "
     "with R ignored, a screening estimate (assumed scope)",
     "S_sc = S_k''min / c_min on the PoC's minimum case, else the entered S_k'' / c_max (IEC 60909 voltage factor)",
-    "Q_gfm is the grid-forming storage's available reactive power at the PoC; when it cannot be stated it is 0 "
-    "(conservative)",
+    "Q_gfm is the grid-forming storage's available reactive power at the PoC, rating * tan(acos pf_rated) at rated "
+    "power (assumed); when it cannot be stated it is 0 (conservative)",
     "one motor starts at a time, from a steady PoC voltage (assumed)",
 )
 
