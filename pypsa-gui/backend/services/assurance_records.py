@@ -600,6 +600,9 @@ def aggregate_source(ctx, args):
             None,
             targets,
         )
+    # A numeric-string upload would convert below but join, not add, in sum().
+    if any(not pd.api.types.is_numeric_dtype(s) or s.dtype == bool for s in members):
+        return hashed.hexdigest(), "a step that is not a number", None, targets
     frame = pd.concat(members, axis=1)
     try:
         bad = int((~np.isfinite(frame.to_numpy(dtype="float64"))).sum())

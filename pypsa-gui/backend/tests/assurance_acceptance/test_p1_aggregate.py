@@ -116,6 +116,8 @@ def evidence_status(harness, evidence_id):
 
 
 def test_section_peak_is_checked_over_every_load_and_step(loads, harness):
+    shown = chat_tools.DISPATCHERS["get_aggregate_load"](section="electricity")
+    assert (shown["peak"], shown["mean"]) == (PEAK, MEAN)
     frames, evidence_id = checked(harness)
     text = public_text(frames)
     assert "Aggregate load (section electricity, 2 loads, 3 steps): peak = 8 MW" in text
@@ -184,10 +186,13 @@ def test_peak_past_the_truncated_result_is_the_global_peak(loads, harness):
          "1 missing or non-finite step"),
         (lambda n: n.loads_t.p_set.__setitem__("L2", [1.0, math.inf, 5.0]), SECTION,
          "1 missing or non-finite step"),
+        (lambda n: n.loads_t.p_set.__setitem__(
+            "L2", pd.Series(["1", "4", "5"], index=n.snapshots, dtype=object)),
+         SECTION, "a step that is not a number"),
         (lambda n: None, {"names": "L1,L9"}, "no load named L9"),
         (lambda n: None, {"section": "heat"}, "no loads"),
     ],
-    ids=["no-profile", "nan", "inf", "unknown-name", "empty"],
+    ids=["no-profile", "nan", "inf", "string", "unknown-name", "empty"],
 )
 def test_incomplete_coverage_is_refused_before_the_handler(
     loads, harness, monkeypatch, change, args, gap
