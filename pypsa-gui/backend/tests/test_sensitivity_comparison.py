@@ -415,3 +415,13 @@ def test_a_k_euro_row_formats_cells_and_deltas_like_the_cost_card():
 def test_other_reasons_join_in_one_line():
     assert sc._not_comparable("Lines 160", ["case_unsolved", "mode_differs"]) == (
         "Lines 160: not solved yet; solved in a different mode from the base")
+
+
+def test_multi_period_total_cost_is_unavailable_never_mixed(monkeypatch):
+    """GK B: annuitised CAPEX and undiscounted OPEX of a multi-period run do not add."""
+    head = {"has_solve": True, "is_multi_period": True, "opex_meur": 2.0, "capex_meur_total": 3.0,
+            "capacity_mw_total": 10.0, "dispatch_gwh_total": 1.0}
+    monkeypatch.setattr(chat_tools, "_scenario_headlines", lambda summary: head)
+    values = sc._values({"summary": {"has_solve": True}, "hours": sc.HOURS_PER_YEAR})
+    assert values["total_cost_meur"] == (None, "multi-period: annuitised CAPEX and undiscounted OPEX do not add", None)
+    assert values["opex_meur"][0] == 2.0 and values["capex_meur_total"][0] == 3.0
