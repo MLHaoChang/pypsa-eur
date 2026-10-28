@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   Bar, BarChart, CartesianGrid, Legend, Line, LineChart, ReferenceLine,
@@ -221,11 +221,22 @@ function ScenarioPicker({ label, value, exclude, projects, onChange }: PickerPro
 }
 
 function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  // A tab opened from chat can sit past the rail's edge: scroll the row (only
+  // the row, never the rail) so the active tab shows (LC-18, UX).
+  const row = useRef<HTMLDivElement>(null)
+  const active = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const r = row.current, b = active.current
+    if (!r || !b) return
+    if (b.offsetLeft < r.scrollLeft) r.scrollLeft = b.offsetLeft
+    else if (b.offsetLeft + b.offsetWidth > r.scrollLeft + r.clientWidth) r.scrollLeft = b.offsetLeft + b.offsetWidth - r.clientWidth
+  }, [tab])
   return (
-    <div className="flex gap-1 border-b border-border -mb-px">
+    <div ref={row} className="relative flex gap-1 overflow-x-auto border-b border-border -mb-px">
       {TABS.map(t => (
         <button
           key={t.id}
+          ref={tab === t.id ? active : undefined}
           onClick={() => onChange(t.id)}
           title={t.description}
           className={
