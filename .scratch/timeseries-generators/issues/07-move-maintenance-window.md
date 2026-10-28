@@ -1,6 +1,6 @@
 # Move a maintenance window
 
-Status: ready-for-agent (triage 2026-10-28: no window op on master; availability meta records its windows, so it is buildable)
+Status: in progress (claude/tsg07-move-window; plan to GK B 2026-10-28)
 Type: task
 Blocked by: none (02 done, #512; 04 done, #576)
 Gated: yes (apply path)
@@ -54,3 +54,31 @@ The refine ops are `scale_peak_to`, `scale_window`, `set_floor`, `set_cap`, `shi
 
 **Plan first:** this is apply path plus engine, so send GK B a plan before building. If the editor gets the control, the UX reviewer OKs it.
 **Likely files (scheduling):** `pypsa-gui/backend/services/profile_gen/refine.py`, `pypsa-gui/backend/services/profile_gen/availability.py`, `pypsa-gui/frontend/src/components/series/SeriesKit.tsx`.
+
+## Plan (sent to GK B before building)
+
+**Op.** `move_window {window?: int, by: "±Nd" | "±Nw"}` in `profile_gen/refine.py` (added to `OPS`). Whole days only (window ends are days); `by` 0 is refused.
+
+**Where it is accepted.** Only when the artifact's meta is family `availability`, kind `maintenance`, with `params.windows` or `params.rule`. Anything else (load, must-run, derating, prices, an upload): `InvalidRefineOpError("op i: this series has no maintenance window to move")`.
+
+**Apply path: re-generate, never post-transform.** Semantics: a refined maintenance series = `availability.generate_frame(params_eff)` followed by the value ops (every other op) in order. `params_eff` is the recorded `meta.params` with each `move_window` folded in. So `move_window` at position *k* of the chain:
+1. moves the window's dates in a copy of `params_eff` (below);
+2. re-generates the column through `availability.generate_frame([col], "maintenance", params_eff, year)` (year = `meta.weather_year`, the source year);
+3. re-runs the value ops recorded before it (the artifact's prior `refinements` plus this request's earlier ops; earlier moves are already in `params_eff`) through the same `_apply_op`, keeping their recorded resolved values. No second interpreter;
+4. later ops in the list apply to that series as usual.
+
+The new meta carries `params = params_eff` and the generator's `windows` record, so the apply guard `check_dated_windows` sees the moved dates. `refinements` records the op as sent plus `window` (the resolved index), `from`/`to` before and after, and `converted_from_rule` when it applied. Undo (05, which re-refines `based_on` without op *k* through `replay`) and replay on re-generate (06) both start from a generator output with the original params, and `move_window` is relative, so both work unchanged.
+
+**Moving the dates.** Each end is parsed by the generator's own `_DATE`. A dated end (YYYY-MM-DD) is moved by the days and written back with its new year; the generator then refuses a year other than the source year with its own `MaintenanceYearError` text. An MM-DD end is moved inside the source year and wraps across the new year (12-25 +14d → 01-08); the generator then accepts it as a wrapping window, or refuses one over half a year with its own reason. Both ends move by the same days, so the window keeps its length. Generator refusals surface as the op's refusal, with the generator's message.
+
+**Index.** `window` may be omitted only when exactly one window exists; with several, the refusal lists each as `0: 06-01–06-14 (available 0)`. Out of range is refused the same way.
+
+**Rule.** A `rule` window is replaced by the explicit MM-DD window the generator's meta records for it (`windows[0]`), with `available` 0, and the record says `converted_from_rule: {weeks, season}`.
+
+**Determinism (GK B, 2026-10-28).** The maintenance generator has no seed: its output is a pure function of `(params, year)` (no RNG; only `pd.date_range` and comparisons). Re-generation reuses the recorded params, so +14d then −14d gives back the original MM-DD / dated strings, hence the same params, hence the same bytes. MM-DD wrap arithmetic is a bijection inside the source year (move, then replace the year by the source year), so it round-trips too, including across the new year and in a leap year. Tests assert `array_equal` and equal `.tobytes()`.
+
+**Copilot.** `refine_generated_profile`'s catalogue description gains `move_window {window?, by}` (maintenance only). No new tool: it is behind the existing old→new card. `card.py`'s `_OP` gets "maintenance window".
+
+**Editor.** `RefinePanel` (SeriesKit) offers "Move the maintenance window" only when the pending artifact is kind `maintenance`: a "By days" input (± whole days) and, with several windows, a window select. The UX reviewer OKs that part before merge.
+
+**Tests.** Engine (`test_profile_gen_refine.py`): one window +14d moves only it (every hour outside the old and new windows equal); two windows no index refused naming both; +14d then −14d bitwise equal; load / must-run refused; dated window past the source year refused; MM-DD window crossing the new year; rule converted and recorded; a move after a cap keeps the cap (re-generate then replay). Route + chat tool (`test_profiles_refine_routes.py`): the chat tool's refine with `move_window` returns the card's pending artifact with the op recorded; replay of a stored move on re-generate (06) gives the same series. Frontend: the op shows only on a maintenance series and sends `{op: move_window, by: "14d"}`.
