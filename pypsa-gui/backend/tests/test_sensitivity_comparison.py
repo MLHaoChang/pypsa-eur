@@ -136,7 +136,7 @@ def test_oj30_rank_by_gives_a_qualified_preference_and_its_why(swept):
     assert high["rank"]["preference"]["name"] == "Gas 30" and high["show"]["args"]["compare_tab"] == "dispatch"
     picked = tool("compare_sensitivities", baseline_project_id=base_id, metrics=["peak_line_loading_pct"],
                   compare_case=ids["Gas 20"])
-    assert picked["show"]["offer"] == "Open Compare for Tool Baseline vs Gas 20 on Overview?"
+    assert picked["show"]["offer"] == "Open Compare for Tool Baseline vs Gas 20 on Line loading?"
     assert [m["metric"] for m in picked["metrics"]] == ["peak_line_loading_pct"]
 
 

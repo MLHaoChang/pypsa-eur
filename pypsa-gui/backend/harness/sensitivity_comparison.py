@@ -408,7 +408,9 @@ def _report(baseline_project_id, case_project_ids, metrics, rank_by, rank_order,
     elif out.get("rank", {}).get("preference") and not out["rank"]["preference"]["is_base"]:
         target = next(e for e in entries if e["project_id"] == out["rank"]["preference"]["project_id"])
     if target is not None:
-        tab = METRICS[rank_by][2] if rank_by else "overview"
+        # The ranked metric's tab; else the one metric asked for; else Overview.
+        focus = rank_by or (chosen[0] if len(chosen) == 1 else None)
+        tab = METRICS[focus][2] if focus else "overview"
         out["show"] = {
             "tool": "ui_open_panel",
             "args": {"panel_id": "compare", "compare_a": base.name, "compare_b": target["name"], "compare_tab": tab},
