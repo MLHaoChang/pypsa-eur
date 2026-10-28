@@ -34,6 +34,19 @@ required green public-seam cases and relevant result/harness regressions. Domain
 rules must be independently reviewed for each released metric. Record pending
 metrics explicitly in [ledger](../coverage-ledger.md) and [handoff](../session-handoff.md).
 
+## Follow-up: checked plausibility findings
+
+Named by GK B's amendment on #851 (2026-10-28): Codex K ships the plausibility rules native and read-only, and checked publication of its findings is deferred here. Owned by the Assurance track, gated by GK B.
+
+**Checked plausibility findings: a bounded plausibility evidence/profile adapter.** Acceptance:
+- only `get_results(result_kind="plausibility")` is admitted; no blanket `get_results` whitelist, and the general guard on ordinary results reads stays closed;
+- a valid finding is published as a positive control;
+- LC-T19 injected extra claims are withheld;
+- the stored record is MAC'd like #850;
+- lookup re-derives the findings from the recorded result.
+
+Study-harness issue 05's LC-T19 line depends on this item.
+
 ## Comments
 
 Initial source targets: `services/results/losses.py` zero-filling and denominator
