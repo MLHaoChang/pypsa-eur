@@ -326,7 +326,9 @@ def test_each_dispatch_rechecks_under_the_lock_and_refuses_with_no_effect(detach
 
 def test_a_foreground_write_during_the_solve_is_refused_409_and_none_is_lost(detached, site, client, monkeypatch):
     _, root = site
+    from routers.simulation import _solver_in_flight
     task, path, record = until_solve_waits(detached, site, monkeypatch)  # its follower never settles it
+    wait_until(lambda: not _solver_in_flight())  # the solver's own gate would answer the PUTs
     assert json.loads(path.read_text())['steps'][-1]['status'] == 'waiting'
     assert harness_locks.holder(record['project_id']) == task['task_id']  # the runner's own hold
     body = {'name': 'G1', 'bus': 'B1', 'marginal_cost': 30}
