@@ -1,11 +1,15 @@
 """LC-06 LC-D04: a capacity expansion with a unique optimum, by hand.
 
-One bus, 10 MW of demand for two hours. Cheap is extendable to at most 6 MW at
-100 EUR/MW plus 10 EUR/MWh; Backup is extendable without a cap at 500 EUR/MW
-plus 50 EUR/MWh. Per MW over the horizon Cheap costs 100 + 2 x 10 = 120 EUR and
-Backup 500 + 2 x 50 = 600, so the unique optimum builds Cheap to its cap and
-Backup the remaining 4 MW. Raising the cap by 1 MW moves one MW from Backup to
-Cheap and lowers the objective by 600 - 120 = 480.
+One bus, 10 MW of demand in two snapshots weighted 4380 h each, so the horizon
+is exactly one year and the app's periodised capital cost (capital_cost x
+nyears, nyears = sum of weights / 8760, the validator's
+snapshot_weights_nyears_off) is the annual figure itself. Cheap is extendable
+to at most 6 MW at 60,000 EUR/MW/a plus 10 EUR/MWh; Backup to 100 MW at 20,000
+EUR/MW/a plus 50 EUR/MWh (the validator refuses an unbounded extendable).
+Run flat out for the year, one MW of Cheap costs 60,000 + 8760 x 10 = 147,600
+EUR and one MW of Backup 20,000 + 8760 x 50 = 458,000, so the unique optimum
+builds Cheap to its cap and Backup the remaining 4 MW. Raising the cap by 1 MW
+moves one MW from Backup to Cheap and lowers the objective by the difference.
 
 Every number below is computed here from those inputs. The run goes through
 the ordinary `run_simulation` chat tool, the answer through `get_results`,
@@ -22,13 +26,14 @@ from tests.test_oj01_latest_loadflow_journey import _solve_once
 from tests.test_workflow_tools import helpers_state  # noqa: F401
 
 NAME = 'lc06-d04-lp'
-DEMAND_MW, HOURS = 10.0, 2
-CHEAP = {'capital_cost': 100.0, 'marginal_cost': 10.0, 'p_nom_max': 6.0}
-BACKUP = {'capital_cost': 500.0, 'marginal_cost': 50.0}
+DEMAND_MW, WEIGHTS = 10.0, (4380.0, 4380.0)
+NYEARS = sum(WEIGHTS) / 8760
+CHEAP = {'capital_cost': 60_000.0, 'marginal_cost': 10.0, 'p_nom_max': 6.0}
+BACKUP = {'capital_cost': 20_000.0, 'marginal_cost': 50.0, 'p_nom_max': 100.0}
 
 
 def per_mw(gen):
-    return gen['capital_cost'] + HOURS * gen['marginal_cost']
+    return gen['capital_cost'] * NYEARS + sum(WEIGHTS) * gen['marginal_cost']
 
 
 def objective(cap):
@@ -37,7 +42,9 @@ def objective(cap):
 
 def build() -> pypsa.Network:
     n = pypsa.Network()
-    n.set_snapshots(pd.date_range('2030-01-01', periods=HOURS, freq='h'))
+    n.set_snapshots(pd.date_range('2030-01-01', periods=len(WEIGHTS), freq='h'))
+    n.snapshot_weightings.loc[:, :] = pd.DataFrame({c: WEIGHTS for c in n.snapshot_weightings.columns},
+                                                   index=n.snapshots)
     n.add('Bus', 'B', v_nom=20)
     n.add('Carrier', 'cheap')
     n.add('Carrier', 'backup')
