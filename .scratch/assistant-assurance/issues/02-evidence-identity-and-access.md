@@ -3,7 +3,7 @@
 
 # P1: authorized evidence identity and validity
 
-Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable on claude/assurance-02-integrity; rest of P1 open
+Status: in progress — list_components page evidence (A1.1, current-input part of A1.3, A1.5 page capture) in #806; A1.2 revocation cases executable (#813), REVOKE-TOCTOU closed (#818); get_timeseries steps (#826); A1.4 integrity cases executable (#840); A1.4-RETAINED closed by a record MAC on claude/assurance-02-retained-mac; rest of P1 open
 Progress: Authorized retained evidence, ACL rechecks shipped; status says whole phase open, displayed-data revision proof pending
 Type: task
 Blocked by: 01; live-voice issue 06 for retained-run guarantees
@@ -99,4 +99,12 @@ Fixed here:
 **Still certified by a hash alone: retained scoped results (A1.4-RETAINED).** A `request_scope.retain` record carries its own `raw`; `evidence()` checks `digest(raw) == source_sha256` and that `scoped_calculate(raw)` gives the stored facts and slots, and the file envelope is an unkeyed `digest(record)`. A record whose `raw`, `source_sha256`, facts, slots and envelope are all rewritten together still reads as checked, without any write to the live project. A server-keyed MAC over the envelope (a key outside the record store) would close it; until then A1.4 is not closed for retained runs.
 
 Not covered: a real process restart (the in-process reload stands in), retention reclaim during a lookup, duplicate completion replayed through the stream (only `records.save` is driven), run and artifact APIs (A1.3, A4), and an attacker who rewrites both the record and the live project (out of scope: that is write access to the project).
+
+### 2026-10-28 — A1.4-RETAINED closed: a server-keyed MAC on every record
+
+`tests/assurance_acceptance/test_p1_retained_mac.py` (8 cases, 7 red on the base). Every record envelope now carries `mac`, an HMAC-SHA256 of the canonical record and its id (so a sealed record copied over another id is refused). Its key is derived from `SECRET_KEY` and a 32-byte per-install key in `<app data>/assistant_assurance.key` (mode 0600, created once with a hard link, or an exclusive create where links are unsupported, so concurrent processes agree; it sits beside the record store, not in it). `load()` and the checked-chart verify read a record only through `unseal()`, so a retained run whose `raw`, `source_sha256`, facts, slots and checksum are rewritten together reads 409 on the answer, export and evidence reads, and so does a record sealed under another key or missing its MAC or checksum.
+
+Consequences: records saved before this change, and every record after `SECRET_KEY` or the key file changes, read as unavailable (retention is 24 hours). With the dev default `SECRET_KEY` the MAC rests on the key file alone, so an attacker who can read app data can forge; a deployment that sets `SECRET_KEY` outside app data is protected against one who can only write the record store. Tests that rewrite a record to reach the deeper checks now re-seal it with `records.seal`.
+
+Not covered: replay of an older, validly sealed version of a mutable record (`operation`, `ui_action`, `conversation_context`) within its 24 hours; a monotonic counter would close it. An unresolved `operation` reservation saved before this change no longer reads, and the reclaim loop still keeps unresolved reservations, so such a file holds a quota slot until removed by hand.
 

@@ -100,7 +100,8 @@ facts; it does not cover unexpressed user goals.
 
 To replay history, supply `evidence_id` with the exact original retained scope
 and `retain: true`. Retained raw evidence is recalculated without reading
-foreground outputs; ownership/ACLs and checksum validation still apply.
+foreground outputs; ownership/ACLs and the record MAC (a server key outside
+the record store, `assurance_records.seal`) still apply.
 For signed comparisons, request `cost_delta` and/or `cost_change_percent` and
 supply `comparison_evidence_id` from a compatible retained baseline. Profile,
 project, entity, snapshot window and cost basis must match. Delta is candidate

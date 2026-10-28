@@ -920,3 +920,15 @@ Regressions: `tests/assurance_acceptance` 205 passed; `tests/test_*assur*.py` wi
 
 Remaining for P1: A1.4-RETAINED (retained scoped results are still certified by an unkeyed hash; a server-keyed MAC on the envelope closes it), A1.3 historical as-of runs, A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
 
+
+### 2026-10-28 — P1 tracer: A1.4-RETAINED, a server-keyed record MAC (issue 02)
+
+Policy version 1. Every assurance record envelope carries `mac`: HMAC-SHA256 over the canonical `{id, record}`, keyed from `SECRET_KEY` and a 32-byte per-install key at `<app data>/assistant_assurance.key` (beside the record store, mode 0600). `load()` and `checked_charts.verify` read only through `unseal()`. `test_p1_retained_mac.py`: 8 cases; on the base 7 fail, 1 passes (a missing checksum was already refused); after the change 8 pass (`python -m pytest -q -o addopts='' tests/assurance_acceptance/test_p1_retained_mac.py`).
+
+Mutants, each red: no MAC comparison in `unseal` (5), no id in the MAC (2).
+
+Tests that rewrite a record to reach the deeper checks re-seal it with `records.seal(record, record_id)` (`test_p1_integrity`, `test_conversation_recovery`, `test_checked_charts`); `test_assurance_storage` reads the workers' key root. Regressions: `tests/assurance_acceptance` with conversation recovery/scope, checked charts, harness reliability and the navigation/drain/lock-policy files: 457 passed, 1 skipped; `tests/test_*assur*.py`: 277 passed.
+
+Not covered: replay of an older sealed version of a mutable record within 24 hours; pre-change unresolved operation reservations keep a quota slot. Records saved before this change, or after `SECRET_KEY` or the key file changes, read as unavailable.
+
+Remaining for P1: A1.3 historical as-of runs (live-voice 06 is done, so not blocked by it), A1.5 complete-source aggregates, A1.6/A1.7 validity and masks, the other `read_unvalidated` families, frontend `assurance_state`, SERIES-WINDOW, REVOKE-KIND.
