@@ -942,6 +942,9 @@ def _poc_sk_min(inp: _Inputs):
     try:
         import yaml
         from gridspine.drivers.campus_study import SK_CAMPUS, _pcc_sk_min, _sk_source
+    except ImportError:  # pragma: no cover - build-shape branch
+        return None, None
+    try:
         campus = yaml.safe_load((inp.dir / "campus_electrical" / "campus_input.yaml").read_text())
         pcc = campus["campus"]["pcc"]
         bus = pcc.get("pypsa_name")
@@ -950,7 +953,8 @@ def _poc_sk_min(inp: _Inputs):
         if _sk_source(campus, inp.n)[0] != SK_CAMPUS:
             return None, None
         return _pcc_sk_min(pcc), _num(pcc.get("vn_kv"))
-    except Exception:  # noqa: BLE001 - no, or no readable, campus description: the entered S_k'' is used
+    except (OSError, yaml.YAMLError, KeyError, TypeError, ValueError):
+        # No, or no readable, campus description: the entered S_k'' is used, and the row says so.
         return None, None
 
 

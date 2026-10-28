@@ -35,7 +35,7 @@ import math
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
-from gridspine.static.flicker import _num, _sk_of
+from gridspine.static.flicker import NO_SK, _num, _sk_of
 from gridspine.static.island_sc_seq import c_factor
 
 TOLERANCE = 1e-9
@@ -71,7 +71,6 @@ LEDGER = (
 #: Said of a limit the profile does not take from a code (a shipped demo value).
 PLANNING_LEVEL = ("planning level, not an emission limit allocated to this installation; the project's grid code "
                   "governs")
-NO_SK = "No short-circuit level at the point of connection"
 MOTOR_LABEL, METHOD_LABEL, MULTIPLE_LABEL = "Motor rating", "Start method", "Start current multiple"
 
 UNIT_COLUMNS = (
@@ -132,7 +131,7 @@ def limit_from_profile(profile: dict | None) -> tuple[float | None, str | None]:
     return float(lim["value"]), clause
 
 
-def _empty(row: dict, note: str) -> dict:
+def _unknown(row: dict, note: str) -> dict:
     row.update(du_pct=None, margin_pct=None, verdict="unknown", note=note)
     return row
 
@@ -171,10 +170,10 @@ def motor_start_table(units: pd.DataFrame, sources: dict, q_gfm_mvar_by_poc: dic
                "sk_case": case, "c": c, "s_sc_mva": s_sc, "limit_pct": limit_pct, "label": LABEL}
         missing = [label for label, v in ((MOTOR_LABEL, kw), (METHOD_LABEL, method)) if v is None]
         if missing:
-            rows.append(_empty(row, f"no input: {' and '.join(missing)} not set"))
+            rows.append(_unknown(row, f"no input: {' and '.join(missing)} not set"))
             continue
         if s_sc is None:
-            rows.append(_empty(row, NO_SK))
+            rows.append(_unknown(row, NO_SK))
             continue
         q_gfm = _num((q_gfm_mvar_by_poc or {}).get(poc))
         notes = []

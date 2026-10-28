@@ -12,10 +12,10 @@ LIMIT = 3.0
 POC = {"PoC": ms.Source(sk_mva=150.0)}
 # Hand values. S_rated = 2000 kW / 0.85 = 2.352941 MVA; S_sc = 150 / 1.1 = 136.3636 MVA.
 # DOL: S_start = 6 * 2.352941 = 14.117647 MVA, sin phi = sqrt(1 - 0.30^2) = 0.953939,
-#      Q_start = 13.467372 Mvar, dU = 13.467372 / 136.3636 * 100 = 9.876073 %  (> 3 %: fail).
+#      Q_start = 13.467372 Mvar, dU = 13.467372 / 136.3636 * 100 = 9.876076 %  (> 3 %: fail).
 # VFD: S_start = 2.352941 MVA, sin phi = sqrt(1 - 0.95^2) = 0.312250,
 #      Q_start = 0.734706 Mvar, dU = 0.538784 %  (<= 3 %: pass).
-DOL_DU = 9.876073
+DOL_DU = 9.876076
 VFD_DU = 0.538784
 
 
