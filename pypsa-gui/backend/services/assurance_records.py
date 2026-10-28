@@ -515,9 +515,10 @@ def aggregate_selector(args):
     """(selector, entity id, target names or None) for exact get_aggregate_load
     args, else None.
 
-    No args is every load; `section` must already be in the handler's
-    canonical form; `names` is a comma list with no padding, empty or repeated
-    name (the handler would silently drop or double-count those).
+    No args is every load; `section` is normalised as the handler does
+    (lower case, stripped); `names` is a comma list with no padding, empty or
+    repeated name (the handler would silently drop or double-count those).
+    A null, empty or blank value is refused, not read as absent.
     """
     if not isinstance(args, dict) or len(args) > 1:
         return None
@@ -529,7 +530,8 @@ def aggregate_selector(args):
     if not 1 <= len(value) <= MAX_AGGREGATE_ARG_CHARS:
         return None
     if key == "section":
-        return ("section", value, None) if value == value.lower().strip() else None
+        section = value.lower().strip()
+        return ("section", section, None) if section else None
     names = value.split(",")
     if any(not n or n != n.strip() for n in names) or len(set(names)) != len(names):
         return None
@@ -543,8 +545,11 @@ def aggregate_source(ctx, args):
     resolve_series, the source the handler sums. `gap` names why the sum is
     not complete (no targets, an unknown name, a load with no profile, a
     missing or non-finite step, indexes that differ), else it is None and
-    `totals` is the per-step sum. The digest covers the project, the args,
-    the ordered target names and each member's series digest.
+    `totals` is the per-step sum, by the handler's own expression so a shown
+    value matches bit for bit. Members must share the network's snapshots: a
+    series uploaded on another snapshot set would sum over the wrong steps.
+    The digest covers the project, the normalised selection, the ordered
+    target names and each member's series digest.
     """
     import numpy as np
     import pandas as pd
@@ -552,16 +557,20 @@ def aggregate_source(ctx, args):
     from services.profile_shapes import _load_section
 
     n = ctx.network
-    selector, _entity, names = aggregate_selector(args)
+    selector, entity, names = aggregate_selector(args)
     if selector == "names":
         targets = names
     elif selector == "section":
-        targets = [t for t in n.loads.index if _load_section(n, t) == args["section"]]
+        targets = [t for t in n.loads.index if _load_section(n, t) == entity]
     else:
         targets = list(n.loads.index)
     hashed = hashlib.sha256(
         json.dumps(
-            {"project_id": ctx.project_uuid, "args": args, "targets": targets},
+            {
+                "project_id": ctx.project_uuid,
+                "selection": [selector, entity],
+                "targets": targets,
+            },
             sort_keys=True,
         ).encode()
     )
@@ -584,8 +593,13 @@ def aggregate_source(ctx, args):
             None,
             targets,
         )
-    if any(not s.index.equals(members[0].index) for s in members[1:]):
-        return hashed.hexdigest(), "the loads do not share one time index", None, targets
+    if any(not s.index.equals(n.snapshots) for s in members):
+        return (
+            hashed.hexdigest(),
+            "the loads do not share the network's snapshots",
+            None,
+            targets,
+        )
     frame = pd.concat(members, axis=1)
     try:
         bad = int((~np.isfinite(frame.to_numpy(dtype="float64"))).sum())
@@ -599,7 +613,8 @@ def aggregate_source(ctx, args):
 
 
 def _aggregate_facts(entity, totals):
-    """The peak and mean of the summed series, over every step."""
+    """The peak and the mean over steps of the per-step sum, as the handler
+    computes them."""
     totals = [float(v) for v in totals]
     values = {"peak": max(totals), "mean": sum(totals) / len(totals)}
     return [
@@ -625,8 +640,9 @@ def active_aggregate_source(args):
 def capture_aggregate(owner, args, result, digest_before):
     """Evidence for the peak and mean one get_aggregate_load result showed.
 
-    The sum is recomputed from every member's raw series; a shown value
-    certifies only when it equals that sum's statistic after a JSON round-trip.
+    The sum is recomputed from every member's raw series. Every shown
+    statistic and count must equal it after a JSON round-trip, or nothing is
+    stored: an edit between the guard and the handler leaves it unchecked.
     """
     ctx = PyPSAService.get_active_context()
     selected = aggregate_selector(args)
@@ -652,12 +668,8 @@ def capture_aggregate(owner, args, result, digest_before):
             or len(result["values"]) != len(totals)
         ):
             return None
-        facts = [
-            fact
-            for fact in _aggregate_facts(entity, totals)
-            if _certified(result.get(fact["metric"]), fact["value"])
-        ]
-        if not facts:
+        facts = _aggregate_facts(entity, totals)
+        if not all(_certified(result.get(f["metric"]), f["value"]) for f in facts):
             return None
         record = {
             "version": 1,

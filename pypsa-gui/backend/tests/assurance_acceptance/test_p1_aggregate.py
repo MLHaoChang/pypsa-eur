@@ -152,8 +152,12 @@ def test_mean_is_checked_too(loads, harness):
 
 @pytest.mark.parametrize(
     ("args", "entity", "peak"),
-    [({}, "all loads", 108.0), ({"names": "L2,L1"}, "L2,L1", PEAK)],
-    ids=["all", "names"],
+    [
+        ({}, "all loads", 108.0),
+        ({"names": "L2,L1"}, "L2,L1", PEAK),
+        ({"section": " Electricity "}, "electricity", PEAK),
+    ],
+    ids=["all", "names", "mixed-case-section"],
 )
 def test_all_loads_and_named_loads_are_checked(loads, harness, args, entity, peak):
     frames, _ = checked(harness, draft(value=peak, entity=entity), args)
@@ -198,15 +202,31 @@ def test_incomplete_coverage_is_refused_before_the_handler(
     assert approval(frames)["verdict"] == "limited"
 
 
-def test_misaligned_upload_is_refused(loads, harness, monkeypatch):
-    berlin = pd.date_range("2026-01-01", periods=3, freq="h", tz="Europe/Berlin")
-    PyPSAService.get_user_ts()[("loads", "p_set", "L2")] = pd.Series(L2, index=berlin)
+@pytest.mark.parametrize(
+    "uploads",
+    [
+        {"L2": pd.date_range("2026-01-01", periods=3, freq="h", tz="Europe/Berlin")},
+        # Both members agree with each other, on an older snapshot set.
+        {
+            "L1": pd.date_range("2025-01-01", periods=3, freq="h"),
+            "L2": pd.date_range("2025-01-01", periods=3, freq="h"),
+        },
+    ],
+    ids=["one-member", "older-snapshots"],
+)
+def test_a_member_off_the_network_snapshots_is_refused(
+    loads, harness, monkeypatch, uploads
+):
+    for name, index in uploads.items():
+        PyPSAService.get_user_ts()[("loads", "p_set", name)] = pd.Series(
+            L1 if name == "L1" else L2, index=index
+        )
     calls = wrap_handler(monkeypatch)
     frames = read_aggregate(harness)
     assert not calls
     refused = aggregate_result(frames)
     assert refused["error_kind"] == "aggregate_not_checkable"
-    assert "do not share one time index" in refused["message"]
+    assert "do not share the network's snapshots" in refused["message"]
 
 
 @pytest.mark.parametrize(
@@ -216,11 +236,17 @@ def test_misaligned_upload_is_refused(loads, harness, monkeypatch):
         {"names": "L1,L1"},
         {"names": "L1, L2"},
         {"names": "L1,"},
-        {"section": " Electricity"},
         {"section": 7},
+        {"section": None},
+        {"section": ""},
+        {"section": "  "},
+        {"names": ""},
         {"period": 2026},
     ],
-    ids=["both", "duplicate", "padded", "empty-name", "uncanonical", "number", "extra"],
+    ids=[
+        "both", "duplicate", "padded", "empty-name", "number", "null-section",
+        "empty-section", "blank-section", "empty-names", "extra",
+    ],
 )
 def test_inexact_args_are_refused_before_the_handler(loads, harness, monkeypatch, args):
     calls = wrap_handler(monkeypatch)
@@ -247,12 +273,37 @@ def test_a_claim_off_the_aggregate_is_refused(loads, harness, text):
     assert "Aggregate load" not in public_text(frames)
 
 
-def test_a_shown_peak_that_differs_from_the_source_is_not_certified(
-    loads, harness, monkeypatch
-):
-    wrap_handler(monkeypatch, lambda result: result.update(peak=9.0))
-    frames = read_aggregate(harness)
+@pytest.mark.parametrize(
+    "shown",
+    [{"peak": 9.0}, {"total_loads": 3}, {"loads_with_profile": 1}],
+    ids=["peak", "total-loads", "loads-with-profile"],
+)
+def test_any_shown_mismatch_stores_no_evidence(loads, harness, monkeypatch, shown):
+    """An edit between the guard and the handler leaves the answer unchecked,
+    even for the statistic that still matches."""
+    wrap_handler(monkeypatch, lambda result: result.update(shown))
+    frames = read_aggregate(harness, draft(metric="mean", value=MEAN))
     assert approval(frames)["verdict"] == "limited"
+    assert aggregate_result(frames)["result"]["_assurance"]["evidence_ids"] == []
+
+
+def test_facts_equal_the_handlers_shown_values_bit_for_bit(loads, harness):
+    """Fifty loads of awkward floats: the guard sums exactly as the handler."""
+    n = network()
+    n.set_snapshots(pd.date_range("2026-01-01", periods=24, freq="h"))
+    for i in range(50):
+        name = f"X{i}"
+        n.add("Load", name, bus="B1")
+        n.loads_t.p_set[name] = [0.1 * (i + 1) + 1e-9 * k + 1 / 3 for k in range(24)]
+    n.loads_t.p_set["L1"] = [0.7] * 24
+    n.loads_t.p_set["L2"] = [1 / 7] * 24
+    shown = chat_tools.DISPATCHERS["get_aggregate_load"](section="electricity")
+    frames, evidence_id = checked(harness, draft(value=shown["peak"]))
+    record = harness.client.get(f"/api/chat/evidence/{evidence_id}").json()
+    assert {f["metric"]: f["value"] for f in record["facts"]} == {
+        "peak": shown["peak"],
+        "mean": shown["mean"],
+    }
 
 
 @pytest.mark.parametrize(
