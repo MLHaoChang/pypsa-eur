@@ -94,3 +94,34 @@ Branch `claude/lc06-family-manifest`.
   `assistant_inventory.py --check` passes at the master merge (2d8779ca).
 - Covered rows are the rebaseline's PS+O tests. Their oracles were read from
   the tests and were not re-derived here. `full_coverage=not_established`.
+
+### Reviewers and standing conditions (2026-10-28)
+
+The coordinator named GK A to lead S4–S9 (adequacy/EH MC, common-mode, island
+control/GFM, frequency oracles). GK B keeps S0–S3 and the D11/D14/D19/D01–23
+rows; a UI slice also needs UX. GK A's plan GO came with these per-slice conditions:
+
+- Every slice: one mutation per oracle (a perturbed input fails the assert);
+  each tolerance stated and justified; f0 from the network/profile, never a
+  literal (`test_sixty_hz` stays green); generic demo figures in campus fixtures (SAGC-1).
+- S4 standard MC: exact LOLE = Σ_h P(cap < L_h) and EUE = Σ_h E[max(L_h − cap, 0)]
+  from the two-unit COPT. Fixed seed. CI half-width ≤ 10 % of the oracle LOLE,
+  with both that and oracle-in-CI asserted. Handle the bias of all units starting
+  available (horizon ≫ MTTR, or a stationary start), and say which.
+- S5: zonal per-hour min(available Link, max(surplus, 0) × delivery ratio) on hours
+  where both bounds bind. Common-mode: equal per-draw unit states across runs, so
+  removing a Link does not shift the RNG stream. EUE_cm ≥ EUE_base per draw,
+  and strictly greater in total where the Link matters.
+- S7: each refusal names the field and model; one case per wrong-base class;
+  exact read-back.
+- S8: RoCoF at 0+ with D = 0. Settled Δf = −ΔP/(ΣK + D), with no isochronous
+  unit in that case; an isochronous case of its own (Δf → 0). UPS L·T/2/3600 MWh.
+  Halving dt must cut the error by the scheme's order (≥ ~1.8). EMT row stays explicit.
+- S9: stale = a network edit between preview and apply; the re-study is
+  required and runs on the applied values.
+- S6: energization survives capacity edits up and down; bus and per-Load VoLL
+  each change the result.
+
+GK B on S1: fill `tools` for LC-D04.bound_build/units. The perturbation delta is
+computed in the test, not read from the result. S2's unavailable-solver refusal
+goes through the real dispatcher, not a monkeypatched `_probe`.
