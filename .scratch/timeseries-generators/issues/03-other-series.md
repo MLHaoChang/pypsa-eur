@@ -1,6 +1,6 @@
 # Other model series (prices, inflow, COP, process schedules)
 
-Status: needs-info (owner question via the coordinator, 2026-10-28: are process schedules covered, and does the market price wait on C2?)
+Status: done (#554, #586; owner TSG-03 2026-10-28: "Mark done"; market prices pending on package C2)
 Progress: series.py has tou price, inflow, COP; no process schedules, and market price bundles (C2) do not exist yet.
 Type: task
 Blocked by: profiles RP-06 hand-off; UI part blocked by the approved project workflow
@@ -21,6 +21,7 @@ See [the spec](../spec.md), family section.
 - Market price bundles (`kind: market`) are refused until package C2 exists. No C2 package exists on master.
 - Process schedules: in the approved workflow (§TSG-03) and in grid-to-process design §2.5, a delivery schedule is a Load `p_set`, which the load editor's upload already writes. A unit shutdown is a maintenance window on the unit's Link, which #554 covers. The hourly delivery schedule belongs to grid-to-process 09 (P3 chronological year).
 
-**What we still need from the owner (asked via the coordinator, 2026-10-28):**
+**Owner answer (TSG-03, 2026-10-28, relayed by the coordinator): "Mark done".**
 
-- Mark 03 done, with market prices pending on C2 and process schedules covered as above (recommended)? Build a "process schedule" preset here? Or drop the item to grid-to-process?
+- 03 is done. Market price bundles are a pending pointer to package C2: when C2 lands, the refused `kind: market` gets its own issue.
+- Process schedules count as covered: product deliveries by the load upload (Load `p_set`), unit shutdowns by link maintenance windows (#554). The chronological delivery schedule is left to grid-to-process 09.
