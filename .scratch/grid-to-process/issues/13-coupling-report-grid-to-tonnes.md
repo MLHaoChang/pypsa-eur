@@ -31,7 +31,7 @@ This ticket builds no new loop (design D5).
 ## Triage (2026-10-28)
 
 **Verified on master (41ade3be):** not built. No "grid risk to production" section exists. The inputs exist or arrive with 12:
-- ride-through results arrive with 12;
+- ride-through results arrive with 12b (the `12-` file);
 - island hours and pickup blocks come from the island sidecar (`services/solver/island.py`, `gridspine/schema/island.py`, `campus_island_report.py`);
 - outage rates and MTTR are in the adequacy archetypes;
 - the LP's lost tonnes come from the process view (04) and process loss (08).
@@ -63,5 +63,5 @@ This ticket builds no new loop (design D5).
 **Out of scope:** any LP feedback loop (P4, design §7); new grid studies.
 
 **Likely files:** new `pypsa-gui/backend/services/results/grid_risk_production.py`, `pypsa-gui/backend/routers/results.py`, `pypsa-gui/backend/services/results/process_view.py` (read only), the report chapter code, `pypsa-gui/frontend/src/pages/Results.tsx`, tests.
-**Blocked by:** 12 (12b if split); 08 is done.
+**Blocked by:** 12 (the `12-` file is 12b, owner G2P-12-SPLIT); 08 is done.
 **Model:** Opus (reads gridspine and adequacy results, gated). The Guided tiles need the UX reviewer's OK.

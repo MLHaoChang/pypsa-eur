@@ -1,11 +1,11 @@
-# Minutes-scale: motor-start ΔU and the process restart sequence
+# 12b: minutes-scale dips, the process restart sequence and lost tonnes
 
-Status: ready-for-agent (triage 2026-10-28: still blocked by 10; owner question G2P-12-SPLIT may start 12a sooner)
+Status: ready-for-agent (owner G2P-12-SPLIT, 2026-10-28: this file is 12b; 12a is issue 18 and starts now)
 Type: task
-Blocked by: 10
+Blocked by: 10, 18 (12a: the motor fields and the ΔU check)
 Gated: **yes** (gridspine)
 Model tier: opus
-Size: L
+Size: M–L
 
 Read [the design](../design.md) §4.3 first. (The old "stay out of the island and tuning code while #332 is open"
 no longer applies: #332 merged on 2026-10-16.)
@@ -50,34 +50,15 @@ On the B template:
   - the island schema already has pickup blocks;
   - the process-unit field pattern of 17a (fields, Link-form reveal, attrs doc, inventory) is the model for item 1.
 
-**Size L, so ship it as two PRs on this one issue (as 17 did):**
-- **12a:** items 1 and 2 (fields and the ΔU check).
-- **12b:** items 3–5 (dip to trips to tonnes, the restart sequence, results), plus the B acceptance.
+**Split (owner G2P-12-SPLIT, 2026-10-28).** Items 1 (the motor fields) and 2 (the ΔU check) of "What to build" moved to [12a, issue 18](18-12a-motor-start-fields-and-du-check.md). This file is 12b: the ride-through fields and items 3–5, plus the B acceptance. Issue 13 waits for this file.
 
-Owner question **G2P-12-SPLIT** (sent 2026-10-28) asks whether 12a may start now on a fixture network. Until it is answered, both wait for 10.
-
-### Agent brief
+### Agent brief (12b)
 
 **Category:** enhancement (gated gridspine: send GK A the plan before code)
-**Summary:** motor-start ΔU at the PoC and a discrete-event restart model that turn grid dips and island transitions into lost tonnes.
+**Summary:** turn grid dips and island transitions into lost tonnes, through ride-through curves and a discrete-event restart model that reuses 12a's ΔU check.
 
 **Desired behaviour:**
-- **Process-unit fields:**
-  - `motor_kw`;
-  - `start_method` ∈ {`dol`, `soft`, `vfd`}, with a default start-current multiple of 6 / 3 / 1 that a per-unit field overrides;
-  - a ride-through curve (depth % against duration s);
-  - `restart_time_h`.
-
-  An unset field means "no input": the check reads unknown, never pass (as 17a's harmonic fields do).
-- **A gridspine static check** beside `static/capacity.py` and `static/flicker.py` (GK A, 2026-10-28):
-  - **Source strength.** S_sc = S_k''/c, i.e. Z = c·Un²/S_k'' (the standing c-factor rule). Judge on the PoC's **minimum** short-circuit case when it has one; else use the entered S_k'' with c, plus a note saying so. Reuse flicker's S_k *lookup* (`_sk_of`) only, not its "S_k as is" ledger line.
-  - **Formula.** ΔU% ≈ (S_start·sin φ_start − Q_gfm) / S_sc × 100.
-    - S_start = √3·U·I_start from the start method.
-    - The starting power factor is ledgered per start method (demo, assumed).
-    - Q_gfm is the grid-forming storage's available reactive power at that PoC.
-    - If Q_gfm cannot be stated from the network, set Q_gfm = 0 (conservative) and say so in the row.
-  - **Limit.** Read the profile's existing rapid-voltage-change key (`rvc_limit_pct`, as the scorecard's `rapid_voltage_change` rows do). Add no new profile key. A shipped demo 3 % carries the clause "planning level, not an emission limit allocated to this installation". The project's grid code governs.
-  - **Scorecard.** One row per unit and start method on the grid-readiness scorecard. This changes the row count, so the PR updates the pilot-evaluation golden (`not_checked` count in `pypsa-gui/backend/tests/test_pilot_evaluation.py`) and names that update.
+- **Process-unit fields:** a ride-through curve (depth % against duration s) and `restart_time_h`. Unset means "no input" and reads unknown, never pass.
 - **Dip to trips:**
   - demo dip statistics per PoC (counts per year by depth and duration class, in the ledger);
   - a unit trips when a class falls outside its ride-through curve;
@@ -92,14 +73,13 @@ Owner question **G2P-12-SPLIT** (sent 2026-10-28) asks whether 12a may start now
 - **Results:** a campus-study output file and a results section.
 
 **Acceptance (on the B template):**
-- [ ] Hand-calculated: a DOL start of the B mill's motor kW at its ledgered start pf on 150 MVA (c applied) gives ΔU = the hand value in % (written in the test) > the limit, so it fails. The VFD start's hand value is ≤ the limit, so it passes.
-- [ ] Q_gfm = 0 and Q_gfm > 0 give the hand values of the formula above.
+- [ ] The B template's motor-start check: a DOL mill start fails on 150 MVA and a VFD start passes, with the hand values of 12a's formula (design §3.B).
 - [ ] The restart timeline's lost tonnes equal Σ restart time × rate × mass pull over the units that tripped.
-- [ ] A unit with no motor fields reads unknown on the scorecard, not pass.
-- [ ] The assistant inventory and the attrs-doc compact cap test pass. If the cap is exceeded, ask the owner, as G2P-17A-DOCCAP did; do not raise it unasked.
+- [ ] A unit with no ride-through curve reads unknown, not "rides through".
+- [ ] The assistant inventory and the attrs-doc compact cap test pass. If the cap is exceeded, ask the owner; do not raise it unasked.
 
-**Out of scope:** dynamic (RMS/EMT) motor start; any LP feedback; the coupling report (13).
+**Out of scope:** the motor fields and the ΔU check (12a); dynamic (RMS/EMT) motor start; any LP feedback; the coupling report (13).
 
-**Likely files:** `pypsa-gui/backend/models/process_unit.py`, `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/services/asset_schema/attrs_doc.py`, new `gridspine/static/motor_start.py`, `gridspine/static/flicker.py` (shared S_k lookup only), `pypsa-gui/backend/services/adequacy/grid_readiness.py`, `pypsa-gui/backend/services/campus_island_report.py`, `pypsa-gui/frontend/src/pages/` (a results section), tests under `tests/gridspine/` and `pypsa-gui/backend/tests/`.
-**Blocked by:** 10 (12a may start sooner if the owner picks the split in G2P-12-SPLIT).
+**Likely files:** `pypsa-gui/backend/models/process_unit.py`, `pypsa-gui/backend/services/asset_schema/fields.py`, `pypsa-gui/backend/services/asset_schema/attrs_doc.py`, new `gridspine/static/restart_sequence.py`, `gridspine/static/motor_start.py` (from 12a), `pypsa-gui/backend/services/campus_island_report.py`, `pypsa-gui/frontend/src/pages/` (a results section), tests under `tests/gridspine/` and `pypsa-gui/backend/tests/`.
+**Blocked by:** 10 and 18 (12a).
 **Model:** Opus (gridspine, gated). The results section needs the UX reviewer's OK.

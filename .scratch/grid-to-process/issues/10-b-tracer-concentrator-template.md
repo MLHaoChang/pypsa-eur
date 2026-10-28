@@ -46,12 +46,14 @@ Design §3.B, "Acceptance checks (B)", except:
 - A new staged template `eh_concentrator_staged`, built like `eh_ammonia_staged`, with the same template registration, ledger and sidecars. It contains the flowsheet and numbers of design §3.B (Flowsheet, Numbers), each number labelled in the ledger as `demo` or `sourced`.
 - It uses `stage_network(time_base="year")` from 09.
 - The commercial and finance blocks follow the generic site's industrial preset.
-- If the owner answers G2P-14-NOW with the recommended option, this PR also lists the template in the assistant's `create_project_from_template` enum and regenerates the inventory.
+- The assistant's `create_project_from_template` lists `eh_concentrator_staged`, and the assistant inventory is regenerated (owner G2P-14-NOW, 2026-10-28: moved here from issue 14).
 
-**Acceptance:** design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12).
+**Acceptance:**
+- [ ] `create_project_from_template` with `eh_concentrator_staged` creates the project, and the assistant inventory check passes.
+- [ ] Design §3.B "Acceptance checks (B)": the year solve within 09's budget, the mass balance, the shed carrying across shipments with the week build refused, non-firm curtailment, and restart. Two exceptions: the investment-case check (11) and the motor-start check (12).
 
 **Out of scope:** the IC blocker (11); motor fields (12); any change to `stage_network` beyond calling it.
 
-**Likely files:** new `pypsa-gui/backend/project_templates/eh_concentrator.py` and `pypsa-gui/backend/project_templates/eh_concentrator_staged/`, `pypsa-gui/backend/project_templates/eh_templates.py`, `pypsa-gui/backend/routers/projects.py`, `pypsa-gui/backend/services/flow_scope.py`, new tests under `pypsa-gui/backend/tests/`.
+**Likely files:** new `pypsa-gui/backend/project_templates/eh_concentrator.py` and `pypsa-gui/backend/project_templates/eh_concentrator_staged/`, `pypsa-gui/backend/project_templates/eh_templates.py`, `pypsa-gui/backend/routers/projects.py`, `pypsa-gui/backend/services/flow_scope.py`, `pypsa-gui/backend/harness/catalogue.py`, new tests under `pypsa-gui/backend/tests/`.
 **Blocked by:** 09, and 09's measurement within the ≤ 30 min budget. If 09 reports over budget, this goes back to the owner.
 **Model:** Opus.

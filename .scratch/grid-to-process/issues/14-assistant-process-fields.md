@@ -1,8 +1,8 @@
 # Assistant: process-unit fields and the template parameters
 
-Status: ready-for-agent (triage 2026-10-28: mostly done on master, the gap is narrowed below; still blocked by 10; owner question G2P-14-NOW may start it sooner)
+Status: ready-for-agent (owner G2P-14-NOW, 2026-10-28: run now; the concentrator listing moved to issue 10)
 Type: task
-Blocked by: 10 (the concentrator template to list; was 07, which shares no code with this)
+Blocked by: none (was 07; the template listing moved to issue 10 by owner G2P-14-NOW)
 Gated: no (harness)
 Model tier: sonnet
 Size: S
@@ -31,7 +31,7 @@ Read `pypsa-gui/backend/harness/README.md` first; it is the contract.
 2. No chat smoke creates an HB-like unit.
 3. `eh_concentrator_staged` cannot be listed until 10 makes it.
 
-The old blocker 07 (a frontend form) shares no code with this, so it is dropped. The real blocker is 10, for item 3. Owner question **G2P-14-NOW** (sent 2026-10-28) asks whether items 1–2 may go now, with item 3 moved into 10's PR.
+The old blocker 07 (a frontend form) shares no code with this, so it is dropped. Item 3 depended on 10. Owner decision **G2P-14-NOW** (2026-10-28): items 1–2 go now; item 3 moved into issue 10's acceptance.
 
 ### Agent brief
 
@@ -40,17 +40,15 @@ The old blocker 07 (a frontend form) shares no code with this, so it is dropped.
 
 **Desired behaviour:**
 - The attribute docs the chat tools read name Bus `lost_production_value` and Generator `process_role` (with its two values), in the same compact style. Writes go through the existing schema validation.
-- `create_project_from_template` lists `eh_concentrator_staged`.
 - The assistant inventory is regenerated as `pypsa-gui/backend/harness/README.md` requires.
 
 **Acceptance:**
 - [ ] The inventory check passes.
 - [ ] The attrs-doc compact cap test passes. If it cannot, ask the owner (as G2P-17A-DOCCAP); never raise the cap unasked.
 - [ ] A chat smoke creates an HB-like unit: an `eh_process` Link with a negative `efficiency2`, a product bus with `mwh_per_t`, and a `shortfall` Generator. The saved network then has `process_view` rows for that product.
-- [ ] `create_project_from_template` with `eh_concentrator_staged` creates the project.
 
-**Out of scope:** the frontend form (07); motor fields (12); new chat tools.
+**Out of scope:** the frontend form (07); motor fields (12a); listing `eh_concentrator_staged` (issue 10, G2P-14-NOW); new chat tools.
 
 **Likely files:** `pypsa-gui/backend/services/asset_schema/attrs_doc.py`, `pypsa-gui/backend/harness/catalogue.py`, the generated assistant inventory, `pypsa-gui/backend/smoke/assistant_inventory.py`, tests under `pypsa-gui/backend/tests/`. The harness is busy (open PRs #795, #802, #812), so the frontier holds this until those land or the files don't overlap.
-**Blocked by:** 10 (for the template listing only; see G2P-14-NOW).
+**Blocked by:** none.
 **Model:** Sonnet (harness docs and a smoke).
