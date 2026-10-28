@@ -75,3 +75,17 @@ def test_cli_prints_one_line_per_test_and_none(tree, capsys):
         "pytest\tpypsa-gui/backend/services/costs.py\ttests/test_costs_extra.py",
         "none\tSnakefile",
     ]
+
+
+@pytest.mark.parametrize(
+    "path, tests",
+    [
+        ("pypsa-gui/tool-error-kinds.json", ["tests/test_tool_error_kind_manifest.py", "tests/test_json_fragments.py"]),
+        ("pypsa-gui/tool-error-kinds.d/claude-x.json",
+         ["tests/test_tool_error_kind_manifest.py", "tests/test_json_fragments.py"]),
+        ("pypsa-gui/backend/smoke/assistant_route_parity_declarations.d/claude-x.json",
+         ["tests/test_assistant_route_parity.py", "tests/test_json_fragments.py"]),
+    ],
+)
+def test_shared_json_and_its_fragments_map_to_their_tests(tree, path, tests):
+    assert map_tests(tree, path) == ("pytest", tests)
