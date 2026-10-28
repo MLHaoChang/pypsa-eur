@@ -618,6 +618,9 @@ def replay(ctx, series: pd.Series, meta: Mapping[str, Any], refinements: list,
 
 UNDO_BASE_GONE = ("the series before step {n} is no longer kept: generate it again "
                   "without the refinements, or undo the whole apply")
+UNDO_BASE_CHANGED = ("the series before step {n} no longer holds this series' earlier "
+                     "refinements: generate it again without the refinements, or undo "
+                     "the whole apply")
 
 
 def _canon(ops: Any) -> str:
@@ -638,6 +641,7 @@ def undo_base(meta: Mapping[str, Any], k: Any, load) -> tuple[str, Any, dict[str
             if not isinstance(k, int) or isinstance(k, bool) else
             f"this series has {len(ops)} refinements; there is no step {k + 1}")
     gone = InvalidRefineOpError(UNDO_BASE_GONE.format(n=k + 1))
+    changed = InvalidRefineOpError(UNDO_BASE_CHANGED.format(n=k + 1))
     cur, seen = meta, set()
     while True:
         job = cur.get("based_on")
@@ -649,12 +653,10 @@ def undo_base(meta: Mapping[str, Any], k: Any, load) -> tuple[str, Any, dict[str
             raise gone
         frame, cur = loaded
         mine = list(cur.get("refinements") or [])
-        if len(mine) <= k:
-            if _canon(mine) != _canon(ops[:len(mine)]):
-                raise gone
-            return job, frame, cur
         if _canon(mine) != _canon(ops[:len(mine)]):
-            raise gone
+            raise changed
+        if len(mine) <= k:
+            return job, frame, cur
 
 
 def undo_plan(refinements: list, k: int, base: list) -> tuple[list, list[int]]:

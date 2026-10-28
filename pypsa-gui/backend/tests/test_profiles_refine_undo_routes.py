@@ -147,14 +147,36 @@ def test_an_index_out_of_range_is_refused_plainly(client, project):
     assert "this series has 2 refinements; there is no step 3" in detail["message"]
 
 
-@pytest.mark.parametrize("index", [-1, True, "1", 1.0])
-def test_an_index_that_is_not_a_whole_number_from_0_is_refused(client, project, index):
+@pytest.mark.parametrize("index", [True, "1", 1.0])
+def test_an_index_that_is_not_a_whole_number_is_refused(client, project, index):
     # Python's -1 would silently undo the last op; True would undo op 1.
     gen = _generate(client, project)
     both = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
     resp = client.post(f"/api/projects/{project}/profiles/refine",
                        json={"job_id": both["job_id"], "undo_index": index})
     assert resp.status_code == 422, resp.text
+
+
+def test_a_negative_index_is_a_typed_refusal_not_the_last_op(client, project, bound_ctx):
+    # Python's -1 would silently undo the last op.
+    gen = _generate(client, project)
+    both = _refine(client, project, gen["job_id"], [_WINDOW, _PEAK]).json()
+    resp = _refine(client, project, both["job_id"], undo_index=-1)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["detail"]["error_kind"] == "invalid_refine_op"
+    assert "there is no step 0" in resp.json()["detail"]["message"]
+
+
+def test_ops_or_undo_is_a_typed_refusal_on_the_chat_tool_too(client, project, bound_ctx):
+    from fastapi import HTTPException
+
+    gen = _generate(client, project)
+    for args in ({}, {"ops": [_PEAK], "undo_index": 0}):
+        with bound_ctx(client), pytest.raises(HTTPException) as err:
+            chat_tools.DISPATCHERS["refine_generated_profile"](
+                project_id=project, job_id=gen["job_id"], **args)
+        assert err.value.detail["error_kind"] == "invalid_refine_op"
+        assert "either a non-empty ops list or undo_index" in err.value.detail["message"]
 
 
 def test_an_unrefined_artifact_has_nothing_to_undo(client, project):
@@ -167,8 +189,10 @@ def test_an_unrefined_artifact_has_nothing_to_undo(client, project):
 
 def test_ops_and_undo_together_or_neither_are_refused(client, project):
     gen = _generate(client, project)
-    assert _refine(client, project, gen["job_id"]).status_code == 422
-    assert _refine(client, project, gen["job_id"], [_PEAK], undo_index=0).status_code == 422
+    for resp in (_refine(client, project, gen["job_id"]),
+                 _refine(client, project, gen["job_id"], [_PEAK], undo_index=0)):
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["detail"]["error_kind"] == "invalid_refine_op"
 
 
 def test_the_applied_change_log_line_lists_each_op_with_its_parameters(client, project):
@@ -274,7 +298,8 @@ def test_a_base_whose_ops_differ_is_not_a_base(client, project, session_ctx):
     assert resp.status_code == 422, resp.text
     detail = resp.json()["detail"]
     assert detail["error_kind"] == "invalid_refine_op"
-    assert detail["message"].startswith("the series before step 2 is no longer kept: ")
+    assert detail["message"].startswith(
+        "the series before step 2 no longer holds this series' earlier refinements: ")
 
 
 @pytest.mark.parametrize("forged", ["not-a-kept-job", "../../Other Site/profiles_pending/x",

@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import Project, User
@@ -250,16 +250,11 @@ class RefineRequest(BaseModel):
     # A pending artifact to refine by deterministic ops
     # (services/profile_gen/refine.py); the result is a new pending artifact.
     # Or, with ``undo_index``, the artifact re-refined without that recorded
-    # op (TSG 05). Exactly one of the two.
+    # op (TSG 05). Exactly one of the two (`refine_profile` refuses both or
+    # neither; `refine.undo_base` an index out of range).
     job_id: str
     ops: list[dict[str, Any]] = Field(default_factory=list)
-    undo_index: int | None = Field(default=None, ge=0, strict=True)
-
-    @model_validator(mode="after")
-    def _ops_or_undo(self):
-        if bool(self.ops) == (self.undo_index is not None):
-            raise ValueError("send either a non-empty ops list or undo_index")
-        return self
+    undo_index: int | None = Field(default=None, strict=True)
 
 
 class ShapeRequest(BaseModel):
@@ -1499,6 +1494,8 @@ def refine_profile(
     frame = _pending_frame(nc, meta)
     based_on = body.job_id
     try:
+        if bool(body.ops) == (body.undo_index is not None):
+            raise InvalidRefineOpError("send either a non-empty ops list or undo_index")
         if body.undo_index is None:
             new, new_meta, stats, warnings = _refine_frame(ctx, frame, meta, body.ops,
                                                            replaying=False)

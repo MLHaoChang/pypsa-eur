@@ -214,8 +214,7 @@ export function replayRefusalText(error: unknown): string {
   const op = typeof detail?.op === 'string' ? detail.op : null
   const index = typeof detail?.index === 'number' ? detail.index : null
   if (op == null || index == null) return 'The refinements no longer fit the new series.'
-  const label = OP_LABELS[op as OpKind] ?? 'a refinement'
-  return `Step ${index + 1} of the refinements (${label.charAt(0).toLowerCase()}${label.slice(1)}) no longer fits the new series.`
+  return `Step ${index + 1} of the refinements (${stepLabel(op)}) no longer fits the new series.`
 }
 
 const stepLabel = (op: string) => {
@@ -377,12 +376,12 @@ export function PendingCard({
   const qc = useQueryClient()
   // The receipt belongs to the series it applied: a new preview (a refine or
   // a removed step) needs its own Apply.
-  const [receipt, setApplied] = useState<{ job: string; r: SeriesApplyResult } | null>(null)
-  const applied = receipt?.job === pending.job_id ? receipt.r : null
+  const [receipt, setReceipt] = useState<{ job: string; result: SeriesApplyResult } | null>(null)
+  const applied = receipt?.job === pending.job_id ? receipt.result : null
   const apply = useMutation({
     mutationFn: () => seriesApi.apply(project, { job_id: pending.job_id, component }),
     onSuccess: r => {
-      setApplied({ job: pending.job_id, r })
+      setReceipt({ job: pending.job_id, result: r })
       onApplied?.(r)
       void qc.invalidateQueries()
     },
@@ -620,7 +619,7 @@ export function RefinePanel({
               <li key={i} className="flex items-center gap-1">
                 <span>{describe(op, outages)}</span>
                 <button type="button" aria-label={`Remove step ${i + 1} (${stepLabel(op.op)})`}
-                  disabled={undo.isPending}
+                  disabled={undo.isPending || refine.isPending}
                   className="text-muted hover:text-danger disabled:opacity-50"
                   onClick={() => undo.mutate(i)}>Remove</button>
               </li>
@@ -693,7 +692,7 @@ export function RefinePanel({
         </ol>
       )}
       <div className="flex items-center gap-2 mt-1">
-        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending}>
+        <Btn onClick={() => refine.mutate()} disabled={!ops.length || refine.isPending || undo.isPending}>
           <Wand2 size={12} /> Refine
         </Btn>
         {!ops.length && <span className="text-[11px] text-muted">Add an edit above to refine.</span>}
