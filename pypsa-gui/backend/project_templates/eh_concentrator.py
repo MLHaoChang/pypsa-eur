@@ -22,7 +22,6 @@ has its ledger row (``_ledger``), labelled ``demo`` or ``sourced``. ``register(T
 """
 from __future__ import annotations
 
-import copy
 import importlib.util
 import pathlib
 import sys
@@ -197,7 +196,7 @@ def _process(n, name, kwh_t, tier, **attrs) -> None:
     n.links.at[name, "specific_energy_kwh_per_t"] = kwh_t
 
 
-def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> "pypsa.Network":  # noqa: F821
+def build_eh_concentrator_staged(T, *, years=YEARS, time_base: str = "year") -> pypsa.Network:  # noqa: F821
     """The template over ``years`` (the example's by default; a test plans a subset). ``time_base="week"``
     builds the same network on one representative week (the first of July), which the validator refuses:
     the shed's 21-day cycle does not fit in it (design §2.4)."""
@@ -455,6 +454,11 @@ def _ledger() -> list[dict]:
                  "so the plan dispatches the mills and flotation without their minimum load and min "
                  "up / down; the binary operational check then re-solves one week per season of each "
                  "period with them committable, and reports the gap"},
+        {"item": "solver", "value": "HiGHS interior point (solver_options solver=ipm)",
+         "source": "sourced",
+         "note": "own measurement (g2p 10): 3-period year plain LP, 595,688 cols × 1,322,776 rows, 4 cores: dual simplex "
+                 "hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB "
+                 "(shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB"},
     ]
 
 

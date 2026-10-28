@@ -13,6 +13,7 @@ here.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import queue
 import sys
@@ -21,6 +22,7 @@ import time
 
 import numpy as np
 import pandas as pd
+
 import pytest
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
@@ -433,8 +435,11 @@ def test_dropping_the_restart_time_never_raises_the_lost_tonnes(reset_backend):
 # ── the whole template ─────────────────────────────────────────────────────
 
 
+# About 20 min on 4 cores, so CI skips it; the timing is ledgered under "solver".
 @pytest.mark.slow
 @pytest.mark.live_solve
+@pytest.mark.skipif(os.environ.get("PYPSA_GUI_YEAR_BUDGET_LIVE") != "1",
+                    reason="Explicit year-budget live opt-in required (about 20 min)")
 def test_the_three_period_year_solves_within_the_budget(reset_backend):
     n, state, seconds = _plan("full")
     assert seconds <= BUDGET_S, f"{seconds:.0f} s"

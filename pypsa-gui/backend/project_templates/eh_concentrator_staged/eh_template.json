@@ -163,6 +163,12 @@
       "note": "linearised UC on 26,280 snapshots did not finish within the 30-min budget (ticket 09), so the plan dispatches the mills and flotation without their minimum load and min up / down; the binary operational check then re-solves one week per season of each period with them committable, and reports the gap",
       "source": "demo",
       "value": "plain LP on the year base, then the binary check on sampled weeks"
+    },
+    {
+      "item": "solver",
+      "note": "own measurement (g2p 10): 3-period year plain LP, 595,688 cols \u00d7 1,322,776 rows, 4 cores: dual simplex hit its 1,500 s limit unsolved; IPM with crossover optimal in 1,212 s at 2.6 GB (shared machine); IPM without crossover, alone, optimal in 1,137 s at 2.3 GB",
+      "source": "sourced",
+      "value": "HiGHS interior point (solver_options solver=ipm)"
     }
   ],
   "name": "Mining Concentrator (staged growth)",

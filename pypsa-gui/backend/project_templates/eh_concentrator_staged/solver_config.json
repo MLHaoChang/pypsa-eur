@@ -265,5 +265,8 @@
     "wacc_nominal": 0.07
   },
   "multi_investment_periods": true,
+  "solver_options": {
+    "solver": "ipm"
+  },
   "voll": 5000.0
 }
