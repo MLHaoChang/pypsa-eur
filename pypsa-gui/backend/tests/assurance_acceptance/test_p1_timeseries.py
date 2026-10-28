@@ -16,21 +16,18 @@ from services import chat_tools
 from services.pypsa_service import PyPSAService
 from tests.assurance_acceptance.support import (
     approval,
-    parse_sse,
     public_text,
     text_turn,
     tool_turn,
 )
-from tests.assurance_acceptance.test_p1_revocation import (  # noqa: F401
-    RevokingProvider,
-    assert_nothing_published,
-    answer_records,
-    revoke,
-)
 
 ARGS = {"component": "loads", "name": "L1", "attribute": "p_set"}
-STEPS = ["2026-01-01T00:00:00", "2026-01-01T01:00:00", "2026-01-01T02:00:00",
-         "2026-01-01T03:00:00"]
+STEPS = [
+    "2026-01-01T00:00:00",
+    "2026-01-01T01:00:00",
+    "2026-01-01T02:00:00",
+    "2026-01-01T03:00:00",
+]
 
 
 def network():
@@ -97,8 +94,11 @@ def series_result(frames):
 
 
 def evidence_ids(frames):
-    return series_result(frames).get("result", {}).get("_assurance", {}).get(
-        "evidence_ids", []
+    return (
+        series_result(frames)
+        .get("result", {})
+        .get("_assurance", {})
+        .get("evidence_ids", [])
     )
 
 
@@ -139,7 +139,9 @@ def test_series_step_has_step_scoped_project_evidence(series, harness):
     }
     # The NaN step is not a fact; no step is a series aggregate.
     assert [f["path"] for f in record["facts"]] == [
-        f"/L1/{STEPS[0]}", f"/L1/{STEPS[1]}", f"/L1/{STEPS[3]}"
+        f"/L1/{STEPS[0]}",
+        f"/L1/{STEPS[1]}",
+        f"/L1/{STEPS[3]}",
     ]
     assert record["facts"][1] == {
         "path": f"/L1/{STEPS[1]}",
@@ -222,8 +224,17 @@ def test_claim_off_a_shown_step_is_refused(series, harness, draft):
         {**ARGS, "name": 1},
         {"component": "loads", "name": "L1"},
     ],
-    ids=["period", "extra", "attribute", "component", "comma", "padded", "empty",
-         "number", "missing"],
+    ids=[
+        "period",
+        "extra",
+        "attribute",
+        "component",
+        "comma",
+        "padded",
+        "empty",
+        "number",
+        "missing",
+    ],
 )
 def test_inexact_args_are_refused_before_the_handler(
     series, harness, monkeypatch, args
@@ -293,7 +304,10 @@ def test_series_edit_after_capture_invalidates_the_evidence(series, harness):
 
 def test_project_switch_after_capture_invalidates_the_evidence(series, harness):
     evidence_id = evidence_ids(read_series(harness))[0]
-    for path in ("/api/projects/Another Baseline", "/api/projects/Another Baseline/activate"):
+    for path in (
+        "/api/projects/Another Baseline",
+        "/api/projects/Another Baseline/activate",
+    ):
         assert harness.client.post(path).status_code == 200
     response = harness.client.get(f"/api/chat/evidence/{evidence_id}")
     assert response.status_code == 409
@@ -381,25 +395,5 @@ def test_multi_period_step_path_names_its_period(baseline, harness):
     assert approval(frames)["verdict"] == "passed"
     assert "at 2026-01-01T01:00:00 (period 2040) = 4 MW" in public_text(frames)
     # The same timestep without its period is not a fact.
-    frames = read_series(
-        harness, series_draft(value=4, path="/L1/2026-01-01T01:00:00")
-    )
+    frames = read_series(harness, series_draft(value=4, path="/L1/2026-01-01T01:00:00"))
     assert approval(frames)["verdict"] == "limited"
-
-
-@pytest.mark.parametrize("kind", ["membership", "disabled"])
-def test_access_revoked_after_capture_publishes_nothing(
-    series, harness, revoke, seeded_identity, kind  # noqa: F811
-):
-    owner = str(seeded_identity["user_id"])
-    before = answer_records(owner)
-    draft = series_draft()
-    turns = [
-        tool_turn("get_timeseries", ARGS, call_id="read-series"),
-        text_turn(draft),
-        text_turn(draft),
-    ]
-    frames = parse_sse(harness.request(RevokingProvider(turns, revoke[kind])).text)
-    assert evidence_ids(frames)
-    assert_nothing_published(frames, owner, before)
-

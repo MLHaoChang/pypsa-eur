@@ -434,8 +434,9 @@ def _series_source(ctx, args):
         for level in range(series.index.nlevels):
             values = series.index.get_level_values(level)
             if isinstance(values, pd.DatetimeIndex):
-                hashed.update(f"datetime:{values.tz}".encode())
-                hashed.update(values.asi8.tobytes())
+                # asi8 is in the index's own unit; pin it to ns.
+                hashed.update(f"datetime[ns]:{values.tz}".encode())
+                hashed.update(values.as_unit("ns").asi8.tobytes())
             else:
                 hashed.update(json.dumps([str(v) for v in values]).encode())
         hashed.update(series.to_numpy(dtype="float64").tobytes())
