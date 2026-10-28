@@ -478,8 +478,8 @@ TOOLS: list[dict[str, Any]] = [
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
         "Read `message` and check dispatch_status; do NOT report it as a zero. "
-        "run_id (statistics, cost_breakdown, economics_by_carrier, generators and "
-        "storage_dispatch only) answers for one run as "
+        "run_id (statistics, cost_breakdown, economics_by_carrier, generators, "
+        "storage_dispatch, prices and price_drivers only) answers for one run as "
         "{status, scope, result_kind, data, run}: the newest completed run whose "
         "inputs are still current answers with the current read (scope current); "
         "any other run answers from the results kept when it finished (scope "
@@ -489,7 +489,13 @@ TOOLS: list[dict[str, Any]] = [
         "except that generators and storage_dispatch answer a digest (shape "
         "'digest': per carrier and per unit weighted energy, peak and its "
         "snapshot, weighted mean and running hours; storage discharge and charge "
-        "apart) for every run and refuse those arguments. "
+        "apart) and prices answers one (overall and per bus carrier: "
+        "objective-weighted mean, median, p90, max and min, and the load-weighted "
+        "mean; per bus: mean, max with its snapshot, min and the load-weighted "
+        "mean) for every run, with price_drivers kept beside it; these refuse "
+        "those arguments. A digest's lists are trimmed to fit: units_omitted, "
+        "carriers_omitted, buses_omitted and rows_omitted count the rows left "
+        "out, so a nonzero count means that list is not complete; say so. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},

@@ -24,6 +24,28 @@ from services.compare.support import (
 from services.results.load_frames import corrected_marginal_prices
 
 
+def weighted_stats(values, weights_arr):
+    """Weighted (mean, median, p90) of finite values; zeros when there is no weight.
+
+    One rule for every price surface: Compare here and the retained prices
+    digest (services/results/prices_digest.py)."""
+    if values.size == 0 or weights_arr.sum() <= 0:
+        return 0.0, 0.0, 0.0
+    # Weighted mean (analytic), median + p90 from sorted + cumulative weight.
+    mean = float((values * weights_arr).sum() / weights_arr.sum())
+    order = np.argsort(values)
+    sv = values[order]
+    sw = weights_arr[order]
+    cum = np.cumsum(sw)
+    total = cum[-1]
+    def _quantile(q):
+        target = q * total
+        idx = int(np.searchsorted(cum, target))
+        idx = min(max(idx, 0), sv.size - 1)
+        return float(sv[idx])
+    return mean, _quantile(0.5), _quantile(0.9)
+
+
 def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison:
     """
     Marginal price view. Builds:
@@ -98,22 +120,7 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     else:
         duration_curve = []
 
-    def _stats(values, weights_arr):
-        if values.size == 0 or weights_arr.sum() <= 0:
-            return 0.0, 0.0, 0.0
-        # Weighted mean (analytic), median + p90 from sorted + cumulative weight.
-        mean = float((values * weights_arr).sum() / weights_arr.sum())
-        order = np.argsort(values)
-        sv = values[order]
-        sw = weights_arr[order]
-        cum = np.cumsum(sw)
-        total = cum[-1]
-        def _quantile(q):
-            target = q * total
-            idx = int(np.searchsorted(cum, target))
-            idx = min(max(idx, 0), sv.size - 1)
-            return float(sv[idx])
-        return mean, _quantile(0.5), _quantile(0.9)
+    _stats = weighted_stats
 
     mean_total, median_total, p90_total = _stats(vals_clean, w_full)
     mean_pp: dict[str, float] = {}

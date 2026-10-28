@@ -715,7 +715,6 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
     something else, such as the per-snapshot series or another source.
     """
     from services import retained_results, run_evidence
-    from services.results import dispatch_digest
 
     if not isinstance(run_id, str) or not run_evidence._valid_run_id(run_id):
         raise HTTPException(422, {"error_kind": "invalid_results_argument",
@@ -733,7 +732,7 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
             f"A run keeps a digest of {result_kind!r} (the default LOPF read over all snapshots), "
             "not its per-snapshot series or another source; call it with run_id alone.",
             run_id=run_id, scope="historical", result_kind=result_kind,
-            digest_fields=list(dispatch_digest.FIELDS))
+            digest_fields=list(digest.fields))
     from services.workflow_tools import solve_freshness
 
     run_evidence._authority()
@@ -744,13 +743,13 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
         if digest is None:
             data = get_results(result_kind)
         else:
-            live = digest()
+            live = digest.build()
             if live.get("status") != "ok":
                 return retained_results.unavailable(
                     "historical_scope_mismatch", "This run's results cannot be digested.",
                     reason=live.get("reason"), result_kind=result_kind, run_id=run_id,
                     run=run, **facts)
-            data = dispatch_digest.for_kind(live, result_kind)
+            data = digest.for_kind(live, result_kind)
         return {"status": "ok", "scope": "current", "result_kind": result_kind,
                 "data": data, "run_id": run_id, "run": run, **facts}
     record, refused = retained_results.historical(section, run_id)
@@ -758,7 +757,7 @@ def _results_for_run(result_kind: str, run_id: Any, *, reshaped: bool = False) -
         return {**refused, "result_kind": result_kind, "run_id": run_id, **facts,
                 "next_step": "Say this run is not the current result and offer to re-run."}
     return {"status": "ok", "scope": "historical", "result_kind": result_kind,
-            "data": (dispatch_digest.for_kind(record["data"], result_kind) if digest is not None
+            "data": (digest.for_kind(record["data"], result_kind) if digest is not None
                      else (record.get("data") or {}).get(result_kind)),
             "section": section, "run_id": run_id,
             "run": retained_results.run_ref(run_id, record, current=False), **facts,
