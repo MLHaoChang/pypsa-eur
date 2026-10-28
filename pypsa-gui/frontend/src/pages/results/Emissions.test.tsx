@@ -161,3 +161,44 @@ describe('Emissions — the zero-emissions explanation', () => {
     expect(screen.queryByTitle(EXPLANATION)).toBeNull()
   })
 })
+
+// A1.6: a cap whose dual is unknown has a null shadow price — shown as '—',
+// never "0.00"; a real 0 (a slack cap) still shows 0.00.
+function cap(name: string, mu: number | null) {
+  return {
+    active: true as const, name, investment_period: null, scope: 'horizon' as const, cap_tCO2: 1000,
+    used_tCO2: 424.24, shadow_price_eur_per_tCO2: mu, slack_tCO2: 575.76, binding: null as never,
+  }
+}
+
+function mockCaps(caps: Array<ReturnType<typeof cap>>) {
+  vi.mocked(resultsApi.getEmissions).mockResolvedValue({
+    total_tCO2: 424.24,
+    by_carrier: [{ carrier: 'gas', tCO2: 424.24, share_pct: 100.0 }],
+    by_generator: [],
+    cap: { active: true, name: caps[0].name, cap_tCO2: 1000,
+      shadow_price_eur_per_tCO2: caps[0].shadow_price_eur_per_tCO2, slack_tCO2: 575.76 },
+    caps,
+    is_multi_period: false,
+    by_period: [],
+  })
+  vi.mocked(networkApi.getCarriers).mockResolvedValue([])
+}
+
+it('shows an unknown cap shadow price as — in the KPI, never 0.00', async () => {
+  mockCaps([cap('CO2Limit', null)])
+  renderPage()
+  expect(await findKpiValue('—')).toBeTruthy()
+  expect(screen.queryByText(/0\.00/)).toBeNull()
+})
+
+it('shows an unknown μ as — in the caps table and keeps a real 0 as 0.00', async () => {
+  mockCaps([cap('Unknown', null), cap('Slack', 0)])
+  renderPage()
+  const table = (await screen.findByText('μ (€/tCO₂)')).closest('table') as HTMLElement
+  const mu = (name: string) =>
+    [...table.querySelectorAll('tbody tr')].find(r => r.firstElementChild?.textContent === name)
+      ?.lastElementChild?.textContent
+  expect(mu('Unknown')).toBe('—')
+  expect(mu('Slack')).toBe('0.00')
+})

@@ -1,0 +1,1 @@
+* Fix(pypsa-gui): The emissions and lost-load results no longer show an unknown value as 0. A CO₂ cap whose shadow price the solve did not give reads "—" (null), and so do lost-load totals the capture lacks and a VOLL that is neither captured nor derivable; a real captured 0 still reads 0.

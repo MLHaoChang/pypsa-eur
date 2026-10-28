@@ -159,7 +159,7 @@ export default function SummaryTab({ onOpenTab, onOpenGroup }: {
         status={status} onOpenTab={onOpenTab} onOpenGroup={onOpenGroup}
         isIn={card => !scopeRead || inScope(flowScope, card)}
         headline={{
-          capacity: c ? `${fmtCurrency(c.total)} a year${ll && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
+          capacity: c ? `${fmtCurrency(c.total)} a year${ll?.total_mwh != null && ll.total_mwh > 0 ? ` · ${fmtEnergy(ll.total_mwh)} unserved` : ''}` : null,
           reliability: target
             ? `${fmtEnergy(target.target.system.achieved_ens_mwh)} unserved of ${fmtEnergy(target.target.system.cap_mwh)} allowed`
             : rm ? `Reserve margin ${rm.text}` : null,

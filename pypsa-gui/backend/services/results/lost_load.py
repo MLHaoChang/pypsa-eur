@@ -11,6 +11,7 @@ pandas / numpy are used only through the injected frame and helpers.
 """
 from __future__ import annotations
 
+from services.results.sizing import finite
 from services.serialization import (
     slice_ts as _slice_ts,
     ts_payload as _ts_payload,
@@ -35,16 +36,19 @@ def compute_lost_load(n, capture, from_, to_):
     # solver, not per-snapshot arrays — a `from`/`to` window below narrows
     # `data` but does NOT recompute these; `range.complete` tells the
     # frontend whether the window covers the whole series.
-    total_mwh = float(capture.get("lost_load_total_mwh", 0))
-    total_cost = float(capture.get("lost_load_cost_eur", 0))
+    # A total the capture lacks (or holds as NaN) is unknown, not 0 (A1.7):
+    # null. A captured 0 stays 0.
+    total_mwh = finite(capture.get("lost_load_total_mwh"))
+    total_cost = finite(capture.get("lost_load_cost_eur"))
     # Surface VOLL directly so the frontend doesn't infer it via division
     # (which crashes on zero-MWh edge cases). Cost / MWh recovers the
     # per-MWh VOLL price the solver used.
     # Prefer the capture's explicit VoLL (present since the weighted-totals
-    # change); older captures lack it — fall back to the cost/energy ratio.
-    voll = float(capture.get("voll_eur_per_mwh") or 0.0) or (
-        (total_cost / total_mwh) if total_mwh > 0 else 0.0
-    )
+    # change); older captures lack it — fall back to the cost/energy ratio,
+    # only from two known totals with energy > 0. Otherwise it is null.
+    voll = finite(capture.get("voll_eur_per_mwh"))
+    if voll is None and total_cost is not None and total_mwh is not None and total_mwh > 0:
+        voll = total_cost / total_mwh
 
     # Per-column bus carrier. solver_service adds a VOLL slack on EVERY bus
     # (not just electricity), so `lost_load_t.columns` carries bus names

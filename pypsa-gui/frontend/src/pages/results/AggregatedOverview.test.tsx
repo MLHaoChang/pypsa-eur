@@ -251,3 +251,29 @@ describe('AggregatedOverview partial-payload guard covers curtailTS and lostLoad
     expect(await screen.findByText(/reports whole-horizon totals/)).toBeTruthy()
   })
 })
+
+// A1.7: a null lost-load total or VOLL is unknown — '—', never 0.
+describe('AggregatedOverview lost-load KPIs with unknown totals', () => {
+  const kpi = async (label: string) =>
+    ((await screen.findByText(label)).parentElement as HTMLElement)
+
+  it('shows — for the cost of a shed series whose VOLL is unknown', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect(getKpiValueWithin(await kpi('Lost load'), '42.0 MWh')).toBeTruthy()
+    expect(getKpiValueWithin(await kpi('Lost-load cost'), '—')).toBeTruthy()
+  })
+
+  it('shows — for null totals on an empty series', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+    })
+    renderOverview()
+    expect(getKpiValueWithin(await kpi('Lost load'), '—')).toBeTruthy()
+    expect(getKpiValueWithin(await kpi('Lost-load cost'), '—')).toBeTruthy()
+  })
+})

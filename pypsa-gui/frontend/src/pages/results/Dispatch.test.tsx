@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
@@ -8,7 +8,7 @@ import Dispatch, { linkFlowTotals, type LinkPort } from './Dispatch'
 import {
   buildMultiPeriodWindowFixture, COLUMNS, WINDOW, TIMESTEPS_PER_PERIOD,
 } from './__fixtures__/multiPeriodWindow'
-import { findAllKpiValues } from '../../test/kpi'
+import { findAllKpiValues, getKpiValueWithin } from '../../test/kpi'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -250,4 +250,15 @@ it('linkFlowTotals: whole-horizon totals are unchanged (positional == keyed here
   }
   expect(all.linkGen).toBeCloseTo(gen, 4)
   expect(all.linkOutflow).toBeCloseTo(out, 4)
+})
+
+// A1.7: a shed series whose VOLL is unknown has an unknown cost ('—'), not €0.
+it('shows the lost-load cost as — when the VOLL is unknown', async () => {
+  vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+    index: ['2026-01-01T00:00:00'], columns: ['Bus 0'], data: [[42]],
+    total_mwh: null, total_cost_eur: null, voll_eur_per_mwh: null,
+  })
+  renderPage()
+  const label = await screen.findByText('Lost-load cost')
+  expect(getKpiValueWithin(label.parentElement as HTMLElement, '—')).toBeTruthy()
 })

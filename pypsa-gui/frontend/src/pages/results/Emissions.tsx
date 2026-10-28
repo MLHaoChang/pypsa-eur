@@ -205,7 +205,9 @@ export default function Emissions() {
                       {c.binding && <span className="ml-1 text-warn text-[9px]">BIND</span>}
                     </td>
                     <td className="px-2 py-1 font-mono text-[11px] text-right">
-                      {c.shadow_price_eur_per_tCO2.toFixed(2)}
+                      {c.shadow_price_eur_per_tCO2 != null
+                        ? c.shadow_price_eur_per_tCO2.toFixed(2)
+                        : '—'}
                     </td>
                   </tr>
                 ))}

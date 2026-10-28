@@ -22,6 +22,7 @@ import {
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS, WEEKDAYS,
   parseSeasonStamp, useSeasonalViewMode, colourForCarrier, isAllZero, ChartZero,
 } from './shared'
+import { type LostLoadMeta, vollOf } from './summary'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
 import DispatchStack from './DispatchStack'
@@ -704,18 +705,17 @@ export default function Dispatch() {
     if (!ts || ts.data.length === 0) {
       // No filter movement, no series — fall back to whatever the backend
       // reported (it's already an annualised number when present).
-      const ll = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-      return ll ? { mwh: ll.total_mwh ?? 0, cost: ll.total_cost_eur ?? 0 } : null
+      // A null total is unknown ('—'), never 0.
+      const ll = lostLoad as unknown as LostLoadMeta
+      return ll ? { mwh: ll.total_mwh ?? null, cost: ll.total_cost_eur ?? null } : null
     }
     // Σ max(p,0) × weight — slack generators only inject so values are ≥ 0,
     // but clip defensively in case PyPSA writes a small negative.
     const cols = new Set(ts.columns)
     const split = weightedSumSplit(ts, cols, weightCtx, range, 'generators')
     const mwh = split.positive ?? 0
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    return { mwh, cost: mwh * voll }
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    return { mwh, cost: voll != null ? mwh * voll : null }
   }, [lostLoad, weightCtx, range.from, range.to])
   // UX overhaul S2b: null lost load inside a solved results tab means the
   // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
@@ -745,14 +745,12 @@ export default function Dispatch() {
       bucket.add(col)
       groups.set(carrier, bucket)
     }
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    const out: Array<{ carrier: string; mwh: number; cost: number }> = []
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    const out: Array<{ carrier: string; mwh: number; cost: number | null }> = []
     for (const [carrier, cols] of groups) {
       const split = weightedSumSplit(ts, cols, weightCtx, range, 'generators')
       const mwh = split.positive ?? 0
-      if (mwh > 0) out.push({ carrier, mwh, cost: mwh * voll })
+      if (mwh > 0) out.push({ carrier, mwh, cost: voll != null ? mwh * voll : null })
     }
     out.sort((a, b) => loadCarrierSortKey(a.carrier).localeCompare(loadCarrierSortKey(b.carrier)))
     return out
@@ -2266,7 +2264,7 @@ export function CarrierKpiPanel({
   // memo — already weighted by snapshot × ipw.years and keyed by canonical
   // load carrier (electrical / hydrogen / heat / …). Single source of truth
   // avoids the panel re-computing with different (unweighted) semantics.
-  lostLoadByCarrier: Array<{ carrier: string; mwh: number; cost: number }> | null
+  lostLoadByCarrier: Array<{ carrier: string; mwh: number; cost: number | null }> | null
   econByCarrier: Record<string, {
     revenue_meur: { total: number; by_period: Record<string, number> }
     opex_meur:    { total: number; by_period: Record<string, number> }
@@ -2687,7 +2685,7 @@ interface GroupSectionProps<T> {
   // totals (MWh + €) come from `lostLoadTotals` so a single header line
   // shows Σ over the horizon at a glance.
   lostLoadSeries?: ReturnType<typeof aggregateTS>
-  lostLoadTotals?: { mwh: number; cost: number } | null
+  lostLoadTotals?: { mwh: number | null; cost: number | null } | null
   // Vintage results + per-snapshot period array — only needed for the
   // energy-reservoir SoC % view in multi-period runs, so the denominator
   // shrinks to the period-active capacity instead of the cumulative final
@@ -2736,7 +2734,7 @@ interface CarrierTabbedSectionProps<T extends { name: string }> {
   unitOverride?: string
   extraPropsForCarrier?: (carrierId: string) => Partial<{
     lostLoadSeries: ReturnType<typeof aggregateTS>
-    lostLoadTotals: { mwh: number; cost: number } | null
+    lostLoadTotals: { mwh: number | null; cost: number | null } | null
     curtailmentSeries: ReturnType<typeof aggregateTS>
   }>
 }

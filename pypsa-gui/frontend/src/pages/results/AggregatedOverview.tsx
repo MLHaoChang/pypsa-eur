@@ -20,6 +20,7 @@ import {
 } from './shared'
 import { storageCarrierKey, loadCarrierKey } from './carrierAliases'
 import NotSolved from './NotSolved'
+import { type LostLoadMeta, vollOf } from './summary'
 
 // ── Aggregated overview ────────────────────────────────────────────────────
 // Shown when the user picks the "Aggregated" period sub-tab. Replaces the
@@ -153,16 +154,15 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     if (!lostLoad) return null
     const ts = lostLoad as TSPayload | null | undefined
     if (!ts || ts.data.length === 0) {
-      const ll = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-      return ll ? { mwh: ll.total_mwh ?? 0, cost: ll.total_cost_eur ?? 0 } : null
+      // A null total is unknown ('—'), never 0.
+      const ll = lostLoad as unknown as LostLoadMeta
+      return ll ? { mwh: ll.total_mwh ?? null, cost: ll.total_cost_eur ?? null } : null
     }
     const cols = new Set(ts.columns)
     const split = weightedSumSplit(ts, cols, weightCtx, fullRange, 'generators')
     const mwh = split.positive ?? 0
-    const llMeta = lostLoad as unknown as { total_mwh?: number; total_cost_eur?: number }
-    const voll = (llMeta.total_mwh && llMeta.total_mwh > 0)
-      ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0
-    return { mwh, cost: mwh * voll }
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta)
+    return { mwh, cost: voll != null ? mwh * voll : null }
   }, [lostLoad, weightCtx, fullRange])
   // UX overhaul S2b: null lost load inside a solved results tab means the
   // solve had no VOLL — not modelled, never "—"; a VOLL solve that shed
@@ -389,17 +389,11 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
     // is €100 × VOLL = €10M+ — off by ~5 orders of magnitude on typical
     // VOLL = 10,000-100,000 €/MWh.
     const llTs = lostLoad as TSPayload | null | undefined
-    const llMeta = lostLoad as unknown as {
-      total_mwh?: number; total_cost_eur?: number; voll_eur_per_mwh?: number
-    }
-    // Prefer backend-provided voll_eur_per_mwh. Fall back to ratio for
-    // pre-fix payloads / stale caches.
-    const voll = llMeta?.voll_eur_per_mwh
-      ?? ((llMeta?.total_mwh && llMeta.total_mwh > 0)
-        ? ((llMeta.total_cost_eur ?? 0) / llMeta.total_mwh) : 0)
-    const vollPerPeriod = llTs
+    // An unknown VOLL leaves the VOLL bars out (null), never €0.
+    const voll = vollOf(lostLoad as unknown as LostLoadMeta | null | undefined)
+    const vollPerPeriod: Array<number | null> = llTs
       ? perPeriodWeightedSumSplit(llTs, new Set(llTs.columns), weightCtx, 'generators')
-          .map(r => r.positive * voll)
+          .map(r => (voll != null ? r.positive * voll : null))
       : []
     // Curtailment penalty per period: only generators with curtailment_cost > 0.
     const curtTs = curtailTS as TSPayload | null
@@ -452,14 +446,14 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       const capex = bp ? bp.capex : evenCapex
       const opex  = bp ? bp.opex  : evenOpex
       const curt  = curtPenaltyPerPeriod[i] ?? 0
-      const voll  = vollPerPeriod[i] ?? 0
+      const vollCost = voll != null ? (vollPerPeriod[i] ?? 0) : null
       return {
         period: p,
         CAPEX: capex,
         // Bundle dispatch OPEX + curtailment penalty so the OPEX bar
         // matches the "Total OPEX" KPI in the per-period Dispatch view.
         OPEX: opex + curt,
-        VOLL: voll,
+        VOLL: vollCost,
       }
     })
   }, [cost, lostLoad, curtailTS, generators, gensTS, loadTS, weightCtx])
@@ -595,7 +589,7 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
       {/* Hide entirely when every bar would be 0 — keeps the layout clean on
           test networks where no cost data is configured. */}
       {economicsBars && economicsBars.length > 0
-        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || r.VOLL > 0) && (
+        && economicsBars.some(r => r.CAPEX > 0 || r.OPEX > 0 || (r.VOLL ?? 0) > 0) && (
         <ChartCard
           title="Economics — system cost per period"
           hint="CAPEX · OPEX · VOLL"
