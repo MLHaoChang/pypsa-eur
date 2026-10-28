@@ -24,7 +24,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session as DBSession
 
@@ -41,34 +41,28 @@ router = APIRouter()
 # Raw request-body caps, checked before JSON parsing. A proposal carries at
 # most `native.MAX_BUILDINGS` footprints; its preview is capped at 4 MiB, and
 # the request that produces it gets the same cap.
-MAX_ANCHOR_BODY = 4 * 1024
 MAX_SMALL_BODY = 4 * 1024
 MAX_PROPOSAL_BODY = 4 * 1024 * 1024
 
 
-def _raise(exc: SceneError) -> HTTPException:
-    return HTTPException(exc.status, exc.to_body()["detail"])
-
-
 async def _call(fn, *args) -> Any:
-    """Run a blocking service call (file I/O, the scene mutex) off the event loop."""
-    try:
-        return await run_in_threadpool(fn, *args)
-    except SceneError as exc:
-        raise _raise(exc) from exc
+    """Run a blocking service call (file I/O, the scene mutex) off the event loop.
+    A `SceneError` reaches `main._scene_error_as_its_status`, which answers with
+    its status and `{detail: {error_kind, message, …}}`."""
+    return await run_in_threadpool(fn, *args)
 
 
 async def _json_body(request: Request, cap: int) -> Any:
     raw = await request.body()
     if len(raw) > cap:
-        raise _raise(SceneError("resource_limit", f"Too large: the request is {len(raw)} bytes, the limit is {cap}",
-                                {"limit": "request_bytes", "max": cap, "actual": len(raw)}))
+        raise SceneError("resource_limit", f"Too large: the request is {len(raw)} bytes, the limit is {cap}",
+                                {"limit": "request_bytes", "max": cap, "actual": len(raw)})
     if not raw:
         return None
     try:
         return json.loads(raw)
     except ValueError:
-        raise _raise(SceneError("invalid_input", "The request is not valid JSON")) from None
+        raise SceneError("invalid_input", "The request is not valid JSON") from None
 
 
 def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) -> None:
@@ -90,17 +84,12 @@ def _site_known(project: AuthorizedProject, site_id: str) -> None:
         site_service.site_dir(project.directory, site_id)
         store.legacy_site_digest(site_service.read_sites(project.directory), site_id)
     except site_service.SitesInvalid:
-        raise _raise(SceneError("not_found", "Site not found")) from None
-    except SceneError as exc:
-        raise _raise(exc) from exc
+        raise SceneError("not_found", "Site not found") from None
 
 
 @router.get("/{name}/site-anchor")
 def get_site_anchor(project: AuthorizedProject = ProjectAccessDep) -> dict:
-    try:
-        return anchor.read_anchor(project.directory)
-    except SceneError as exc:
-        raise _raise(exc) from exc
+    return anchor.read_anchor(project.directory)
 
 
 @router.put("/{name}/site-anchor")
@@ -108,9 +97,9 @@ async def put_site_anchor(request: Request, project: AuthorizedProject = Project
                           db: DBSession = Depends(get_db),
                           user: User | None = Depends(optional_user)) -> dict:
     _check_lock(project, db, user)
-    body = await _json_body(request, MAX_ANCHOR_BODY)
+    body = await _json_body(request, MAX_SMALL_BODY)
     if not isinstance(body, dict):
-        raise _raise(SceneError("invalid_input", "Site coordinates: send anchor and expected_revision"))
+        raise SceneError("invalid_input", "Site coordinates: send anchor and expected_revision")
     return await _call(anchor.write_anchor, project.directory, body.get("anchor"), body.get("expected_revision"))
 
 
@@ -145,10 +134,7 @@ def _unbound_keys(project: AuthorizedProject, scene: dict) -> list[str] | None:
 @router.get("/{name}/sites/{site_id}/scene")
 def get_scene(site_id: str, project: AuthorizedProject = ProjectAccessDep) -> dict:
     _site_known(project, site_id)
-    try:
-        scene = store.read_scene(project.directory, site_id)
-    except SceneError as exc:
-        raise _raise(exc) from exc
+    scene = store.read_scene(project.directory, site_id)
     if scene["state"] == "enabled":
         scene = {**scene, "unbound_keys": _unbound_keys(project, scene)}
     return scene
@@ -163,7 +149,7 @@ async def adopt_scene(site_id: str, request: Request, project: AuthorizedProject
     await run_in_threadpool(_site_known, project, site_id)
     digest = body.get("expected_digest") if isinstance(body, dict) else None
     if not isinstance(digest, str):
-        raise _raise(SceneError("invalid_input", "Adopt: expected_digest is required", {"field": "expected_digest"}))
+        raise SceneError("invalid_input", "Adopt: expected_digest is required", {"field": "expected_digest"})
     await _call(store.adopt, project.directory, site_id, digest)
     return await _call(store.read_scene, project.directory, site_id)
 
@@ -181,10 +167,7 @@ async def create_proposal(site_id: str, request: Request, project: AuthorizedPro
 @router.get("/{name}/sites/{site_id}/scene/proposals/{proposal_id}")
 def get_proposal(site_id: str, proposal_id: str, project: AuthorizedProject = ProjectAccessDep,
                  user: User | None = Depends(optional_user)) -> dict:
-    try:
-        return proposals.view(proposals.get(project.registry_key, _owner(user), site_id, proposal_id))
-    except SceneError as exc:
-        raise _raise(exc) from exc
+    return proposals.view(proposals.get(project.registry_key, _owner(user), site_id, proposal_id))
 
 
 @router.post("/{name}/sites/{site_id}/scene/proposals/{proposal_id}/apply")
@@ -203,7 +186,4 @@ def cancel_proposal(site_id: str, proposal_id: str, project: AuthorizedProject =
                     db: DBSession = Depends(get_db),
                     user: User | None = Depends(optional_user)) -> dict:
     _check_lock(project, db, user)
-    try:
-        return proposals.cancel(project.registry_key, _owner(user), site_id, proposal_id)
-    except SceneError as exc:
-        raise _raise(exc) from exc
+    return proposals.cancel(project.registry_key, _owner(user), site_id, proposal_id)

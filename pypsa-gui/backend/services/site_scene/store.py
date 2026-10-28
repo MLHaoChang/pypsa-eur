@@ -153,9 +153,10 @@ def read_scene(project_dir: pathlib.Path, site_id: str) -> dict[str, Any]:
 
 
 def legacy_site_digest(doc: dict[str, Any], site_id: str) -> str:
+    """The digest adoption checks: the exact legacy Site AND the footprints it would take over."""
     for site in doc.get("sites", []):
         if site.get("id") == site_id:
-            return sha256(site)
+            return sha256({"site": site, "asset_footprints": _owned_footprints(doc, site)})
     raise SceneError("not_found", "Site not found")
 
 
@@ -299,46 +300,48 @@ def guard_legacy_put(project_dir: pathlib.Path, incoming: dict[str, Any]) -> Non
         for key, value in state["asset_footprints"].items():
             if in_fps.get(key) != value:
                 raise SceneError("scene_managed_site",
-                                 f"The footprint of {key} is managed by a 3D scene and your copy is out of date: reload to edit it",
+                                 "An equipment footprint is managed by a 3D scene and your copy is out of date: reload to edit it",
                                  {"site_id": site_id, "key": key})
 
 
 def rename_component(project_dir: pathlib.Path, component_class: str, old: str, new: str) -> list[str]:
     """The rename hook for enabled Sites: re-key placements/footprints in a NEW generation."""
     old_key, new_key = f"{component_class}:{old}", f"{component_class}:{new}"
-    touched = []
-    for site_id in sorted(enabled_site_ids(project_dir)):
-        state = read_scene(project_dir, site_id)
-        placements, fps = state["site"].get("placements") or {}, state["asset_footprints"]
-        if old_key not in placements and old_key not in fps:
-            continue
-        changes = {
-            "placements": {(new_key if k == old_key else k): v for k, v in placements.items()},
-            "asset_footprints": {(new_key if k == old_key else k): v for k, v in fps.items()},
-        }
-        pid = f"rename:{old_key}->{new_key}@{state['revision']}"
-        apply(project_dir, site_id, {"id": pid, "base_revision": state["revision"],
-                                     "input_hash": sha256(changes), "changes": changes}, state["revision"])
-        touched.append(site_id)
-    return touched
+    with project_lock(project_dir):      # read and apply as one step: no apply can slip between
+        touched = []
+        for site_id in sorted(enabled_site_ids(project_dir)):
+            state = read_scene(project_dir, site_id)
+            placements, fps = state["site"].get("placements") or {}, state["asset_footprints"]
+            if old_key not in placements and old_key not in fps:
+                continue
+            changes = {
+                "placements": {(new_key if k == old_key else k): v for k, v in placements.items()},
+                "asset_footprints": {(new_key if k == old_key else k): v for k, v in fps.items()},
+            }
+            pid = f"rename:{old_key}->{new_key}@{state['revision']}"
+            apply(project_dir, site_id, {"id": pid, "base_revision": state["revision"],
+                                         "input_hash": sha256(changes), "changes": changes}, state["revision"])
+            touched.append(site_id)
+        return touched
 
 
 def remove_component(project_dir: pathlib.Path, component_class: str, name: str) -> list[str]:
     """The delete hook for enabled Sites: drop the key in a NEW generation."""
     key = f"{component_class}:{name}"
-    touched = []
-    for site_id in sorted(enabled_site_ids(project_dir)):
-        state = read_scene(project_dir, site_id)
-        placements, fps = state["site"].get("placements") or {}, state["asset_footprints"]
-        if key not in placements and key not in fps:
-            continue
-        changes = {"placements": {k: v for k, v in placements.items() if k != key},
-                   "asset_footprints": {k: v for k, v in fps.items() if k != key}}
-        pid = f"remove:{key}@{state['revision']}"
-        apply(project_dir, site_id, {"id": pid, "base_revision": state["revision"],
-                                     "input_hash": sha256(changes), "changes": changes}, state["revision"])
-        touched.append(site_id)
-    return touched
+    with project_lock(project_dir):      # read and apply as one step: no apply can slip between
+        touched = []
+        for site_id in sorted(enabled_site_ids(project_dir)):
+            state = read_scene(project_dir, site_id)
+            placements, fps = state["site"].get("placements") or {}, state["asset_footprints"]
+            if key not in placements and key not in fps:
+                continue
+            changes = {"placements": {k: v for k, v in placements.items() if k != key},
+                       "asset_footprints": {k: v for k, v in fps.items() if k != key}}
+            pid = f"remove:{key}@{state['revision']}"
+            apply(project_dir, site_id, {"id": pid, "base_revision": state["revision"],
+                                         "input_hash": sha256(changes), "changes": changes}, state["revision"])
+            touched.append(site_id)
+        return touched
 
 
 # ── copy / snapshot / export closure ────────────────────────────────────────

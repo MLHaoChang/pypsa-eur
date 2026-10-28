@@ -501,6 +501,6 @@ def test_an_oversize_body_is_413_before_parsing(client, geo):
                     headers={"content-type": "application/json"})
     assert (r.status_code, _kind(r)) == (413, "resource_limit")
     assert r.json()["detail"]["max"] == cap and r.json()["detail"]["actual"] == cap + 1
-    r = client.put("/api/projects/geo/site-anchor", content=b"x" * (site_scene.MAX_ANCHOR_BODY + 1),
+    r = client.put("/api/projects/geo/site-anchor", content=b"x" * (site_scene.MAX_SMALL_BODY + 1),
                    headers={"content-type": "application/json"})
     assert (r.status_code, _kind(r)) == (413, "resource_limit")

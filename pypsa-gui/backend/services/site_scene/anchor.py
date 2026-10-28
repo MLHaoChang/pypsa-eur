@@ -78,8 +78,11 @@ def read_anchor(project_dir: pathlib.Path) -> dict[str, Any]:
     path = project_dir / ANCHOR_FILE
     if not path.exists():
         return {"version": SCHEMA_VERSION, "revision": 0, "anchor": None}
-    doc = json.loads(path.read_text(encoding="utf-8"))
-    if doc.get("version") != SCHEMA_VERSION or not isinstance(doc.get("revision"), int):
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        doc = None
+    if not isinstance(doc, dict) or doc.get("version") != SCHEMA_VERSION or not isinstance(doc.get("revision"), int):
         raise SceneError("integrity_error", "Site coordinates: the saved file is not readable, so it was left as it is")
     return doc
 

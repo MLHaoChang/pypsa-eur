@@ -4347,7 +4347,6 @@ def get_sites(
     """
     from services import site_service
     from services.site_scene import store as scene_store
-    from services.site_scene.contract import SceneError
 
     src, name = _resolve_project_src(name, db, user)
     if not src.exists():
@@ -4358,8 +4357,6 @@ def get_sites(
         return scene_store.project_sites(src)
     except PermissionError as exc:
         raise _access_denied(src / site_service.SITES_FILE) from exc
-    except SceneError as exc:
-        raise HTTPException(exc.status, exc.to_body()["detail"]) from exc
 
 
 @router.put("/{name}/sites")
@@ -4377,7 +4374,6 @@ def put_sites(
     """
     from services import project_registry, site_service
     from services.site_scene import store as scene_store
-    from services.site_scene.contract import SceneError
 
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
@@ -4394,10 +4390,7 @@ def put_sites(
     # and the prune run under the scene mutex, so an adoption cannot land
     # between the check and the write.
     with scene_store.project_lock(dest):
-        try:
-            scene_store.guard_legacy_put(dest, sites)
-        except SceneError as exc:
-            raise HTTPException(exc.status, exc.to_body()["detail"]) from exc
+        scene_store.guard_legacy_put(dest, sites)      # SceneError -> main's handler
         try:
             site_service.write_sites(dest, sites)
         except site_service.SitesTooLarge as exc:
