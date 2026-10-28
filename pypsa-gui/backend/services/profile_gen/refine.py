@@ -312,10 +312,12 @@ def _apply_op(t: _Target, s: pd.Series, op: Mapping[str, Any], i: int,
     if t.power:
         stats["energy_before_mwh"] = float(s.sum())
         stats["energy_after_mwh"] = float(out.sum())
-        peak = float(out.max())
-        stats["load_factor"] = float(out.mean() / peak) if peak > 0 else 0.0
-        # Not the edit card's: that one is weighted over the model's snapshots.
-        stats["load_factor_basis"] = "hourly mean / peak, source year"
+        from services.profile_gen.card import LOAD_FACTOR_BASIS, weighted_load_factor
+        aligned, _ = _align_to_snapshots(out, t.ctx.network.snapshots,
+                                         resolution=t.resolution, time_basis=t.basis)
+        stats["load_factor"] = weighted_load_factor(
+            t.ctx.network, aligned.to_numpy(dtype=float), t.spec.weighting)
+        stats["load_factor_basis"] = LOAD_FACTOR_BASIS
     return out, stats
 
 
