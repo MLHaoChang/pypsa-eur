@@ -3567,7 +3567,8 @@ def dispatch_status() -> dict:
 # ── Simulation execution (4) ────────────────────────────────────────────────
 
 
-def run_simulation() -> dict:
+def run_simulation(rerun_current: bool = False) -> dict:
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # The route handler is `run`, NOT `run_simulation` — the latter is
     # `services.solver_service.run_simulation` re-exported via the router
     # module's `from services.solver_service import run_simulation` import.
@@ -3579,7 +3580,8 @@ def run_simulation() -> dict:
     return _h()
 
 
-def run_ac_pf_stage() -> dict:
+def run_ac_pf_stage(rerun_current: bool = False) -> dict:
+    # `rerun_current` is read before the card (harness/run_lifecycle.py), never here.
     # Same shape as run_simulation — `run_ac_pf` is the route handler. The
     # router module re-exports `run_ac_pf_stage` from solver_service as the
     # service-level entry point; we want the HTTP-equivalent handler.
@@ -4086,7 +4088,7 @@ def abort_adequacy_study(study: str) -> dict:
 # ── Solve queue (4) ─────────────────────────────────────────────────────────
 
 
-def solve_queue_enqueue(project_id: str) -> dict:
+def solve_queue_enqueue(project_id: str, rerun_current: bool = False) -> dict:
     # Handler is enqueue_solve(req: EnqueueRequest) — wrap the id in the model.
     from routers.solve_queue import enqueue_solve as _h, EnqueueRequest
     return _route(_h, EnqueueRequest(project_id=project_id))
@@ -4147,7 +4149,7 @@ def solve_queue_dismiss(job_id: str) -> dict:
     return _route(_h, job_id)
 
 
-def solve_queue_requeue(job_id: str) -> dict:
+def solve_queue_requeue(job_id: str, rerun_current: bool = False) -> dict:
     from routers.solve_queue import requeue_job as _h
     return _route(_h, job_id)
 
