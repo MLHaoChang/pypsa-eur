@@ -4395,24 +4395,27 @@ def list_load_profile_archetypes() -> dict:
 
 def generate_load_profile(project_id: str, archetype: str, loads: list,
                           params: dict | None = None,
-                          year: int | None = None) -> dict:
+                          year: int | None = None,
+                          replay_refinements: bool = True) -> dict:
     from routers.profiles import LoadGenerateRequest, generate_load_profiles as _h
     body = LoadGenerateRequest(archetype=archetype, loads=loads, params=params,
-                               year=year)
+                               year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
 def generate_availability_profile(project_id: str, kind: str, generators: list,
                                   params: dict | None = None,
                                   year: int | None = None,
-                                  component_type: str = "generators") -> dict:
+                                  component_type: str = "generators",
+                                  replay_refinements: bool = True) -> dict:
     from routers.profiles import (
         AvailabilityGenerateRequest,
         generate_availability_profiles as _h,
     )
     body = AvailabilityGenerateRequest(kind=kind, components=generators,
                                        component_type=component_type,
-                                       params=params, year=year)
+                                       params=params, year=year,
+                                       replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -4424,10 +4427,11 @@ def refine_generated_profile(project_id: str, job_id: str, ops: list) -> dict:
 
 def generate_series_profile(project_id: str, kind: str, components: list,
                             params: dict | None = None,
-                            year: int | None = None) -> dict:
+                            year: int | None = None,
+                            replay_refinements: bool = True) -> dict:
     from routers.profiles import SeriesGenerateRequest, generate_series_profiles as _h
     body = SeriesGenerateRequest(kind=kind, components=components, params=params,
-                                 year=year)
+                                 year=year, replay_refinements=replay_refinements)
     return _profile_route(_h, body, proj=_authorized_project(project_id))
 
 
@@ -6751,6 +6755,10 @@ def apply_demand_from_excel(
         if _user_ts is not None and _user_ts_lock is not None:
             with _user_ts_lock:
                 _user_ts[("loads", "p_set", load_name)] = aligned
+                # The upload replaces the series, so the meta recorded for the
+                # old one (generator, refinements) no longer describes it.
+                from services.user_timeseries import _user_ts_meta
+                _user_ts_meta.pop(("loads", "p_set", load_name), None)
         # A user's load profile sets the growth placeholders it covers (E1 follow-up).
         growth_placeholders.mark_set(n, "loads", "p_set", {load_name: aligned}, prior)
 
